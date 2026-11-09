@@ -22,13 +22,14 @@ import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
  *   restart, a stop and new work are refused while it drains; `restartNow`
  *   during the drain asks for an immediate restart; the drain completes after
  *   the run;
- * - on a second, idle Gateway `gateway.stop` drains nothing and asks for the stop.
+ * - on a second, idle Gateway `gateway.stop` drains nothing and asks for the stop; on a
+ *   third, `gateway.restart` answers that it is restarting now.
  *
  * Effects are asserted by name: each exact refusal and result, the drain
  * snapshots and their blockers, the recorded process requests in order, every
  * persisted receipt and message, each provider request's messages and the
- * `session-shapes` shapes. `restarting` and `stopping` count the RPC's own work
- * as a blocker, so they are never true (#1559) and are not asserted.
+ * `session-shapes` shapes. A lifecycle RPC's answer leaves out its own work, so
+ * `restarting` and `stopping` are true exactly when nothing else blocks (#1559).
  */
 
 const gateways: LockGateway[] = [];
@@ -63,7 +64,7 @@ function blockers(drain: { blockers: Array<{ category: string; sessionId?: strin
 }
 
 describe("gateway/run lifecycle RPC lock", () => {
-  it("run-lifecycle-rpcs: restart and stop refusals, the session restart, a restart drain over a live run, and an idle stop", async () => {
+  it("run-lifecycle-rpcs: restart and stop refusals, the session restart, a restart drain over a live run, an idle stop and an idle restart", async () => {
     const gateway = await startLockGateway("run-lifecycle-rpcs", { lifecycleRequests: true });
     gateways.push(gateway);
     const phone = await gateway.connect("phone");
@@ -118,6 +119,11 @@ describe("gateway/run lifecycle RPC lock", () => {
     const stopCompleted = await awaitsWithin(idle.registry.waitUntilIdle(), "the stop drain to complete");
     const stopStatus = await mac.request("gateway.drain.status", {});
 
+    // 5. An idle Gateway's restart has nothing but its own RPC to drain either.
+    const idleRestart = await startLockGateway("run-lifecycle-restart", { lifecycleRequests: true });
+    gateways.push(idleRestart);
+    const restartIdle = await (await idleRestart.connect("mac")).request("gateway.restart", { commandId: idleRestart.commandId() });
+
     const refusal = (code: string, message: string, retryable = false) => ({ code, message, retryable });
     expect(unsupervisedRestart.error).toEqual(refusal("unsupported", "Gateway restart requires an external supervisor"));
     expect(unsupervisedStop.error).toEqual(refusal("unsupported", "Gateway stop requires an external supervisor"));
@@ -127,17 +133,19 @@ describe("gateway/run lifecycle RPC lock", () => {
     expect(reloadIdle.result).toEqual({ reloaded: true });
     expect(reloadRunning.error).toEqual(refusal("busy", "Session must be idle for this operation"));
 
-    // The restart names the live session and drains it and its own RPC; everything else is refused while it drains.
-    const drainShape = { omittedCount: 0, suspectProjectionCount: 0, blockerCount: 2, blockerCounts: { "foreground-agent-operation": 1, "rpc-mutation": 1 } };
-    expect(restart.result).toMatchObject({ scheduled: true, activeSessionIds: [sessionId], drainRevision: 4, drainId: restart.result.drain.drainId,
-      drain: { ...drainShape, phase: "preparing" } });
-    expect(blockers(restart.result.drain, sessionId)).toEqual(["foreground-agent-operation:live:active", "rpc-mutation:gateway.restart:active"]);
+    // The restart names the live session and answers it as the drain's only blocker, not its own RPC; everything else is
+    // refused while it drains.
+    const drainShape = { omittedCount: 0, suspectProjectionCount: 0, blockerCount: 1, blockerCounts: { "foreground-agent-operation": 1 } };
+    expect(restart.result).toMatchObject({ restarting: false, scheduled: true, activeSessionIds: [sessionId], drainRevision: 4,
+      drainId: restart.result.drain.drainId, drain: { ...drainShape, phase: "preparing" } });
+    expect(blockers(restart.result.drain, sessionId)).toEqual(["foreground-agent-operation:live:active"]);
     const draining = refusal("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
     expect(secondRestart.error).toEqual(draining);
     expect(stopDuringDrain.error).toEqual(draining);
     expect(promptDuringDrain.error).toEqual(refusal("busy", "The Gateway is draining accepted work", true));
-    expect(restartNow.result).toMatchObject({ scheduled: true, restartNow: true, drain: { ...drainShape, phase: "waiting", drainId: restart.result.drainId } });
-    expect(blockers(restartNow.result.drain, sessionId)).toEqual(["foreground-agent-operation:live:active", "rpc-mutation:gateway.restart:active"]);
+    expect(restartNow.result).toMatchObject({ restarting: false, scheduled: true, restartNow: true,
+      drain: { ...drainShape, phase: "waiting", drainId: restart.result.drainId } });
+    expect(blockers(restartNow.result.drain, sessionId)).toEqual(["foreground-agent-operation:live:active"]);
     expect(requestsBeforeSettle).toEqual([
       { kind: "auth.cancelWaitingForRestart" }, { kind: "restart", restartNow: false }, { kind: "restart", restartNow: true },
     ]);
@@ -171,12 +179,13 @@ describe("gateway/run lifecycle RPC lock", () => {
     ]);
     expectRequestShapes(recorded.providerRequests, ["chat", "chat"]);
 
-    // The idle Gateway's stop drains only its own RPC and completes.
-    expect(stop.result).toMatchObject({ scheduled: true, activeSessionIds: [], drainRevision: 3, drainId: stop.result.drain.drainId,
-      drain: { phase: "preparing", omittedCount: 0, suspectProjectionCount: 0, blockerCount: 1, blockerCounts: { "rpc-mutation": 1 } } });
-    expect(blockers(stop.result.drain, sessionId)).toEqual(["rpc-mutation:gateway.stop:active"]);
+    // The idle Gateway's stop has nothing but its own RPC to drain, so it answers stopping, and completes.
+    expect(stop.result).toMatchObject({ stopping: true, scheduled: true, activeSessionIds: [], drainRevision: 3, drainId: stop.result.drain.drainId,
+      drain: { phase: "preparing", omittedCount: 0, suspectProjectionCount: 0, blockerCount: 0, blockerCounts: {}, blockers: [] } });
     expect(stopCompleted).toBe(true);
     expect(idle.lifecycleRequests).toEqual([{ kind: "stop" }]);
     expect(stopStatus.result).toMatchObject({ phase: "complete", blockerCount: 0, blockerCounts: {}, blockers: [], drainId: stop.result.drainId });
+    expect(restartIdle.result).toMatchObject({ restarting: true, scheduled: false, activeSessionIds: [],
+      drain: { phase: "preparing", blockerCount: 0, blockerCounts: {}, blockers: [] } });
   }, 60_000);
 });
