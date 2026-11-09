@@ -1,0 +1,66 @@
+{
+  "packetHash": "01d0be5df284bd5d",
+  "tier": "high-stakes",
+  "date": "2026-11-09",
+  "writer": {
+    "agent": "parent",
+    "model": "anthropic/claude-opus-5-5"
+  },
+  "reviewer": {
+    "agent": "law-reviewer (run 71a71da5)",
+    "model": "openai/gpt-6-luna",
+    "session": "2026-11-09T09-25-13-804Z_01a1bfa0-43cb-7473-beb1-ed93d992bcce/91413064-545f-4304-9ed2-7a039e33324e/run-0/session.jsonl"
+  },
+  "laws": {
+    "M1 modifier-steps": {
+      "verdict": "ACCEPT",
+      "notes": "The four equations match the English, including the empty-name token guard for + and removing only the first match; [2,1,2] with -2 is a concrete step witness. Kills 31 mutants, 12 uniquely, including empty-name and removal behavior."
+    },
+    "M2 modifier-sequence": {
+      "verdict": "ACCEPT",
+      "notes": "The concatenation equation states ordered sequential application exactly; t=[1], a=[Plus(2)], b=[Minus(1)] satisfies it. It kills 6 mutants and is required as the explicit sequencing law despite no unique kills."
+    },
+    "C1 modifiers-over-below": {
+      "verdict": "ACCEPT",
+      "notes": "For any nonempty all-modifier list, Compose over Names(below) dispatches to Mods(below, es), exactly as stated; below=[1], es=[Plus(2)] is a witness. It kills 6 mutants and directly covers modifier composition over an explicit empty or nonempty base."
+    },
+    "C2 plain-list": {
+      "verdict": "ACCEPT",
+      "notes": "The existential plain-entry premise and result match replacement by ordered plain names followed by modifiers; below=NoBelow and es=[Plain(2),Minus(1)] witnesses it. Repeated plain entries remain repeated as in TS, and 21 mutants (4 unique) are killed."
+    },
+    "C3 modifiers-over-defaults": {
+      "verdict": "ACCEPT",
+      "notes": "For a nonempty modifier-only layer with NoBelow, the implementation starts at defaults and applies entries, precisely as stated; defaults=[1], es=[Minus(1)] is a witness. It kills 9 mutants and explicitly guards fallback to pi defaults."
+    },
+    "C4 empty-is-no-tools": {
+      "verdict": "ACCEPT",
+      "notes": "The unconditional equation correctly covers both a selection below and no layer, because empty entries yield an empty plain base and no modifiers; below=Names([1]) is a witness. It kills 13 mutants, one uniquely, and matches TS's empty list meaning no tools."
+    },
+    "B1 no-duplicates": {
+      "verdict": "ACCEPT",
+      "notes": "Its conditional guarantees exactly the supported uniqueness result when each possible starting list is duplicate-free; below=NoBelow, es=[Plain(1)], defaults=[2] witnesses it. TS preserves repeats in plain lists, so the precondition is necessary rather than a claim that arbitrary input is deduplicated; it kills 31 mutants."
+    },
+    "E1 modifiers-kept": {
+      "verdict": "ACCEPT",
+      "notes": "Any chosen list containing a modifier is returned as Holds(chosen), matching encode's first branch; chosen=[Plus(1)] is a witness. It kills 6 mutants, 3 uniquely, including branch priority."
+    },
+    "E2 plain-layer-stays-plain": {
+      "verdict": "ACCEPT",
+      "notes": "A current layer with a plain entry fails AllModifiers, so the chosen entries are held unchanged regardless of choice; current=[Plain(1)], chosen=[] witnesses it. This matches the existing plain-layer branch and kills 8 mutants, one uniquely."
+    },
+    "E3 round-trip": {
+      "verdict": "ACCEPT",
+      "notes": "The case split states the exact round trip for every all-plain choice, including no stored value preserving below or defaults; chosen=[] with NoBelow is a witness. Empty chosen correctly composes to no tools (not defaults), while a Nothing result occurs only when the selected names already equal the base; 25 mutants, 4 uniquely, are killed."
+    },
+    "E4 relative-when-reproducible": {
+      "verdict": "ACCEPT",
+      "notes": "Under all-plain chosen/current-modifier premises, the conditional conclusion is precisely the relative encoding branch, including Nothing for empty Delta; chosen=[Plain(1)], current=[], NoBelow, defaults=[1] witnesses the empty-Delta case. This matches adds-then-removes and encode's branch order, killing 32 mutants, 10 uniquely."
+    },
+    "E5 plain-when-order-differs": {
+      "verdict": "ACCEPT",
+      "notes": "For an all-plain choice, when Delta does not reproduce its order, Encode holds the plain choice as stated; chosen=[Plain(2),Plain(1)], NoBelow, defaults=[1] witnesses it. The law correctly reflects the landed product decision that user order outranks later changes below and kills 10 mutants, 2 uniquely."
+    }
+  },
+  "acceptedMutants": {},
+  "general": "High-stakes is appropriate: tool selection governs which tools the model can invoke. A1 is realistic for the tool-selection facts seam and explicitly specifies tokenization, empty name as 0, defaults, name round-tripping, and the list-of-strings domain; shell contract tests should continue to enforce that seam, since the proof itself cannot establish the token/name mapping or input validation. The laws cover exact modifier/composition/encoding results and a conditional uniqueness safety property; progress, recovery, stale-input, and uncertain-outcome kinds are correctly n/a for these pure per-call functions (the separate change path owns stale fencing). All 110 valid mutants were killed, none accepted; 20,000 generated shadow inputs matched, but this is lab evidence, not the required seven-day real-traffic shadow for cut-over. The laws match TS behavior for repeated plain names, first-only removal, empty-name additions being skipped, empty lists selecting no tools, defaults when no layer lies below, encode's modifier/plain/current-layer branch order, and round-trip. No unresolved subjective product decision remains in this block."
+}
