@@ -272,17 +272,17 @@ class ExternalVerificationTests(VerifyCase):
         self.assertEqual(report["passingTests"], 1)
         self.assertEqual(next(step for step in report["steps"] if step["name"] == "tests: ios")["status"], "skipped")
         self.assertNotIn("ios build", [step["name"] for step in report["steps"]])
-        # A harness-only declaration must remain incomplete unless explicitly skipped.
-        r.write("packages/ios-app/UITests/RealGatewayPairAndChatUITests.swift",
-                "class RealGatewayPairAndChatUITests: XCTestCase {}\n")
-        self.declare("alpha", ["scripts/tron test ios run --only-testing TronMobileUITests/RealGatewayPairAndChatUITests"])
+        # A declaration of a class only an undriven harness runs remains incomplete unless explicitly skipped.
+        r.write("packages/ios-app/UITests/TronMacTerminalUITests.swift",
+                "class TronMacTerminalUITests: XCTestCase {}\n")
+        self.declare("alpha", ["scripts/tron test ios run --only-testing TronMobileUITests/TronMacTerminalUITests"])
         r.commit("harness-only consumer")
         incomplete = r.verify("--module", "repo/alpha")
         self.assertEqual(incomplete.returncode, 1, incomplete.stdout + incomplete.stderr)
         self.assertEqual(r.report()["verdict"], "incomplete")
         skipped = r.verify("--module", "repo/alpha", "--skip", "ios")
         self.assertEqual(skipped.returncode, 0, skipped.stdout + skipped.stderr)
-        self.assertEqual(r.report()["groups"]["ios-lanes"], ["packages/ios-app/UITests/RealGatewayPairAndChatUITests.swift"])
+        self.assertEqual(r.report()["groups"]["ios-lanes"], ["packages/ios-app/UITests/TronMacTerminalUITests.swift"])
 
     def test_external_failure_empty_and_unsupported_commands_cannot_pass(self) -> None:
         r = self.repo

@@ -38,6 +38,12 @@ IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppU
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
                  "TronMacTerminalUITests": "scripts/ios-mac-terminal-journey"}
 NOT_DRIVEN = ("ios-lanes", "mac", "relay")
+# The real-UI journeys run, by exact selector, through the harness that owns them (its
+# `ui_owned_journeys`), as `verify --batch`'s UI journey lane runs them all.
+JOURNEY_CLASS = "RealGatewayPairAndChatUITests"
+JOURNEY_HARNESS = "scripts/ios-gateway-e2e-test"
+JOURNEY_LANES = 3
+JOURNEY_LINE = re.compile(r"^Real-UI journey (\S+) completed in \d+s \(status (\d+)\); evidence: (\S+)$", re.M)
 # Estimated test seconds per iOS runner process. A shard keeps the runner's unchanged 1200 s
 # focused deadline even when every method takes twice its longest recorded time and the process
 # spends IOS_LAUNCH_SECONDS launching. A method with no record counts a third of the budget, so
@@ -130,7 +136,10 @@ def runner_of(path: str, nested: set, mac_terminal: set) -> str:
     if path.endswith(".sh"):
         return "shell"
     if path.startswith(f"{IOS}/"):
-        return "ios" if path.split("/")[2] in IOS_TARGETS and ios_class(path) not in IOS_HARNESSED else "ios-lanes"
+        if path.split("/")[2] not in IOS_TARGETS:
+            return "ios-lanes"
+        name = ios_class(path)
+        return "ios-journeys" if name == JOURNEY_CLASS else "ios-lanes" if name in IOS_HARNESSED else "ios"
     if path.startswith("packages/mac-app/"):
         return "mac"
     if path.startswith("packages/push-relay/"):
@@ -145,6 +154,63 @@ def ios_class(path: str) -> str | None:
         return stem
     extended = re.search(r"^extension (\w+Tests)\b", text, re.M)
     return extended.group(1) if extended else None
+
+
+def owned_journeys() -> list[str]:
+    """The harness's `ui_owned_journeys`: the only selectors its `run-ui` accepts."""
+    try:
+        text = (ROOT / JOURNEY_HARNESS).read_text()
+    except OSError as error:
+        raise VerifyError(f"the real-UI journeys' harness is unreadable: {error}") from error
+    block = re.search(r"^ui_owned_journeys=\((.*?)^\)", text, re.S | re.M)
+    if block is None:
+        raise VerifyError(f"{JOURNEY_HARNESS} declares no ui_owned_journeys")
+    return re.findall(r"""['"]([\w/]+)['"]""", block.group(1))
+
+
+def journey_selectors(paths: list[str]) -> list[str]:
+    """The owned journeys a change reaches: the test methods a changed extension file declares, or,
+    for the class's own file (the shared fixture and helpers), every owned journey."""
+    owned = owned_journeys() if paths else []
+    selected: set[str] = set()
+    for path in paths:
+        if Path(path).stem == JOURNEY_CLASS:
+            selected.update(owned)
+            continue
+        target = IOS_TARGETS[path.split("/")[2]]
+        for method in re.findall(r"func (test\w+)\s*\(", (ROOT / path).read_text()):
+            selector = f"{target}/{JOURNEY_CLASS}/{method}"
+            if selector not in owned:
+                raise VerifyError(f"{path}: {selector} is not a journey {JOURNEY_HARNESS} run-ui owns")
+            selected.add(selector)
+    return sorted(selected)
+
+
+def journey_evidence(output: str, selectors: list[str], sha: str) -> tuple[list[dict], list[str], list[str]]:
+    """Each journey's report.json the harness wrote, checked against its report.sha256 and this
+    commit's clean source; returns the reports, the failed journeys and the selectors with no
+    passing report for this commit."""
+    reports, failed = [], []
+    passing = set()
+    for journey, status, directory in JOURNEY_LINE.findall(output):
+        path = Path(directory) / "report.json"
+        try:
+            data = path.read_bytes()
+            report = json.loads(data)
+            recorded = (Path(directory) / "report.sha256").read_text().split()[0]
+        except (OSError, ValueError, IndexError):
+            failed.append(journey)
+            continue
+        digest = hashlib.sha256(data).hexdigest()
+        source = report.get("source") or {}
+        reports.append({"journey": journey, "status": report.get("journey_status"), "report": str(path), "sha256": digest,
+                        "revision": source.get("revision"), "dirty": source.get("dirty")})
+        if int(status) or report.get("journey_status") != 0:
+            failed.append(journey)
+        elif (digest == recorded and report.get("journey") == journey and report.get("evidence_complete") is True
+              and source.get("revision") == sha and source.get("dirty") is False):
+            passing.add(journey)
+    return reports, failed, [selector for selector in selectors if selector not in passing]
 
 
 def ios_selectors(paths: list[str]) -> list[str]:
@@ -915,6 +981,8 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         lanes = [*(["--lane", lane] if lane else []), *(["--device-type", IOS_PAD_DEVICE_TYPE] if pad else [])]
         wait = ["--host-slot-wait-seconds", "0"] if opportunistic else ["--host-slot-wait-seconds", "30"] if ios_wait else []
         return ([str(ROOT / "scripts/tron-ios-test"), "run", *lanes, *wait, *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
+    if group == "ios-journeys":
+        return ([str(ROOT / JOURNEY_HARNESS), "run-ui", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, None)
     if group == "node-gateway":
         return (node + ["node", "--test", "--test-concurrency=1", *[p[len(GATEWAY) + 1:] for p in files]], ROOT / GATEWAY, tap_count)
     if group == "node":
@@ -1057,6 +1125,7 @@ def main(argv: list[str]) -> int:
         # Selectors are needed only by a run that drives the iOS group (#1522).
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
         shards = ios_shards(selectors, ios_method_seconds() if selectors else {})
+        journeys = journey_selectors(groups.get("ios-journeys", [])) if "ios" not in skip else []
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
@@ -1128,7 +1197,8 @@ def main(argv: list[str]) -> int:
             if group in NOT_DRIVEN or skipped_group(group):
                 commands.append({"name": f"tests: {group}", "notRun": "explicit skip" if skipped_group(group) else "requires owning harness"})
             else:
-                for label, shard in zip(test_step_names(group, shards, False), shards if group == "ios" else [selectors]):
+                for label, shard in zip(test_step_names(group, shards, False),
+                                        shards if group == "ios" else [journeys] if group == "ios-journeys" else [selectors]):
                     command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host)
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
@@ -1249,6 +1319,19 @@ def main(argv: list[str]) -> int:
                 # Every admitted shard runs, so one red cannot hide another selected test's outcome.
                 if failed_shards:
                     return finish("failed", "; ".join(failed_shards))
+                continue
+            if group == "ios-journeys":
+                command, cwd, _ = test_spec(group, files, journeys, run.logs)
+                result = run.step(label, command, cwd=cwd, env={"TRON_IOS_E2E_UI_LANES": str(min(JOURNEY_LANES, len(journeys)))})
+                reports, failed, missing = journey_evidence((ROOT / result["log"]).read_text(errors="replace"), journeys, sha)
+                result.update(journeyReports=reports, tests=len(journeys) - len(missing))
+                if failed or result["status"] == "failed":
+                    result.update(status="failed", failedTests=failed)
+                    print("\n".join(f"    failed: {journey}" for journey in failed), flush=True)
+                    return finish("failed", f"{label} failed")
+                if missing:
+                    result["status"] = "failed"
+                    return finish("failed", f"{label}: no passing report for this commit from {', '.join(missing)}")
                 continue
             command, cwd, count = test_spec(group, files, selectors, run.logs, ios_wait=name != "all", gateway_host=gateway_host)
             report = run.logs / f"{group}-vitest.json"
