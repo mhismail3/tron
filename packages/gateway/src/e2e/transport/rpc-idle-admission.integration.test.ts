@@ -809,10 +809,12 @@ describe("receipt-backed mutations against their own session work entry", () => 
       commandId: "held-bash-command", sessionId: session.id, command: "sleep 5", excludeFromContext: true,
     });
     await waitFor(async () => (await list(client)).sessions.some((row) => row.id === session.id && row.phase === "running"), "bash running");
-    // The drain waits on the Bash RPC and on the foreground agent operation it admitted (#2283).
+    // The drain waits on the Bash RPC and on the foreground agent operation it admitted (#2283); both may
+    // share an admission millisecond, so they are compared by category.
     expect(f.registry.administrativeDrainSnapshot().blockers.filter((blocker) => blocker.sessionId === session.id)
-      .map(({ category, method, state }) => ({ category, method, state })), "the running Bash's drain blockers").toEqual([
-      { category: "rpc-mutation", method: "session.bash", state: "active" }, { category: "foreground-agent-operation", method: undefined, state: "active" }]);
+      .map(({ category, method, state }) => ({ category, method, state })).sort((left, right) => left.category.localeCompare(right.category)),
+    "the running Bash's drain blockers").toEqual([
+      { category: "foreground-agent-operation", method: undefined, state: "active" }, { category: "rpc-mutation", method: "session.bash", state: "active" }]);
     const blocked = await client.request("held-set-tools", "settings.change", sessionSettingChange("tools", {
       commandId: "held-set-tools-command", sessionId: session.id, tools: [],
     }));
