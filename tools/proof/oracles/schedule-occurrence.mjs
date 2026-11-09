@@ -59,7 +59,9 @@ if (replay) {
     : o === null || iso(o));
   for (const file of files) {
     const day = /(\d{4}-\d{2}-\d{2})\.jsonl$/.exec(file)?.[1];
-    readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+    let text;
+    try { text = readFileSync(file, "utf8"); } catch (error) { console.error(`${file}: ${error.message}`); process.exit(2); }
+    text.split("\n").forEach((line, i) => {
       if (!line) return;
       const refuse = (why) => { console.error(`${file}:${i + 1}: ${why}`); process.exit(2); };
       let r; try { r = JSON.parse(line); } catch { refuse("not JSON"); }

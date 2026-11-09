@@ -12,7 +12,8 @@ setting and is not an approval queue.
   effect and native-tap classification. Composition supplies Home tool names,
   compaction limits and security validation without upward imports.
 - `settings-resolver.ts`: layer precedence, qualifiers, composition, clamping and
-  state badges. `settings-project-diagnostics.ts` owns bounded Project diagnostics.
+  state badges. Its precedence fold is shadowed by proof block `settings/precedence` (packages/core) through a
+  Debug-only seam (`precedenceFacts`; the fold before capability clamping); the TypeScript stays authoritative until that block's cut-over. `settings-project-diagnostics.ts` owns bounded Project diagnostics.
 - `settings-model.ts`: target resolution and fixed-direction request pins.
 - `settings-change.ts`: planning, expected-before fences, target stripes, ordered
   store application/reverse rollback, outside-write brackets, Home companion effects,
