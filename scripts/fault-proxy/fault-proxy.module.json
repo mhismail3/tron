@@ -1,0 +1,7 @@
+{
+  "layer": "L5",
+  "purpose": "The real-Gateway E2E fault proxy: owned-Gateway proof, link faults and respawns for scripts/ios-gateway-e2e-test, with its owner test.",
+  "owns": [
+    "**"
+  ]
+}

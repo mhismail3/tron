@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-const { WebSocket, WebSocketServer } = createRequire(new URL("../packages/gateway/package.json", import.meta.url))("ws");
+const { WebSocket, WebSocketServer } = createRequire(new URL("../../packages/gateway/package.json", import.meta.url))("ws");
 const maximumBytes = 1_048_576;
 const maximumFrames = 16;
 
@@ -29,12 +29,8 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     throw new Error("Fault proxy requires an owned loopback target and control token");
   }
   await verifyTarget();
-  let verifyingConnections = 0;
-  const checkTarget = async () => {
-    if (verifyingConnections >= 12) throw new Error("Fixture verification capacity reached");
-    verifyingConnections++;
-    try { await verifyTarget(); } finally { verifyingConnections--; }
-  };
+  // Proofs are coalesced by the verifier, so waiting requests cost no spawns.
+  const checkTarget = () => verifyTarget();
   const bridges = new Set();
   const sockets = new Set();
   const waiters = new Set();
@@ -519,10 +515,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
   };
 }
 
-async function ownedGatewayVerifier(initialPid, port) {
+// Exported for its owner test (ios-gateway-fault-proxy.test.mjs, beside it), which
+// substitutes the ps/lsof runner to produce timeouts and PID reuse on demand.
+export async function ownedGatewayVerifier(initialPid, port, { execute = promisify(execFile), proofIntervalMs = 1_000 } = {}) {
   if (!Number.isSafeInteger(initialPid) || initialPid <= 1 || process.ppid <= 1) throw new Error("Fixture owner PID is required");
-  const execute = promisify(execFile);
-  const entrypoint = realpathSync(fileURLToPath(new URL("../packages/gateway/dist/index.js", import.meta.url)));
+  const entrypoint = realpathSync(fileURLToPath(new URL("../../packages/gateway/dist/index.js", import.meta.url)));
   let pid = initialPid;
   let birth;
   let command;
@@ -539,22 +536,68 @@ async function ownedGatewayVerifier(initialPid, port) {
   const initial = await capture(pid, process.ppid);
   command = initial.command;
   birth = initial.birth;
+  // The full proof (birth, command line, listener) is off the request path; a
+  // request checks only that the proven PID is alive. A Gateway is proven at
+  // proxy start and at the first request after a respawn is adopted. A watcher
+  // re-proves it every interval, so a PID that died and was reused, a zombie or
+  // a lost listener is unproven within one interval even when no request saw
+  // it die. A helper killed at its deadline proves nothing either way; five such
+  // misses in a row unprove the Gateway (Home decision on #2386), at the cost of
+  // refusals while they last. Residual: a PID reused and serving the port inside
+  // that window is trusted.
+  let proven = false;
+  // Bumped by every adopt and exit, so a proof that started before either
+  // cannot prove what replaced it.
+  let generation = 0;
+  let missedProofs = 0;
+  const prove = async target => {
+    if (await inspect(target, "lstart") !== birth || await inspect(target, "command") !== command) throw new Error("Gateway process ownership changed");
+    const result = await execute(process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
+      ["-nP", "-a", "-p", String(target), `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpn"], { timeout: 2_000, maxBuffer: 4_096 });
+    const fields = result.stdout.trim().split("\n");
+    if (!fields.includes(`p${target}`) || !fields.includes(`n127.0.0.1:${port}`)) throw new Error("Gateway does not own the fixture listener");
+  };
+  const alive = () => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  };
   const verifyTarget = () => {
+    if (proven) {
+      if (alive()) return Promise.resolve();
+      proven = false;
+      return Promise.reject(new Error("Gateway process exited"));
+    }
     checking ??= (async () => {
-      if (await inspect(pid, "lstart") !== birth || await inspect(pid, "command") !== command) throw new Error("Gateway process ownership changed");
-      const result = await execute(process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
-        ["-nP", "-a", "-p", String(pid), `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpn"], { timeout: 2_000, maxBuffer: 4_096 });
-      const fields = result.stdout.trim().split("\n");
-      if (!fields.includes(`p${pid}`) || !fields.includes(`n127.0.0.1:${port}`)) throw new Error("Gateway does not own the fixture listener");
+      const started = generation;
+      await prove(pid);
+      // Nothing proven for an adopt or exit that came during the proof.
+      if (generation !== started) throw new Error("Gateway changed during its ownership proof");
+      proven = true;
+      missedProofs = 0;
     })().finally(() => { checking = undefined; });
     return checking;
   };
+  let watching;
+  setInterval(() => {
+    if (!proven || watching) return;
+    const started = generation;
+    watching = prove(pid)
+      .then(() => { if (generation === started) missedProofs = 0; })
+      .catch(error => {
+        if (generation !== started) return;
+        if (!error?.killed || ++missedProofs >= 5) proven = false;
+      })
+      .finally(() => { watching = undefined; });
+  }, proofIntervalMs).unref();
   verifyTarget.adopt = async target => {
     const next = await capture(target, process.pid);
+    generation += 1;
+    proven = false;
     pid = target;
     command = next.command;
     birth = next.birth;
   };
+  // A respawned child is the proxy's own: its exit is known exactly.
+  verifyTarget.exited = target => { if (pid === target) { generation += 1; proven = false; } };
   verifyTarget.pid = () => pid;
   return verifyTarget;
 }
@@ -565,7 +608,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   // Keep the caller's launch spelling for its PID ownership proof (/var may
   // resolve to /private/var). Canonical validation must not rewrite that contract.
   const entrypoint = process.env.TRON_E2E_GATEWAY_ENTRY;
-  if (realpathSync(entrypoint) !== realpathSync(fileURLToPath(new URL("../packages/gateway/dist/index.js", import.meta.url)))) throw new Error("Gateway restart entrypoint is not the repository fixture");
+  if (realpathSync(entrypoint) !== realpathSync(fileURLToPath(new URL("../../packages/gateway/dist/index.js", import.meta.url)))) throw new Error("Gateway restart entrypoint is not the repository fixture");
   const restartGateway = async () => {
     await verifyTarget();
     const oldPid = verifyTarget.pid();
@@ -580,7 +623,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     }
     const { spawn } = await import("node:child_process");
     const child = spawn(process.execPath, [entrypoint], {
-      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      cwd: fileURLToPath(new URL("../..", import.meta.url)),
       env: {
         PATH: process.env.PATH,
         HOME: process.env.TRON_E2E_GATEWAY_HOME,
@@ -600,6 +643,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     try {
       await writeFile(process.env.TRON_E2E_GATEWAY_PID_FILE, `${child.pid}\n`, { mode: 0o600 });
       await verifyTarget.adopt(child.pid);
+      child.once("exit", () => verifyTarget.exited(child.pid));
     } catch (error) {
       child.kill("SIGTERM");
       throw error;

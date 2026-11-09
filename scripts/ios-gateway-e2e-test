@@ -194,7 +194,7 @@ pid_file="$run_root/gateway.pid"
 log_file="$run_root/gateway.log"
 proxy_pid_file="$run_root/proxy.pid"
 proxy_ready="$run_root/proxy-ready.json"
-proxy_script="$repo_root/scripts/ios-gateway-fault-proxy.mjs"
+proxy_script="$repo_root/scripts/fault-proxy/ios-gateway-fault-proxy.mjs"
 # The command's test filter and whether this fixture Gateway runs its pinned
 # LAN lane (E-3c). `run` keeps the lane off, so the fault proxy owns every leg
 # the boundary test drives; `run-lan` turns it on, because the two-lane cases
