@@ -84,7 +84,9 @@ final class TronAppsDesignUITests: XCTestCase {
         XCTAssertTrue(automation.buttons["dashboard.menu"].waitForExistence(timeout: 8))
         automation.buttons["dashboard.menu"].tap()
         automation.buttons["Automations"].tap()
-        XCTAssertTrue(automation.buttons["automation-card.automation-0"].waitForExistence(timeout: 8))
+        // The inventory's first row in lifecycle order (the running one), so it is
+        // built at every type size; drafts sort last and stay lazy at XXXL.
+        XCTAssertTrue(automation.buttons["automation-card.automation-2"].waitForExistence(timeout: 8))
         expand(automation, title: "Automations")
         capture("automations-\(suffix)")
         automation.terminate()
