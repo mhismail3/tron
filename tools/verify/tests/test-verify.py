@@ -249,6 +249,14 @@ class ExternalVerificationTests(VerifyCase):
         refused = r.verify("--module", "repo/alpha", "--plan")
         self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
         self.assertIn("unsupported verify declaration", refused.stderr)
+        # #2326: a serial-runner entry naming no tracked file would match nothing and pass silently.
+        self.declare("alpha", ["scripts/tron test gateway " + " ".join(files)])
+        r.write("packages/gateway/vitest.nested.config.ts",
+                'const nestedTestFiles = ["src/nested.integration.test.ts", "src/deleted.e2e.test.ts"];\n')
+        r.commit("stale nested entry")
+        stale = r.verify("--module", "repo/alpha", "--plan")
+        self.assertEqual(stale.returncode, 2, stale.stdout + stale.stderr)
+        self.assertIn("serial runner config lists untracked packages/gateway/src/deleted.e2e.test.ts", stale.stderr)
 
     def test_declared_ios_class_uses_existing_lane_and_explicit_skip(self) -> None:
         r = self.repo

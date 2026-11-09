@@ -503,6 +503,10 @@ def importers(changed: list[str], tracked: list[str]) -> dict[str, set[str]]:
 
 def select(mode: str, target: str | None, base: str, modules: dict, tracked: list, paths: list | None = None) -> dict:
     """The tests a run selects; `paths` stands in for the changed paths (the mutation sampler's one file)."""
+    # A serial-runner entry naming no tracked file matches nothing, so its runner would pass silently.
+    stale = sorted(set().union(*nested_files()) - set(tracked))
+    if stale:
+        raise VerifyError(f"serial runner config lists untracked {', '.join(stale)}; remove the entry")
     owner = {path: key for key, module in modules.items() for path in module["owned"]}
     tests = [path for path in tracked if is_test(path)]
     locks = sorted(path for path in tests if is_lock(path))
