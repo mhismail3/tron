@@ -449,6 +449,58 @@ def golden_readers(goldens: list[str], tests: list[str]) -> set[str]:
     return readers
 
 
+PYTHON_IMPORT = re.compile(r"^[ \t]*(?:from[ \t]+([A-Za-z_]\w*)[\w.]*[ \t]+import\b|import[ \t]+([^#\n]+))", re.M)
+JS_IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*["'](\.{1,2}/[^"']+)["']""")
+
+
+def importers(changed: list[str], tracked: list[str]) -> dict[str, set[str]]:
+    """Untyped code files that import a changed file, by importer: Python by module name (or by the
+    path it hands importlib), JavaScript by relative specifier. A typed importer is left to its
+    compiler, which already checks the shapes it uses across modules."""
+    names: dict[str, set[str]] = {}
+    for path in changed:
+        if path.endswith(".py") and Path(path).stem.isidentifier():
+            names.setdefault(Path(path).stem, set()).add(path)
+    python_paths = [path for path in changed if path.endswith(".py")]
+    targets = set(changed)
+    found: dict[str, set[str]] = {}
+    for path in tracked:
+        file = ROOT / path
+        python = path.endswith(".py")
+        if not (python or path.endswith((".mjs", ".js", ".cjs"))):
+            if "." in Path(path).name or not path.startswith(("scripts/", "tools/")):
+                continue
+            try:
+                with file.open("rb") as stream:
+                    python = b"python" in stream.readline()
+            except OSError:
+                continue
+            if not python:
+                continue
+        try:
+            source = file.read_text(errors="replace")
+        except OSError:
+            continue
+        hits = set()
+        if python:
+            for first, listed in PYTHON_IMPORT.findall(source):
+                for name in [first] if first else [part.split()[0].split(".")[0] for part in listed.split(",") if part.split()]:
+                    hits |= names.get(name, set())
+            if "spec_from_file_location" in source:
+                hits |= {target for target in python_paths if target in source}
+        else:
+            for specifier in JS_IMPORT.findall(source):
+                resolved = os.path.normpath(str(Path(path).parent / specifier))
+                candidates = {resolved, resolved + ".js", resolved + ".mjs", resolved + ".ts", f"{resolved}/index.js"}
+                if resolved.endswith(".js"):
+                    candidates.add(resolved[:-3] + ".ts")
+                hits |= candidates & targets
+        hits.discard(path)
+        if hits:
+            found[path] = hits
+    return found
+
+
 def select(mode: str, target: str | None, base: str, modules: dict, tracked: list, paths: list | None = None) -> dict:
     """The tests a run selects; `paths` stands in for the changed paths (the mutation sampler's one file)."""
     owner = {path: key for key, module in modules.items() for path in module["owned"]}
@@ -519,6 +571,25 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             else:
                 reasons.append(f"{key}: owns a changed path; its {len(owned)} owned test file(s)")
             selected |= set(owned)
+        # A changed source file's untyped importers in other modules run their tests too: no compiler
+        # checks the shape they read (#2364). An importing test file runs alone; importing source runs
+        # its module's owned tests, a deleted file's included. One hop: the importer's own exports did not change.
+        sources = [path for key in changes if key not in narrow for path in changes[key] if not is_test(path)]
+        consumers: dict[str, set[str]] = {}
+        for importer, hits in importers(sources, tracked).items():
+            key = owner.get(importer)
+            if key is None or all(owner.get(hit) == key for hit in hits):
+                continue
+            if is_test(importer):
+                if importer not in selected:
+                    selected.add(importer)
+                    reasons.append(f"{importer}: imports changed {', '.join(sorted(hits))}")
+            elif key not in chosen:
+                consumers.setdefault(key, set()).update(hit for hit in hits if owner.get(hit) != key)
+        for key in sorted(consumers):
+            owned = [path for path in modules[key]["owned"] if is_test(path)]
+            selected |= set(owned)
+            reasons.append(f"{key}: imports changed {', '.join(sorted(consumers[key]))}; its {len(owned)} owned test file(s)")
     if mode in ("changed", "module"):
         # A change is gated by its own modules' tests (docs/PRINCIPLES.md P1). The one consumer
         # added is a module whose dynamic edge names a selected one (today only the iOS UI
