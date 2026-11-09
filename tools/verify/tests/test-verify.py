@@ -476,7 +476,6 @@ class GatewayDependenciesTests(VerifyCase):
         passed = r.verify("--changed")
         self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
 
-
     def test_a_relay_test_runs_in_the_relay_lane_on_its_installed_lockfile(self) -> None:
         # A relay-only change once ended `incomplete` or, skipped, `zero tests ran`: no passing path (#2299).
         r = self.repo
