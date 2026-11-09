@@ -2,11 +2,11 @@
 // Isolated integration fixture only. No production module imports this proxy.
 // The caller owns the loopback Gateway and supplies an ephemeral control token.
 import { createServer, Server, request as upstreamRequest } from "node:http";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { createRequire } from "node:module";
 import { writeFile } from "node:fs/promises";
-import { realpathSync } from "node:fs";
+import { closeSync, openSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 const { WebSocket, WebSocketServer } = createRequire(new URL("../../packages/gateway/package.json", import.meta.url))("ws");
 const maximumBytes = 1_048_576;
@@ -178,10 +178,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           answer(response, 200, { mode: next.mode, bytes: next.bytes });
           return;
         }
-        if (next.mode === "restart-gateway") {
+        if (next.mode === "restart-gateway" || next.mode === "respawn-exited-gateway") {
           if (!restartGateway) throw new Error("private Gateway restart is unavailable in this fixture");
-          for (const bridge of [...bridges]) bridge.terminate();
-          const pid = await restartGateway();
+          // An exiting Gateway closes its own sockets with its own close code.
+          if (next.mode === "restart-gateway") for (const bridge of [...bridges]) bridge.terminate();
+          const pid = await restartGateway({ awaitOwnExit: next.mode === "respawn-exited-gateway" });
           answer(response, 200, { mode: next.mode, pid });
           return;
         }
@@ -609,22 +610,33 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   // resolve to /private/var). Canonical validation must not rewrite that contract.
   const entrypoint = process.env.TRON_E2E_GATEWAY_ENTRY;
   if (realpathSync(entrypoint) !== realpathSync(fileURLToPath(new URL("../../packages/gateway/dist/index.js", import.meta.url)))) throw new Error("Gateway restart entrypoint is not the repository fixture");
-  const restartGateway = async () => {
-    await verifyTarget();
+  // The launchd-like allow-list and per-journey extras the harness started the
+  // first Gateway with, kept for every respawn (one KEY=VALUE per line).
+  const extraEnvironment = Object.fromEntries((process.env.TRON_E2E_GATEWAY_ENVIRONMENT ?? "").split("\n")
+    .filter(Boolean).map(line => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
+  // An exited child of the harness shell may linger as a zombie until it is reaped.
+  const exited = async target => {
+    try { process.kill(target, 0); } catch { return true; }
+    try { return (await promisify(execFile)("/bin/ps", ["-p", String(target), "-o", "stat="], { timeout: 2_000 })).stdout.includes("Z"); }
+    // A ps that failed proved nothing: keep waiting, and fail at the deadline.
+    catch { return false; }
+  };
+  // restart-gateway stops the Gateway itself. respawn-exited-gateway plays the
+  // supervisor: the Gateway exits on its own after a remote restart's drain, and
+  // is started again only once it has.
+  const restartGateway = async ({ awaitOwnExit }) => {
+    if (!awaitOwnExit) await verifyTarget();
     const oldPid = verifyTarget.pid();
-    process.kill(oldPid, "SIGTERM");
-    const stoppedAt = Date.now() + 5_000;
-    while (Date.now() < stoppedAt) {
-      try { process.kill(oldPid, 0); } catch { break; }
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    try { process.kill(oldPid, 0); throw new Error("Private Gateway did not stop within its fixture deadline"); } catch (error) {
-      if (error.message.includes("did not stop")) throw error;
-    }
-    const { spawn } = await import("node:child_process");
+    if (!awaitOwnExit) process.kill(oldPid, "SIGTERM");
+    const stoppedAt = Date.now() + (awaitOwnExit ? 60_000 : 5_000);
+    while (Date.now() < stoppedAt && !await exited(oldPid)) await new Promise(resolve => setTimeout(resolve, 50));
+    if (!await exited(oldPid)) throw new Error("Private Gateway did not stop within its fixture deadline");
+    // A respawn appends to the first generation's process log.
+    const log = openSync(process.env.TRON_E2E_GATEWAY_LOG, "a");
     const child = spawn(process.execPath, [entrypoint], {
       cwd: fileURLToPath(new URL("../..", import.meta.url)),
       env: {
+        ...extraEnvironment,
         PATH: process.env.PATH,
         HOME: process.env.TRON_E2E_GATEWAY_HOME,
         TRON_DATA_DIR: process.env.TRON_E2E_TRON_HOME,
@@ -637,8 +649,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
         // the phone would re-learn an advertisement this run dials.
         ...(process.env.TRON_E2E_LAN_ENDPOINT ? { TRON_GATEWAY_LAN_ENDPOINT: process.env.TRON_E2E_LAN_ENDPOINT } : {}),
       },
-      stdio: "ignore",
+      stdio: ["ignore", log, log],
     });
+    closeSync(log);
     if (!child.pid) throw new Error("Private Gateway fixture failed to spawn");
     try {
       await writeFile(process.env.TRON_E2E_GATEWAY_PID_FILE, `${child.pid}\n`, { mode: 0o600 });

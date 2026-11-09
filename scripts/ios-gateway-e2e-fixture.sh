@@ -225,6 +225,15 @@ const reinstallTurn = async (context) => {
   while (!existsSync(goFile) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
   return fauxAssistantMessage([fauxToolCall("swift_app", { action: "offer", appId: "persistence-proof", name: "Persistence proof 2", feeds: [], source: { kind: "path", path: "InstalledPersistence.swift" } }, { id: "installed-persistence-reinstall" })], { stopReason: "toolUse" });
 };
+// The Gateway restart journey (#2366) holds one turn as accepted live work
+// until the phone writes the go file the prompt names.
+const RESTART_MARKER = "GATEWAY-RESTART-JOURNEY";
+const restartTurn = async (context) => {
+  const goFile = (latestUserText(context).match(/GATEWAY-RESTART-JOURNEY (\S+)/) ?? [])[1];
+  const deadline = Date.now() + 240000;
+  while (!existsSync(goFile) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
+  return fauxAssistantMessage("Restart journey turn finished.");
+};
 let buildsOfferNumber = 0;
 // The native settings-card journey (#2232): "SETTINGS-CARD-JOURNEY <n>" asks Home's
 // settings tool to set its task budget to n output tokens, which a raise sends to
@@ -253,6 +262,7 @@ const scripted = (context, options, state, model) => {
       feeds: ["ios-builds"], source: { kind: "path", path: "Builds.swift" } }, { id: "e2e-builds-offer-" + (++buildsOfferNumber) })], { stopReason: "toolUse" });
   }
   if (latestUserText(context).includes(REINSTALL_MARKER)) return reinstallTurn(context);
+  if (latestUserText(context).includes(RESTART_MARKER)) return restartTurn(context);
   if (latestUserText(context).includes("INSTALLED-SWIFT-APP-PERSISTENCE")) {
     // Agents offer; only the phone's explicit review installs.
     if (context.messages.at(-1)?.role === "toolResult") return fauxAssistantMessage("Persistence proof app ready for review.");

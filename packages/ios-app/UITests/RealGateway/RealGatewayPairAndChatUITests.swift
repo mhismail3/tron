@@ -2215,7 +2215,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    private func setProxyMode(_ fixture: RealGatewayUIFixture, mode: String, code: Int? = nil) throws {
+    func setProxyMode(_ fixture: RealGatewayUIFixture, mode: String, code: Int? = nil, timeout: TimeInterval = 15) throws {
         let token = try XCTUnwrap(ProcessInfo.processInfo.environment["TRON_E2E_PROXY_TOKEN"])
         var request = URLRequest(url: try XCTUnwrap(URL(string: "http://\(fixture.host):\(fixture.port)/_fixture/control")))
         request.httpMethod = "POST"
@@ -2230,7 +2230,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
             completed.fulfill()
         }.resume()
-        wait(for: [completed], timeout: 15)
+        wait(for: [completed], timeout: timeout)
     }
 
     /// The route's persistent recovery reason, matched by what it tells the user

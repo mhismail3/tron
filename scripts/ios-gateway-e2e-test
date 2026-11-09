@@ -108,6 +108,7 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetLight"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAgentBehaviorQueuesSaveReopenAndResetDark"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectLifecycleApproveCreatesUntrustsAndTrusts"
@@ -135,6 +136,7 @@ ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
     *testPendingAppReviewInstallLight|*testPendingAppReviewInstallDark|*testHomeStatusShowsHostPressureAndWorkers|*testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen|*testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded|*testManageRenamesClearsDataAndRemovesOnlyAfterConfirmation|*testCaptureAppsAndManageLight|*testCaptureAppsAndManageDark|*testBuildsInstallLight|*testBuildsInstallDark|*testBuildsInstallLightXXXL|*testBuildsInstallDarkXXXL) echo "1 no" ;;
+    *testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects) echo "3 yes" ;;
     *testForegroundAndReconnectKeepSheetsAndTheirContent|*testProviderLoginSurvivesSafariAndReconnect|*testStreamedReplyAppearsExactlyOnceAcrossReconnect) echo "2 yes" ;;
     *) echo "0 no" ;;
   esac
@@ -606,6 +608,7 @@ PY
     "TRON_E2E_GATEWAY_LOG=$log_file" "TRON_E2E_GATEWAY_PID_FILE=$pid_file" \
     "TRON_E2E_PROXY_TOKEN=$proxy_token" "TRON_E2E_PROXY_READY=$proxy_ready" \
     "TRON_E2E_LAN_ENDPOINT=$e2e_lan_endpoint" \
+    "TRON_E2E_GATEWAY_ENVIRONMENT=$(printf '%s\n' "${fixture_environment[@]}" "$@")" \
     "$NODE_BIN" "$proxy_script" >"$run_root/proxy.log" 2>&1 </dev/null
   proxy_pid="$!"
   echo "$proxy_pid" >"$proxy_pid_file"
@@ -973,6 +976,16 @@ run_ui_journey() {
   # of the still-live runtime and its ephemeral tool-origin map (#1302).
   if [[ "$journey" == *testCompletedAskUserColdReplayRetainsSelectedAnswers ]]; then
     runtime_limits+=("TRON_GATEWAY_MAX_LIVE_RUNTIMES=1")
+  fi
+  # Remote restart is admitted only under a supervisor; the fault proxy plays
+  # launchd and respawns the Gateway once it has exited on its own (#2366). The
+  # supervised marker needs a payload root with a regular entrypoint; the source
+  # Gateway is not that entrypoint, so the payload's Node contract stays inactive.
+  if [[ "$journey" == *testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects ]]; then
+    rm -rf "$run_root/payload"
+    mkdir -p "$run_root/payload/app/dist"
+    : >"$run_root/payload/app/dist/index.js"
+    runtime_limits+=("TRON_GATEWAY_SUPERVISED=1" "TRON_GATEWAY_PAYLOAD_ROOT=$run_root/payload")
   fi
   # macOS Bash 3 treats an empty array as unset under nounset.
   start_fresh_fixture ${runtime_limits[@]+"${runtime_limits[@]}"}
@@ -1619,7 +1632,7 @@ case "$command" in
   all) install_gateway_if_needed; build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test"; run_test ;;
   status) show_status ;;
   logs) touch "$log_file"; tail -f "$log_file" ;;
-  stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/home" "$state_file" ;;
+  stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/home" "$run_root/payload" "$state_file" ;;
   clean)
     stop_gateway
     python3 "$simulator_owner" delete "${simulator_args[@]}"

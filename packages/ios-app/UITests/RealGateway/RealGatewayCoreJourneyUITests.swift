@@ -231,6 +231,86 @@ extension RealGatewayPairAndChatUITests {
         }.filter { $0["key"] as? String == key }
     }
 
+    /// #2366: Restart from Connections answers what the Gateway's drain found.
+    /// Over a held turn it is scheduled after that one operation; once the
+    /// Gateway is idle it restarts at once, so the app shows Restarting and its
+    /// notice. Each time the supervised fixture exits and the proxy, playing
+    /// launchd, starts it again; the app reconnects without a Retry.
+    @MainActor
+    func testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let agentDirectory = try XCTUnwrap(fixture.agentDirectory)
+        let goFile = URL(fileURLWithPath: agentDirectory).deletingLastPathComponent()
+            .appending(path: "restart-journey-\(UUID().uuidString).go")
+        defer { try? FileManager.default.removeItem(at: goFile) }
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        sendJourneyPrompt(app, "GATEWAY-RESTART-JOURNEY \(goFile.path)")
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
+        gear.tap()
+        let link = app.buttons["settings-link-Connections"]
+        for _ in 0..<20 where !link.isHittable { app.swipeDown() }
+        link.tap()
+        let details = app.buttons["Details for Tron iOS E2E"]
+        XCTAssertTrue(waitForHittable(details, timeout: 30), app.debugDescription)
+        details.tap()
+
+        // The status row heads the detail sheet; a swipe down would dismiss the sheet.
+        let connected = app.descendants(matching: .any)["Connection status: Connected"]
+        // Waits for the notice, naming every notice seen instead when it never shows.
+        func assertNotice(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
+            let cards = app.descendants(matching: .any).matching(identifier: "in-app-notice-card")
+            var seen: [String] = []
+            let shown = waitUntil(timeout: 30) {
+                for label in cards.allElementsBoundByIndex.map(\.label) where !seen.contains(label) { seen.append(label) }
+                return seen.contains(text)
+            }
+            XCTAssertTrue(shown, "expected notice \"\(text)\"; saw \(seen)", file: file, line: line)
+        }
+        func confirmRestart() {
+            let restart = app.buttons["Restart"]
+            for _ in 0..<8 where !restart.isHittable { app.swipeUp() }
+            XCTAssertTrue(waitForEnabled(restart, timeout: 30), "a supervised Gateway admits Restart: \(app.debugDescription)")
+            restart.tap()
+            let confirm = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "confirmation-primary-")).firstMatch
+            XCTAssertTrue(waitForHittable(confirm, timeout: 15), app.debugDescription)
+            confirm.tap()
+        }
+
+        // The held turn is the one accepted operation the drain waits for.
+        confirmRestart()
+        assertNotice("Gateway restart scheduled after 1 accepted operation finishes.")
+        keepScreenshot(app, name: "2366-restart-scheduled")
+        try Data().write(to: goFile)
+        try setProxyMode(fixture, mode: "respawn-exited-gateway", timeout: 75)
+        XCTAssertTrue(connected.waitForExistence(timeout: 90), "the drained restart reconnects: \(app.debugDescription)")
+        // The drain waited for the held turn: its reply is in the Gateway's
+        // canonical session store (the sheet covers the transcript).
+        let sessions = URL(fileURLWithPath: agentDirectory).appending(path: "sessions")
+        func heldTurnFinished() -> Bool {
+            let files = FileManager.default.enumerator(at: sessions, includingPropertiesForKeys: nil)?
+                .compactMap { $0 as? URL }.filter { $0.pathExtension == "jsonl" } ?? []
+            return files.contains { (try? String(contentsOf: $0, encoding: .utf8))?.contains("Restart journey turn finished.") == true }
+        }
+        XCTAssertTrue(waitUntil(timeout: 60, heldTurnFinished), "the restart did not let the held turn finish")
+
+        // Idle: the restart is immediate, and the app says so.
+        confirmRestart()
+        assertNotice("Gateway is restarting. Tron will reconnect automatically.")
+        XCTAssertTrue(app.descendants(matching: .any)["Connection status: Restarting"].waitForExistence(timeout: 15),
+                      app.debugDescription)
+        keepScreenshot(app, name: "2366-restart-idle")
+        try setProxyMode(fixture, mode: "respawn-exited-gateway", timeout: 75)
+        XCTAssertTrue(connected.waitForExistence(timeout: 90), "the idle restart reconnects: \(app.debugDescription)")
+        keepScreenshot(app, name: "2366-restart-reconnected")
+    }
+
     @MainActor
     private func sendJourneyPrompt(_ app: XCUIApplication, _ text: String) {
         let composer = app.textViews["Message input"]
