@@ -117,7 +117,11 @@ export class HomeTaskStore {
   private readonly home: string;
   private readonly directory: string;
   private readonly authorizationPath: string;
-  private publicationUncertain = false;
+  /** Publications made visible but not proven durable: a task ID, "authorization", or
+   * "namespace" for the setup marker. While any is uncertain the store refuses everything
+   * except an in-place update of an uncertain task (#2319): that complete durable rewrite
+   * supersedes the uncertain rename, and its synced directory covers the namespace. */
+  private readonly uncertain = new Set<string>();
   readonly authorization: HomeTaskAuthorizationStore;
   /** Durable publications this process attempted. This process is the namespace's
    * only writer, so an unchanged count proves no record changed (#922). */
@@ -283,7 +287,7 @@ export class HomeTaskStore {
         || (current.stopIntent !== null && JSON.stringify(current.stopIntent) !== JSON.stringify(next.stopIntent))) throw new HomeTaskStoreError("invalid-record");
       await this.publish(this.taskPath(next), next, TASK_BYTES);
       return next;
-    });
+    }, undefined, taskId);
   }
 
   /** Inbox is the sole mutable portion of a terminal task. Its result and
@@ -326,16 +330,17 @@ export class HomeTaskStore {
   }
 
   /** `signal` withdraws a read still queued for the mutex (a caller that went away). */
-  private async run<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  /** `repairs` names the one uncertain task this operation may rewrite while the store is fenced. */
+  private async run<T>(operation: () => Promise<T>, signal?: AbortSignal, repairs?: string): Promise<T> {
     return this.mutex.run(async () => {
       try {
-        if (this.publicationUncertain) throw new HomeTaskStoreError("publication-uncertain");
+        if (this.uncertain.size && !(repairs !== undefined && this.uncertain.has(repairs))) throw new HomeTaskStoreError("publication-uncertain");
         return await operation();
       } catch (error) {
         // Setup-marker and data-file publications share this one uncertainty
-        // owner; no write path can continue after a visible uncertain commit.
-        if (isDurablePublicationUncertain(error)) this.publicationUncertain = true;
-        const refusal = this.publicationUncertain ? new HomeTaskStoreError("publication-uncertain")
+        // owner; no other write path continues after a visible uncertain commit.
+        if (isDurablePublicationUncertain(error)) this.uncertain.add("namespace");
+        const refusal = this.uncertain.size ? new HomeTaskStoreError("publication-uncertain")
           : error instanceof HomeTaskStoreError ? error
             : new HomeTaskStoreError(error instanceof SecureJsonFileError && error.kind === "invalid" ? "invalid-record" : "unsafe-state");
         this.options.diagnostic?.({ event: "home.task.store-refused", reason: refusal.code });
@@ -350,11 +355,14 @@ export class HomeTaskStore {
     this.journal.push(path === this.authorizationPath ? null : (document as HomeTaskRecord).taskId);
     if (this.journal.length > WRITE_JOURNAL) this.journal.shift();
     if (Buffer.byteLength(`${JSON.stringify(document, null, 2)}\n`) > maximumBytes) throw new HomeTaskStoreError("invalid-record");
+    const key = path === this.authorizationPath ? "authorization" : (document as HomeTaskRecord).taskId;
     try { await durableAtomicWriteJson(path, document, 0o600, this.options.fileSystem); }
     catch (error) {
-      if (isDurablePublicationUncertain(error)) throw error;
-      throw new HomeTaskStoreError("write-failed");
+      if (!isDurablePublicationUncertain(error)) throw new HomeTaskStoreError("write-failed");
+      this.uncertain.add(key);
+      throw new HomeTaskStoreError("publication-uncertain");
     }
+    this.uncertain.delete(key);
   }
 
   /** Directory checks for the namespace path, without reading any file. False
