@@ -712,7 +712,7 @@ describe("AuthBroker", () => {
   });
 
   it("settles a signal-ignoring manual-code provider through broker prompt retirement", async () => {
-    // A legacy extension login shape: onAuth/onPrompt
+    // A callback-style extension login: onAuth/onPrompt
     // callbacks through Pi's real OAuth adapter, no signal use, and a code exchange
     // only after the pasted code arrives. The broker owns that prompt, so retiring
     // an abandoned login rejects the exact provider await instead of relying on abort.

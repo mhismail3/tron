@@ -889,7 +889,8 @@ export function markHomeMemoryCache(payload: unknown): unknown {
   });
   if (index < 0) return payload;
   const blocks = (messages[index] as { content: unknown[] }).content;
-  // [header, ...groups, footer, nonce]: the last group is third from the end.
+  // [header, ...groups, footer, nonce]: the last group is third from the end,
+  // so a block a provider places ahead of the header does not move the mark.
   let mark = blocks.length - 3;
   if (mark < 0) return payload;
   const lines = viewGroupLines(blocks[mark]);

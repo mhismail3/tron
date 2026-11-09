@@ -37,7 +37,7 @@ Commands:
                                     slots; a 4th job waits; `test ios slots` shows holders)
   test mac [test classes...]        Build and run the Mac integration tests under a temporary HOME
   test tooling [test files...]      Run Python script integration suites directly
-  provider-smoke [--probe-only] [--live] [--require-fable-5-2] [--json]
+  provider-smoke [--probe-only] [--live --agent-dir <dir>] [--require-fable-5-2] [--json]
                                     Claude subscription smoke of the pinned Pi: Fable 5.2,
                                     the Claude Code version it sends, Tron's wiring tests
                                     (tools/claude-provider-smoke)

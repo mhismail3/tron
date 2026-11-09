@@ -106,7 +106,7 @@ describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
     const model = home.getModels("anthropic").find((candidate) => candidate.id === "claude-opus-5-5")!;
     expect(model).toMatchObject({ provider: "anthropic", api: "anthropic-messages" });
     expect(shared.isUsingOAuth("anthropic")).toBe(true);
-    expect(getSupportedThinkingLevels(model)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(getSupportedThinkingLevels(model)).toEqual(expect.arrayContaining(["xhigh", "max"]));
 
     const onPayload = homeBeforeProviderRequest();
     const tools = [

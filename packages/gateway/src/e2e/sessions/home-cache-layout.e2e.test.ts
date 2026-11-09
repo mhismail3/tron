@@ -15,7 +15,7 @@ import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, VIEW_BLOCK_LINES } from "../../episodi
 import { EPISODIC_COMPACT_PROMPT } from "../../episodic/episodic-compactor.js";
 import { EPISODIC_DEFAULTS } from "../../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../../modules/home/home-memory.js";
-import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../../modules/home/home-request-policy.js";
+import { HOME_NONCE_MARKER, markHomeMemoryCache, type HomeRequestRecord } from "../../modules/home/home-request-policy.js";
 import type { HomeStatus } from "../../protocol/types.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
@@ -403,6 +403,13 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     // Before the first whole group the header is marked: the empty first view, then
     // a two-line partial group; the first whole group takes the mark from there.
     expect(homeRequests.slice(0, 3).map(viewMarks)).toEqual([[".messages[0].content[0]"], [".messages[0].content[0]"], [".messages[0].content[1]"]]);
+    // A block a provider places ahead of the memory view moves the mark with the
+    // view: the mark is found from the end.
+    const prepended = structuredClone(last!.body) as { messages: Array<{ content: Block[] }> };
+    for (const block of prepended.messages[0]!.content) delete block.cache_control;
+    prepended.messages[0]!.content.unshift({ type: "text", text: "provider prompt block", cache_control: { type: "ephemeral", ttl: "1h" } });
+    const remarked = markHomeMemoryCache(prepended) as { messages: Array<{ content: Block[] }> };
+    expect(remarked.messages[0]!.content.flatMap((block, index) => block.cache_control ? [index] : [])).toEqual([0, viewMarkAt + 1]);
     const lastMessage = messagesOf(last!).length - 1;
     expect(lastMarks).toContain(`.messages[${lastMessage}].content[${blocks(messagesOf(last!)[lastMessage]!).length - 1}]`);
     expect(lastMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);

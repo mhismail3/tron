@@ -22,11 +22,11 @@ const HAIKU = "claude-haiku-5-5";
 const WIRING_TESTS = ["src/e2e/modules/home/home-anthropic-oauth-wire.integration.test.ts", "src/providers/provider-usage.integration.test.ts"];
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 
-const USAGE = `Usage: scripts/tron provider-smoke [--probe-only] [--live [--agent-dir <dir>]] [--require-fable-5-2] [--json]
+const USAGE = `Usage: scripts/tron provider-smoke [--probe-only] [--live --agent-dir <dir>] [--require-fable-5-2] [--json]
   (default)            offline probe of the pinned Pi, then the Gateway wiring tests
   --probe-only         offline probe only
   --live               also send at most six short real requests on the subscription
-  --agent-dir <dir>    agent directory whose auth.json is read (default ~/.tron/agent); never written
+  --agent-dir <dir>    agent directory whose auth.json --live reads (required with --live); never written
   --require-fable-5-2  fail unless the pinned Pi serves Claude Fable 5.2
   --json               print the result as JSON`;
 
@@ -146,7 +146,7 @@ async function main(argv) {
   const flags = new Set(argv.filter((arg) => arg.startsWith("--")));
   const dirAt = argv.indexOf("--agent-dir");
   const unknown = [...flags].filter((flag) => !["--probe-only", "--live", "--agent-dir", "--require-fable-5-2", "--json", "--help"].includes(flag));
-  if (flags.has("--help") || unknown.length || (dirAt >= 0 && !argv[dirAt + 1])) {
+  if (flags.has("--help") || unknown.length || (dirAt >= 0 && !argv[dirAt + 1]) || (flags.has("--live") && dirAt < 0)) {
     console.error(USAGE);
     return flags.has("--help") ? 0 : 2;
   }
@@ -154,7 +154,7 @@ async function main(argv) {
   const failures = [...result.probe.failures];
   if (flags.has("--require-fable-5-2") && result.probe.fable52.status !== "servable") failures.push(`${FABLE} is ${result.probe.fable52.status} in pi-ai ${result.probe.piAi}`);
   if (flags.has("--live")) {
-    result.live = await live(dirAt >= 0 ? resolve(argv[dirAt + 1]) : join(process.env.HOME, ".tron/agent"), result.probe);
+    result.live = await live(resolve(argv[dirAt + 1]), result.probe);
     failures.push(...result.live.failures);
   }
   if (!flags.has("--probe-only")) failures.push(...wiringTests());

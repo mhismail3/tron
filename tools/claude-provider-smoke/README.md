@@ -8,7 +8,7 @@ tool is the gate for every Pi release that changes that path
 ```bash
 scripts/tron provider-smoke                  # offline probe, then the Gateway wiring tests
 scripts/tron provider-smoke --probe-only     # offline probe only
-scripts/tron provider-smoke --live           # plus at most six short real requests
+scripts/tron provider-smoke --live --agent-dir <dir>   # plus at most six short real requests
 scripts/tron provider-smoke --require-fable-5-2
 ```
 
@@ -43,8 +43,8 @@ The default run also runs these tests through `scripts/tron test gateway`:
 
 Run `--live` only with the maintainer's approval. It costs subscription usage.
 
-- **Credential.** It reads the current access token from `<agent-dir>/auth.json`, which is
-  `~/.tron/agent` by default, and never writes it. It refuses a token that expires within 30
+- **Credential.** It reads the current access token from `<agent-dir>/auth.json` (no default:
+  the maintainer names Stable or Debug) and never writes it. It refuses a token that expires within 30
   minutes. Every request goes through a fetch that refuses the OAuth token endpoint, so the
   stored login is never refreshed or rotated.
 - **Requests.** It reads `/api/oauth/usage` before and after, and sends:
