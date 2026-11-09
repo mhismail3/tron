@@ -1533,6 +1533,7 @@ class BrowserForkProvisionTests(unittest.TestCase):
         selections = {
             ('src/e2e/sessions/browser-fork-receipts.integration.test.ts',): True,
             ('src/e2e/sessions/browser-fork-receipts.integration.test.ts:48',): True,
+            ('SRC/E2E/SESSIONS/BROWSER-FORK',): True,
             (str(self.root / 'packages/gateway/src/e2e/sessions/browser-fork-receipts.integration.test.ts'),): True,
             ('src/e2e/admin/package-updates.lock.integration.test.ts',): False,
             ('--testTimeout', '5000', 'src/e2e/admin/package-updates.lock.integration.test.ts'): False,
