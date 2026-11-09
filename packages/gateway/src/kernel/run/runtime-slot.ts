@@ -1341,7 +1341,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
       // Home is the exception: it loads no project or package code, so nothing
       // can register a provider into its runtime, and it runs on the Gateway-wide
       // runtime where `home.designate` admitted its model and user provider
-      // packages such as CortexKit's are registered (#480).
+      // packages are registered (#480).
       const profile = this.profileFor(sessionManager);
       const binding = profile.modelRuntime === "gateway"
         ? await profile.acquireModelRuntime()

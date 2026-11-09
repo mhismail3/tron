@@ -1,0 +1,167 @@
+import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { getSupportedThinkingLevels, type Context, type Message, type Model } from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, it } from "vitest";
+import { VIEW_BLOCK_LINES } from "../../../episodic/cache-layout.js";
+import { applyHomeCacheRetention, HOME_NONCE_MARKER } from "../../../modules/home/home-request-policy.js";
+import { createTronHomeExtension } from "../../../modules/home/tron-home-extension.js";
+import { sessionRuntimeView } from "../../../providers/openai-model-eligibility.js";
+import { createProviderModelRuntime } from "../../../providers/provider-runtime.js";
+import { ProviderUsageOwner } from "../../../providers/provider-usage.js";
+
+// Tron serves Claude subscriptions through Pi's built-in `anthropic` provider and
+// its OAuth login in auth.json. This drives the Gateway's own runtime composition
+// and Home's real `before_provider_request` hook against a local Anthropic
+// endpoint (the built-in provider with only its baseUrl moved, as Pi's models.json
+// documents for proxies) and checks what reaches the wire.
+
+type Captured = { headers: IncomingHttpHeaders; body: Record<string, unknown> };
+type Block = { type: string; text?: string; name?: string; cache_control?: { type: string; ttl?: string } };
+type WireMessage = { role: string; content: Block[] | string };
+
+const ACCESS = "sk-ant-oat01-tron-wire-test";
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+
+function sse(events: Array<Record<string, unknown>>): string {
+  return events.map((event) => `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`).join("");
+}
+const start = (model: string) => ({ type: "message_start", message: { id: "msg_wire", type: "message", role: "assistant", model, content: [],
+  stop_reason: null, usage: { input_tokens: 4, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } });
+/** Anthropic replies under Claude Code's tool casing (`Bash`), then plain text. */
+function reply(index: number, model: string): string {
+  if (index === 0) return sse([start(model),
+    { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_wire", name: "Bash", input: {} } },
+    { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "{\"command\":\"echo ok\"}" } },
+    { type: "content_block_stop", index: 0 },
+    { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 5 } }, { type: "message_stop" }]);
+  return sse([start(model),
+    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } },
+    { type: "content_block_stop", index: 0 },
+    { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } }, { type: "message_stop" }]);
+}
+
+async function anthropicEndpoint(): Promise<{ port: number; requests: Captured[] }> {
+  const requests: Captured[] = [];
+  const server: Server = createServer((request, response) => {
+    let text = "";
+    request.on("data", (chunk) => { text += String(chunk); });
+    request.on("end", () => {
+      const body = JSON.parse(text) as Record<string, unknown>;
+      response.writeHead(200, { "content-type": "text/event-stream" }).end(reply(requests.length, String(body.model)));
+      requests.push({ headers: request.headers, body });
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  return { port: (server.address() as AddressInfo).port, requests };
+}
+
+/** Home's real hook, as the Home session's Pi agent calls it before each provider request. */
+function homeBeforeProviderRequest(): (payload: unknown, model: Model) => unknown {
+  const handlers = new Map<string, (event: { payload: unknown }, ctx: { model: Model }) => unknown>();
+  const unused = async () => { throw new Error("not used on the wire"); };
+  createTronHomeExtension(() => undefined, unused, unused, () => undefined, () => undefined, unused as never, () => "user", unused)(
+    { on: (name: string, handler: never) => handlers.set(name, handler), registerTool: () => {} } as never);
+  const hook = handlers.get("before_provider_request")!;
+  return (payload, model) => hook({ payload }, { model });
+}
+
+/** Home's memory message: header, whole view groups, the footer and the activation nonce. */
+function memoryMessage(): Message {
+  const group = (first: number) => Array.from({ length: VIEW_BLOCK_LINES }, (_, line) => `${first + line}+0|fact ${first + line}\n`).join("");
+  const blocks = ["<memory>", group(1), group(1 + VIEW_BLOCK_LINES), "</memory>", `${HOME_NONCE_MARKER}wire`];
+  return { role: "user", content: blocks.map((text) => ({ type: "text", text })), timestamp: 1 };
+}
+
+function cacheMarks(body: Record<string, unknown>): Array<{ path: string; ttl?: string }> {
+  const marks: Array<{ path: string; ttl?: string }> = [];
+  const visit = (value: unknown, path: string) => {
+    if (Array.isArray(value)) value.forEach((item, index) => visit(item, `${path}[${index}]`));
+    else if (value && typeof value === "object") for (const [key, field] of Object.entries(value)) {
+      if (key === "cache_control") marks.push({ path, ttl: (field as { ttl?: string }).ttl });
+      else visit(field, `${path}.${key}`);
+    }
+  };
+  visit(body, "");
+  return marks;
+}
+
+describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
+  it("sends Home's one-hour view mark, Claude Code identity and tool casing, and maps the reply back", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-anthropic-oauth-wire-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const agentDir = join(root, "agent");
+    const endpoint = await anthropicEndpoint();
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(join(agentDir, "auth.json"), JSON.stringify({ anthropic: { type: "oauth", access: ACCESS, refresh: "sk-ant-ort01-tron-wire-test", expires: Date.now() + 3_600_000 } }), { mode: 0o600 });
+    await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { anthropic: { baseUrl: `http://127.0.0.1:${endpoint.port}` } } }));
+    const shared = await createProviderModelRuntime(agentDir);
+    // The Home session's runtime, composed as gateway-main composes it.
+    const home = applyHomeCacheRetention(sessionRuntimeView(shared));
+    const model = home.getModels("anthropic").find((candidate) => candidate.id === "claude-opus-5-5")!;
+    expect(model).toMatchObject({ provider: "anthropic", api: "anthropic-messages" });
+    expect(shared.isUsingOAuth("anthropic")).toBe(true);
+    expect(getSupportedThinkingLevels(model)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+
+    const onPayload = homeBeforeProviderRequest();
+    const tools = [
+      { name: "bash", description: "Run a shell command.", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } },
+      { name: "read", description: "Read a file.", parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+    ];
+    const messages: Message[] = [memoryMessage(), { role: "user", content: [{ type: "text", text: "Run echo ok." }], timestamp: 2 }];
+    const context: Context = { systemPrompt: "You are Tron Home.", tools: tools as never, messages };
+    const first = await home.streamSimple(model, context, { sessionId: "home-wire", reasoning: "xhigh", onPayload }).result();
+    expect(first.stopReason).toBe("toolUse");
+    // Claude Code's `Bash` comes back as the host's own `bash`.
+    expect(first.content.filter((block) => block.type === "toolCall")).toEqual([expect.objectContaining({ name: "bash", arguments: { command: "echo ok" } })]);
+    expect(first.providerThinkingLevel).toBe("xhigh");
+
+    const second = await home.streamSimple(model, { ...context, messages: [...messages, first,
+      { role: "toolResult", toolCallId: "toolu_wire", toolName: "bash", content: [{ type: "text", text: "ok" }], isError: false, timestamp: 3 }] },
+    { sessionId: "home-wire", reasoning: "max", onPayload }).result();
+    expect(second).toMatchObject({ stopReason: "stop", providerThinkingLevel: "max" });
+
+    expect(endpoint.requests).toHaveLength(2);
+    for (const { headers, body } of endpoint.requests) {
+      // Subscription identity: the OAuth bearer, Claude Code's headers, betas and system line.
+      expect(headers.authorization).toBe(`Bearer ${ACCESS}`);
+      expect(headers["x-api-key"]).toBeUndefined();
+      expect(headers["user-agent"]).toMatch(/^claude-cli\/\d+\.\d+\.\d+$/u);
+      expect(headers["x-app"]).toBe("cli");
+      expect(String(headers["anthropic-beta"]).split(",")).toEqual(expect.arrayContaining(["claude-code-20250219", "oauth-2025-04-20"]));
+      expect((body.system as Block[])[0]!.text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
+      expect((body.tools as Block[] | undefined)?.map((tool) => tool.name)).toEqual(expect.arrayContaining(["Bash", "Read"]));
+      // Home's mark on the last whole view group, every mark one-hour, the limit kept.
+      const memory = (body.messages as WireMessage[]).findIndex((message) => Array.isArray(message.content)
+        && message.content.some((block) => block.text?.startsWith(HOME_NONCE_MARKER)));
+      const marks = cacheMarks(body);
+      expect(marks.map((mark) => mark.path)).toContain(`.messages[${memory}].content[2]`);
+      expect(marks.length).toBeLessThanOrEqual(4);
+      expect(new Set(marks.map((mark) => mark.ttl))).toEqual(new Set(["1h"]));
+    }
+    // The second request returns the tool call under the casing Anthropic sent.
+    const toolUse = (endpoint.requests[1]!.body.messages as WireMessage[]).flatMap((message) => Array.isArray(message.content) ? message.content : [])
+      .find((block) => block.type === "tool_use");
+    expect(toolUse?.name).toBe("Bash");
+
+    // The usage card claims the Claude Code version Pi's requests claim, so a Pi bump
+    // that moves it (Anthropic gates models on it) cannot leave the card behind.
+    let usageAgent: string | null = null;
+    const usage = new ProviderUsageOwner({ fetch: async (_input, init) => {
+      usageAgent = new Headers(init?.headers).get("user-agent");
+      return new Response(JSON.stringify({ five_hour: null, seven_day: { utilization: 10 } }), { headers: { "content-type": "application/json" } });
+    } });
+    // Usage reads only Anthropic's own host, so its runtime keeps the built-in baseUrl.
+    const direct = join(root, "direct");
+    await mkdir(direct);
+    await writeFile(join(direct, "auth.json"), JSON.stringify({ anthropic: { type: "oauth", access: ACCESS, refresh: "sk-ant-ort01-tron-wire-test", expires: Date.now() + 3_600_000 } }), { mode: 0o600 });
+    expect((await usage.read(await createProviderModelRuntime(direct), "anthropic")).providers[0]).toMatchObject({ status: "available" });
+    const version = (agent: unknown) => /\/(\d+\.\d+\.\d+)/u.exec(String(agent))?.[1];
+    expect(version(usageAgent)).toBe(version(endpoint.requests[0]!.headers["user-agent"]));
+  });
+});

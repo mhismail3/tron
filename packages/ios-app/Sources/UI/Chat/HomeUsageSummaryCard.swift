@@ -181,7 +181,7 @@ struct HomeUsageSummaryCard: View {
     }
 
     private func providerName(_ provider: ProviderSummary) -> some View {
-        // Long names ("Anthropic (CortexKit)") wrap, then scale, before they clip.
+        // Long names ("Cloudflare AI Gateway") wrap, then scale, before they clip.
         Text(provider.displayName)
             .font(TronTypography.sans(size: HomeUsageCardLayout.nameSize, weight: .medium))
             .foregroundStyle(Color.tronTextPrimary)

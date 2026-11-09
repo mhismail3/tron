@@ -1573,7 +1573,7 @@ enum HostedHomeDashboardWorkers {
         .object(["providers": .array([
             provider("anthropic", "Anthropic"), provider("openai-codex", "OpenAI Codex"),
             provider("fixture", "Fixture", usage: false),
-        ] + (longName ? [provider("cortexkit", "Anthropic (CortexKit)")] : [])
+        ] + (longName ? [provider("cloudflare-ai-gateway", "Cloudflare AI Gateway")] : [])
           + (openCodeGo ? [provider("opencode-go", "OpenCode Go")] : []))])
     }
 
@@ -1596,7 +1596,7 @@ enum HostedHomeDashboardWorkers {
         return .object(["providers": .array([
             snapshot("anthropic", [window("five-hour", "5h", 42, 18_000), window("weekly", "Weekly", 18, 604_800)]),
             snapshot("openai-codex", [window("five-hour", "5h", 7, 18_000), window("weekly", "Weekly", 2, 604_800)]),
-        ] + (longName ? [snapshot("cortexkit", [window("weekly", "Weekly", 48, 604_800)]
+        ] + (longName ? [snapshot("cloudflare-ai-gateway", [window("weekly", "Weekly", 48, 604_800)]
                                     + (scopedWeekly ? [window("weekly-claude-opus", "Opus only", 61, 604_800)] : []))] : [])
           + (openCodeGo ? [snapshot("opencode-go", [
               window("rolling", "5h", 0, 18_000, resetsIn: 18_000), window("weekly", "Weekly", 72, 604_800, resetsIn: 172_800),

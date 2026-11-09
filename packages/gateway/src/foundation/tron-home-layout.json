@@ -10,8 +10,6 @@
     "agent/mcp.log": {"owner": "gateway/host", "writer": "gateway(pi)", "life": "log", "rebuild": "n/a", "backup": false, "secret": null, "retention": "Pi MCP adapter", "view": "system"},
     "agent/trust.json": {"owner": "gateway/admin", "writer": "gateway", "life": "durable", "rebuild": "re-trust projects", "backup": true, "secret": null, "retention": "single document", "view": "config"},
     "agent/auth.json": {"owner": "gateway/providers", "writer": "gateway(pi)", "life": "durable", "rebuild": "sign in again", "backup": false, "secret": "credential", "retention": "single document", "view": "system"},
-    "agent/anthropic-auth.json": {"owner": "extension", "writer": "extension", "life": "durable", "rebuild": "sign in again", "backup": false, "secret": "credential", "retention": null, "view": "system"},
-    "agent/anthropic-auth-*.json": {"owner": "gateway/providers", "writer": "extension, gateway", "life": "durable", "rebuild": "sign in again", "backup": false, "secret": "credential", "retention": null, "view": "system"},
     "agent/agents": {"owner": "pi-subagents", "writer": "user", "life": "durable", "rebuild": "none", "backup": true, "secret": null, "retention": "user-managed", "view": "config", "subtree": true},
     "agent/profiles": {"owner": "pi-subagents", "writer": "user, pi-subagents", "life": "durable", "rebuild": "none", "backup": true, "secret": null, "retention": "user-managed", "view": "config", "subtree": true},
     "agent/prompts": {"owner": "pi-sdk", "writer": "user", "life": "durable", "rebuild": "none", "backup": true, "secret": null, "retention": "user-managed", "view": "knowledge", "subtree": true},

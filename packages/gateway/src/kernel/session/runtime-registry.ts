@@ -702,8 +702,8 @@ export class RuntimeRegistry implements SessionOperations {
        * examined by a later pass; the report keeps the stop visible. */
       artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
       extensionArtifactWarning?: (warning: { reason: import("../projection/extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
-      /** The Gateway-wide user-scope runtime, where user provider packages (for
-       * example CortexKit's `anthropic` override) are registered. Home's chat runs
+      /** The Gateway-wide user-scope runtime, where user provider packages
+       * are registered. Home's chat runs
        * on it (#480). Only a registry without a Gateway, as in tests, omits it;
        * Home then gets a runtime of its own, as an ordinary session does. */
       gatewayModelRuntime?: ModelRuntime;

@@ -109,7 +109,7 @@ function stripTerminalPresentation(value: string): string { return stripTerminal
 /**
  * One-line, unique labels for select options; the answer maps back by position
  * to the extension's own option. Pi's terminal select renders multi-line options
- * (CortexKit's `/claude` sections carry their status lines), but a semantic
+ * (a sectioned menu carries status lines under each option), but a semantic
  * select option is a single line on the wire and in the app.
  */
 function selectLabels(options: readonly string[]): string[] {

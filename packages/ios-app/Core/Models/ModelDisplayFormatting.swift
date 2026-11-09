@@ -4,7 +4,6 @@ package enum ModelDisplayFormatting {
     private static let providerAliases: [String: String] = [
         "amazon-bedrock": "Amazon Bedrock",
         "anthropic": "Anthropic",
-        "anthropic-(cortexkit)": "Anthropic (CortexKit)",
         "azure": "Azure OpenAI",
         "azure-openai": "Azure OpenAI",
         "deepseek": "DeepSeek",

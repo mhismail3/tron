@@ -33,7 +33,6 @@ conflict or a persisted-data migration is a maintainer decision, never applied a
 | --- | --- | --- |
 | `pi-coding-agent` | `pi-coding-agent-patch.json` (`removeWhen`) | one numbered `third_party/pi-coding-agent/tron.patch`; queue form at its next bump |
 | `pi-subagents` | `pi-subagents-pin.json` | fork commits on v0.76.1, each with tests and a drop condition in TRON-PATCHES.md in the fork; queue form at its next bump |
-| CortexKit `anthropic-auth` | user package in `~/.tron/agent/settings.json` | a 1.23.1-tron fork build; its replacement is a patch queue on upstream 2.4.12 (PATCHES.md in the fork, patch tests in one file) that the maintainer switches to |
 
 ## Version authority and checks
 
@@ -52,6 +51,18 @@ fails). `pi-sdk-baseline.json` records the prior runtime and accepted `knownOneW
 ways, JSONL, settings, auth, `mcp.json` and MCP OAuth credentials.
 `node scripts/compare-pi-sdk-graph.mjs BASE HEAD` compares the family's dependency closure;
 when it changes run the rollback matrix and `scripts/ios-gateway-e2e-test` directly.
+
+## Claude subscriptions
+
+Claude Pro, Max and Ultra run on Pi's built-in `anthropic` provider and its OAuth login in
+`auth.json`, with no provider package. Pi refreshes that login under its credential lock, and the
+usage card reads the bearer Pi resolves. Home's view mark reaches the wire through
+`before_provider_request` with one-hour retention. Anthropic gates newer models on the Claude
+Code version a subscription request claims (Fable 5.2 needs 2.1.290 or later). Tron never
+patches that version or Pi's request shaping: a model Pi cannot serve waits for a Pi release.
+Every Pi bump runs `scripts/tron provider-smoke` ([tool](../../../tools/claude-provider-smoke/README.md)):
+it reports Fable 5.2 and the Claude Code version Pi sends, and runs the wiring tests
+(`home-anthropic-oauth-wire`, `provider-usage`). A live run of a few real requests waits for the maintainer.
 
 ## Tron-patched `pi-coding-agent`
 
