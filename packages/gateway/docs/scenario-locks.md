@@ -102,8 +102,9 @@ sets file times explicitly and `tron-workspace.lock` records none) and asserting
 step's result or refusal and the exact persisted documents after it: `session-archive.lock`, `blob-store.lock`,
 `catalog-metadata-index.lock` (`gateway/session-catalog`), `session-attention.lock`
 (`gateway/projection`), `run-markers.lock` (`gateway/run`), `tron-workspace.lock`
-(`gateway/workspace`) and `command-receipts.lock` (`gateway/transport`; its paths test
-pins the receipt file names and documents the store writes).
+(`gateway/workspace`), `command-receipts.lock` (`gateway/transport`; its paths test
+pins the receipt file names and documents the store writes) and `home-task-store.lock`
+(`gateway/home`; it pins the task file names and the authority document).
 
 The delivery locks (`notifications-queue.lock`) script the relay's availability and run
 the owner on a clock they freeze and advance, so no retry comes due by host timing; their
@@ -204,10 +205,6 @@ Knowledge lock.
 | `gateway/model-release-dates.json` (models.dev cache) | `ModelReleaseDateCatalog` | `gateway/providers` store-model-release-dates |
 | Pi session JSONL, `agent/` auth, MCP and settings | Pi SDK | Pi persisted-state corpus (`gateway/pi-sdk`) |
 
-The Home tasks mutation-path lock (`home-task-store-paths`, `gateway/home`) still
-uses `test-support/store-path-lock.ts`: it drives the store's writes on a fresh home
-under a fixed clock and pins each step's result or refusal and the exact files after
-it in its golden.
 The catalog metadata index test reads each file's device and inode identity from
 the file system it asserts against, and sets each transcript's modification time
 itself. The run-marker lock holds a queued write in the store's own file-system option to pin
