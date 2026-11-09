@@ -1334,7 +1334,12 @@ while other and not Path('test-results/started-'+other).exists() and time.time()
         report = self.reports()[-1]
         self.assertEqual(report['verdict'], 'uncovered')
         self.assertFalse(report['results'][1]['failureComplete'])
-        self.assertEqual(report['failures'][0]['attribution']['status'], 'unresolved')
+        # #2265: with no exact-case selector there is nothing to bisect: the suite is never rerun.
+        self.assertEqual(report['results'][1]['status'], 'uncovered')
+        self.assertEqual(report['failures'][0]['attribution'], {'status': 'unresolved', 'reason': 'owner provided no exact-case attribution selector',
+                                                                'candidates': report['commits']})
+        self.assertFalse(list((self.root / '.git/verify/batches').glob('*/attribution-*')))
+        self.assertFalse((self.root / '.git/verify/attributions').exists())
         self.assertFalse(self.repair())
 
     def assert_never_publishes(self, marker):
