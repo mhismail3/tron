@@ -202,19 +202,9 @@ class MiniGatewayLane(unittest.TestCase):
             time.sleep(0.2)
 
     def assert_mini_job_ended(self) -> None:
-        deadline = time.time() + 60
-        while not (self.mini / 'lane-terminated').exists():
-            self.assertLess(time.time(), deadline, 'the mini lane was never stopped')
-            time.sleep(0.2)
         self.assertEqual((self.mini / 'lane-terminated').read_text(), 'SIGTERM')
         with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
-            while True:
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    self.assertLess(time.time(), deadline, 'a mini job still holds the job lock')
-                    time.sleep(0.2)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if a mini job still held it
         self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
 
     def test_killing_the_local_runner_process_group_stops_the_mini_lane_and_frees_its_lock(self) -> None:
@@ -226,6 +216,16 @@ class MiniGatewayLane(unittest.TestCase):
         # No local handler runs: the runner and its ssh client die together, as under a timeout's group kill.
         os.killpg(runner.pid, signal.SIGKILL)
         runner.communicate(timeout=60)
+        # Nothing local outlives the kill to wait for the mini job: it ends on its own once its input closes.
+        deadline = time.time() + 60
+        with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    self.assertLess(time.time(), deadline, 'a mini job still holds the job lock')
+                    time.sleep(0.2)
         self.assert_mini_job_ended()
 
     def test_stopping_the_local_runner_stops_the_mini_lane_and_frees_its_lock(self) -> None:
@@ -233,8 +233,13 @@ class MiniGatewayLane(unittest.TestCase):
         runner = self.lane(*args, 'hang', background=True)
         self.addCleanup(lambda: runner.poll() is None and runner.kill())
         self.wait_for_lane(runner)
+        # A later push owns the incoming ref; the running job must not remove it.
+        self.write('README', 'later push\n')
+        later = self.commit('later')
+        self.git('push', '-q', '--force', str(self.mini / 'tron-ci/tron.git'), f'{later}:refs/tron-jobs/incoming')
         runner.send_signal(signal.SIGTERM)
         output, _ = runner.communicate(timeout=60)
+        self.assertEqual(self.git('rev-parse', 'refs/tron-jobs/incoming', cwd=self.mini / 'tron-ci/tron.git'), later, output)
         self.assertEqual((self.mini / 'lane-terminated').read_text(), 'SIGTERM', output)
         self.assertEqual(runner.returncode, 143, output)
         self.assert_mini_job_ended()
