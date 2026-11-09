@@ -116,7 +116,10 @@ before it was recorded, and the branch of a detached checkout.
 reused PID based on `kill -0` alone. The supervisor atomically publishes bounded lifecycle state:
 `starting`, `ready`, `stopping`, `restarting`, `failed`, or `stopped`. Lifecycle writes use the explicit transition table in `scripts/tron-dev-state.mjs`; illegal regressions fail closed. Exit 75
 is the intentional authenticated restart drain; other exits consume a bounded
-restart budget and eventually become `failed`.
+restart budget and eventually become `failed`. A failed `restart` restores the
+prior selection and waits for this supervisor to relaunch it; it never uses the
+Stable launchd path. When the supervisor has already exited, `scripts/tron dev start`
+brings Debug back.
 
 Only after workers stop/park cleanly, use `scripts/tron dev restart` for Debug
 loopback, or add `--tailscale` when iOS must reach it; production rebuild/delivery

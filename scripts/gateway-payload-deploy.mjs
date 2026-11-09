@@ -1940,7 +1940,7 @@ export async function waitForReplacement({
     }
     if (!launched && now() - startedAt >= naturalGraceMs) {
       // Recheck immediately at the destructive boundary. Only proven listener
-      // absence authorizes the one fixed Stable kickstart.
+      // absence authorizes the one supervisor launch.
       const beforeLaunch = await readListener();
       if (!beforeLaunch) {
         await launchSupervisor();
@@ -2190,7 +2190,10 @@ function productionReplacementDependencies({ channel, host, port, token, timeout
     readAuthenticatedHealth: async () => requireAuthenticatedRuntimeInfo(await authenticatedRequest({
       host, port, token, timeoutMs, method: "system.info",
     }), channel),
-    launchSupervisor: () => kickstartStableSupervisor(channel),
+    // launchd owns the Stable relaunch. The live Debug supervisor
+    // (scripts/tron dev) relaunches the current selection after its child
+    // exits, so Debug recovery only waits for it and never reaches launchd.
+    launchSupervisor: channel === "dev" ? async () => {} : () => kickstartStableSupervisor(channel),
   };
 }
 
@@ -2400,6 +2403,7 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
             ? caughtRecovery
             : new Error(String(caughtRecovery));
           error.message += `; deployment recovery failed: ${recoveryError.message}`;
+          if (channel === "dev") error.message += "; Debug recovery belongs to its supervisor: scripts/tron dev start brings Debug back";
           await writeState(paths, {
             ...stateBase,
             state: "failed",
