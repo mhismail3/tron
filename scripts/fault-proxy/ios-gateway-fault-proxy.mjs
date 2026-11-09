@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-const { WebSocket, WebSocketServer } = createRequire(new URL("../packages/gateway/package.json", import.meta.url))("ws");
+const { WebSocket, WebSocketServer } = createRequire(new URL("../../packages/gateway/package.json", import.meta.url))("ws");
 const maximumBytes = 1_048_576;
 const maximumFrames = 16;
 
@@ -515,11 +515,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
   };
 }
 
-// Exported for its owner test (scripts/ios-gateway-fault-proxy.test.mjs), which
+// Exported for its owner test (ios-gateway-fault-proxy.test.mjs, beside it), which
 // substitutes the ps/lsof runner to produce timeouts and PID reuse on demand.
 export async function ownedGatewayVerifier(initialPid, port, { execute = promisify(execFile), proofIntervalMs = 1_000 } = {}) {
   if (!Number.isSafeInteger(initialPid) || initialPid <= 1 || process.ppid <= 1) throw new Error("Fixture owner PID is required");
-  const entrypoint = realpathSync(fileURLToPath(new URL("../packages/gateway/dist/index.js", import.meta.url)));
+  const entrypoint = realpathSync(fileURLToPath(new URL("../../packages/gateway/dist/index.js", import.meta.url)));
   let pid = initialPid;
   let birth;
   let command;
@@ -607,7 +607,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   // Keep the caller's launch spelling for its PID ownership proof (/var may
   // resolve to /private/var). Canonical validation must not rewrite that contract.
   const entrypoint = process.env.TRON_E2E_GATEWAY_ENTRY;
-  if (realpathSync(entrypoint) !== realpathSync(fileURLToPath(new URL("../packages/gateway/dist/index.js", import.meta.url)))) throw new Error("Gateway restart entrypoint is not the repository fixture");
+  if (realpathSync(entrypoint) !== realpathSync(fileURLToPath(new URL("../../packages/gateway/dist/index.js", import.meta.url)))) throw new Error("Gateway restart entrypoint is not the repository fixture");
   const restartGateway = async () => {
     await verifyTarget();
     const oldPid = verifyTarget.pid();
@@ -622,7 +622,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     }
     const { spawn } = await import("node:child_process");
     const child = spawn(process.execPath, [entrypoint], {
-      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      cwd: fileURLToPath(new URL("../..", import.meta.url)),
       env: {
         PATH: process.env.PATH,
         HOME: process.env.TRON_E2E_GATEWAY_HOME,

@@ -16,11 +16,12 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scripts = fileURLToPath(new URL(".", import.meta.url));
-const gateway = join(scripts, "..", "packages", "gateway");
+const gateway = join(scripts, "..", "..", "packages", "gateway");
 const root = realpathSync(await mkdtemp(join(tmpdir(), "tron-fault-proxy-test-")));
-await mkdir(join(root, "scripts"));
+await mkdir(join(root, "scripts", "fault-proxy"), { recursive: true });
 await mkdir(join(root, "packages", "gateway", "dist"), { recursive: true });
-await copyFile(join(scripts, "ios-gateway-fault-proxy.mjs"), join(root, "scripts", "ios-gateway-fault-proxy.mjs"));
+const proxyScript = join(root, "scripts", "fault-proxy", "ios-gateway-fault-proxy.mjs");
+await copyFile(join(scripts, "ios-gateway-fault-proxy.mjs"), proxyScript);
 await copyFile(join(gateway, "package.json"), join(root, "packages", "gateway", "package.json"));
 await symlink(join(gateway, "node_modules"), join(root, "packages", "gateway", "node_modules"));
 const entry = join(root, "packages", "gateway", "dist", "index.js");
@@ -82,7 +83,7 @@ async function startFixture() {
   await until(async () => (await get(upstreamPort)).status === 200, "the stand-in Gateway");
   const token = randomBytes(32).toString("hex");
   const ready = join(dir, "ready.json");
-  const proxy = track(spawn(process.execPath, [join(root, "scripts", "ios-gateway-fault-proxy.mjs")], {
+  const proxy = track(spawn(process.execPath, [proxyScript], {
     env: {
       PATH: process.env.PATH, HOME: dir,
       TRON_E2E_UPSTREAM_PORT: String(upstreamPort), TRON_E2E_UPSTREAM_PID: String(gatewayProcess.pid),
@@ -178,7 +179,7 @@ test("a respawned Gateway is adopted and proven before it serves", async () => {
 // The verifier with its ps/lsof runner substituted. Each call either answers from
 // the process table or, when `held`, waits for the case to settle it by hand.
 async function verifierCase() {
-  const proxyModule = await import(pathToFileURL(join(root, "scripts", "ios-gateway-fault-proxy.mjs")).href);
+  const proxyModule = await import(pathToFileURL(proxyScript).href);
   const port = 4321;
   const table = new Map();
   const calls = [];

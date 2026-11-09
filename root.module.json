@@ -46,8 +46,6 @@
       "scripts/install-hooks.sh",
       "scripts/ios-gateway-e2e-fixture.sh",
       "scripts/ios-gateway-e2e-test",
-      "scripts/ios-gateway-fault-proxy.mjs",
-      "scripts/ios-gateway-fault-proxy.test.mjs",
       "scripts/ios-mac-terminal-journey",
       "scripts/ios-share-publish.py",
       "scripts/ios-share-server.py",
