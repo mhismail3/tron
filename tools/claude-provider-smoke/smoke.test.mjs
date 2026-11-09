@@ -15,6 +15,7 @@ test("reports the Claude Code version Pi sends and Fable 5.2's status, and gates
   // Read off the wire, not Pi's source.
   assert.match(probe.userAgent, /^claude-cli\/\d+\.\d+\.\d+/u);
   assert.equal(probe.userAgent.split("/")[1].split(" ")[0], probe.claudeCode);
+  assert.ok(probe.claudeCode, "Pi's OAuth request carried a Claude Code version");
   assert.equal(probe.fable52.listed, probe.anthropicModels.includes("claude-fable-5-2"));
   const expected = !probe.fable52.listed ? "absent" : newerOrEqual(probe.claudeCode, probe.fable52.minimumClaudeCode) ? "servable" : "listed-but-refused";
   assert.equal(probe.fable52.status, expected);
