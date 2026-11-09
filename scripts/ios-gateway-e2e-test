@@ -787,6 +787,8 @@ report_result_bundle_failures() {
 # the result bundle, of its whole file tree) and records what the journey
 # asserted. A reviewer can therefore re-derive each artifact without trusting
 # this run.
+# The hosted app's `app-log/` sits beside them as diagnosis only: it is no
+# artifact of the journey's verdict, so the report neither hashes nor requires it.
 #
 # The two halves are separate because the report must carry the journey's FINAL
 # status: when an artifact cannot be captured, an otherwise passing journey has
@@ -855,7 +857,7 @@ import hashlib, json, os
 from pathlib import Path
 
 report_dir = Path(os.environ["TRON_E2E_REPORT_DIR"])
-artifacts = ["Journeys.xcresult", "gateway.jsonl", "proxy-link-stats.json", "summary.json", "app-log"]
+artifacts = ["Journeys.xcresult", "gateway.jsonl", "proxy-link-stats.json", "summary.json"]
 
 
 def file_sha256(path):
