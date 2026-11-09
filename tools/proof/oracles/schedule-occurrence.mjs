@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
 import { importGatewaySource } from "./gateway-source.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+// The schedule seams record on an opted-in Debug Gateway; an oracle run must never add its own calls to that corpus.
+delete process.env.TRON_PROOF_TRAFFIC;
 const oracle = await importGatewaySource("automations/schedule.ts");
 const { isGatewayTimestamp } = await importGatewaySource("util/timestamp.ts");
 const [corePath, countArg, seedArg, ...replayFiles] = process.argv.slice(2);

@@ -11,7 +11,9 @@ definition, retry or ledger. iOS and the first-party `schedule` tool (including 
 
 `automation-service.ts`, `automation-scheduler.ts`, `automation-executor.ts`,
 `automation-store.ts`, `automation-home-trigger.ts`, `schedule.ts`,
-`schedule-module.ts` (optional-owner descriptor) and `tron-schedule-extension.ts`. Store: `gateway/automations/`, strict schema-version-2
+`schedule-module.ts` (optional-owner descriptor), `tron-schedule-extension.ts` and `zone-table.ts` (a timezone's
+UTC offsets around an instant, from Intl: the trusted input of proof block `schedule/calendar`, read by its
+shadow until that block's cut-over). Store: `gateway/automations/`, strict schema-version-2
 owner-only documents, each with one definition, one ordinary nonterminal run or a
 Home message outbox (`currentRun` plus `pendingHomeRuns`), and 64 retained terminal runs. Older shapes are not admitted, migrated or projected. Writes
 sync the file and its directory before acknowledgement.
