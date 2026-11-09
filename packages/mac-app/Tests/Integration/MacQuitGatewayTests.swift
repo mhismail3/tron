@@ -336,31 +336,52 @@ private final class QuitGatewayFixture: @unchecked Sendable {
         return try #require((JSONSerialization.jsonObject(with: data) as? [String: Any])?["bearerToken"] as? String)
     }
 
-    func waitUntilServing() async throws {
+    func waitUntilServing() async throws { try await waitUntilLogged(event: "gateway.startup-budget") }
+
+    private func waitUntilLogged(event: String, step: String? = nil) async throws {
         let deadline = ContinuousClock.now.advanced(by: .seconds(30))
         while ContinuousClock.now < deadline {
             if let text = try? String(contentsOf: root.appendingPathComponent("launches"), encoding: .utf8),
                let first = text.split(separator: "\n").first, let value = Int32(first) { capturedPID = value }
-            if logContains(event: "gateway.startup-budget") { return }
+            if logContains(event: event, step: step) { return }
             try await Task.sleep(for: .milliseconds(100))
         }
         throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey:
-            "Gateway fixture did not serve: \((try? String(contentsOf: root.appendingPathComponent("process.log"), encoding: .utf8)) ?? "no output")"])
+            "Gateway fixture never logged \(event) \(step ?? ""): \((try? String(contentsOf: root.appendingPathComponent("process.log"), encoding: .utf8)) ?? "no output")"])
     }
 
-    func logContains(event: String) -> Bool {
+    func logContains(event: String, step: String? = nil) -> Bool {
         let text = (try? String(contentsOf: log, encoding: .utf8))
             ?? (try? String(contentsOf: root.appendingPathComponent("shutdown-log.jsonl"), encoding: .utf8)) ?? ""
         return text.split(separator: "\n").contains { line in
             guard let record = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { return false }
-            return record["event"] as? String == event
+            return record["event"] as? String == event && (step == nil || record["step"] as? String == step)
         }
     }
 
     func startAcceptedWork() async throws {
-        let created = try await rpc("session.create", ["commandId": UUID().uuidString, "cwd": root.appendingPathComponent("project").path])
-        let sessionID = try #require(created["sessionId"] as? String)
-        _ = try await rpc("session.prompt", ["commandId": UUID().uuidString, "sessionId": sessionID, "text": "Wait for the fixture."])
+        // A fresh home's first session joins the Gateway's post-serve transform of
+        // the managed subagent closure: seconds of CPU, many more under host load.
+        // Start once the Gateway logs that step, so the RPC deadline bounds only
+        // this session's create and prompt.
+        try await waitUntilLogged(event: "gateway.startup-step", step: "subagent-transforms")
+        var method = "session.create"
+        let started = ContinuousClock.now
+        do {
+            let created = try await rpc(method, ["commandId": UUID().uuidString, "cwd": root.appendingPathComponent("project").path])
+            let sessionID = try #require(created["sessionId"] as? String)
+            method = "session.prompt"
+            _ = try await rpc(method, ["commandId": UUID().uuidString, "sessionId": sessionID, "text": "Wait for the fixture."])
+        } catch {
+            // The fixture's Gateway log goes with its root: name where the time went first.
+            let timing = ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { line -> String? in
+                guard let record = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                      ["gateway.startup-step", "runtime.loaded", "rpc.completed"].contains(record["event"] as? String ?? "") else { return nil }
+                return "\(record["timestamp"] ?? "") \(record["message"] ?? "") \(record["stages"] ?? "")"
+            }
+            Issue.record("\(method) failed \(ContinuousClock.now - started) into accepted work: \(error)\n\(timing.joined(separator: "\n"))")
+            throw error
+        }
         let deadline = ContinuousClock.now.advanced(by: .seconds(15))
         while !FileManager.default.fileExists(atPath: root.appendingPathComponent("model-started").path), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(100))
