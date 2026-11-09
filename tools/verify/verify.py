@@ -573,8 +573,8 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             selected |= set(owned)
         # A changed source file's untyped importers in other modules run their tests too: no compiler
         # checks the shape they read (#2364). An importing test file runs alone; importing source runs
-        # its module's owned tests. One hop: the importer's own exports did not change.
-        sources = [path for key in changes if key not in narrow for path in changes[key] if path in tracked and not is_test(path)]
+        # its module's owned tests, a deleted file's included. One hop: the importer's own exports did not change.
+        sources = [path for key in changes if key not in narrow for path in changes[key] if not is_test(path)]
         consumers: dict[str, set[str]] = {}
         for importer, hits in importers(sources, tracked).items():
             key = owner.get(importer)

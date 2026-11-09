@@ -503,6 +503,12 @@ class SelectionTests(VerifyCase):
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
         self.assertIn("repo/untested: imports changed mods/core/core.mjs", planned.stdout)
         self.assertNotIn("repo/beta", planned.stdout)
+        # Deleting the imported file selects its importers too.
+        r.git("branch", "-f", "base")
+        r.git("rm", "-q", "mods/alpha/alpha.py")
+        r.commit("delete alpha")
+        deleted = r.verify("--changed", "--plan")
+        self.assertIn("repo/beta: imports changed mods/alpha/alpha.py; its 1 owned test file(s)", deleted.stdout)
 
     def test_ignored_residue_with_no_named_writer_fails_the_run(self) -> None:
         r = self.repo
