@@ -121,6 +121,7 @@ describe("Managed subagents: intentional stop drain", () => {
     const blocker = (category: string) => f.registry.administrativeDrainSnapshot().blockers
       .find(entry => entry.sessionId === run.sessionId && entry.category === category);
     const heldAt = blocker("foreground-agent-operation")!.progressAt!;
+    // The run's ISO progress time must be strictly later than the task's (same-millisecond times compare equal).
     await new Promise(resolve => setTimeout(resolve, 20));
     // The run takes a tool step after the task's last transition, then holds again: live and progressing.
     child.releaseHeld();
@@ -136,6 +137,7 @@ describe("Managed subagents: intentional stop drain", () => {
     // The bound still holds: no progress from either for the limit is a stall, named at the held task.
     expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(runProgress) + limit, limit))
       .toMatchObject({ outcome: "stalled", blocker: { sessionId: run.sessionId }, ageMs: limit });
+    // Cleanup only: the task's settlement is the stop-drain cases' concern, not this one's.
     child.releaseHeld();
     await run.completion.catch(() => {});
   }, 60_000);
