@@ -37,12 +37,15 @@ const toCore = (r) => ({ inv: r.inv, op: r.op, src: SOURCES.indexOf(r.src), kind
   name: opt(r.name), origin: opt(r.origin), entry: opt(r.entry), retryable: r.retryable === null ? { $: "NoFlag" } : { $: "FlagOf", b: r.retryable },
   sequence: r.sequence, at: r.at });
 const fromOpt = (o) => (o.$ === "None" ? null : o.v);
-function result(input) {
-  const outcome = core.Project(input.map(toCore));
+// shift moves every invocation, operation and entry token (an order-preserving renaming, so the result is the same
+// up to the shift): sparse tokens and tokens past the core's array limit take its other paths.
+function result(input, shift = 0) {
+  const moved = (t) => (t === null ? null : t + shift);
+  const outcome = core.Project(input.map((r) => toCore({ ...r, inv: r.inv + shift, op: r.op + shift, entry: moved(r.entry) })));
   if (outcome.$ === "Rejected") return { refused: outcome.why };
   const projections = outcome.projs.map((p, i) => ({ p, i })).sort((a, b) => a.p.sequence - b.p.sequence || a.i - b.i).map(({ p }) => ({
-    inv: p.inv, op: p.op, src: SOURCES[p.src], name: fromOpt(p.name), origin: fromOpt(p.origin), life: p.life[0].toLowerCase() + p.life.slice(1),
-    entry: fromOpt(p.entry), retryable: p.retryable.$ === "NoFlag" ? null : p.retryable.b, sequence: p.sequence, updated: p.updated }));
+    inv: p.inv - shift, op: p.op - shift, src: SOURCES[p.src], name: fromOpt(p.name), origin: fromOpt(p.origin), life: p.life[0].toLowerCase() + p.life.slice(1),
+    entry: p.entry.$ === "None" ? null : p.entry.v - shift, retryable: p.retryable.$ === "NoFlag" ? null : p.retryable.b, sequence: p.sequence, updated: p.updated }));
   return { projections };
 }
 
@@ -126,7 +129,8 @@ if (replay) {
     let ts;
     try { ts = { projections: invocationProjection(receipts) }; } catch (error) { ts = { refused: error }; }
     const facts = invocationLifecycleFacts(receipts, "refused" in ts ? { refused: invocationRefusalCode(ts.refused) } : ts);
-    compare(`generated ${i}`, facts.input, facts.output, result(facts.input));
+    // Most histories use the shell's dense tokens; some are shifted sparse (below the core's array limit) or past it.
+    compare(`generated ${i}`, facts.input, facts.output, result(facts.input, i % 20 === 7 ? 50_000 : i % 20 === 13 ? 1_048_576 : 0));
   }
 }
 console.log(JSON.stringify({ requests, agree, refused, diffs }, null, 1));

@@ -7,8 +7,8 @@
  "source": "compiled core vs packages/gateway/src/kernel/receipts/invocation-receipts.ts (invocationProjection) on 5,000 generated receipt histories (not real traffic)",
  "realTraffic": false,
  "windowDays": 0,
- "inputsHash": "adad9576e0c2db4c",
- "coreJsHash": "1e9086c988ce0b7f",
+ "inputsHash": "567b18e428635b86",
+ "coreJsHash": "5c2ec2f5a9e3c681",
  "command": "node tools/proof/oracles/receipts-invocation-lifecycle.mjs {core} 5000",
  "date": "2026-11-09"
 }

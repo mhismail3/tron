@@ -40,6 +40,10 @@ receipts fold into each invocation's lifecycle, and which histories are refused;
   behind a comment), because the cache key would not cover what the block depends on.
 - Law statements are what review guards; definitions and proofs are what the checker guards. Edit a
   law only with an independent review of that law.
+- A fast compiled body is a `function ... { spec } by method { ... }` proven equal to its spec. Put it on a function
+  of the block's own (the laws' function calls it): Dafny 4.11 drops a `by method` on a function that refines a laws
+  declaration, neither verifying nor compiling it. The mutation tool mutates only the functional body; the method is
+  held to it by the proof.
 - Escape hatches (`assume`, `{:axiom}`, `{:verify false}`, `{:extern}`) are trusted code and need a
   maintainer decision.
 

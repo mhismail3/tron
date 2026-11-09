@@ -1217,35 +1217,36 @@ let ReceiptsInvocationLifecycle = (function() {
       } else if (settle) {
         return ReceiptsInvocationLifecycle.__default.TerminalLife((to).dtor_l);
       } else {
+        let _0_t = (to).dtor_l;
         let _source0 = from;
         {
           if (_source0.is_Staged) {
-            return (_dafny.Set.fromElements(ReceiptsInvocationLifecycle.Life.create_Accepted(), ReceiptsInvocationLifecycle.Life.create_Queued(), ReceiptsInvocationLifecycle.Life.create_Running(), ReceiptsInvocationLifecycle.Life.create_WaitingForInput(), ReceiptsInvocationLifecycle.Life.create_Retrying(), ReceiptsInvocationLifecycle.Life.create_Settling())).contains((to).dtor_l);
+            return ((((((_0_t).is_Accepted) || ((_0_t).is_Queued)) || ((_0_t).is_Running)) || ((_0_t).is_WaitingForInput)) || ((_0_t).is_Retrying)) || ((_0_t).is_Settling);
           }
         }
         {
           if (_source0.is_Accepted) {
-            return (_dafny.Set.fromElements(ReceiptsInvocationLifecycle.Life.create_Queued(), ReceiptsInvocationLifecycle.Life.create_Running(), ReceiptsInvocationLifecycle.Life.create_WaitingForInput(), ReceiptsInvocationLifecycle.Life.create_Retrying(), ReceiptsInvocationLifecycle.Life.create_Settling())).contains((to).dtor_l);
+            return (((((_0_t).is_Queued) || ((_0_t).is_Running)) || ((_0_t).is_WaitingForInput)) || ((_0_t).is_Retrying)) || ((_0_t).is_Settling);
           }
         }
         {
           if (_source0.is_Queued) {
-            return (_dafny.Set.fromElements(ReceiptsInvocationLifecycle.Life.create_Running(), ReceiptsInvocationLifecycle.Life.create_Settling())).contains((to).dtor_l);
+            return ((_0_t).is_Running) || ((_0_t).is_Settling);
           }
         }
         {
           if (_source0.is_Running) {
-            return (_dafny.Set.fromElements(ReceiptsInvocationLifecycle.Life.create_WaitingForInput(), ReceiptsInvocationLifecycle.Life.create_Retrying(), ReceiptsInvocationLifecycle.Life.create_Settling())).contains((to).dtor_l);
+            return (((_0_t).is_WaitingForInput) || ((_0_t).is_Retrying)) || ((_0_t).is_Settling);
           }
         }
         {
           if (_source0.is_WaitingForInput) {
-            return (_dafny.Set.fromElements(ReceiptsInvocationLifecycle.Life.create_Running(), ReceiptsInvocationLifecycle.Life.create_Settling())).contains((to).dtor_l);
+            return ((_0_t).is_Running) || ((_0_t).is_Settling);
           }
         }
         {
           if (_source0.is_Retrying) {
-            return (_dafny.Set.fromElements(ReceiptsInvocationLifecycle.Life.create_Running(), ReceiptsInvocationLifecycle.Life.create_Settling())).contains((to).dtor_l);
+            return ((_0_t).is_Running) || ((_0_t).is_Settling);
           }
         }
         {
@@ -1363,11 +1364,192 @@ let ReceiptsInvocationLifecycle = (function() {
       }
     };
     static Project(rs) {
-      return ReceiptsInvocationLifecycle.__default.RunAt(ReceiptsInvocationLifecycle.State.create_State(_dafny.Seq.of(), _dafny.Seq.of(), _dafny.Seq.of()), rs, _dafny.ZERO);
+      return ReceiptsInvocationLifecycle.__default.ProjectFast(rs);
     };
+    static ProjectFast(rs) {
+      let _hresult = ReceiptsInvocationLifecycle.Outcome.Default();
+      if ((new BigNumber(ReceiptsInvocationLifecycle.__default.LIMIT)).isLessThanOrEqualTo(new BigNumber((rs).length))) {
+        _hresult = ReceiptsInvocationLifecycle.__default.RunAt(ReceiptsInvocationLifecycle.State.create_State(_dafny.Seq.of(), _dafny.Seq.of(), _dafny.Seq.of()), rs, _dafny.ZERO);
+        return _hresult;
+      }
+      let _0_len;
+      _0_len = (rs).length;
+      let _1_n;
+      _1_n = 1;
+      let _2_k;
+      _2_k = 0;
+      while ((_2_k) < (_0_len)) {
+        let _3_r;
+        _3_r = (rs)[_2_k];
+        if ((!(((_dafny.ZERO).isLessThanOrEqualTo((_3_r).dtor_inv)) && (((_3_r).dtor_inv).isLessThan(new BigNumber(ReceiptsInvocationLifecycle.__default.LIMIT))))) || ((((_3_r).dtor_entry).is_Some) && (!(((_dafny.ZERO).isLessThanOrEqualTo(((_3_r).dtor_entry).dtor_v)) && ((((_3_r).dtor_entry).dtor_v).isLessThan(new BigNumber(ReceiptsInvocationLifecycle.__default.LIMIT))))))) {
+          _hresult = ReceiptsInvocationLifecycle.__default.RunAt(ReceiptsInvocationLifecycle.State.create_State(_dafny.Seq.of(), _dafny.Seq.of(), _dafny.Seq.of()), rs, _dafny.ZERO);
+          return _hresult;
+        }
+        if ((((_3_r).dtor_inv).toNumber()) >= (_1_n)) {
+          _1_n = (((_3_r).dtor_inv).toNumber()) + (1);
+        }
+        if ((((_3_r).dtor_entry).is_Some) && (((((_3_r).dtor_entry).dtor_v).toNumber()) >= (_1_n))) {
+          _1_n = ((((_3_r).dtor_entry).dtor_v).toNumber()) + (1);
+        }
+        _2_k = (_2_k) + (1);
+      }
+      let _4_slot;
+      let _init0 = function (_5___v1) {
+        return -1;
+      };
+      let _nw0 = Array((BigNumber(_1_n)).toNumber());
+      for (let _i0_0 = 0; _i0_0 < new BigNumber(_nw0.length); _i0_0++) {
+        _nw0[_i0_0] = _init0(new BigNumber(_i0_0));
+      }
+      _4_slot = _nw0;
+      let _6_invBound;
+      let _init1 = function (_7___v2) {
+        return false;
+      };
+      let _nw1 = Array((BigNumber(_1_n)).toNumber());
+      for (let _i0_1 = 0; _i0_1 < new BigNumber(_nw1.length); _i0_1++) {
+        _nw1[_i0_1] = _init1(new BigNumber(_i0_1));
+      }
+      _6_invBound = _nw1;
+      let _8_entryBound;
+      let _init2 = function (_9___v3) {
+        return false;
+      };
+      let _nw2 = Array((BigNumber(_1_n)).toNumber());
+      for (let _i0_2 = 0; _i0_2 < new BigNumber(_nw2.length); _i0_2++) {
+        _nw2[_i0_2] = _init2(new BigNumber(_i0_2));
+      }
+      _8_entryBound = _nw2;
+      let _10_noneBound;
+      _10_noneBound = false;
+      let _11_projs;
+      let _init3 = function (_12___v4) {
+        return ReceiptsInvocationLifecycle.Proj.create_Proj(_dafny.ZERO, _dafny.ZERO, _dafny.ZERO, ReceiptsInvocationLifecycle.Opt.create_None(), ReceiptsInvocationLifecycle.Opt.create_None(), ReceiptsInvocationLifecycle.Life.create_Staged(), ReceiptsInvocationLifecycle.Opt.create_None(), ReceiptsInvocationLifecycle.Flag.create_NoFlag(), _dafny.ZERO, _dafny.ZERO, false);
+      };
+      let _nw3 = Array((BigNumber(_0_len)).toNumber());
+      for (let _i0_3 = 0; _i0_3 < new BigNumber(_nw3.length); _i0_3++) {
+        _nw3[_i0_3] = _init3(new BigNumber(_i0_3));
+      }
+      _11_projs = _nw3;
+      let _13_count;
+      _13_count = 0;
+      _2_k = 0;
+      while ((_2_k) < (_0_len)) {
+        let _14_r;
+        _14_r = (rs)[_2_k];
+        let _15_inv;
+        _15_inv = ((_14_r).dtor_inv).toNumber();
+        let _16_i;
+        _16_i = (_4_slot)[_15_inv];
+        if (((_14_r).dtor_kind).is_Start) {
+          if ((_16_i) >= (0)) {
+            _hresult = ReceiptsInvocationLifecycle.Outcome.create_Rejected(ReceiptsInvocationLifecycle.Refusal.create_DuplicateStart(), new BigNumber(_2_k));
+            return _hresult;
+          }
+          let _17_p;
+          _17_p = ReceiptsInvocationLifecycle.Proj.create_Proj((_14_r).dtor_inv, (_14_r).dtor_op, (_14_r).dtor_src, (_14_r).dtor_name, (_14_r).dtor_origin, ((((_14_r).dtor_life).is_LifeOf) ? (((_14_r).dtor_life).dtor_l) : (ReceiptsInvocationLifecycle.Life.create_Accepted())), ReceiptsInvocationLifecycle.Opt.create_None(), ReceiptsInvocationLifecycle.Flag.create_NoFlag(), (_14_r).dtor_sequence, (_14_r).dtor_at, false);
+          (_11_projs)[(_13_count)] = _17_p;
+          (_4_slot)[(_15_inv)] = _13_count;
+          _13_count = (_13_count) + (1);
+        } else {
+          if ((_16_i) < (0)) {
+            _hresult = ReceiptsInvocationLifecycle.Outcome.create_Rejected(ReceiptsInvocationLifecycle.Refusal.create_NoStart(), new BigNumber(_2_k));
+            return _hresult;
+          }
+          let _18_p;
+          _18_p = (_11_projs)[_16_i];
+          let _19_entryIn;
+          if (((_14_r).dtor_entry).is_Some) {
+            _19_entryIn = (_8_entryBound)[(((_14_r).dtor_entry).dtor_v).toNumber()];
+          } else {
+            _19_entryIn = _10_noneBound;
+          }
+          if ((!((_18_p).dtor_op).isEqualTo((_14_r).dtor_op)) || (!((_18_p).dtor_src).isEqualTo((_14_r).dtor_src))) {
+            _hresult = ReceiptsInvocationLifecycle.Outcome.create_Rejected(ReceiptsInvocationLifecycle.Refusal.create_OwnershipChanged(), new BigNumber(_2_k));
+            return _hresult;
+          }
+          if ((((_14_r).dtor_kind).is_Binding) && (_19_entryIn)) {
+            _hresult = ReceiptsInvocationLifecycle.Outcome.create_Rejected(ReceiptsInvocationLifecycle.Refusal.create_EntryBound(), new BigNumber(_2_k));
+            return _hresult;
+          }
+          if ((((_14_r).dtor_kind).is_Binding) && ((_6_invBound)[_15_inv])) {
+            _hresult = ReceiptsInvocationLifecycle.Outcome.create_Rejected(ReceiptsInvocationLifecycle.Refusal.create_InvocationBound(), new BigNumber(_2_k));
+            return _hresult;
+          }
+          if ((((_14_r).dtor_name).is_Some) && (!_dafny.areEqual((_14_r).dtor_name, (_18_p).dtor_name))) {
+            _hresult = ReceiptsInvocationLifecycle.Outcome.create_Rejected(ReceiptsInvocationLifecycle.Refusal.create_NameChanged(), new BigNumber(_2_k));
+            return _hresult;
+          }
+          if ((((_14_r).dtor_origin).is_Some) && (!_dafny.areEqual((_14_r).dtor_origin, (_18_p).dtor_origin))) {
+            _hresult = ReceiptsInvocationLifecycle.Outcome.create_Rejected(ReceiptsInvocationLifecycle.Refusal.create_OriginChanged(), new BigNumber(_2_k));
+            return _hresult;
+          }
+          if (((((_14_r).dtor_kind).is_Terminal) && ((_18_p).dtor_terminal)) && (!_dafny.areEqual((_14_r).dtor_life, ReceiptsInvocationLifecycle.MaybeLife.create_LifeOf((_18_p).dtor_life)))) {
+            _hresult = ReceiptsInvocationLifecycle.Outcome.create_Rejected(ReceiptsInvocationLifecycle.Refusal.create_ContradictoryTerminal(), new BigNumber(_2_k));
+            return _hresult;
+          }
+          if (((((_14_r).dtor_kind).is_Terminal) && (!((_18_p).dtor_terminal))) && (!(ReceiptsInvocationLifecycle.__default.Legal((_18_p).dtor_life, (_14_r).dtor_life, true)))) {
+            _hresult = ReceiptsInvocationLifecycle.Outcome.create_Rejected(ReceiptsInvocationLifecycle.Refusal.create_IllegalTerminal(), new BigNumber(_2_k));
+            return _hresult;
+          }
+          if ((((_14_r).dtor_kind).is_Transition) && (!(ReceiptsInvocationLifecycle.__default.Legal((_18_p).dtor_life, (_14_r).dtor_life, false)))) {
+            _hresult = ReceiptsInvocationLifecycle.Outcome.create_Rejected(ReceiptsInvocationLifecycle.Refusal.create_IllegalTransition(), new BigNumber(_2_k));
+            return _hresult;
+          }
+          let _20_settled;
+          _20_settled = ((_18_p).dtor_terminal) || (((_14_r).dtor_kind).is_Terminal);
+          let _21_q;
+          let _22_dt__update__tmp_h1 = _18_p;
+          let _23_dt__update_hterminal_h0 = _20_settled;
+          let _24_dt__update_hupdated_h0 = (_14_r).dtor_at;
+          let _25_dt__update_hretryable_h0 = ((((_14_r).dtor_retryable).is_FlagOf) ? ((_14_r).dtor_retryable) : ((_18_p).dtor_retryable));
+          let _26_dt__update_hentry_h0 = ((((_14_r).dtor_entry).is_Some) ? ((_14_r).dtor_entry) : ((_18_p).dtor_entry));
+          let _27_dt__update_hlife_h0 = (((((_14_r).dtor_life).is_LifeOf) && ((((_14_r).dtor_kind).is_Terminal) || (!(_20_settled)))) ? (((_14_r).dtor_life).dtor_l) : ((_18_p).dtor_life));
+          _21_q = ReceiptsInvocationLifecycle.Proj.create_Proj((_22_dt__update__tmp_h1).dtor_inv, (_22_dt__update__tmp_h1).dtor_op, (_22_dt__update__tmp_h1).dtor_src, (_22_dt__update__tmp_h1).dtor_name, (_22_dt__update__tmp_h1).dtor_origin, _27_dt__update_hlife_h0, _26_dt__update_hentry_h0, _25_dt__update_hretryable_h0, (_22_dt__update__tmp_h1).dtor_sequence, _24_dt__update_hupdated_h0, _23_dt__update_hterminal_h0);
+          (_11_projs)[(_16_i)] = _21_q;
+          if (((_14_r).dtor_kind).is_Binding) {
+            (_6_invBound)[(_15_inv)] = true;
+            if (((_14_r).dtor_entry).is_Some) {
+              let _index0 = (((_14_r).dtor_entry).dtor_v).toNumber();
+              (_8_entryBound)[_index0] = true;
+            } else {
+              _10_noneBound = true;
+            }
+          }
+        }
+        _2_k = (_2_k) + (1);
+      }
+      _hresult = ReceiptsInvocationLifecycle.Outcome.create_Projected(_dafny.Seq.of(...(_11_projs).slice(0, _13_count)));
+      return _hresult;
+      return _hresult;
+    }
     static TerminalLife(l) {
       return ((((l).is_Completed) || ((l).is_Failed)) || ((l).is_Interrupted)) || ((l).is_OutcomeUnknown);
     };
+    static get LIMIT() {
+      return 1048576;
+    };
+  };
+
+  $module.i53 = class i53 {
+    constructor () {
+    }
+    _parentTraits() {
+      return [];
+    }
+    static *IntegerRange(lo, hi) {
+      while (lo.isLessThan(hi)) {
+        yield lo.toNumber();
+        lo = lo.plus(1);
+      }
+    }
+    static get Default() {
+      return 0;
+    }
+    static _Is(__source) {
+      let _0_x = new BigNumber(__source);
+      return ((new BigNumber("-9007199254740992")).isLessThan(_0_x)) && ((_0_x).isLessThan(new BigNumber("9007199254740992")));
+    }
   };
 
   $module.Kind = class Kind {

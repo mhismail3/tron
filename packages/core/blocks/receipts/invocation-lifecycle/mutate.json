@@ -8,7 +8,8 @@
     "Legal",
     "StepOf",
     "RunAt",
-    "Project"
+    "Project",
+    "ProjectFast"
   ],
   "excludeSymbols": {
     "TerminalLife": "defined in the laws file (which lifecycles are settled), not implementation"
@@ -26,7 +27,8 @@
     ],
     "S1 start": [
       "ReceiptsInvocationLifecycle.S1Start",
-      "ReceiptsInvocationLifecycle.FindIndexSpec"
+      "ReceiptsInvocationLifecycle.FindIndexSpec",
+      "ReceiptsInvocationLifecycle.FindIndexAppend"
     ],
     "S2 checks": [
       "ReceiptsInvocationLifecycle.S2Checks",
@@ -39,7 +41,8 @@
       "ReceiptsInvocationLifecycle.S4Settle"
     ],
     "S5 update": [
-      "ReceiptsInvocationLifecycle.S5Update"
+      "ReceiptsInvocationLifecycle.S5Update",
+      "ReceiptsInvocationLifecycle.FindIndexUpdate"
     ],
     "P1 progress": [
       "ReceiptsInvocationLifecycle.P1Progress"
