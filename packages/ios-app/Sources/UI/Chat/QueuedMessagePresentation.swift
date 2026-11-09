@@ -443,7 +443,8 @@ struct QueuedMessageRow: View {
         // a large queued prompt arrives causes a visible container flash.
         card.fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
-        .modifier(ChatMessageCopyMenu(text: ChatAnnotationEnvelope.body(of: displayText), mutationIdentity: message.id, actions: menuActions))
+        .modifier(ChatMessageCopyMenu(text: ChatAnnotationEnvelope.body(of: displayText), mutationIdentity: message.id, actions: menuActions, isOneElement: false))
+        .environment(\.chatMessageDeliveryState, "Queued")
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .contain)
         .accessibilityHint(isManageable ? "" : readOnlyExplanation)

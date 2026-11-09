@@ -153,6 +153,7 @@ struct ChatPendingPromptRow: View, Equatable {
                 queueCard
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
+            .environment(\.chatMessageDeliveryState, "Sending")
             .accessibilityElement(children: .contain)
             .accessibilityLabel(queueAccessibilityLabel)
         } else {
@@ -179,6 +180,7 @@ struct ChatPendingPromptRow: View, Equatable {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
+            .environment(\.chatMessageDeliveryState, "Sending")
             .accessibilityElement(children: .contain)
             .accessibilityLabel(displayText.isEmpty ? presentation.statusTitle : "\(presentation.statusTitle): \(displayText)")
         }
@@ -222,7 +224,7 @@ struct ChatPendingPromptRow: View, Equatable {
                 },
                 statusContent: { EmptyView() }
             )
-            .modifier(ChatMessageCopyMenu(text: ChatAnnotationEnvelope.body(of: displayText)))
+            .modifier(ChatMessageCopyMenu(text: ChatAnnotationEnvelope.body(of: displayText), isOneElement: false))
         }
     }
 }
@@ -257,10 +259,11 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                         attachmentContent: { queuedAttachmentChips },
                         statusContent: { EmptyView() }
                     )
-                    .modifier(ChatMessageCopyMenu(text: ChatAnnotationEnvelope.body(of: displayText)))
+                    .modifier(ChatMessageCopyMenu(text: ChatAnnotationEnvelope.body(of: displayText), isOneElement: false))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
+            .environment(\.chatMessageDeliveryState, "Sending")
             .accessibilityElement(children: .contain)
             .accessibilityLabel(promptAccessibilityLabel)
         } else {
@@ -276,6 +279,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
+            .environment(\.chatMessageDeliveryState, "Sending")
             .accessibilityElement(children: .contain)
             .accessibilityLabel(accessibilityLabel)
         }

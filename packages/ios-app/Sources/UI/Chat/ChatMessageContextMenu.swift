@@ -14,18 +14,25 @@ struct ChatMessageCopyMenu: ViewModifier {
     let text: String
     var mutationIdentity: String? = nil
     var actions: [ChatMessageMenuAction] = []
+    /// A plain bubble is one accessibility element: its text, its delivery
+    /// state and its menu actions. A card whose content holds its own controls
+    /// passes false and keeps them reachable.
+    var isOneElement = true
+    @Environment(\.chatMessageDeliveryState) private var deliveryState
 
     func body(content: Content) -> some View {
-        ChatMessageContextMenuSurface(content: content, text: text, mutationIdentity: mutationIdentity, actions: actions)
-            .accessibilityActions {
-                if !text.isEmpty { Button("Copy") {
-                    UIPasteboard.general.string = text
-                    TronHaptics.shared.play(.copied)
-                } }
+        let surface = ChatMessageContextMenuSurface(content: content, text: text, mutationIdentity: mutationIdentity,
+                                                    actions: actions, element: isOneElement ? .init(value: deliveryState) : nil)
+        if isOneElement {
+            surface
+        } else {
+            surface.accessibilityActions {
+                if !text.isEmpty { Button("Copy") { ChatMessageContextMenuOwner.copy(text) } }
                 ForEach(actions) { action in
                     Button(action.title, role: action.destructive ? .destructive : nil, action: action.perform)
                 }
             }
+        }
     }
 }
 
@@ -37,6 +44,8 @@ private struct ChatMessageContextMenuSurface<Content: View>: UIViewControllerRep
     let text: String
     let mutationIdentity: String?
     let actions: [ChatMessageMenuAction]
+    /// Set for a one-element bubble, described by the host view itself.
+    let element: ChatMessageAccessibilityElement?
 
     func makeCoordinator() -> ChatMessageContextMenuOwner { ChatMessageContextMenuOwner() }
 
@@ -56,6 +65,7 @@ private struct ChatMessageContextMenuSurface<Content: View>: UIViewControllerRep
         context.coordinator.text = text
         context.coordinator.mutationIdentity = mutationIdentity
         context.coordinator.actions = actions
+        context.coordinator.describe(host.view, as: element)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiViewController: UIHostingController<ChatMessageNativeContent<Content>>,
@@ -74,6 +84,10 @@ private struct ChatMessageNativeContent<Content: View>: View {
     let content: Content
     let values: EnvironmentValues
     var body: some View { content.environment(\.self, values) }
+}
+
+struct ChatMessageAccessibilityElement {
+    let value: String?
 }
 
 /// One UIKit interaction owns an immutable open menu. SwiftUI updates configure
@@ -98,14 +112,44 @@ final class ChatMessageContextMenuOwner: NSObject, UIContextMenuInteractionDeleg
         oldSource?.removeInteraction(interaction)
     }
 
+    static func copy(_ text: String) {
+        UIPasteboard.general.string = text
+        TronHaptics.shared.play(.copied)
+    }
+
+    /// A one-element bubble is described on the nested host's own view, in
+    /// UIKit: that host's SwiftUI tree reached accessibility only in some
+    /// launches, and a SwiftUI element around it still exposed it in others.
+    func describe(_ view: UIView, as element: ChatMessageAccessibilityElement?) {
+        view.isAccessibilityElement = element != nil
+        guard let element else {
+            view.accessibilityLabel = nil
+            view.accessibilityValue = nil
+            view.accessibilityCustomActions = nil
+            return
+        }
+        view.accessibilityLabel = text
+        view.accessibilityValue = element.value
+        view.accessibilityTraits = .staticText
+        let copiedText = text
+        view.accessibilityCustomActions = (copiedText.isEmpty ? [] : [UIAccessibilityCustomAction(name: "Copy") { _ in
+            Self.copy(copiedText)
+            return true
+        }]) + actions.map { action in
+            UIAccessibilityCustomAction(name: action.title) { _ in
+                action.perform()
+                return true
+            }
+        }
+    }
+
     func makeMenu() -> UIMenu? {
         let copiedText = text
         let identity = mutationIdentity
         var items: [UIMenuElement] = []
         if !copiedText.isEmpty {
             items.append(UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
-                UIPasteboard.general.string = copiedText
-                TronHaptics.shared.play(.copied)
+                Self.copy(copiedText)
             })
         }
         for action in actions {

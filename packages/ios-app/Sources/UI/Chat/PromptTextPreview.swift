@@ -1,6 +1,13 @@
 import SwiftUI
 import UIKit
 
+extension EnvironmentValues {
+    /// The delivery state a prompt bubble reports to accessibility as its
+    /// value: "Sending" or "Queued" from the row that owns that state, none
+    /// once the message is sent.
+    @Entry var chatMessageDeliveryState: String?
+}
+
 /// Bound only the visible viewport. The original prompt stays available to
 /// copy/annotation menus and the shared Markdown reader.
 struct PromptTextPreview: View {
@@ -10,6 +17,7 @@ struct PromptTextPreview: View {
     @State private var fullHeight: CGFloat = 0 // view-local: measured text overflow
     @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.chatMessageDeliveryState) private var deliveryState
     @State private var fonts = FontSettings.shared // view-local: selected reading font
 
     private var maximumHeight: CGFloat {
@@ -37,6 +45,13 @@ struct PromptTextPreview: View {
                     }
                 }
             }
+            // One element: the message's text and its delivery state. The
+            // copy menu hosts this view in a nested UIHostingController whose
+            // UIKit label was exposed to accessibility only in some launches.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(text)
+            .accessibilityValue(deliveryState ?? "")
+            .accessibilityAddTraits(.isStaticText)
             .contentShape(Rectangle())
             .gesture(TapGesture().onEnded {
                 guard canOpen else { return }

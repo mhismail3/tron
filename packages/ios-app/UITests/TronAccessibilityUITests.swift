@@ -300,6 +300,39 @@ final class TronAccessibilityUITests: XCTestCase {
 
     /// Device pixels per point: the screen raster's width over the full-screen
     /// app's width in points.
+    /// #2328: a chat bubble is one accessibility element. Its label is the
+    /// message text and its value the delivery state: none once sent, "Queued"
+    /// while it waits in the queue. The sent prompt sits in the copy menu's
+    /// nested host, so every launch must expose it, not only some.
+    func testChatBubbleIsOneElementLabelledByItsTextWithItsDeliveryState() {
+        continueAfterFailure = false
+        let prompt = "How should the gateway retry dropped connections?"
+        for attempt in 1...5 {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-chat-annotation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            app.launch()
+            let bubbles = app.staticTexts.matching(NSPredicate(format: "label == %@", prompt))
+            XCTAssertTrue(bubbles.firstMatch.waitForExistence(timeout: 10), "launch \(attempt): \(app.debugDescription)")
+            XCTAssertEqual(bubbles.count - app.navigationBars.staticTexts.matching(NSPredicate(format: "label == %@", prompt)).count, 1,
+                           "launch \(attempt): \(app.debugDescription)")
+            XCTAssertEqual(bubbles.firstMatch.value as? String ?? "", "", "a sent bubble carries no delivery value")
+            app.terminate()
+        }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-foreground-queued-editor", "-foreground-queued-steer"]
+        app.launch()
+        defer { app.terminate() }
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(home.waitForExistence(timeout: 15), app.debugDescription)
+        home.tap()
+        // The queued card opens its editor, so its text is a button.
+        let queued = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Queued message 1607"))
+        XCTAssertTrue(queued.firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(queued.count, 1, app.debugDescription)
+        XCTAssertEqual(queued.firstMatch.value as? String, "Queued", app.debugDescription)
+    }
+
     private func devicePixelScale(_ app: XCUIApplication) -> CGFloat {
         let scale = CGFloat(XCUIScreen.main.screenshot().image.cgImage?.width ?? 0) / app.frame.width
         XCTAssertGreaterThan(scale, 0, "No screen raster to measure device pixels")

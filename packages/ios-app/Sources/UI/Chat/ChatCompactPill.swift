@@ -563,7 +563,6 @@ struct UserPromptText: View {
             tone: tone,
             fontRevision: "\(family.rawValue):\(weight):\(casual)"
         )
-        .accessibilityLabel(text)
     }
 }
 
@@ -593,7 +592,6 @@ private struct UserPromptLabel: UIViewRepresentable {
         label.adjustsFontForContentSizeCategory = true
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.setContentHuggingPriority(.required, for: .horizontal)
-        label.isAccessibilityElement = true
         return label
     }
 
@@ -676,7 +674,6 @@ private struct UserPromptLabel: UIViewRepresentable {
                 .paragraphStyle: paragraph,
             ]
         )
-        label.accessibilityLabel = text
     }
 
 }
