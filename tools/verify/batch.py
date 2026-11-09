@@ -160,10 +160,7 @@ def stop_running(grace: float = 30) -> None:
     with RUNNING_LOCK:
         groups = list(RUNNING)
     for group in groups:
-        try:
-            os.killpg(group, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        verify.signal_group(group, signal.SIGTERM)
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline:
         with RUNNING_LOCK:
@@ -173,10 +170,7 @@ def stop_running(grace: float = 30) -> None:
     with RUNNING_LOCK:
         groups = list(RUNNING & set(groups))
     for group in groups:
-        try:
-            os.killpg(group, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        verify.signal_group(group, signal.SIGKILL)
 
 
 def run_chains(chains: list[list[tuple[int, dict]]], run_lane) -> None:
@@ -288,11 +282,11 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             try:
                 code = process.wait()
             except BaseException:
-                os.killpg(process.pid, signal.SIGTERM)
+                verify.signal_group(process.pid, signal.SIGTERM)
                 try:
                     process.wait(timeout=30)
                 except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    verify.signal_group(process.pid, signal.SIGKILL)
                     process.wait()
                 raise
             finally:
