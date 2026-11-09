@@ -3900,6 +3900,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     } catch (error) {
       this.emit("session.extensionError", safeJson({ code: "subagent-wake-admission-failed",
         message: error instanceof Error ? error.message : String(error), owner }));
+      if (this.lifecycle.isDraining) await this.ownedTurns.releaseWaitingTaskForDrain();
     }
   };
 

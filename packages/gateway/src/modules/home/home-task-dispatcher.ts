@@ -675,7 +675,8 @@ export class HomeTaskDispatcher {
       // deadline bounds the subagent join below, so it is disarmed only at settlement.
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
-      work.transition("foreground-agent-operation");
+      // The task's work is owned by its bound worker session, so a drain waits on it like any foreground owner.
+      work.transition("foreground-agent-operation", slot.id);
       const admitted = slot.prompt(`${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Send a short checkin at milestones and about every 30 minutes (step, done, next; optional blocker/refs). It does not pause or finish work. Use needsAttention only for blockers needing Home; it is rate-limited. Use report with explicit evidence to finish. A normal reply is not a task result.`, launch.resume?.images ?? [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {

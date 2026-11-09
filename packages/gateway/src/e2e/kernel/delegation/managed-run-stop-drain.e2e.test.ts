@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { fixture } from "../../../../test-support/home-task-fixture.js";
+import { dispatch, fixture } from "../../../../test-support/home-task-fixture.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
-import { closeSubagentFixtures, bound, childModel, holdingAsyncLaunch } from "../../../../test-support/home-task-subagents-support.js";
+import { closeSubagentFixtures, bound, childModel, holdingAsyncLaunch, waitBetweenTurns } from "../../../../test-support/home-task-subagents-support.js";
 import { GatewayLogger } from "../../../transport/logger.js";
 import { waitForStopDrain } from "../../../sessions/restart-drain.js";
 
@@ -64,5 +64,46 @@ describe("Managed subagents: intentional stop drain", () => {
     await writeFile("test-results/2256/managed-run-stop-drain.json", JSON.stringify({ waiting, final }, null, 2));
     expect(final).toMatchObject({ phase: "complete", blockerCount: 0 });
     expect(slot.administrativeDrainBlockers()).toEqual([]);
+  }, 60_000);
+
+  it("a live Home task waiting on its async run holds the stop, is named on its worker session, and the stop completes after the task settles (#2259)", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch"),
+      fauxAssistantMessage("Launched the background check."),
+    ]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    await waitFor(() => child.heldRequests() === 1, "async child live", bound);
+    await waitBetweenTurns(slot);
+
+    const root = await mkdtemp(join(tmpdir(), "tron-2259-stop-drain-"));
+    roots.push(root);
+    const logPath = join(root, "gateway.jsonl");
+    let settled = false;
+    let failure: unknown;
+    const drain = waitForStopDrain(f.registry, new GatewayLogger(logPath), 200).finally(() => { settled = true; });
+    drain.catch(error => { failure = error; });
+    await waitFor(async () => {
+      if (failure) throw failure;
+      return (await records(logPath)).some(record => record.event === "gateway.stop-drain.waiting");
+    }, "the stop names its blockers", bound);
+    const [first] = (await records(logPath)).filter(record => record.event === "gateway.stop-drain.waiting");
+    const named = JSON.parse(first!.message!.slice(first!.message!.indexOf("["))) as Array<Record<string, unknown>>;
+    // The task's own work is owned by the worker session it bound, never a stranded owner.
+    expect(named).toContainEqual(expect.objectContaining({ sessionId: run.sessionId, category: "foreground-agent-operation", state: "active" }));
+    expect(named.filter(blocker => blocker.state === "suspect")).toEqual([]);
+    expect(settled).toBe(false);
+
+    // The run settles; the drain refuses the wake the task waits for, and a refused wake is never
+    // replayed, so the task settles here without a report (resumable) instead of holding the stop.
+    child.releaseHeld();
+    expect(await run.completion).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown", reason: "no-report", sessionId: run.sessionId } });
+    const final = await drain;
+    const waiting = (await records(logPath)).filter(record => record.event === "gateway.stop-drain.waiting");
+    await mkdir("test-results/2259", { recursive: true });
+    await writeFile("test-results/2259/home-task-stop-drain.json", JSON.stringify({ waiting, final }, null, 2));
+    expect(final).toMatchObject({ phase: "complete", blockerCount: 0 });
   }, 60_000);
 });
