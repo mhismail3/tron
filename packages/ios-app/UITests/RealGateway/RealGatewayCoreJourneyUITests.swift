@@ -240,7 +240,8 @@ extension RealGatewayPairAndChatUITests {
     func testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let goFile = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).deletingLastPathComponent()
+        let agentDirectory = try XCTUnwrap(fixture.agentDirectory)
+        let goFile = URL(fileURLWithPath: agentDirectory).deletingLastPathComponent()
             .appending(path: "restart-journey-\(UUID().uuidString).go")
         defer { try? FileManager.default.removeItem(at: goFile) }
         let app = launchApp()
@@ -289,6 +290,15 @@ extension RealGatewayPairAndChatUITests {
         try Data().write(to: goFile)
         try setProxyMode(fixture, mode: "respawn-exited-gateway", timeout: 75)
         XCTAssertTrue(connected.waitForExistence(timeout: 90), "the drained restart reconnects: \(app.debugDescription)")
+        // The drain waited for the held turn: its reply is in the Gateway's
+        // canonical session store (the sheet covers the transcript).
+        let sessions = URL(fileURLWithPath: agentDirectory).appending(path: "sessions")
+        func heldTurnFinished() -> Bool {
+            let files = FileManager.default.enumerator(at: sessions, includingPropertiesForKeys: nil)?
+                .compactMap { $0 as? URL }.filter { $0.pathExtension == "jsonl" } ?? []
+            return files.contains { (try? String(contentsOf: $0, encoding: .utf8))?.contains("Restart journey turn finished.") == true }
+        }
+        XCTAssertTrue(waitUntil(timeout: 60, heldTurnFinished), "the restart did not let the held turn finish")
 
         // Idle: the restart is immediate, and the app says so.
         confirmRestart()

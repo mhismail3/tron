@@ -618,7 +618,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
   const exited = async target => {
     try { process.kill(target, 0); } catch { return true; }
     try { return (await promisify(execFile)("/bin/ps", ["-p", String(target), "-o", "stat="], { timeout: 2_000 })).stdout.includes("Z"); }
-    catch { return true; }
+    // A ps that failed proved nothing: keep waiting, and fail at the deadline.
+    catch { return false; }
   };
   // restart-gateway stops the Gateway itself. respawn-exited-gateway plays the
   // supervisor: the Gateway exits on its own after a remote restart's drain, and
