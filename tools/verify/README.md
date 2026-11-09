@@ -81,7 +81,7 @@ user's settings or profile. Test input and output must not depend on live stores
 The Gateway Vitest lanes of `verify` and `scripts/tron test gateway` run on the pool {the Mac mini, this Mac}:
 `mini.py`'s `choose_host` picks the mini when it is configured, the tree is committed and an ssh probe (5 s to
 connect, 30 s in all) finds it set up with its job lock free, and otherwise this Mac. Each run prints which host
-ran its lanes and why; verify records it (`gatewayHostReason`). `--gateway-host local|mini` (`test gateway --local|--mini`) overrides it; `--update-locks` always runs here.
+ran its lanes and why; verify records it (`gatewayHostReason`). `--gateway-host local|mini` (`test gateway --local|--mini`) overrides it; `--update-locks`, and a lane whose arguments name a path outside the checkout (a relative one resolved against `packages/gateway`), always run here.
 On the mini, `mini.py` refuses a dirty tree, or a HEAD other than the commit verify records, and pushes HEAD to the mini's `~/tron-ci/tron.git` as the one shared `refs/tron-jobs/incoming`, which each push
 overwrites, so a push whose job never starts leaves nothing that grows. One job at a time
 (`~/tron-ci/jobs/gateway.lock`) checks out exactly that commit in `~/tron-ci/jobs/gateway`, cleaned except for the

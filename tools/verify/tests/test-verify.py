@@ -256,6 +256,7 @@ class ExternalVerificationTests(VerifyCase):
                              {"tests: gateway": runner, "tests: gateway-nested": runner}, options)
             self.assertEqual(plan["gatewayHost"], {"host": runner.removesuffix(".py").replace("gateway", "local"), "reason": reason})
             self.assertIn(f"gateway lanes: on {'the Mac mini' if runner == 'mini.py' else 'this Mac'} ({reason})", planned.stdout)
+            self.assertIn("mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", planned.stdout)
         r.git("config", "--unset", "tron.verify.mini")
         self.declare("alpha", ["scripts/tron test gateway scripts/outside.test.ts"])
         r.commit("unsupported Gateway input")
