@@ -127,7 +127,7 @@ test("40 requests, 10 at a time, through the proxy all reach the proven Gateway"
   }
 });
 
-test("a Gateway killed while idle is refused, and so is a foreign listener on its port", async () => {
+test("a Gateway killed while idle is refused, and a foreign listener on its dead port gets nothing", async () => {
   const fixture = await startFixture();
   assert.equal((await get(fixture.port)).status, 200);
   fixture.gatewayProcess.kill("SIGTERM");
@@ -225,6 +225,31 @@ test("a proven Gateway costs no helper calls per request, alone or concurrent", 
   assert.equal(helperCalls, proof, "requests after the proof must not spawn ps or lsof");
 });
 
+test("concurrent requests to an unproven Gateway share one proof", async () => {
+  const fixture = await verifierCase();
+  fixture.row(process.pid, process.ppid, "start-a");
+  let helperCalls = 0;
+  const verify = await fixture.proxyModule.ownedGatewayVerifier(process.pid, fixture.port,
+    { execute: (...args) => { helperCalls++; return fixture.execute(...args); }, proofIntervalMs: 60_000 });
+  const construction = helperCalls;
+  await Promise.all(Array.from({ length: 40 }, () => verify()));
+  assert.equal(helperCalls - construction, 3, "40 concurrent requests must run one proof (2 ps, 1 lsof)");
+});
+
+test("a Gateway whose listener is not its own is refused", async () => {
+  const fixture = await verifierCase();
+  fixture.row(process.pid, process.ppid, "start-a");
+  const verify = await fixture.proxyModule.ownedGatewayVerifier(process.pid, fixture.port,
+    { execute: fixture.execute, proofIntervalMs: 5 });
+  fixture.table.get(process.pid).listening = false;
+  await assert.rejects(verify(), /does not own the fixture listener/);
+  // A proven Gateway that loses its listener is unproven by the watcher.
+  fixture.table.get(process.pid).listening = true;
+  await verify();
+  fixture.table.get(process.pid).listening = false;
+  await until(async () => await settles(verify()) === "rejected", "refusal after the listener moved", 2_000);
+});
+
 test("a proof that started before a respawn never proves the respawn", async () => {
   const fixture = await verifierCase();
   const sleeper = track(spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" }));
@@ -246,7 +271,7 @@ test("a proof that started before a respawn never proves the respawn", async () 
   await verify.adopt(sleeper.pid);
   fixture.hold(true);
   call.pass();
-  await stale;
+  await assert.rejects(stale, /changed during its ownership proof/);
   // The respawn is unproven: verifying it starts its own proof.
   const fresh = verify();
   call = await Promise.race([fixture.nextCall(), fresh.then(() => undefined)]);
