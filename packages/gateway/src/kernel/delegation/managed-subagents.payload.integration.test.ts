@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { chmod, mkdir, mkdtemp, open, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, open, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,15 +11,21 @@ import { awaitsWithin } from "../../../test-support/wait-for.js";
 const gateway = fileURLToPath(new URL("../../..", import.meta.url));
 const run = promisify(execFile);
 
-let staged: { root: string; app: string; preparation?: Promise<unknown> } | undefined;
+let staged: { root: string; app: string; source: string; preparation?: Promise<unknown> } | undefined;
 // Copying/validating the real payload is preparation, not offline activation.
 // Record ownership before the first fallible step so failed setup is cleaned too.
+// The staging source is this checkout seen through a test-owned view whose dist
+// is emitted from this commit, so a missing or stale checkout build never decides.
 beforeAll(async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-subagents-staged-"));
-  const app = join(root, "app");
-  staged = { root, app };
+  const app = join(root, "app"), repo = join(root, "repo"), source = join(repo, "packages", "gateway");
+  staged = { root, app, source };
   await mkdir(app);
-  staged.preparation = run("bash", [join(gateway, "../mac-app/scripts/stage-gateway-app.sh"), gateway, app], { timeout: 45_000 });
+  await mkdir(source, { recursive: true });
+  for (const entry of ["config", "scripts"]) await symlink(join(gateway, "../..", entry), join(repo, entry));
+  for (const entry of await readdir(gateway)) if (entry !== "dist") await symlink(join(gateway, entry), join(source, entry));
+  await run(process.execPath, [join(gateway, "node_modules/typescript/bin/tsc"), "-p", join(gateway, "tsconfig.json"), "--outDir", join(source, "dist")], { timeout: 15_000 });
+  staged.preparation = run("bash", [join(gateway, "../mac-app/scripts/stage-gateway-app.sh"), source, app], { timeout: 45_000 });
   await staged.preparation;
   await symlink(join(gateway, "node_modules"), join(app, "node_modules"));
 }, 60_000);
@@ -90,7 +96,7 @@ it("joins an interrupted staging writer before the caller can remove its tree", 
     const copy = join(bin, "cp");
     await writeFile(copy, '#!/bin/bash\nset -e\nexec 3< "$TRON_STAGE_COPY_GATE"\nprintf "writer:%s\\n" "$$"\nIFS= read -r _ <&3\nexec /bin/cp "$@"\n');
     await chmod(copy, 0o755);
-    const child = spawn("bash", [join(gateway, "../mac-app/scripts/stage-gateway-app.sh"), gateway, app], {
+    const child = spawn("bash", [join(gateway, "../mac-app/scripts/stage-gateway-app.sh"), staged!.source, app], {
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TRON_STAGE_COPY_GATE: gate },
       stdio: ["ignore", "pipe", "pipe"],
     });
