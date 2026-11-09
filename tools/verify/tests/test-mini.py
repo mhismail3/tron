@@ -8,7 +8,8 @@ command in that home, the way sshd would run it in the mini user's home: git's o
 mini.py's session both go through it. The cases check that a lane runs at the exact commit and its
 report and exit code come back with the mini checkout path rewritten; that a dirty tree, an
 unreachable host, an off-pin toolchain and a HEAD other than verify's commit fail with exit 2 and no
-result; and that stopping the local runner stops the mini lane and releases the mini job lock.
+result; that a push whose job never started leaves no ref once the next job ends; and that stopping the local runner, or killing its
+whole process group, stops the mini lane and releases the mini job lock.
 """
 from __future__ import annotations
 
@@ -35,7 +36,10 @@ while (($#)); do
 done
 destination="$1"; shift
 [[ "$destination" != unreachable* ]] || { echo "ssh: connect to host $destination port 22: Connection refused" >&2; exit 255; }
-cd "$MINI_HOME" && HOME="$MINI_HOME" exec /bin/sh -c "$*"
+[[ "$destination" != nojob* || "$*" != *" remote "* ]] || { echo "ssh: connection to $destination closed" >&2; exit 255; }
+# sshd runs the command in its own session: killing this client's process group leaves it running, with its
+# input closed once no client holds the pipe.
+cd "$MINI_HOME" && HOME="$MINI_HOME" exec /usr/bin/python3 -c 'import os, sys; os.setsid(); os.execv("/bin/sh", ["sh", "-c", sys.argv[1]])' "$*"
 '''
 LANE = r'''#!/usr/bin/env python3
 import json, os, signal, sys, time
@@ -174,22 +178,66 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertNotIn('stand-in lane progress', off_pin.stdout)
         self.assertFalse(report.exists())
 
-    def test_stopping_the_local_runner_stops_the_mini_lane_and_frees_its_lock(self) -> None:
-        _report, args = self.report_args()
-        runner = self.lane(*args, 'hang', background=True)
-        self.addCleanup(lambda: runner.poll() is None and runner.kill())
+    def test_a_push_whose_job_never_started_leaves_no_ref_after_the_next_job(self) -> None:
+        report, args = self.report_args()
+        repository = self.mini / 'tron-ci/tron.git'
+        # The push succeeds, then the session that would start the job drops.
+        self.git('config', 'tron.verify.mini', 'nojob.test')
+        abandoned = self.lane(*args)
+        self.assertEqual(abandoned.returncode, 2, abandoned.stdout + abandoned.stderr)
+        self.assertIn('pushed', abandoned.stdout)
+        self.assertIn('without a result', abandoned.stderr)
+        self.git('config', 'tron.verify.mini', 'mini.test')
+        self.write('README', 'next commit\n')
+        sha = self.commit('next')
+        passed = self.lane(*args)
+        self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+        self.assertEqual(self.git('for-each-ref', '--format=%(refname) %(objectname)', cwd=repository), f'refs/tron-jobs/gateway {sha}')
+
+    def wait_for_lane(self, runner: subprocess.Popen) -> None:
         deadline = time.time() + 120
         while not (self.mini / 'lane-started').exists():
             self.assertIsNone(runner.poll(), runner.stdout.read() if runner.poll() is not None else '')
             self.assertLess(time.time(), deadline, 'the stand-in lane never started')
             time.sleep(0.2)
+
+    def assert_mini_job_ended(self) -> None:
+        deadline = time.time() + 60
+        while not (self.mini / 'lane-terminated').exists():
+            self.assertLess(time.time(), deadline, 'the mini lane was never stopped')
+            time.sleep(0.2)
+        self.assertEqual((self.mini / 'lane-terminated').read_text(), 'SIGTERM')
+        with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    self.assertLess(time.time(), deadline, 'a mini job still holds the job lock')
+                    time.sleep(0.2)
+        self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
+
+    def test_killing_the_local_runner_process_group_stops_the_mini_lane_and_frees_its_lock(self) -> None:
+        _report, args = self.report_args()
+        runner = subprocess.Popen(['python3', str(self.local / 'tools/verify/mini.py'), *args, 'hang'], cwd=self.local / 'packages/gateway',
+                                  env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+        self.addCleanup(lambda: runner.poll() is None and runner.kill())
+        self.wait_for_lane(runner)
+        # No local handler runs: the runner and its ssh client die together, as under a timeout's group kill.
+        os.killpg(runner.pid, signal.SIGKILL)
+        runner.communicate(timeout=60)
+        self.assert_mini_job_ended()
+
+    def test_stopping_the_local_runner_stops_the_mini_lane_and_frees_its_lock(self) -> None:
+        _report, args = self.report_args()
+        runner = self.lane(*args, 'hang', background=True)
+        self.addCleanup(lambda: runner.poll() is None and runner.kill())
+        self.wait_for_lane(runner)
         runner.send_signal(signal.SIGTERM)
         output, _ = runner.communicate(timeout=60)
         self.assertEqual((self.mini / 'lane-terminated').read_text(), 'SIGTERM', output)
         self.assertEqual(runner.returncode, 143, output)
-        with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if a mini job still held it
-        self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
+        self.assert_mini_job_ended()
 
 
 if __name__ == '__main__':
