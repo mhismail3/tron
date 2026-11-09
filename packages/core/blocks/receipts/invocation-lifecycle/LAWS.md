@@ -5,11 +5,11 @@ Block hash: `adad9576e0c2db4c` (over `blocks/receipts/invocation-lifecycle/Block
 
 | Gate | Status |
 |---|---|
-| Proof (pinned Dafny, --verify-included-files) | not run (--no-verify) |
-| Independent review | MISSING |
-| Mutation check | MISSING |
-| Shadow | match: 5000 inputs compared, 0 mismatches; lab traffic only; compiled core vs packages/gateway/src/kernel/receipts/invocation-receipts.ts (invocationProjection) on 5,000 generated receipt histories (not real traffic); compiled core not checked (--no-verify or translate failed) |
-| **Ready for cut-over** | no (READY is only computed with --recheck) |
+| Proof (pinned Dafny, --verify-included-files) | PASS: blocks/receipts/invocation-lifecycle/Block.dfy: Dafny program verifier finished with 51 verified, 0 errors;  |
+| Independent review | ACCEPT by law-reviewer (run 53291cd2) (openai/gpt-6-luna, transcript-verified); writer parent (anthropic/claude-opus-5-5); 2026-11-09 |
+| Mutation check | PASS: 422 valid mutants, 422 killed by laws, 0 law-gap, 0 survived, 0 accepted (blocks/receipts/invocation-lifecycle/MUTATION.json) |
+| Shadow | match: 5000 inputs compared, 0 mismatches; lab traffic only; compiled core vs packages/gateway/src/kernel/receipts/invocation-receipts.ts (invocationProjection) on 5,000 generated receipt histories (not real traffic) |
+| **Ready for cut-over** | no (READY is only computed with --recheck) (needs a current real-traffic shadow over >= 7 days) |
 
 ## L1 legal-moves
 
@@ -21,9 +21,9 @@ lemma L1LegalMoves(from: Life, to: Life, settle: bool)
   ensures Legal(from, LifeOf(to), settle) == (!TerminalLife(from) && (if settle then TerminalLife(to) else Allowed(from, to)))
 ```
 
-**Mutation results.** no report
+**Mutation results.** kills 207 of 422 valid mutants; 181 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: English matches the equation: NoLife and terminal sources are illegal; terminals may move any unsettled source to a terminal target and ordinary moves use exactly Allowed. For example Staged→Accepted with settle=false satisfies it; 207 mutants (181 uniquely) were killed, including the transition/terminal branch semantics.
 
 ## H1 history
 
@@ -45,9 +45,9 @@ lemma RunAtRun(st: State, rs: seq<Receipt>, k: nat)
   ensures RunAt(st, rs, k) == Run(st, rs[k..], k)
 ```
 
-**Mutation results.** no report
+**Mutation results.** kills 12 of 422 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: This is the exact iterative fold equivalence, with index 0 and first refusal preserved; an empty receipt sequence satisfies it. It directly defines recovery/fold semantics and the report says 12 kills, despite none unique.
 
 ## S1 start
 
@@ -73,9 +73,9 @@ lemma FindIndexSpec(projs: seq<Proj>, inv: int)
     && (k >= 0 ==> projs[k].inv == inv && forall j | 0 <= j < k :: projs[j].inv != inv)
 ```
 
-**Mutation results.** no report
+**Mutation results.** kills 61 of 422 valid mutants; 36 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: The equation matches start behavior including lifecycle default Accepted, copied identity/name/origin/sequence/time, and empty entry/retryable/unsettled fields; empty state plus a Staged start is a witness. 61 kills (36 unique) cover duplicate starts and defaults.
 
 ## S2 checks
 
@@ -99,9 +99,9 @@ lemma FindIndexAt(projs: seq<Proj>, inv: int, i: int)
   ensures FindIndex(projs, inv) == i
 ```
 
-**Mutation results.** no report
+**Mutation results.** kills 74 of 422 valid mutants; 49 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: For example a matching first projection and a Binding with empty binding sets, matching ownership and omitted name/origin satisfies the premise and passes; failure entails the first ordered Check refusal, while passed bindings proceed. Check order is ownership, bound entry, bound invocation, name, origin; 74 kills (49 unique) directly exercise these refusals.
 
 ## S3 no-start
 
@@ -113,9 +113,9 @@ lemma S3NoStart(st: State, r: Receipt)
   ensures StepOf(st, r) == Refused(NoStart)
 ```
 
-**Mutation results.** no report
+**Mutation results.** kills 13 of 422 valid mutants; 9 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: An empty state and any non-start receipt satisfy the premise and yield NoStart, exactly as stated. This precedes all ownership/check behavior in the fold, and 13 mutants (9 unique) were killed.
 
 ## S4 settle
 
@@ -134,9 +134,9 @@ lemma S4Settle(st: State, r: Receipt, i: int)
       else if p.terminal then ContradictoryTerminal else IllegalTerminal)
 ```
 
-**Mutation results.** no report
+**Mutation results.** kills 60 of 422 valid mutants; 28 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: A first Started/Staged projection and legal terminal Completed receipt satisfies the premises; duplicate terminal lifecycle is accepted, contradictory lifecycle is refused, and legal moves gate fresh settlement and transitions. It accurately reflects the TS ordering after checks; the unreachable TS ChangedAfterTerminal arm is correctly absent because transitions are handled earlier and bindings are allowed; 60 kills (28 unique).
 
 ## S5 update
 
@@ -158,9 +158,9 @@ lemma S5Update(st: State, r: Receipt, i: int)
       if r.kind.Binding? then st.bound + [r.inv] else st.bound)
 ```
 
-**Mutation results.** no report
+**Mutation results.** kills 16 of 422 valid mutants; 1 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: A valid started invocation followed by an accepted binding witnesses the premises and matches the update equation: own projection only, current time, optional entry/flag, lifecycle preservation after settlement, and binding sets. In particular bindings after settlement change updatedAt/entry but retain lifecycle; start defaults are separately covered by S1; 16 kills (1 unique).
 
 ## P1 progress
 
@@ -176,9 +176,9 @@ lemma P1Progress(inv: int, op: int, src: int, origin: int, e: int, s: int)
     Project(rs) == Projected([Proj(inv, op, src, None, Some(origin), Completed, Some(e), FlagOf(false), s, 5, true)])
 ```
 
-**Mutation results.** no report
+**Mutation results.** kills 92 of 422 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: The fixed five-receipt successful trace is a concrete witness and its terminal, settled, bound result matches the stated outcome exactly. This explicit progress guarantee is not vacuous despite zero unique kills; mutation evidence reports 92 kills.
 
 ## I1 settled-stays-settled
 
@@ -227,9 +227,9 @@ lemma StepSettles(st: State, r: Receipt)
   ensures r.life.LifeOf? && SettledIn(StepOf(st, r).st, r.inv, r.life.l)
 ```
 
-**Mutation results.** no report
+**Mutation results.** kills 20 of 422 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: A single Staged start followed by Completed terminal satisfies the premise and conclusion; later same-lifecycle terminal duplicates or bindings preserve settlement and lifecycle. The universal accepted-history invariant is correctly stronger than a single-step claim; 20 mutants were killed though none uniquely.
 
 ## I2 one-binding
 
@@ -279,9 +279,9 @@ lemma StepGrows(st: State, r: Receipt)
     && (r.kind.Binding? ==> r.entry in st2.entries && r.inv in st2.bound)
 ```
 
-**Mutation results.** no report
+**Mutation results.** kills 7 of 422 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: Two distinct started invocations each followed by bindings to distinct entries is a concrete projected-history witness; any repeated entry or invocation is refused by the fold. This captures both uniqueness constraints; 7 mutants killed, with no unique kills.
 
 ## Law kinds
 
@@ -434,3 +434,7 @@ ghost predicate SettledIn(st: State, inv: int, l: Life) {
   exists i | 0 <= i < |st.projs| :: st.projs[i].inv == inv && st.projs[i].terminal && st.projs[i].life == l
 }
 ```
+
+## Reviewer: general notes
+
+High-stakes is correct because this is a task/run lifecycle. A1 is realistic for parsed receipt shapes and token equality, but remains a shell boundary contract; A2 explicitly leaves sorting to the shell, which matches invocationProjection's stable start-sequence sort versus core start order and must be tested at that seam. All 422 valid mutants were killed by laws (0 gaps/survivors/accepted); the 5,000-history shadow matches but is generated lab traffic, not the required seven-day real-traffic evidence. TS check order is ownership, binding entry, binding invocation, name, origin, terminal contradiction/legality, transition legality; duplicate terminal receipts of same lifecycle pass, contradictory terminal receipts refuse. Accepted terminal sets lifecycle/retryable and settlement; each accepted later receipt updates updatedAt, including binding after terminal, while binding adds canonical entry and does not change terminal lifecycle. retryable is overwritten only when supplied and otherwise retained. Refusals terminate the whole fold at the first bad receipt. The TS ChangedAfterTerminal branch is unreachable: transitions and terminal records are handled earlier, and only bindings can reach it after settlement, which are permitted; there is no missing refusal. Core models only receipt facts, so TS projection extras (arguments/resources/submittedText/origin fallback) are outside this lifecycle facts seam; lifecycle for bindings is correctly unchanged. All six law kinds are accounted for; no additional kind omission or unresolved subjective product decision identified. Lab shadow is not cut-over readiness.

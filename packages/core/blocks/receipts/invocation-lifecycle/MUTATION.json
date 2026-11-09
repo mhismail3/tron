@@ -1,0 +1,7970 @@
+{
+ "summary": {
+  "block": "receipts/invocation-lifecycle",
+  "tier": "high-stakes",
+  "laws": "blocks/receipts/invocation-lifecycle/Block.dfy",
+  "oracle": true,
+  "toolHash": "a36fd30c10c2fc06",
+  "mutants": 453,
+  "stillborn": 31,
+  "valid": 422,
+  "killed": 422,
+  "lawGap": 0,
+  "survived": 0,
+  "accepted": 0,
+  "seconds": 1353,
+  "score": 1,
+  "unknown": 0,
+  "stillbornRatio": 0.068,
+  "filter": null,
+  "generated": 453,
+  "pass": true,
+  "inputsHash": "adad9576e0c2db4c"
+ },
+ "perLaw": [
+  {
+   "law": "L1 legal-moves",
+   "killed": 207,
+   "only": 181
+  },
+  {
+   "law": "H1 history",
+   "killed": 12,
+   "only": 0
+  },
+  {
+   "law": "S1 start",
+   "killed": 61,
+   "only": 36
+  },
+  {
+   "law": "S2 checks",
+   "killed": 74,
+   "only": 49
+  },
+  {
+   "law": "S3 no-start",
+   "killed": 13,
+   "only": 9
+  },
+  {
+   "law": "S4 settle",
+   "killed": 60,
+   "only": 28
+  },
+  {
+   "law": "S5 update",
+   "killed": 16,
+   "only": 1
+  },
+  {
+   "law": "P1 progress",
+   "killed": 92,
+   "only": 0
+  },
+  {
+   "law": "I1 settled-stays-settled",
+   "killed": 20,
+   "only": 0
+  },
+  {
+   "law": "I2 one-binding",
+   "killed": 7,
+   "only": 0
+  }
+ ],
+ "results": [
+  {
+   "id": "FindIndex/branch/|projs| == 0->false#1",
+   "sym": "FindIndex",
+   "op": "branch",
+   "line": 12,
+   "col": 8,
+   "from": "|projs| == 0",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/branch/|projs| == 0->true#1",
+   "sym": "FindIndex",
+   "op": "branch",
+   "line": 12,
+   "col": 8,
+   "from": "|projs| == 0",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/relational/==->!=#1",
+   "sym": "FindIndex",
+   "op": "relational",
+   "line": 12,
+   "col": 16,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/0->1#1",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 12,
+   "col": 19,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/arith/-->+#1",
+   "sym": "FindIndex",
+   "op": "arith",
+   "line": 12,
+   "col": 26,
+   "from": "-",
+   "to": "+",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/drop-operand/-1->#1",
+   "sym": "FindIndex",
+   "op": "drop-operand",
+   "line": 12,
+   "col": 26,
+   "from": "-1",
+   "to": "",
+   "note": "drop right operand",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/1->0#1",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 12,
+   "col": 27,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/1->2#1",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 12,
+   "col": 27,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/branch/projs[0].inv == inv->false#1",
+   "sym": "FindIndex",
+   "op": "branch",
+   "line": 13,
+   "col": 13,
+   "from": "projs[0].inv == inv",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/branch/projs[0].inv == inv->true#1",
+   "sym": "FindIndex",
+   "op": "branch",
+   "line": 13,
+   "col": 13,
+   "from": "projs[0].inv == inv",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/0->1#2",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 13,
+   "col": 19,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/relational/==->!=#2",
+   "sym": "FindIndex",
+   "op": "relational",
+   "line": 13,
+   "col": 26,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/off-by-one/inv->(inv - 1)#1",
+   "sym": "FindIndex",
+   "op": "off-by-one",
+   "line": 13,
+   "col": 29,
+   "from": "inv",
+   "to": "(inv - 1)",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/off-by-one/inv->(inv + 1)#1",
+   "sym": "FindIndex",
+   "op": "off-by-one",
+   "line": 13,
+   "col": 29,
+   "from": "inv",
+   "to": "(inv + 1)",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/0->1#3",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 13,
+   "col": 38,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "S1 start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/swap-args/projs[1..], inv->inv, projs[1..]#1",
+   "sym": "FindIndex",
+   "op": "swap-args",
+   "line": 14,
+   "col": 29,
+   "from": "projs[1..], inv",
+   "to": "inv, projs[1..]",
+   "note": "FindIndex args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/1->0#2",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 14,
+   "col": 35,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "S1 start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/1->2#2",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 14,
+   "col": 35,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "S1 start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/branch/k < 0->false#1",
+   "sym": "FindIndex",
+   "op": "branch",
+   "line": 14,
+   "col": 50,
+   "from": "k < 0",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/branch/k < 0->true#1",
+   "sym": "FindIndex",
+   "op": "branch",
+   "line": 14,
+   "col": 50,
+   "from": "k < 0",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/off-by-one/k->(k - 1)#1",
+   "sym": "FindIndex",
+   "op": "off-by-one",
+   "line": 14,
+   "col": 50,
+   "from": "k",
+   "to": "(k - 1)",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/off-by-one/k->(k + 1)#1",
+   "sym": "FindIndex",
+   "op": "off-by-one",
+   "line": 14,
+   "col": 50,
+   "from": "k",
+   "to": "(k + 1)",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/boundary/<-><=#1",
+   "sym": "FindIndex",
+   "op": "boundary",
+   "line": 14,
+   "col": 52,
+   "from": "<",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/relational/<->>=#1",
+   "sym": "FindIndex",
+   "op": "relational",
+   "line": 14,
+   "col": 52,
+   "from": "<",
+   "to": ">=",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/0->1#4",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 14,
+   "col": 54,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/arith/-->+#2",
+   "sym": "FindIndex",
+   "op": "arith",
+   "line": 14,
+   "col": 61,
+   "from": "-",
+   "to": "+",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/drop-operand/-1->#2",
+   "sym": "FindIndex",
+   "op": "drop-operand",
+   "line": 14,
+   "col": 61,
+   "from": "-1",
+   "to": "",
+   "note": "drop right operand",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/1->0#3",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 14,
+   "col": 62,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/1->2#3",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 14,
+   "col": 62,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/off-by-one/k->(k - 1)#2",
+   "sym": "FindIndex",
+   "op": "off-by-one",
+   "line": 14,
+   "col": 69,
+   "from": "k",
+   "to": "(k - 1)",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/off-by-one/k->(k + 1)#2",
+   "sym": "FindIndex",
+   "op": "off-by-one",
+   "line": 14,
+   "col": 69,
+   "from": "k",
+   "to": "(k + 1)",
+   "status": "killed",
+   "killedBy": [
+    "S1 start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/arith/+->-#1",
+   "sym": "FindIndex",
+   "op": "arith",
+   "line": 14,
+   "col": 71,
+   "from": "+",
+   "to": "-",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/drop-operand/+ 1->#1",
+   "sym": "FindIndex",
+   "op": "drop-operand",
+   "line": 14,
+   "col": 71,
+   "from": "+ 1",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/1->0#4",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 14,
+   "col": 73,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "FindIndex/constant/1->2#4",
+   "sym": "FindIndex",
+   "op": "constant",
+   "line": 14,
+   "col": 73,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "S1 start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/branch/TerminalLife(from) || to.NoLife?->false#1",
+   "sym": "Legal",
+   "op": "branch",
+   "line": 18,
+   "col": 8,
+   "from": "TerminalLife(from) || to.NoLife?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "L1 legal-moves",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/branch/TerminalLife(from) || to.NoLife?->true#1",
+   "sym": "Legal",
+   "op": "branch",
+   "line": 18,
+   "col": 8,
+   "from": "TerminalLife(from) || to.NoLife?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/logic/||->&&#1",
+   "sym": "Legal",
+   "op": "logic",
+   "line": 18,
+   "col": 27,
+   "from": "||",
+   "to": "&&",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "L1 legal-moves",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constant/false->true#1",
+   "sym": "Legal",
+   "op": "constant",
+   "line": 18,
+   "col": 46,
+   "from": "false",
+   "to": "true",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/branch/settle->false#1",
+   "sym": "Legal",
+   "op": "branch",
+   "line": 19,
+   "col": 13,
+   "from": "settle",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/branch/settle->true#1",
+   "sym": "Legal",
+   "op": "branch",
+   "line": 19,
+   "col": 13,
+   "from": "settle",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Accepted->Completed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 31,
+   "from": "Accepted",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Accepted->Failed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 31,
+   "from": "Accepted",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Accepted->Interrupted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 31,
+   "from": "Accepted",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Accepted->OutcomeUnknown#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 31,
+   "from": "Accepted",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Accepted->Queued#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 31,
+   "from": "Accepted",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Accepted->Retrying#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 31,
+   "from": "Accepted",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Accepted->Running#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 31,
+   "from": "Accepted",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Accepted->Settling#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 31,
+   "from": "Accepted",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Accepted->Staged#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 31,
+   "from": "Accepted",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Accepted->WaitingForInput#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 31,
+   "from": "Accepted",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Accepted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 41,
+   "from": "Queued",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Completed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 41,
+   "from": "Queued",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Failed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 41,
+   "from": "Queued",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Interrupted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 41,
+   "from": "Queued",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->OutcomeUnknown#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 41,
+   "from": "Queued",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Retrying#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 41,
+   "from": "Queued",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Running#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 41,
+   "from": "Queued",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Settling#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 41,
+   "from": "Queued",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Staged#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 41,
+   "from": "Queued",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->WaitingForInput#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 41,
+   "from": "Queued",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Accepted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 49,
+   "from": "Running",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Completed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 49,
+   "from": "Running",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Failed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 49,
+   "from": "Running",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Interrupted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 49,
+   "from": "Running",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->OutcomeUnknown#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 49,
+   "from": "Running",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Queued#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 49,
+   "from": "Running",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Retrying#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 49,
+   "from": "Running",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Settling#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 49,
+   "from": "Running",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Staged#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 49,
+   "from": "Running",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->WaitingForInput#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 49,
+   "from": "Running",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Accepted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 58,
+   "from": "WaitingForInput",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Completed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 58,
+   "from": "WaitingForInput",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Failed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 58,
+   "from": "WaitingForInput",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Interrupted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 58,
+   "from": "WaitingForInput",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->OutcomeUnknown#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 58,
+   "from": "WaitingForInput",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Queued#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 58,
+   "from": "WaitingForInput",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Retrying#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 58,
+   "from": "WaitingForInput",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Running#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 58,
+   "from": "WaitingForInput",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Settling#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 58,
+   "from": "WaitingForInput",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Staged#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 58,
+   "from": "WaitingForInput",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Accepted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 75,
+   "from": "Retrying",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Completed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 75,
+   "from": "Retrying",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Failed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 75,
+   "from": "Retrying",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Interrupted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 75,
+   "from": "Retrying",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->OutcomeUnknown#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 75,
+   "from": "Retrying",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Queued#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 75,
+   "from": "Retrying",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Running#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 75,
+   "from": "Retrying",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Settling#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 75,
+   "from": "Retrying",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Staged#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 75,
+   "from": "Retrying",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->WaitingForInput#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 75,
+   "from": "Retrying",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Accepted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 85,
+   "from": "Settling",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Completed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 85,
+   "from": "Settling",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Failed#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 85,
+   "from": "Settling",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Interrupted#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 85,
+   "from": "Settling",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->OutcomeUnknown#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 85,
+   "from": "Settling",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Queued#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 85,
+   "from": "Settling",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Retrying#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 85,
+   "from": "Settling",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Running#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 85,
+   "from": "Settling",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Staged#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 85,
+   "from": "Settling",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->WaitingForInput#1",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 21,
+   "col": 85,
+   "from": "Settling",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Accepted#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 33,
+   "from": "Queued",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Completed#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 33,
+   "from": "Queued",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Failed#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 33,
+   "from": "Queued",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Interrupted#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 33,
+   "from": "Queued",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->OutcomeUnknown#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 33,
+   "from": "Queued",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Retrying#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 33,
+   "from": "Queued",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Running#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 33,
+   "from": "Queued",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Settling#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 33,
+   "from": "Queued",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->Staged#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 33,
+   "from": "Queued",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Queued->WaitingForInput#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 33,
+   "from": "Queued",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Accepted#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 41,
+   "from": "Running",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Completed#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 41,
+   "from": "Running",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Failed#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 41,
+   "from": "Running",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Interrupted#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 41,
+   "from": "Running",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->OutcomeUnknown#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 41,
+   "from": "Running",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Queued#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 41,
+   "from": "Running",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Retrying#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 41,
+   "from": "Running",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Settling#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 41,
+   "from": "Running",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Staged#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 41,
+   "from": "Running",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->WaitingForInput#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 41,
+   "from": "Running",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Accepted#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 50,
+   "from": "WaitingForInput",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Completed#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 50,
+   "from": "WaitingForInput",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Failed#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 50,
+   "from": "WaitingForInput",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Interrupted#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 50,
+   "from": "WaitingForInput",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->OutcomeUnknown#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 50,
+   "from": "WaitingForInput",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Queued#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 50,
+   "from": "WaitingForInput",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Retrying#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 50,
+   "from": "WaitingForInput",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Running#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 50,
+   "from": "WaitingForInput",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Settling#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 50,
+   "from": "WaitingForInput",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Staged#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 50,
+   "from": "WaitingForInput",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Accepted#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 67,
+   "from": "Retrying",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Completed#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 67,
+   "from": "Retrying",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Failed#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 67,
+   "from": "Retrying",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Interrupted#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 67,
+   "from": "Retrying",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->OutcomeUnknown#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 67,
+   "from": "Retrying",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Queued#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 67,
+   "from": "Retrying",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Running#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 67,
+   "from": "Retrying",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Settling#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 67,
+   "from": "Retrying",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Staged#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 67,
+   "from": "Retrying",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->WaitingForInput#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 67,
+   "from": "Retrying",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Accepted#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 77,
+   "from": "Settling",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Completed#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 77,
+   "from": "Settling",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Failed#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 77,
+   "from": "Settling",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Interrupted#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 77,
+   "from": "Settling",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->OutcomeUnknown#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 77,
+   "from": "Settling",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Queued#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 77,
+   "from": "Settling",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Retrying#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 77,
+   "from": "Settling",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Running#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 77,
+   "from": "Settling",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Staged#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 77,
+   "from": "Settling",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->WaitingForInput#2",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 22,
+   "col": 77,
+   "from": "Settling",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Accepted#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 31,
+   "from": "Running",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Completed#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 31,
+   "from": "Running",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Failed#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 31,
+   "from": "Running",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Interrupted#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 31,
+   "from": "Running",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->OutcomeUnknown#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 31,
+   "from": "Running",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Queued#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 31,
+   "from": "Running",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Retrying#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 31,
+   "from": "Running",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Settling#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 31,
+   "from": "Running",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Staged#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 31,
+   "from": "Running",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->WaitingForInput#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 31,
+   "from": "Running",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Accepted#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 40,
+   "from": "Settling",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Completed#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 40,
+   "from": "Settling",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Failed#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 40,
+   "from": "Settling",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Interrupted#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 40,
+   "from": "Settling",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->OutcomeUnknown#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 40,
+   "from": "Settling",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Queued#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 40,
+   "from": "Settling",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Retrying#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 40,
+   "from": "Settling",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Running#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 40,
+   "from": "Settling",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Staged#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 40,
+   "from": "Settling",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->WaitingForInput#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 23,
+   "col": 40,
+   "from": "Settling",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Accepted#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 32,
+   "from": "WaitingForInput",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Completed#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 32,
+   "from": "WaitingForInput",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Failed#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 32,
+   "from": "WaitingForInput",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Interrupted#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 32,
+   "from": "WaitingForInput",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->OutcomeUnknown#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 32,
+   "from": "WaitingForInput",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Queued#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 32,
+   "from": "WaitingForInput",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Retrying#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 32,
+   "from": "WaitingForInput",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Running#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 32,
+   "from": "WaitingForInput",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Settling#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 32,
+   "from": "WaitingForInput",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/WaitingForInput->Staged#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 32,
+   "from": "WaitingForInput",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Accepted#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 49,
+   "from": "Retrying",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Completed#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 49,
+   "from": "Retrying",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Failed#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 49,
+   "from": "Retrying",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Interrupted#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 49,
+   "from": "Retrying",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->OutcomeUnknown#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 49,
+   "from": "Retrying",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Queued#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 49,
+   "from": "Retrying",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Running#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 49,
+   "from": "Retrying",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Settling#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 49,
+   "from": "Retrying",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->Staged#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 49,
+   "from": "Retrying",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Retrying->WaitingForInput#3",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 49,
+   "from": "Retrying",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Accepted#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 59,
+   "from": "Settling",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Completed#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 59,
+   "from": "Settling",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Failed#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 59,
+   "from": "Settling",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Interrupted#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 59,
+   "from": "Settling",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->OutcomeUnknown#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 59,
+   "from": "Settling",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Queued#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 59,
+   "from": "Settling",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Retrying#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 59,
+   "from": "Settling",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Running#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 59,
+   "from": "Settling",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Staged#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 59,
+   "from": "Settling",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->WaitingForInput#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 24,
+   "col": 59,
+   "from": "Settling",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Accepted#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 40,
+   "from": "Running",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Completed#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 40,
+   "from": "Running",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Failed#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 40,
+   "from": "Running",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Interrupted#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 40,
+   "from": "Running",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->OutcomeUnknown#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 40,
+   "from": "Running",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Queued#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 40,
+   "from": "Running",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Retrying#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 40,
+   "from": "Running",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Settling#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 40,
+   "from": "Running",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Staged#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 40,
+   "from": "Running",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->WaitingForInput#4",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 40,
+   "from": "Running",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Accepted#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 49,
+   "from": "Settling",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Completed#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 49,
+   "from": "Settling",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Failed#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 49,
+   "from": "Settling",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Interrupted#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 49,
+   "from": "Settling",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->OutcomeUnknown#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 49,
+   "from": "Settling",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Queued#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 49,
+   "from": "Settling",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Retrying#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 49,
+   "from": "Settling",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Running#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 49,
+   "from": "Settling",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Staged#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 49,
+   "from": "Settling",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->WaitingForInput#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 25,
+   "col": 49,
+   "from": "Settling",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Accepted#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 33,
+   "from": "Running",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Completed#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 33,
+   "from": "Running",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Failed#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 33,
+   "from": "Running",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Interrupted#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 33,
+   "from": "Running",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->OutcomeUnknown#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 33,
+   "from": "Running",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Queued#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 33,
+   "from": "Running",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Retrying#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 33,
+   "from": "Running",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Settling#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 33,
+   "from": "Running",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->Staged#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 33,
+   "from": "Running",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Running->WaitingForInput#5",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 33,
+   "from": "Running",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Accepted#6",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 42,
+   "from": "Settling",
+   "to": "Accepted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Completed#6",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 42,
+   "from": "Settling",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Failed#6",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 42,
+   "from": "Settling",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Interrupted#6",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 42,
+   "from": "Settling",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->OutcomeUnknown#6",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 42,
+   "from": "Settling",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Queued#6",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 42,
+   "from": "Settling",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Retrying#6",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 42,
+   "from": "Settling",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Running#6",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 42,
+   "from": "Settling",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->Staged#6",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 42,
+   "from": "Settling",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constructor/Settling->WaitingForInput#6",
+   "sym": "Legal",
+   "op": "constructor",
+   "line": 26,
+   "col": 42,
+   "from": "Settling",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Legal/constant/false->true#2",
+   "sym": "Legal",
+   "op": "constant",
+   "line": 27,
+   "col": 17,
+   "from": "false",
+   "to": "true",
+   "status": "killed",
+   "killedBy": [
+    "L1 legal-moves"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/st.projs, r.inv->r.inv, st.projs#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 31,
+   "col": 24,
+   "from": "st.projs, r.inv",
+   "to": "r.inv, st.projs",
+   "note": "FindIndex args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Start?->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 32,
+   "col": 8,
+   "from": "r.kind.Start?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Start?->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 32,
+   "col": 8,
+   "from": "r.kind.Start?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "I2 one-binding",
+    "P1 progress",
+    "S2 checks",
+    "S3 no-start",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/i >= 0->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 33,
+   "col": 10,
+   "from": "i >= 0",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/i >= 0->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 33,
+   "col": 10,
+   "from": "i >= 0",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/off-by-one/i->(i - 1)#1",
+   "sym": "StepOf",
+   "op": "off-by-one",
+   "line": 33,
+   "col": 10,
+   "from": "i",
+   "to": "(i - 1)",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/off-by-one/i->(i + 1)#1",
+   "sym": "StepOf",
+   "op": "off-by-one",
+   "line": 33,
+   "col": 10,
+   "from": "i",
+   "to": "(i + 1)",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/boundary/>=->>#1",
+   "sym": "StepOf",
+   "op": "boundary",
+   "line": 33,
+   "col": 12,
+   "from": ">=",
+   "to": ">",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/relational/>=-><#1",
+   "sym": "StepOf",
+   "op": "relational",
+   "line": 33,
+   "col": 12,
+   "from": ">=",
+   "to": "<",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constant/0->1#1",
+   "sym": "StepOf",
+   "op": "constant",
+   "line": 33,
+   "col": 15,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/DuplicateStart->ContradictoryTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 33,
+   "col": 30,
+   "from": "DuplicateStart",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/DuplicateStart->EntryBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 33,
+   "col": 30,
+   "from": "DuplicateStart",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/DuplicateStart->IllegalTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 33,
+   "col": 30,
+   "from": "DuplicateStart",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/DuplicateStart->IllegalTransition#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 33,
+   "col": 30,
+   "from": "DuplicateStart",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/DuplicateStart->InvocationBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 33,
+   "col": 30,
+   "from": "DuplicateStart",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/DuplicateStart->NameChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 33,
+   "col": 30,
+   "from": "DuplicateStart",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/DuplicateStart->NoStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 33,
+   "col": 30,
+   "from": "DuplicateStart",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/DuplicateStart->OriginChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 33,
+   "col": 30,
+   "from": "DuplicateStart",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/DuplicateStart->OwnershipChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 33,
+   "col": 30,
+   "from": "DuplicateStart",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/arith/+->-#1",
+   "sym": "StepOf",
+   "op": "arith",
+   "line": 34,
+   "col": 39,
+   "from": "+",
+   "to": "-",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/drop-operand/+ [Proj(r.inv, r.op, r.src, r.name, r.origin, if r.life.LifeOf? then r.life.l else Accepted, None, NoFlag, r.sequence, r.at, false)]->#1",
+   "sym": "StepOf",
+   "op": "drop-operand",
+   "line": 34,
+   "col": 39,
+   "from": "+ [Proj(r.inv, r.op, r.src, r.name, r.origin,\n        if r.life.LifeOf? then r.life.l else Accepted, None, NoFlag, r.sequence, r.at, false)]",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/r.inv, r.op->r.op, r.inv#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 34,
+   "col": 47,
+   "from": "r.inv, r.op",
+   "to": "r.op, r.inv",
+   "note": "Proj args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/r.op, r.src->r.src, r.op#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 34,
+   "col": 54,
+   "from": "r.op, r.src",
+   "to": "r.src, r.op",
+   "note": "Proj args 2<->3",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/r.src, r.name->r.name, r.src#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 34,
+   "col": 60,
+   "from": "r.src, r.name",
+   "to": "r.name, r.src",
+   "note": "Proj args 3<->4",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/r.name, r.origin->r.origin, r.name#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 34,
+   "col": 67,
+   "from": "r.name, r.origin",
+   "to": "r.origin, r.name",
+   "note": "Proj args 4<->5",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/r.origin, if r.life.LifeOf? then r.life.l else Accepted->if r.life.LifeOf? then r.life.l else Accepted, r.origin#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 34,
+   "col": 75,
+   "from": "r.origin, if r.life.LifeOf? then r.life.l else Accepted",
+   "to": "if r.life.LifeOf? then r.life.l else Accepted, r.origin",
+   "note": "Proj args 5<->6",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/if r.life.LifeOf? then r.life.l else Accepted, None->None, if r.life.LifeOf? then r.life.l else Accepted#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 35,
+   "col": 9,
+   "from": "if r.life.LifeOf? then r.life.l else Accepted, None",
+   "to": "None, if r.life.LifeOf? then r.life.l else Accepted",
+   "note": "Proj args 6<->7",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.life.LifeOf?->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 35,
+   "col": 12,
+   "from": "r.life.LifeOf?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.life.LifeOf?->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 35,
+   "col": 12,
+   "from": "r.life.LifeOf?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "S1 start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/Accepted->Completed#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 35,
+   "col": 46,
+   "from": "Accepted",
+   "to": "Completed",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/Accepted->Failed#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 35,
+   "col": 46,
+   "from": "Accepted",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/Accepted->Interrupted#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 35,
+   "col": 46,
+   "from": "Accepted",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/Accepted->OutcomeUnknown#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 35,
+   "col": 46,
+   "from": "Accepted",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/Accepted->Queued#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 35,
+   "col": 46,
+   "from": "Accepted",
+   "to": "Queued",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/Accepted->Retrying#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 35,
+   "col": 46,
+   "from": "Accepted",
+   "to": "Retrying",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/Accepted->Running#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 35,
+   "col": 46,
+   "from": "Accepted",
+   "to": "Running",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/Accepted->Settling#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 35,
+   "col": 46,
+   "from": "Accepted",
+   "to": "Settling",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/Accepted->Staged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 35,
+   "col": 46,
+   "from": "Accepted",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/Accepted->WaitingForInput#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 35,
+   "col": 46,
+   "from": "Accepted",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/None, NoFlag->NoFlag, None#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 35,
+   "col": 56,
+   "from": "None, NoFlag",
+   "to": "NoFlag, None",
+   "note": "Proj args 7<->8",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/NoFlag, r.sequence->r.sequence, NoFlag#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 35,
+   "col": 62,
+   "from": "NoFlag, r.sequence",
+   "to": "r.sequence, NoFlag",
+   "note": "Proj args 8<->9",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/r.sequence, r.at->r.at, r.sequence#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 35,
+   "col": 70,
+   "from": "r.sequence, r.at",
+   "to": "r.at, r.sequence",
+   "note": "Proj args 9<->10",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/r.at, false->false, r.at#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 35,
+   "col": 82,
+   "from": "r.at, false",
+   "to": "false, r.at",
+   "note": "Proj args 10<->11",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constant/false->true#1",
+   "sym": "StepOf",
+   "op": "constant",
+   "line": 35,
+   "col": 88,
+   "from": "false",
+   "to": "true",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S1 start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/i < 0->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 36,
+   "col": 13,
+   "from": "i < 0",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "S3 no-start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/i < 0->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 36,
+   "col": 13,
+   "from": "i < 0",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/off-by-one/i->(i - 1)#2",
+   "sym": "StepOf",
+   "op": "off-by-one",
+   "line": 36,
+   "col": 13,
+   "from": "i",
+   "to": "(i - 1)",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/off-by-one/i->(i + 1)#2",
+   "sym": "StepOf",
+   "op": "off-by-one",
+   "line": 36,
+   "col": 13,
+   "from": "i",
+   "to": "(i + 1)",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "S3 no-start",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/boundary/<-><=#1",
+   "sym": "StepOf",
+   "op": "boundary",
+   "line": 36,
+   "col": 15,
+   "from": "<",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/relational/<->>=#1",
+   "sym": "StepOf",
+   "op": "relational",
+   "line": 36,
+   "col": 15,
+   "from": "<",
+   "to": ">=",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "P1 progress",
+    "S2 checks",
+    "S3 no-start",
+    "S4 settle",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constant/0->1#2",
+   "sym": "StepOf",
+   "op": "constant",
+   "line": 36,
+   "col": 17,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NoStart->ContradictoryTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 36,
+   "col": 32,
+   "from": "NoStart",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S3 no-start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NoStart->DuplicateStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 36,
+   "col": 32,
+   "from": "NoStart",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "S3 no-start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NoStart->EntryBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 36,
+   "col": 32,
+   "from": "NoStart",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "S3 no-start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NoStart->IllegalTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 36,
+   "col": 32,
+   "from": "NoStart",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S3 no-start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NoStart->IllegalTransition#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 36,
+   "col": 32,
+   "from": "NoStart",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "S3 no-start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NoStart->InvocationBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 36,
+   "col": 32,
+   "from": "NoStart",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "S3 no-start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NoStart->NameChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 36,
+   "col": 32,
+   "from": "NoStart",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "S3 no-start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NoStart->OriginChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 36,
+   "col": 32,
+   "from": "NoStart",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "S3 no-start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NoStart->OwnershipChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 36,
+   "col": 32,
+   "from": "NoStart",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "S3 no-start"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/p.op != r.op || p.src != r.src->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 39,
+   "col": 10,
+   "from": "p.op != r.op || p.src != r.src",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/p.op != r.op || p.src != r.src->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 39,
+   "col": 10,
+   "from": "p.op != r.op || p.src != r.src",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/relational/!=->==#1",
+   "sym": "StepOf",
+   "op": "relational",
+   "line": 39,
+   "col": 15,
+   "from": "!=",
+   "to": "==",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/||->&&#1",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 39,
+   "col": 23,
+   "from": "||",
+   "to": "&&",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/relational/!=->==#2",
+   "sym": "StepOf",
+   "op": "relational",
+   "line": 39,
+   "col": 32,
+   "from": "!=",
+   "to": "==",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OwnershipChanged->ContradictoryTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 39,
+   "col": 54,
+   "from": "OwnershipChanged",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OwnershipChanged->DuplicateStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 39,
+   "col": 54,
+   "from": "OwnershipChanged",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OwnershipChanged->EntryBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 39,
+   "col": 54,
+   "from": "OwnershipChanged",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OwnershipChanged->IllegalTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 39,
+   "col": 54,
+   "from": "OwnershipChanged",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OwnershipChanged->IllegalTransition#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 39,
+   "col": 54,
+   "from": "OwnershipChanged",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OwnershipChanged->InvocationBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 39,
+   "col": 54,
+   "from": "OwnershipChanged",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OwnershipChanged->NameChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 39,
+   "col": 54,
+   "from": "OwnershipChanged",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OwnershipChanged->NoStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 39,
+   "col": 54,
+   "from": "OwnershipChanged",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OwnershipChanged->OriginChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 39,
+   "col": 54,
+   "from": "OwnershipChanged",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Binding? && r.entry in st.entries->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 40,
+   "col": 15,
+   "from": "r.kind.Binding? && r.entry in st.entries",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "I2 one-binding",
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Binding? && r.entry in st.entries->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 40,
+   "col": 15,
+   "from": "r.kind.Binding? && r.entry in st.entries",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/&&->||#1",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 40,
+   "col": 31,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/EntryBound->ContradictoryTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 40,
+   "col": 69,
+   "from": "EntryBound",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/EntryBound->DuplicateStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 40,
+   "col": 69,
+   "from": "EntryBound",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/EntryBound->IllegalTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 40,
+   "col": 69,
+   "from": "EntryBound",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/EntryBound->IllegalTransition#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 40,
+   "col": 69,
+   "from": "EntryBound",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/EntryBound->InvocationBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 40,
+   "col": 69,
+   "from": "EntryBound",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/EntryBound->NameChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 40,
+   "col": 69,
+   "from": "EntryBound",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/EntryBound->NoStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 40,
+   "col": 69,
+   "from": "EntryBound",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/EntryBound->OriginChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 40,
+   "col": 69,
+   "from": "EntryBound",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/EntryBound->OwnershipChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 40,
+   "col": 69,
+   "from": "EntryBound",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Binding? && r.inv in st.bound->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 41,
+   "col": 15,
+   "from": "r.kind.Binding? && r.inv in st.bound",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "I2 one-binding",
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Binding? && r.inv in st.bound->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 41,
+   "col": 15,
+   "from": "r.kind.Binding? && r.inv in st.bound",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/&&->||#2",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 41,
+   "col": 31,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/InvocationBound->ContradictoryTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 41,
+   "col": 65,
+   "from": "InvocationBound",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/InvocationBound->DuplicateStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 41,
+   "col": 65,
+   "from": "InvocationBound",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/InvocationBound->EntryBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 41,
+   "col": 65,
+   "from": "InvocationBound",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/InvocationBound->IllegalTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 41,
+   "col": 65,
+   "from": "InvocationBound",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/InvocationBound->IllegalTransition#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 41,
+   "col": 65,
+   "from": "InvocationBound",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/InvocationBound->NameChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 41,
+   "col": 65,
+   "from": "InvocationBound",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/InvocationBound->NoStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 41,
+   "col": 65,
+   "from": "InvocationBound",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/InvocationBound->OriginChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 41,
+   "col": 65,
+   "from": "InvocationBound",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/InvocationBound->OwnershipChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 41,
+   "col": 65,
+   "from": "InvocationBound",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.name.Some? && r.name != p.name->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 42,
+   "col": 15,
+   "from": "r.name.Some? && r.name != p.name",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.name.Some? && r.name != p.name->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 42,
+   "col": 15,
+   "from": "r.name.Some? && r.name != p.name",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/&&->||#3",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 42,
+   "col": 28,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/relational/!=->==#3",
+   "sym": "StepOf",
+   "op": "relational",
+   "line": 42,
+   "col": 38,
+   "from": "!=",
+   "to": "==",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NameChanged->ContradictoryTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 42,
+   "col": 61,
+   "from": "NameChanged",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NameChanged->DuplicateStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 42,
+   "col": 61,
+   "from": "NameChanged",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NameChanged->EntryBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 42,
+   "col": 61,
+   "from": "NameChanged",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NameChanged->IllegalTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 42,
+   "col": 61,
+   "from": "NameChanged",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NameChanged->IllegalTransition#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 42,
+   "col": 61,
+   "from": "NameChanged",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NameChanged->InvocationBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 42,
+   "col": 61,
+   "from": "NameChanged",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NameChanged->NoStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 42,
+   "col": 61,
+   "from": "NameChanged",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NameChanged->OriginChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 42,
+   "col": 61,
+   "from": "NameChanged",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/NameChanged->OwnershipChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 42,
+   "col": 61,
+   "from": "NameChanged",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.origin.Some? && r.origin != p.origin->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 43,
+   "col": 15,
+   "from": "r.origin.Some? && r.origin != p.origin",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.origin.Some? && r.origin != p.origin->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 43,
+   "col": 15,
+   "from": "r.origin.Some? && r.origin != p.origin",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/&&->||#4",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 43,
+   "col": 30,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/relational/!=->==#4",
+   "sym": "StepOf",
+   "op": "relational",
+   "line": 43,
+   "col": 42,
+   "from": "!=",
+   "to": "==",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OriginChanged->ContradictoryTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 43,
+   "col": 67,
+   "from": "OriginChanged",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OriginChanged->DuplicateStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 43,
+   "col": 67,
+   "from": "OriginChanged",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OriginChanged->EntryBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 43,
+   "col": 67,
+   "from": "OriginChanged",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OriginChanged->IllegalTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 43,
+   "col": 67,
+   "from": "OriginChanged",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OriginChanged->IllegalTransition#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 43,
+   "col": 67,
+   "from": "OriginChanged",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OriginChanged->InvocationBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 43,
+   "col": 67,
+   "from": "OriginChanged",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OriginChanged->NameChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 43,
+   "col": 67,
+   "from": "OriginChanged",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OriginChanged->NoStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 43,
+   "col": 67,
+   "from": "OriginChanged",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/OriginChanged->OwnershipChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 43,
+   "col": 67,
+   "from": "OriginChanged",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "S2 checks"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Terminal? && p.terminal && r.life != LifeOf(p.life)->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 44,
+   "col": 15,
+   "from": "r.kind.Terminal? && p.terminal && r.life != LifeOf(p.life)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Terminal? && p.terminal && r.life != LifeOf(p.life)->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 44,
+   "col": 15,
+   "from": "r.kind.Terminal? && p.terminal && r.life != LifeOf(p.life)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/&&->||#5",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 44,
+   "col": 32,
+   "from": "&&",
+   "to": "||",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/&&->||#6",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 44,
+   "col": 46,
+   "from": "&&",
+   "to": "||",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/relational/!=->==#5",
+   "sym": "StepOf",
+   "op": "relational",
+   "line": 44,
+   "col": 56,
+   "from": "!=",
+   "to": "==",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/LifeOf(p.life)->NoLife#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 44,
+   "col": 59,
+   "from": "LifeOf(p.life)",
+   "to": "NoLife",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/ContradictoryTerminal->DuplicateStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 44,
+   "col": 87,
+   "from": "ContradictoryTerminal",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/ContradictoryTerminal->EntryBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 44,
+   "col": 87,
+   "from": "ContradictoryTerminal",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/ContradictoryTerminal->IllegalTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 44,
+   "col": 87,
+   "from": "ContradictoryTerminal",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/ContradictoryTerminal->IllegalTransition#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 44,
+   "col": 87,
+   "from": "ContradictoryTerminal",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/ContradictoryTerminal->InvocationBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 44,
+   "col": 87,
+   "from": "ContradictoryTerminal",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/ContradictoryTerminal->NameChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 44,
+   "col": 87,
+   "from": "ContradictoryTerminal",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/ContradictoryTerminal->NoStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 44,
+   "col": 87,
+   "from": "ContradictoryTerminal",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/ContradictoryTerminal->OriginChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 44,
+   "col": 87,
+   "from": "ContradictoryTerminal",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/ContradictoryTerminal->OwnershipChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 44,
+   "col": 87,
+   "from": "ContradictoryTerminal",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Terminal? && !p.terminal && !Legal(p.life, r.life, true)->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 45,
+   "col": 15,
+   "from": "r.kind.Terminal? && !p.terminal && !Legal(p.life, r.life, true)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Terminal? && !p.terminal && !Legal(p.life, r.life, true)->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 45,
+   "col": 15,
+   "from": "r.kind.Terminal? && !p.terminal && !Legal(p.life, r.life, true)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/&&->||#7",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 45,
+   "col": 32,
+   "from": "&&",
+   "to": "||",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/!->#1",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 45,
+   "col": 35,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/&&->||#8",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 45,
+   "col": 47,
+   "from": "&&",
+   "to": "||",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/!->#2",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 45,
+   "col": 50,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "P1 progress",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/p.life, r.life->r.life, p.life#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 45,
+   "col": 57,
+   "from": "p.life, r.life",
+   "to": "r.life, p.life",
+   "note": "Legal args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/r.life, true->true, r.life#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 45,
+   "col": 65,
+   "from": "r.life, true",
+   "to": "true, r.life",
+   "note": "Legal args 2<->3",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constant/true->false#1",
+   "sym": "StepOf",
+   "op": "constant",
+   "line": 45,
+   "col": 73,
+   "from": "true",
+   "to": "false",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTerminal->ContradictoryTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 45,
+   "col": 92,
+   "from": "IllegalTerminal",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTerminal->DuplicateStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 45,
+   "col": 92,
+   "from": "IllegalTerminal",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTerminal->EntryBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 45,
+   "col": 92,
+   "from": "IllegalTerminal",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTerminal->IllegalTransition#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 45,
+   "col": 92,
+   "from": "IllegalTerminal",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTerminal->InvocationBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 45,
+   "col": 92,
+   "from": "IllegalTerminal",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTerminal->NameChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 45,
+   "col": 92,
+   "from": "IllegalTerminal",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTerminal->NoStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 45,
+   "col": 92,
+   "from": "IllegalTerminal",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTerminal->OriginChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 45,
+   "col": 92,
+   "from": "IllegalTerminal",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTerminal->OwnershipChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 45,
+   "col": 92,
+   "from": "IllegalTerminal",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Transition? && !Legal(p.life, r.life, false)->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 46,
+   "col": 15,
+   "from": "r.kind.Transition? && !Legal(p.life, r.life, false)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Transition? && !Legal(p.life, r.life, false)->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 46,
+   "col": 15,
+   "from": "r.kind.Transition? && !Legal(p.life, r.life, false)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/&&->||#9",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 46,
+   "col": 34,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S2 checks",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/!->#3",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 46,
+   "col": 37,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/p.life, r.life->r.life, p.life#2",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 46,
+   "col": 44,
+   "from": "p.life, r.life",
+   "to": "r.life, p.life",
+   "note": "Legal args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/r.life, false->false, r.life#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 46,
+   "col": 52,
+   "from": "r.life, false",
+   "to": "false, r.life",
+   "note": "Legal args 2<->3",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constant/false->true#2",
+   "sym": "StepOf",
+   "op": "constant",
+   "line": 46,
+   "col": 60,
+   "from": "false",
+   "to": "true",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTransition->ContradictoryTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 46,
+   "col": 80,
+   "from": "IllegalTransition",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTransition->DuplicateStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 46,
+   "col": 80,
+   "from": "IllegalTransition",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTransition->EntryBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 46,
+   "col": 80,
+   "from": "IllegalTransition",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTransition->IllegalTerminal#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 46,
+   "col": 80,
+   "from": "IllegalTransition",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTransition->InvocationBound#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 46,
+   "col": 80,
+   "from": "IllegalTransition",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTransition->NameChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 46,
+   "col": 80,
+   "from": "IllegalTransition",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTransition->NoStart#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 46,
+   "col": 80,
+   "from": "IllegalTransition",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTransition->OriginChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 46,
+   "col": 80,
+   "from": "IllegalTransition",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/constructor/IllegalTransition->OwnershipChanged#1",
+   "sym": "StepOf",
+   "op": "constructor",
+   "line": 46,
+   "col": 80,
+   "from": "IllegalTransition",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "S4 settle"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/||->&&#2",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 48,
+   "col": 35,
+   "from": "||",
+   "to": "&&",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/st.projs[i := p.( life := if r.life.LifeOf? && (r.kind.Terminal? || !settled) then r.life.l else p.life, entry := if r.entry.Some? then r.entry else p.entry, retryable := if r.retryable.FlagOf? then r.retryable else p.retryable, updated := r.at, terminal := settled)], if r.kind.Binding? then st.entries + [r.entry] else st.entries->if r.kind.Binding? then st.entries + [r.entry] else st.entries, st.projs[i := p.(\n            life := if r.life.LifeOf? && (r.kind.Terminal? || !settled) then r.life.l else p.life,\n            entry := if r.entry.Some? then r.entry else p.entry,\n            retryable := if r.retryable.FlagOf? then r.retryable else p.retryable,\n            updated := r.at, terminal := settled)]#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 49,
+   "col": 20,
+   "from": "st.projs[i := p.(\n            life := if r.life.LifeOf? && (r.kind.Terminal? || !settled) then r.life.l else p.life,\n            entry := if r.entry.Some? then r.entry else p.entry,\n            retryable := if r.retryable.FlagOf? then r.retryable else p.retryable,\n            updated := r.at, terminal := settled)], if r.kind.Binding? then st.entries + [r.entry] else st.entries",
+   "to": "if r.kind.Binding? then st.entries + [r.entry] else st.entries, st.projs[i := p.(\n            life := if r.life.LifeOf? && (r.kind.Terminal? || !settled) then r.life.l else p.life,\n            entry := if r.entry.Some? then r.entry else p.entry,\n            retryable := if r.retryable.FlagOf? then r.retryable else p.retryable,\n            updated := r.at, terminal := settled)]",
+   "note": "State args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.life.LifeOf? && (r.kind.Terminal? || !settled)->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 50,
+   "col": 24,
+   "from": "r.life.LifeOf? && (r.kind.Terminal? || !settled)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.life.LifeOf? && (r.kind.Terminal? || !settled)->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 50,
+   "col": 24,
+   "from": "r.life.LifeOf? && (r.kind.Terminal? || !settled)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "P1 progress",
+    "S5 update",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/&&->||#10",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 50,
+   "col": 39,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "S5 update",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/||->&&#3",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 50,
+   "col": 60,
+   "from": "||",
+   "to": "&&",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/logic/!->#4",
+   "sym": "StepOf",
+   "op": "logic",
+   "line": 50,
+   "col": 63,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "I1 settled-stays-settled",
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.entry.Some?->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 51,
+   "col": 25,
+   "from": "r.entry.Some?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.entry.Some?->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 51,
+   "col": 25,
+   "from": "r.entry.Some?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.retryable.FlagOf?->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 52,
+   "col": 29,
+   "from": "r.retryable.FlagOf?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.retryable.FlagOf?->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 52,
+   "col": 29,
+   "from": "r.retryable.FlagOf?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/swap-args/if r.kind.Binding? then st.entries + [r.entry] else st.entries, if r.kind.Binding? then st.bound + [r.inv] else st.bound->if r.kind.Binding? then st.bound + [r.inv] else st.bound, if r.kind.Binding? then st.entries + [r.entry] else st.entries#1",
+   "sym": "StepOf",
+   "op": "swap-args",
+   "line": 54,
+   "col": 11,
+   "from": "if r.kind.Binding? then st.entries + [r.entry] else st.entries, if r.kind.Binding? then st.bound + [r.inv] else st.bound",
+   "to": "if r.kind.Binding? then st.bound + [r.inv] else st.bound, if r.kind.Binding? then st.entries + [r.entry] else st.entries",
+   "note": "State args 2<->3",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Binding?->false#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 54,
+   "col": 14,
+   "from": "r.kind.Binding?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "I2 one-binding",
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Binding?->true#1",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 54,
+   "col": 14,
+   "from": "r.kind.Binding?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/arith/+->-#2",
+   "sym": "StepOf",
+   "op": "arith",
+   "line": 54,
+   "col": 46,
+   "from": "+",
+   "to": "-",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/drop-operand/+ [r.entry]->#1",
+   "sym": "StepOf",
+   "op": "drop-operand",
+   "line": 54,
+   "col": 46,
+   "from": "+ [r.entry]",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "I2 one-binding",
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Binding?->false#2",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 55,
+   "col": 14,
+   "from": "r.kind.Binding?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "I2 one-binding",
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/branch/r.kind.Binding?->true#2",
+   "sym": "StepOf",
+   "op": "branch",
+   "line": 55,
+   "col": 14,
+   "from": "r.kind.Binding?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/arith/+->-#3",
+   "sym": "StepOf",
+   "op": "arith",
+   "line": 55,
+   "col": 44,
+   "from": "+",
+   "to": "-",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "StepOf/drop-operand/+ [r.inv]->#1",
+   "sym": "StepOf",
+   "op": "drop-operand",
+   "line": 55,
+   "col": 44,
+   "from": "+ [r.inv]",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "I2 one-binding",
+    "P1 progress",
+    "S5 update"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/branch/k == |rs|->false#1",
+   "sym": "RunAt",
+   "op": "branch",
+   "line": 63,
+   "col": 8,
+   "from": "k == |rs|",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/branch/k == |rs|->true#1",
+   "sym": "RunAt",
+   "op": "branch",
+   "line": 63,
+   "col": 8,
+   "from": "k == |rs|",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/off-by-one/k->(k - 1)#1",
+   "sym": "RunAt",
+   "op": "off-by-one",
+   "line": 63,
+   "col": 8,
+   "from": "k",
+   "to": "(k - 1)",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/off-by-one/k->(k + 1)#1",
+   "sym": "RunAt",
+   "op": "off-by-one",
+   "line": 63,
+   "col": 8,
+   "from": "k",
+   "to": "(k + 1)",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/relational/==->!=#1",
+   "sym": "RunAt",
+   "op": "relational",
+   "line": 63,
+   "col": 10,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/swap-args/st, rs[k]->rs[k], st#1",
+   "sym": "RunAt",
+   "op": "swap-args",
+   "line": 64,
+   "col": 23,
+   "from": "st, rs[k]",
+   "to": "rs[k], st",
+   "note": "StepOf args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/swap-args/why, k->k, why#1",
+   "sym": "RunAt",
+   "op": "swap-args",
+   "line": 65,
+   "col": 37,
+   "from": "why, k",
+   "to": "k, why",
+   "note": "Rejected args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/swap-args/st2, rs->rs, st2#1",
+   "sym": "RunAt",
+   "op": "swap-args",
+   "line": 66,
+   "col": 31,
+   "from": "st2, rs",
+   "to": "rs, st2",
+   "note": "RunAt args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/swap-args/rs, k + 1->k + 1, rs#1",
+   "sym": "RunAt",
+   "op": "swap-args",
+   "line": 66,
+   "col": 36,
+   "from": "rs, k + 1",
+   "to": "k + 1, rs",
+   "note": "RunAt args 2<->3",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/off-by-one/k->(k - 1)#2",
+   "sym": "RunAt",
+   "op": "off-by-one",
+   "line": 66,
+   "col": 40,
+   "from": "k",
+   "to": "(k - 1)",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/off-by-one/k->(k + 1)#2",
+   "sym": "RunAt",
+   "op": "off-by-one",
+   "line": 66,
+   "col": 40,
+   "from": "k",
+   "to": "(k + 1)",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/arith/+->-#1",
+   "sym": "RunAt",
+   "op": "arith",
+   "line": 66,
+   "col": 42,
+   "from": "+",
+   "to": "-",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/drop-operand/+ 1->#1",
+   "sym": "RunAt",
+   "op": "drop-operand",
+   "line": 66,
+   "col": 42,
+   "from": "+ 1",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/constant/1->0#1",
+   "sym": "RunAt",
+   "op": "constant",
+   "line": 66,
+   "col": 44,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "RunAt/constant/1->2#1",
+   "sym": "RunAt",
+   "op": "constant",
+   "line": 66,
+   "col": 44,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Project/swap-args/State([], [], []), rs->rs, State([], [], [])#1",
+   "sym": "Project",
+   "op": "swap-args",
+   "line": 70,
+   "col": 11,
+   "from": "State([], [], []), rs",
+   "to": "rs, State([], [], [])",
+   "note": "RunAt args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Project/swap-args/rs, 0->0, rs#1",
+   "sym": "Project",
+   "op": "swap-args",
+   "line": 70,
+   "col": 30,
+   "from": "rs, 0",
+   "to": "0, rs",
+   "note": "RunAt args 2<->3",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Project/constant/0->1#1",
+   "sym": "Project",
+   "op": "constant",
+   "line": 70,
+   "col": 34,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "H1 history",
+    "P1 progress",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  }
+ ]
+}
