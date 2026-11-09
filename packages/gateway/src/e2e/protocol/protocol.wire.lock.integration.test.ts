@@ -7,6 +7,7 @@ import { startLockGateway, type LockGateway } from "../../../test-support/gatewa
 import { compareWithGolden, eventShapePaths, lockPaths, lockUpdateRequested } from "../../../test-support/scenario-lock.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import * as Protocol from "../../protocol/types.js";
+import { protocolTs } from "../../../../../tools/proof/dafny2wire/dafny2wire.mjs";
 
 /**
  * Wire contract lock (packages/gateway/docs/scenario-locks.md#wire-contract-v7) for the `gateway/protocol` module:
@@ -46,6 +47,11 @@ async function handshake(gateway: LockGateway, protocolVersion: number): Promise
 }
 
 describe("gateway/protocol wire contract locks", () => {
+  it("types.ts is exactly what packages/core/wire/Protocol.dfy generates (never edited by hand)", async () => {
+    expect(await readFile(resolve(REPOSITORY, "packages/gateway/src/protocol/types.ts"), "utf8"),
+      "run scripts/tron proof wire --protocol").toBe(protocolTs());
+  });
+
   it("preserves supervised provenance in raw hello and system.info without changing the base wire", async () => {
     const identity = { sourceRevision: "fixture-source", buildFingerprint: "fixture-build", runtimeEpoch: "fixture-epoch" };
     vi.stubEnv("TRON_GATEWAY_SOURCE_REVISION", identity.sourceRevision);

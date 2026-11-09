@@ -11,6 +11,9 @@ For every block with a mutate.json, with the pinned toolchain and the repository
    packages/core/dist/<block> are exactly what the current sources generate.
 4. `scripts/tron proof shadow <block>` still matches today's shipped TypeScript.
 
+And for the protocol source packages/core/wire/Protocol.dfy: the Gateway's protocol types are what it
+generates, and its TypeScript and Swift codecs agree (the protocol test of wire.test.mjs).
+
 So an edit to a block that does not re-run its mutation check, shadow and review, or regenerate its
 packet, fails here. The review row is verified against the reviewer's transcript in this machine's Pi
 session store (read only), so the test needs that transcript.
@@ -35,6 +38,13 @@ def tron(*args: str) -> subprocess.CompletedProcess:
 
 
 class CoreBlocksTest(unittest.TestCase):
+    def test_protocol_is_generated_and_its_codecs_agree(self) -> None:
+        run = subprocess.run([str(ROOT / "scripts/tron-node"), "exec", "node", "--test", "--test-name-pattern", "^protocol",
+                              str(ROOT / "tools/proof/tests/wire.test.mjs")], capture_output=True, text=True, timeout=1800, cwd=ROOT)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("pass 1\n", run.stdout)
+
+
     def test_blocks_hold_their_gates(self) -> None:
         self.assertTrue(BLOCKS, "no proof blocks under packages/core/blocks")
         with tempfile.TemporaryDirectory(prefix="tron-proof-core.") as tmp:
