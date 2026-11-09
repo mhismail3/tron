@@ -27,10 +27,9 @@ export async function recordFixed<T>(run: () => Promise<T>): Promise<T> {
 
 /**
  * Replace the process's `crypto.randomUUID` with a counter until the returned restore
- * runs. A mutation-path lock (store-path-lock.ts) uses it so generated ids are part of
- * its byte-stable golden.
+ * runs, so generated ids are part of a byte-stable recording.
  */
-export function countRandomUUID(): () => void {
+function countRandomUUID(): () => void {
   const original = crypto.randomUUID;
   let next = 0;
   crypto.randomUUID = () => `${(++next).toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`;
