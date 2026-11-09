@@ -104,7 +104,7 @@ class BatchTests(unittest.TestCase):
                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
         self.env['GIT_COMMITTER_DATE'] = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         self.git('init', '-q', '-b', 'main')
-        for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py', 'vitest_configs.py'):
+        for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py', 'vitest_configs.py', 'mac.py'):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
             text = source.read_text()
             # The shared host lock path belongs to real full-Gateway runs, not fixtures.
@@ -585,9 +585,11 @@ else: sys.exit('unexpected xcrun '+' '.join(args))
 
     def test_mac_xctest_case_filter_proves_landing_without_suite_probe(self):
         binary = Path(self.temporary.name) / 'bin/xcodebuild'
-        binary.write_text('''#!/usr/bin/env python3
+        calls = Path(self.temporary.name) / 'xcodebuild-calls'
+        binary.write_text(f'''#!/usr/bin/env python3
 import sys
 from pathlib import Path
+with open({str(calls)!r}, 'a') as f: f.write(' '.join(sys.argv[1:]) + '\\n')
 if Path('mac-bad').exists():
     selected=[arg for arg in sys.argv if arg.startswith('-only-testing:')]
     if selected and selected != ['-only-testing:TronMacIntegrationTests/SampleTests/testExample']:
@@ -602,7 +604,10 @@ print('Executed 2 tests, with 0 failures')
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         proof = self.reports()[-1]['failures'][0]['attribution']
         self.assertEqual((proof['status'], proof['commit']), ('proven', culprit))
-        self.assertTrue(all('-only-testing:TronMacIntegrationTests/SampleTests/testExample' in p['command'] for p in proof['probes']))
+        self.assertTrue(all(p['command'][-1] == 'SampleTests/testExample' for p in proof['probes']))
+        # Each probe reached xcodebuild with exactly that case's filter: never a whole-suite run.
+        filtered = [line for line in calls.read_text().splitlines() if '-only-testing:TronMacIntegrationTests/SampleTests/testExample' in line]
+        self.assertEqual(len(filtered), len(proof['probes']))
 
     def test_ios_smoke_case_selector_proves_landing_with_own_build(self):
         owner = (self.root / 'scripts/tron-ios-test').read_text()

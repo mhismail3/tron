@@ -1,49 +1,131 @@
 // Integration test for `scripts/tron proof wire` (tools/proof/README.md "Wire").
-// 1. Inventory: every export of packages/gateway/src/protocol/types.ts is classified from the pinned
-//    compiler's expansion, the parser's reading of every expansion is confirmed equal by that compiler,
-//    at least 95% of the protocol types are expressible (the H5 kill criterion) with numbers as float64,
-//    every generator form those types need is one the codec fixture exercises, and shapes the format cannot
-//    carry (unknown, functions, fields mixed with an index signature, untagged object unions, two array
-//    kinds, object) are refused with their reason.
+// 1. Protocol: packages/gateway/src/protocol/types.ts is exactly what packages/core/wire/Protocol.dfy generates,
+//    and the protocol's own TypeScript and Swift codecs agree byte for byte on a seeded corpus of values of
+//    every datatype (TypeScript encodes, each side decodes and re-encodes), the TypeScript encoder writes what
+//    JSON.stringify writes for a value built in declaration order (how the Gateway builds frames); on malformed
+//    values TypeScript (strict, the Gateway's validators) refuses at a JSON path and Swift (tolerant, the iOS
+//    decoding policy) reads defaults or refuses as stated.
 // 2. Codecs: the generator's TypeScript and Swift codecs for the fixture wire source (one datatype per shape
 //    the protocol uses) round trip 2,000 seeded random frames and the edge values byte for byte, agree with
 //    each other byte for byte (Swift re-encodes what TypeScript encoded, and both normalise the same
-//    non-canonical inputs identically; a map built in Swift encodes in JavaScript order), and reject the
-//    same malformed inputs at the same JSON path.
+//    non-canonical inputs identically; a map built in Swift encodes in JavaScript order); TypeScript rejects
+//    malformed inputs at their JSON path and tolerant Swift reads or rejects each as stated.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseWire } from "../dafny2wire/dafny2wire.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const FIXTURE = join(ROOT, "tools/proof/tests/fixtures/wire/Wire.dfy");
+const PROTOCOL = join(ROOT, "packages/core/wire/Protocol.dfy");
 
-test("protocol inventory: compiler-confirmed and at least 95% expressible", () => {
-  const exportLines = execFileSync("grep", ["-cE", "^export (interface|type|const) ", join(ROOT, "packages/gateway/src/protocol/types.ts")], { encoding: "utf8" }).trim();
-  const run = spawnSync(join(ROOT, "scripts/tron"), ["proof", "wire", "--inventory", "--json"], { encoding: "utf8", maxBuffer: 1 << 26 });
-  assert.equal(run.status, 0, run.stderr);
-  const { summary, rows } = JSON.parse(run.stdout);
-  assert.equal(rows.length, Number(exportLines));
-  assert.equal(summary.types + summary.consts, rows.length);
-  assert.deepEqual(summary.unfaithful, []);
-  for (const row of rows) assert.ok(row.expressible || row.reason, `${row.name} has no reason`);
-  assert.ok(summary.share >= 0.95, `only ${summary.expressible}/${summary.types} expressible`);
-  // Integer-only numbers would not be faithful to today's wire: reported, not gated.
-  const integer = JSON.parse(execFileSync(join(ROOT, "scripts/tron"), ["proof", "wire", "--inventory", "--json", "--numbers", "integer"], { encoding: "utf8", maxBuffer: 1 << 26 })).summary;
-  assert.ok(integer.expressible < summary.expressible);
-  // Every generator form the expressible types need is one the codec test below exercises.
-  const covered = ["absent", "array", "bykind", "enum", "float64", "literal-boolean", "literal-number", "literal-string", "map", "nullable", "optional", "recursive", "tagged"];
-  assert.deepEqual(summary.features.filter((f) => !covered.includes(f)), []);
-  // Shapes the format cannot carry are refused, each with its reason.
-  const negative = JSON.parse(execFileSync(join(ROOT, "scripts/tron"), ["proof", "wire", "--inventory", "--json", "--types", join(ROOT, "tools/proof/tests/fixtures/wire/not-expressible.ts")], { encoding: "utf8" }));
-  assert.deepEqual(Object.fromEntries(negative.rows.map((r) => [r.name, r.reason ?? "expressible"])), {
-    Opaque: "field value: unknown type", Callback: "field run: function type", Mixed: "object with both fields and an index signature",
-    Untagged: "object union without a discriminator of disjoint literal values", SameKind: "union of several array types",
-    Loose: "field value: object type without a shape", Fine: "expressible",
-  });
+test("protocol: types.ts is generated, and its TypeScript and tolerant Swift codecs agree byte for byte", async (t) => {
+  const check = spawnSync(join(ROOT, "scripts/tron"), ["proof", "wire", "--protocol", "--check"], { encoding: "utf8" });
+  assert.equal(check.status, 0, check.stderr);
+  const dir = mkdtempSync(join(tmpdir(), "tron-proof-protocol-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const gen = spawnSync(join(ROOT, "scripts/tron"), ["proof", "wire", "--generate", PROTOCOL, dir], { encoding: "utf8" });
+  assert.equal(gen.status, 0, gen.stderr);
+  const W = await import(pathToFileURL(join(dir, "wire.ts")).href);
+  const types = parseWire(readFileSync(PROTOCOL, "utf8"));
+  const byName = new Map(types.map((ty) => [ty.name, ty]));
+
+  let seed = 23;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const pick = (xs) => xs[Math.floor(rnd() * xs.length)];
+  const STRINGS = ["", "a", 'q"uote', "back\\slash", "line\nbreak", "\u0001ctl", "é ✓ 😀", "2026-11-09T09:00:00.000Z"];
+  const DOUBLES = [0, 1, 7, 100, 0.5, 1 / 3, 1e21, 5e-324, -2, 1700000000000];
+  // A random value of field type ft, in declaration order; depth bounds the recursive types.
+  const value = (ft, depth) => {
+    switch (ft.kind) {
+      case "string": return pick(STRINGS);
+      case "bool": return rnd() < 0.5;
+      case "real": case "int": case "nat": return pick(DOUBLES);
+      case "seq": return depth > 3 ? [] : Array.from({ length: Math.floor(rnd() * 3) }, () => value(ft.arg, depth + 1));
+      case "map": {
+        const keys = ft.key.kind === "string" ? ["a", "b", "1", "z"] : byName.get(ft.key.kind).ctors.map((c) => c.wire);
+        return depth > 3 ? {} : Object.fromEntries(keys.filter(() => rnd() < 0.4).map((k) => [k, value(ft.arg, depth + 1)]));
+      }
+      case "Nullable": return rnd() < 0.3 ? null : value(ft.arg, depth);
+      default: return datatype(byName.get(ft.kind), depth + 1);
+    }
+  };
+  const fields = (c, depth, out) => {
+    for (const f of c.fields) {
+      if (f.type.kind === "Absent" || (f.type.kind === "Option" && (depth > 3 || rnd() < 0.4))) continue;
+      out[f.wire] = value(f.type.kind === "Option" ? f.type.arg : f.type, depth);
+    }
+    return out;
+  };
+  const datatype = (ty, depth) => {
+    if (ty.kind === "enum") return pick(ty.ctors).wire;
+    if (ty.kind === "record") return fields(ty.ctors[0], depth, {});
+    if (ty.kind === "tagged") { const c = pick(ty.ctors); return fields(c, depth, { [ty.tag]: c.wire }); }
+    // bykind: deep values are scalars.
+    const ctors = depth > 3 ? ty.ctors.filter((c) => !c.fields.length || ["string", "real", "bool"].includes(c.fields[0].type.kind)) : ty.ctors;
+    const c = pick(ctors);
+    return c.fields.length ? value(c.fields[0].type, depth) : null;
+  };
+
+  const lines = [];
+  for (const ty of types) for (let i = 0; i < 12; i++) {
+    const v = datatype(ty, 0);
+    const encoded = W[`encode${ty.name}`](v);
+    assert.equal(encoded, JSON.stringify(v), `${ty.name}: the generated encoder writes what JSON.stringify writes`);
+    assert.equal(W[`encode${ty.name}`](W[`decode${ty.name}`](JSON.parse(encoded))), encoded, `${ty.name} round trip`);
+    lines.push(`${ty.name}\t${encoded}`);
+  }
+  const bad = [
+    'AdministrativeDrainSnapshot\t{"drainId":"d","revision":1,"phase":"idle","blockerCount":0,"blockerCounts":{"nope":1},"blockers":[],"omittedCount":0,"suspectProjectionCount":0}',
+    'HomeStatusTaskRecovery\t{"available":"yes"}',
+    'HomeStatusTaskRecovery\t{"available":true,"reason":"x"}',
+    'SessionCreationOrigin\t{"kind":"automation","automationId":"a","extra":1}',
+    'ModelRef\t{"provider":"p"}',
+    'JsonValue\t{"a":[1,{"b":1e400}]}',
+    'ChatSemanticKind\t"brandNew"',
+    'ModelRef\t{"provider":null,"id":"x"}',
+  ];
+  const corpus = [...lines, ...bad];
+  const tsOut = (line) => {
+    const [name, json] = line.split("\t");
+    try { return W[`encode${name}`](W[`decode${name}`](JSON.parse(json))); }
+    catch (error) { if (!(error instanceof W.WireError)) throw error; return `ERR ${error.path}`; }
+  };
+  writeFileSync(join(dir, "corpus.txt"), `${corpus.join("\n")}\n`);
+  writeFileSync(join(dir, "main.swift"), [
+    "import Foundation",
+    "func roundTrip(_ name: Substring, _ v: WireJSON) throws -> String {",
+    "  switch name {",
+    ...types.map((ty) => `  case "${ty.name}": return try ${ty.name}.decode(v).encode()`),
+    '  default: return "NO TYPE"',
+    "  }",
+    "}",
+    "let text = try! String(contentsOfFile: CommandLine.arguments[1], encoding: .utf8)",
+    'for line in text.split(separator: "\\n") {',
+    '  let parts = line.split(separator: "\\t", maxSplits: 1)',
+    '  do { print(try roundTrip(parts[0], try wParse(String(parts[1])))) } catch let e as WireError { print("ERR \\(e.path)") } catch { print("ERR ?") }',
+    "}",
+  ].join("\n"));
+  execFileSync("swiftc", ["-O", join(dir, "Wire.swift"), join(dir, "main.swift"), "-o", join(dir, "roundtrip")], { stdio: "pipe" });
+  const swift = execFileSync(join(dir, "roundtrip"), [join(dir, "corpus.txt")], { encoding: "utf8", maxBuffer: 1 << 28 }).split("\n").slice(0, corpus.length);
+  const ts = corpus.map(tsOut);
+  const differ = lines.map((line, i) => [line.split("\t")[0], ts[i], swift[i]]).filter(([, a, b]) => a !== b);
+  assert.deepEqual(differ.slice(0, 3), [], `${differ.length} of ${lines.length} values differ between TypeScript and Swift`);
+  // TypeScript (the Gateway's validators) is strict; Swift is tolerant, as the iOS app decodes: an unknown field
+  // is ignored, an absent or null field takes its default, an unknown value of an enum with an `unknown` value
+  // is `unknown`; a wrong kind, an unknown enum map key or tag, and an overflowing number are still refused.
+  assert.deepEqual(ts.slice(lines.length), [
+    'ERR $.blockerCounts["nope"]', "ERR $.available", "ERR $", "ERR $", "ERR $.id", "ERR $[\"a\"][1][\"b\"]", "ERR $", "ERR $.provider",
+  ]);
+  assert.deepEqual(swift.slice(lines.length), [
+    'ERR $.blockerCounts["nope"]', "ERR $.available", '{"available":true}', '{"kind":"automation","automationId":"a"}',
+    '{"provider":"p","id":""}', "ERR $[\"a\"][1][\"b\"]", '"unknown"', '{"provider":"","id":"x"}',
+  ]);
+  assert.equal(lines.length, types.length * 12);
 });
 
 test("generated TypeScript and Swift codecs agree byte for byte", async (t) => {
@@ -125,13 +207,22 @@ test("generated TypeScript and Swift codecs agree byte for byte", async (t) => {
   const built = { b: 1, 1: 2, a: 3, 0: 4 }; built.b = 5;
   assert.equal(swiftLines[corpus.length], JSON.stringify(built));
   const ts = corpus.map(tsOut);
-  const differ = ts.map((line, i) => [i, line, swift[i]]).filter(([, a, b]) => a !== b);
-  assert.deepEqual(differ.slice(0, 3), [], `${differ.length} of ${corpus.length} lines differ between TypeScript and Swift`);
+  const valid = lines.length + reorder.length;
+  const differ = ts.slice(0, valid).map((line, i) => [i, line, swift[i]]).filter(([, a, b]) => a !== b);
+  assert.deepEqual(differ.slice(0, 3), [], `${differ.length} of ${valid} lines differ between TypeScript and Swift`);
   assert.deepEqual(ts.slice(lines.length, lines.length + reorder.length).map((l) => l.startsWith("ERR")), [false, false, false, false]);
   assert.equal(ts[lines.length + 1].includes('"arguments":{"0":[1.5,2000],"1":2,"b":1,"a":{"0":1,"z":0}}'), true, ts[lines.length + 1]);
   assert.deepEqual(ts.slice(lines.length + reorder.length), [
     "ERR $.seq", "ERR $.seq", "ERR $.seq", "ERR $.events[0].type", "ERR $.events[0].text", "ERR $", "ERR $.events[0]", "ERR $.seq",
     "ERR $.events[0].sample.version", "ERR $.parts[1].text", 'ERR $.parts[0].arguments["k"][1]', "ERR $.events[0]", "ERR $.parts[0]",
+    "ERR $.events[0].sample.version", "ERR $.events[0].sample.level", "ERR $.events[0].sample.bold",
+  ]);
+  // Swift decodes tolerantly (see the protocol test): what it still refuses, and what it reads instead.
+  assert.deepEqual(swift.slice(valid), [
+    "ERR $.seq", "ERR $.seq", "ERR $.seq", "ERR $.events[0].type", "ERR $.events[0].text",
+    '{"seq":1,"events":[],"parts":[]}', '{"seq":1,"events":[{"type":"Stopped"}],"parts":[]}', '{"seq":0,"events":[],"parts":[]}',
+    "ERR $.events[0].sample.phase", '{"seq":1,"events":[],"parts":[{"kind":"Tool","name":"n","arguments":{"k":{"x":[1,"a",{"y":"z"}],"w":true}}},{"kind":"Text","text":""}]}',
+    'ERR $.parts[0].arguments["k"][1]', '{"seq":1,"events":[{"type":"Stopped"}],"parts":[]}', '{"seq":1,"events":[],"parts":[{"kind":"Text","text":"t"}]}',
     "ERR $.events[0].sample.version", "ERR $.events[0].sample.level", "ERR $.events[0].sample.bold",
   ]);
 });

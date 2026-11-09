@@ -481,3 +481,140 @@ test("a crash inside the rollback keeps a startable selection (#2316 F8)", async
     }
   }
 });
+
+// #699: a Debug promotion whose candidate never relaunches must recover without
+// the Stable path. The real promote CLI drives an owned stand-in Gateway process
+// on a private port: it drains and exits 75 like the Gateway, and the candidate
+// never listens. The relaunching owner is a model of scripts/tron-dev's
+// supervisor, which relaunches the current selection only after an exit 75 and
+// otherwise exits `failed`. Failure modes:
+// 1. dev recovery reaches the Stable launchd kickstart (Stable error text);
+// 2. the prior selection is not restored;
+// 3. with no supervisor left, the failure does not name its recovery command,
+//    or a relaunch of the restored selection is not accepted as the recovery.
+const FAKE_GATEWAY = `
+import { createServer } from "node:http";
+import { createRequire } from "node:module";
+const [, , wsPackage, portText, identityText] = process.argv;
+const { WebSocketServer } = createRequire(wsPackage)("ws");
+const identity = JSON.parse(identityText);
+const server = createServer((request, response) => {
+  response.setHeader("content-type", "application/json");
+  response.end(JSON.stringify({ status: "ok", readiness: "ready", ...identity }));
+});
+const sockets = new WebSocketServer({ server, path: "/v1/socket" });
+sockets.on("connection", (socket) => socket.on("message", (raw) => {
+  const frame = JSON.parse(String(raw));
+  if (frame.type === "hello") return socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, minProtocolVersion: 8 }));
+  const result = frame.method === "system.info" ? { gatewayChannel: "dev", ...identity } : { restarting: true };
+  socket.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result }));
+  if (frame.method === "gateway.restart") setTimeout(() => { sockets.close(); server.close(); process.exit(75); }, 200);
+}));
+server.listen(Number(portText), "127.0.0.1");
+`;
+
+async function makeDevPromotionPayload(root, name) {
+  const payload = await makePreflightFixture(join(root, name));
+  await rm(join(payload, "app", "node_modules", "native-probe"), { recursive: true });
+  await rm(join(payload, "runtime", `node-${process.arch}`));
+  await runBounded("/bin/cp", ["-c", process.execPath, join(payload, "runtime", `node-${process.arch}`)], { timeoutMs: 60_000 });
+  await writeFile(join(payload, "app", "package.json"), "{\"type\":\"module\"}\n");
+  await writeFile(join(payload, "app", "dist", "index.js"), `export const payload = ${JSON.stringify(name)};\n//${"x".repeat(1_024)}\n`);
+  const manifest = JSON.parse(await readFile(join(payload, "manifest.json"), "utf8"));
+  const index = name === "prior" ? "1" : "2";
+  await writeFile(join(payload, "manifest.json"), JSON.stringify({
+    ...manifest, channel: "dev", version: name, sourceRevision: index.repeat(40),
+    runtimeEpoch: `00000000-0000-4000-8000-00000000000${index}`, payloadFingerprint: await payloadFingerprint(payload),
+  }));
+  return payload;
+}
+
+test("a failed Debug promotion restores the prior selection and never takes the Stable recovery path (#699)", { timeout: 180_000 }, async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-dev-promote-")));
+  const children = new Set();
+  try {
+    const home = join(root, "home");
+    const staged = {};
+    for (const name of ["prior", "candidate"]) {
+      const result = await stagePayload({ home, channel: "dev", source: await makeDevPromotionPayload(root, name), version: name });
+      staged[name] = result.manifest;
+    }
+    await selectInitialDevCandidate({ home, version: "prior", expectedFingerprint: staged.prior.payloadFingerprint });
+    await writeFile(join(home, "gateway", "local-auth.json"), JSON.stringify({
+      version: 2, purpose: "local-wrapper-health", bearerToken: "d".repeat(32), lastUpdated: new Date().toISOString(),
+    }), { mode: 0o600 });
+    const gatewayScript = join(root, "fake-gateway.mjs");
+    await writeFile(gatewayScript, FAKE_GATEWAY);
+    const wsPackage = fileURLToPath(new URL("../packages/gateway/package.json", import.meta.url));
+    const freePort = async () => {
+      const { createServer } = await import("node:net");
+      const probe = createServer().listen(0, "127.0.0.1");
+      await once(probe, "listening");
+      const { port } = probe.address();
+      probe.close();
+      await once(probe, "close");
+      return port;
+    };
+    const currentVersion = async () => JSON.parse(await readFile(join(home, "gateway", "payloads", "dev", "current.json"), "utf8")).version;
+    const launch = (port, manifest) => {
+      const child = spawn(process.execPath, [gatewayScript, wsPackage, String(port), JSON.stringify({
+        buildFingerprint: manifest.payloadFingerprint, sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
+      })], { stdio: "ignore" });
+      children.add(child);
+      child.once("exit", () => children.delete(child));
+      return child;
+    };
+    const waitForListener = async (port) => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        try { await fetch(`http://127.0.0.1:${port}/health`); return; } catch { await new Promise((done) => setTimeout(done, 50)); }
+      }
+      throw new Error("fake Gateway did not listen");
+    };
+
+    for (const supervisorLive of [false, true]) {
+      // Each case starts on the prior selection, served by its first child.
+      assert.equal(await currentVersion(), "prior");
+      const port = await freePort();
+      const first = launch(port, staged.prior);
+      await waitForListener(port);
+      // The stand-in supervisor relaunches on exit 75, and only the restored
+      // prior selection ever listens; the candidate never produces a listener.
+      first.once("exit", async (code) => {
+        if (!supervisorLive || code !== 75) return;
+        // Bounded: if the selection is never restored, nothing relaunches and the case fails.
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          if (await currentVersion().catch(() => undefined) === "prior") {
+            await new Promise((done) => setTimeout(done, 500));
+            launch(port, staged.prior);
+            return;
+          }
+          await new Promise((done) => setTimeout(done, 100));
+        }
+      });
+      const result = await new Promise((done) => execFile(process.execPath, [
+        fileURLToPath(new URL("./gateway-payload-deploy.mjs", import.meta.url)), "promote", "--channel", "dev", "--home", home,
+        "--version", "candidate", "--fingerprint", staged.candidate.payloadFingerprint,
+        "--host", "127.0.0.1", "--port", String(port), "--timeout-ms", "5000", "--command-id", `debug-update-699-${supervisorLive}`,
+      ], { env: { PATH: process.env.PATH, HOME: home, TMPDIR: root, TRON_GATEWAY_CHANNEL: "dev", TRON_GATEWAY_SUPERVISED: "1" }, timeout: 120_000 },
+      (error, stdout, stderr) => done({ error, stdout, stderr })));
+      const label = supervisorLive ? "live supervisor" : "supervisor down";
+      assert.ok(result.error, `the failed candidate is reported (${label})`);
+      assert.doesNotMatch(result.stderr, /Stable/u, `Debug recovery never takes the Stable path (${label}): ${result.stderr}`);
+      assert.equal(await currentVersion(), "prior", `prior selection restored (${label})`);
+      const state = JSON.parse(await readFile(join(home, "gateway", "payloads", "dev", "deployment-state.json"), "utf8"));
+      if (supervisorLive) {
+        assert.equal(state.state, "rolled-back", `${label}: ${result.stderr}`);
+        const health = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
+        assert.equal(health.buildFingerprint, staged.prior.payloadFingerprint);
+      } else {
+        assert.equal(state.state, "failed", `${label}: ${result.stderr}`);
+        assert.match(result.stderr, /scripts\/tron dev start/u, `${label}: ${result.stderr}`);
+      }
+      for (const child of children) { child.kill("SIGTERM"); await once(child, "exit"); }
+    }
+  } finally {
+    for (const child of children) child.kill("SIGKILL");
+    await makeTreeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  }
+});
