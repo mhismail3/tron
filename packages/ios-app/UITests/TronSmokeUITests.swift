@@ -695,8 +695,8 @@ final class TronSmokeUITests: XCTestCase {
         // outside its shape, so the next control's rim reaches into this frame;
         // light glass fades to the row's color up to ~2.5pt inside its edge, and
         // its faint shadow begins ~7pt below it. A background gap of 4pt or more
-        // separates surfaces. That stays under the 16pt spacing asserted below,
-        // so a control too near its neighbor still fails that spacing.
+        // separates surfaces and is measured as spacing; a smaller gap merges
+        // into the neighbor and reads as ~0. Both fail the 16pt check below.
         func extent(_ rect: CGRect, reversed: Bool = false) -> ClosedRange<CGFloat> {
             let samples = strip(rect)
             let isInk = samples.map { sample in (zip(sample, background).map { abs($0.0 - $0.1) }.max() ?? 0) > 4 }

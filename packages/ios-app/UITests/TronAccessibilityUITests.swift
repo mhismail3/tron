@@ -187,6 +187,7 @@ final class TronAccessibilityUITests: XCTestCase {
             XCTAssertTrue(app.buttons["Automations"].waitForNonExistence(timeout: 3), app.debugDescription)
             let scroll = app.collectionViews.firstMatch
             let viewport = scroll.frame
+            let scale = devicePixelScale(app)
             app.buttons["Scroll 40"].tap()
             waitForFrame(title, y: expanded.minY - 12.5, height: expanded.height * 33 / 34)
             XCTAssertEqual(title.frame.minY, expanded.minY - 12.5, accuracy: 1)
@@ -196,7 +197,7 @@ final class TronAccessibilityUITests: XCTestCase {
             XCTAssertEqual(title.frame.minY, expanded.minY - 25, accuracy: 1)
             XCTAssertEqual(title.frame.minX, expanded.minX, accuracy: 1)
             XCTAssertEqual(title.frame.height / expanded.height, 32.0 / 34, accuracy: 0.015)
-            XCTAssertEqual(scroll.frame, viewport)
+            XCTAssertEqual(devicePixels(scroll.frame, scale: scale), devicePixels(viewport, scale: scale))
             XCTAssertEqual(menu.frame, menuFrame)
             app.buttons["Scroll -120"].tap()
             waitForFrame(title, y: expanded.minY, height: expanded.height * 1.06)
@@ -211,7 +212,7 @@ final class TronAccessibilityUITests: XCTestCase {
             // issued while a fixture has forced an out-of-range contentOffset.
             scroll.swipeDown()
             waitForFrame(title, y: expanded.minY, height: expanded.height)
-            XCTAssertEqual(scroll.frame, viewport)
+            XCTAssertEqual(devicePixels(scroll.frame, scale: scale), devicePixels(viewport, scale: scale))
             XCTAssertEqual(menu.frame, menuFrame)
         }
     }
@@ -295,6 +296,18 @@ final class TronAccessibilityUITests: XCTestCase {
             settingsCapture.lifetime = .keepAlways
             add(settingsCapture)
         }
+    }
+
+    /// Device pixels per point, read from the screen's own raster.
+    private func devicePixelScale(_ app: XCUIApplication) -> CGFloat {
+        CGFloat(XCUIScreen.main.screenshot().image.cgImage?.width ?? 0) / app.frame.width
+    }
+
+    /// A frame in whole device pixels. UIKit's coordinate conversion carries
+    /// float residue (5e-15pt at iOS 27's 108.667pt list inset), but only whole
+    /// pixels reach the screen, so a one-pixel layout error still differs.
+    private func devicePixels(_ frame: CGRect, scale: CGFloat) -> [Int] {
+        [frame.minX, frame.minY, frame.width, frame.height].map { Int(($0 * scale).rounded()) }
     }
 
     private func waitForFrame(_ element: XCUIElement, y: CGFloat, height: CGFloat) {
