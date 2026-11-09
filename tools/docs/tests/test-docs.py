@@ -71,7 +71,7 @@ class RealRepositoryTests(unittest.TestCase):
         for path in manifests:  # each manifest's module, and each whole directory it declares
             expected.add(ownership.module_id(path))
             directories = ownership.directory_modules(path, json.loads((ROOT / path).read_text()), [])
-            expected |= {own_id for own_id, _, _ in directories.values()}
+            expected |= {own_id for own_id, *_ in directories.values()}
         self.assertEqual({cell.strip("`") for cell in first_cells(self.generate("modules"))}, expected)
         gateway = {cell.strip("`") for cell in first_cells(self.generate("modules", "packages/gateway"))}
         self.assertEqual(gateway, {m for m in expected if m.startswith("gateway/")})
