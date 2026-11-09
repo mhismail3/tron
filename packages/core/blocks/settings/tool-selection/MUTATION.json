@@ -1,0 +1,2550 @@
+{
+ "summary": {
+  "block": "settings/tool-selection",
+  "tier": "high-stakes",
+  "laws": "blocks/settings/tool-selection/Block.dfy",
+  "oracle": true,
+  "toolHash": "a36fd30c10c2fc06",
+  "mutants": 137,
+  "stillborn": 27,
+  "valid": 110,
+  "killed": 110,
+  "lawGap": 0,
+  "survived": 0,
+  "accepted": 0,
+  "seconds": 557,
+  "score": 1,
+  "unknown": 0,
+  "stillbornRatio": 0.197,
+  "filter": null,
+  "generated": 137,
+  "pass": true,
+  "inputsHash": "01d0be5df284bd5d"
+ },
+ "perLaw": [
+  {
+   "law": "M1 modifier-steps",
+   "killed": 31,
+   "only": 12
+  },
+  {
+   "law": "M2 modifier-sequence",
+   "killed": 6,
+   "only": 0
+  },
+  {
+   "law": "C1 modifiers-over-below",
+   "killed": 6,
+   "only": 0
+  },
+  {
+   "law": "C2 plain-list",
+   "killed": 21,
+   "only": 4
+  },
+  {
+   "law": "C3 modifiers-over-defaults",
+   "killed": 9,
+   "only": 0
+  },
+  {
+   "law": "C4 empty-is-no-tools",
+   "killed": 13,
+   "only": 1
+  },
+  {
+   "law": "B1 no-duplicates",
+   "killed": 31,
+   "only": 0
+  },
+  {
+   "law": "E1 modifiers-kept",
+   "killed": 6,
+   "only": 3
+  },
+  {
+   "law": "E2 plain-layer-stays-plain",
+   "killed": 8,
+   "only": 1
+  },
+  {
+   "law": "E3 round-trip",
+   "killed": 25,
+   "only": 4
+  },
+  {
+   "law": "E4 relative-when-reproducible",
+   "killed": 32,
+   "only": 10
+  },
+  {
+   "law": "E5 plain-when-order-differs",
+   "killed": 10,
+   "only": 2
+  }
+ ],
+ "results": [
+  {
+   "id": "Without/branch/|t| == 0->false#1",
+   "sym": "Without",
+   "op": "branch",
+   "line": 10,
+   "col": 8,
+   "from": "|t| == 0",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/branch/|t| == 0->true#1",
+   "sym": "Without",
+   "op": "branch",
+   "line": 10,
+   "col": 8,
+   "from": "|t| == 0",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/relational/==->!=#1",
+   "sym": "Without",
+   "op": "relational",
+   "line": 10,
+   "col": 12,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/constant/0->1#1",
+   "sym": "Without",
+   "op": "constant",
+   "line": 10,
+   "col": 15,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/branch/t[0] == n->false#1",
+   "sym": "Without",
+   "op": "branch",
+   "line": 10,
+   "col": 33,
+   "from": "t[0] == n",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/branch/t[0] == n->true#1",
+   "sym": "Without",
+   "op": "branch",
+   "line": 10,
+   "col": 33,
+   "from": "t[0] == n",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/constant/0->1#2",
+   "sym": "Without",
+   "op": "constant",
+   "line": 10,
+   "col": 35,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/relational/==->!=#2",
+   "sym": "Without",
+   "op": "relational",
+   "line": 10,
+   "col": 38,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/off-by-one/n->(n - 1)#1",
+   "sym": "Without",
+   "op": "off-by-one",
+   "line": 10,
+   "col": 41,
+   "from": "n",
+   "to": "(n - 1)",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/off-by-one/n->(n + 1)#1",
+   "sym": "Without",
+   "op": "off-by-one",
+   "line": 10,
+   "col": 41,
+   "from": "n",
+   "to": "(n + 1)",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/constant/1->0#1",
+   "sym": "Without",
+   "op": "constant",
+   "line": 10,
+   "col": 50,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/constant/1->2#1",
+   "sym": "Without",
+   "op": "constant",
+   "line": 10,
+   "col": 50,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/constant/0->1#3",
+   "sym": "Without",
+   "op": "constant",
+   "line": 10,
+   "col": 63,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/arith/+->-#1",
+   "sym": "Without",
+   "op": "arith",
+   "line": 10,
+   "col": 67,
+   "from": "+",
+   "to": "-",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/drop-operand/+ Without(t[1..], n)->#1",
+   "sym": "Without",
+   "op": "drop-operand",
+   "line": 10,
+   "col": 67,
+   "from": "+ Without(t[1..], n)",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/swap-args/t[1..], n->n, t[1..]#1",
+   "sym": "Without",
+   "op": "swap-args",
+   "line": 10,
+   "col": 77,
+   "from": "t[1..], n",
+   "to": "n, t[1..]",
+   "note": "Without args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/constant/1->0#2",
+   "sym": "Without",
+   "op": "constant",
+   "line": 10,
+   "col": 79,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Without/constant/1->2#2",
+   "sym": "Without",
+   "op": "constant",
+   "line": 10,
+   "col": 79,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/branch/|entries| == 0->false#1",
+   "sym": "Mods",
+   "op": "branch",
+   "line": 14,
+   "col": 8,
+   "from": "|entries| == 0",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C4 empty-is-no-tools",
+    "E3 round-trip",
+    "M1 modifier-steps",
+    "M2 modifier-sequence",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/branch/|entries| == 0->true#1",
+   "sym": "Mods",
+   "op": "branch",
+   "line": 14,
+   "col": 8,
+   "from": "|entries| == 0",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/relational/==->!=#1",
+   "sym": "Mods",
+   "op": "relational",
+   "line": 14,
+   "col": 18,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C4 empty-is-no-tools",
+    "E3 round-trip",
+    "M1 modifier-steps",
+    "M2 modifier-sequence",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/constant/0->1#1",
+   "sym": "Mods",
+   "op": "constant",
+   "line": 14,
+   "col": 21,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C4 empty-is-no-tools",
+    "E3 round-trip",
+    "M1 modifier-steps",
+    "M2 modifier-sequence",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/constant/0->1#2",
+   "sym": "Mods",
+   "op": "constant",
+   "line": 16,
+   "col": 24,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "E3 round-trip",
+    "M1 modifier-steps",
+    "M2 modifier-sequence",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/branch/n != 0 && n !in tools->false#1",
+   "sym": "Mods",
+   "op": "branch",
+   "line": 19,
+   "col": 28,
+   "from": "n != 0 && n !in tools",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/branch/n != 0 && n !in tools->true#1",
+   "sym": "Mods",
+   "op": "branch",
+   "line": 19,
+   "col": 28,
+   "from": "n != 0 && n !in tools",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/off-by-one/n->(n - 1)#1",
+   "sym": "Mods",
+   "op": "off-by-one",
+   "line": 19,
+   "col": 28,
+   "from": "n",
+   "to": "(n - 1)",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/off-by-one/n->(n + 1)#1",
+   "sym": "Mods",
+   "op": "off-by-one",
+   "line": 19,
+   "col": 28,
+   "from": "n",
+   "to": "(n + 1)",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/relational/!=->==#1",
+   "sym": "Mods",
+   "op": "relational",
+   "line": 19,
+   "col": 30,
+   "from": "!=",
+   "to": "==",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/constant/0->1#3",
+   "sym": "Mods",
+   "op": "constant",
+   "line": 19,
+   "col": 33,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/logic/&&->||#1",
+   "sym": "Mods",
+   "op": "logic",
+   "line": 19,
+   "col": 35,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/logic/!->#1",
+   "sym": "Mods",
+   "op": "logic",
+   "line": 19,
+   "col": 40,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/off-by-one/tools->(tools - 1)#1",
+   "sym": "Mods",
+   "op": "off-by-one",
+   "line": 19,
+   "col": 55,
+   "from": "tools",
+   "to": "(tools - 1)",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/off-by-one/tools->(tools + 1)#1",
+   "sym": "Mods",
+   "op": "off-by-one",
+   "line": 19,
+   "col": 55,
+   "from": "tools",
+   "to": "(tools + 1)",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/arith/+->-#1",
+   "sym": "Mods",
+   "op": "arith",
+   "line": 19,
+   "col": 61,
+   "from": "+",
+   "to": "-",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/drop-operand/+ [n]->#1",
+   "sym": "Mods",
+   "op": "drop-operand",
+   "line": 19,
+   "col": 61,
+   "from": "+ [n]",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "M1 modifier-steps"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/swap-args/tools, n->n, tools#1",
+   "sym": "Mods",
+   "op": "swap-args",
+   "line": 20,
+   "col": 34,
+   "from": "tools, n",
+   "to": "n, tools",
+   "note": "Without args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/swap-args/next, entries[1..]->entries[1..], next#1",
+   "sym": "Mods",
+   "op": "swap-args",
+   "line": 21,
+   "col": 12,
+   "from": "next, entries[1..]",
+   "to": "entries[1..], next",
+   "note": "Mods args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/constant/1->0#1",
+   "sym": "Mods",
+   "op": "constant",
+   "line": 21,
+   "col": 26,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "E3 round-trip",
+    "M1 modifier-steps",
+    "M2 modifier-sequence",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Mods/constant/1->2#1",
+   "sym": "Mods",
+   "op": "constant",
+   "line": 21,
+   "col": 26,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "E3 round-trip",
+    "M1 modifier-steps",
+    "M2 modifier-sequence",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/branch/|es| == 0->false#1",
+   "sym": "PlainNames",
+   "op": "branch",
+   "line": 27,
+   "col": 8,
+   "from": "|es| == 0",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list",
+    "C4 empty-is-no-tools",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/branch/|es| == 0->true#1",
+   "sym": "PlainNames",
+   "op": "branch",
+   "line": 27,
+   "col": 8,
+   "from": "|es| == 0",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/relational/==->!=#1",
+   "sym": "PlainNames",
+   "op": "relational",
+   "line": 27,
+   "col": 13,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list",
+    "C4 empty-is-no-tools",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/constant/0->1#1",
+   "sym": "PlainNames",
+   "op": "constant",
+   "line": 27,
+   "col": 16,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list",
+    "C4 empty-is-no-tools",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/branch/es[0].Plain?->false#1",
+   "sym": "PlainNames",
+   "op": "branch",
+   "line": 27,
+   "col": 35,
+   "from": "es[0].Plain?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/branch/es[0].Plain?->true#1",
+   "sym": "PlainNames",
+   "op": "branch",
+   "line": 27,
+   "col": 35,
+   "from": "es[0].Plain?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/constant/0->1#2",
+   "sym": "PlainNames",
+   "op": "constant",
+   "line": 27,
+   "col": 38,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/constant/0->1#3",
+   "sym": "PlainNames",
+   "op": "constant",
+   "line": 27,
+   "col": 57,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/arith/+->-#1",
+   "sym": "PlainNames",
+   "op": "arith",
+   "line": 27,
+   "col": 72,
+   "from": "+",
+   "to": "-",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/drop-operand/+ PlainNames(es[1..])->#1",
+   "sym": "PlainNames",
+   "op": "drop-operand",
+   "line": 27,
+   "col": 72,
+   "from": "+ PlainNames(es[1..])",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/constant/1->0#1",
+   "sym": "PlainNames",
+   "op": "constant",
+   "line": 27,
+   "col": 88,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "PlainNames/constant/1->2#1",
+   "sym": "PlainNames",
+   "op": "constant",
+   "line": 27,
+   "col": 88,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "AllModifiers/constant/0->1#1",
+   "sym": "AllModifiers",
+   "op": "constant",
+   "line": 29,
+   "col": 55,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list",
+    "E2 plain-layer-stays-plain"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "AllModifiers/boundary/<=-><#1",
+   "sym": "AllModifiers",
+   "op": "boundary",
+   "line": 29,
+   "col": 57,
+   "from": "<=",
+   "to": "<",
+   "status": "killed",
+   "killedBy": [
+    "C2 plain-list",
+    "E2 plain-layer-stays-plain"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "AllModifiers/relational/<=->>#1",
+   "sym": "AllModifiers",
+   "op": "relational",
+   "line": 29,
+   "col": 57,
+   "from": "<=",
+   "to": ">",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "AllModifiers/off-by-one/i->(i - 1)#1",
+   "sym": "AllModifiers",
+   "op": "off-by-one",
+   "line": 29,
+   "col": 60,
+   "from": "i",
+   "to": "(i - 1)",
+   "status": "killed",
+   "killedBy": [
+    "C1 modifiers-over-below",
+    "C2 plain-list",
+    "C3 modifiers-over-defaults",
+    "E2 plain-layer-stays-plain",
+    "E3 round-trip",
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "AllModifiers/off-by-one/i->(i + 1)#1",
+   "sym": "AllModifiers",
+   "op": "off-by-one",
+   "line": 29,
+   "col": 60,
+   "from": "i",
+   "to": "(i + 1)",
+   "status": "killed",
+   "killedBy": [
+    "C1 modifiers-over-below",
+    "C2 plain-list",
+    "C3 modifiers-over-defaults",
+    "E2 plain-layer-stays-plain",
+    "E3 round-trip",
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "AllModifiers/boundary/<-><=#1",
+   "sym": "AllModifiers",
+   "op": "boundary",
+   "line": 29,
+   "col": 62,
+   "from": "<",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "C1 modifiers-over-below",
+    "C2 plain-list",
+    "C3 modifiers-over-defaults",
+    "E3 round-trip",
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "AllModifiers/relational/<->>=#1",
+   "sym": "AllModifiers",
+   "op": "relational",
+   "line": 29,
+   "col": 62,
+   "from": "<",
+   "to": ">=",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/branch/below.Names? && |entries| > 0 && AllModifiers(entries)->false#1",
+   "sym": "Compose",
+   "op": "branch",
+   "line": 32,
+   "col": 8,
+   "from": "below.Names? && |entries| > 0 && AllModifiers(entries)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C1 modifiers-over-below"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/branch/below.Names? && |entries| > 0 && AllModifiers(entries)->true#1",
+   "sym": "Compose",
+   "op": "branch",
+   "line": 32,
+   "col": 8,
+   "from": "below.Names? && |entries| > 0 && AllModifiers(entries)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C2 plain-list",
+    "C3 modifiers-over-defaults",
+    "C4 empty-is-no-tools",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/logic/&&->||#1",
+   "sym": "Compose",
+   "op": "logic",
+   "line": 32,
+   "col": 21,
+   "from": "&&",
+   "to": "||",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/boundary/>->>=#1",
+   "sym": "Compose",
+   "op": "boundary",
+   "line": 32,
+   "col": 34,
+   "from": ">",
+   "to": ">=",
+   "status": "killed",
+   "killedBy": [
+    "C4 empty-is-no-tools"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/relational/>-><=#1",
+   "sym": "Compose",
+   "op": "relational",
+   "line": 32,
+   "col": 34,
+   "from": ">",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C1 modifiers-over-below",
+    "C4 empty-is-no-tools",
+    "E3 round-trip"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/constant/0->1#1",
+   "sym": "Compose",
+   "op": "constant",
+   "line": 32,
+   "col": 36,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C1 modifiers-over-below",
+    "E3 round-trip"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/logic/&&->||#2",
+   "sym": "Compose",
+   "op": "logic",
+   "line": 32,
+   "col": 38,
+   "from": "&&",
+   "to": "||",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/swap-args/below.names, entries->entries, below.names#1",
+   "sym": "Compose",
+   "op": "swap-args",
+   "line": 32,
+   "col": 73,
+   "from": "below.names, entries",
+   "to": "entries, below.names",
+   "note": "Mods args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/swap-args/if |plain| > 0 || |entries| == 0 then plain else defaults, entries->entries, if |plain| > 0 || |entries| == 0 then plain else defaults#1",
+   "sym": "Compose",
+   "op": "swap-args",
+   "line": 35,
+   "col": 12,
+   "from": "if |plain| > 0 || |entries| == 0 then plain else defaults, entries",
+   "to": "entries, if |plain| > 0 || |entries| == 0 then plain else defaults",
+   "note": "Mods args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/branch/|plain| > 0 || |entries| == 0->false#1",
+   "sym": "Compose",
+   "op": "branch",
+   "line": 35,
+   "col": 15,
+   "from": "|plain| > 0 || |entries| == 0",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C2 plain-list",
+    "C4 empty-is-no-tools"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/branch/|plain| > 0 || |entries| == 0->true#1",
+   "sym": "Compose",
+   "op": "branch",
+   "line": 35,
+   "col": 15,
+   "from": "|plain| > 0 || |entries| == 0",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C3 modifiers-over-defaults"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/boundary/>->>=#2",
+   "sym": "Compose",
+   "op": "boundary",
+   "line": 35,
+   "col": 23,
+   "from": ">",
+   "to": ">=",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C3 modifiers-over-defaults"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/relational/>-><=#2",
+   "sym": "Compose",
+   "op": "relational",
+   "line": 35,
+   "col": 23,
+   "from": ">",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C2 plain-list",
+    "C3 modifiers-over-defaults"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/constant/0->1#2",
+   "sym": "Compose",
+   "op": "constant",
+   "line": 35,
+   "col": 25,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C2 plain-list"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/logic/||->&&#1",
+   "sym": "Compose",
+   "op": "logic",
+   "line": 35,
+   "col": 27,
+   "from": "||",
+   "to": "&&",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C2 plain-list",
+    "C4 empty-is-no-tools"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/relational/==->!=#1",
+   "sym": "Compose",
+   "op": "relational",
+   "line": 35,
+   "col": 40,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C3 modifiers-over-defaults",
+    "C4 empty-is-no-tools"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Compose/constant/0->1#3",
+   "sym": "Compose",
+   "op": "constant",
+   "line": 35,
+   "col": 43,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "B1 no-duplicates",
+    "C3 modifiers-over-defaults",
+    "C4 empty-is-no-tools"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/branch/|a| == 0->false#1",
+   "sym": "Missing",
+   "op": "branch",
+   "line": 41,
+   "col": 8,
+   "from": "|a| == 0",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/branch/|a| == 0->true#1",
+   "sym": "Missing",
+   "op": "branch",
+   "line": 41,
+   "col": 8,
+   "from": "|a| == 0",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/relational/==->!=#1",
+   "sym": "Missing",
+   "op": "relational",
+   "line": 41,
+   "col": 12,
+   "from": "==",
+   "to": "!=",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/constant/0->1#1",
+   "sym": "Missing",
+   "op": "constant",
+   "line": 41,
+   "col": 15,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/branch/a[0] in b->false#1",
+   "sym": "Missing",
+   "op": "branch",
+   "line": 41,
+   "col": 34,
+   "from": "a[0] in b",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/branch/a[0] in b->true#1",
+   "sym": "Missing",
+   "op": "branch",
+   "line": 41,
+   "col": 34,
+   "from": "a[0] in b",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/constant/0->1#2",
+   "sym": "Missing",
+   "op": "constant",
+   "line": 41,
+   "col": 36,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/constant/0->1#3",
+   "sym": "Missing",
+   "op": "constant",
+   "line": 41,
+   "col": 60,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/arith/+->-#1",
+   "sym": "Missing",
+   "op": "arith",
+   "line": 41,
+   "col": 65,
+   "from": "+",
+   "to": "-",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/drop-operand/+ Missing(a[1..], b)->#1",
+   "sym": "Missing",
+   "op": "drop-operand",
+   "line": 41,
+   "col": 65,
+   "from": "+ Missing(a[1..], b)",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/swap-args/a[1..], b->b, a[1..]#1",
+   "sym": "Missing",
+   "op": "swap-args",
+   "line": 41,
+   "col": 75,
+   "from": "a[1..], b",
+   "to": "b, a[1..]",
+   "note": "Missing args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/constant/1->0#1",
+   "sym": "Missing",
+   "op": "constant",
+   "line": 41,
+   "col": 77,
+   "from": "1",
+   "to": "0",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Missing/constant/1->2#1",
+   "sym": "Missing",
+   "op": "constant",
+   "line": 41,
+   "col": 77,
+   "from": "1",
+   "to": "2",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/branch/exists i | 0 <= i < |chosen| :: IsModifier(chosen[i])->false#1",
+   "sym": "Encode",
+   "op": "branch",
+   "line": 44,
+   "col": 8,
+   "from": "exists i | 0 <= i < |chosen| :: IsModifier(chosen[i])",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "E1 modifiers-kept"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/branch/exists i | 0 <= i < |chosen| :: IsModifier(chosen[i])->true#1",
+   "sym": "Encode",
+   "op": "branch",
+   "line": 44,
+   "col": 8,
+   "from": "exists i | 0 <= i < |chosen| :: IsModifier(chosen[i])",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/constant/0->1#1",
+   "sym": "Encode",
+   "op": "constant",
+   "line": 44,
+   "col": 19,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "E1 modifiers-kept"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/boundary/<=-><#1",
+   "sym": "Encode",
+   "op": "boundary",
+   "line": 44,
+   "col": 21,
+   "from": "<=",
+   "to": "<",
+   "status": "killed",
+   "killedBy": [
+    "E1 modifiers-kept"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/relational/<=->>#1",
+   "sym": "Encode",
+   "op": "relational",
+   "line": 44,
+   "col": 21,
+   "from": "<=",
+   "to": ">",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/off-by-one/i->(i - 1)#1",
+   "sym": "Encode",
+   "op": "off-by-one",
+   "line": 44,
+   "col": 24,
+   "from": "i",
+   "to": "(i - 1)",
+   "status": "killed",
+   "killedBy": [
+    "E1 modifiers-kept",
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/off-by-one/i->(i + 1)#1",
+   "sym": "Encode",
+   "op": "off-by-one",
+   "line": 44,
+   "col": 24,
+   "from": "i",
+   "to": "(i + 1)",
+   "status": "killed",
+   "killedBy": [
+    "E1 modifiers-kept",
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/boundary/<-><=#1",
+   "sym": "Encode",
+   "op": "boundary",
+   "line": 44,
+   "col": 26,
+   "from": "<",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/relational/<->>=#1",
+   "sym": "Encode",
+   "op": "relational",
+   "line": 44,
+   "col": 26,
+   "from": "<",
+   "to": ">=",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/constructor/Holds(chosen)->Nothing#1",
+   "sym": "Encode",
+   "op": "constructor",
+   "line": 44,
+   "col": 67,
+   "from": "Holds(chosen)",
+   "to": "Nothing",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "E1 modifiers-kept",
+    "E2 plain-layer-stays-plain"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/branch/!AllModifiers(current)->false#1",
+   "sym": "Encode",
+   "op": "branch",
+   "line": 45,
+   "col": 13,
+   "from": "!AllModifiers(current)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "E2 plain-layer-stays-plain"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/branch/!AllModifiers(current)->true#1",
+   "sym": "Encode",
+   "op": "branch",
+   "line": 45,
+   "col": 13,
+   "from": "!AllModifiers(current)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/logic/!->#1",
+   "sym": "Encode",
+   "op": "logic",
+   "line": 45,
+   "col": 13,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "E2 plain-layer-stays-plain",
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/constructor/Holds(chosen)->Nothing#2",
+   "sym": "Encode",
+   "op": "constructor",
+   "line": 45,
+   "col": 41,
+   "from": "Holds(chosen)",
+   "to": "Nothing",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "E2 plain-layer-stays-plain",
+    "E3 round-trip",
+    "E5 plain-when-order-differs"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/branch/below.Names?->false#1",
+   "sym": "Encode",
+   "op": "branch",
+   "line": 47,
+   "col": 22,
+   "from": "below.Names?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "E5 plain-when-order-differs"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/branch/below.Names?->true#1",
+   "sym": "Encode",
+   "op": "branch",
+   "line": 47,
+   "col": 22,
+   "from": "below.Names?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "E5 plain-when-order-differs",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/swap-args/names, base->base, names#1",
+   "sym": "Encode",
+   "op": "swap-args",
+   "line": 49,
+   "col": 27,
+   "from": "names, base",
+   "to": "base, names",
+   "note": "Missing args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/swap-args/base, names->names, base#1",
+   "sym": "Encode",
+   "op": "swap-args",
+   "line": 50,
+   "col": 30,
+   "from": "base, names",
+   "to": "names, base",
+   "note": "Missing args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "E5 plain-when-order-differs"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/swap-args/|adds|, i requires 0 <= i < |adds| => Plus(adds[i])->i requires 0 <= i < |adds| => Plus(adds[i]), |adds|#1",
+   "sym": "Encode",
+   "op": "swap-args",
+   "line": 51,
+   "col": 26,
+   "from": "|adds|, i requires 0 <= i < |adds| => Plus(adds[i])",
+   "to": "i requires 0 <= i < |adds| => Plus(adds[i]), |adds|",
+   "note": "seq args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/constant/0->1#2",
+   "sym": "Encode",
+   "op": "constant",
+   "line": 51,
+   "col": 45,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/boundary/<=-><#2",
+   "sym": "Encode",
+   "op": "boundary",
+   "line": 51,
+   "col": 47,
+   "from": "<=",
+   "to": "<",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/relational/<=->>#2",
+   "sym": "Encode",
+   "op": "relational",
+   "line": 51,
+   "col": 47,
+   "from": "<=",
+   "to": ">",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/off-by-one/i->(i - 1)#2",
+   "sym": "Encode",
+   "op": "off-by-one",
+   "line": 51,
+   "col": 50,
+   "from": "i",
+   "to": "(i - 1)",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/off-by-one/i->(i + 1)#2",
+   "sym": "Encode",
+   "op": "off-by-one",
+   "line": 51,
+   "col": 50,
+   "from": "i",
+   "to": "(i + 1)",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/boundary/<-><=#2",
+   "sym": "Encode",
+   "op": "boundary",
+   "line": 51,
+   "col": 52,
+   "from": "<",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "E5 plain-when-order-differs",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/relational/<->>=#2",
+   "sym": "Encode",
+   "op": "relational",
+   "line": 51,
+   "col": 52,
+   "from": "<",
+   "to": ">=",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/arith/+->-#1",
+   "sym": "Encode",
+   "op": "arith",
+   "line": 52,
+   "col": 9,
+   "from": "+",
+   "to": "-",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/drop-operand/+ seq(|removes|, i requires 0 <= i < |removes| => Minus(removes[i]))->#1",
+   "sym": "Encode",
+   "op": "drop-operand",
+   "line": 52,
+   "col": 9,
+   "from": "+ seq(|removes|, i requires 0 <= i < |removes| => Minus(removes[i]))",
+   "to": "",
+   "note": "drop right operand",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/swap-args/|removes|, i requires 0 <= i < |removes| => Minus(removes[i])->i requires 0 <= i < |removes| => Minus(removes[i]), |removes|#1",
+   "sym": "Encode",
+   "op": "swap-args",
+   "line": 52,
+   "col": 15,
+   "from": "|removes|, i requires 0 <= i < |removes| => Minus(removes[i])",
+   "to": "i requires 0 <= i < |removes| => Minus(removes[i]), |removes|",
+   "note": "seq args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/constant/0->1#3",
+   "sym": "Encode",
+   "op": "constant",
+   "line": 52,
+   "col": 37,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/boundary/<=-><#3",
+   "sym": "Encode",
+   "op": "boundary",
+   "line": 52,
+   "col": 39,
+   "from": "<=",
+   "to": "<",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/relational/<=->>#3",
+   "sym": "Encode",
+   "op": "relational",
+   "line": 52,
+   "col": 39,
+   "from": "<=",
+   "to": ">",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/off-by-one/i->(i - 1)#3",
+   "sym": "Encode",
+   "op": "off-by-one",
+   "line": 52,
+   "col": 42,
+   "from": "i",
+   "to": "(i - 1)",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "E5 plain-when-order-differs",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/off-by-one/i->(i + 1)#3",
+   "sym": "Encode",
+   "op": "off-by-one",
+   "line": 52,
+   "col": 42,
+   "from": "i",
+   "to": "(i + 1)",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 2,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/boundary/<-><=#3",
+   "sym": "Encode",
+   "op": "boundary",
+   "line": 52,
+   "col": 44,
+   "from": "<",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "E5 plain-when-order-differs",
+    "build: impl well-formedness"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/relational/<->>=#3",
+   "sym": "Encode",
+   "op": "relational",
+   "line": 52,
+   "col": 44,
+   "from": "<",
+   "to": ">=",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/branch/Mods(base, entries) != names->false#1",
+   "sym": "Encode",
+   "op": "branch",
+   "line": 53,
+   "col": 10,
+   "from": "Mods(base, entries) != names",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "E5 plain-when-order-differs"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/branch/Mods(base, entries) != names->true#1",
+   "sym": "Encode",
+   "op": "branch",
+   "line": 53,
+   "col": 10,
+   "from": "Mods(base, entries) != names",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/swap-args/base, entries->entries, base#1",
+   "sym": "Encode",
+   "op": "swap-args",
+   "line": 53,
+   "col": 15,
+   "from": "base, entries",
+   "to": "entries, base",
+   "note": "Mods args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/relational/!=->==#1",
+   "sym": "Encode",
+   "op": "relational",
+   "line": 53,
+   "col": 30,
+   "from": "!=",
+   "to": "==",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible",
+    "E5 plain-when-order-differs"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/off-by-one/names->(names - 1)#1",
+   "sym": "Encode",
+   "op": "off-by-one",
+   "line": 53,
+   "col": 33,
+   "from": "names",
+   "to": "(names - 1)",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/off-by-one/names->(names + 1)#1",
+   "sym": "Encode",
+   "op": "off-by-one",
+   "line": 53,
+   "col": 33,
+   "from": "names",
+   "to": "(names + 1)",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/constructor/Holds(chosen)->Nothing#3",
+   "sym": "Encode",
+   "op": "constructor",
+   "line": 53,
+   "col": 44,
+   "from": "Holds(chosen)",
+   "to": "Nothing",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "E5 plain-when-order-differs"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/branch/|entries| > 0->false#1",
+   "sym": "Encode",
+   "op": "branch",
+   "line": 54,
+   "col": 15,
+   "from": "|entries| > 0",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/branch/|entries| > 0->true#1",
+   "sym": "Encode",
+   "op": "branch",
+   "line": 54,
+   "col": 15,
+   "from": "|entries| > 0",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "E3 round-trip",
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/boundary/>->>=#1",
+   "sym": "Encode",
+   "op": "boundary",
+   "line": 54,
+   "col": 25,
+   "from": ">",
+   "to": ">=",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/relational/>-><=#1",
+   "sym": "Encode",
+   "op": "relational",
+   "line": 54,
+   "col": 25,
+   "from": ">",
+   "to": "<=",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/constant/0->1#4",
+   "sym": "Encode",
+   "op": "constant",
+   "line": 54,
+   "col": 27,
+   "from": "0",
+   "to": "1",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Encode/constructor/Holds(entries)->Nothing#1",
+   "sym": "Encode",
+   "op": "constructor",
+   "line": 54,
+   "col": 34,
+   "from": "Holds(entries)",
+   "to": "Nothing",
+   "note": "drop value",
+   "status": "killed",
+   "killedBy": [
+    "E4 relative-when-reproducible"
+   ],
+   "unmapped": [],
+   "timeouts": 1,
+   "error": null,
+   "oracleFailed": []
+  }
+ ]
+}

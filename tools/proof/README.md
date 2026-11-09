@@ -126,7 +126,10 @@ records each resolved key instance's facts as `precedenceFacts` builds them (per
 per-model and plain value, applied) and the fold's result (value, layer, not-applied layer, shown layers; capability clamping comes after it and
 is not part of the record); values
 enter as tokens, equal values (as JSON) of one call sharing one and the default being 0, so no setting value is
-recorded. A composing key's value is recorded as null (its composition is checked on generated inputs). A seam
+recorded. The `settings/tool-selection` seams in `toolSelectionType()`'s `compose` and `encode`
+(`packages/gateway/src/kernel/settings/settings-types.ts`) record their facts as `toolSelectionFacts` builds them
+(tool names as tokens: the empty name 0, the rest numbered by first appearance) and the result, only for lists of
+strings. A composing key's value is recorded as null (its composition is checked on generated inputs). A seam
 whose record costs work checks `seamsRecorded()` first.
 
 - **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
@@ -176,7 +179,8 @@ checks the table builder too); generated inputs the TypeScript throws on (a civi
 counted as `tsRefused`, not compared, since a throw is never recorded. `oracles/settings-precedence.mjs` runs the real
 `resolveSettings` and `composedBelow` over a synthetic schema (every combination of bindings, admission,
 per-model and composing keys) with random stores and targets; a composing key's `compose` builds a term, so the
-TypeScript's composition order is compared exactly. Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
+TypeScript's composition order is compared exactly. `oracles/settings-tool-selection.mjs` drives the real `compose`
+and `encode` with plain names, modifiers, repeats and the empty name over every kind of selection below. Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
 the corpus, and exit 2 on a corpus file they cannot read. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 
@@ -277,7 +281,9 @@ outside an opted-in Debug Gateway (Stable channel, no channel, other values, the
 seeded schedule journey through the real seams writes one record per call (none for nested calls), each under
 its trigger's block (`schedule/occurrence` or `schedule/calendar`), that replays through the same TypeScript to the recorded outputs,
 that resolving the real settings schema records every key instance's fold (layer and not-applied layer as
-resolved, an untrusted project's value reported) with no setting value, model id or path in the corpus, and
+resolved, an untrusted project's value reported) with no setting value, model id or path in the corpus, that
+tool-selection compose and encode calls (direct and through a real resolution) record name tokens, never names,
+and nothing for a value outside the block's domain, and
 that the daily cap and retention hold.
 
 `scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the fixture block

@@ -1,0 +1,1 @@
+{"interface": ["laws/settings/ToolSelection.dfy"], "impl": ["blocks/settings/tool-selection/Block.dfy"], "deps": []}
