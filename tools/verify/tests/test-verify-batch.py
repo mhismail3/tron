@@ -585,9 +585,11 @@ else: sys.exit('unexpected xcrun '+' '.join(args))
 
     def test_mac_xctest_case_filter_proves_landing_without_suite_probe(self):
         binary = Path(self.temporary.name) / 'bin/xcodebuild'
-        binary.write_text('''#!/usr/bin/env python3
+        calls = Path(self.temporary.name) / 'xcodebuild-calls'
+        binary.write_text(f'''#!/usr/bin/env python3
 import sys
 from pathlib import Path
+with open({str(calls)!r}, 'a') as f: f.write(' '.join(sys.argv[1:]) + '\\n')
 if Path('mac-bad').exists():
     selected=[arg for arg in sys.argv if arg.startswith('-only-testing:')]
     if selected and selected != ['-only-testing:TronMacIntegrationTests/SampleTests/testExample']:
@@ -603,6 +605,9 @@ print('Executed 2 tests, with 0 failures')
         proof = self.reports()[-1]['failures'][0]['attribution']
         self.assertEqual((proof['status'], proof['commit']), ('proven', culprit))
         self.assertTrue(all(p['command'][-1] == 'SampleTests/testExample' for p in proof['probes']))
+        # Each probe reached xcodebuild with exactly that case's filter: never a whole-suite run.
+        filtered = [line for line in calls.read_text().splitlines() if '-only-testing:TronMacIntegrationTests/SampleTests/testExample' in line]
+        self.assertEqual(len(filtered), len(proof['probes']))
 
     def test_ios_smoke_case_selector_proves_landing_with_own_build(self):
         owner = (self.root / 'scripts/tron-ios-test').read_text()

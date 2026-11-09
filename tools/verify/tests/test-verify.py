@@ -234,7 +234,7 @@ class ExternalVerificationTests(VerifyCase):
         planned = r.verify("--module", "repo/alpha", "--plan")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
         groups = json.loads(planned.stdout[planned.stdout.index("{"):])["groups"]
-        for group, path in zip(("gateway", "gateway-nested", "mac", "node-gateway"), files):
+        for group, path in zip(("gateway", "gateway-nested", "mac-terminal", "node-gateway"), files):
             self.assertEqual(groups[group], [f"packages/gateway/{path}"])
         # The lanes' runner: gateway.py here by default (a configured mini host changes nothing), mini.py on request.
         r.git("config", "tron.verify.mini", "mini.invalid")

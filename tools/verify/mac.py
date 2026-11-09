@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -40,5 +41,13 @@ def main(classes: list[str]) -> int:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
+def interrupted(_signal, _frame):
+    raise KeyboardInterrupt  # verify stops a step with SIGTERM; unwind so the scratch HOME is removed
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    signal.signal(signal.SIGTERM, interrupted)
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)
