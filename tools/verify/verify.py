@@ -511,12 +511,10 @@ def golden_readers(goldens: list[str], tests: list[str]) -> set[str]:
     """The locks a golden change reruns. A Gateway E2E golden `<dir>/locks/<name>.golden.json` is read
     only by the lock in `<dir>` naming it through `lockPaths(import.meta.url, "<name>")`, or through a
     computed argument when the lock spells `"<name>"`; any other golden reruns every lock its module owns.
-    A deleted golden has no reader left: the lock that dropped it changed too and is selected as a changed test."""
+    A deleted golden no lock names any more needs none: the lock that dropped it changed and is selected as a changed test."""
     locks = [path for path in tests if is_lock(path)]
     readers: set[str] = set()
     for golden in goldens:
-        if not (ROOT / golden).exists():
-            continue
         if not golden.startswith(f"{GATEWAY}/src/e2e/"):
             readers |= set(locks)
             continue
@@ -534,6 +532,8 @@ def golden_readers(goldens: list[str], tests: list[str]) -> set[str]:
                 names.add(name)
             if name in names:
                 found.add(lock)
+        if not found and not (ROOT / golden).exists():
+            continue
         if not found:
             raise VerifyError(f"no lock beside {golden} reads it through lockPaths(import.meta.url, {name!r})")
         readers |= found
