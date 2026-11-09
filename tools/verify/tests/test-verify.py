@@ -516,6 +516,38 @@ class GatewayDependenciesTests(VerifyCase):
         report = r.report()
         self.assertEqual((report["verdict"], report["passingTests"]), ("passed", 3))
 
+    def test_a_mac_change_runs_the_mac_integration_tests(self) -> None:
+        # A Mac-only change once ended `incomplete`, or, skipped, `zero tests ran`; a Mac source
+        # change selected no test at all: no passing path (#2371).
+        r = self.repo
+        mac = "packages/mac-app"
+        r.write(f"{mac}/Sources/Server/server.module.json", json.dumps({"layer": "L3", "owns": ["**"], "verify": ["scripts/tron test mac"]}))
+        r.write(f"{mac}/Sources/Server/GatewayProcess.swift", "let value = 1\n")
+        r.write(f"{mac}/Tests/tests.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        r.write(f"{mac}/Tests/Integration/SubprocessTests.swift", "struct SubprocessTests {}\n")
+        r.write(f"{mac}/Tests/Integration/WizardTests.swift", "struct WizardTests {}\n")
+        r.write(f"{mac}/Tests/Integration/TestTempDir.swift", "enum TestTempDir {}\n")
+        # The Mac runner builds and runs TronMacIntegrationTests; this one records its classes and prints the summaries.
+        r.write("tools/verify/mac.py", "import pathlib,sys\npathlib.Path('test-results/mac-ran').write_text(' '.join(sys.argv[1:]))\n"
+                "print(\"Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds\")\n"
+                "print(f'Test run with {2 * (len(sys.argv) - 1)} tests in 1 suite passed after 1.0 seconds.')\n")
+        r.commit("mac app")
+        r.git("branch", "-f", "base")
+        r.write(f"{mac}/Sources/Server/GatewayProcess.swift", "let value = 2\n")
+        r.commit("mac source change")
+        source = r.verify("--changed")
+        self.assertEqual(source.returncode, 0, source.stdout + source.stderr)
+        self.assertEqual((r.path / "test-results/mac-ran").read_text(), "SubprocessTests WizardTests")
+        report = r.report()
+        self.assertEqual((report["verdict"], report["passingTests"]), ("passed", 4))
+        r.git("branch", "-f", "base")
+        r.write(f"{mac}/Tests/Integration/WizardTests.swift", "struct WizardTests { let changed = true }\n")
+        r.commit("mac test change")
+        tests = r.verify("--changed")
+        self.assertEqual(tests.returncode, 0, tests.stdout + tests.stderr)
+        self.assertEqual((r.path / "test-results/mac-ran").read_text(), "WizardTests")
+        self.assertEqual(r.report()["passingTests"], 2)
+
 
 class SelectionTests(VerifyCase):
     def test_one_module_change_runs_only_its_tests_and_a_failure_fails_loudly(self) -> None:

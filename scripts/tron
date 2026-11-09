@@ -35,6 +35,7 @@ Commands:
                                     runs them on the Mac mini test host (tools/verify/README.md)
   test ios [runner args...]         Run the owned iOS test runner directly (3 host-wide simulator
                                     slots; a 4th job waits; `test ios slots` shows holders)
+  test mac [test classes...]        Build and run the Mac integration tests under a temporary HOME
   test tooling [test files...]      Run Python script integration suites directly
   build gateway                     Build Gateway directly with pinned Node
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
@@ -189,6 +190,7 @@ case "$cmd" in
         exec python3 "$ROOT/tools/verify/gateway.py" "$@"
         ;;
       ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
+      mac) exec python3 "$ROOT/tools/verify/mac.py" "$@" ;;
       tooling)
         if (($# == 0)); then set -- "$ROOT"/tools/work/tests/test-*.py; fi
         for suite in "$@"; do python3 "$suite"; done

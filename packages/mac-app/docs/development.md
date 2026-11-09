@@ -57,8 +57,9 @@ payload validation and installed verification all pass.
 ## Efficient focused tests
 
 CI compiles the app and tests unsigned (`CODE_SIGNING_ALLOWED=NO`) and runs nothing; hosted
-`TronMacIntegrationTests` need the team's signing certificate, so run them locally. Build once,
-then select suites:
+`TronMacIntegrationTests` need the team's signing certificate, so run them locally.
+`scripts/tron test mac SingleInstanceLockTests` builds and runs the named classes under scratch
+`HOME`/`TMPDIR` (`verify` runs it for Mac changes). By hand, build once, then select suites:
 
 ```bash
 ../../scripts/tron-xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
