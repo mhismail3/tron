@@ -176,8 +176,13 @@ struct ProductionSceneRoot: View {
             .onOpenURL { url in
                 if let invitation = PairingInvitationParser.parse(url) {
                     Task {
+                        // The receipt and a cancelled pairing are recorded: an
+                        // invitation that never pairs must say where it stopped.
+                        await owner.model.appLog.recordCausal(name: "pairing.link", outcome: "received")
                         do { try await owner.model.pair(invitation) }
-                        catch is CancellationError { return }
+                        catch is CancellationError {
+                            await owner.model.appLog.recordCausal(name: "pairing.link", outcome: "cancelled", level: "warning")
+                        }
                         catch { owner.model.presentError(error) }
                     }
                 } else if url.host == "share",
