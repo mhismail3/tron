@@ -53,7 +53,8 @@ interface GatewayWorkAdmission {
 export interface GatewayWorkHandle {
   readonly token: string;
   readonly settled: Promise<void>;
-  transition(kind: GatewayWorkKind): void;
+  /** `sessionId` binds work admitted before its session existed to that session, once. */
+  transition(kind: GatewayWorkKind, sessionId?: string): void;
   progress(): void;
   markSuspect(): void;
   settle(): void;
@@ -176,11 +177,15 @@ export class GatewayWorkRegistry {
     const handle: GatewayWorkHandle = {
       token,
       settled,
-      transition: (kind) => {
+      transition: (kind, sessionId) => {
         const current = owned();
         if (!current) return;
         if (!gatewayWorkKinds.includes(kind)) throw new Error("Gateway work kind is invalid");
+        if (sessionId !== undefined && current.sessionId !== undefined && current.sessionId !== sessionId) {
+          throw new Error("Gateway work is already bound to another session");
+        }
         current.kind = kind;
+        if (sessionId !== undefined) current.sessionId = sessionId;
         this.markProgress(current);
         this.publishSessionChange(current.sessionId);
       },

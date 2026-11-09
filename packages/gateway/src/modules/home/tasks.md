@@ -105,6 +105,9 @@ its workflows name); nothing extra is persisted.
   `noticesUndelivered`.
 - A normal stop turn without a report while owned work is live keeps the operation open; the
   provider's wake starts the next turn. `report` is refused while any owned run is live.
+  The task's work entry is bound to its worker session, so an administrative drain waits on
+  it. The drain refuses that wake and a refused wake is never replayed, so once no owned run is
+  live the task settles `unknown:no-report` (resumable) and the drain completes.
 - `home.taskStatus.subagents` is `{ started, stoppedAtEnd }` from canonical evidence;
   `ownerSettlement` proves an `unknown:no-report` cut but never makes it a success.
 - A worker session keeps receiving entries after settlement (a late `subagent-notify`, a

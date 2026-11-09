@@ -199,6 +199,16 @@ export class OwnedTurnOwner {
       && this.operations.hasDetachedDashboardWork();
   }
 
+  /** An administrative drain refuses the provider wake a held task waits for, and a refused wake
+   * is never replayed, so the task can never continue in this process. Once no owned run is live
+   * it settles from its last turn's terminal (no report: resumable), and the drain can complete. */
+  async releaseWaitingTaskForDrain(): Promise<void> {
+    if (!this.waitingTask || this.waitingTask.wakeOperationId !== undefined || this.operations.hasDetachedDashboardWork()) return;
+    const { observer, terminal } = this.waitingTask;
+    this.waitingTask = undefined;
+    await observer(terminal);
+  }
+
   /** Task cancellation follows the root prompt owner, not its disposable
    * presentation primitive (automatic compaction/retry may have another ID). */
   async cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
