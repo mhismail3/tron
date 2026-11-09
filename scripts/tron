@@ -30,11 +30,12 @@ Commands:
                                     every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
-  test gateway [--mini] [vitest args...]
-                                    Run Gateway tests directly with pinned Node; --mini
-                                    runs them on the Mac mini test host (tools/verify/README.md)
+  test gateway [--mini|--local] [vitest args...]
+                                    Run Gateway tests with pinned Node on the test-host pool: the Mac
+                                    mini when reachable and idle, else here (tools/verify/README.md)
   test ios [runner args...]         Run the owned iOS test runner directly (3 host-wide simulator
                                     slots; a 4th job waits; `test ios slots` shows holders)
+  test mac [test classes...]        Build and run the Mac integration tests under a temporary HOME
   test tooling [test files...]      Run Python script integration suites directly
   build gateway                     Build Gateway directly with pinned Node
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
@@ -59,7 +60,7 @@ Commands:
                                     objects to test-results/metrics/<sha>.json;
                                     --compare prints the delta table; never a gate
   verify [--changed] [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
-         [--gateway-host local|mini]
+         [--gateway-host pool|local|mini]
                                     Mechanical none/partial/full tier; affected checks
                                     now, full coverage in the async main batch.
                                     --plan includes dirty paths and exact commands.
@@ -90,11 +91,10 @@ Commands:
   budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
   proof bootstrap|doctor            Install (bootstrap) or re-verify (doctor) the pinned Dafny
                                     proof toolchain in the per-user cache (tools/proof)
-  proof wire --inventory [--json] [--numbers float64|integer]
-                                    Classify every protocol type as expressible by the
-                                    generated wire format, from the pinned tsc's expansion
   proof wire --generate <in.dfy> <out-dir>
                                     Generate TypeScript and Swift codecs from @wire datatypes
+  proof wire --protocol [--check]   Write (or check) the Gateway's protocol types and decoders
+                                    from packages/core/wire/Protocol.dfy
   proof check [<block>...] [--json] Check proof blocks (packages/core/blocks) and the blocks
                                     below them with the pinned toolchain; cached per worktree
   proof mutate <block> [options]    Mutation gate: every change to a block's compiled functions
@@ -185,10 +185,14 @@ case "$cmd" in
     suite="${1:-}"; shift || true
     case "$suite" in
       gateway)
-        if [[ "${1:-}" == --mini ]]; then shift; exec python3 "$ROOT/tools/verify/mini.py" "$@"; fi
-        exec python3 "$ROOT/tools/verify/gateway.py" "$@"
+        case "${1:-}" in
+          --mini) shift; exec python3 "$ROOT/tools/verify/mini.py" "$@" ;;
+          --local) shift; exec python3 "$ROOT/tools/verify/gateway.py" "$@" ;;
+          *) exec python3 "$ROOT/tools/verify/mini.py" pool "$@" ;;
+        esac
         ;;
       ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
+      mac) exec python3 "$ROOT/tools/verify/mac.py" "$@" ;;
       tooling)
         if (($# == 0)); then set -- "$ROOT"/tools/work/tests/test-*.py; fi
         for suite in "$@"; do python3 "$suite"; done
@@ -254,8 +258,7 @@ case "$cmd" in
       wire)
         shift; use_pinned_node
         case "${1:-}" in
-          --inventory) exec node "$ROOT/tools/proof/dafny2wire/inventory.mjs" "$@" ;;
-          --generate) exec node "$ROOT/tools/proof/dafny2wire/dafny2wire.mjs" "$@" ;;
+          --generate|--protocol) exec node "$ROOT/tools/proof/dafny2wire/dafny2wire.mjs" "$@" ;;
           *) usage >&2; exit 64 ;;
         esac
         ;;

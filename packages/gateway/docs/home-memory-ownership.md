@@ -21,7 +21,7 @@ the [Home contract](../src/modules/home/README.md) and
 | Browser admission, cursor encoding and display projection | `episodic/home-memory-browser.ts`; `EpisodicMemory` constructs pages | Episodic |
 | Canonical JSONL parsing, branch reads and digests | `kernel/session/canonical-reader.ts` | `src/session-catalog.module.json` |
 | Canonical live runtime and mutation ordering | `kernel/session/runtime-registry.ts`, `kernel/run/runtime-slot.ts` | `src/run.module.json` |
-| Wire shapes and RPC dispatch | `protocol/types.ts`; `transport/gateway-service.ts`, `server.ts` | `src/protocol/protocol.module.json`; `src/transport/transport.module.json` |
+| Wire shapes and RPC dispatch | `packages/core/wire/Protocol.dfy` (generates `protocol/types.ts`); `transport/gateway-service.ts`, `server.ts` | `src/protocol/protocol.module.json`; `src/transport/transport.module.json` |
 
 Paths in the table are relative to `packages/gateway/src/`, except manifest paths,
 which are relative to `packages/gateway/`. Home and episodic are L3 capability
