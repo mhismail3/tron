@@ -13,7 +13,8 @@ import type { HomeWakeEvent } from "./home-wake-inbox.js";
  * `gateway/home` Home task store write paths (packages/gateway/docs/scenario-locks.md#persisted-stores-v4):
  * setup, authority saves, task put/update/wake publication, record admission, paging and
  * temporary recovery. Each step asserts its exact result or refusal, and the whole
- * `gateway/home/tasks` directory (literal file names, exact documents) after it, under a
+ * `gateway/home/tasks` directory (literal file names, exact documents) is asserted after
+ * every write and after each run of refusals, under a
  * fixed clock, so a changed write, name or refusal fails here. `store-home-tasks` pins
  * reading the committed format back.
  */
@@ -72,7 +73,7 @@ async function drive(home: string, store: HomeTaskStore): Promise<void> {
     const { nextCursor, ...rest } = await store.page(input);
     return { ...rest, nextCursor: nextCursor !== undefined };
   };
-  /** The files the store must hold, by literal name; each step updates it, then the directory must equal it. */
+  /** The files the store must hold, by literal name; a write updates it, then the directory must equal it at each checkpoint. */
   const expected: Record<string, unknown> = {};
   const holds = async (label: string) => {
     const names = await readdir(tasks).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
