@@ -135,6 +135,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @Binding var isPresented: Bool
     let identity: String
     let dependencies: Set<PresentationRefreshDependency>?
+    let keepsPresenterViewport: Bool
     /// The presenting call site: two presenters that share an identity string
     /// still keep separate presentation state.
     let site: String
@@ -155,11 +156,13 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @State private var claimant = UUID() // view-local: this view's claim on the shared key
     @State private var localStateStore = PresentationStateStore() // view-local: standalone fallback outside a scene store
 
-    init(isPresented: Binding<Bool>, identity: String, dependencies: Set<PresentationRefreshDependency>?, site: String, onDismiss: (() -> Void)?,
+    init(isPresented: Binding<Bool>, identity: String, dependencies: Set<PresentationRefreshDependency>?,
+         keepsPresenterViewport: Bool, site: String, onDismiss: (() -> Void)?,
          haptic: TronHaptic?, sheetContent: @escaping () -> SheetContent) {
         _isPresented = isPresented
         self.identity = identity
         self.dependencies = dependencies
+        self.keepsPresenterViewport = keepsPresenterViewport
         self.site = site
         self.onDismiss = onDismiss
         self.haptic = haptic
@@ -188,7 +191,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
             owner: nativeHost,
             content: AnyView(Color.clear.accessibilityHidden(true).sheet(isPresented: $isPresented, onDismiss: didDismiss) {
                 let token = lease.contentToken(identity: identity)
-                TronPresentationSurface(token: token, parent: parent) {
+                TronPresentationSurface(token: token, parent: parent, keepsParentViewport: keepsPresenterViewport) {
                     sheetContent().environment(\.chatOwnsStatusBar, false)
                 }
                 .tronPadSheetPresentation()
@@ -234,7 +237,8 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
 
     private func registerIfPossible(live: Bool) {
         if let token = lease.register(identity: identity) {
-            coordinator?.register(token, parent: parent, dependencies: dependencies)
+            coordinator?.register(token, parent: parent, dependencies: dependencies,
+                                  keepsParentViewport: keepsPresenterViewport)
             if live { lease.expectAppearance(of: token) }
         }
     }
@@ -462,11 +466,14 @@ private struct TronManagedSystemPresentationModifier: ViewModifier {
 extension View {
     /// `instance` names a presenter that repeats inside one surface (a chip in
     /// a `ForEach`) when its `identity` does not; see `ManagedSheetPresenterClaims`.
+    /// `keepsPresenterViewport`: a partial sheet that shows its presenter
+    /// behind it keeps the presenter's viewport work live.
     func tronManagedSheet<SheetContent: View>(
         isPresented: Binding<Bool>,
         instance: String? = nil,
         identity: String,
         dependencies: Set<PresentationRefreshDependency>? = nil,
+        keepsPresenterViewport: Bool = false,
         onDismiss: (() -> Void)? = nil,
         presentationHaptic: TronHaptic? = .sheetPresented,
         fileID: String = #fileID,
@@ -477,6 +484,7 @@ extension View {
             isPresented: isPresented,
             identity: identity,
             dependencies: dependencies,
+            keepsPresenterViewport: keepsPresenterViewport,
             site: "\(fileID):\(line)" + (instance.map { "#\($0)" } ?? ""),
             onDismiss: onDismiss,
             haptic: presentationHaptic,

@@ -18,6 +18,7 @@ struct HostedChatAnnotationFixture: View {
     @State private var ready = false
     @State private var error: String?
     @State private var lastPrompt = "none"
+    @State private var reveals: [String] = []
     private let profile: GatewayProfile
     private let snapshot: SessionSnapshot
     private let socket = HostedChatAnnotationSocket()
@@ -74,8 +75,17 @@ struct HostedChatAnnotationFixture: View {
                 .font(.system(size: 1)).opacity(0.01)
                 .accessibilityIdentifier("fixture.last-prompt")
                 .allowsHitTesting(false)
+            // Each revealed source ("shown|quote|minY|maxY") and its clearing.
+            Text(reveals.isEmpty ? "none" : reveals.joined(separator: ";"))
+                .font(.system(size: 1)).opacity(0.01)
+                .accessibilityIdentifier("fixture.reveals")
+                .allowsHitTesting(false)
         }
         .task {
+            ChatAnnotationPresenter.hostedReveals = { quote, frame in
+                reveals.append(frame.map { "shown|\(quote)|\(Int($0.minY.rounded(.down)))|\(Int($0.maxY.rounded(.up)))" }
+                    ?? "cleared|\(quote)")
+            }
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
                 model.invalidateHostedPendingPresentation()

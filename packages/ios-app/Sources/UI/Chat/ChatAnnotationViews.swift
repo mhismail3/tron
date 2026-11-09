@@ -44,7 +44,9 @@ struct ComposerAnnotationChip: View {
         }
         .tronManagedSheet(
             isPresented: $showsDetail,
-            identity: "composer.annotation.\(annotation.id)"
+            identity: "composer.annotation.\(annotation.id)",
+            // Its quote reveals the source in the chat behind the sheet.
+            keepsPresenterViewport: true
         ) {
             ChatAnnotationSheet(annotation: annotation, editing: .init(onSave: onSave, onDelete: onRemove))
         }
@@ -141,8 +143,6 @@ struct ChatAnnotationSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.chatAnnotationPresenter) private var presenter
     @PresentationState private var comment: String
-    /// Set by tapping the quote: the source is revealed once the sheet is gone.
-    @State private var revealsSource = false // view-local: set only between the quote tap and this sheet's disappearance
 
     init(annotation: ChatAnnotation, editing: Editing?) {
         self.annotation = annotation
@@ -168,10 +168,7 @@ struct ChatAnnotationSheet: View {
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("chat.annotation.quote")
                         .modifier(ChatAnnotationQuoteReveal(enabled: presenter != nil && annotation.anchor != nil) {
-                            // Like Save: keep the edited comment, then show the source.
-                            editing?.onSave(comment.trimmingCharacters(in: .whitespacesAndNewlines))
-                            revealsSource = true
-                            dismiss()
+                            presenter?.reveal(annotation)
                         })
                     }
                     VStack(alignment: .leading, spacing: 8) {
@@ -229,9 +226,9 @@ struct ChatAnnotationSheet: View {
                 }
             }
         }
-        .onDisappear {
-            if revealsSource { presenter?.reveal(annotation) }
-        }
+        // The sheet's top bounds where a revealed source may land.
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { presenter?.sheetTop = $0 }
+        .onDisappear { presenter?.sheetTop = nil }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)

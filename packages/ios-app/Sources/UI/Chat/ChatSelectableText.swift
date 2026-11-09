@@ -42,6 +42,7 @@ final class ChatAnnotationPresenter {
             pending = nil
             endReveal()
             revealed = nil
+            revealSheetTop = nil
         }
     }
 
@@ -90,12 +91,15 @@ final class ChatAnnotationPresenter {
     /// window height: below the navigation bar.
     static let revealBandTop: CGFloat = 0.14
     private static let maximumRevealScrolls = 3
+    /// Frames a landed reveal scroll waits for its source to hold still.
+    static let maximumSettleFrames = 30
 
     private(set) var revealScroll: RevealScroll?
 
-    /// The last revealed source, for assistive technologies: the transcript
-    /// row exposes it as an element over the range until the next reveal.
+    /// The revealed source, for assistive technologies: the transcript row
+    /// exposes it as an element over the range while its highlight shows.
     struct RevealedSource: Equatable {
+        let id = UUID()
         let itemID: String
         let blockKey: String
         let quote: String
@@ -104,6 +108,12 @@ final class ChatAnnotationPresenter {
     }
     private(set) var revealed: RevealedSource?
 
+    #if HOSTED_TEST
+    /// Hosted journeys read each revealed source (its window frame) and its
+    /// clearing (nil): both fall inside XCUITest's idle wait after the tap.
+    static var hostedReveals: (@MainActor (_ quote: String, _ windowFrame: CGRect?) -> Void)?
+    #endif
+
     func revealed(itemID: String, blockKey: String) -> RevealedSource? {
         guard let revealed, revealed.itemID == itemID, revealed.blockKey == blockKey else { return nil }
         return revealed
@@ -111,6 +121,15 @@ final class ChatAnnotationPresenter {
     /// The composer's top (with its staged chips) in window coordinates, the
     /// band's bottom; ChatView keeps it current.
     @ObservationIgnored var revealBottom: CGFloat?
+    /// The open annotation sheet's top in window coordinates; the source
+    /// lands above it.
+    @ObservationIgnored var sheetTop: CGFloat? {
+        didSet { if revealSheetTop != nil { revealSheetTop = sheetTop } }
+    }
+    /// The sheet's top once one of its quotes revealed: the transcript keeps
+    /// that much clearance so its content scrolls above the sheet, until the
+    /// sheet closes.
+    private(set) var revealSheetTop: CGFloat?
     @ObservationIgnored var reduceMotion = false
     @ObservationIgnored private var reveal: Reveal?
     @ObservationIgnored private var sources: [SourceKey: WeakSource] = [:]
@@ -125,6 +144,9 @@ final class ChatAnnotationPresenter {
         guard let anchor = annotation.anchor else { return }
         revealed = nil
         reveal = Reveal(anchor: anchor, quote: annotation.quote)
+        // The transcript makes room above an open sheet; the measured
+        // scrolls below converge on the source as that layout lands.
+        if let sheetTop { revealSheetTop = sheetTop }
         if !placeReveal() { request(.row(itemID: anchor.itemID)) }
     }
 
@@ -146,6 +168,15 @@ final class ChatAnnotationPresenter {
         sources = sources.filter { $0.value.view != nil && $0.value.view !== view }
     }
 
+    /// The pending reveal's source range in window coordinates, when mounted.
+    var revealSourceFrame: CGRect? {
+        guard let reveal,
+              let view = sources[SourceKey(itemID: reveal.anchor.itemID, blockKey: reveal.anchor.blockKey)]?.view,
+              let window = view.window,
+              NSMaxRange(reveal.anchor.range) <= view.attributedText.length else { return nil }
+        return view.convert(view.bounds(of: reveal.anchor.range), to: window)
+    }
+
     /// Measures the mounted source: flashes it when it is in the band (or no
     /// scroll can improve it), otherwise asks for the measured scroll. False
     /// when the source is not mounted.
@@ -156,22 +187,36 @@ final class ChatAnnotationPresenter {
               NSMaxRange(reveal.anchor.range) <= view.attributedText.length else { return false }
         let rect = view.convert(view.bounds(of: reveal.anchor.range), to: window)
         let top = window.bounds.height * Self.revealBandTop
-        let bottom = max(top + 1, (revealBottom ?? window.bounds.height * 0.5) - 12)
-        if (rect.minY >= top && rect.maxY <= bottom) || reveal.scrolls >= Self.maximumRevealScrolls {
-            view.flash(reveal.anchor.range, reduceMotion: reduceMotion)
-            revealed = RevealedSource(
+        let obstruction = min(revealBottom ?? window.bounds.height * 0.5, sheetTop ?? .infinity)
+        let bottom = max(top + 1, obstruction - 12)
+        // A source taller than the band starts at its top.
+        let tall = rect.height > bottom - top
+        let placed = tall ? abs(rect.minY - top) <= 1 : rect.minY >= top && rect.maxY <= bottom
+        if placed || reveal.scrolls >= Self.maximumRevealScrolls {
+            let source = RevealedSource(
                 itemID: reveal.anchor.itemID,
                 blockKey: reveal.anchor.blockKey,
                 quote: reveal.quote,
                 rect: view.bounds(of: reveal.anchor.range)
             )
+            revealed = source
+            #if HOSTED_TEST
+            Self.hostedReveals?(source.quote, rect)
+            #endif
+            // The element lives as long as the highlight it describes.
+            view.flash(reveal.anchor.range, reduceMotion: reduceMotion) { [weak self] in
+                guard let self, self.revealed?.id == source.id else { return }
+                self.revealed = nil
+                #if HOSTED_TEST
+                Self.hostedReveals?(source.quote, nil)
+                #endif
+            }
             endReveal()
             return true
         }
         reveal.scrolls += 1
         self.reveal = reveal
-        // A source taller than the band starts at its top.
-        let target = rect.height > bottom - top ? top : (top + bottom - rect.height) / 2
+        let target = tall ? top : (top + bottom - rect.height) / 2
         request(.visualOffset(rect.minY - target))
         return true
     }
@@ -522,7 +567,9 @@ class ChatSelectableTextView: UITextView {
 
     /// A brief amber pulse over `range` that fades; with Reduce Motion only
     /// the fade.
-    func flash(_ range: NSRange, reduceMotion: Bool) {
+    /// `faded` runs once the highlight is gone, also when a re-render
+    /// removes it early.
+    func flash(_ range: NSRange, reduceMotion: Bool, faded: @escaping () -> Void) {
         clearRevealedSource()
         var rects: [CGRect] = []
         if let start = position(from: beginningOfDocument, offset: range.location),
@@ -531,7 +578,7 @@ class ChatSelectableTextView: UITextView {
             rects = selectionRects(for: textRange).map(\.rect).filter { !$0.isEmpty }
         }
         let union = rects.reduce(CGRect.null) { $0.union($1) }
-        guard !union.isNull else { return }
+        guard !union.isNull else { faded(); return }
         let container = UIView(frame: union)
         container.isUserInteractionEnabled = false
         let tint = UIColor(Color.tronAmber).resolvedColor(with: traitCollection).withAlphaComponent(0.5)
@@ -545,6 +592,7 @@ class ChatSelectableTextView: UITextView {
         addSubview(container)
         flashView = container
         let finish = { [weak self, weak container] (_: Bool) in
+            faded()
             guard let self, let container, self.flashView === container else { return }
             container.removeFromSuperview()
             self.flashView = nil

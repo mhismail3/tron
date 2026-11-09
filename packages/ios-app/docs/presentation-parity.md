@@ -305,6 +305,8 @@ canonical state, is never persisted, and is not a second state authority.
   polls, automatic presentation, animation or viewport observation.
   An accepted command's outcome (a refusal behind a retiring review card) also publishes under
   that gate, into state the surface's restarted reads do not clear.
+  A partial sheet that shows its presenter (`keepsPresenterViewport`, the staged annotation
+  sheet) leaves its direct parent's viewport work live.
 - Surface tokens are generation-qualified; a bounded tombstone ledger rejects content arriving
   after its generation retired. Binding intent registers a child before its transition, and a
   dismissal lease keeps the retiring generation until SwiftUI's callback. The sheet haptic

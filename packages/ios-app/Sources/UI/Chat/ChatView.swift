@@ -1294,6 +1294,7 @@ struct ChatView: View {
             responseState: responseState,
             mutatingQueuedMessageIDs: sessionPresentation.mutatingQueuedMessageIDs,
             orientation: transcriptOrientation,
+            revealSheetTop: annotationPresenter.revealSheetTop,
             scrollPosition: $transcriptScrollPosition,
             earlierRow: { installed in earlierMessagesChip(installed: installed) },
             openingSurface: {
@@ -2627,12 +2628,22 @@ struct ChatView: View {
             }
         }
         // An annotation reveal measures its source once the scroll has landed:
-        // when its animation completes, or a display frame after a jump. A
-        // reader who took the transcript in between ends the reveal.
+        // after its animation completes (or the jump), when the source's frame
+        // holds still between display frames; lazy rows can keep settling for
+        // a few frames. A reader who took the transcript in between ends it.
         let landed: () -> Void = command.origin == .annotationReveal
-            ? { [annotationPresenter, scrollCoordinator] in
-                if scrollCoordinator.isUserInteracting { annotationPresenter.endReveal() }
-                else { annotationPresenter.revealScrollLanded() }
+            ? { [annotationPresenter, scrollCoordinator, displayFrameScheduler] in
+                Task { @MainActor in
+                    var previous: CGRect?
+                    for _ in 0..<ChatAnnotationPresenter.maximumSettleFrames {
+                        do { try await displayFrameScheduler.nextFrame() } catch { return }
+                        let frame = annotationPresenter.revealSourceFrame
+                        if frame == previous { break }
+                        previous = frame
+                    }
+                    if scrollCoordinator.isUserInteracting { annotationPresenter.endReveal() }
+                    else { annotationPresenter.revealScrollLanded() }
+                }
             }
             : {}
         switch command.animation {
@@ -2642,12 +2653,7 @@ struct ChatView: View {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction, update)
-            if command.origin == .annotationReveal {
-                Task { @MainActor [displayFrameScheduler] in
-                    do { try await displayFrameScheduler.nextFrame() } catch { return }
-                    landed()
-                }
-            }
+            landed()
         }
         // The coordinator keeps this exact token installed through its native
         // opening/catch-up/semantic settlement, then publishes a leased release.

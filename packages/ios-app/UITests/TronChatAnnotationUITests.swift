@@ -330,8 +330,10 @@ final class TronChatAnnotationUITests: XCTestCase {
                       String(describing: composer.value))
     }
 
-    /// Tapping the sheet's quote closes it, scrolls the transcript to the
-    /// selected range, even when it has scrolled off screen, and flashes it.
+    /// Tapping the sheet's quote keeps the sheet open and scrolls the transcript
+    /// behind it to the selected range, even when it has scrolled off screen,
+    /// above the sheet, and flashes it; the revealed element clears with the
+    /// flash, plain or under Reduce Motion.
     /// The sent sheet's comment uses the quote's text size (equal text, equal
     /// height), at the default size in dark and light and at the largest
     /// accessibility size.
@@ -381,13 +383,28 @@ final class TronChatAnnotationUITests: XCTestCase {
 
         let quoted = quote.label
         quote.tap()
+        // The highlight and its element last about a second, inside XCUITest's
+        // idle wait after the tap, so the fixture records each reveal's window
+        // frame and its clearing.
+        let reveals = app.staticTexts["fixture.reveals"]
+        XCTAssertTrue(wait { reveals.label.contains("cleared|") },
+                      "The quote reveals its source and clears it with the highlight: \(reveals.label)")
+        keepScreenshot(app, "quote-reveal-sheet-open-source-\(name)")
+        let shown = reveals.label.components(separatedBy: ";").first { $0.hasPrefix("shown|") }?
+            .components(separatedBy: "|") ?? []
+        XCTAssertEqual(shown.count, 4, reveals.label)
+        XCTAssertEqual(shown[1], quoted)
+        XCTAssertEqual(reveals.label, "shown|\(quoted)|\(shown[2])|\(shown[3]);cleared|\(quoted)", "One reveal, cleared once")
+        XCTAssertTrue(quote.exists, "The sheet stays open over the revealed source")
         let flash = app.descendants(matching: .any)["chat.annotation.revealed-source"]
-        XCTAssertTrue(flash.waitForExistence(timeout: 5), "The quote reveals its source: \(app.debugDescription)")
-        XCTAssertEqual(flash.label, quoted)
-        XCTAssertFalse(quote.exists, "The sheet closes to show the source")
-        XCTAssertGreaterThanOrEqual(flash.frame.minY, navigationBottom, "Revealed below the navigation bar: \(flash.frame)")
-        XCTAssertLessThanOrEqual(flash.frame.maxY, chip.frame.minY, "Revealed above the staged chip: \(flash.frame)")
-        keepScreenshot(app, "quote-reveal-source-\(name)")
+        XCTAssertFalse(flash.exists, "The revealed source's element clears with its highlight")
+        let sheetTop = app.navigationBars.containing(NSPredicate(format: "label == 'Save annotation'")).firstMatch.frame.minY
+        let minY = CGFloat(Int(shown[2]) ?? -1), maxY = CGFloat(Int(shown[3]) ?? .max)
+        XCTAssertGreaterThanOrEqual(minY, navigationBottom, "Revealed below the navigation bar: \(shown)")
+        XCTAssertLessThanOrEqual(maxY, min(chip.frame.minY, sheetTop),
+                                 "Revealed above the sheet (\(sheetTop)) and the staged chip (\(chip.frame.minY)): \(shown)")
+        app.buttons["Save annotation"].tap()
+        XCTAssertTrue(wait(for: quote, exists: false))
 
         // The sent annotation's read-only comment uses the quote's text size.
         app.textViews["Message input"].tap()

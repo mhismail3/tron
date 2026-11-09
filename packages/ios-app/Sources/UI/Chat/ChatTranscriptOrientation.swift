@@ -213,6 +213,9 @@ extension ChatTranscriptOrientation {
 /// the transcript keeps the last active scene's obstructions; a change that
 /// survives reactivation then applies as an ordinary active-scene layout.
 struct ChatTranscriptViewport<Content: View>: View {
+    /// The global top of a partial sheet over the transcript, whose content
+    /// must be able to scroll above it; nil when none is.
+    var sheetTop: CGFloat? = nil
     @ViewBuilder let content: (EdgeInsets) -> Content
     @Environment(\.scenePhase) private var scenePhase
     @State private var activeSceneInsets: EdgeInsets?
@@ -220,7 +223,7 @@ struct ChatTranscriptViewport<Content: View>: View {
     @ViewBuilder var body: some View {
         GeometryReader { insets in
             GeometryReader { viewport in
-                content(obstructions(live: insets.safeAreaInsets))
+                content(covered(obstructions(live: insets.safeAreaInsets), viewport: viewport.frame(in: .global)))
                     .frame(width: viewport.size.width, height: viewport.size.height)
             }
             .ignoresSafeArea(.all, edges: .vertical)
@@ -229,6 +232,13 @@ struct ChatTranscriptViewport<Content: View>: View {
                 if current.active { activeSceneInsets = current.insets }
             }
         }
+    }
+
+    private func covered(_ insets: EdgeInsets, viewport: CGRect) -> EdgeInsets {
+        guard let sheetTop else { return insets }
+        var covered = insets
+        covered.bottom = max(insets.bottom, viewport.maxY - sheetTop)
+        return covered
     }
 
     private func obstructions(live: EdgeInsets) -> EdgeInsets {
