@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
+import { expectRequestShapes } from "../../../test-support/lock-projections.js";
 import { notificationsPushScenario, PUSH_RELAY_ORIGIN } from "../../../test-support/lock-scenarios.js";
 
 /**
@@ -17,13 +17,12 @@ import { notificationsPushScenario, PUSH_RELAY_ORIGIN } from "../../../test-supp
  * exact push envelopes), every notification receipt (queued, suppressed), the
  * phone's inbox and its push, presentation and answer responses, as explicit checks.
  *
- * The golden keeps only what crosses a boundary another party reads verbatim: the
- * client event schemas the phone decodes (topic and payload paths) and the provider
- * requests the model receives (tool names, prompt sections, prompt hash and
- * messages, including the task worker's report reminder).
+ * Each provider request's tools, prompt sections and prompt hash must equal its
+ * `session-shapes` shape, and its messages are checked inline; the client event
+ * schemas the phone decodes are pinned by `client-event-schemas`, which runs this
+ * same scenario.
  */
 
-const MODULE = "gateway/e2e";
 const owned: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });
 
@@ -69,17 +68,22 @@ describe("gateway/notifications push lock", () => {
         entry("agent_finished", "finish the quiet run", "The agent finished responding.", false),
       ], revision: expect.stringMatching(/^[0-9a-f]{32}$/u), unreadCount: 2 } });
     expect(workerRoles, "the task worker ran a turn and its reminder turn").toEqual(["system", "user", "assistant", "assistant"]);
-    const recorded = gateway.record();
-    const trace = {
-      lock: "notifications-push",
-      events: recorded.events,
-      providerRequests: recorded.providerRequests as unknown as TraceValue[],
-    };
-    await compareWithGolden({
-      module: MODULE, ...lockPaths(import.meta.url, "notifications-push"), trace, update: lockUpdateRequested(MODULE),
-      validate: () => {
-        expect(recorded.providerRequests, "seven chat provider requests and the worker's two").toHaveLength(9);
-      },
-    });
+    // The model receives the chat's growing conversation, then the worker's turn and its report reminder (the
+    // reminder request has the task worker's shape; its text is the last message).
+    const requests = gateway.record().providerRequests;
+    expectRequestShapes(requests, [...Array.from({ length: 7 }, () => "chatWithNotificationsSelect"), "taskWorker", "taskWorker"]);
+    const select = (text: string) => [{ role: "assistant", text: "", toolCalls: ["lock_select"] }, { role: "toolResult", text: "chosen: Keep", toolName: "lock_select" },
+      { role: "assistant", text }];
+    const chat = [
+      { role: "user", text: "finish the quiet run" }, { role: "assistant", text: "Finished the quiet run." },
+      { role: "user", text: "ask me while I am away" }, ...select("Keeping the hidden path."),
+      { role: "user", text: "ask me while I am watching" }, ...select("Keeping the presented path."),
+      { role: "user", text: "fail this run" }, { role: "assistant", text: "partial" }, { role: "user", text: "start a run to stop" },
+    ];
+    const worker = [{ role: "user", text: "do the lock task" }, { role: "assistant", text: "Worker reply without a report." }, { role: "user",
+      text: "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input "
+        + "for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report." }];
+    expect(requests.map((request) => request.messages), "each request's messages: the chat's turns so far, then the worker's turn and its reminder").toEqual([
+      ...[1, 3, 5, 7, 9, 11, 13].map((count) => chat.slice(0, count)), worker.slice(0, 1), worker]);
   });
 });

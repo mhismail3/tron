@@ -650,6 +650,23 @@ class FastPathTests(VerifyCase):
         refused = r.verify("--changed", "--plan")
         self.assertNotEqual(refused.returncode, 0, refused.stdout)
         self.assertIn("no lock beside packages/gateway/src/e2e/two/locks/unread.golden.json reads it", refused.stdout + refused.stderr)
+        # A lock converted to inline checks deletes its golden: that lock is selected, nothing is refused.
+        r.git("reset", "-q", "--hard", "base")
+        r.git("rm", "-q", f"{base}/one/locks/state.golden.json")
+        r.write(f"{base}/one/one.lock.integration.test.ts", "// inline checks\n")
+        r.commit("one lock converted")
+        converted = r.verify("--changed", "--plan")
+        self.assertEqual(converted.returncode, 0, converted.stdout + converted.stderr)
+        self.assertEqual(json.loads(converted.stdout[converted.stdout.index("{\n"):])["selection"]["tests"],
+                         [f"{base}/one/one.lock.integration.test.ts"], converted.stdout)
+        # A golden deleted while its lock still names it reruns that lock (the lock now fails for want of it).
+        r.git("reset", "-q", "--hard", "base")
+        r.git("rm", "-q", f"{base}/one/locks/state.golden.json")
+        r.commit("one golden deleted, lock unchanged")
+        orphaned = r.verify("--changed", "--plan")
+        self.assertEqual(orphaned.returncode, 0, orphaned.stdout + orphaned.stderr)
+        self.assertEqual(json.loads(orphaned.stdout[orphaned.stdout.index("{\n"):])["selection"]["tests"],
+                         [f"{base}/one/one.lock.integration.test.ts"], orphaned.stdout)
 
     def test_a_change_to_only_tests_or_goldens_runs_those_tests_and_the_goldens_locks(self) -> None:
         r = self.repo
