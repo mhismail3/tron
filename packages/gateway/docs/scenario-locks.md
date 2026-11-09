@@ -13,8 +13,9 @@ its provider requests and event shapes (the latter also pinned by
 `client-event-schemas`). `notifications-queued-restart`, `notifications-queued-cancel`, the five `run.lock` scenarios (`run-prompt-stream`, `run-steer`, `run-abort`, `run-compaction`, `run-extension-ui`), `run-queue-control`, `project-root-trust`, `project-root-resources`, `run-lifecycle-rpcs`, `transport-reconnect-snapshot`, `admin-settings-change`, `automation-owned-run`, `run-cold-load-eviction`, `run-drain-snapshot`, `run-eviction-choice`, `run-drain-blockers` and the store mutation-path tests in the paragraph after the table
 assert named effects only. `delegation-subagent` and `home-contention-restart` keep a
 narrowed golden of the entries no other lock covers, plus an `inlineTrace` in
-the same golden for the remaining ordered trace. The other scenario locks in the
-table below compare whole-scenario goldens.
+the same golden for the remaining ordered trace. `home-activation-wake` asserts its
+trace inline and keeps a narrowed golden of its model-visible text: every provider
+request and both system entries.
 
 ## Framework
 
@@ -256,7 +257,8 @@ Human before/after approval is for new design or intended visible changes, not
 unchanged behavior or repeated schema metadata. A refactor never rewrites one.
 
 `home-activation-wake` is the canonical real Home/worker shared tool-schema
-check: its narrowed golden keeps both runtimes' system entries with full declarations. Other traces retain declaration names, ordering and constrained sampling,
+check: its narrowed golden keeps both runtimes' system entries with full
+declarations. Other traces retain declaration names, ordering and constrained sampling,
 not duplicated descriptions/parameters or their wire-shape subtrees. Tools absent
 from that canonical capture retain their full schema with their owning scenario. Only schema blocks are
 projected away; lifecycle fields, tool visibility, receipts and validation remain.
