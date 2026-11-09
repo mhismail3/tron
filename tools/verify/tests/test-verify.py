@@ -476,6 +476,46 @@ class GatewayDependenciesTests(VerifyCase):
         passed = r.verify("--changed")
         self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
 
+    def test_a_relay_test_runs_in_the_relay_lane_on_its_installed_lockfile(self) -> None:
+        # A relay-only change once ended `incomplete` or, skipped, `zero tests ran`: no passing path (#2299).
+        r = self.repo
+        relay = "packages/push-relay"
+        lock = {"lockfileVersion": 3, "packages": {"": {"name": "push-relay"}, "node_modules/vitest": {"version": "5.0.5", "integrity": "sha512-v"}}}
+        r.write(f"{relay}/package-lock.json", json.dumps(lock))
+        r.write(f"{relay}/relay.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
+        r.write(f"{relay}/src/registry.ts", "export const value = 1;\n")
+        r.write(f"{relay}/tests/worker.integration.test.ts", "// run by the relay's Vitest\n")
+        r.write(".gitignore", f"test-results/\n{relay}/node_modules/\n")
+        # scripts/tron-node execs the package's npm: here a producer of Vitest's JSON report protocol.
+        r.write("scripts/tron-node", '#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
+        (r.path / "scripts/tron-node").chmod(0o755)
+        tooling = json.loads((r.path / "tooling.module.json").read_text())
+        tooling["owns"].append("scripts/tron-node")
+        r.write("tooling.module.json", json.dumps(tooling))
+        npm = Path(self.temp.name) / "bin" / "npm"
+        npm.parent.mkdir()
+        npm.write_text("#!/usr/bin/env python3\nimport json,pathlib,sys\n"
+                       "out=next(a.split('=',1)[1] for a in sys.argv if a.startswith('--outputFile.json='))\n"
+                       "pathlib.Path('ran').write_text(' '.join(sys.argv[1:]))\n"
+                       "pathlib.Path(out).write_text(json.dumps({'numPassedTests':3,'numFailedTests':0,'testResults':[]}))\n")
+        npm.chmod(0o755)
+        r.env["PATH"] = str(npm.parent) + os.pathsep + r.env["PATH"]
+        r.commit("relay")
+        r.git("branch", "-f", "base")
+        r.write(f"{relay}/src/registry.ts", "export const value = 2;\n")
+        r.commit("relay-only change")
+        missing = r.verify("--changed")
+        self.assertEqual(missing.returncode, 2, missing.stdout + missing.stderr)
+        self.assertIn(f"Relay dependencies are not installed; prepare this worktree with: scripts/tron-node exec npm --prefix {relay} ci --include=dev", missing.stderr)
+        self.assertNotIn("[1/", missing.stdout, "a step ran before the refusal")
+        r.write(f"{relay}/node_modules/.package-lock.json", json.dumps({"lockfileVersion": 3, "packages": {"node_modules/vitest": lock["packages"]["node_modules/vitest"]}}))
+        passed = r.verify("--changed")
+        self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+        self.assertEqual((r.path / relay / "ran").read_text().split()[:2], ["test", "--"])
+        self.assertTrue((r.path / relay / "ran").read_text().endswith("tests/worker.integration.test.ts"))
+        report = r.report()
+        self.assertEqual((report["verdict"], report["passingTests"]), ("passed", 3))
+
 
 class SelectionTests(VerifyCase):
     def test_one_module_change_runs_only_its_tests_and_a_failure_fails_loudly(self) -> None:

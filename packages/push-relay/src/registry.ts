@@ -28,6 +28,11 @@ import {
 import { json } from "./response";
 import { isOpaqueId, validateNotification, validateRegistration } from "./validation";
 
+/** A registration that lost to concurrent or replayed authority: a spent challenge, an attested key, a stale assertion. */
+class RegistrationConflict extends Error {}
+/** The registry is at its installation or grant bound. */
+class RegistrationCapacity extends Error {}
+
 const CHALLENGE_TTL_SECONDS = 5 * 60;
 const MAX_ACTIVE_CHALLENGES = 4096;
 const MAX_CHALLENGES_PER_MINUTE = 300;
@@ -201,7 +206,7 @@ export class PushRegistry {
       const result = await this.state.storage.transaction(async (): Promise<RegistrationResult> => {
         const currentChallenge = this.challenge(registration.challengeId);
         if (!currentChallenge || currentChallenge.consumed_at !== null || currentChallenge.expires_at < epochSeconds()) {
-          throw new Error("challenge_replayed");
+          throw new RegistrationConflict("challenge_replayed");
         }
         this.state.storage.sql.exec("UPDATE challenges SET consumed_at = ? WHERE challenge_id = ?", epochSeconds(), registration.challengeId);
 
@@ -215,9 +220,9 @@ export class PushRegistry {
           this.state.storage.sql.exec("UPDATE grants SET enabled = 0, updated_at = ? WHERE installation_id = ?", now, tokenOwner.installation_id);
         }
         if (registration.proof === "attestation") {
-          if (installation) throw new Error("key_already_attested");
+          if (installation) throw new RegistrationConflict("key_already_attested");
           const installationCount = this.state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM installations").one().count;
-          if (Number(installationCount) >= MAX_INSTALLATIONS) throw new Error("installation_capacity");
+          if (Number(installationCount) >= MAX_INSTALLATIONS) throw new RegistrationCapacity("installation_capacity");
           const installationId = randomOpaqueId();
           this.state.storage.sql.exec(
             `INSERT INTO installations
@@ -232,7 +237,7 @@ export class PushRegistry {
           // disabled by a token rejection or replacement attestation meanwhile.
           if (!installation || installation.enabled !== 1 || installation.route !== registration.route
             || Number(installation.assertion_counter) >= counter) {
-            throw new Error("assertion_replayed");
+            throw new RegistrationConflict("assertion_replayed");
           }
           this.state.storage.sql.exec(
             "UPDATE installations SET apns_token = ?, token_hash = ?, assertion_counter = ?, updated_at = ? WHERE installation_id = ?",
@@ -248,7 +253,7 @@ export class PushRegistry {
             "SELECT COUNT(*) AS count FROM grants WHERE installation_id = ?", installation.installation_id,
           ).one().count;
           if (Number(grantCount) >= MAX_GRANTS || Number(installationGrantCount) >= MAX_GRANTS_PER_INSTALLATION) {
-            throw new Error("grant_capacity");
+            throw new RegistrationCapacity("grant_capacity");
           }
           const grantId = randomOpaqueId();
           const secret = randomOpaqueId(32);
@@ -287,10 +292,10 @@ export class PushRegistry {
       });
       return json(result, 201);
     } catch (error) {
-      if ((error as Error).message === "installation_capacity" || (error as Error).message === "grant_capacity") {
-        return json({ error: "temporarily_unavailable" }, 503);
-      }
-      return json({ error: "registration_conflict" }, 409);
+      if (error instanceof RegistrationCapacity) return json({ error: "temporarily_unavailable" }, 503);
+      if (error instanceof RegistrationConflict) return json({ error: "registration_conflict" }, 409);
+      // Anything else is a server fault: the transaction rolled back, and the Worker answers 503 temporarily_unavailable.
+      throw error;
     }
   }
 

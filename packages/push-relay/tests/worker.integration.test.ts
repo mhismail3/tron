@@ -437,6 +437,23 @@ describe("v3 Worker boundary", () => {
     expect(active).toEqual(expect.objectContaining({ grant_id: replacement.grantId, enabled: 1 }));
   });
 
+  test("reports a storage fault inside the registration transaction as a server fault, not a conflict, and rolls it back", async () => {
+    const registration = await assertionRegistration();
+    await seedGrantForAssertion(registration);
+    // A real SQLite failure on the installation write: the server's own storage, not a replayed or stale proof.
+    await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
+      state.storage.sql.exec("CREATE TRIGGER lock_storage_fault BEFORE UPDATE ON installations BEGIN SELECT RAISE(ABORT, 'storage fault'); END");
+    });
+    const response = await SELF.fetch("https://push.test/v3/installations", registration.request);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "temporarily_unavailable" });
+    const stored = await runInDurableObject(stub(), async (_instance: PushRegistry, state) => ({
+      challenge: state.storage.sql.exec<{ consumed_at: number | null }>("SELECT consumed_at FROM challenges WHERE challenge_id = ?", registration.challenge.challengeId).one().consumed_at,
+      counter: state.storage.sql.exec<{ assertion_counter: number }>("SELECT assertion_counter FROM installations WHERE installation_id = ?", testGrant.installationId).one().assertion_counter,
+    }));
+    expect(stored, "the transaction rolled back: the challenge is unspent and the counter unchanged").toEqual({ challenge: null, counter: 1 });
+  });
+
   test("accepts a valid assertion registration and persists its capability binding", async () => {
     const registration = await assertionRegistration();
     const tokenHash = await seedAssertionInstallation(registration);
