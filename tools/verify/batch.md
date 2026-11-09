@@ -55,6 +55,7 @@ freeze the first failure after every lane joined and before any probe runs.
 **Attribution** probes one exact case (Vitest file plus `-t` anchoring the describe and test
 titles joined with ` > `, as Vitest matches them; XCTest class/method;
 or the owner's `--only-testing` selector) in one disposable worktree; it never reruns a suite.
+A red lane with no such selector is uncovered and filed unresolved, naming every covered commit.
 Main's first-parent chain is the landing history: an ordinary commit or a two-parent
 integration is one unit; octopus history is unresolved. Proof requires two fresh failing
 executions with the identical normalized signature at the head, a binary search proposal
