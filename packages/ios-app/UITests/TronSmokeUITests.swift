@@ -4153,7 +4153,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(staging.waitForExistence(timeout: 5), app.debugDescription)
         staging.tap()
         askUserQuestion("Which environments should receive the change?", in: app).swipeLeft()
-        XCTAssertTrue(app.textViews["When should the change happen?"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(askUserQuestion("When should the change happen?", in: app).waitForExistence(timeout: 3), app.debugDescription)
         let other = app.buttons.matching(NSPredicate(format: "label == %@", "Other"))
             .allElementsBoundByIndex.first { $0.isHittable }
         XCTAssertNotNil(other, app.debugDescription)
