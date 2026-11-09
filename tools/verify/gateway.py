@@ -69,7 +69,7 @@ def selects_browser_fork(args: list[str]) -> bool:
 def with_own_config(args: list[str]) -> list[str]:
     """`args` under the one config that runs every file its filters select: a listing config when that is it.
 
-    A filter selects each test file whose path contains it, as Vitest matches. Filters selecting files of
+    A filter selects each test file whose path contains it, ignoring case, as Vitest matches. Filters selecting files of
     more than one config are refused with each config's command, since any one config would skip the rest."""
     config, filters = vitest_selection(args)
     if config is not None or not filters:
@@ -80,13 +80,13 @@ def with_own_config(args: list[str]) -> list[str]:
     owners.update({path: name for name, paths in listed.items() for path in paths})
     selected: dict[str | None, list[str]] = {}
     for word, relative in filters:
-        for name in {owner for path, owner in owners.items() if relative in path} or {None}:
+        for name in {owner for path, owner in owners.items() if relative.lower() in path.lower()} or {None}:
             selected.setdefault(name, []).append(word)
     if len(selected) == 1:
         name = next(iter(selected))
         return args if name is None else ['--config', name, *args]
     options = ' '.join(word for word in args if word not in {raw for raw, _ in filters})
-    commands = [' '.join(['scripts/tron test gateway', *(['--config', name] if name else []), *([options] if options else []), *words])
+    commands = [' '.join(['scripts/tron test gateway', '--config', name or 'vitest.config.ts', *([options] if options else []), *words])
                 for name, words in sorted(selected.items(), key=lambda item: item[0] or '')]
     raise Refused('gateway tests: these files run under different Vitest configs; run each set under its own:\n  '
                   + '\n  '.join(commands))

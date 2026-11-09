@@ -151,13 +151,13 @@ class GatewayTestConfigRouting(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertEqual(argv, " ".join(["run", *config, *words]) + "\n")
             # A list spanning configs, including a Vitest substring filter that matches files of two, runs nothing.
-            for words in (["src/a/nested.e2e.test.ts", "src/a/plain.test.ts"], ["src/a/"]):
+            for words in (["src/a/nested.e2e.test.ts", "src/a/plain.test.ts"], ["src/a/"], ["SRC/A/"]):
                 with self.subTest(words=words):
                     result, argv = self.run_files(base, *words, "-t", "x")
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertIsNone(argv, "a mixed list ran Vitest")
                     self.assertIn("scripts/tron test gateway --config vitest.nested.config.ts -t x", result.stderr)
-                    self.assertIn("scripts/tron test gateway -t x ", result.stderr)
+                    self.assertIn("scripts/tron test gateway --config vitest.config.ts -t x ", result.stderr)
 
 
 if __name__ == "__main__":
