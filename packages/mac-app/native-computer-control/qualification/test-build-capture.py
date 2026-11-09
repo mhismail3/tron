@@ -5,6 +5,7 @@
 with EPERM, not ESRCH. A command that exits between the cleanup's liveness check and its signal must
 leave the original outcome (here the build's timeout) intact, never a PermissionError. Each spy only
 holds that window open: it ends the command, waits until it is a zombie, then returns the real answer.
+The module is macOS-only; elsewhere ESRCH covers this window, so these cases cannot fail there.
 
 Run: python3 packages/mac-app/native-computer-control/qualification/test-build-capture.py
 """
