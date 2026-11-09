@@ -27,6 +27,7 @@ struct HostedChatAnnotationFixture: View {
     init() {
         let defaults = UserDefaults(suiteName: "chat-annotation-fixture")!
         defaults.removePersistentDomain(forName: "chat-annotation-fixture")
+        probe.reducesMotion = ProcessInfo.processInfo.arguments.contains("-annotation-reduce-motion")
         profile = GatewayProfile(id: "annotation-fixture", label: "Fixture", host: "gateway.test", port: 9847,
             machineId: "fixture-machine", deviceId: "fixture-device")
         defaults.set(try! JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")

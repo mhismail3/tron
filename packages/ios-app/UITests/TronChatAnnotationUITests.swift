@@ -338,7 +338,8 @@ final class TronChatAnnotationUITests: XCTestCase {
     @MainActor func testQuoteRevealsSourceAndCommentMatchesQuote() {
         continueAfterFailure = false
         let xxxl = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-        for (name, extra) in [("dark", [String]()), ("light", ["-annotation-light"]), ("xxxl", xxxl)] {
+        for (name, extra) in [("dark", [String]()), ("light", ["-annotation-light"]), ("xxxl", xxxl),
+                              ("xxxl-reduce-motion", xxxl + ["-annotation-reduce-motion"])] {
             assertQuoteRevealsSource(launch(extra), name: name)
         }
     }
@@ -358,13 +359,15 @@ final class TronChatAnnotationUITests: XCTestCase {
         annotate.tap()
         XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
         dismissKeyboardTip(app)
-        app.typeText("Retry policy")
+        // The comment repeats the quote, so equal sizes give equal heights.
+        app.typeText(app.descendants(matching: .any)["chat.annotation.bubble.quote"].label)
         app.buttons["Save annotation"].firstMatch.tap()
         XCTAssertTrue(wait(for: bubble, exists: false))
+        let chip = app.otherElements.matching(identifier: "composer.staged-chip").firstMatch
         let catchUp = app.buttons["Catch up"]
         if catchUp.waitForExistence(timeout: 2) { catchUp.tap() }
         // The fixture fits the screen at the default size; at XXXL the source is off screen.
-        if name == "xxxl" {
+        if name.hasPrefix("xxxl") {
             XCTAssertTrue(wait { heading.frame.maxY < navigationBottom }, "The source scrolled away: \(heading.frame)")
         }
 
@@ -382,9 +385,8 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(flash.waitForExistence(timeout: 5), "The quote reveals its source: \(app.debugDescription)")
         XCTAssertEqual(flash.label, quoted)
         XCTAssertFalse(quote.exists, "The sheet closes to show the source")
-        let composerTop = app.textViews["Message input"].frame.minY
         XCTAssertGreaterThanOrEqual(flash.frame.minY, navigationBottom, "Revealed below the navigation bar: \(flash.frame)")
-        XCTAssertLessThanOrEqual(flash.frame.maxY, composerTop, "Revealed above the composer: \(flash.frame)")
+        XCTAssertLessThanOrEqual(flash.frame.maxY, chip.frame.minY, "Revealed above the staged chip: \(flash.frame)")
         keepScreenshot(app, "quote-reveal-source-\(name)")
 
         // The sent annotation's read-only comment uses the quote's text size.

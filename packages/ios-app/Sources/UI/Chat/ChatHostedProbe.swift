@@ -53,6 +53,8 @@ struct ChatHostedObservation: Sendable {
 
 @MainActor
 final class ChatHostedProbe {
+    /// Hosted journeys exercise ChatView's Reduce Motion paths with this.
+    var reducesMotion = false
     private var geometry = ChatTranscriptGeometry.zero
     private var rowFrames: [String: CGRect] = [:]
     private var rowFrameOrder: [String] = []

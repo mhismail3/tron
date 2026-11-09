@@ -23,7 +23,13 @@ struct ChatView: View {
     let hostedProbe: ChatHostedProbe?
     #endif
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool {
+        #if HOSTED_TEST
+        if hostedProbe?.reducesMotion == true { return true }
+        #endif
+        return systemReduceMotion
+    }
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -224,6 +230,9 @@ struct ChatView: View {
                 scrollCoordinator.requestAnnotationReveal(visualOffset: offset, reduceMotion: reduceMotion)
             }
             if !issued { annotationPresenter.endReveal() }
+        }
+        .onChange(of: reduceMotion, initial: true) { _, reduce in
+            annotationPresenter.reduceMotion = reduce
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -2617,9 +2626,14 @@ struct ChatView: View {
                 ))
             }
         }
-        // An annotation reveal measures its source once the scroll has landed.
+        // An annotation reveal measures its source once the scroll has landed:
+        // when its animation completes, or a display frame after a jump. A
+        // reader who took the transcript in between ends the reveal.
         let landed: () -> Void = command.origin == .annotationReveal
-            ? { [annotationPresenter] in annotationPresenter.revealScrollLanded() }
+            ? { [annotationPresenter, scrollCoordinator] in
+                if scrollCoordinator.isUserInteracting { annotationPresenter.endReveal() }
+                else { annotationPresenter.revealScrollLanded() }
+            }
             : {}
         switch command.animation {
         case .smooth(let duration) where !reduceMotion:
@@ -2627,8 +2641,13 @@ struct ChatView: View {
         case .disabled, .smooth:
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            transaction.addAnimationCompletion(criteria: .logicallyComplete, landed)
             withTransaction(transaction, update)
+            if command.origin == .annotationReveal {
+                Task { @MainActor [displayFrameScheduler] in
+                    do { try await displayFrameScheduler.nextFrame() } catch { return }
+                    landed()
+                }
+            }
         }
         // The coordinator keeps this exact token installed through its native
         // opening/catch-up/semantic settlement, then publishes a leased release.
@@ -2793,6 +2812,10 @@ struct ChatView: View {
             onComposerHeight: composerHeightChanged,
             onComposerHeightSettled: composerHeightSettled
         )
+        // The transcript's visible bottom, above the composer and its staged chips.
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: {
+            annotationPresenter.revealBottom = $0
+        }
         .environment(\.chatOwnsStatusBar, true)
     }
 

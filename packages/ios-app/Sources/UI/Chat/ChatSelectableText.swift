@@ -41,6 +41,7 @@ final class ChatAnnotationPresenter {
             self.scope = scope
             pending = nil
             endReveal()
+            revealed = nil
         }
     }
 
@@ -85,12 +86,32 @@ final class ChatAnnotationPresenter {
         var scrolls = 0
     }
 
-    /// The window band, as fractions of its height, the source must lie in:
-    /// below the navigation bar and above the composer and keyboard.
-    static let revealBand: ClosedRange<CGFloat> = 0.14...0.5
+    /// The top of the band the source must lie in, as a fraction of the
+    /// window height: below the navigation bar.
+    static let revealBandTop: CGFloat = 0.14
     private static let maximumRevealScrolls = 3
 
     private(set) var revealScroll: RevealScroll?
+
+    /// The last revealed source, for assistive technologies: the transcript
+    /// row exposes it as an element over the range until the next reveal.
+    struct RevealedSource: Equatable {
+        let itemID: String
+        let blockKey: String
+        let quote: String
+        /// The range's bounds in the source text view.
+        let rect: CGRect
+    }
+    private(set) var revealed: RevealedSource?
+
+    func revealed(itemID: String, blockKey: String) -> RevealedSource? {
+        guard let revealed, revealed.itemID == itemID, revealed.blockKey == blockKey else { return nil }
+        return revealed
+    }
+    /// The composer's top (with its staged chips) in window coordinates, the
+    /// band's bottom; ChatView keeps it current.
+    @ObservationIgnored var revealBottom: CGFloat?
+    @ObservationIgnored var reduceMotion = false
     @ObservationIgnored private var reveal: Reveal?
     @ObservationIgnored private var sources: [SourceKey: WeakSource] = [:]
 
@@ -102,6 +123,7 @@ final class ChatAnnotationPresenter {
     /// nothing.
     func reveal(_ annotation: ChatAnnotation) {
         guard let anchor = annotation.anchor else { return }
+        revealed = nil
         reveal = Reveal(anchor: anchor, quote: annotation.quote)
         if !placeReveal() { request(.row(itemID: anchor.itemID)) }
     }
@@ -133,11 +155,16 @@ final class ChatAnnotationPresenter {
               let window = view.window,
               NSMaxRange(reveal.anchor.range) <= view.attributedText.length else { return false }
         let rect = view.convert(view.bounds(of: reveal.anchor.range), to: window)
-        let band = Self.revealBand
-        let top = window.bounds.height * band.lowerBound
-        let bottom = window.bounds.height * band.upperBound
+        let top = window.bounds.height * Self.revealBandTop
+        let bottom = max(top + 1, (revealBottom ?? window.bounds.height * 0.5) - 12)
         if (rect.minY >= top && rect.maxY <= bottom) || reveal.scrolls >= Self.maximumRevealScrolls {
-            view.flash(reveal.anchor.range, label: reveal.quote)
+            view.flash(reveal.anchor.range, reduceMotion: reduceMotion)
+            revealed = RevealedSource(
+                itemID: reveal.anchor.itemID,
+                blockKey: reveal.anchor.blockKey,
+                quote: reveal.quote,
+                rect: view.bounds(of: reveal.anchor.range)
+            )
             endReveal()
             return true
         }
@@ -164,6 +191,25 @@ final class ChatAnnotationPresenter {
             for: scope
         )
         self.pending = nil
+    }
+}
+
+extension View {
+    /// The revealed source's accessibility element, over its range in this
+    /// selectable text.
+    func chatRevealedSource(_ presenter: ChatAnnotationPresenter, itemID: String, blockKey: String) -> some View {
+        overlay(alignment: .topLeading) {
+            if let revealed = presenter.revealed(itemID: itemID, blockKey: blockKey) {
+                Color.clear
+                    .frame(width: revealed.rect.width, height: revealed.rect.height)
+                    .offset(x: revealed.rect.minX, y: revealed.rect.minY)
+                    .allowsHitTesting(false)
+                    .accessibilityElement()
+                    .accessibilityLabel(revealed.quote)
+                    .accessibilityAddTraits(.isStaticText)
+                    .accessibilityIdentifier("chat.annotation.revealed-source")
+            }
+        }
     }
 }
 
@@ -468,20 +514,15 @@ class ChatSelectableTextView: UITextView {
     // MARK: Reveal flash
 
     private var flashView: UIView?
-    /// The revealed source for assistive technologies. It outlives the visual
-    /// flash so VoiceOver focus stays on it, until the next reveal or render;
-    /// the message view lists it after its block elements.
-    fileprivate private(set) var revealedElement: UIAccessibilityElement?
 
     func clearRevealedSource() {
         flashView?.removeFromSuperview()
         flashView = nil
-        revealedElement = nil
     }
 
     /// A brief amber pulse over `range` that fades; with Reduce Motion only
     /// the fade.
-    func flash(_ range: NSRange, label: String) {
+    func flash(_ range: NSRange, reduceMotion: Bool) {
         clearRevealedSource()
         var rects: [CGRect] = []
         if let start = position(from: beginningOfDocument, offset: range.location),
@@ -503,19 +544,12 @@ class ChatSelectableTextView: UITextView {
         }
         addSubview(container)
         flashView = container
-        let element = UIAccessibilityElement(accessibilityContainer: self)
-        element.accessibilityIdentifier = "chat.annotation.revealed-source"
-        element.accessibilityLabel = label
-        element.accessibilityTraits = .staticText
-        element.accessibilityFrameInContainerSpace = union
-        revealedElement = element
-        UIAccessibility.post(notification: .layoutChanged, argument: element)
         let finish = { [weak self, weak container] (_: Bool) in
             guard let self, let container, self.flashView === container else { return }
             container.removeFromSuperview()
             self.flashView = nil
         }
-        if UIAccessibility.isReduceMotionEnabled {
+        if reduceMotion {
             UIView.animate(withDuration: 0.6, delay: 0.5, options: [.curveEaseOut, .allowUserInteraction],
                            animations: { container.alpha = 0 }, completion: finish)
         } else {
@@ -763,15 +797,11 @@ private final class ChatSelectableMessageTextView: ChatSelectableTextView {
                 element.accessibilityTraits = .staticText
                 return element
             }
+            accessibilityElements = segmentElements
         }
         isAccessibilityElement = false
         accessibilityLabel = nil
         refreshAccessibilityFrames()
-    }
-
-    override var accessibilityElements: [Any]? {
-        get { segmentElements + (revealedElement.map { [$0] } ?? []) }
-        set {}
     }
 
     override func layoutSubviews() {

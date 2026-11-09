@@ -76,6 +76,7 @@ struct TronMarkdownView: View {
                                 ))
                             }
                         )
+                        .chatRevealedSource(annotationPresenter, itemID: annotationSource.itemID, blockKey: blockKey)
                         .frame(alignment: .topLeading)
                     }
                 } else {
@@ -206,6 +207,7 @@ struct TronMarkdownView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(value.accessibilitySource)
             .accessibilityAddTraits(.isStaticText)
+            .chatRevealedSource(annotationPresenter, itemID: annotationSource.itemID, blockKey: blockKey)
         } else if !streaming, selectableText {
             ChatSelectableInlineText(inline: value, style: style, detectsLinks: true, onAnnotate: nil)
                 .alignmentGuide(.firstTextBaseline) { _ in
