@@ -20,7 +20,7 @@ import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
 export type HomeTaskGrantApproval = { confirm: ConfirmChange } | { maintainerCommand: string };
 /** A tapped grant is consumed by the admission that asked for it, within this bound. */
 const HOME_TASK_GRANT_USE_MS = 60_000;
-import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskFailureCause, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
+import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskWrite, type HomeTaskFailureCause, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskPromptTokens, homeTaskSpend, type HomeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHECKIN_VISIBLE } from "../../kernel/delegation/task-checkin.js";
@@ -409,7 +409,7 @@ export class HomeTaskDispatcher {
   /** Settles a task whose admission was refused after its record exists, like
    * every terminal task with its one result wake. Accepted identity stays durable
    * and is never replayed. */
-  private async refuseAdmission(task: HomeTaskRecord, reason: "admission-cancelled" | "admission-timeout"): Promise<void> {
+  private async refuseAdmission(task: Pick<HomeTaskRecord, "taskId">, reason: "admission-cancelled" | "admission-timeout"): Promise<void> {
     const final = await this.store.update(task.taskId, current => current.lifecycle === "terminal" ? current : {
       ...current, lifecycle: "terminal", wake: this.inbox.event(current),
       terminalEvidence: { outcome: "unknown", sessionId: current.sessionId, entryIds: [], reason } });
@@ -470,7 +470,7 @@ export class HomeTaskDispatcher {
     // The settled predecessor's operation precedes anything appended since.
     const entries = await this.sessions.readTaskEvidence(sessionId, { appendStable: true });
     const brief = resumeBrief(previous, instructions, interruptedQuestion(homeTaskOperationSpan(entries, previous.operationId!).run));
-    const task = await this.stage("create", taskId, signal, () => this.store.put({
+    const task = await this.create(taskId, signal, {
       version: 1, taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
       intent: { text: brief }, intentDigest: taskIntentDigest(brief), target: previous.target,
       grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
@@ -479,7 +479,7 @@ export class HomeTaskDispatcher {
       ...(previous.lastAttentionAt ? { lastAttentionAt: previous.lastAttentionAt } : {}),
       resumes: { taskId: previous.taskId, operationId: previous.operationId!, ...(text ? { instruction: text } : {}) },
       ...(budget && Object.keys(budget).length ? { budget } : {}),
-    }, null), created => { this.transition(created, "created"); void this.refuseAdmission(created, "admission-cancelled").catch(() => {}); });
+    });
     this.transition(task, "created");
     let authority: Awaited<ReturnType<HomeTaskAuthorization["authorize"]>>;
     try {
@@ -490,6 +490,15 @@ export class HomeTaskDispatcher {
     const handle = await this.admit({ task, authority, input: { taskId, intent: brief, target: task.target }, title: undefined, choice: {}, deferredThinking: undefined,
       resume: { sessionId, images: options.images ?? [], ...(options.exceptWorkToken ? { exceptWorkToken: options.exceptWorkToken } : {}) }, operationId }, work, signal);
     return { ...handle, sessionId, operationId };
+  }
+
+  /** Publishes a new task's pending record. A record published after its admission was
+   * refused, or whose publication is uncertain (#2319), is settled, never left pending. */
+  private create(taskId: string, signal: AbortSignal | undefined, record: HomeTaskWrite): Promise<HomeTaskRecord> {
+    return this.stage("create", taskId, signal, () => this.store.put(record, null).catch(async error => {
+      if (error instanceof HomeTaskStoreError && error.code === "publication-uncertain") await this.admissionFailed(record, error).catch(() => {});
+      throw error;
+    }), created => { this.transition(created, "created"); void this.refuseAdmission(created, "admission-cancelled").catch(() => {}); });
   }
 
   /** A one-use grant comes only from the maintainer: his tap on the exact card an
@@ -543,14 +552,13 @@ export class HomeTaskDispatcher {
     // a later raise never reaches this task; a later lower applies at its next turn.
     const budget = await this.stage("budget", taskId, signal, () => this.policy.budget());
     const target = await this.stage("target", taskId, signal, () => this.policy.canonicalTarget(input.target));
-    // A record published after its admission was refused is settled, never left pending.
-    let task = await this.stage("create", taskId, signal, () => this.store.put({
+    let task = await this.create(taskId, signal, {
       version: 1, taskId, revision: 1, homeId: identity.homeId, generation: identity.generation, routeGeneration: identity.routeGeneration, wake: null,
       intent: { text: input.intent }, intentDigest: taskIntentDigest(input.intent), target,
       grantRef: null, scopeRef: null, lifecycle: "pending", sessionId: null, operationId: null,
       stopIntent: null, spend: null, reportRef: null, terminalEvidence: null,
       ...(budget && Object.keys(budget).length ? { budget } : {}),
-    }, null), created => { this.transition(created, "created"); void this.refuseAdmission(created, "admission-cancelled").catch(() => {}); });
+    });
     this.transition(task, "created");
     let authority: Awaited<ReturnType<HomeTaskAuthorization["authorize"]>>;
     try {
@@ -778,7 +786,7 @@ export class HomeTaskDispatcher {
   }
 
   /** Settles a task whose admission failed after its pending record exists. */
-  private async admissionFailed(task: HomeTaskRecord, error: unknown): Promise<void> {
+  private async admissionFailed(task: Pick<HomeTaskRecord, "taskId">, error: unknown): Promise<void> {
     if (error instanceof HomeTaskDispatchStageError) {
       // The refused step may still hold the store queue, so the turn's Stop never
       // waits for this settlement; cold recovery is its backstop if it fails.

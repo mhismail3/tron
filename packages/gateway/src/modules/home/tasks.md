@@ -29,7 +29,9 @@ following symlinks).
   grant one approved decision with matching binding, expiry and epoch.
 - Both files replace durably (temp, fsync, rename, directory fsync) before acknowledgement.
   Malformed or contradictory records keep their bytes and refuse (`home.task.store-refused`);
-  an uncertain publication fences the instance until reload; startup removes only this user's
+  an uncertain publication fences the instance until reload, except the one in-place update that
+  settles the uncertain task (an uncertain create is refused live as `admission-refused`); its
+  complete durable rewrite lifts the fence. Startup removes only this user's
   crash-staged temp files. Creation filenames are permanent; lookup refuses duplicate
   suffixes; there is no index, cap, pruning or deletion. Terminal and authority fields are
   immutable; only WakeInboxOwner advances `wake`.
