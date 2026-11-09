@@ -604,6 +604,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let responseState: ChatResponseState?
     let mutatingQueuedMessageIDs: Set<String>
     let orientation: ChatTranscriptOrientation
+    /// An annotation sheet revealing its source over the transcript.
+    let revealSheetTop: CGFloat?
     @State private var viewportGeometry = ChatTranscriptViewportGeometry()
     @Binding var scrollPosition: ScrollPosition
     let earlierRow: (InstalledChatTranscript) -> Earlier
@@ -620,7 +622,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
 
     var body: some View {
-        ChatTranscriptViewport { insets in
+        ChatTranscriptViewport(sheetTop: revealSheetTop) { insets in
             transcriptBody(safeAreaInsets: insets)
         }
     }

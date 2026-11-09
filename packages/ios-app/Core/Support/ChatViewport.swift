@@ -17,12 +17,13 @@ package struct ChatScrollCommand: Equatable, Sendable {
         case oldestHistory
         case layout
         case prepend
+        case annotationReveal
     }
 
     package enum Destination: Equatable, Sendable {
         case tail
         case oldestHistory
-        /// Exact semantic row target used when restoring a reader's position.
+        /// A physical row centered in the viewport (an annotation's source).
         case row(String)
         case offsetY(CGFloat)
     }

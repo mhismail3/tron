@@ -21,6 +21,11 @@ struct PresentationSurfaceActivity: Equatable, Sendable {
     static let presentingDescendant = Self(allowsDataPublication: true, allowsPresentationPublication: false,
                                            allowsContinuousAnimation: false, allowsViewportObservation: false)
 
+    /// A parent whose topmost child is a partial sheet that shows it (an
+    /// annotation's sheet revealing its source) keeps its viewport live.
+    static let presentingViewportDescendant = Self(allowsDataPublication: true, allowsPresentationPublication: false,
+                                                   allowsContinuousAnimation: false, allowsViewportObservation: true)
+
     static let covered = Self(allowsDataPublication: false, allowsPresentationPublication: false,
                               allowsContinuousAnimation: false, allowsViewportObservation: false)
 }
@@ -70,6 +75,8 @@ final class PresentationActivityCoordinator {
     private struct Surface {
         let parent: PresentationSurfaceToken?
         let dependencies: Set<PresentationRefreshDependency>
+        /// Its direct parent keeps viewport work while this is topmost.
+        let keepsParentViewport: Bool
     }
 
     private static let retiredTokenLimit = 512
@@ -84,7 +91,7 @@ final class PresentationActivityCoordinator {
     /// Registration is idempotent so binding intent and mounted content can
     /// both establish the same generation without creating duplicate leases.
     func register(_ token: PresentationSurfaceToken, parent: PresentationSurfaceToken?,
-                  dependencies: Set<PresentationRefreshDependency>? = nil) {
+                  dependencies: Set<PresentationRefreshDependency>? = nil, keepsParentViewport: Bool = false) {
         guard surfaces[token] == nil,
               !retiredTokens.contains(token),
               parent.map({ !retiredTokens.contains($0) }) ?? true else { return }
@@ -94,7 +101,8 @@ final class PresentationActivityCoordinator {
         // Session authority is shared down its lineage; catalog demand belongs
         // only to the surface declaring that it actually consumes the roster.
         surfaces[token] = Surface(parent: parent, dependencies: dependencies
-            ?? refreshDependencies(for: parent).filter { $0 != .sessionCatalog })
+            ?? refreshDependencies(for: parent).filter { $0 != .sessionCatalog },
+            keepsParentViewport: keepsParentViewport)
         order.append(token)
     }
 
@@ -119,6 +127,9 @@ final class PresentationActivityCoordinator {
         guard let token else { return .active }
         guard surfaces[token] != nil, let topmostToken else { return .covered }
         if topmostToken == token { return .active }
+        if let topmost = surfaces[topmostToken], topmost.parent == token, topmost.keepsParentViewport {
+            return .presentingViewportDescendant
+        }
         if isDescendant(topmostToken, of: token) { return .presentingDescendant }
         return .covered
     }
@@ -230,6 +241,7 @@ struct TronPresentationSurface<Content: View>: View {
     @Environment(\.tronPresentationDependencyRead) private var dependencyRead
     @Environment(\.scenePhase) private var scenePhase
     private let explicitParent: PresentationSurfaceToken?
+    private let keepsParentViewport: Bool
     @State private var generation = UUID()
 
     init(
@@ -246,12 +258,14 @@ struct TronPresentationSurface<Content: View>: View {
         self.onMount = onMount
         self.onRetire = onRetire
         explicitParent = nil
+        keepsParentViewport = false
         self.content = content
     }
 
     init(
         token: PresentationSurfaceToken,
         parent: PresentationSurfaceToken?,
+        keepsParentViewport: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) {
         id = token.id
@@ -261,6 +275,7 @@ struct TronPresentationSurface<Content: View>: View {
         onMount = nil
         onRetire = nil
         explicitParent = parent
+        self.keepsParentViewport = keepsParentViewport
         self.content = content
     }
 
@@ -313,7 +328,8 @@ struct TronPresentationSurface<Content: View>: View {
                 #if HOSTED_TEST
                 HostedPresentationProbe.record?("appear", "\(token.id)#\(token.generation)")
                 #endif
-                coordinator?.register(token, parent: explicitParent ?? inheritedParent, dependencies: dependencies)
+                coordinator?.register(token, parent: explicitParent ?? inheritedParent, dependencies: dependencies,
+                                      keepsParentViewport: keepsParentViewport)
                 if registersLifecycle { onMount?(token) }
             }
             .onDisappear {

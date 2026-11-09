@@ -18,6 +18,7 @@ struct HostedChatAnnotationFixture: View {
     @State private var ready = false
     @State private var error: String?
     @State private var lastPrompt = "none"
+    @State private var reveals: [String] = []
     private let profile: GatewayProfile
     private let snapshot: SessionSnapshot
     private let socket = HostedChatAnnotationSocket()
@@ -27,6 +28,7 @@ struct HostedChatAnnotationFixture: View {
     init() {
         let defaults = UserDefaults(suiteName: "chat-annotation-fixture")!
         defaults.removePersistentDomain(forName: "chat-annotation-fixture")
+        probe.reducesMotion = ProcessInfo.processInfo.arguments.contains("-annotation-reduce-motion")
         profile = GatewayProfile(id: "annotation-fixture", label: "Fixture", host: "gateway.test", port: 9847,
             machineId: "fixture-machine", deviceId: "fixture-device")
         defaults.set(try! JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
@@ -73,8 +75,19 @@ struct HostedChatAnnotationFixture: View {
                 .font(.system(size: 1)).opacity(0.01)
                 .accessibilityIdentifier("fixture.last-prompt")
                 .allowsHitTesting(false)
+            // Each revealed source ("shown|quote|minY|maxY"), its element
+            // mounting ("exposed|quote") and its clearing ("cleared|quote").
+            Text(reveals.isEmpty ? "none" : reveals.joined(separator: ";"))
+                .font(.system(size: 1)).opacity(0.01)
+                .accessibilityIdentifier("fixture.reveals")
+                .allowsHitTesting(false)
         }
         .task {
+            ChatAnnotationPresenter.hostedReveals = { event, quote, frame in
+                reveals.append(([event, quote] + (frame.map {
+                    ["\(Int($0.minY.rounded(.down)))", "\(Int($0.maxY.rounded(.up)))"]
+                } ?? [])).joined(separator: "|"))
+            }
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
                 model.invalidateHostedPendingPresentation()
