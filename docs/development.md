@@ -118,9 +118,9 @@ reused PID based on `kill -0` alone. The supervisor atomically publishes bounded
 is the intentional authenticated restart drain; other exits consume a bounded
 restart budget and eventually become `failed`. A failed `restart` restores the
 prior selection and waits, within its bounded window, for this supervisor to relaunch
-it (it stops a candidate that never gets ready, which exits 75); it never uses the
-Stable launchd path. A candidate that crashes leaves the supervisor `failed`; then
-`scripts/tron dev start` brings Debug back.
+it, which it does only when the candidate exited 75; it never uses the Stable launchd
+path. A candidate that crashes, or dies by signal before its shutdown handler is
+installed, leaves the supervisor `failed`; then `scripts/tron dev start` brings Debug back.
 
 Only after workers stop/park cleanly, use `scripts/tron dev restart` for Debug
 loopback, or add `--tailscale` when iOS must reach it; production rebuild/delivery

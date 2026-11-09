@@ -486,9 +486,8 @@ test("a crash inside the rollback keeps a startable selection (#2316 F8)", async
 // the Stable path. The real promote CLI drives an owned stand-in Gateway process
 // on a private port: it drains and exits 75 like the Gateway, and the candidate
 // never listens. The relaunching owner is a model of scripts/tron-dev's
-// supervisor, which relaunches the current selection after each exit 75 (also
-// when it stops a candidate that never got ready), but exits `failed` when a
-// candidate crashes. Failure modes:
+// supervisor, which relaunches the current selection only after an exit 75 and
+// otherwise exits `failed`. Failure modes:
 // 1. dev recovery reaches the Stable launchd kickstart (Stable error text);
 // 2. the prior selection is not restored;
 // 3. with no supervisor left, the failure does not name its recovery command,

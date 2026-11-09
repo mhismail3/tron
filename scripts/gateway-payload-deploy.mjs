@@ -2191,9 +2191,9 @@ function productionReplacementDependencies({ channel, host, port, token, timeout
       host, port, token, timeoutMs, method: "system.info",
     }), channel),
     // launchd owns the Stable relaunch. The Debug supervisor (scripts/tron dev)
-    // relaunches whatever is selected after each exit 75, including the
-    // restored selection once recovery publishes it, so Debug recovery only
-    // waits for it and never reaches launchd.
+    // relaunches whatever is selected after an exit 75, the restored selection
+    // included, so Debug recovery only waits for it and never reaches launchd;
+    // otherwise the failure names scripts/tron dev start.
     launchSupervisor: channel === "dev" ? async () => {} : () => kickstartStableSupervisor(channel),
   };
 }
