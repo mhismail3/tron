@@ -85,15 +85,10 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   run, so native Copy/Annotate ranges cross those block boundaries with emphasis, links, heading
   levels and list markers intact; each block keeps its own static-text accessibility element
   and frame, and a list item reads its marker. Selection stays on at accessibility text sizes.
-  While the composer or a comment field holds the keyboard, message text does not take first
-  responder: it selects by its own long-press drag, handles and loupe with the same Annotate and
-  system menu, so the keyboard and transcript stay put and Annotate quotes the range shown when
-  its menu opened (#2383; simulator-proven, device feel needs a Tron Device check). Tapping a staged
-  annotation's quote saves the sheet, closes it and reveals the source: `ChatAnnotationPresenter`
-  measures the mounted block's range and asks `ChatScrollCoordinator` for a detached reveal (the
-  row first when it is not mounted, then a measured offset), then the block flashes the range
-  (a pulse, a plain fade with Reduce Motion) and keeps a `chat.annotation.revealed-source`
-  accessibility element; a missing source does nothing (#2387). Quote and comment share one size.
+  With the composer or a comment field holding the keyboard, message text selects without first
+  responder (own drag, handles, loupe, Annotate + system menu), so nothing moves (#2383; device feel
+  needs a Tron Device check). A staged quote's tap saves, closes the sheet and reveals the source via
+  `ChatAnnotationPresenter` + a detached `ChatScrollCoordinator` reveal, then flashes it (#2387).
   Staged selections anchor by run-scoped UTF-16 range for their highlight (not persisted). Code blocks, tables and blockquotes keep their own renderers, and a selection
   does not cross them (#1112). Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937). The context ring opens Manage Session.
