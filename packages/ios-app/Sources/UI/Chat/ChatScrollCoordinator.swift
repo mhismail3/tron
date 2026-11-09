@@ -567,6 +567,29 @@ extension ChatScrollCoordinator {
         publish(.oldestHistory, animation: ChatMotion.historyScroll(reduceMotion: reduceMotion), origin: .oldestHistory)
     }
 
+    /// Reader intent from an annotation's quote. It detaches like a direct
+    /// scroll, so streaming rows stay frozen, then centers the source row.
+    /// False when that row is not installed (trimmed history): nothing moves.
+    func requestAnnotationReveal(row physicalID: String, reduceMotion: Bool) -> Bool {
+        guard installedPhysicalRowPositions[physicalID] != nil else { return false }
+        beginDirectInteraction(allowsBottomRubberBand: false)
+        publish(.row(physicalID), animation: ChatMotion.historyScroll(reduceMotion: reduceMotion), origin: .annotationReveal)
+        return command?.origin == .annotationReveal
+    }
+
+    /// Scrolls the detached transcript by `visualOffset` points: content moves
+    /// up by that much (a negative offset moves it down).
+    func requestAnnotationReveal(visualOffset: CGFloat, reduceMotion: Bool) -> Bool {
+        guard geometry.isValid else { return false }
+        beginDirectInteraction(allowsBottomRubberBand: false)
+        publish(
+            .offsetY(geometry.offsetY + visualOffset),
+            animation: ChatMotion.historyScroll(reduceMotion: reduceMotion),
+            origin: .annotationReveal
+        )
+        return command?.origin == .annotationReveal
+    }
+
     func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {
         guard var restore = layoutRestore else { return }
         guard let installed else { return }
@@ -734,12 +757,13 @@ extension ChatScrollCoordinator {
         targetReleaseToken = nil
         appliedTargetCommandToken = applied.token
         appliedTargetOrigin = applied.origin
-        if applied.origin == .oldestHistory {
-            // The status-bar jump to the oldest edge needs no marker proof: the
-            // oldest end is legal as soon as the command lands. Release through
-            // the bounded lease so native anchoring owns the viewport again from
-            // the next frame and the load-earlier page request is admitted,
-            // instead of holding an edge target across the jump.
+        if applied.origin == .oldestHistory || applied.origin == .annotationReveal {
+            // Neither the status-bar jump to the oldest edge nor a detached
+            // annotation reveal waits for marker proof: the edge is legal as soon
+            // as the command lands, and a reveal is reader intent that native
+            // anchoring keeps from the next frame. Release through the bounded
+            // lease so the load-earlier page request is admitted again, instead
+            // of holding a target across the jump.
             requestTargetRelease(applied.token)
         }
         if catchUpCommandToken == applied.token {

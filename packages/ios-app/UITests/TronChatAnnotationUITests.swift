@@ -330,6 +330,101 @@ final class TronChatAnnotationUITests: XCTestCase {
                       String(describing: composer.value))
     }
 
+    /// Tapping the sheet's quote keeps the sheet open and scrolls the transcript
+    /// behind it to the selected range, even when it has scrolled off screen,
+    /// above the sheet, and flashes it; the revealed element clears with the
+    /// flash, plain or under Reduce Motion.
+    /// The sent sheet's comment uses the quote's text size (equal text, equal
+    /// height), at the default size in dark and light and at the largest
+    /// accessibility size.
+    @MainActor func testQuoteRevealsSourceAndCommentMatchesQuote() {
+        continueAfterFailure = false
+        let xxxl = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        for (name, extra) in [("dark", [String]()), ("light", ["-annotation-light"]), ("xxxl", xxxl),
+                              ("xxxl-reduce-motion", xxxl + ["-annotation-reduce-motion"])] {
+            assertQuoteRevealsSource(launch(extra), name: name)
+        }
+    }
+
+    @MainActor private func assertQuoteRevealsSource(_ app: XCUIApplication, name: String) {
+        defer { app.terminate() }
+        let heading = assistantBlock(app, containing: "Retry policy")
+        let bubble = app.otherElements["chat.annotation.bubble"]
+        let navigationBottom = app.navigationBars.firstMatch.frame.maxY
+        // Bring the oldest text into view, annotate the heading with its own
+        // words as the comment, then scroll back to the newest end.
+        for _ in 0..<4 where heading.frame.minY < navigationBottom { app.swipeDown() }
+        heading.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
+            .press(forDuration: 1.0, thenDragTo: heading.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
+        let annotate = menuAction(app, "Annotate")
+        XCTAssertTrue(annotate.waitForExistence(timeout: 5), app.debugDescription)
+        annotate.tap()
+        XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
+        dismissKeyboardTip(app)
+        // The comment repeats the quote, so equal sizes give equal heights.
+        app.typeText(app.descendants(matching: .any)["chat.annotation.bubble.quote"].label)
+        app.buttons["Save annotation"].firstMatch.tap()
+        XCTAssertTrue(wait(for: bubble, exists: false))
+        let chip = app.otherElements.matching(identifier: "composer.staged-chip").firstMatch
+        let catchUp = app.buttons["Catch up"]
+        if catchUp.waitForExistence(timeout: 2) { catchUp.tap() }
+        // The fixture fits the screen at the default size; at XXXL the source is off screen.
+        if name.hasPrefix("xxxl") {
+            XCTAssertTrue(wait { heading.frame.maxY < navigationBottom }, "The source scrolled away: \(heading.frame)")
+        }
+
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
+        let quote = app.descendants(matching: .any)["chat.annotation.quote"]
+        let comment = commentField(in: app)
+        XCTAssertTrue(quote.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(comment.waitForExistence(timeout: 5), app.debugDescription)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        keepScreenshot(app, "quote-reveal-sheet-\(name)")
+
+        let quoted = quote.label
+        quote.tap()
+        // The highlight and its element last about a second, inside XCUITest's
+        // idle wait after the tap, so the fixture records each reveal's window
+        // frame and its clearing.
+        let reveals = app.staticTexts["fixture.reveals"]
+        XCTAssertTrue(wait { reveals.label.contains("cleared|") },
+                      "The quote reveals its source and clears it with the highlight: \(reveals.label)")
+        keepScreenshot(app, "quote-reveal-sheet-open-source-\(name)")
+        let shown = reveals.label.components(separatedBy: ";").first { $0.hasPrefix("shown|") }?
+            .components(separatedBy: "|") ?? []
+        XCTAssertEqual(shown.count, 4, reveals.label)
+        XCTAssertEqual(shown[1], quoted)
+        XCTAssertEqual(reveals.label, "shown|\(quoted)|\(shown[2])|\(shown[3]);exposed|\(quoted);cleared|\(quoted)",
+                       "One reveal whose element mounts, then clears once")
+        XCTAssertTrue(quote.exists, "The sheet stays open over the revealed source")
+        let flash = app.descendants(matching: .any)["chat.annotation.revealed-source"]
+        XCTAssertFalse(flash.exists, "The revealed source's element clears with its highlight")
+        let sheetTop = app.navigationBars.containing(NSPredicate(format: "label == 'Save annotation'")).firstMatch.frame.minY
+        let minY = CGFloat(Int(shown[2]) ?? -1), maxY = CGFloat(Int(shown[3]) ?? .max)
+        XCTAssertGreaterThanOrEqual(minY, navigationBottom, "Revealed below the navigation bar: \(shown)")
+        XCTAssertLessThanOrEqual(maxY, min(chip.frame.minY, sheetTop),
+                                 "Revealed above the sheet (\(sheetTop)) and the staged chip (\(chip.frame.minY)): \(shown)")
+        app.buttons["Save annotation"].tap()
+        XCTAssertTrue(wait(for: quote, exists: false))
+
+        // The sent annotation's read-only comment uses the quote's text size.
+        app.textViews["Message input"].tap()
+        app.typeText("Thanks")
+        app.buttons["Send message"].firstMatch.tap()
+        // The revealed source leaves the reader detached from the newest end.
+        if catchUp.waitForExistence(timeout: 2) { catchUp.tap() }
+        let sent = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch
+        XCTAssertTrue(sent.waitForExistence(timeout: 8), app.debugDescription)
+        sent.tap()
+        let sentComment = app.staticTexts["chat.annotation.comment"]
+        XCTAssertTrue(sentComment.waitForExistence(timeout: 5), app.debugDescription)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+        keepScreenshot(app, "quote-reveal-sent-sheet-\(name)")
+        // Both are selectable Text, whose element frames carry the same inset.
+        XCTAssertEqual(sentComment.frame.height, quote.frame.height, accuracy: 1,
+                       "The sent comment uses the quote's text size: comment \(sentComment.frame), quote \(quote.frame)")
+    }
+
     /// On iPad, Return in the composer sends exactly like Send, and not while
     /// the composer is empty (uploads: TronComposerUploadUITests). Hardware
     /// Shift+Return and a pasted newline still edit. `typeKey("\n")` is a hardware Return

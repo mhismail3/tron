@@ -40,6 +40,9 @@ final class ChatAnnotationPresenter {
         if self.scope != scope {
             self.scope = scope
             pending = nil
+            endReveal()
+            revealed = nil
+            revealSheetTop = nil
         }
     }
 
@@ -65,6 +68,164 @@ final class ChatAnnotationPresenter {
 
     func cancel() { pending = nil }
 
+    // MARK: Revealing a staged annotation's source
+
+    /// A scroll the transcript owes the open reveal.
+    struct RevealScroll: Equatable {
+        enum Target: Equatable {
+            /// The source row is not mounted: bring it into the viewport first.
+            case row(itemID: String)
+            case visualOffset(CGFloat)
+        }
+        let id = UUID()
+        let target: Target
+    }
+
+    private struct Reveal {
+        let anchor: ChatAnnotationAnchor
+        let quote: String
+        var scrolls = 0
+    }
+
+    /// The top of the band the source must lie in, as a fraction of the
+    /// window height: below the navigation bar.
+    static let revealBandTop: CGFloat = 0.14
+    private static let maximumRevealScrolls = 3
+    /// Frames a landed reveal scroll waits for its source to hold still.
+    static let maximumSettleFrames = 30
+
+    private(set) var revealScroll: RevealScroll?
+
+    /// The revealed source, for assistive technologies: the transcript row
+    /// exposes it as an element over the range while its highlight shows.
+    struct RevealedSource: Equatable {
+        let id = UUID()
+        let itemID: String
+        let blockKey: String
+        let quote: String
+        /// The range's bounds in the source text view.
+        let rect: CGRect
+    }
+    private(set) var revealed: RevealedSource?
+
+    #if HOSTED_TEST
+    /// Hosted journeys read each revealed source ("shown" with its window
+    /// frame), its element mounting ("exposed") and its clearing ("cleared"):
+    /// all fall inside XCUITest's idle wait after the tap.
+    static var hostedReveals: (@MainActor (_ event: String, _ quote: String, _ windowFrame: CGRect?) -> Void)?
+    #endif
+
+    func revealed(itemID: String, blockKey: String) -> RevealedSource? {
+        guard let revealed, revealed.itemID == itemID, revealed.blockKey == blockKey else { return nil }
+        return revealed
+    }
+    /// The composer's top (with its staged chips) in window coordinates, the
+    /// band's bottom; ChatView keeps it current.
+    @ObservationIgnored var revealBottom: CGFloat?
+    /// The open annotation sheet's top in window coordinates; the source
+    /// lands above it.
+    @ObservationIgnored var sheetTop: CGFloat? {
+        didSet { if revealSheetTop != nil { revealSheetTop = sheetTop } }
+    }
+    /// The sheet's top once one of its quotes revealed: the transcript keeps
+    /// that much clearance so its content scrolls above the sheet, until the
+    /// sheet closes.
+    private(set) var revealSheetTop: CGFloat?
+    @ObservationIgnored var reduceMotion = false
+    @ObservationIgnored private var reveal: Reveal?
+    @ObservationIgnored private var sources: [SourceKey: WeakSource] = [:]
+
+    private struct SourceKey: Hashable { let itemID: String; let blockKey: String }
+    private struct WeakSource { weak var view: ChatSelectableTextView? }
+
+    /// Scrolls the transcript to an annotation's selected range and flashes
+    /// it. An annotation without an anchor, or whose source row is gone, does
+    /// nothing.
+    func reveal(_ annotation: ChatAnnotation) {
+        guard let anchor = annotation.anchor else { return }
+        revealed = nil
+        reveal = Reveal(anchor: anchor, quote: annotation.quote)
+        // The transcript makes room above an open sheet; the measured
+        // scrolls below converge on the source as that layout lands.
+        if let sheetTop { revealSheetTop = sheetTop }
+        if !placeReveal() { request(.row(itemID: anchor.itemID)) }
+    }
+
+    func revealScrollLanded() {
+        guard reveal != nil else { return }
+        if !placeReveal() { endReveal() }
+    }
+
+    func endReveal() {
+        reveal = nil
+        revealScroll = nil
+    }
+
+    func register(_ view: ChatSelectableTextView, itemID: String, blockKey: String) {
+        sources[SourceKey(itemID: itemID, blockKey: blockKey)] = WeakSource(view: view)
+    }
+
+    func unregister(_ view: ChatSelectableTextView) {
+        sources = sources.filter { $0.value.view != nil && $0.value.view !== view }
+    }
+
+    /// The pending reveal's source range in window coordinates, when mounted.
+    var revealSourceFrame: CGRect? {
+        guard let reveal,
+              let view = sources[SourceKey(itemID: reveal.anchor.itemID, blockKey: reveal.anchor.blockKey)]?.view,
+              let window = view.window,
+              NSMaxRange(reveal.anchor.range) <= view.attributedText.length else { return nil }
+        return view.convert(view.bounds(of: reveal.anchor.range), to: window)
+    }
+
+    /// Measures the mounted source: flashes it when it is in the band (or
+    /// after `maximumRevealScrolls` measured scrolls), otherwise asks for the
+    /// measured scroll. False when the source is not mounted.
+    private func placeReveal() -> Bool {
+        guard var reveal,
+              let view = sources[SourceKey(itemID: reveal.anchor.itemID, blockKey: reveal.anchor.blockKey)]?.view,
+              let window = view.window,
+              NSMaxRange(reveal.anchor.range) <= view.attributedText.length else { return false }
+        let rect = view.convert(view.bounds(of: reveal.anchor.range), to: window)
+        let top = window.bounds.height * Self.revealBandTop
+        let obstruction = min(revealBottom ?? window.bounds.height * 0.5, sheetTop ?? .infinity)
+        let bottom = max(top + 1, obstruction - 12)
+        // A source taller than the band starts at its top.
+        let tall = rect.height > bottom - top
+        let placed = tall ? abs(rect.minY - top) <= 1 : rect.minY >= top && rect.maxY <= bottom
+        if placed || reveal.scrolls >= Self.maximumRevealScrolls {
+            let source = RevealedSource(
+                itemID: reveal.anchor.itemID,
+                blockKey: reveal.anchor.blockKey,
+                quote: reveal.quote,
+                rect: view.bounds(of: reveal.anchor.range)
+            )
+            revealed = source
+            #if HOSTED_TEST
+            Self.hostedReveals?("shown", source.quote, rect)
+            #endif
+            // The element lives as long as the highlight it describes.
+            view.flash(reveal.anchor.range, reduceMotion: reduceMotion) { [weak self] in
+                guard let self, self.revealed?.id == source.id else { return }
+                self.revealed = nil
+                #if HOSTED_TEST
+                Self.hostedReveals?("cleared", source.quote, nil)
+                #endif
+            }
+            endReveal()
+            return true
+        }
+        reveal.scrolls += 1
+        self.reveal = reveal
+        let target = tall ? top : (top + bottom - rect.height) / 2
+        request(.visualOffset(rect.minY - target))
+        return true
+    }
+
+    private func request(_ target: RevealScroll.Target) {
+        revealScroll = RevealScroll(target: target)
+    }
+
     func save(comment: String) {
         guard let pending, let scope, let drafts else { return }
         drafts.addAnnotation(
@@ -76,6 +237,28 @@ final class ChatAnnotationPresenter {
             for: scope
         )
         self.pending = nil
+    }
+}
+
+extension View {
+    /// The revealed source's accessibility element, over its range in this
+    /// selectable text.
+    func chatRevealedSource(_ presenter: ChatAnnotationPresenter, itemID: String, blockKey: String) -> some View {
+        overlay(alignment: .topLeading) {
+            if let revealed = presenter.revealed(itemID: itemID, blockKey: blockKey) {
+                Color.clear
+                    .frame(width: revealed.rect.width, height: revealed.rect.height)
+                    .offset(x: revealed.rect.minX, y: revealed.rect.minY)
+                    .allowsHitTesting(false)
+                    .accessibilityElement()
+                    .accessibilityLabel(revealed.quote)
+                    .accessibilityAddTraits(.isStaticText)
+                    .accessibilityIdentifier("chat.annotation.revealed-source")
+                    #if HOSTED_TEST
+                    .onAppear { ChatAnnotationPresenter.hostedReveals?("exposed", revealed.quote, nil) }
+                    #endif
+            }
+        }
     }
 }
 
@@ -99,6 +282,9 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     var messageBlocks: [MarkdownPresentation.Block]? = nil
     var highlights: [NSRange] = []
     var detectsLinks = false
+    /// The presenter and block this text quotes from, so a staged
+    /// annotation's quote can find and flash its source.
+    var revealSource: (presenter: ChatAnnotationPresenter, itemID: String, blockKey: String)? = nil
     let onAnnotate: ((String, NSRange, CGRect) -> Void)?
 
     init(
@@ -106,12 +292,14 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         style: ChatSelectableTextStyle,
         highlights: [NSRange] = [],
         detectsLinks: Bool = false,
+        revealSource: (presenter: ChatAnnotationPresenter, itemID: String, blockKey: String)? = nil,
         onAnnotate: ((String, NSRange, CGRect) -> Void)?
     ) {
         self.inline = inline
         self.style = style
         self.highlights = highlights
         self.detectsLinks = detectsLinks
+        self.revealSource = revealSource
         self.onAnnotate = onAnnotate
     }
 
@@ -119,8 +307,10 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         messageBlocks: [MarkdownPresentation.Block],
         style: ChatSelectableTextStyle,
         highlights: [NSRange],
+        revealSource: (presenter: ChatAnnotationPresenter, itemID: String, blockKey: String)?,
         onAnnotate: ((String, NSRange, CGRect) -> Void)?
     ) {
+        self.revealSource = revealSource
         // The message run renders `messageBlocks`; its plain text needs no Markdown parse.
         self.inline = MarkdownPresentation.Inline(source: Self.plainText(messageBlocks), attributedString: nil)
         self.style = style
@@ -162,6 +352,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var key: RenderKey?
         var onAnnotate: ((String, NSRange, CGRect) -> Void)?
+        weak var presenter: ChatAnnotationPresenter?
 
         func textView(
             _ textView: UITextView,
@@ -227,6 +418,10 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         configure(view, coordinator: context.coordinator)
     }
 
+    static func dismantleUIView(_ view: ChatSelectableTextView, coordinator: Coordinator) {
+        coordinator.presenter?.unregister(view)
+    }
+
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: ChatSelectableTextView, context: Context) -> CGSize? {
         configure(uiView, coordinator: context.coordinator)
         let width = proposal.width ?? 10_000
@@ -237,6 +432,10 @@ struct ChatSelectableInlineText: UIViewRepresentable {
 
     private func configure(_ view: ChatSelectableTextView, coordinator: Coordinator) {
         coordinator.onAnnotate = onAnnotate
+        if let revealSource {
+            coordinator.presenter = revealSource.presenter
+            revealSource.presenter.register(view, itemID: revealSource.itemID, blockKey: revealSource.blockKey)
+        }
         let family = fontSettings.selectedFamily
         let key = RenderKey(
             inline: inline,
@@ -251,6 +450,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         guard coordinator.key != key else { return }
         coordinator.key = key
         view.endKeyboardSelection()
+        view.clearRevealedSource()
         view.dataDetectorTypes = detectsLinks ? [.link] : []
         let traits = UITraitCollection(traitsFrom: [
             view.traitCollection,
@@ -358,6 +558,63 @@ class ChatSelectableTextView: UITextView {
         selectedRange = NSRange(location: 0, length: 0)
         selectionDisplay.isActivated = false
         editMenu.dismissMenu()
+    }
+
+    // MARK: Reveal flash
+
+    private var flashView: UIView?
+
+    func clearRevealedSource() {
+        flashView?.removeFromSuperview()
+        flashView = nil
+    }
+
+    /// A brief amber pulse over `range` that fades; with Reduce Motion only
+    /// the fade.
+    /// `faded` runs once the highlight is gone, also when a re-render
+    /// removes it early.
+    func flash(_ range: NSRange, reduceMotion: Bool, faded: @escaping () -> Void) {
+        clearRevealedSource()
+        var rects: [CGRect] = []
+        if let start = position(from: beginningOfDocument, offset: range.location),
+           let end = position(from: start, offset: range.length),
+           let textRange = textRange(from: start, to: end) {
+            rects = selectionRects(for: textRange).map(\.rect).filter { !$0.isEmpty }
+        }
+        let union = rects.reduce(CGRect.null) { $0.union($1) }
+        guard !union.isNull else { faded(); return }
+        let container = UIView(frame: union)
+        container.isUserInteractionEnabled = false
+        let tint = UIColor(Color.tronAmber).resolvedColor(with: traitCollection).withAlphaComponent(0.5)
+        for rect in rects {
+            let piece = UIView(frame: rect.offsetBy(dx: -union.minX, dy: -union.minY).insetBy(dx: -2, dy: -1))
+            piece.backgroundColor = tint
+            piece.layer.cornerRadius = 4
+            piece.layer.cornerCurve = .continuous
+            container.addSubview(piece)
+        }
+        addSubview(container)
+        flashView = container
+        let finish = { [weak self, weak container] (_: Bool) in
+            faded()
+            guard let self, let container, self.flashView === container else { return }
+            container.removeFromSuperview()
+            self.flashView = nil
+        }
+        if reduceMotion {
+            UIView.animate(withDuration: 0.6, delay: 0.5, options: [.curveEaseOut, .allowUserInteraction],
+                           animations: { container.alpha = 0 }, completion: finish)
+        } else {
+            container.alpha = 0
+            container.transform = CGAffineTransform(scaleX: 1.04, y: 1.12)
+            UIView.animateKeyframes(withDuration: 1.05, delay: 0, options: [.allowUserInteraction, .calculationModeCubic], animations: {
+                UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.25) {
+                    container.alpha = 1
+                    container.transform = .identity
+                }
+                UIView.addKeyframe(withRelativeStartTime: 0.45, relativeDuration: 0.55) { container.alpha = 0 }
+            }, completion: finish)
+        }
     }
 
     // MARK: Gestures
