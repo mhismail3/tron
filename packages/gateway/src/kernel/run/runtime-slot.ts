@@ -280,6 +280,7 @@ interface RuntimeDrainBlockerFact {
   category: AdministrativeDrainBlockerCategory;
   state: "active" | "settling" | "suspect";
   admittedAt?: string;
+  progressAt?: string;
 }
 
 export class RuntimeSlot extends RunOperations<FixedSetting> {
@@ -1127,6 +1128,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           category: "detached-extension-run",
           key: activity.activityId ?? activity.toolCallId,
           admittedAt: activity.startedAt,
+          // The run's own last step: a held Home task is judged by it (restart-drain.ts).
+          ...(activity.lastActivityAt ? { progressAt: activity.lastActivityAt } : {}),
           state: "active",
         });
       }

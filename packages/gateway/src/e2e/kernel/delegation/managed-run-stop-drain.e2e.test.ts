@@ -136,5 +136,7 @@ describe("Managed subagents: intentional stop drain", () => {
     // The bound still holds: no progress from either for the limit is a stall, named at the held task.
     expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(runProgress) + limit, limit))
       .toMatchObject({ outcome: "stalled", blocker: { sessionId: run.sessionId }, ageMs: limit });
+    child.releaseHeld();
+    await run.completion.catch(() => {});
   }, 60_000);
 });
