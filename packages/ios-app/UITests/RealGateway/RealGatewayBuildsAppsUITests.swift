@@ -267,7 +267,11 @@ extension RealGatewayPairAndChatUITests {
         app.buttons["Send message"].tap()
         // The terminal reply adds its footer and moves the bottom-pinned card.
         // Acquire the review target only after that canonical turn is complete.
-        XCTAssertTrue(app.staticTexts["Builds app ready for review."].firstMatch.waitForExistence(timeout: 60), app.debugDescription)
+        // The reply's paragraph inside its selectable text view: a StaticText on
+        // iOS 26, typed TextView on iOS 27, so match it by label within the view.
+        let reply = app.textViews.matching(identifier: "chat.assistant.selectable-text")
+            .descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Builds app ready for review."))
+        XCTAssertTrue(reply.firstMatch.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertTrue(app.buttons["Stop Tron"].waitForNonExistence(timeout: 60), app.debugDescription)
     }
     @MainActor func buildsDismissReview(_ app: XCUIApplication) {

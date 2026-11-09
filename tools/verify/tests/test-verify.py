@@ -272,17 +272,17 @@ class ExternalVerificationTests(VerifyCase):
         self.assertEqual(report["passingTests"], 1)
         self.assertEqual(next(step for step in report["steps"] if step["name"] == "tests: ios")["status"], "skipped")
         self.assertNotIn("ios build", [step["name"] for step in report["steps"]])
-        # A harness-only declaration must remain incomplete unless explicitly skipped.
-        r.write("packages/ios-app/UITests/RealGatewayPairAndChatUITests.swift",
-                "class RealGatewayPairAndChatUITests: XCTestCase {}\n")
-        self.declare("alpha", ["scripts/tron test ios run --only-testing TronMobileUITests/RealGatewayPairAndChatUITests"])
+        # A declaration of a class only an undriven harness runs remains incomplete unless explicitly skipped.
+        r.write("packages/ios-app/UITests/TronMacTerminalUITests.swift",
+                "class TronMacTerminalUITests: XCTestCase {}\n")
+        self.declare("alpha", ["scripts/tron test ios run --only-testing TronMobileUITests/TronMacTerminalUITests"])
         r.commit("harness-only consumer")
         incomplete = r.verify("--module", "repo/alpha")
         self.assertEqual(incomplete.returncode, 1, incomplete.stdout + incomplete.stderr)
         self.assertEqual(r.report()["verdict"], "incomplete")
         skipped = r.verify("--module", "repo/alpha", "--skip", "ios")
         self.assertEqual(skipped.returncode, 0, skipped.stdout + skipped.stderr)
-        self.assertEqual(r.report()["groups"]["ios-lanes"], ["packages/ios-app/UITests/RealGatewayPairAndChatUITests.swift"])
+        self.assertEqual(r.report()["groups"]["ios-lanes"], ["packages/ios-app/UITests/TronMacTerminalUITests.swift"])
 
     def test_external_failure_empty_and_unsupported_commands_cannot_pass(self) -> None:
         r = self.repo
@@ -747,6 +747,41 @@ esac
 """
 
 
+# The real-UI journey harness: its owned journey list, and `run-ui` writing each journey's
+# report.json in the harness's schema (revision from the products' commit) and its result line.
+E2E_STUB = r"""#!/bin/bash
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+ui_owned_journeys=(
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight'
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark'
+)
+echo "$* lanes=${TRON_IOS_E2E_UI_LANES:-1}" >>"$FIXTURE_E2E_CALLS"
+[[ "$1" == run-ui ]] || exit 2
+shift
+revision="${FIXTURE_E2E_REVISION:-$(git -C "$root" rev-parse HEAD)}"
+status=0
+while (($#)); do
+  journey="$2"; shift 2
+  dir="$(mktemp -d "$TMPDIR/e2e-ui.XXXXXX")"
+  code=0; [[ "$journey" == *"${FIXTURE_E2E_FAIL:-none}" ]] && code=65
+  python3 - "$dir" "$journey" "$code" "$revision" <<'PY'
+import hashlib, json, sys
+from pathlib import Path
+directory, journey, code, revision = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
+report = {"schema": "tron.ios-e2e-ui-journey.v1", "journey": journey, "journey_status": code, "journey_seconds": 1,
+          "evidence_complete": True, "source": {"revision": revision, "dirty": False}, "artifacts": []}
+(directory / "report.json").write_text(json.dumps(report))
+digest = hashlib.sha256((directory / "report.json").read_bytes()).hexdigest()
+(directory / "report.sha256").write_text(f"{digest}  report.json\n")
+PY
+  echo "Real-UI journey $journey completed in 1s (status $code); evidence: $dir"
+  ((code == 0)) || status=$code
+done
+exit "$status"
+"""
+
+
 class IosLaneTests(VerifyCase):
     def ios_fixture(self) -> Path:
         """An app module, a UI-tests module whose spawn edge reaches it, and the stand-in lane; returns its call log."""
@@ -866,6 +901,77 @@ class IosLaneTests(VerifyCase):
         failed = r.verify("--module", "ios-app/state")
         self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
         self.assertIn("failed: TronMobileUITests/FixtureLockTests/testChat(): a11y differs", failed.stdout)
+
+    def test_a_real_gateway_journey_change_runs_its_journeys_through_their_harness(self) -> None:
+        """#2365: a changed real-UI journey runs, by exact selector, through `ios-gateway-e2e-test
+        run-ui`; each journey's report.json for this commit is the step's evidence."""
+        r = self.repo
+        self.ios_fixture()
+        calls = Path(self.temp.name) / "e2e-calls.txt"
+        r.env["FIXTURE_E2E_CALLS"] = str(calls)
+        tooling = json.loads((r.path / "tooling.module.json").read_text())
+        tooling["owns"] += ["scripts/ios-gateway-e2e-test"]
+        r.write("tooling.module.json", json.dumps(tooling))
+        r.write("scripts/ios-gateway-e2e-test", E2E_STUB)
+        (r.path / "scripts/ios-gateway-e2e-test").chmod(0o755)
+        journeys = "packages/ios-app/UITests/RealGateway"
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift",
+                "class RealGatewayPairAndChatUITests {\n    func testPairLight() {}\n    func launch() {}\n}\n")
+        r.write(f"{journeys}/RealGatewayBuildsUITests.swift",
+                "extension RealGatewayPairAndChatUITests {\n    func testBuildsDark() {}\n}\n")
+        r.commit("journeys")
+        r.git("branch", "-f", "base")
+        r.write(f"{journeys}/RealGatewayBuildsUITests.swift",
+                "extension RealGatewayPairAndChatUITests {\n    func testBuildsDark() { _ = 1 }\n}\n")
+        r.commit("one journey changes")
+        sha = r.git("rev-parse", "HEAD").strip()
+
+        passed = r.verify("--changed")
+        self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+        report = r.report()
+        self.assertEqual(report["verdict"], "passed")
+        step = next(step for step in report["steps"] if step["name"] == "tests: ios-journeys")
+        self.assertEqual((step["status"], step["tests"]), ("ok", 1))
+        [evidence] = step["journeyReports"]
+        self.assertEqual((evidence["journey"], evidence["status"], evidence["revision"]),
+                         ("TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark", 0, sha))
+        self.assertEqual(evidence["sha256"], hashlib.sha256(Path(evidence["report"]).read_bytes()).hexdigest())
+        # Only the changed file's journey, on one lane.
+        self.assertEqual(calls.read_text().splitlines(),
+                         ["run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark lanes=1"])
+
+        # A red journey fails the run and names itself.
+        failed = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
+                                env={**r.env, "FIXTURE_E2E_FAIL": "testBuildsDark"}, capture_output=True, text=True)
+        self.assertEqual(failed.returncode, 1, failed.stdout)
+        step = next(step for step in r.report()["steps"] if step["name"] == "tests: ios-journeys")
+        self.assertEqual(step["failedTests"], ["TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark"])
+        # A report for other source bytes is not evidence for this commit, even with status 0.
+        stale = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
+                               env={**r.env, "FIXTURE_E2E_REVISION": "0" * 40}, capture_output=True, text=True)
+        self.assertEqual(stale.returncode, 1, stale.stdout)
+        self.assertIn("no passing report for this commit", stale.stdout)
+
+        # The class's own file holds the shared helpers, so changing it runs every owned journey.
+        calls.write_text("")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift",
+                "class RealGatewayPairAndChatUITests {\n    func testPairLight() {}\n    func launch() { _ = 2 }\n}\n")
+        r.commit("shared helper changes")
+        every = r.verify("--changed")
+        self.assertEqual(every.returncode, 0, every.stdout + every.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [
+            "run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark"
+            " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight lanes=2"])
+        # So does a helper-only extension file, which declares no journey of its own.
+        calls.write_text("")
+        r.write(f"{journeys}/RealGatewayHelpersUITests.swift", "extension RealGatewayPairAndChatUITests {\n    func reveal() {}\n}\n")
+        r.commit("shared extension helper")
+        helpers = r.verify("--changed")
+        self.assertEqual(helpers.returncode, 0, helpers.stdout + helpers.stderr)
+        self.assertEqual(calls.read_text().splitlines()[-1].rsplit(" ", 1)[-1], "lanes=2")
+        # --skip ios still accepts not running them, explicitly.
+        skipped = r.verify("--changed", "--skip", "ios")
+        self.assertEqual(r.report()["steps"][-1]["status"], "skipped", skipped.stdout)
 
     def test_an_extension_file_runs_as_the_class_it_extends(self) -> None:
         """#1522: a file that extends another file's XCTestCase class runs as that class, in that class's lane."""
