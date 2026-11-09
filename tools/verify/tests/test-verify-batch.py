@@ -104,7 +104,7 @@ class BatchTests(unittest.TestCase):
                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
         self.env['GIT_COMMITTER_DATE'] = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         self.git('init', '-q', '-b', 'main')
-        for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py', 'vitest_configs.py', 'mac.py'):
+        for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py', 'vitest_configs.py', 'mac.py', 'mini.py'):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
             text = source.read_text()
             # The shared host lock path belongs to real full-Gateway runs, not fixtures.
