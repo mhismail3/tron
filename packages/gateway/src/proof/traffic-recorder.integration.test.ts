@@ -120,14 +120,11 @@ describe("proof traffic recorder", () => {
 
     const records = corpus(dataDir, "settings/precedence");
     expect(records.every((r) => r.schema === TRAFFIC_SCHEMA && r.block === "settings/precedence" && r.seam === "resolve")).toBe(true);
-    // Each resolved key instance has its record, in resolution order (a key's dependencies and the chat model
-    // resolve too, so other records lie between), with the fold's layer and not-applied layer.
-    let at = 0;
-    for (const row of resolution.keys) {
-      while (at < records.length && (records[at]!.input as { key: string }).key !== row.key) at++;
-      const record = records[at++]!;
-      expect(record, row.key).toBeDefined();
-      const output = record.output as { layer: string; notApplied: string | null };
+    // Exactly one record per resolved key instance, in resolution order, after the chat model's own resolution
+    // (which the model-qualified keys read), each with the fold's layer and not-applied layer.
+    expect(records.map((r) => (r.input as { key: string }).key)).toEqual(["model.ref[role=chat]", ...resolution.keys.map((row) => row.key)]);
+    for (const [index, row] of resolution.keys.entries()) {
+      const output = records[index + 1]!.output as { layer: string; notApplied: string | null };
       expect(scopeForStore(output.layer as never)).toBe(row.layer);
       expect(output.notApplied === null).toBe(row.applied);
     }

@@ -6,7 +6,10 @@
 // Generated inputs run the real resolveSettings over a synthetic schema (keys bound in every combination of
 // layers, admitted or not, per-model or not, composing or not) and random stores and targets; a composing key's
 // compose builds a term {c: [below, value]}, so the TypeScript's composition order is compared exactly. The core
-// gets the facts the shell's own precedenceFacts builds (the seam's record input).
+// gets the facts the shell's own precedenceFacts builds (the seam's record input). The rows compared are
+// resolveSettings' output, which names Home's layer as Session and does not say whether a shown value is the
+// per-model one: generated mode checks those through the values; replay compares the raw store layers and the
+// per-model flag the seam records.
 // Usage: node tools/proof/oracles/settings-precedence.mjs <compiled core.js> [count=2000] [seed=3]
 //        node tools/proof/oracles/settings-precedence.mjs <compiled core.js> --replay <corpus.jsonl>...
 // Prints {requests, agree, diffs (first 5)}; exit 0 iff every request agrees, 1 on a mismatch, 2 on a corpus
@@ -92,6 +95,7 @@ if (replay) {
   const MODELS = ["p/m1", "p/m2"];
   // A few small values, so equal values in different layers (one token) are common.
   const value = () => pick([0, 1, 2, "a", "b", [1], { x: 1 }]);
+  // No synthetic key declares an optionsSource, so resolveSettings clamps nothing and its rows are the fold's result.
   const type = (composes) => ({ kind: "test", format: (v) => JSON.stringify(v) ?? "", validate: (v) => v,
     ...(composes ? { compose: (below, v) => ({ c: [below === undefined ? null : below, v] }) } : {}) });
   const chatKey = { id: "model.ref[role=chat]", group: "model", type: type(false), sessionOverridable: false, projectSettable: true,

@@ -123,7 +123,8 @@ block will replace TypeScript logic, the exact typed inputs and the output the T
 `schedule/occurrence`, calendar triggers under `schedule/calendar`; nested calls are not seams. The
 `settings/precedence` seam in `resolveInstance` (`packages/gateway/src/kernel/settings/settings-resolver.ts`)
 records each resolved key instance's facts as `precedenceFacts` builds them (per layer: in the target, bound,
-per-model and plain value, applied) and the fold's result (value, layer, not-applied layer, shown layers); values
+per-model and plain value, applied) and the fold's result (value, layer, not-applied layer, shown layers; capability clamping comes after it and
+is not part of the record); values
 enter as tokens, equal values (as JSON) of one call sharing one and the default being 0, so no setting value is
 recorded. A composing key's value is recorded as null (its composition is checked on generated inputs). A seam
 whose record costs work checks `seamsRecorded()` first.
