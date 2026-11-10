@@ -475,7 +475,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
         { value: "streaming", label: "While running", detail: "Caches stay warm while a turn runs" },
         { value: "idle", label: "Also between runs", detail: "Also kept warm between turns; costs more" },
       ]),
-      layers: { global: pi("cacheWarming") }, defaultValue: "streaming", timing: "fixed", effect: "new-chat",
+      layers: { global: pi("cacheWarming") }, defaultValue: "off", timing: "fixed", effect: "new-chat",
       direction: (_b, a) => a === "idle" ? "widen" : "narrow", writers: ["ui", "home"],
       label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced",
     },

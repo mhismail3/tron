@@ -36,7 +36,7 @@ export {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 export type {
-  AgentSession, // patch 1 `projectDir`; 2-3 `steer`/`followUp(text, images)`; 4 idle `systemPrompt`; 5 `prompt({ preflightResult })` revocation
+  AgentSession, // patch 1 `projectDir`; 2 idle `systemPrompt`; 3 `prompt({ preflightResult })` revocation
   AgentSessionEvent,
   BashOperations,
   ContextEditEntry,

@@ -122,7 +122,7 @@ async function fixture() {
   return { root, tronHome, agentDir, project, trust, registry, service, settingsModel, settingsChanges, modelRuntime, model, modelKey, faux };
 }
 
-/** What pi's own SettingsManager resolves for each key it owns: the oracle. */
+/** What a chat's own SettingsManager (Pi's, behind Tron's admission) resolves for each key Pi owns: the oracle. */
 function piEffective(manager: SettingsManager, model: { provider: string; id: string }): Record<string, unknown> {
   return {
     "model.thinking[role=chat]": manager.getModelThinkingLevel(model.provider, model.id) ?? manager.getDefaultThinkingLevel(),
@@ -199,8 +199,8 @@ describe("settings.resolve", () => {
     expect(retries).toMatchObject({ value: 5, layer: "global", applied: false, reason: "untrusted", display: "5 retries" });
     expect(retries.layers.find(layer => layer.layer === "project")).toMatchObject({ value: 7, applied: false, reason: "untrusted" });
     expect(retries.badges).toContainEqual(expect.objectContaining({ kind: "state", label: "Not applied (untrusted)" }));
-    // Untrusted equals what pi itself applies without trust.
-    const piUntrusted = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: false }), model);
+    // Untrusted equals what a chat's settings apply without trust.
+    const piUntrusted = piEffective(await createSettingsManager(TEST_SETTINGS_SCHEMA, project, agentDir, false), model);
     for (const [key, expected] of Object.entries(piUntrusted)) expect(row(untrusted, key).value, key).toEqual(expected);
     // A Project value for a Global-only key is a diagnostic, never applied.
     expect(untrusted.diagnostics).toContainEqual({ key: "permissions.defaultProjectTrust", layer: "project", reason: "project-forbidden", path: "defaultProjectTrust", file: projectFile });
@@ -220,11 +220,10 @@ describe("settings.resolve", () => {
     expect(strip(trusted)).toEqual(strip(untrusted));
     expect(row(trusted, "permissions.projectTrust")).toMatchObject({ value: true, display: "Trusted", qualifiers: { project: trusted.keys.find(k => k.key === "permissions.projectTrust")!.qualifiers!.project } });
 
-    // Keep raw SDK parity for every other key. Tools cross the production
-    // admission boundary: the repository cannot widen the executable ceiling.
-    const piTrusted = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: true }), model);
-    const admittedTools = (await createSettingsManager(TEST_SETTINGS_SCHEMA, project, agentDir, true)).getDefaultTools();
-    piTrusted["tools.active"] = admittedTools;
+    // Parity with the production admission boundary: the repository cannot
+    // widen the executable ceiling.
+    const piTrusted = piEffective(await createSettingsManager(TEST_SETTINGS_SCHEMA, project, agentDir, true), model);
+    const admittedTools = piTrusted["tools.active"];
     for (const [key, expected] of Object.entries(piTrusted)) {
       const qualifiers = key.startsWith("context.compaction.") && key !== "context.compaction.enabled" ? { model: modelKey } : undefined;
       expect(row(trusted, key, qualifiers).value, key).toEqual(expected);
@@ -278,7 +277,7 @@ describe("settings.resolve", () => {
     // boundary, not merely make two declaration tables agree.
     await writeFile(join(agentDir, "settings.json"), "{}");
     const defaults = await resolve({ kind: "global" });
-    const piDefaults = piEffective(SettingsManager.create(project, agentDir, { projectTrusted: false }), model);
+    const piDefaults = piEffective(await createSettingsManager(TEST_SETTINGS_SCHEMA, project, agentDir, false), model);
     for (const [key, expected] of Object.entries(piDefaults)) {
       if (expected !== undefined) expect(row(defaults, key), key).toMatchObject({ value: expected, layer: "global" });
     }
