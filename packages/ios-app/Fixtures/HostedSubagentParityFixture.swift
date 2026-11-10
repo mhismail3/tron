@@ -24,8 +24,9 @@ struct HostedSubagentParityFixture: View {
         self.defaults = defaults
         profile = GatewayProfile(id: "parity", label: "Fixture", host: "gateway.test", port: 9847,
             machineId: "fixture-machine", deviceId: "fixture-device")
-        defaults.set(try! JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
-        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        defaults.set(try! JSONEncoder.gateway.encode(
+            GatewayProfileDocument(profiles: [profile], selectedProfileID: profile.id)
+        ), forKey: "gatewayProfiles.v2")
         let socket = HostedSubagentParitySocket()
         cacheRoot = FileManager.default.temporaryDirectory.appending(path: "subagent-parity-\(UUID().uuidString)")
         _model = State(initialValue: AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { _ in socket }),
@@ -41,7 +42,7 @@ struct HostedSubagentParityFixture: View {
         let process = SessionProcessActivity(processId: "worker", kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
             lifecycle: .init(state: .running, sequence: 1, observedAt: startedAt), visibility: .active,
             startedAt: startedAt, title: "Worker", currentTool: "read", currentPathBasename: "parity.txt",
-            model: "fixture/model", thinking: "medium", outputTail: "PARITY_CHILD_COMPLETE", toolCount: 2, turnCount: 1, toolCallId: "launch", runId: "run-worker")
+            model: "anthropic/claude-fable-5-2", thinking: "medium", outputTail: "PARITY_CHILD_COMPLETE", toolCount: 2, turnCount: 1, toolCallId: "launch", runId: "run-worker")
         var snapshot = SessionSnapshot(sessionId: "parity", runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
             phase: .idle, name: historic ? "Historical subagents" : "Subagents", cwd: "/workspace", parentSessionId: nil, model: nil,
             thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,

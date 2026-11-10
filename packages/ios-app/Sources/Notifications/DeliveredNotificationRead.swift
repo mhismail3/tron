@@ -25,9 +25,8 @@ struct DeliveredNotificationRead {
         deliveries.contains { $0.sessionID != sessionID }
     }
 
-    func remove(sessionIDs: Set<String>) async {
+    func remove(sessionIDs: Set<String>) {
         let identifiers = deliveries.filter { sessionIDs.contains($0.sessionID) }.map(\.identifier)
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
-        await RetiredNotificationBadge.clear()
     }
 }

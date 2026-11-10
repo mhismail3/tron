@@ -173,6 +173,49 @@ describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
     expect(usageAgent).toBe(`claude-code/${CLAUDE_CODE_VERSION}`);
   });
 
+  it("sends every request with its full context, never an Anthropic message thread, on Anthropic's own endpoint", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-anthropic-full-context-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    await writeFile(join(root, "auth.json"), JSON.stringify({ anthropic: { type: "oauth", access: ACCESS, refresh: "sk-ant-ort01-tron-wire-test", expires: Date.now() + 3_600_000 } }), { mode: 0o600 });
+    const shared = await createProviderModelRuntime(root);
+    const runtimes = { chat: shared, home: applyHomeCacheRetention(sessionRuntimeView(shared)) };
+    // The stock baseUrl, where Pi would continue a server-side thread; requests stop at this fetch.
+    const model = shared.getModels("anthropic").find((candidate) => candidate.id === "claude-opus-5-5")!;
+    expect(model.baseUrl).toContain("api.anthropic.com");
+    const requests: Array<{ name: string; headers: Headers; body: Record<string, unknown> }> = [];
+    for (const [name, runtime] of Object.entries(runtimes)) {
+      const fetch = async (_input: unknown, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        const index = requests.filter((request) => request.name === name).length;
+        requests.push({ name, headers: new Headers(init?.headers), body });
+        return new Response(reply(index, String(body.model)), { headers: { "content-type": "text/event-stream" } });
+      };
+      const tools = [{ name: "bash", description: "Run a shell command.", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } }];
+      const messages: Message[] = [{ role: "user", content: [{ type: "text", text: "Run echo ok." }], timestamp: 1 }];
+      const context: Context = { systemPrompt: "You are Tron.", tools: tools as never, messages };
+      const options = { sessionId: `${name}-full-context`, fetch: fetch as typeof globalThis.fetch };
+      const first = await runtime.streamSimple(model, context, options).result();
+      expect(first.stopReason).toBe("toolUse");
+      const second = await runtime.streamSimple(model, { ...context, messages: [...messages, first,
+        { role: "toolResult", toolCallId: "toolu_wire", toolName: "bash", content: [{ type: "text", text: "ok" }], isError: false, timestamp: 2 }] }, options).result();
+      expect(second.stopReason).toBe("stop");
+    }
+
+    expect(requests.map((request) => request.name)).toEqual(["chat", "chat", "home", "home"]);
+    for (const { name, headers, body } of requests) {
+      expect(body.thread, name).toBeUndefined();
+      expect(String(headers.get("anthropic-beta")).split(","), name).not.toContain("message-threads-2026-08-12");
+      expect((body.system as Block[] | undefined)?.length, name).toBeGreaterThan(0);
+      expect((body.tools as Block[] | undefined)?.map((tool) => tool.name), name).toContain("Bash");
+    }
+    // The follow-up resends the whole conversation: the prompt, the tool call and its result.
+    for (const request of requests.filter((_, index) => index % 2 === 1)) {
+      const blocks = (request.body.messages as WireMessage[]).flatMap((message) => Array.isArray(message.content) ? message.content : []);
+      expect(blocks.some((block) => block.type === "text" && block.text === "Run echo ok."), request.name).toBe(true);
+      expect(blocks.map((block) => block.type), request.name).toEqual(expect.arrayContaining(["tool_use", "tool_result"]));
+    }
+  });
+
   it("leaves an Anthropic API-key login's identity to Pi", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-anthropic-api-key-wire-"));
     cleanups.push(() => rm(root, { recursive: true, force: true }));

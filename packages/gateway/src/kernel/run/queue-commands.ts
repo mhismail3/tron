@@ -182,8 +182,8 @@ export class RunQueueCommands {
       this.operations.runQueue.suppressQueueEvents = true;
       try {
         session.clearQueue();
-        // Publish in requested order: each item is prepared (images may need resizing) and queued before the
-        // next starts, so a slow photo cannot let a later item of the same behavior enter Pi's queue first.
+        // Publish in requested order: each item passes Pi's async input hooks and is queued before the next
+        // starts, so a slow hook cannot let a later item of the same behavior enter Pi's queue first.
         const dispositions: Array<"handled" | "queued"> = [];
         for (const item of next) {
           dispositions.push(item.behavior === "steer"

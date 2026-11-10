@@ -1,0 +1,74 @@
+# Generated façades and wire codecs
+
+`scripts/tron proof facade` and `scripts/tron proof wire` ([proof toolchain](../README.md)): what they generate
+from Dafny sources, and what they refuse.
+
+## Façade
+
+`dafny2wire/facade.mjs` (`proof facade <block> [--check] [--root <dir>]`) writes a block's compiled core and
+`facade.ts`, a typed TypeScript wrapper generated from the datatypes and compiled signatures of the block's laws.
+The façade exposes every compiled function and predicate of the laws (ghost and commented-out declarations are
+not compiled, so not exposed) and checks each stated precondition before calling, because compiled code does not
+check `requires`. Refused before anything is written: Dafny 3 `function method` syntax, preconditions other than
+a call of a compiled predicate on parameters, generic functions, and any Dafny type the block's kind does not
+carry (an unused generic datatype is ignored). `--check` regenerates into a temporary directory and exits 1 if
+the checked-in files differ.
+
+**A block its shell runs** (`block.json` `shell`, a directory relative to the repository) is written there as
+`core.mjs` and `facade.ts`. `core.mjs` imports nothing: it is the output of `dafny translate js` without the
+Dafny runtime, byte for byte, after a generated header and before one `export { <module> as compiled }` line.
+The compiled functions of such a block may not use the runtime, with one exception: a runtime helper that is a
+closed function (it names nothing else of the runtime; today integer division and modulo on numbers) is copied
+verbatim into the header from the runtime the same compiler emits. Any other use (an unbounded `int`, building a
+sequence, datatype `==`, a tuple) is refused, naming the function and the compiled line; only the members the
+compiler emits for the runtime's own use (a datatype's `toString` and `equals`, a newtype's `_Is` and
+`IntegerRange`) may mention it: nothing a core or its façade runs calls them, and one that names the runtime
+would throw. A block's own function is never exempt, whatever its name. Types: a newtype over a literal integer range within the JavaScript safe integers -> `number`, checked to be
+an integer in that range in both directions; `bool` -> `boolean`; `seq<T>` -> a readonly array of `T`; a linked
+list, a generic datatype of the shape `L<T> = Nil | Cons(head: T, tail: L<T>)` under any names, -> a readonly
+array of `T`, converted in a loop in both directions (no other generic datatype has a shape); a datatype
+of nullary constructors -> a string union of their names, a one-constructor datatype named like its type -> a
+plain object, any other datatype -> an object tagged by `$`; an unknown constructor is a `TypeError` in either
+direction. `bind(compiled)` binds the façade to another translation of the block; `core` is the checked-in one.
+
+**A shadowed block** is written to `packages/core/dist/<block>` as `core.js`, compiled with the Dafny runtime
+(unedited, with a generated header), and a `facade.ts` that evaluates it: `load(corePath)` binds it to any
+compiled core (the checked-in one, or a mutant or fresh translation for oracles), and `core` is the bound
+checked-in one. Types there: `int` -> `number` and `nat` -> `number >= 0` (safe integers, converted to and from
+the runtime's BigNumber and checked both ways), and the datatype, `bool` and `seq<T>` forms above. No shell can
+run such a core, because the runtime needs the `bignumber.js` package: a block is rewritten to the form above
+before its cut-over, and this form goes with the last shadowed block.
+
+## Wire
+
+The Gateway protocol's value types have one source, `packages/core/wire/Protocol.dfy`: `proof wire --protocol`
+writes `packages/gateway/src/protocol/types.ts` (types, decoders and encoders, generated; never edited) and
+`--check` exits 1 when that file is not what the source generates. The Gateway still writes frames with
+`JSON.stringify` of the values it builds, so the generated encoders serve the codec tests only and the
+decoders are the protocol's validators. A type another module owns (the display contract, the upstream error)
+is marked `import=<path>`: types.ts imports it and fails to compile unless it equals the stated shape. The
+Swift codec is generated and proven against the TypeScript one in the test below; the iOS app still decodes
+with its own models.
+
+`dafny2wire/dafny2wire.mjs` (`proof wire --generate`) turns `// @wire` Dafny datatypes into `wire.ts` and
+`Wire.swift` codecs: records; `// @wire enum` (a JSON literal per constructor: `{:wire "x"}`, `{:wire 1}`,
+`{:wire true}`, else the constructor name); `// @wire tag=<field>` tagged unions (a tag value may be a string,
+number or boolean); `// @wire bykind` unions
+split by JSON kind (a nullary constructor is `null`; this is how open JSON values are written). Field types:
+`string`, `bool`, `int`/`nat` (safe-range JSON integers), `real` (float64), `seq<T>`, `map<string, T>` (or
+`map<E, T>` with E a string enum: only E's values are keys),
+`Option<T>` (absent key), `Nullable<T>` (JSON null) and `Absent` (the key never appears); a trailing `_`
+escapes a Dafny keyword or a shared destructor name. Canonical JSON: keys in declaration order with the tag
+first, no whitespace, JSON.stringify string escaping, ECMAScript Number::toString (`-0` as `0`; non-finite
+numbers refused by both encoders). Maps keep JavaScript's property order (array-index keys ascending, then
+insertion order; a duplicate key keeps its first position and last value), also when built in Swift, so the
+Swift codec parses JSON itself rather than through Foundation; an overflowing number literal (`1e400`)
+parses as infinity and is rejected at its path by both decoders. The TypeScript decoders are strict: they
+reject unknown and absent-only fields, missing fields, wrong kinds, out-of-range integers and unknown
+constructors at a named JSON path. The Swift decoders are tolerant, the iOS decoding policy: unknown fields are
+ignored; an absent field, or a null one whose type cannot hold null (not `Nullable<T>`, not a union with a null
+constructor), takes its type's default (`""`, `0`, `false`, empty, `null`, the `unknown` value of an enum that
+has one, an enum's only value, a record of defaults); an unknown value of an enum with an `unknown` value is
+`unknown`. A field with no default (another enum, a union) is still required, and wrong kinds, unknown tags and
+unknown map keys are still refused; invariants beyond the shape belong to a validator layer, not the decoder.
+Limits: Swift refuses a lone UTF-16 surrogate, which JavaScript strings can hold.

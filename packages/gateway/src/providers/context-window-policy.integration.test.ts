@@ -149,7 +149,8 @@ describe("context window policy", () => {
     policy.set(astra, 1_050_000);
     expect(session.model).toMatchObject({ contextWindow: 1_050_000, maxTokens: 128_000, cost: astra.cost });
     expect(session.thinkingLevel).toBe("high");
-    expect(modelRuntime.getModels().find(model => model.id === astra.id)?.contextWindow).toBe(272_000);
+    // Match provider and id: the bundled catalog lists this model id under other providers with other windows.
+    expect(modelRuntime.getModels().find(model => model.provider === astra.provider && model.id === astra.id)?.contextWindow).toBe(272_000);
     expect(session.getContextUsage()?.contextWindow).toBe(1_050_000);
     expect(policy.snapshot()).toMatchObject({ effective: 1_050_000, override: 1_050_000, source: "session", warning: expect.stringContaining("pricing") });
     policy.set(astra, null);

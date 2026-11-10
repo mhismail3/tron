@@ -11,7 +11,8 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
 `provider-usage.ts`, `openai-model-eligibility.ts` (`OpenAIModelEligibility`),
 `context-window-policy.ts`, `model-queue.ts` and `model-queue-extension.ts`,
 `recent-models.ts`, `model-release-date-catalog.ts` (+ JSON data), `virtual-model.ts`,
-`kimi-k3-policy.ts`, `jev-model-pricing.ts`, `provider-runtime.ts`.
+`kimi-k3-policy.ts`, `claude-code-identity.ts`, `anthropic-full-context.ts`, `jev-model-pricing.ts`,
+`provider-runtime.ts`.
 
 Queue roles, setting-key addresses and lexical model-reference parsing belong to
 [the settings vocabulary](../kernel/settings/README.md), not provider queue execution.
@@ -73,9 +74,11 @@ and before worker controls, reading canonical fixed settings and the worker fact
   state (account, OAuth flag, slugs, names) or the stored-credential set changes, never per read, so `provider.list`
   and `model.list` cost does not grow with the open sessions.
 - **Runtime construction.** `createProviderModelRuntime` supplies canonical auth/model paths,
-  offline refresh defaults and Kimi, Claude Code identity, then Jev policy wrapping for Gateway and
-  session runtimes. The identity policy sends the Gateway's Claude Code version
-  (`claude-code-identity.json`) as the `user-agent` of stored-OAuth `anthropic` requests.
+  offline refresh defaults and Kimi, Claude Code identity, Anthropic full-context, then Jev policy
+  wrapping for Gateway and session runtimes. The identity policy sends the Gateway's Claude Code version
+  (`claude-code-identity.json`) as the `user-agent` of stored-OAuth `anthropic` requests. The
+  full-context policy (`anthropic-full-context.ts`) turns Pi's Anthropic message threads off, so
+  every Anthropic Messages request resends its whole conversation.
   The registry receives this factory from composition; injected raw factories use the same policies.
 - **Moonshot Kimi K3** caps the completion reservation at 32,768 tokens via
   `max_completion_tokens` (Moonshot TPM counts the reservation). Account and org quota

@@ -9,7 +9,7 @@
   "dependsOn": [
     "gateway/receipts",
     "gateway/pi",
-    "gateway/proof"
+    "gateway/core"
   ],
   "verify": [
     "scripts/tron test gateway src/e2e/kernel/settings/settings-change.preparation.test.ts"

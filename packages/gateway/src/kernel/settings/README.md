@@ -11,10 +11,11 @@ setting and is not an approval queue.
 - `settings-schema.ts`: key bindings, value validation/formatting, writers, timing,
   effect and native-tap classification. Composition supplies Home tool names,
   compaction limits and security validation without upward imports.
-- `settings-resolver.ts`: layer precedence, qualifiers, composition, clamping and
-  state badges. Its precedence fold is shadowed by proof block `settings/precedence` (packages/core) through a
-  Debug-only seam (`precedenceFacts`; the fold before capability clamping); the TypeScript stays authoritative
-  until that block's cut-over. `settings-project-diagnostics.ts` owns bounded Project diagnostics.
+- `settings-resolver.ts`: qualifiers, store reads, composition, clamping and state badges. Which layer's value
+  a setting resolves to, which layers are shown, which is not applied and what lies below a layer are decided by
+  proof block `settings/precedence` ([`gateway/core`](../../core/settings/precedence/facade.ts), generated from
+  `packages/core`): the resolver gives it each layer's facts with a token per value and turns its answer back
+  into values, and holds no copy of the fold (`settings-resolver.test.ts` pins the rows and values around it). `settings-project-diagnostics.ts` owns bounded Project diagnostics.
 - `settings-model.ts`: target resolution and fixed-direction request pins.
 - `settings-change.ts`: planning, expected-before fences, target stripes, ordered
   store application/reverse rollback, outside-write brackets, Home companion effects,
@@ -27,8 +28,11 @@ setting and is not an approval queue.
   a grouped Undo requires exactly its unique, consistently sized members.
 - `tool-contract.ts`: layer, qualifier, model-reference/queue and typed tool/result
   vocabulary. `settings-types.ts` owns value formatting/composition and immutable,
-  disclosed before/after reviews whose digest binds identity and every shown field. The tool selection's compose
-  and encode are shadowed by proof block `settings/tool-selection` through Debug-only seams (`toolSelectionFacts`).
+  disclosed before/after reviews whose digest binds identity and every shown field. How a tool selection's
+  entries compose, and the form a chosen selection is stored in, are decided by proof block
+  `settings/tool-selection` ([`gateway/core`](../../core/settings/tool-selection/facade.ts), generated from
+  `packages/core`): `settings-types.ts` names each tool of a call with a token and writes the block's answer back
+  as names, and holds no copy of the merge (`settings-types.test.ts` pins the names and failures around it).
 - `scope-resolution.ts`: declared binding admission, canonical targets and sorted
   qualifier identities. `settings-admission.ts` owns operational model/thinking
   selection and synchronous compaction validation.

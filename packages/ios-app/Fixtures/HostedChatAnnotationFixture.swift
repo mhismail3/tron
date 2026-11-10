@@ -10,7 +10,7 @@ struct HostedChatAnnotationFixture: View {
     static let transcriptData = Data(#"""
         [
           {"id":"ask","parentId":null,"presentationId":"ask","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"ask-text","ordinal":0,"type":"text","text":"How should the gateway retry dropped connections?"}]},
-          {"id":"answer","parentId":"ask","presentationId":"answer","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer-text","ordinal":0,"type":"text","text":"## Retry policy\n\nThe gateway should retry dropped connections with **exponential backoff**, starting at one second and capping at thirty seconds. Each attempt adds jitter so many phones do not reconnect at once.\n\nKeep the session open while retrying:\n\n- Accepted prompts continue on the Mac.\n- The phone receives an authoritative snapshot when it returns.\n\nSee the [reconnect notes](https://example.com/reconnect) for the full contract."}],"provider":"anthropic","modelId":"claude-opus-5-5"}
+          {"id":"answer","parentId":"ask","presentationId":"answer","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer-text","ordinal":0,"type":"text","text":"## Retry policy\n\nThe gateway should retry dropped connections with **exponential backoff**, starting at one second and capping at thirty seconds. Each attempt adds jitter so many phones do not reconnect at once.\n\nKeep the session open while retrying:\n\n- Accepted prompts continue on the Mac.\n- The phone receives an authoritative snapshot when it returns.\n\nSee the [reconnect notes](https://example.com/reconnect) for the full contract."}],"provider":"anthropic","modelId":"claude-fable-5-2"}
         ]
         """#.utf8)
 
@@ -31,8 +31,9 @@ struct HostedChatAnnotationFixture: View {
         probe.reducesMotion = ProcessInfo.processInfo.arguments.contains("-annotation-reduce-motion")
         profile = GatewayProfile(id: "annotation-fixture", label: "Fixture", host: "gateway.test", port: 9847,
             machineId: "fixture-machine", deviceId: "fixture-device")
-        defaults.set(try! JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
-        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        defaults.set(try! JSONEncoder.gateway.encode(
+            GatewayProfileDocument(profiles: [profile], selectedProfileID: profile.id)
+        ), forKey: "gatewayProfiles.v2")
         let socket = socket
         _model = State(initialValue: AppModel(
             client: GatewayClient(socketFactory: GatewaySocketFactory { _ in socket }),

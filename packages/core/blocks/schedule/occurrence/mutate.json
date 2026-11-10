@@ -4,6 +4,7 @@
   "tierReason": "decides when automation runs dispatch or skip (feeds the automation-run lifecycle); \"when unsure, high-stakes\"",
   "impl": "blocks/schedule/occurrence/Block.dfy",
   "symbols": [
+    "Periods",
     "Next",
     "First",
     "Classify"
@@ -29,7 +30,6 @@
     ],
     "L6 classify-due": [
       "ScheduleOccurrence.L6ClassifyDue",
-      "ScheduleOccurrence.L6IntervalResult",
       "ScheduleOccurrence.L6IntervalLatest",
       "ScheduleOccurrence.L6IntervalNext",
       "ScheduleOccurrence.NoOccBetween"
@@ -47,45 +47,13 @@
     "MulNonNeg",
     "MulLeMono",
     "DivNonNeg",
-    "ShiftDiv"
+    "ShiftDiv",
+    "PeriodsFit"
   ],
   "translate": "blocks/schedule/occurrence/Block.dfy",
-  "oracles": [
-    {
-      "name": "diff-vs-gateway-schedule.ts(20000)",
-      "cmd": [
-        "node",
-        "tools/proof/oracles/schedule-occurrence.mjs",
-        "{dir}/out/core.js",
-        "20000"
-      ],
-      "jsonEq": [
-        "agree",
-        "requests"
-      ]
-    }
-  ],
+  "oracles": [],
   "accepted": {},
   "report": "blocks/schedule/occurrence/MUTATION.json",
-  "shadow": {
-    "cmd": [
-      "node",
-      "tools/proof/oracles/schedule-occurrence.mjs",
-      "{core}",
-      "20000"
-    ],
-    "source": "compiled core vs packages/gateway/src/automations/schedule.ts on 20,000 generated inputs (not real traffic)"
-  },
-  "replay": {
-    "cmd": [
-      "node",
-      "tools/proof/oracles/schedule-occurrence.mjs",
-      "{core}",
-      "--replay",
-      "{corpus}"
-    ],
-    "source": "compiled core vs the schedule seams' recorded Debug-Gateway calls (packages/gateway/src/automations/schedule.ts)"
-  },
   "kinds": {
     "safety": [
       "L1 next-sound",

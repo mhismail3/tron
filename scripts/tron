@@ -42,6 +42,11 @@ Commands:
                                     the Claude Code version it sends, Tron's wiring tests
                                     (tools/claude-provider-smoke)
   build gateway                     Build Gateway directly with pinned Node
+  migrate connections-residue --tron-home <dir> [--apply --backup <new dir>]
+  migrate connections-residue --restore --backup <dir>
+                                    One-shot #2327 removal of retired connection setup
+                                    operations, receipts and Raindrop collection mappings;
+                                    dry run unless --apply; never at startup
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
                                     Write one read-only redacted diagnostic bundle
                                     to <path>, or to a new file in the system temp
@@ -106,8 +111,8 @@ Commands:
   proof packet <block> [options]    Render a block's hash-bound law review packet (LAWS.md)
   proof shadow <block> [options]    Compare a block's compiled core with the TypeScript it models;
                                     writes the hash-bound SHADOW.json
-  proof facade <block> [--check]    Generate (or check) packages/core/dist/<block>: the compiled
-                                    core and its typed TypeScript façade
+  proof facade <block> [--check]    Generate (or check) a block's compiled core and its typed
+                                    TypeScript façade, in its shell or packages/core/dist/<block>
   health [<rev>] [--baseline <rev>] [--github] [--evidence] [--deploy-log <jsonl>]
          [--home-sessions <dir>] [--backtest <t0>] [--csv <dir>]
                                     Read-only outcome and diagnostic health signals diffed
@@ -216,6 +221,15 @@ case "$cmd" in
       echo "Prepare the CLI first: scripts/tron build gateway" >&2; exit 66;
     }
     exec node "$GATEWAY/dist/security/mac-terminal-cli.js" "$@"
+    ;;
+  migrate)
+    [[ "${1:-}" == connections-residue ]] || { usage >&2; exit 64; }
+    shift
+    use_pinned_node
+    [[ -f "$GATEWAY/dist/integrations/connections-residue-migration.js" ]] || {
+      echo "Prepare it first: scripts/tron build gateway" >&2; exit 66;
+    }
+    exec node "$GATEWAY/dist/integrations/connections-residue-migration.js" "$@"
     ;;
   diagnose)
     use_pinned_node
