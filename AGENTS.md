@@ -50,7 +50,7 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 - **Ship together:** code, its owning doc and the smallest faithful regression proof in one change.
 - **Clear owners, clean modules** ([P3](docs/PRINCIPLES.md#p3-clear-owners-clean-modules)): every component and capability, core or feature, has one owner module with one concern. A change leaves
-  it minimal for what it does and deletes what it replaces (code, tests, fixtures, docs). Line counts are a signal, never a target or gate. Fix root causes; leave coherent code alone; never revive retired architecture (README.md, Repository).
+  it minimal for what it does and deletes what it replaces (code, tests, fixtures, docs) in the same change. Line counts are a signal, never a target or gate. Fix root causes; leave coherent code alone; never revive retired architecture (README.md, Repository).
 - **No backward-compatibility code:** no shims, aliases, re-exports, dual schemas, fallbacks, old-format
   readers or finished-migration code; replace contracts atomically. Live old data moves once through a backed-up
   migration (above) and its reader is deleted; an external consumer is a maintainer decision. Test-only hooks stay test-only.
