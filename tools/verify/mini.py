@@ -379,10 +379,11 @@ def remote_main(job: dict) -> int:
                 return refuse('stopped before the lane started')
 
             if job['lane'] == 'python':
-                # Python tests check proof blocks with the commit's pinned Dafny (tools/proof/dafny.pin); a mini
+                # Python tests check proof blocks with the Dafny the commit pins (tools/proof/dafny.pin); a mini
                 # without it refuses with the install command, as for Node, rather than failing those tests.
-                doctor = run('/bin/bash', str(checkout / 'tools/proof/bootstrap.sh'), 'doctor', cwd=checkout)
-                if doctor.returncode != 0:
+                doctor = (run('/bin/bash', str(checkout / 'tools/proof/bootstrap.sh'), 'doctor', cwd=checkout)
+                          if (checkout / 'tools/proof/dafny.pin').is_file() else None)
+                if doctor and doctor.returncode != 0:
                     return refuse(f'no pinned Dafny on the mini: {(doctor.stderr or doctor.stdout).strip()}\n'
                                   f'    install it there with: cd {checkout} && scripts/tron proof bootstrap')
                 # One stream, so each file's unittest summary (stderr) stays after its marker (stdout).
