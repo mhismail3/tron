@@ -7,7 +7,6 @@ export interface ActivityVisibility {
   remainingMs?: number;
   terminalAt?: string;
   recentUntil?: string;
-  /** Internal admission fact; never serialized on the wire. */
   accepted?: boolean;
 }
 
@@ -20,12 +19,8 @@ export interface ActivityExpiryFrame {
 
 type ExtensionActivityExpiryCallback = (frame: ActivityExpiryFrame) => void;
 
-/** Gateway-owned current/recent partition. Recency is a bounded scheduling
- * projection; canonical history is never removed here. */
 export class ExtensionActivityRecency {
   private readonly activities = new Map<string, ExtensionRunActivity>();
-  /** In-memory monotonic deadlines are reconstructed from persisted
-   * recentUntil-wallNow on admission, including after restart. */
   private readonly deadlines: RecencyDeadlines;
   private readonly expiryCallbacks = new Set<ExtensionActivityExpiryCallback>();
   private revision = 0;
@@ -36,7 +31,6 @@ export class ExtensionActivityRecency {
 
   get liveRevision(): number { return this.revision; }
 
-  /** Registers the owning RuntimeSlot's expiry callback. */
   registerExpiryCallback(callback: ExtensionActivityExpiryCallback): () => void {
     this.expiryCallbacks.add(callback);
     return () => this.expiryCallbacks.delete(callback);
@@ -45,8 +39,6 @@ export class ExtensionActivityRecency {
   upsert(activity: ExtensionRunActivity): ActivityVisibility {
     const key = activity.activityId ?? activity.id;
     const existing = this.activities.get(key);
-    // Terminal latches and sequence ordering are Gateway-owned. Producer
-    // timestamps are not allowed to resurrect or replace a newer projection.
     if (existing?.lifecycle?.sequence !== undefined && activity.lifecycle?.sequence !== undefined
       && activity.lifecycle.sequence <= existing.lifecycle.sequence) {
       return { ...this.visibility(existing), accepted: false };
@@ -59,7 +51,7 @@ export class ExtensionActivityRecency {
     const recentUntil = activity.lifecycle?.recentUntil;
     this.deadlines.admit(key, recentUntil === undefined ? undefined : Date.parse(recentUntil));
     this.revision += 1;
-    this.expireDue(false); // Also installs the nearest remaining expiry timer.
+    this.expireDue(false);
     return { ...this.visibility(activity), accepted: true };
   }
 
@@ -95,8 +87,6 @@ export class ExtensionActivityRecency {
     return this.expireDue();
   }
 
-  /** Removes all terminal entries whose persisted wall-clock deadline has
-   * arrived, then invokes RuntimeSlot callbacks with the authoritative frame. */
   expireDue(notify = true): ActivityExpiryFrame {
     const now = this.clock.wallNow();
     const expiredActivityIds: string[] = [];

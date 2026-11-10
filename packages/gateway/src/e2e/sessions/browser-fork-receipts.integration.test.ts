@@ -77,9 +77,6 @@ describe("installed agent-browser fork receipts", () => {
     } });
     const nativeExecutable = mode === "native" ? execFileSync("/usr/bin/which", ["agent-browser"], { encoding: "utf8" }).trim() : undefined;
     const callsPath = join(root, "cli-calls.jsonl");
-    // Run the real pinned fork in both cases. One case controls CLI envelopes;
-    // the other crosses the actual engine boundary. Record only owned session
-    // identities so even an assertion failure can close exactly our browsers.
     const fakeExecutable = `#!${process.execPath}\nconst fs = require("node:fs"), cp = require("node:child_process");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({ args, socketDir: process.env.AGENT_BROWSER_SOCKET_DIR }) + "\\n");
@@ -125,8 +122,6 @@ if (args.includes("https://forged.invalid/") || ${JSON.stringify(mode)} === "env
     const sdkUrl = import.meta.resolve("@earendil-works/pi-coding-agent");
     await writeFile(join(extensions, "codemode.ts"), `import { createCodemodeExtension } from ${JSON.stringify(sdkUrl)}; export default createCodemodeExtension({ mode: "on" });\n`);
 
-    // A bare never-settling sandbox Promise is rejected by the SDK, not an
-    // abort window. Hold a real nested host tool until the public abort arrives.
     await writeFile(join(extensions, "receipt-gate.ts"), `export default pi => pi.registerTool({
       name: "receipt_gate", label: "Receipt gate", description: "Hold the fixture parent for cancellation",
       parameters: { type: "object", properties: {} },

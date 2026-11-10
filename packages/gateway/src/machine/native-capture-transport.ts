@@ -1,6 +1,5 @@
 import { createRequire } from "node:module";
 
-/** Local transport retirement is NOT evidence of host Stop/native retirement. */
 export interface NativeCaptureTransport {
   request(control: Buffer): Promise<{ control: Buffer; jpeg: Buffer | null }>;
   closeLocal(): Promise<void>;
@@ -28,8 +27,6 @@ function boundedCallback<T>(
         if (error) reject(error); else resolve(value);
       });
     } catch (error) {
-      // A synchronous native failure must not leave the deadline timer armed for
-      // a callback that no longer exists.
       if (!settled) {
         settled = true;
         clearTimeout(timer);
@@ -39,7 +36,6 @@ function boundedCallback<T>(
   });
 }
 
-/** Import is inert; only this explicit operation loads/opens the fixed addon. */
 export function openNativeCaptureTransport(): NativeCaptureTransport {
   if (process.platform !== "darwin" || !["arm64", "x64"].includes(process.arch)) {
     throw new Error("Native capture requires the installed signed Mac runtime");
@@ -56,8 +52,6 @@ export function openNativeCaptureTransport(): NativeCaptureTransport {
   } catch (cause) {
     throw new Error("Native capture unavailable: a manual signed Mac app update is required; source-only Gateway updates cannot install native code", { cause });
   }
-  // Capacity, peer admission and other explicit-open errors are runtime
-  // failures, not instructions to replace an already valid signed binary.
   type Reply = { control: Buffer; jpeg: Buffer | null };
   type NativeClient = {
     request(control: Buffer, done: (error: Error | null, value: Reply) => void): void;
@@ -65,8 +59,6 @@ export function openNativeCaptureTransport(): NativeCaptureTransport {
   };
   const native = (addon as { open(): NativeClient }).open();
   let closing: Promise<void> | undefined;
-  // V8 owns these Promises. Native code retains only disposable callback refs,
-  // not opaque napi_deferred handles that cannot be freed during forced exit.
   return {
     request: (control) => boundedCallback("request", (done) => native.request(control, done)),
     closeLocal: () => closing ??= boundedCallback<void>("local retirement", (done) => native.closeLocal((error) => done(error, undefined))),

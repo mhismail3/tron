@@ -87,15 +87,11 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     const canonicalAtAdmission: any[][] = [];
     const persistedAtAdmission: Array<any[] | undefined> = [];
     const enqueue = vi.fn(async (_input: any) => {
-      // Take the branch cut synchronously: an asynchronous file read alone could
-      // see a receipt appended AFTER premature notification admission.
       canonicalAtAdmission.push([...(slot as unknown as { sessionManager: { getBranch(): any[] } }).sessionManager.getBranch()]);
       try {
         persistedAtAdmission.push((await readFile(slot.sessionFile!, "utf8")).trim().split("\n").map((line) => JSON.parse(line)));
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        // Pi buffers a new session until its first assistant. Keep this explicit
-        // rather than claiming a no-model first invocation reached disk.
         persistedAtAdmission.push(undefined);
       }
       return "queued" as const;
@@ -129,7 +125,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     const settle = async () => {
       await waitFor(() => !slot.isBusy, "the slot to go idle");
       await waitFor(() => enqueue.mock.calls.length + suppressAutomatic.mock.calls.length > 0, "the title refresh");
-      // A mock call is visible before its async admission recorder settles.
       await Promise.allSettled(enqueue.mock.results.map((result) => result.value));
     };
     return { root, slot, registry, faux, enqueue, suppressAutomatic, settle, canonicalAtAdmission, persistedAtAdmission, sdkEvents };
@@ -208,8 +203,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     });
     expect(denied.error.code).toBe("invalid_request");
 
-    // A mobile connection exists but is not presenting: the local lease alone
-    // owns this turn's observed disposition.
     await value.slot.prompt("terminal request");
     await value.settle();
     expect(value.enqueue).not.toHaveBeenCalled();
@@ -297,8 +290,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     await value.slot.rename("Ordinary project title");
     expect(home.snapshot().name).toBe("Home");
     expect(value.slot.snapshot().name).toBe("Ordinary project title");
-    // All producers, including input-needed and settings notifications, pass
-    // through this real admission/store/HTTP boundary. No APNs connection occurs.
     await notifications.enqueue({ sessionId: home.id, sourceId: "home-title-explicit", kind: "explicit",
       title: "Generated Home conversation title", message: "Home update",
       route: { sessionId: home.id, machineId: "machine-terminal-test" } });
@@ -317,8 +308,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       .toBe(previewsEnabled ? "Home update" : "Tron has an update. Open Tron to view it.");
     expect((await notifications.inbox()).notifications.filter(item => item.sessionId === home.id).map(item => item.title))
       .toEqual(["Home", "Home", "Home", "Home"]);
-    // A previously admitted row keeps its durable receipt but not an obsolete
-    // user-visible Home title. Reading never rewrites that historical evidence.
     await store.update(document => {
       for (const entry of document.inbox) if (entry.sessionId === home.id) entry.title = "Historical generated Home title";
       return document;
@@ -326,8 +315,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     expect((await notifications.inbox()).notifications.filter(item => item.sessionId === home.id).map(item => item.title))
       .toEqual(["Home", "Home", "Home", "Home"]);
     expect((await store.snapshot()).inbox.filter(item => item.sessionId === home.id).every(item => item.title === "Historical generated Home title")).toBe(true);
-    // Exercise the same mobile open/sync/visible journey as the app, not just
-    // the presence owner: redaction must never remove the canonical chat route.
     const devices = new DeviceStore(value.root, "machine-terminal-test");
     await devices.initialize();
     const enrollment = await devices.ensureEnrollment();
@@ -389,15 +376,11 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     const afterHome = await request("notification.inbox.list", { filter: "unread" });
     expect(afterHome.notifications).toEqual([]);
     expect(afterHome.unreadCount).toBe(0);
-    // Home is one chat across physical chapters. A completion in its successor
-    // must not strand an explicit update in the sealed predecessor (#1303).
     await request("session.presentation.set", { sessionId: home.id, subscriptionToken: homeToken, revision: 2, visible: false });
     const homeManager = (home as unknown as { sessionManager: SessionManager }).sessionManager;
     homeManager.appendMessage(fauxAssistantMessage("Predecessor Home conversation"));
     await notifications.enqueue({ sessionId: home.id, sourceId: "sibling-home-update", kind: "explicit", message: "Home update",
       route: { sessionId: home.id, machineId: "machine-terminal-test" } });
-    // Real canonical growth crosses the actual rollover limit; no mocked Home
-    // record, chapter metrics or alternate notification admission path.
     homeManager.appendCustomEntry("fixture-chapter-growth", { padding: "x".repeat(HOME_SOFT_BYTES) });
     await homeOwnerOf(registry).chapterQuiescent(home.id);
     const successorId = (await homeOwnerOf(registry).status()).sessionId!;
@@ -414,8 +397,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     expect(completion).toBeDefined();
     expect(siblingInbox.unreadCount).toBe(3);
     expect(siblingInbox.notifications.some((row: NotificationInboxItem) => row.sessionId === home.id && row.kind === "explicit")).toBe(true);
-    // Opening the completion detail reads only that row; Open Chat then travels
-    // its exact payload route through the shared synchronized presentation path.
     await request("notification.inbox.read", { commandId: "open-home-completion", id: completion.id });
     const afterCompletionRead = await request("notification.inbox.list", { filter: "unread" });
     expect(afterCompletionRead.unreadCount).toBe(2);
@@ -586,11 +567,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
           throw error;
         }
       }, "the real managed subagent provider status to complete");
-      // #616 tracks the tron.4 terminal-artifact identity mismatch: the provider is complete,
-      // but the session-owned activity remains live until that projection is fixed.
-      // The parent's completion wake is the one turn that clears that activity, so its
-      // agent_finished is the completion event: wait for its delivery and turn settlement
-      // before snapshotting, because the wake's latency depends on host load.
       await waitFor(() => received.some(({ envelope }) => envelope.notificationKind === "agent_finished" && envelope.title === "background task"),
         "the completion wake's agent_finished delivery");
       await waitFor(() => !value.slot.isBusy, "the completion wake turn to settle");
@@ -599,8 +575,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       expect(received.every(({ signatureValid }) => signatureValid)).toBe(true);
       expect(received.map(({ envelope }) => envelope.notificationKind)).toEqual(["ask", "waiting", "agent_finished"]);
 
-      // The relay is already at its device daily backstop. A routine refusal is terminal,
-      // observable, retained in the inbox, and does not prevent the ask exemption.
       await notifications.enqueue({ sessionId: value.slot.id, sourceId: "routine-over-cap", kind: "agent_finished", title: "Routine", message: "Finished." });
       await waitFor(() => signals.some(({ relayReason }) => relayReason === "daily_limit"), "the cap refusal signal");
       await notifications.userInputRequired({ sessionId: value.slot.id, interactionId: "ask-after-cap", observed: false, machineId: "machine-terminal-test" });
@@ -727,9 +701,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     expect(assistants).toHaveLength(2);
     expect(assistants[1].message.stopReason).toBe("error");
     expect(value.enqueue.mock.calls[0]![0].sourceId).toBe(assistants[1].id);
-    // The user invocation owns its first completed assistant. Pi's queued
-    // continuation is a distinct SDK run whose failure notifies separately; it
-    // must not rewrite the already durable invocation receipt.
     expect(terminals).toHaveLength(1);
     expect(terminals[0].data.lifecycle).toBe("completed");
   });
@@ -818,8 +789,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     expect(assistants).toHaveLength(2);
     expect(assistants[0].message.stopReason).toBe("stop");
     expect(assistants[1].message.stopReason).toBe("aborted");
-    // Drain rejects the SDK continuation; notification remains bound to the
-    // preceding successful assistant without rewriting its completion receipt.
     expect(value.enqueue.mock.calls[0]![0].sourceId).toBe(assistants[0].id);
     expect(entries.filter((entry: any) => entry.type === "custom" && entry.customType === "test-settlement-order")
       .map((entry: any) => entry.data.stage)).toEqual(["agent_before_settle", "agent_settled"]);
@@ -869,8 +838,6 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     expect(value.enqueue).not.toHaveBeenCalled();
     await value.slot.prompt("/handled");
     expect(value.enqueue).not.toHaveBeenCalled();
-    // Exercise Pi's real missing-model preflight without reaching a network
-    // provider or mocking prompt/settlement events.
     (value.slot as unknown as { runtime: { session: { agent: { state: { model: undefined } } } } })
       .runtime.session.agent.state.model = undefined;
     await expect(value.slot.prompt("setup request")).rejects.toBeDefined();

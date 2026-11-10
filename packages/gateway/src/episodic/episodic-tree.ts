@@ -1,12 +1,6 @@
 import { yieldToEventLoop } from "../util/event-loop-yield.js";
 import { EPISODIC_PLACEHOLDER, type EpisodicContextRun } from "./episodic-contract.js";
 
-/*
- * The tree and the view of the OptChat recipe (gist §3 and §5), as pure
- * functions. Addresses are the recipe's `start+n`: node (l, i) is
- * `${i·2^l}+${2^l}`, covering messages [i·2^l, (i+1)·2^l).
- */
-
 export interface EpisodicViewPart {
   level: number;
   index: number;
@@ -14,12 +8,8 @@ export interface EpisodicViewPart {
   span: number;
 }
 
-/** Byte size of one part and whether its node is built; an unbuilt part counts
- * the placeholder the view would render (gist §5.2 `fit`). */
 type EpisodicViewBytes = (part: EpisodicViewPart) => { built: boolean; bytes: number };
 
-/** A node level above this cannot be addressed by one base-36 code. No real
- * session reaches it: level 31 covers 2^31 messages. */
 export const EPISODIC_MAX_LEVEL = 31;
 
 export function nodeAddress(level: number, index: number): string {
@@ -27,7 +17,6 @@ export function nodeAddress(level: number, index: number): string {
   return `${index * span}+${span}`;
 }
 
-/** Parse `start+n`; the level is `log2(n)` and the index `start/n`. */
 export function parseNodeAddress(address: string): { level: number; index: number } | undefined {
   const match = /^(\d+)\+(\d+)$/u.exec(address);
   if (!match) return undefined;
@@ -40,8 +29,6 @@ export function parseNodeAddress(address: string): { level: number; index: numbe
   return { level, index: start / span };
 }
 
-/** One address as a single base-36 code, so an invalidation record stays small
- * (`(start · 32) + level` is unique for every address). */
 export function encodeNodeCode(level: number, index: number): string {
   if (!Number.isSafeInteger(level) || level < 0 || level > EPISODIC_MAX_LEVEL) throw new Error("Node level cannot be encoded");
   return (index * 2 ** level * 32 + level).toString(36);
@@ -56,7 +43,6 @@ export function decodeNodeCode(code: string): string | undefined {
   return nodeAddress(level, start / 2 ** level);
 }
 
-/** The addresses of a stored node's recorded context: its level runs from message 0. */
 export function decodeContextRuns(runs: readonly EpisodicContextRun[]): string[] {
   const addresses: string[] = [];
   let cursor = 0;
@@ -74,16 +60,10 @@ export function utf8Bytes(text: string): number {
   return Buffer.byteLength(text, "utf8");
 }
 
-/** Cap one text at `capChars`, keeping head and tail with a marker naming what
- * was removed (gist §7; the recipe caps tool output the same way). The result is a
- * copy: a slice keeps its whole source string alive for as long as the capped text
- * is stored, and a stored record must not hold a multi-megabyte source. */
 export function capText(text: string, capChars: number, tailChars: number): { text: string; capped: boolean } {
   if (text.length <= capChars) return { text, capped: false };
   let tail = Math.min(tailChars, Math.max(0, capChars - 1));
   let head = capChars - tail;
-  // JS slices count UTF-16 units: move either cut past a split surrogate pair
-  // rather than converting that half of an astral character into U+FFFD.
   if (/[\uD800-\uDBFF]/u.test(text[head - 1] ?? "") && /[\uDC00-\uDFFF]/u.test(text[head] ?? "")) head -= 1;
   if (/[\uDC00-\uDFFF]/u.test(text[text.length - tail] ?? "") && /[\uD800-\uDBFF]/u.test(text[text.length - tail - 1] ?? "")) tail -= 1;
   const removed = text.length - head - tail;
@@ -91,18 +71,7 @@ export function capText(text: string, capChars: number, tailChars: number): { te
   return { text: Buffer.from(capped, "utf8").toString("utf8"), capped: true };
 }
 
-/**
- * The window one search hit shows around its match: at most `limit` characters,
- * the match kept whole, with `…` marking each end that was cut, and its newlines
- * flattened to single spaces exactly as a view line renders text, so one hit stays
- * one line. The caller's query bound is under `limit`, so the match always fits,
- * and the marks are inside `limit`, so the returned snippet is bounded by it
- * whatever it cut.
- */
 export function snippetAround(text: string, matchIndex: number, matchLength: number, limit: number): string {
-  // Two characters are reserved for the truncation marks, so the snippet is
-  // bounded by `limit` whatever it cut; a caller's query bound is under `body`,
-  // so the whole match fits and the window never has to slide.
   const body = Math.max(0, limit - 2);
   const latest = Math.max(0, text.length - body);
   const start = Math.min(Math.max(0, matchIndex - Math.floor((body - matchLength) / 2)), latest);
@@ -111,13 +80,11 @@ export function snippetAround(text: string, matchIndex: number, matchLength: num
   return `${start > 0 ? "…" : ""}${window}${end < text.length ? "…" : ""}`;
 }
 
-/** A level-0 free node (gist §3): the source itself when it fits `nodeBytes`. */
 export function freeNodeText(kind: string, text: string, nodeBytes: number): string | undefined {
   const line = `${kind}: ${text}`;
   return utf8Bytes(line) <= nodeBytes ? line : undefined;
 }
 
-/** A level>0 free node: the two children when they fit `nodeBytes`. */
 export function mergedFreeText(childA: string, childB: string, nodeBytes: number): string | undefined {
   const line = `${childA}\n${childB}`;
   return utf8Bytes(line) <= nodeBytes ? line : undefined;
@@ -137,14 +104,6 @@ function viewBytes(parts: readonly EpisodicViewPart[], bytesOf: EpisodicViewByte
   return total;
 }
 
-/**
- * The view's `fit` (gist §5.2): while over budget, merge the adjacent built
- * parent pair with the largest `due = (T - start) / 2^(l+2)`. Parents that are
- * not built are passed over, so the budget is soft; parts are never split.
- * `total` is the caller's running byte total; the returned total is the one the
- * merged view now has, so a caller that appends or merges can keep it running
- * instead of re-summing the whole view.
- */
 function fitView(
   parts: EpisodicViewPart[],
   count: number,
@@ -173,20 +132,10 @@ function fitView(
   return total;
 }
 
-/** Where a rebalance fits the view down to: an eighth of the budget below it. */
 function viewLowWater(viewBudget: number): number {
   return viewBudget - Math.floor(viewBudget / 8);
 }
 
-/**
- * The view's rebalance (#491): nothing while the view is within its budget, then
- * one `fitView` down to the low-water mark. A fit merges the oldest eligible
- * parts, near the view's head, so fitting after every message rewrote the head of
- * nearly every request and voided every provider's prompt cache. Between two
- * rebalances the view only grows at its end, so a request re-reads what an earlier
- * one sent up to that one's last cache mark, and a rebalance leaves an eighth of the
- * budget before the next.
- */
 export function rebalanceView(
   parts: EpisodicViewPart[],
   count: number,
@@ -199,23 +148,14 @@ export function rebalanceView(
   const lowWater = viewLowWater(viewBudget);
   const fitted = [...parts];
   const bytes = fitView(fitted, count, lowWater, bytesOf, isBuilt, total);
-  // Publish a complete batch: a partial fit would drop paid-merge demand below
-  // the high-water mark and rewrite the cached head again on the next turn.
   if (bytes > lowWater && fitted.some((part, index) => siblings(part, fitted[index + 1]))) return total;
-  // An irreducible binary forest may not reach low water with a tiny budget;
-  // keep the existing best-effort soft-budget contract in that case.
   for (let index = 0; index < fitted.length; index += 1) parts[index] = fitted[index]!;
   parts.length = fitted.length;
   return bytes;
 }
 
-/** A bounded synchronous stretch of the fold, not a deadline. */
 const EPISODIC_FOLD_SLICE_MESSAGES = 2_000;
 
-/** The fold of the view from message 0 (gist §5.2 "At load"): append each
- * message's part, then rebalance, exactly as the live view does. It yields to the
- * event loop every `EPISODIC_FOLD_SLICE_MESSAGES` messages, so opening a long
- * memory never blocks an in-flight request for the whole fold. */
 export async function foldViewSliced(
   count: number,
   viewBudget: number,

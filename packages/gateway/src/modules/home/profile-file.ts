@@ -30,8 +30,6 @@ export interface ProfileFileControl {
   commands: Record<string, ProfileFileCommand>;
 }
 export const emptyProfileControl = (): ProfileFileControl => ({ config: structuredClone(DEFAULT_PROFILE_NOTE_CONFIG), suppressions: {}, scopeExclusions: {}, commands: {} });
-/** The hierarchy owns current placement; it is not duplicated inside its notes.
- * Anchors are immutable claim evidence, never another current-value projection. */
 export interface ProfileFile {
   format: "tron-profile";
   version: 2;
@@ -122,8 +120,6 @@ function validateProfileFile(value: unknown): ProfileFile {
   return file;
 }
 
-/** Construction may receive prior current heads as anchor candidates. Only exact
- * claims still linked by current Corrections survive; no history list is copied. */
 export function createProfileFile(records: readonly ProfileNoteRecord[], input: {
   anchorCandidates?: readonly ProfileNoteRecord[]; stateRevision?: number; deferred?: string; control?: ProfileFileControl;
 } = {}): ProfileFile {
@@ -160,7 +156,6 @@ export function unavailableProfileRevision(id: string, revisionId: string): Gate
     { kind: "profile_revision_unavailable", id, revisionId });
 }
 
-/** A missing explicit revision is a refusal, never an empty or archive-backed read. */
 export function readProfileFileRecord(file: ProfileFile, id: string, revisionId?: string): ProfileNoteRecord | null {
   const records = profileFileRecords(file);
   const current = records.find(record => record.id === id);
@@ -189,8 +184,6 @@ export async function readProfileFile(workspace: Pick<ResourceRoot, "describe">)
   const read = await readSecureJson<unknown>(path, PROFILE_FILE_BYTES);
   return read.present ? validateProfileFile(read.value) : undefined;
 }
-/** Only the serialized file owner calls this after admitting a valid canonical
- * snapshot. Stages are discarded, never alternate data or recovery inputs. */
 export async function discardProfileFileStages(workspace: Pick<ResourceRoot, "describe">): Promise<void> {
   const path = await location(workspace, false);
   if (!path) return;

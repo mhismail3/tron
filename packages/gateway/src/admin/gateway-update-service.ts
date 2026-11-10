@@ -25,7 +25,6 @@ const FINGERPRINT = /^[0-9a-f]{64}$/u;
 const UPDATE_CONFIG_SCHEMA = 1;
 const UPDATE_CONFIG_KIND = "tron-gateway-update-config";
 const COMPONENT = /^[A-Za-z0-9._-]+$/u;
-/** Every persisted Gateway update failure projects as one bounded line. */
 const UPDATE_FAILURE: FailureLine = {
   maximum: 2_048,
   fallback: "Gateway update failed.",
@@ -40,13 +39,11 @@ interface GatewayUpdateRequest {
   mode: GatewayUpdateMode;
   candidateVersion?: string;
   candidateFingerprint?: string;
-  /** Gateway-owned receipt identity, never accepted from the update helper's options. */
   commandId?: string;
 }
 
 interface GatewayRollbackRequest {
   channel: GatewayUpdateChannel;
-  /** Gateway-owned receipt identity, never accepted from the update helper's options. */
   commandId: string;
 }
 
@@ -92,8 +89,6 @@ interface GatewayUpdateStatus {
 type GatewayUpdateCallback = (request: GatewayUpdateRequest | (GatewayRollbackRequest & { operation?: "rollback" })) => Promise<JsonValue>;
 type RuntimeIdentityFallback = GatewayUpdateIdentity & { buildFingerprint?: string };
 
-/** Convert the supervised launcher's `buildFingerprint` into update identity
- * form: that variable carries the selected payload's own fingerprint. */
 function normalizeRuntimeIdentity(value: RuntimeIdentityFallback | undefined): GatewayUpdateIdentity | null {
   if (!value) return null;
   const { buildFingerprint, payloadFingerprint, ...rest } = value;
@@ -104,9 +99,6 @@ function normalizeRuntimeIdentity(value: RuntimeIdentityFallback | undefined): G
   };
 }
 
-/** The helper is trusted only when LaunchAgent exported an absolute, non-link
- * file inside the payload root. The spawn that consumes the result runs
- * detached, so this admission is the only in-process witness of it. */
 function gatewayUpdateHelperPath(environment: NodeJS.ProcessEnv = process.env): string | undefined {
   const value = environment.TRON_GATEWAY_UPDATE_HELPER;
   const payloadRoot = environment.TRON_GATEWAY_PAYLOAD_ROOT;
@@ -120,15 +112,11 @@ function gatewayUpdateHelperPath(environment: NodeJS.ProcessEnv = process.env): 
     const root = realpathSync(payloadRoot);
     const helper = realpathSync(value);
     if (helper !== root && !helper.startsWith(`${root}/`)) return undefined;
-    // Retain the LaunchAgent's absolute spelling so helper argument
-    // construction remains deterministic after containment is proven.
     return value;
   } catch { return undefined; }
 }
 
 function gatewayRollbackHelperArgs(request: GatewayRollbackRequest): string[] {
-  // The rollback helper runs detached with its stdio ignored, so this exact
-  // argument list is the only in-process witness of what is launched.
   if (request.channel !== "stable" && request.channel !== "dev") {
     throw new GatewayError("invalid_request", "Gateway update channel must be stable or dev");
   }
@@ -139,8 +127,6 @@ function gatewayRollbackHelperArgs(request: GatewayRollbackRequest): string[] {
 }
 
 function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[] {
-  // Only an admitted channel/mode/candidate triple and a bounded command ID
-  // reach the detached helper, so its argv is the only in-process witness.
   const normalized = validateGatewayUpdateRequest({
     channel: request.channel, mode: request.mode,
     ...(request.candidateVersion === undefined ? {} : { candidateVersion: request.candidateVersion }),
@@ -156,8 +142,6 @@ function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[] {
     "--command-id", commandId];
 }
 
-/** Bound one Gateway update failure line. `maximum` narrows the bound for a
- * failure embedded in a thrown message. */
 function failureText(error: unknown, maximum = UPDATE_FAILURE.maximum): string {
   return boundedFailureText(error, { ...UPDATE_FAILURE, maximum });
 }
@@ -166,9 +150,6 @@ function updaterFailureMessage(error: unknown): string {
   return failureText(error);
 }
 
-/** The update-progress document a failed helper leaves behind: the persisted
- * shape is the contract, and the detached helper's write path has no in-process
- * seam to observe it through. */
 function updaterFailureProgress(
   channel: GatewayUpdateChannel,
   commandId: string,
@@ -186,9 +167,6 @@ function updaterFailureProgress(
   };
 }
 
-/** Write one compact JSON document through a temp file in its own directory, so
- * a reader observes either the previous document or the complete new one. `wx`
- * refuses a pre-created temp path, and 0600 keeps update state owner-only. */
 async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
   await writeFile(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600, flag: "wx" });
@@ -234,9 +212,6 @@ function launchAgentUpdater(environment: NodeJS.ProcessEnv = process.env, tronHo
         stdio: "ignore",
         windowsHide: true,
       });
-      // An unref'd child can still emit an asynchronous spawn error. Attach
-      // this listener before unref so it is observed rather than uncaught;
-      // acknowledgement remains truthful because the helper can fail later.
       child.once("error", (error) => {
         void recordUpdaterFailure(tronHome, request.channel, commandId, error).catch(() => {});
       });
@@ -423,9 +398,6 @@ export class GatewayUpdateService {
       const selected = selection(currentSelectionValue, channel);
       const selectedManifest = await readBounded(join(root, "versions", selected.version, "manifest.json"));
       if (selectedManifest === undefined) throw new GatewayError("conflict", "Gateway payload manifest is missing");
-      // Validate the selected pointer, but never replace observed live identity
-      // with it: publication precedes restart and status must not report an
-      // inactive candidate as the running Gateway.
       void manifest(selectedManifest, channel, selected);
     }
     const rollbackAvailable = previousSelectionValue !== undefined;
@@ -433,8 +405,6 @@ export class GatewayUpdateService {
       const previous = selection(previousSelectionValue, channel);
       const previousManifest = await readBounded(join(root, "versions", previous.version, "manifest.json"));
       if (previousManifest === undefined) throw new GatewayError("conflict", "Gateway payload manifest is missing");
-      // Previous is intentionally only a rollback reference. It is not shown as
-      // a candidate unless deployment state explicitly marks it as one.
       void manifest(previousManifest, channel, previous);
     }
     if (stateValue !== undefined) {
@@ -477,9 +447,6 @@ export class GatewayUpdateService {
           const candidateManifest = await readBounded(join(root, "versions", candidateSelection.version, "manifest.json"));
           if (candidateManifest === undefined) throw new GatewayError("conflict", "Gateway candidate manifest is missing");
           const verifiedCandidate = manifest(candidateManifest, channel, candidateSelection);
-          // A supervised runtime may only expose health-era provenance (no
-          // payload version). A verified fingerprint is still authoritative;
-          // an optional runtime version narrows the comparison when present.
           const isCurrent = currentIdentity?.payloadFingerprint === verifiedCandidate.payloadFingerprint
             && (currentIdentity?.version === undefined || currentIdentity?.version === verifiedCandidate.version);
           if (!isCurrent) {
@@ -510,8 +477,6 @@ export class GatewayUpdateService {
             }
           }
         } catch (candidateError) {
-          // A deployment marker may outlive a failed staging attempt. Never
-          // project an unverified candidate to iOS; retain only bounded status.
           candidateIdentity = null;
           candidateAvailable = false;
           error = error ?? "Gateway candidate is unavailable or invalid";
@@ -531,9 +496,6 @@ export class GatewayUpdateService {
         shapeRejection: "Gateway update updatedAt is malformed",
         allowOffset: true,
       });
-      // A delayed helper write must not regress an authoritative terminal
-      // deployment state. Timestamps are validated ISO-8601 strings, so their
-      // epoch comparison is deterministic and bounded.
       const progressCommandId = boundedString(raw.commandId, "commandId", 160);
       if (progressCommandId !== undefined && !COMMAND_ID.test(progressCommandId)) {
         throw new GatewayError("conflict", "Gateway update progress command ID is malformed");

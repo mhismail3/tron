@@ -7,26 +7,21 @@ import type { RequestPolicy } from "../host/request-policy.js";
 
 const FOREGROUND_ABORT_SETTLEMENT_GRACE_MS = 5_000;
 
-/** Owns foreground cancellation intent and the accepted Stop continuation.
- * Reads stay live across SDK calls and awaits so successor ownership is rechecked. */
 export class RunAbortOwner {
   readonly stopSteeringRecoveryIDs = new Set<string>();
   readonly stopRecoveryHoldIDs = new Set<string>();
   stopRecoveryQueueClosed = false;
   stopSteeringContinuation: { operationId?: string; queuedSteerCount: number } | undefined;
-  /** Set before SDK cancellation can synchronously settle. */
   readonly abortedOperations = new Set<string>();
   private readonly ordinaryInputCancellation: RequestPolicy["inputCancellation"] = { epoch: 0 };
 
   constructor(private readonly operations: RunOperations<unknown>) {}
 
-  /** Policy installation follows native construction; read the actual lifetime at use. */
   get inputCancellation(): RequestPolicy["inputCancellation"] {
     const policy = this.operations.homeRequestPolicy;
     return policy ? policy.inputCancellation : this.ordinaryInputCancellation;
   }
 
-  /** Stop and retirement revoke preparation before an SDK controller exists. */
   cancelPreparations(): void {
     this.inputCancellation.epoch += 1;
   }
@@ -37,8 +32,6 @@ export class RunAbortOwner {
     terminalErrorCode = "user-abort",
   ): Promise<void> {
     let queuedAtStop: RuntimeQueuedMessage[] | undefined;
-    // Finite task cancellation belongs to its report/controller, not the
-    // ordinary Stop continuation. A sealed task can never admit another turn.
     if (!this.operations.ownedTurns.worker && (this.operations.runQueue.queuedMessages.some((item) => item.behavior === "steer")
       || this.operations.runQueue.pendingQueueAdmission?.behavior === "steer")
       && this.stopSteeringContinuation === undefined) {
@@ -49,8 +42,6 @@ export class RunAbortOwner {
         }
         const accepted = this.operations.runQueue.queuedMessages.slice();
         if (!accepted.some((item) => item.behavior === "steer")) return undefined;
-        // Close before clearing: any steer admitted while Stop waits stays in the
-        // Gateway owner and joins the continuation, never Pi's queue.
         this.stopRecoveryQueueClosed = true;
         for (const item of accepted) this.stopSteeringRecoveryIDs.add(item.id);
         (this.operations.runQueue.suppressQueueEvents = true);
@@ -72,9 +63,6 @@ export class RunAbortOwner {
     terminalErrorCode: string,
     queuedAtStop?: RuntimeQueuedMessage[],
   ): Promise<RuntimeQueuedMessage[]> {
-    // A persistence blocker must not disable the owner's Stop route. Stop still
-    // proves exact operation identity and reports any unresolved receipt after
-    // cancellation instead of clearing the persistence fence.
     this.operations.assertAvailable();
     const taskOperationId = this.operations.ownedTurns.worker?.identity.operationId;
     const taskOwnsForeground = taskOperationId !== undefined && this.operations.ownedTurns.liveTaskOperationId() === taskOperationId;
@@ -91,11 +79,6 @@ export class RunAbortOwner {
     }
 
     this.cancelPreparations();
-    // `kind` is presentation metadata, not cancellation authority. A stale
-    // retry/compaction/bash projection must never route Stop around another
-    // foreground controller or the independently owned built-in bash process.
-    // Keep the exact operation fence above, then fan cancellation out across
-    // every foreground primitive and verify settlement before acknowledging.
     void kind;
     const target = this.operations.operation ? { ...this.operations.operation! } : undefined;
     const agentOperationId = this.operations.activeOperationId;
@@ -104,20 +87,13 @@ export class RunAbortOwner {
       ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
     if (invocationOperationId) {
       const invocation = this.operations.runInvocations.invocationForOperation(invocationOperationId);
-      // A Gateway-owned stop reason outranks the SDK outcome. User Stop is
-      // provisional until cancellation settles; a refused attempt cannot claim
-      // a later natural completion as its interruption.
       if (invocation && terminalErrorCode !== "user-abort") {
-        // A limit crossing is authoritative even if another Gateway stop races it.
         if (!invocation.stopReason || terminalErrorCode === "chapter-limit") invocation.stopReason = terminalErrorCode;
       }
       this.abortedOperations.add(invocationOperationId);
     }
     if (target?.kind === "compaction" && target.id) this.abortedOperations.add(target.id);
 
-    // Retire accepted queue ownership before abort emits queue_update: those
-    // entries were not consumed. Keep their exact owners on this cancellation
-    // frame until their not-delivered receipts are persisted below.
     const stoppedTaskQueue = this.operations.ownedTurns.worker ? this.operations.runQueue.queuedMessages : [];
     if (this.operations.ownedTurns.worker) {
       (this.operations.runQueue.suppressQueueEvents = true);
@@ -136,7 +112,7 @@ export class RunAbortOwner {
       () => session.abortBranchSummary(),
       () => session.abortBash(),
     ]) {
-      try { cancel(); } catch { /* Continue through every independent escape hatch. */ }
+      try { cancel(); } catch { }
     }
     const abortResults = await Promise.allSettled([
       session.abort(),
@@ -149,8 +125,6 @@ export class RunAbortOwner {
     const settled = await this.waitForForegroundAbortSettlement(target, agentOperationId);
     if (!settled || this.operations.directBashProcesses?.hasActiveProcesses
       || abortResults.some((result) => result.status === "rejected")) {
-      // Keep the SDK's actual abort outcome authoritative if cancellation partly
-      // succeeded, but withdraw this unconfirmed invocation-level Stop intent.
       if (invocationOperationId) this.abortedOperations.delete(invocationOperationId);
       throw new GatewayError("conflict", "Foreground work did not stop", true);
     }
@@ -208,8 +182,6 @@ export class RunAbortOwner {
           }, undefined, undefined, item.id, heldEntry, hasAcceptedInvocation ? item : undefined, laneOwned);
           processed.add(item.id);
           this.stopRecoveryHoldIDs.delete(item.id);
-          // A handled input has no Agent message_start; its terminal receipt
-          // from normal admission is the exact queue-row removal boundary.
           const lifecycle = this.operations.runInvocations.invocationForOperation(item.id)?.lifecycle;
           if (lifecycle === "completed" || lifecycle === "failed" || lifecycle === "interrupted") {
             this.consumeStopSteeringRecoveryOwner(item.id);
@@ -242,7 +214,6 @@ export class RunAbortOwner {
         && (this.operations.hasActiveAgentRun
           || this.operations.pendingPrompt?.id === agentOperationId
           || this.operations.operation?.id === agentOperationId));
-    // Polled: the condition spans several owners (direct bash, operation, agent run, pending prompt) with no single settlement event; the deadline bounds the wait.
     while (stillActive() && performance.now() < deadline) {
       await new Promise<void>((resolveDelay) => { setTimeout(resolveDelay, 20); });
     }

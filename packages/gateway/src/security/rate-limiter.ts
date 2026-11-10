@@ -13,8 +13,6 @@ export class RateLimiter {
     }
   }
 
-  /** Test witness for the retained-key bound: pruning is otherwise unobservable
-   * because `admit` re-filters stale timestamps itself. */
   get retainedKeyCount(): number {
     return this.attempts.size;
   }
@@ -28,8 +26,6 @@ export class RateLimiter {
     const admitted = recent.length < this.maximum;
     if (admitted) recent.push(now);
 
-    // Map insertion order is the deterministic LRU. Every presented key is
-    // touched, including a rejected key that still owns a live window.
     this.attempts.delete(key);
     if (!this.attempts.has(key) && this.attempts.size >= this.maximumKeys) {
       const oldest = this.attempts.keys().next().value;

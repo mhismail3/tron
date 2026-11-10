@@ -1,18 +1,13 @@
 import { execFile } from "node:child_process";
 
-/** The documented Tailscale install, then a CLI-only install on `PATH`. */
 const TAILSCALE_CLI_CANDIDATES = ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "tailscale"] as const;
 
 const MAXIMUM_STATUS_BYTES = 1_024 * 1_024;
 const MAXIMUM_COMMAND_OUTPUT_BYTES = 8 * 1_024 * 1_024;
 
-/** Tailscale's own path kinds. `offline` is a peer Tailscale knows but cannot
- * reach; `unknown` is no answer at all (no CLI, a timeout, or an address that
- * is not a Tailscale peer, such as the loopback or LAN listener). */
 type PeerPath = "direct" | "relay" | "offline" | "unknown";
 
 export interface BoundedCommandResult {
-  /** Exit code, or null when the command never ran to completion. */
   code: number | null;
   timedOut: boolean;
   output: string;
@@ -22,7 +17,6 @@ export interface BoundedCommandResult {
 export type BoundedCommand = (tool: string, args: readonly string[], timeoutMs: number,
   options?: { env?: NodeJS.ProcessEnv; maxBuffer?: number }) => Promise<BoundedCommandResult>;
 
-/** The fields of one `tailscale status --json` peer that Tron reads. */
 export interface TailscalePeer {
   readonly TailscaleIPs?: unknown;
   readonly HostName?: unknown;
@@ -37,12 +31,9 @@ export interface TailscalePeer {
 }
 
 export interface TailscaleStatus {
-  /** The CLI candidate that answered. */
   readonly cli: string;
-  /** `Self.TailscaleIPs`, as the status document reported them. */
   readonly self: readonly string[];
   readonly running: boolean;
-  /** `Self.DNSName`, the MagicDNS name (with Tailscale's trailing dot). */
   readonly selfDNSName?: string;
   readonly peers: readonly TailscalePeer[];
 }
@@ -55,17 +46,12 @@ function isPeer(value: unknown): value is TailscalePeer {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** One `tailscale status --json` read through the documented candidates, used
- * by every Tailscale status reader. `ok: false` carries why each candidate failed, for
- * the diagnostic bundle's "no usable Tailscale CLI" line. Never rejects. */
 export async function readTailscaleStatus(run: BoundedCommand, timeoutMs: number): Promise<TailscaleStatusRead> {
   const failures: string[] = [];
   let timedOut = false;
   for (const candidate of TAILSCALE_CLI_CANDIDATES) {
     let result: BoundedCommandResult;
     try {
-      // The app binary otherwise enters GUI mode under launchd (no TERM).
-      // The status owner supplies this to every runner, including diagnose.
       result = await run(candidate, ["status", "--json"], timeoutMs, {
         env: { ...process.env, TAILSCALE_BE_CLI: "1" }, maxBuffer: MAXIMUM_STATUS_BYTES,
       });
@@ -107,11 +93,6 @@ export async function readTailscaleStatus(run: BoundedCommand, timeoutMs: number
   return { ok: false, failures, reason: timedOut ? "timeout" : "cli-failed" };
 }
 
-/** One peer's path, shared by the transport's silence records and the
- * diagnostic bundle so both describe the same peer the same way. `offline`
- * outranks a remembered address: a peer Tailscale cannot reach uses no path.
- * `peerRelay` names the relay actually carrying the path, or is empty when
- * there is no relay (direct, offline or unknown). */
 export function classifyPeer(peer: TailscalePeer | undefined): { peerPath: PeerPath; peerRelay: string } {
   if (peer === undefined) return { peerPath: "unknown", peerRelay: "" };
   if (peer.Online === false) return { peerPath: "offline", peerRelay: "" };

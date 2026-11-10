@@ -2,10 +2,7 @@ import { PROMPT_TEXT_MAX_BYTES } from "./prompt-bounds.js";
 import type { ResourceInvocation } from "../../protocol/types.js";
 import { GatewayError } from "../../errors.js";
 
-/** Resource limits are UTF-8 byte limits because they bound JSONL and wire data. */
 export const RESOURCE_NAME_MAX_BYTES = 512;
-// Arguments are byte-bounded separately from receipt identity and lifecycle metadata.
-// The enclosing invocation receipt has its own larger serialized-record bound.
 export const RESOURCE_ARGUMENTS_MAX_BYTES = 5_000;
 const MAX_SKILL_INVOCATION_BYTES = 4 * 1_048_576;
 const MAX_SKILL_PATH_BYTES = 8_192;
@@ -15,7 +12,6 @@ interface ProjectedSkillInvocation {
   text: string;
 }
 
-/** Recognizes only Pi's exact persisted skill envelope. */
 export function projectSkillInvocation(value: string, expectedArguments?: string): ProjectedSkillInvocation | undefined {
   if (!value.startsWith("<skill name=\"") || Buffer.byteLength(value) > MAX_SKILL_INVOCATION_BYTES) return undefined;
   const headerEnd = value.indexOf(">\n");
@@ -63,11 +59,6 @@ function friendlyResourceName(value: string): string {
   return words ? words[0]!.toLocaleUpperCase() + words.slice(1) : "New session";
 }
 
-/**
- * Skips the leading skill blocks of a composed message (#311) for a preview.
- * Each block ends at the first `</skill>` line followed by the next block or the
- * end; a skill body quoting that line can shorten a preview, never identity.
- */
 function afterLeadingSkillBlocks(value: string): { resourceName: string; text: string } | undefined {
   let rest = value;
   let resourceName: string | undefined;
@@ -84,7 +75,6 @@ function afterLeadingSkillBlocks(value: string): { resourceName: string; text: s
   return resourceName === undefined ? undefined : { resourceName, text: rest };
 }
 
-/** Removes machine-authored invocation syntax from user-facing session titles. */
 export function userFacingPromptPreview(value: string): string {
   const skill = projectSkillInvocation(value) ?? afterLeadingSkillBlocks(value);
   if (skill) return skill.text.trim() || friendlyResourceName(skill.resourceName);
@@ -99,8 +89,6 @@ function admittedText(value: unknown, field: string, maximumBytes: number, allow
   if (Buffer.byteLength(value, "utf8") > maximumBytes) {
     throw new GatewayError("invalid_request", `${field} exceeds ${maximumBytes} UTF-8 bytes`);
   }
-  // Newline, carriage return, and tab are valid prompt content. Other controls
-  // cannot be represented safely in invocation identity or Pi command text.
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)) {
     throw new GatewayError("invalid_request", `${field} contains unsupported control characters`);
   }
@@ -109,8 +97,6 @@ function admittedText(value: unknown, field: string, maximumBytes: number, allow
 
 function admitResourceName(value: unknown): string {
   const name = admittedText(value, "resourceInvocation.name", RESOURCE_NAME_MAX_BYTES, false);
-  // Pi command tokens cannot contain whitespace. Reject catalog entries that
-  // could be displayed but never invoked through their declared identity.
   if (/\s/u.test(name)) {
     throw new GatewayError("invalid_request", "resourceInvocation.name contains whitespace");
   }
@@ -150,15 +136,8 @@ export function admitResourceInvocation(value: unknown): ResourceInvocation {
   return { source, name: source === "skill" ? name.slice("skill:".length) : name, arguments: argumentsText };
 }
 
-/** One message may combine at most this many skills and prompts. */
 export const MAXIMUM_RESOURCE_INVOCATIONS = 16;
 
-/**
- * Admits one chat message's ordered resources (#311). Skills and prompts combine
- * in any order, each at most once, and carry no arguments: the message text
- * follows every expansion once. An extension command runs instead of a message,
- * so it is exclusive and its arguments are exactly the message text.
- */
 export function admitResourceInvocations(value: unknown, text: string): ResourceInvocation[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAXIMUM_RESOURCE_INVOCATIONS) {
     throw new GatewayError("invalid_request", `resourceInvocations must list 1 to ${MAXIMUM_RESOURCE_INVOCATIONS} resources`);
@@ -185,7 +164,6 @@ export function admitResourceInvocations(value: unknown, text: string): Resource
   return resources;
 }
 
-/** The Pi extension/skill command delimiter is literal ASCII space. */
 export function parsePiLiteralCommand(text: string): { name: string; arguments: string } | undefined {
   if (!text.startsWith("/")) return undefined;
   const rest = text.slice(1);

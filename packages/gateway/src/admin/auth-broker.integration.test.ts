@@ -25,7 +25,6 @@ async function flushPromises(): Promise<void> {
   await Promise.resolve();
 }
 
-/** Broker event recorder: the emit sink is also the signal that settles waiters. */
 function authEvents() {
   const events: Array<{ client: string; topic: string; payload: JsonValue }> = [];
   return {
@@ -36,9 +35,6 @@ function authEvents() {
   };
 }
 
-/** Drains the promise chain a retired login settles its work entry on. The work
- * registry has no event source and the chain holds no timers, so this waits on
- * continuations instead of the clock, and fails if the state never arrives. */
 async function settleWorkEntry(predicate: () => boolean): Promise<void> {
   for (let turn = 0; turn < 256 && !predicate(); turn += 1) await Promise.resolve();
   if (!predicate()) throw new Error("auth work did not settle");
@@ -195,8 +191,6 @@ describe("AuthBroker", () => {
     const committed = await readFile(authPath);
     expect(JSON.parse(committed.toString("utf8"))).toMatchObject({ [provider.id]: { type: "api_key", key: "first-key" } });
 
-    // Completion and its response acknowledgement may cross. Replays must not
-    // rewrite canonical credentials, abort the accepted login or emit twice.
     expect(broker.respond("phone", operationId, prompt.promptId as string, "late-key")).toBe(false);
     expect(broker.cancel("phone", operationId)).toBe(false);
     expect(signal?.aborted).toBe(false);
@@ -223,8 +217,6 @@ describe("AuthBroker", () => {
     const tablet = broker.start("tablet", "provider", "api_key").operationId;
     expect(() => broker.start("desktop", "provider", "api_key")).toThrow(expect.objectContaining({ code: "busy" }));
 
-    // Cancellation releases exactly one slot: the replacement is admitted under
-    // the same per-client bound, while the global bound still refuses a third.
     broker.cancel("phone", phone);
     const replacement = broker.start("phone", "provider", "api_key").operationId;
     expect(() => broker.start("desktop", "provider", "api_key"))
@@ -261,8 +253,6 @@ describe("AuthBroker", () => {
   it("times out providers that ignore abort and ignores their late completion", async () => {
     vi.useFakeTimers();
     let interaction: LoginInteraction | undefined;
-    // Pi rejects a login aborted before credential mutation; a late success is
-    // covered by the committed-credential projection test below.
     let completeLogin!: () => void;
     const login = new Promise<void>((_resolve, reject) => { completeLogin = () => reject(new Error("late failure")); });
     const runtime = runtimeWithLogin(async (value) => {
@@ -435,18 +425,14 @@ describe("AuthBroker", () => {
     await waitFor(() => events.some((event) => event.topic === "auth.prompt"), "the auth prompt event");
     broker.detachClient("socket-1");
 
-    // A fresh coordinator lost both the operation and command IDs. Repeated
-    // begins beyond the per-device limit all recover the one operation.
     for (let attempt = 2; attempt <= 4; attempt++) {
       expect(broker.start(`socket-${attempt}`, "provider", "api_key", runtime, "device", `command-${attempt}`, "global"))
         .toEqual({ operationId: first.operationId, recovered: true });
     }
     expect(events.filter((event) => event.client === "socket-4" && event.topic === "auth.prompt")).toHaveLength(1);
-    // The recovery receipt is idempotent too.
     expect(broker.start("socket-5", "provider", "api_key", runtime, "device", "command-3", "global"))
       .toEqual({ operationId: first.operationId, recovered: true });
 
-    // Distinct owners, targets, providers, and auth methods never recover it.
     const isolated = [
       broker.start("tablet", "provider", "api_key", runtime, "tablet", "command-t", "global"),
     ];
@@ -485,8 +471,6 @@ describe("AuthBroker", () => {
     expect(restart.recovered).toBe(false);
     expect(restart.operationId).not.toBe(first);
     expect(pending[0]!.signal.aborted).toBe(true);
-    // An uncertain restart retry returns the same successor instead of
-    // replacing it, and the retired predecessor still owns its drain work.
     expect(broker.start("socket-2", "provider", "api_key", runtime, "device", "command-2", "global", first)).toEqual(restart);
     expect(() => broker.start("socket-2", "provider", "api_key", runtime, "device", "command-2", "global"))
       .toThrow(expect.objectContaining({ code: "conflict" }));
@@ -499,7 +483,6 @@ describe("AuthBroker", () => {
     expect(registry.size).toBe(1);
     expect(broker.resume("device", "socket-2", first)).toMatchObject({ state: "cancelled" });
 
-    // A stale replacement ID recovers the current successor rather than restarting it.
     expect(broker.start("socket-3", "provider", "api_key", runtime, "device", "command-3", "global", first))
       .toEqual({ operationId: restart.operationId, recovered: true });
     expect(pending[1]!.signal.aborted).toBe(false);
@@ -555,8 +538,6 @@ describe("AuthBroker", () => {
         },
         async resolve({ credential }) {
           if (!credential) return undefined;
-          // Hold the real SDK's post-write availability synchronization, not
-          // the credential store. Cancellation here cannot unwrite auth.json.
           resolvingCommittedCredential = true;
           await resolution;
           if (ending === "synchronization failure") throw new Error("Resolution failed for committed-key");
@@ -600,13 +581,10 @@ describe("AuthBroker", () => {
     expect(logs.filter(log => log.event === "auth.login.succeeded")).toHaveLength(success ? 1 : 0);
     expect(broker.activeOperationCount).toBe(0);
     expect(broker.resume("phone", "phone", operationId)).toMatchObject({ state: "completed", success });
-    // Terminal replay and late cancel must not republish a credential change.
     expect(broker.cancel("phone", operationId)).toBe(false);
     expect(broadcasts).toEqual(success ? ["providers.changed"] : []);
     expect(await readFile(authPath)).toEqual(committed);
     if (success) {
-      // These are the same fresh SDK reads used by provider/model catalog RPCs;
-      // no new background refresh or stale synchronous snapshot is needed.
       expect(await runtime.checkAuth(provider.id)).toMatchObject({ type: "api_key" });
       expect(await runtime.getAvailable(provider.id)).toMatchObject([{ provider: provider.id, id: "committed-model" }]);
       expect(await runtime.getAuth(provider.id)).toMatchObject({ auth: { apiKey: "committed-key" } });
@@ -712,10 +690,6 @@ describe("AuthBroker", () => {
   });
 
   it("settles a signal-ignoring manual-code provider through broker prompt retirement", async () => {
-    // A callback-style extension login: onAuth/onPrompt
-    // callbacks through Pi's real OAuth adapter, no signal use, and a code exchange
-    // only after the pasted code arrives. The broker owns that prompt, so retiring
-    // an abandoned login rejects the exact provider await instead of relying on abort.
     const root = await mkdtemp(join(tmpdir(), "tron-auth-manual-code-"));
     const registry = new GatewayWorkRegistry("epoch", 8);
     let broker: AuthBroker | undefined;
@@ -767,9 +741,6 @@ describe("AuthBroker", () => {
     await Promise.all([waitFor(() => settlements.length === 1, "the settlement"), registry.waitUntilSettled()]);
     expect(settlements).toEqual(["rejected"]);
 
-    // After the code is accepted, the exchange is outside every Gateway-owned
-    // boundary. Pi's abort race releases work first, and its credential fence
-    // keeps the late result out of canonical storage.
     events.length = 0;
     const exchanging = broker.start("socket-2", "manual-code-oauth", "oauth", runtime, "device").operationId;
     await waitFor(() => events.some((event) => event.topic === "auth.prompt"), "the auth prompt event");

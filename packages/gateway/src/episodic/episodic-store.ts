@@ -9,25 +9,6 @@ import { HOME_MAX_CHAPTERS, EPISODIC_STORE_VERSION, EPISODIC_HOME_CURSOR_MAX_BYT
 import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
 import { tronWorkspacePath } from "../foundation/tron-home-layout.js";
 
-/*
- * The memory persists under the Tron internal workspace's capability state,
- * `state/episodic/<sourceSessionId>/`, owned and secured the way KnowledgeStore
- * owns `state/knowledge/` (owner-only 0700 directory, created lazily, owner-only
- * files, secure bounded reads, no-follow opens with a dev/ino identity check).
- *
- * The catalog and the node log are append-only JSONL, and every record is
- * fsynced before it is used. A trailing partial line is a torn, unacknowledged
- * write (the record never became durable), so it is truncated away on load and
- * reported; any other unparsable record refuses the store visibly.
- *
- * The workspace marker is evidence that the shared `state/episodic` container
- * was initialized. A container that is now missing is lost state, not a new
- * installation: it refuses rather than restarting and re-spending every
- * compactor call. One session's namespace is created lazily inside the container,
- * and the marker carries no per-session evidence, so a session without one
- * starts fresh (#483), including one whose namespace was deleted (D5: repair).
- */
-
 const SESSION_ID = /^[A-Za-z0-9._-]{1,160}$/u;
 const BLOCKED_REASONS = new Set(["permanent-failure", "retries-exhausted", "usage-limit", "source-unavailable"]);
 
@@ -54,11 +35,8 @@ export interface EpisodicStoreSnapshot {
   messages: Map<number, EpisodicMessageRecord>;
   nodes: Map<string, EpisodicNodeRecord>;
   state: EpisodicStoreState | null;
-  /** Bytes of torn trailing records discarded on load. */
   recoveredTornBytes: number;
-  /** The highest generation any record in the node log names. */
   highestGeneration: number;
-  /** The highest revision any record carries. */
   highestRevision: number;
 }
 
@@ -77,8 +55,6 @@ export class EpisodicStore {
     return { root, initialized: join(root, "initialized.json"), catalog: join(root, "catalog.jsonl"), nodes: join(root, "nodes.jsonl"), state: join(root, "state.json"), checkpointPointer: join(root, "checkpoint.current.json") };
   }
 
-  /** The workspace's `state/` root. The store never creates it here: creation
-   * is lazy and happens on the first append. */
   private async workspaceStateRoot(): Promise<string> {
     const descriptor = await this.workspace.describe();
     if (!descriptor.available) throw new EpisodicMemoryError("unsafe-store", "Tron internal workspace is unavailable; episodic memory cannot be persisted");
@@ -126,7 +102,6 @@ export class EpisodicStore {
   }
 
 
-  /** Remove abandoned checkpoint artifacts only while the single memory opener owns this session. */
   async cleanupOrphans(): Promise<void> {
     const paths = await this.paths();
     if (!(await directoryExists(paths.root))) return;
@@ -146,10 +121,6 @@ export class EpisodicStore {
   async shouldCheckpoint(liveBytes: number): Promise<boolean> {
     const paths = await this.paths();
     const logBytes = (await fileSize(paths.catalog)) + (await fileSize(paths.nodes));
-    // Amortized: a checkpoint rewrites the whole live catalog under the memory's
-    // mutex, so it waits until the append logs outgrow that catalog; a fixed log
-    // bound would rewrite a large memory every few records. Recovery replays at
-    // most a live-catalog-sized tail.
     return logBytes > Math.max(liveBytes, 16_384);
   }
 
@@ -159,7 +130,6 @@ export class EpisodicStore {
     await durableAtomicWriteJson((await this.paths()).state, state, 0o600, this.fileSystem);
   }
 
-  /** Publish a bounded-line checkpoint before reclaiming append history. */
   async checkpoint(options: { messages: Iterable<EpisodicMessageRecord>; nodes: Iterable<EpisodicNodeRecord>; state: EpisodicStoreState; watermark: number }): Promise<void> {
     validateStatePublication(options.state);
     const paths = await this.ensureRoot();
@@ -202,14 +172,10 @@ export class EpisodicStore {
     const { handle, created } = opened;
     try {
       await handle.writeFile(line, "utf8");
-      // Durable before use: the recipe fsyncs every node, and a record a caller
-      // has observed must survive a crash.
       await syncDurably(handle);
     } finally {
       await handle.close();
     }
-    // A new file's directory entry needs its own sync, or a crash can lose the
-    // file that already holds acknowledged records.
     if (created) await syncDirectory(paths.root);
   }
 
@@ -218,18 +184,9 @@ export class EpisodicStore {
     catch { throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record is invalid"); }
   }
 
-  /** Whether this session's namespace exists. An existing namespace must be an
-   * owner-only directory with this format's initialization record. A namespace
-   * that is missing after the shared container was initialized is lost state,
-   * not a new session. */
   private async namespaceExists(paths: StorePaths): Promise<boolean> {
     const initialized = await this.featureInitialized();
     if (!(await directoryExists(paths.root))) {
-      // The feature record describes the shared container, never one session:
-      // reading it per session refused every Home after the first (#483).
-      // Marker first: `ensureRoot` creates the container before it sets the
-      // marker, so a set marker proves the container existed, and a container
-      // created concurrently after a missing-container read cannot look lost.
       if (initialized && !(await directoryExists(dirname(paths.root)))) {
         throw new EpisodicMemoryError("invalid-store", "Episodic memory container is missing after it was initialized");
       }
@@ -254,15 +211,10 @@ export class EpisodicStore {
     await assertOwnerDirectory(join(stateRoot, "episodic"), true);
     await assertOwnerDirectory(paths.root, true);
     if (!(await fileExists(paths.initialized))) {
-      // The marker turns a later missing container into lost state, so each
-      // directory entry on its path must be durable first. This call may have
-      // just created `state/` and `episodic/`, so their parents are synced too.
       for (const directory of [dirname(stateRoot), stateRoot, join(stateRoot, "episodic")]) {
         await syncDirectory(directory, this.fileSystem);
       }
       await durableAtomicWriteJson(paths.initialized, { version: EPISODIC_STORE_VERSION }, 0o600);
-      // The feature record tells a later start that a missing shared container
-      // is lost state rather than a fresh installation.
       try { await this.workspace.markFeatureInitialized("episodic"); }
       catch { throw new EpisodicMemoryError("invalid-store", "Episodic memory initialization record could not be recorded"); }
     }
@@ -270,8 +222,6 @@ export class EpisodicStore {
   }
 }
 
-/** The published checkpoint, when one exists: the directory of its immutable files
- * and the watermark those files cover. */
 async function readCheckpointPointer(paths: StorePaths): Promise<{ directory: string; watermark: number } | undefined> {
   const pointer = await readSecureJson<unknown>(paths.checkpointPointer, 4_096);
   if (!pointer.present) return undefined;
@@ -292,8 +242,6 @@ async function readCheckpoint(paths: StorePaths, maxLineBytes: number): Promise<
   const checkpointState = await readSecureJson<unknown>(join(directory, "state.json"), EPISODIC_STATE_MAX_BYTES);
   if (!checkpointState.present) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint state is missing");
   validateState(checkpointState.value);
-  // state.json is the authority and can advance independently of catalog/node
-  // revisions (for example, a spend or blocked-state update after publication).
   const messages = new Map<number, EpisodicMessageRecord>();
   const entryIds = new Set<string>();
   const nodes = new Map<string, EpisodicNodeRecord>();
@@ -318,8 +266,6 @@ const CHECKPOINT_WRITE_BATCH_CHARS = 1024 * 1024;
 async function writeCheckpointLines<T>(path: string, records: Iterable<T>, maxLineBytes: number, fileSystem: EpisodicStoreFileSystem): Promise<void> {
   const handle = await fileSystem.open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try {
-    // One write per ~1 MiB batch, not per record: each write is a thread-pool
-    // round trip, which a loaded host turns into seconds per thousand records.
     let batch = "";
     for (const record of records) {
       const line = `${JSON.stringify(record)}\n`;
@@ -374,7 +320,6 @@ function hasOnlyKeys(record: Record<string, unknown>, keys: readonly string[]): 
 }
 
 function validateStatePublication(state: EpisodicStoreState): void {
-  // Check the exact encoding used by durableAtomicWriteJson before any effect.
   if (Buffer.byteLength(`${JSON.stringify(state, null, 2)}\n`) > EPISODIC_STATE_MAX_BYTES) {
     throw new EpisodicMemoryError("invalid-store", "Episodic state exceeds its byte limit");
   }
@@ -410,7 +355,6 @@ function validateState(value: unknown): EpisodicStoreState {
     for (const value of home.chapters) {
       if (!value || typeof value !== "object" || Array.isArray(value)) throw new EpisodicMemoryError("invalid-store", "Episodic memory state has an invalid Home chapter cursor");
       const chapter = value as Record<string, unknown>;
-      // Include the actual nested indentation in the per-cursor bound.
       if (Buffer.byteLength(JSON.stringify({ cursor: { home: { chapters: [chapter] } } }, null, 2)) > EPISODIC_HOME_CURSOR_MAX_BYTES) {
         throw new EpisodicMemoryError("invalid-store", "Home chapter cursor exceeds its byte limit");
       }
@@ -448,9 +392,6 @@ function validateState(value: unknown): EpisodicStoreState {
   };
 }
 
-/** Open one store file without following a symlink, verify it is an owner-only
- * regular file, and prove the path was not replaced between the check and the
- * open. Returns whether this call created the file. */
 async function openOwnerFile(path: string, flags: number, mode?: number): Promise<{ handle: FileHandle; created: boolean } | undefined> {
   const before = await lstat(path).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return undefined;
@@ -532,8 +473,6 @@ async function readJsonl<T>(path: string, maxLineBytes: number, isRecord: (value
   }
   if (tornBytes > 0) {
     if (strict) throw new EpisodicMemoryError("invalid-store", "Episodic checkpoint contains a torn record");
-    // The partial line was never a durable record; leaving it would let the
-    // next append concatenate onto it.
     const writer = await openOwnerFile(path, constants.O_RDWR);
     if (writer) {
       try {
@@ -563,8 +502,6 @@ function isCatalogRecord(value: Record<string, unknown>): boolean {
   return isRevision(value.revision) && isRevision(value.index) && typeof value.entryId === "string"
     && (value.kind === "user" || value.kind === "talk" || value.kind === "echo" || value.kind === "event")
     && typeof value.text === "string" && typeof value.omitted === "boolean" && isStringArray(value.omissions)
-    // Every catalog record carries its entry's instant. Its text is not parsed
-    // here: `date` reports an instant it cannot read as unavailable.
     && typeof value.timestamp === "string"
     && typeof value.sourceDigest === "string" && typeof value.projectedDigest === "string" && typeof value.sessionId === "string";
 }
@@ -580,8 +517,6 @@ function isNodeLogRecord(value: Record<string, unknown>): boolean {
     && isContextRuns(value.contextRuns) && typeof value.textDigest === "string" && typeof value.sourceDigest === "string"
     && (childRevisions === undefined || (Array.isArray(childRevisions) && childRevisions.length === 2 && childRevisions.every(isRevision)));
   if (!shape) return false;
-  // Nodes the owner writes hold no runs. A stored summary that holds runs must
-  // cover exactly the messages before its end, or the dependents it implies are wrong.
   const runs = value.contextRuns as EpisodicContextRun[];
   if (runs.length === 0) return true;
   if (value.kind === "free") return false;
@@ -618,7 +553,6 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-/** Create (when asked) and verify one owner-only directory. */
 async function assertOwnerDirectory(path: string, create = false): Promise<void> {
   if (create) {
     try {

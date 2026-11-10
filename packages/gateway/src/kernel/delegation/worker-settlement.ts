@@ -1,5 +1,3 @@
-/** One worker runtime's settlement waiters. Publications wake the same sets
- * joined by task settlement; no projection or second liveness state is retained. */
 export class WorkerSettlement {
   private readonly waiters = {
     detached: new Set<() => void>(),
@@ -7,8 +5,6 @@ export class WorkerSettlement {
   };
   constructor(private readonly graceMs: number) {}
 
-  /** The operation deadline bounds each wait, then one native disposal grace.
-   * A wake is a reason to re-read the live predicate, never proof of completion. */
   async until(kind: "detached" | "delivery", done: () => boolean, deadline: AbortSignal): Promise<boolean> {
     const waiters = this.waiters[kind];
     let timer: ReturnType<typeof setTimeout> | undefined;

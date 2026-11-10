@@ -2,8 +2,6 @@ import type { RunOperations } from "./run-operations.js";
 import type { GatewayWorkHandle, GatewayWorkKind} from "./gateway-work-registry.js";
 
 
-/** Per-runtime operation-handle authority; GatewayWorkRegistry owns the tokens.
- * Live retained-owner projections are sampled again after marker persistence. */
 export class RunWorkOwner {
   private readonly operationWork = new Map<string, GatewayWorkHandle>();
 
@@ -52,11 +50,7 @@ export class RunWorkOwner {
     work.settle();
   }
 
-  /** Foreground tokens without an exact runtime, queue, or settlement owner
-   * are orphaned projections. Age alone never makes work suspect. */
   administrativeSuspectForegroundWorkTokens(): ReadonlySet<string> {
-    // Pi's broad streaming state is authoritative even if a projection callback
-    // is temporarily missing. Ambiguous live ownership must wait, never repair.
     if (this.operations.hasActiveAgentRun) return new Set();
     const retained = this.administrativeRetainedOperationWorkIDs();
     return new Set([...this.operationWork.entries()].flatMap(([operationId, work]) =>
@@ -71,12 +65,7 @@ export class RunWorkOwner {
     }
   }
 
-  /** Administrative drain repairs only proven-orphaned foreground ownership.
-   * Its exact durable marker is removed before the process-local token; active,
-   * queued, and terminal-receipt owners remain untouched without a deadline. */
   async reconcileOrphanedForegroundWorkForDrain(): Promise<void> {
-    // Never synthesize or transfer identity during repair. Once Pi settles, its
-    // sequenced callback or the next reconciliation pass can prove an orphan.
     if (this.operations.hasActiveAgentRun) return;
     const workFacts = new Map(this.operations.dependencies.workRegistry.facts().map((fact) => [fact.token, fact]));
     const retained = this.administrativeRetainedOperationWorkIDs();
@@ -86,8 +75,6 @@ export class RunWorkOwner {
     });
     for (const [operationId, work] of candidates) {
       await this.operations.clearMarkerOwnership(operationId, work);
-      // A delayed exact callback may have restored ownership while marker I/O
-      // yielded. Reassert its marker rather than retiring live work.
       if (this.administrativeRetainedOperationWorkIDs().has(operationId)) {
         await this.operations.enqueueMarkerOwnership(operationId);
         continue;
@@ -100,9 +87,6 @@ export class RunWorkOwner {
     this.operations.releaseSettleWaiters();
     if (!operationId) return;
     this.operations.lifecycle.cancelPreflight(operationId);
-    // PendingPrompt is a provisional projection, not independent ownership.
-    // Once its exact operation settles it must not keep an idle composer row
-    // alive merely because Pi omitted or replaced the expected user callback.
     if (this.operations.pendingPrompt?.id === operationId) {
       this.operations.pendingPrompt = undefined;
       this.operations.pendingPromptMessage = undefined;
@@ -131,8 +115,6 @@ export class RunWorkOwner {
 
   public administrativeRetainedOperationWorkIDs(): Set<string> {
     const retained = this.retainedOperationWorkIDs();
-    // A provisional prompt cannot represent foreground work after both Pi and
-    // the Gateway have reached an operation-free terminal phase.
     if (!this.operations.hasActiveAgentRun
       && (this.operations.phase === "idle" || this.operations.phase === "interrupted")
       && this.operations.activeOperationId === undefined

@@ -13,9 +13,6 @@ export const SESSION_EXPORT_MAX_ITEM_BYTES = 2 * 1_024 * 1_024 * 1_024;
 export const SESSION_EXPORT_MAX_ITEMS = 8;
 export const SESSION_EXPORT_MAX_TOTAL_BYTES = 4 * 1_024 * 1_024 * 1_024;
 export const SESSION_EXPORT_MAX_READERS = 4;
-// A generation may temporarily own a snapshot, rendered output, and store
-// staging copy. Serialize generation so independent capacity probes cannot
-// overcommit physical disk while completed artifacts remain concurrently readable.
 export const SESSION_EXPORT_MAX_PRODUCTIONS = 1;
 
 const COPY_BUFFER_BYTES = 1 * 1_024 * 1_024;
@@ -44,7 +41,6 @@ export async function requireSessionExportDiskCapacity(
   }
 }
 
-/** Copy one immutable byte cut from an already-open canonical descriptor. */
 export async function copyCanonicalSessionCut(
   cut: CanonicalSessionFileCut,
   destination: string,
@@ -77,11 +73,6 @@ export async function copyCanonicalSessionCut(
   }
 }
 
-/**
- * Serialize a captured public SessionManager projection one entry at a time.
- * This covers first-turn JSONL before Pi creates its file and preserves the
- * exact selected branch for standalone HTML rendering.
- */
 export async function writeSessionProjectionCut(
   snapshot: { header: unknown; entries: readonly unknown[] },
   destination: string,
@@ -118,12 +109,6 @@ export async function writeSessionProjectionCut(
   return offset;
 }
 
-/**
- * Use Pi's documented standalone `--export` command against the immutable cut.
- * Running it out of process prevents the SDK's current whole-document HTML
- * renderer from blocking the Gateway event loop or retaining its temporary
- * strings in the live runtime heap.
- */
 export async function renderSessionCutToHtml(snapshot: string, output: string): Promise<number> {
   const cli = resolvePiCliExecutable();
   let errorOutput = Buffer.alloc(0);

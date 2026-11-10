@@ -23,7 +23,6 @@ function bounded(value: unknown, label: string, maximum: number): asserts value 
   if (typeof value !== "string" || value.length < 1 || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`${label} is invalid`);
 }
 
-/** Optional provider metadata never participates in account authorization. */
 function normalizeProviderDisplayName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const label = value.trim();

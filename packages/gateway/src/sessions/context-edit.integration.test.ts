@@ -57,7 +57,6 @@ describe("Pi 0.87 canonical context edits", () => {
     expect(manager.buildSessionProjection().messages.map(message => message.role === "user" ? contentText(message.content) : message.role))
       .toEqual(["replacement request", "assistant"]);
 
-    // Close the only runtime client before opening the canonical file again.
     const first = await fixture("resume", manager);
     const firstContexts: TranscriptContext[] = [];
     first.faux.setResponses([(context) => {

@@ -7,7 +7,6 @@ import type { ConnectionAccess } from "../modules/integrations/contract.js";
 
 interface CoreModuleServices { connections: Pick<ConnectionAccess, "snapshot"> | undefined }
 
-/** Gateway owners are resolved when the runtime assembles its extension, not at start. */
 export function createCoreModule(services: () => CoreModuleServices): ModuleDescriptor {
   return {
     name: "tron-core",

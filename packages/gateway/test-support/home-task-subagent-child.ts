@@ -3,23 +3,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 
-/** A scripted OpenAI-compatible child model for real managed-provider children.
- * A request whose messages contain `HOLD-CHILD` stays open until the test releases
- * it or its client disconnects, so a run is demonstrably live until the test
- * stops it. A request containing `ASK-SUPERVISOR` is held the same way, then answers
- * with a `contact_supervisor` call that blocks until the parent replies. A request
- * containing `CALL-TOOL` is answered with a `read` call once it is released, so the
- * child takes a second request that carries whatever was steered into it meanwhile; with
- * `HOLD-AFTER-TOOL` that second request is held too, so the run stays live after progressing.
- * Every other request answers `CHILD-DONE` at once. The server counts client disconnects
- * of held requests: that is the proof a child was cut off. It counts requests carrying
- * `STEER-PROBE`: that is the proof a steer reached the child's model. */
 export interface ChildModelServer {
   port: number;
   heldRequests: () => number;
   abortedRequests: () => number;
   releaseHeld: () => void;
-  /** Requests whose messages contain `STEER-PROBE`. */
   steerProbeRequests: () => number;
   close: () => Promise<void>;
 }
@@ -43,15 +31,12 @@ async function startChildModelServer(): Promise<ChildModelServer> {
     const messages = (JSON.parse(body) as { messages?: unknown }).messages;
     const text = JSON.stringify(messages);
     if (text.includes("STEER-PROBE")) steerProbes += 1;
-    // A tool result in the request means the held call already answered (the parent's reply
-    // to a supervisor request), so the child's next request finishes its turn.
     const answeredByTool = Array.isArray(messages) && messages.some(message => (message as { role?: unknown }).role === "tool");
     const asksSupervisor = !answeredByTool && text.includes("ASK-SUPERVISOR");
     const callsRead = !answeredByTool && text.includes("CALL-TOOL");
     const holds = answeredByTool ? text.includes("HOLD-AFTER-TOOL") : text.includes("HOLD-CHILD") || asksSupervisor;
     if (holds) {
       held += 1;
-      // The response closes early only when the client disconnects (an abort).
       let finish!: () => void;
       await new Promise<void>(resolve => {
         finish = () => resolve();
@@ -95,9 +80,6 @@ async function startChildModelServer(): Promise<ChildModelServer> {
   };
 }
 
-/** Starts the scripted child model and registers it for a managed fixture: a
- * `task-child` agent whose model answers from this server. The fixture's own
- * agent and project directories hold the registration. */
 export async function startScriptedChild(fixture: { agentDir: string; cwd: string }): Promise<ChildModelServer> {
   const server = await startChildModelServer();
   await writeFile(join(fixture.agentDir, "models.json"), JSON.stringify({ providers: { "task-child": {
@@ -111,12 +93,6 @@ export async function startScriptedChild(fixture: { agentDir: string; cwd: strin
   return server;
 }
 
-/** Workflow scripts (written under the request cwd) whose one child holds until stopped:
- * the workflow stays running while the child is live. */
 export const HELD_WORKFLOW_SCRIPT = 'return runs.run("hold", { agent: "task-child", task: "HOLD-CHILD workflow search" });\n';
-/** A workflow whose one child holds until released, then calls a tool, so its second request
- * carries anything steered into it while it was held. */
 export const STEERED_WORKFLOW_SCRIPT = 'return runs.run("hold", { agent: "task-child", task: "HOLD-CHILD CALL-TOOL steered search" });\n';
-/** A child the script launches as async and then returns: the workflow completes while
- * the child keeps running, as a detached workflow child does. */
 export const DETACHED_WORKFLOW_SCRIPT = 'const receipt = await runs.run("hold", { agent: "task-child", task: "HOLD-CHILD detached search", async: true });\nreturn receipt.runId;\n';

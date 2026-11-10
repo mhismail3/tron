@@ -26,7 +26,6 @@ type SettingsCall =
   | { action: "resolve"; keys?: string[]; taskId?: string }
   | { action: "change"; changes: ChangeRequest[]; reason: string; dryRun?: boolean; taskId?: string };
 
-/** Admits one call with a message naming the field, so a model corrects it in one step. */
 function admitSettingsCall(input: { action: "resolve" | "change"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean }): SettingsCall {
   if (input.action === "resolve") {
     for (const field of ["changes", "reason", "dryRun"] as const) {
@@ -41,7 +40,6 @@ function admitSettingsCall(input: { action: "resolve" | "change"; keys?: string[
     ...(input.dryRun ? { dryRun: true } : {}), ...(input.taskId ? { taskId: input.taskId } : {}) };
 }
 
-/** How an applied change reaches a delegated worker (#1336), in the tool's own words. */
 function signalText(result: ChangeResult): string {
   const signal = result.signal;
   if (!signal) return "";

@@ -19,8 +19,6 @@ export type HomeDiagnosticRecord =
 
 export type HomeDiagnostic = (diagnostic: HomeDiagnosticRecord) => void;
 
-/** One privacy boundary for Home signals. Never spread caller metadata into the
- * shared logger: canonical identities and evidence belong to their owners. */
 export function logHomeDiagnostic(logger: ModuleLog, diagnostic: HomeDiagnosticRecord): void {
   const level = (diagnostic.outcome === "client-control" && diagnostic.reason !== "completed") || diagnostic.outcome === "unavailable" || diagnostic.outcome === "refused"
     || diagnostic.outcome === "chapter-refused" || diagnostic.outcome === "chapter-limit-stop" || diagnostic.outcome === "resources-reload"

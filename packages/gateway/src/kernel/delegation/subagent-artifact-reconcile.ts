@@ -57,9 +57,6 @@ async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
       return "transient";
     }
     if (bound) turns.extensionArtifactMissingSince.delete(bound[1].toolCallId);
-    // Registry discovery is bounded but grants no ownership. Historical
-    // artifacts become admissible only here, where the canonical tool result
-    // or an exact live asyncDir binding proves the owning session/tool call.
     const admission = inspectExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
     if (!admission.accepted) {
       if (diagnosticOwner) turns.warnExtensionArtifact(admission.reason, diagnosticOwner);
@@ -68,9 +65,6 @@ async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
     const raw = admission.artifact;
     const runId = raw.runId as string;
     if (!runId) return "rejected";
-    // The file's declared directory is advisory. If present, it must agree
-    // with the directory that was actually discovered/read; a declared path
-    // this slot cannot resolve is retried rather than recorded.
     if (typeof raw.asyncDir === "string") {
       const declaredAsyncDir = turns.canonicalExtensionArtifactDirectory(raw.asyncDir);
       if (!declaredAsyncDir) return "transient";
@@ -83,13 +77,10 @@ async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
     const canonical = (canonicalFacts ?? canonicalExtensionRunFacts(turns)).get(runId);
     const historicalArtifact = raw.lifecycleArtifactVersion !== EXTENSION_LIFECYCLE_ARTIFACT_VERSION;
     if (historicalArtifact && !ownership?.asyncDir && !canonical?.asyncDir) return "transient";
-    // A duplicated runId in canonical JSONL has no safe artifact owner.
     if (canonical?.ambiguous) {
       if (diagnosticOwner) turns.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
       return "transient";
     }
-    // An ownership or canonical comparison is decided against state this slot
-    // re-reads every pass, so the same bytes may be admissible later.
     if (ownership?.asyncDir) {
       const ownershipAsyncDir = turns.canonicalExtensionArtifactDirectory(ownership.asyncDir);
       if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) {
@@ -105,16 +96,12 @@ async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
       }
     }
     if (canonical?.toolCallId && ownership && ownership.toolCallId !== canonical.toolCallId) {
-      // A synthetic artifact row may be re-keyed to its first real tool call,
-      // but a real ownership binding must never switch to another call.
       if (!ownership.toolCallId.startsWith("subagent:") || ownership.toolCallId === canonical.toolCallId) {
         if (diagnosticOwner) turns.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
         return "transient";
       }
     }
     const matchingEntries = [...turns.extensionActivities.entries()].filter(([, activity]) => activity.runId === runId);
-    // Correlation is Gateway-owned; never pick an arbitrary activity when a
-    // malformed or legacy payload has produced duplicate run identities.
     if (!ownership && !canonical?.toolCallId && matchingEntries.length > 1) {
       if (diagnosticOwner) turns.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
       return "transient";
@@ -127,18 +114,10 @@ async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
     let existingEntry: readonly [string, ExtensionRunActivity | undefined] | undefined = boundToolCallId
       ? ([boundToolCallId, turns.extensionActivities.get(boundToolCallId)] as const)
       : matchingEntries[0];
-    // Synthetic rows are placeholders only. Re-key one to the first real
-    // canonical tool call instead of retaining two rows for the same run.
     if (canonical?.toolCallId && !existingEntry?.[1]) {
       const synthetic = matchingEntries.find(([id]) => id.startsWith("subagent:"));
       if (synthetic) existingEntry = [canonical.toolCallId, synthetic[1]];
     }
-    // A tool result is the ownership proof for an activity. Once that proof
-    // exists, the artifact may enrich it. Unmatched artifacts still require
-    // the exact cwd/session guard.
-    // Artifact files are enrichment only. A current tool execution or a
-    // canonical terminal tool result must establish ownership first; cwd,
-    // sessionId, and a lone running tool are not attribution evidence.
     if (!existingEntry?.[1] && !canonical?.toolCallId) return "transient";
     if (!existingEntry?.[1] && canonical?.toolCallId) {
       existingEntry = [canonical.toolCallId, turns.extensionActivities.get(canonical.toolCallId)];
@@ -150,8 +129,6 @@ async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
       now: new Date().toISOString(),
       ...(previous?.startedAt ? { fallbackStartedAt: previous.startedAt } : {}),
       ...(previous?.updatedAt ? { fallbackUpdatedAt: previous.updatedAt } : {}),
-      // A recovery handoff has no launcher row to supply a start time.
-      // Once admitted, keep that first start stable across later updates.
       useArtifactStartedAt: previous === undefined,
     });
     if (!normalized) {
@@ -166,10 +143,6 @@ async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
     const processTerminal = pausedProcessSettledAt !== undefined;
     const rawLastUpdate = raw.lastUpdate;
     const rawEndedAt = raw.endedAt;
-    // Only the exact provider recovery receipt plus the original paused
-    // runner's terminal proof can settle this source. A later explicit
-    // resume leaves the historical marker behind but has a new live state or
-    // timestamps, so it must not be terminalized by that old marker.
     const superseded = extensionLifecycleState(raw.state ?? raw.status) === "paused"
       && recoveryClaim !== undefined
       && sourceFact?.recoveredReplacementRunId === recoveryClaim.replacementRunId
@@ -181,9 +154,6 @@ async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
       && rawEndedAt <= recoveryClaim.recoveredAt;
     const effectiveState = superseded ? "completed" : state;
     const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
-    // A terminal lifecycle event is authoritative; a late running artifact
-    // enriches neither status nor ownership and must not resurrect the pill.
-    // The latch cannot lift for this identity, so the bytes are rejected.
     if (ownership?.terminal && state === "running") return "rejected";
     const artifactValue = ownership?.terminal
       ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous?.status === "failed" ? "failed" : "completed" })
@@ -219,22 +189,13 @@ async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
       ...(recentUntil ? { recentUntil } : {}),
       childIdentityStrategy: "piArtifact",
     }), artifactValue, "piArtifact");
-    // Ambient discovery is another producer of lifecycle candidates. Apply
-    // the same Gateway terminal latch and sequence admission as live tool
-    // events before replacing an existing row.
     if (admitExtensionRunActivity(previous, activity) === previous) return "rejected";
-    // A later-begun read already published newer bytes; these may not replace them.
     if (turns.extensionArtifactReadSuperseded(toolCallId, ticket)) return "transient";
     const terminalReceiptOwner = activity.status === "running"
       ? undefined
       : turns.claimExtensionReceiptOwnership(activityKey);
-    // A full Gateway work registry is temporary: the terminal receipt can be
-    // claimed by a later pass, so this artifact is not delivered yet.
     if (activity.status !== "running" && !terminalReceiptOwner) return "transient";
     if (terminalReceiptOwner) claimedReceipt = { activityId: activityKey, owner: terminalReceiptOwner };
-    // Ownership facts are written before this frame's projection publishes:
-    // settled paused presentation, dashboard activity, and drain accounting
-    // all read them from the same frame.
     const ownershipAccepted = turns.bindExtensionRunOwnership(runId, {
       toolCallId,
       asyncDir: realAsyncDir,
@@ -271,8 +232,6 @@ async function refreshSubagentActivityFromArtifactRead(turns: OwnedTurnOwner,
       turns.observeMissingExtensionArtifact(missingToolCallId);
     }
     if (diagnosticOwner) turns.warnExtensionArtifact(extensionArtifactReadFailureReason(error), diagnosticOwner);
-    // An artifact that is too large or belongs to another session keeps that
-    // verdict for these bytes; every other failure is retried by the caller.
     return error instanceof OversizedExtensionArtifactError || error instanceof ForeignExtensionArtifactSessionError
       ? "rejected"
       : "transient";
@@ -294,9 +253,6 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
     if (rawValue === undefined) {
       const tracked = turns.extensionActivityWatchers.get(toolCallId);
       if (tracked && tracked.asyncDir === realAsyncDir) {
-        // A pending debounce or retry already owns this re-read, so a read that
-        // lost a replacement race waits for it instead of warning: the timer
-        // fires a few milliseconds later, inside the same replacement.
         if (tracked.timer === undefined && tracked.readRetries < 3) {
           tracked.readRetries += 1;
           tracked.timer = setTimeout(() => {
@@ -331,8 +287,6 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
     }
     const canonical = canonicalExtensionRunFacts(turns).get(runId);
     const ownership = turns.extensionRunOwnership.get(runId);
-    // Watcher refresh is bound to one tool and one canonical directory. A
-    // duplicate canonical runId or either mismatch fails closed.
     if (canonical?.ambiguous || (canonical?.toolCallId && canonical.toolCallId !== toolCallId)
       || !ownership || ownership.toolCallId !== toolCallId) {
         turns.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
@@ -383,11 +337,8 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
     const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
     const terminalStates = ["completed", "failed", "stopped", "rejected"];
     if (ownership.terminal && artifactState === "running" && !superseded) return;
-    // A latched terminal state is final: a re-read of a kept-open run may restate
-    // it (its workflow children still report), never move it to another state.
     if (terminalStates.includes(previous.lifecycle?.state ?? "") && artifactState !== "running"
       && normalized.lifecycleState !== previous.lifecycle?.state) return;
-    // A kept-open run restates its latched terminal lifecycle; only its children move.
     const latchedState = previous.lifecycle?.state !== undefined && terminalStates.includes(previous.lifecycle.state)
       ? previous.lifecycle.state : undefined;
     const artifactValue = ownership.terminal
@@ -434,9 +385,6 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
       if (!claimedReceiptOwner) return;
       claimedReceiptActivityId = activityKey;
     }
-    // Ownership facts are written before this frame's projection publishes:
-    // settled paused presentation, dashboard activity, and drain accounting
-    // all read them from the same frame.
     turns.bindExtensionRunOwnership(runId, {
       toolCallId,
       asyncDir: realAsyncDir,
@@ -469,7 +417,6 @@ export async function refreshExtensionActivityFromArtifact(turns: OwnedTurnOwner
     if (claimedReceiptActivityId) turns.releaseExtensionReceiptOwnership(claimedReceiptActivityId, claimedReceiptOwner);
     if (turns.operations.disposed || turns.operations.shuttingDown
       || turns.extensionActivityReadGenerations.get(toolCallId) !== generation) return;
-    // The next filesystem event or normal snapshot retries; warning is bounded.
     turns.warnExtensionArtifact(
       extensionArtifactReadFailureReason(error),
       `${previous.runId ?? "run"}\0${toolCallId}`,

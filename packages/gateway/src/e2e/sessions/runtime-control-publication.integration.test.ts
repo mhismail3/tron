@@ -77,7 +77,6 @@ describe("runtime control publication through canonical settings", () => {
       return fauxAssistantMessage(text);
     };
     expect(f.session.cacheWarmingStatus).toMatchObject({ state: "inactive", reason: "cache warming disabled" });
-    // The same prime-then-stream sequence that warms under "streaming" in the next case.
     f.faux.setResponses([response("primed")]);
     await f.slot.prompt("context ".repeat(1_000));
     await waitFor(() => !f.slot.isBusy, "first request idle");
@@ -86,7 +85,6 @@ describe("runtime control publication through canonical settings", () => {
     await waitFor(() => !f.slot.isBusy, "streaming request idle");
     expect(warmCalls).toEqual([]);
     expect(f.session.cacheWarmingStatus).toMatchObject({ state: "inactive", reason: "cache warming disabled" });
-    // Settings shows the value the chat runs with.
     const resolved = await f.settingsModel.resolve({ kind: "global" }, undefined, ["run.cacheWarming"]);
     expect(resolved.keys[0]).toMatchObject({ value: "off", layer: "global" });
   });
@@ -128,7 +126,6 @@ describe("runtime control publication through canonical settings", () => {
     let release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });
     let entered = false;
-    // Delay the real resolver at its I/O boundary, without substituting values.
     const resolve = f.settingsModel.resolve.bind(f.settingsModel);
     f.settingsModel.resolve = async (...args) => {
       if (args[2]?.includes("context.branchSummary.reserveTokens")) { entered = true; await held; }
@@ -137,7 +134,6 @@ describe("runtime control publication through canonical settings", () => {
     const requests: unknown[] = [];
     f.faux.setResponses([context => { requests.push(context); return fauxAssistantMessage("unexpected summary"); }]);
     const navigating = route === "native" ? f.slot.navigate(target, { summarize: true }) : f.slot.prompt(`/summarize-branch ${target}`);
-    // Observe rejections immediately, so an intentional cancellation is not unhandled.
     const navigationResult = navigating.then(() => "completed", () => "cancelled");
     try {
       await waitFor(() => entered, "branch-summary settings resolution");
@@ -147,7 +143,6 @@ describe("runtime control publication through canonical settings", () => {
       await navigationResult;
       await waitFor(() => !f.slot.isBusy, "stopped navigation idle");
       expect(requests).toEqual([]);
-      // Extension command receipts may append, but Stop must not leave the old branch.
       expect(f.session.sessionManager.getBranch().map(entry => entry.id)).toContain(leaf);
       expect(f.session.sessionManager.getBranch().some(entry => entry.type === "branch_summary")).toBe(false);
     } finally { release(); await navigationResult; }
@@ -157,8 +152,6 @@ describe("runtime control publication through canonical settings", () => {
     ["native", "global"], ["extension", "global"], ["native", "project"], ["extension", "project"],
   ])("publishes branch-summary reserve before %s navigation from %s settings", async (route, scope) => {
     const f = await fixture(route === "extension");
-    // Real persisted branches, without paying for ordinary requests: the oldest
-    // entry fits the old 3616-token budget but not the new 1000-token budget.
     const target = f.session.sessionManager.appendMessage({ role: "user", content: "branch root", timestamp: Date.now() });
     f.session.sessionManager.appendMessage({ role: "user", content: "OLDEST-BRANCH-SENTINEL " + "older ".repeat(1_000), timestamp: Date.now() });
     f.session.sessionManager.appendMessage(fauxAssistantMessage("latest branch reply"));

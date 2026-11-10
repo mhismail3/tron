@@ -31,9 +31,6 @@ const requestDigest = (operation: string, request: unknown) => createHash("sha25
 const sortingVersion = (rows: ReadonlyArray<{ id: string }>) => createHash("sha256").update(rows.map(row => row.id).sort().join("\n")).digest("hex");
 function commandId(id: string): void { if (!/^[A-Za-z0-9._:-]{8,160}$/.test(id)) throw invalid("Mutating requests require a stable commandId"); }
 
-/** One whole-file authority. Current heads and live correction anchors are the
- * only bodies; command receipts contain references/intent metadata, never editions.
- * No namespace conversion, archive lookup or operation replay runs during open. */
 export class ProfileStore {
   private static readonly locks = new WeakMap<ProfileWorkspace, AsyncMutex>();
   private readonly mutex: AsyncMutex;
@@ -189,7 +186,6 @@ export class ProfileStore {
         if (!pending) {
           this.remember(state, request.commandId, { operation: "knowledge.profile.partition", requestHash, createdAt: now(), recordIds: plan.originals.map(note => note.id),
             partition: { request, context: envelope.context, replayAt: envelope.replayAt, revisions: Object.fromEntries(plan.prepared.map(note => [note.id, note.revisionId])), undoOf: Object.fromEntries(envelope.writes.flatMap(write => write.undoOf ? [[write.id, write.undoOf]] : [])) } });
-          // Body-free accepted intent precedes shared audit preparation and effects.
           await this.save(state);
         }
         plan.result.audit = await audit.prepare(envelope);
@@ -209,8 +205,6 @@ export class ProfileStore {
     if (!receipt.audit || receipt.result?.kind !== "value") throw conflict("Profile operation has no shared Changes preparation");
     return { committed: true as const, reference: receipt.audit, result: receipt.result.value as ProfilePartitionResult };
   }
-  /** Called only inside the Changes stripe. Keep invalidation ordered with the
-   * journal append, but release the file mutex before Changes runs observers. */
   async withProfileAuditProof(id: string, reference: SubjectAuditReference, publish: () => Promise<void>): Promise<void> {
     await this.mutex.run(async () => {
       const state = await this.load(true), receipt = state.control.commands[commandKey("knowledge.profile.partition", id)];
@@ -245,12 +239,9 @@ export class ProfileStore {
       state.records.delete(recordId);
       state.control.suppressions[recordId] = { excluded: true, forgotten: true, reason, updatedAt: now() };
       for (const receipt of Object.values(state.control.commands)) if (receipt.recordIds.includes(recordId)) { receipt.invalidated = true; delete receipt.partition; delete receipt.audit; delete receipt.auditPending; delete receipt.result; }
-      // A forgotten claim cannot remain in any current derivative or anchor.
       for (const [key, record] of state.records) {
         const evidence = record.provenance.evidence.filter(ref => ref.recordId !== recordId);
         const correctedForgottenClaim = record.relations.some(ref => ref.type === "corrects" && ref.recordId === recordId);
-        // An unavailable corrects link is a privacy tombstone, not permission to
-        // resurrect its anchor. Other references can be scrubbed outright.
         const relations = record.relations.filter(ref => ref.recordId !== recordId || ref.type === "corrects");
         const fields = record.content.fields?.filter(field => !field.evidence.some(ref => ref.recordId === recordId));
         const contraryEvidence = record.content.contraryEvidence?.filter(ref => ref.recordId !== recordId);

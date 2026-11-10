@@ -7,7 +7,6 @@ export interface BufferedSessionEvent {
   payload: JsonValue;
 }
 
-/** Immutable operation-local encoding retained with a quarantined event. */
 export interface BufferedSessionEncoding {
   readonly encoded: string;
   readonly bytes: number;
@@ -35,18 +34,12 @@ interface CompletedSessionSync {
   overflowed: boolean;
 }
 
-/** Per-connection admission for bytes retained by concurrent quarantines. */
 interface SessionSynchronizationByteBudget {
   reserve(bytes: number): boolean;
   release(bytes: number): void;
 }
 
 const MAX_BUFFERED_SYNC_EVENTS = 1_024;
-/**
- * One synchronization quarantine may retain at most one default transport
- * frame. A larger burst resynchronizes from a fresh authoritative snapshot
- * instead of multiplying memory across concurrent session opens.
- */
 const MAX_BUFFERED_SYNC_BYTES = 1_048_576;
 
 function serializedEvent(event: BufferedSessionEvent): BufferedSessionEncoding | undefined {
@@ -70,10 +63,6 @@ function sequence(event: BufferedSessionEvent): SessionSyncBaseline | undefined 
   return undefined;
 }
 
-/**
- * Per-connection subscription state. While a baseline response is in flight,
- * later events are quarantined so the response is always observed first.
- */
 export class SessionSyncBarrier {
   private synchronization: Synchronization | undefined;
   private committedEncodings: WeakMap<BufferedSessionEvent, BufferedSessionEncoding> | undefined;
@@ -124,12 +113,10 @@ export class SessionSyncBarrier {
     return undefined;
   }
 
-  /** Take the operation-local encoding after commit; it is not retained by the barrier. */
   takeEncoding(event: BufferedSessionEvent): BufferedSessionEncoding | undefined {
     return (this.synchronization?.encodings ?? this.committedEncodings)?.get(event);
   }
 
-  /** Replace an overflowed quarantine with a bounded recovery quarantine. */
   beginRecovery(requestId: string): boolean {
     const synchronization = this.synchronization;
     if (!synchronization || synchronization.requestId !== requestId || !synchronization.overflowed) return false;
@@ -145,13 +132,11 @@ export class SessionSyncBarrier {
     return true;
   }
 
-  /** True while an acknowledged synchronization is waiting for recovery. */
   isOverflowed(requestId: string): boolean {
     return this.synchronization?.requestId === requestId
       && this.synchronization.overflowed;
   }
 
-  /** Discard a failed or retired synchronization and its byte accounting. */
   abort(requestId: string): boolean {
     const synchronization = this.synchronization;
     if (!synchronization || synchronization.requestId !== requestId) return false;

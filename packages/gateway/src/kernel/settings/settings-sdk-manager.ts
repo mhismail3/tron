@@ -5,8 +5,6 @@ import { SettingsManager } from "../pi/coding-agent.js";
 import { type SettingsSchema, type Binding } from "./settings-schema.js";
 import { GatewayError } from "../../errors.js";
 
-/** Validate declared repository values, not ignored/safety fields. Missing
- * fields inherit; malformed declared fields must not silently become Global. */
 export async function validateProjectSettings(schema: SettingsSchema, raw: Record<string, unknown>): Promise<void> {
   for (const key of schema.KEYS) {
     const binding = key.projectSettable ? key.layers.project : undefined;
@@ -44,8 +42,6 @@ const document = (text: string | undefined): Document => {
 };
 const record = (value: unknown): Document | undefined => value && typeof value === "object" && !Array.isArray(value) ? value as Document : undefined;
 
-/** Copy only declared paths, including each model-qualified instance. Unknown
- * repository values never enter the SDK, even when the repository is trusted. */
 function copyPath(source: Document, destination: Document, path: readonly string[]): void {
   const [field, ...rest] = path;
   if (!field) return;
@@ -73,8 +69,6 @@ function admittedProjectSettings(schema: SettingsSchema, raw: Document): Documen
   return admitted;
 }
 
-/** Delete only admitted paths before replacing their projection. Ignored data
- * remains repository-owned and survives SDK package updates/flushes verbatim. */
 function removePath(raw: Document, path: readonly string[]): void {
   const [field, ...rest] = path;
   if (!field) return;
@@ -95,9 +89,6 @@ function replaceProjectProjection(schema: SettingsSchema, raw: Document, next: D
   return raw;
 }
 
-/** The SDK's public SettingsStorage seam, over the same canonical files and
- * proper-lockfile protocol. This is an admission projection, never another
- * settings store. Writes merge into the locked raw document, not the projection. */
 export async function createSettingsManager(schema: SettingsSchema, projectDir: string, agentDir: string, projectTrusted: boolean): Promise<SettingsManager> {
   const storage: Parameters<typeof SettingsManager.fromStorage>[0] = {
     withLock(scope, transform) {
@@ -108,16 +99,11 @@ export async function createSettingsManager(schema: SettingsSchema, projectDir: 
           try { return lockfile.lockSync(path, { realpath: false }); }
           catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ELOCKED" || attempt === 9) throw error;
-            // Preserve the SDK storage's bounded 10 x 20ms lock wait, without
-            // its busy-spin. No model request or mutation is retried here.
             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
           }
         }
       };
       try {
-        // Lock absent files too when their directory exists. If the directory
-        // is absent a read stays side-effect-free; concurrent creation before a
-        // later write is a conflict, never permission to overwrite unknown data.
         if (existsSync(dirname(path))) release = acquire();
         const current = existsSync(path) ? readFileSync(path, "utf8") : undefined;
         const raw = scope === "project" ? document(current) : undefined;
@@ -136,8 +122,6 @@ export async function createSettingsManager(schema: SettingsSchema, projectDir: 
     },
   };
   const manager = SettingsManager.fromStorage(storage, { projectTrusted });
-  // Pi's own cacheWarming default spends between runs. A missing or invalid value is the
-  // declared run.cacheWarming default, so a chat warms only as the setting Tron shows says.
   const cacheWarming = schema.KEYS.find(key => key.id === "run.cacheWarming")!.defaultValue as ReturnType<SettingsManager["getCacheWarmingMode"]>;
   const piCacheWarming = manager.getCacheWarmingMode.bind(manager);
   manager.getCacheWarmingMode = () => {

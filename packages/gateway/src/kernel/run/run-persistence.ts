@@ -4,29 +4,16 @@ import type { GatewayWorkHandle } from "./gateway-work-registry.js";
 import { RunMarkerCompletionConflictError } from "./run-markers.js";
 import { StallTolerantDeadline } from "../../util/stall-tolerant-deadline.js";
 
-/** Default bound on one durable ownership write's transient-failure retries.
- * Long enough to ride out a brief disk/permission outage, short enough that a
- * permanently broken canonical path cannot hold a session lane, a command
- * response, or the drain indefinitely. */
 export const DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS = 20_000;
 export class CanonicalCustomEntryConflictError extends Error {}
 
 
-/** Sole authority for pending receipt joins and unresolved durable writes.
- * The live session supplies effect/diagnostic cuts, never copies of this state. */
 export class RunPersistence {
-  /** Receipt persistence is runtime work: eviction and restart drain wait for
-   * this bounded barrier rather than disposing the Pi manager underneath it. */
   readonly pendingReceiptWrites = new Set<Promise<void>>();
-  /** A failed or timed-out persistence obligation keeps this runtime fenced.
-   * Losing a waiter is not proof of a durable receipt or permission to evict the
-   * only runtime holding Pi's potentially staged canonical entry. */
   readonly durableWrites = new Map<string, { waiter: Promise<void>; blocked: boolean; admittedAt: string }>();
 
   constructor(private readonly operations: RunOperations<unknown>) {}
 
-  /** Admits one agent_settled settlement chain to the disposal join for its whole
-   * life. The chain settles its own failures; this only orders disposal after it. */
   trackSettlementChain(chain: Promise<void>): void {
     this.pendingReceiptWrites.add(chain);
     void chain.finally(() => {
@@ -62,8 +49,6 @@ export class RunPersistence {
     }, error => {
       this.pendingReceiptWrites.delete(write);
       this.operations.releaseSettleWaiters();
-      // A confirmed contradictory identity rejects before any new write. Only
-      // an unresolved persistence outcome keeps the derived owner admitted.
       if (derived && !isUncertainOutcome(error)) work.settle();
     });
     return write;
@@ -84,8 +69,6 @@ export class RunPersistence {
     if (existing) return existing.waiter;
     this.assertOwnershipPersistence();
     const owner = { blocked: false, admittedAt: new Date().toISOString(), waiter: undefined as unknown as Promise<void> };
-    // The write runs on the fs threadpool. A deadline that a stalled loop reaches
-    // first would fence a runtime whose write had already completed.
     let deadline!: StallTolerantDeadline;
     const expired = new Promise<never>((_, reject) => {
       deadline = new StallTolerantDeadline(DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS, () => {
@@ -117,36 +100,19 @@ export class RunPersistence {
     }, error => {
       if (!owner.blocked && (error instanceof RunMarkerCompletionConflictError
         || error instanceof CanonicalCustomEntryConflictError || this.operations.dependencies.modules.policy("appendGuard")?.(this.operations.canonicalAppendContext).isPreAppendRefusal(error))) {
-        // These owner-validated conflicts reject before a new effect. Existing
-        // canonical evidence remains authoritative; no unresolved write exists.
         if (this.durableWrites.get(key) === owner) this.durableWrites.delete(key);
         throw error;
       }
-      // Even a pre-provider marker may have been renamed before an fsync error.
-      // A timeout cannot certify rejection, and late completion cannot certify
-      // that the abandoned caller finished its dependent canonical transitions.
       owner.blocked = true;
       this.block();
       this.diagnostic("canonical-ownership-persistence-blocked");
       throw asUncertainOutcome(error, "Canonical ownership persistence could not be proven");
     }).finally(() => deadline.cancel());
     this.durableWrites.set(key, owner);
-    // Promise.race observes late completion/rejection without releasing the
-    // blocked owner or appending a second record. A supported SDK recovery
-    // boundary is required before this runtime may be retired safely.
     return owner.waiter;
   }
 
-  /** Joins pending canonical ownership writes within a bounded window. Every
-   * write already bounds its own retry, so an exhausted wait means a permanent
-   * storage fault: report a blocker instead of hanging disposal, and leave the
-   * outstanding writes admitted so a later attempt can still settle them. */
   async waitForReceiptWrites(): Promise<void> {
-    // Every write bounds its own retry, so an exhausted wait means a backstop
-    // promise that cannot settle or a continuous stream of new writes. Race each
-    // join against one stall-tolerant grace instead of awaiting without a clock,
-    // then report a bounded blocker and leave the outstanding writes admitted so
-    // a later attempt can still settle them.
     this.assertOwnershipPersistence();
     let expire!: () => void;
     const expiry = new Promise<"expired">((resolve) => { expire = () => resolve("expired"); });
@@ -172,12 +138,10 @@ export class RunPersistence {
 
   private block(): void {
     this.operations.lifecycle.beginDrain();
-    // Stop further foreground effects through their SDK owners, without
-    // claiming they have settled or disposing the potentially staged branch.
     const session = this.operations.runtime?.session;
     if (session) {
       for (const cancel of [() => session.abortCompaction(), () => session.abortRetry(), () => session.abortBranchSummary(), () => session.abortBash()]) {
-        try { cancel(); } catch { /* Continue requesting each independent stop. */ }
+        try { cancel(); } catch { }
       }
       void session.abort().catch(() => {});
       void this.operations.directBashProcesses?.abortAll().catch(() => {});

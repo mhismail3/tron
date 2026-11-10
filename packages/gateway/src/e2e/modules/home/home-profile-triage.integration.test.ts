@@ -33,8 +33,6 @@ async function setup() {
   f.faux.setResponses([fauxAssistantMessage("Hello.")]);
   await greeting.prompt("Start this isolated fixture conversation.");
   await waitFor(() => greeting.snapshot().operation === undefined && greeting.snapshot().configurationBlocker === null, "greeting settled");
-  // The runtime captures its tool owners when built. Reopen with Knowledge
-  // installed before acquiring the successor runtime, as gateway-main does.
   let registry = await f.restartToReadiness();
   f.registry = registry;
   knowledge = new ProfileStore(registry.moduleHost.contract(workspaceModule));
@@ -49,7 +47,6 @@ async function setup() {
       knowledge = new ProfileStore(registry.moduleHost.contract(workspaceModule));
       await homeOwnerOf(registry).recoverTasks();
     },
-    /** One Home turn; `card` is the maintainer's answer to the exact card it waits on. */
     async turn(input: string, args?: Record<string, unknown>, callId = "triage-call", card?: boolean) {
       const captured: Array<{ system: string; messages: Array<Record<string, unknown>> }> = [];
       const replies = args ? [fauxAssistantMessage(fauxToolCall("profile", args, { id: callId }), { stopReason: "toolUse" }), fauxAssistantMessage("Done.")] : [fauxAssistantMessage("Done.")];
@@ -60,7 +57,6 @@ async function setup() {
       const home = await registry.acquire(f.home.sessionId);
       await home.prompt(input);
       if (card !== undefined) {
-        // One maintainer RPC owner per fixture registry: it observes settings changes once.
         service ??= new GatewayService({ display: displayOwnerOf(registry),
           config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
           modelRuntime: f.gateway, trust: f.trust, settingsModel: f.settings.settingsModel, settingsChanges: f.settings.settingsChanges,
@@ -151,7 +147,6 @@ it("keeps explicitly stated sensitive data unsorted, refuses inferred sensitive 
   expect({ ...restored, revisionId: note.revisionId }).toEqual(note);
   note = restored;
   for (const action of ["refine", "supersede"] as const) {
-    // Home never edits private material alone: its edit waits on the exact card.
     const edit = await p.turn("Infer a new private fact from this short reply.", { action, id: note.id,
       kind: "fact", text: "An invented sensitive fixture inference", reason: "Not an explicit sensitive statement" }, `sensitive-${action}`, false);
     expect(edit.result).toMatchObject({ status: "declined" });

@@ -6,7 +6,6 @@ import { disposeFixtures, fixture } from "../../../../test-support/home-task-fix
 import { DETACHED_WORKFLOW_SCRIPT, startScriptedChild, type ChildModelServer } from "../../../../test-support/home-task-subagent-child.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 
-// Real managed-provider children, as in the Home task subagent cases: this file runs in the nested serial pass.
 type WorkflowStatus = { runId: string; state: string; steps: Array<{ label?: string; runId?: string; sessionFile?: string; sessionOwnerId?: string }> };
 const bound = { boundMs: 20_000 };
 const servers: ChildModelServer[] = [];
@@ -57,8 +56,6 @@ return await runs.run("resumed", { resume: initial.runId, task: "HOLD-CHILD resu
     const initial = slot.snapshot().processActivities?.find(item => item.kind === "subagent" && item.lifecycle.state === "completed" && item.childSessionRef === ref);
     expect(initial?.processId).toBeDefined();
     expect(initial?.processId).not.toBe(row.processId);
-    // The copy has the same canonical header: only its foreign path owner
-    // differs. Reusing a ref cannot authorize an unrelated run's directory.
     const foreign = join(f.root, "foreign-parent", "unrelated-owner", "run-0", "session.jsonl");
     await mkdir(dirname(foreign), { recursive: true });
     await copyFile(admission.path, foreign);
@@ -74,8 +71,6 @@ return await runs.run("resumed", { resume: initial.runId, task: "HOLD-CHILD resu
     report.completed = { processId: completedRow.processId, sessionRef: completedRow.childSessionRef, state: completedRow.lifecycle.state, entries: completed.total };
     report.passed = true;
   } finally {
-    // Keep the model server available while the accepted child finishes; closing
-    // its socket instead can trigger SDK retries and outlive fixture teardown.
     server.releaseHeld();
     await waitFor(() => !slot.catalogHasActiveSubagents, "the test-owned workflow settles before cleanup", bound);
     report.snapshot = slot.snapshot().processActivities;
@@ -97,7 +92,6 @@ it("keeps an ordinary session showing a workflow child that outlives its complet
   const slot = await f.registry.create(f.cwd);
   await slot.prompt("launch the detached workflow");
   await waitFor(() => server.heldRequests() === 1, "workflow child live after the turn", bound);
-  // The turn has settled, but the child it launched is still running, so the session is still active.
   expect(slot.catalogHasActiveSubagents).toBe(true);
   server.releaseHeld();
   await waitFor(() => !slot.catalogHasActiveSubagents, "workflow child ends and the session settles", bound);

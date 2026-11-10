@@ -337,8 +337,6 @@ export class AutomationStore {
         const retainedAutomatic = current.target.kind === "home"
           && [current.currentRun, ...current.pendingHomeRuns ?? []].some(run => run && !run.manual
             && JSON.stringify(run.triggerSnapshot) === JSON.stringify(current.trigger));
-        // A retained automatic firing already advanced this schedule. Enabling
-        // releases that outbox; it must not create the same occurrence again.
         if (!retainedAutomatic) {
           const occurrence = firstAutomationOccurrence(current.trigger, Date.now());
           if (occurrence === undefined) delete next.nextOccurrenceAt;
@@ -412,7 +410,6 @@ export class AutomationStore {
     });
   }
 
-  /** Internal scheduler mutation. Definition revision remains stable. */
   async mutateState(id: string, update: (current: AutomationRecord) => AutomationRecord): Promise<AutomationRecord> {
     return this.mutex.run(async () => {
       this.assertInitialized();

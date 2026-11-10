@@ -41,7 +41,6 @@ const MAXIMUM_RUN_MARKER_BYTES = 32 * 1_024;
 const MAXIMUM_MARKER_IDENTIFIER_BYTES = 256;
 const MAXIMUM_MARKER_TIMESTAMP_BYTES = 128;
 
-/** One operation can never own two different canonical completions. */
 export class RunMarkerCompletionConflictError extends Error {
   constructor(message: string) {
     super(message);
@@ -59,7 +58,6 @@ export class RunMarkerStore {
     this.fileSystem = options.fileSystem ?? productionFileSystem;
   }
 
-  /** Retain a lane for the whole queued operation, not just its execution. */
   private acquireLane(sessionId: string): Lane {
     const existing = this.lanes.get(sessionId);
     if (existing) {
@@ -120,9 +118,6 @@ export class RunMarkerStore {
     });
   }
 
-  /** Atomically restores a live operation's exact marker and stamps its terminal
-   * completion. Keeping both changes in one session lane prevents stale cleanup
-   * from recreating a permanent missing-owner retry between two durable writes. */
   async reassertAssistantCompletion(
     sessionId: string,
     operationId: string,
@@ -166,7 +161,6 @@ export class RunMarkerStore {
     }
   }
 
-  /** Clear only the record owned by operationId when one is supplied. */
   async clear(sessionId: string, operationId?: string): Promise<void> {
     await this.withLane(sessionId, async () => {
       const path = join(this.directory, `${sessionId}.json`);

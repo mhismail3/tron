@@ -1,13 +1,10 @@
 import type { ExtensionHostActivity } from "./presentation/extension-presentation-store.js";
 
-/** Tracks host-observable extension work without interpreting extension-owned state. */
 export class ExtensionLifecycleCoordinator {
   private pendingCommands = 0;
   private pendingPrompts = 0;
   private readonly pendingPreflights = new Set<string>();
-  /** Accepted owners that have not yet produced their one exact agent_start. */
   private readonly acceptedStarts = new Set<string>();
-  /** Handles Pi emitting agent_start before its preflight callback resolves. */
   private readonly observedStarts = new Set<string>();
   private shutdownRequested = false;
   private drainRequested = false;
@@ -32,17 +29,13 @@ export class ExtensionLifecycleCoordinator {
   get hasRetainedPresentation(): boolean { return this.activity.hasRetainedPresentation; }
   get isShutdownRequested(): boolean { return this.shutdownRequested; }
   get isDraining(): boolean { return this.drainRequested; }
-  /** Work that makes trust/resource mutation unsafe. Decorative state is excluded. */
   get preventsOperationalQuiescence(): boolean {
     return this.preventsNonRuntimeQuiescence || this.hasRuntimeWork();
   }
-  /** Parent-only settings may ignore detached child work, but never pending
-   * commands, prompts, or UI interactions owned by this session. */
   get preventsNonRuntimeQuiescence(): boolean {
     return this.pendingCommands > 0 || this.pendingPrompts > 0 || this.hasPendingUI
       || this.activity.hasScheduledRender;
   }
-  /** Automatic eviction also retains reconnect-visible presentation. */
   get preventsEviction(): boolean {
     return this.preventsOperationalQuiescence || this.hasRetainedPresentation || this.activity.hasMountedPresentation;
   }
@@ -57,8 +50,6 @@ export class ExtensionLifecycleCoordinator {
   admitAgentStartDuringDrain(owner: string | undefined): boolean {
     if (owner === undefined) return !this.drainRequested;
     if (this.drainRequested && !this.permittedStartsAfterDrain.delete(owner)) return false;
-    // Consume exactly one start for this owner. If Pi started before its callback,
-    // resolvePreflight observes this latch and does not manufacture a second permit.
     this.pendingPreflights.delete(owner);
     this.acceptedStarts.delete(owner);
     this.observedStarts.add(owner);

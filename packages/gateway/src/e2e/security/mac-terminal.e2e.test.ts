@@ -21,20 +21,6 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 
-/**
- * Mac Terminal end to end (README "Mac Terminal"): a real Gateway enrolls a
- * paired iPhone's key through the logged settings path into an
- * `authorized_keys` file that a real OpenSSH sshd reads, and the iPhone app's
- * own SSH client (`MacTerminalSSH`, built here as `mac-terminal-probe`) logs in
- * over this Mac's Tailscale address. It covers authentication success with a
- * PTY and resize, connecting with the Gateway gone, the host-key pin, the
- * `from=` tailnet restriction, revocation from the iPhone and by revoking the
- * paired device, and Remote Login off.
- *
- * It needs this Mac on its tailnet (Tailscale's own CLI answers with an IPv4
- * address) and a Swift 6.2 toolchain; it fails loudly otherwise. Run it with
- * `npm run test:mac-terminal`; the transcript is `test-results/mac-terminal.json`.
- */
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ARTIFACT = join(HERE, "../../../test-results/mac-terminal.json");
 const PACKAGE = join(HERE, "../../../../ios-app/MacTerminalSSH");
@@ -80,8 +66,6 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-/** A real OpenSSH sshd as this user: its own host key, the fixture's
- * authorized_keys, public-key authentication only, and Apple's crypto policy. */
 async function startSshd(directory: string, sshDirectory: string, port: number, withoutTmux = false) {
   await mkdir(directory, { recursive: true });
   execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "fixture-host", "-f", join(directory, "ssh_host_ed25519_key")]);
@@ -96,8 +80,6 @@ async function startSshd(directory: string, sshDirectory: string, port: number, 
     ...(withoutTmux ? [`ForceCommand /usr/bin/sandbox-exec -p '${policy}' /bin/sh -c "$SSH_ORIGINAL_COMMAND"`] : []), "",
   ].join("\n"));
   const args = ["-D", "-f", config, "-E", join(directory, "sshd.log")];
-  // Sandbox only the post-auth shell for the missing-binary case. It executes
-  // SSH_ORIGINAL_COMMAND unchanged; there is no canned response or host change.
   const child = spawn("/usr/sbin/sshd", args, { stdio: "ignore" });
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const listening = await new Promise<boolean>(resolve => {
@@ -120,8 +102,6 @@ function client(deviceId: string): ClientContext {
 let command = 0;
 const commandId = () => `mac-terminal-${String(++command).padStart(4, "0")}`;
 
-/** A Gateway with the production Mac Terminal wiring (gateway-main.ts) over
- * the fixture's ~/.ssh and host keys. */
 async function gateway(tronHome: string, port: number) {
   const agentDir = join(tronHome, "agent");
   await mkdir(agentDir, { recursive: true });
@@ -177,8 +157,6 @@ describe("Mac Terminal", () => {
     const sshDirectory = join(tronHome, "mac-terminal");
     const hostDirectory = sshDirectory;
     await mkdir(sshDirectory, { recursive: true, mode: 0o700 });
-    // A key the user added by hand, with a comment that is not UTF-8: every
-    // Tron write must leave those bytes exactly.
     const own = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwnUserKeyOwnUserKeyOwnUserKeyOwnUser00 user@laptop";
     const handWritten = Buffer.concat([Buffer.from("# hand-written caf"), Buffer.from([0xe9]), Buffer.from(`\n${own}\n`)]);
     const authorizedKeys = join(sshDirectory, "authorized_keys");
@@ -196,7 +174,6 @@ describe("Mac Terminal", () => {
         changes: [{ key: "permissions.macTerminalServer", layer: "global", op: "set", value: true }],
       }) as unknown as { changes: Array<{ changeId: string }> };
       expect(enabled).toMatchObject({ status: "applied", changes: [{ status: "applied" }] });
-      // Enable has prepared a host identity, but has not published a phone key.
       const before = await service.invoke(client(phone), "macTerminal.status", {}) as unknown as MacTerminalStatus;
       expect(before).toMatchObject({ username: userInfo().username, port, serviceState: "running", enrolled: false });
       expect(before.hosts).toContain(tailnetIPv4);
@@ -206,8 +183,6 @@ describe("Mac Terminal", () => {
       const endpoint = { hosts: before.hosts, port, username: before.username, hostKeys: before.hostKeys };
       expect(await connect(endpoint, key.privateKeyPEM)).toMatchObject({ outcome: "error", error: "authenticationRefused" });
 
-      // Enrollment is the maintainer's tap through settings.change: applied at
-      // its approve tier and recorded.
       const enrolled = await maintainerChange(service, client(phone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: key.publicKey }],
@@ -222,20 +197,14 @@ describe("Mac Terminal", () => {
       expect((await service.invoke(client(phone), "macTerminal.status", {}))).toMatchObject({ enrolled: true, enrolledKey: key.publicKey });
       transcript.push({ case: "enrolled", detail: { line, record: history.entries[0] } });
 
-      // Login over the tailnet: a PTY at the requested size after resize.
       const login = await connect(endpoint, key.privateKeyPEM);
       expect(login).toMatchObject({ outcome: "ok", exitStatus: 0 });
       expect(login.output).toContain("TRON_MAC_TERMINAL_42");
       expect(login.output).toContain("30 100");
       transcript.push({ case: "login", detail: { exitStatus: login.exitStatus } });
 
-      // Preserve the server-side source restriction oracle separately: the
-      // app now rejects loopback before dialing, so it cannot prove this boundary.
       const identity = join(root, "source-restriction-key.pem");
       const knownHosts = join(root, "source-restriction-known-hosts");
-      // A separate test-only loopback sshd proves the from= authorization
-      // boundary using the production owner’s actual authorized_keys. The
-      // private production listener itself correctly refuses loopback TCP.
       const sourcePort = await freePort();
       const sourceDirectory = join(root, "source-restriction-sshd");
       const sourcePeer = await startSshd(sourceDirectory, sshDirectory, sourcePort);
@@ -254,18 +223,15 @@ describe("Mac Terminal", () => {
       } finally { await sourcePeer.stop(); }
       transcript.push({ case: "real-sshd-source-restriction", detail: { tailnet: "allowed", loopback: "refused" } });
 
-      // The client refuses a non-tailnet destination before dialing it.
       expect(await connect({ ...endpoint, hosts: ["127.0.0.1"] }, key.privateKeyPEM))
         .toMatchObject({ outcome: "error", error: "invalidEndpoint" });
 
-      // The Gateway gone: nothing in the connection path needs it.
       service = undefined as never;
       const offline = await connect(endpoint, key.privateKeyPEM);
       expect(offline).toMatchObject({ outcome: "ok", exitStatus: 0 });
       expect(offline.output).toContain("TRON_MAC_TERMINAL_42");
       transcript.push({ case: "gateway-down-login", detail: { exitStatus: offline.exitStatus } });
 
-      // A host key that is not the pinned one never gets an authentication attempt.
       execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(root, "other")]);
       const other = (await readFile(join(root, "other.pub"), "utf8")).split(" ").slice(0, 2).join(" ");
       const mismatch = await connect({ ...endpoint, hostKeys: [other] }, key.privateKeyPEM);
@@ -274,8 +240,6 @@ describe("Mac Terminal", () => {
       transcript.push({ case: "host-key-mismatch", detail: mismatch });
 
       ({ service } = await gateway(tronHome, port));
-      // Keep a second phone authorized so revoke is proved by actual public-key
-      // denial after TCP/auth, not merely by the last-key service shutdown.
       const keeper = await pair("Keeper iPhone");
       const keeperKey = JSON.parse(await run(probe, ["keygen"])) as { publicKey: string };
       await maintainerChange(service, client(keeper), "settings.change", {
@@ -283,16 +247,11 @@ describe("Mac Terminal", () => {
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: keeper }, layer: "global", op: "set", value: keeperKey.publicKey }],
       });
       const surviving = Buffer.concat([handWritten, Buffer.from(`from="${MAC_TERMINAL_SOURCES}",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc ${keeperKey.publicKey} tron-mac-terminal:${keeper} Tron Mac Terminal key for one paired iPhone; delete this line to revoke it\n`)]);
-      // The native replacement/undo oracle covers the hardware-owned rows
-      // that cannot be mutated by the generic hosted/Linux settings journey.
       const replacement = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
       const replaced = await maintainerChange(service, client(phone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: replacement.publicKey }],
       }) as unknown as { changes: Array<{ changeId: string }> };
-      // Independent auth-negative scenarios must not inherit native source
-      // penalties. Explicit fixture recovery preserves keys/shells; no throttle
-      // is disabled and no assertion is retried.
       await native.recover();
       expect(await connect(endpoint, key.privateKeyPEM)).toMatchObject({ outcome: "error", error: "authenticationRefused" });
       expect(await connect(endpoint, replacement.privateKeyPEM)).toMatchObject({ outcome: "ok" });
@@ -301,7 +260,6 @@ describe("Mac Terminal", () => {
       expect(await connect(endpoint, replacement.privateKeyPEM)).toMatchObject({ outcome: "error", error: "authenticationRefused" });
       transcript.push({ case: "native-key-replacement-undo", detail: { restored: true } });
       await native.recover();
-      // Revocation from the iPhone: the key unset through the same path.
       ({ service } = await gateway(tronHome, port));
       const revoked = await maintainerChange(service, client(phone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
@@ -313,7 +271,6 @@ describe("Mac Terminal", () => {
       expect(refused).toMatchObject({ outcome: "error", error: "authenticationRefused" });
       transcript.push({ case: "revoked-from-iphone", detail: refused });
 
-      // Revoking the paired device removes its key as a logged change.
       ({ service, devices } = await gateway(tronHome, port));
       await maintainerChange(service, client(phone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
@@ -321,14 +278,10 @@ describe("Mac Terminal", () => {
       });
       expect((await connect(endpoint, key.privateKeyPEM)).outcome).toBe("ok");
       const otherPhone = await pair("Second iPhone");
-      // An iPhone enrolls only its own key, so a device revoke always finds it.
       await expect(maintainerChange(service, client(otherPhone), "settings.change", {
         commandId: commandId(), target: { kind: "global" },
         changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "global", op: "set", value: key.publicKey }],
       })).rejects.toMatchObject({ code: "invalid_request" });
-      // A key that cannot be removed (authorized_keys made a symlink) fails the
-      // revoke and leaves the device paired, so it can be retried; a revoked
-      // iPhone never keeps a working key.
       await rename(authorizedKeys, `${authorizedKeys}.real`);
       await symlink(`${authorizedKeys}.real`, authorizedKeys);
       await expect(service.invoke(client(otherPhone), "device.revoke", { commandId: commandId(), deviceId: phone }))
@@ -357,7 +310,6 @@ describe("Mac Terminal", () => {
       await native.setEnabled(false);
     }
 
-    // Owned service stopped: the Gateway says so, and the client names it.
     const { service } = await gateway(tronHome, port);
     const phone = "11111111-2222-3333-4444-555555555555";
     expect(await service.invoke(client(phone), "macTerminal.status", {})).toMatchObject({ serviceState: "stopped" });
@@ -428,8 +380,6 @@ describe("Mac Terminal", () => {
     const sockets = new Set<Socket>();
     const backends = new Set<ReturnType<typeof spawn>>();
     const proxy = createServer(downstream => {
-      // Like the Swift client, a fixture-owned process dials this Mac's
-      // tailnet. Keep the default Node test network-isolation guard intact.
       const upstream = spawn("/usr/bin/nc", ["-s", tailnetIPv4, tailnetIPv4, String(port)]);
       backends.add(upstream);
       sockets.add(downstream);
@@ -457,7 +407,6 @@ describe("Mac Terminal", () => {
         if (firstResult) throw new Error(JSON.stringify({ firstResult, sshd: await readFile(join(directory, "sshd.log"), "utf8") }));
         return (await readFile(marker, "utf8").catch(() => "")).startsWith("before=");
       }, "shell PID before network drop");
-      // Tear down real TCP streams, not the client's close/detach method.
       for (const socket of sockets) socket.destroy();
       expect(JSON.parse(await first)).toMatchObject({ outcome: "ok" });
       const second = JSON.parse(await run(probe, ["connect"], JSON.stringify({

@@ -9,11 +9,6 @@ import { GatewayError } from "../../errors.js";
 import { projectRoot } from "./project-root.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 
-/**
- * Trust belongs to the Project root, not to the chat's cwd: the root's `.pi/`
- * is the configuration trust gates, so a chat in a subdirectory reads, records
- * and re-reads the decision of its root. `cwd` stays the canonical chat cwd.
- */
 export interface TrustInspection {
   cwd: string;
   projectDir: string;
@@ -24,11 +19,6 @@ export interface TrustInspection {
 }
 
 interface TrustServiceOptions {
-  /**
-   * Directories that are their own Project root even inside a Git work tree.
-   * Tron Home's neutral workspace is one: its explicit untrusted decision must
-   * never land on a repository that happens to enclose the Tron home.
-   */
   standaloneDirectories?: readonly string[];
 }
 
@@ -46,8 +36,6 @@ export class TrustService {
     this.store = new ProjectTrustStore(agentDir);
   }
 
-  /** The Project root, except that a root enclosing a standalone directory stops
-   * at the cwd; a repository inside the standalone directory keeps its own root. */
   private async projectDirectory(cwd: string): Promise<string> {
     const root = await projectRoot(cwd);
     const within = (path: string, directory: string) => path === directory || path.startsWith(`${directory}${sep}`);
@@ -73,15 +61,10 @@ export class TrustService {
     return this.inspectUnlocked(path);
   }
 
-  /** `projectDir` pins the root a transition already addressed, so its apply,
-   * commit and rollback name one key even if Git's answer changes meanwhile. */
   private async inspectUnlocked(path: string, knownProjectDir?: string): Promise<TrustInspection> {
     const cwd = await this.canonicalDirectory(path);
     const projectDir = knownProjectDir ?? await this.projectDirectory(cwd);
     const requiresDecision = hasTrustRequiringProjectResources(cwd, projectDir);
-    // A lifecycle reservation is explicitly denied before it is a Git root.
-    // Honor that exact deny even beneath a trusted repository. A subdirectory
-    // may never grant authority to its root; this exception only narrows it.
     const exact = this.store.getEntry(cwd);
     const savedDecision = exact?.path === cwd && exact.decision === false ? false : this.store.get(projectDir);
     const settings = SettingsManager.create(projectDir, this.agentDir, { projectTrusted: false });
@@ -98,12 +81,6 @@ export class TrustService {
     return { cwd: inspection.cwd, projectDir: inspection.projectDir, trusted: inspection.effectiveDecision === true };
   }
 
-  /**
-   * A Git worktree is a new canonical path for the same project. Carry the
-   * already-resolved source decision only when the target has no explicit or
-   * inherited decision, so creating a worktree cannot bypass project trust or
-   * overwrite a deliberate target decision.
-   */
   async propagateResolvedDecision(sourcePath: string, targetPath: string): Promise<PropagatedTrustDecision> {
     return this.mutationMutex.run(async () => {
       const source = await this.inspectUnlocked(sourcePath);
@@ -131,8 +108,6 @@ export class TrustService {
     });
   }
 
-  /** A newly created/reserved directory must shadow inherited/default trust
-   * before it has a Git root. Never resolve this reservation to an ancestor. */
   async reserveUntrustedDirectory(path: string): Promise<void> {
     await this.mutationMutex.run(async () => this.store.set(await this.canonicalDirectory(path), false));
   }
@@ -196,8 +171,6 @@ export class TrustService {
     });
   }
 
-  /** Successful commit releases the native reservation. Anything still pending
-   * must retire uncertain frames, never publish them as a successful rollback. */
   private async withRuntimeRetirement<T>(operation: () => Promise<T>, abort: () => Promise<void>): Promise<T> {
     return operation().then(async value => { await abort(); return value; }, async failure => {
       try { await abort(); }

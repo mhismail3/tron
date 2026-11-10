@@ -6,13 +6,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-// The checked-in Oxlint allowlist, run through the binary `npm ci` installed from the lockfile
-// against real source files in a temp directory. Nothing is mocked, and the fixtures are removed.
 const gatewayRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const oxlint = join(gatewayRoot, "node_modules", ".bin", "oxlint");
 const config = join(gatewayRoot, ".oxlintrc.json");
 
-// The same flags as the `lint` script in package.json.
 const flags = ["-c", config, "--deny-warnings", "--report-unused-disable-directives"];
 
 async function lintFixture(files) {

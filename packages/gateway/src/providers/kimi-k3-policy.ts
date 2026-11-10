@@ -1,11 +1,6 @@
 import type { FetchFunction, Model } from "../kernel/pi/ai.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 
-/**
- * Moonshot accounts reserve the requested completion budget against TPM, even
- * when the model emits fewer tokens. Keep the default agent request useful for
- * coding while leaving headroom for large K3 contexts on ordinary accounts.
- */
 const KIMI_K3_MAX_COMPLETION_TOKENS = 32_768;
 const installedRuntimes = new WeakSet<ModelRuntime>();
 const KIMI_K3_MAX_CONCURRENCY_RETRY_DELAY_MS = 10_000;
@@ -20,14 +15,10 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-/** Apply K3's current Chat Completions parameter contract to a provider payload. */
 function normalizeKimiK3Payload(payload: unknown): unknown {
   const source = record(payload);
   if (!source) return payload;
   const next = { ...source };
-  // The 0.99 catalog advertises a 1,048,576-token maximum, but Moonshot's
-  // Chat Completions contract still names this request field `max_tokens`.
-  // Cap whichever supported limit the caller supplied without renaming it.
   for (const key of ["max_tokens", "max_completion_tokens"] as const) {
     const requested = next[key];
     if (typeof requested === "number") next[key] = Math.min(requested, KIMI_K3_MAX_COMPLETION_TOKENS);
@@ -47,9 +38,6 @@ function accountError(body: unknown): { type: string; message: string } | undefi
 function retryAfterMs(response: Response, body: unknown): number | undefined {
   const error = accountError(body);
   if (!error || error.type !== "rate_limit_reached_error") return undefined;
-  // A max-concurrency response is recoverable when Moonshot supplies explicit
-  // retry guidance. Only perform one short, provider-advised retry; TPM/RPM/TPD
-  // budget failures without guidance remain terminal for this request.
   if (!/(?:concurrenc|try again after|retry after)/i.test(error.message)) return undefined;
   const retryAfterMsHeader = Number.parseFloat(response.headers.get("retry-after-ms") ?? "");
   if (Number.isFinite(retryAfterMsHeader)) return Math.min(Math.max(0, retryAfterMsHeader), KIMI_K3_MAX_CONCURRENCY_RETRY_DELAY_MS);
@@ -66,8 +54,6 @@ function retryAfterMs(response: Response, body: unknown): number | undefined {
 function terminalAccountLimit(body: unknown): boolean {
   const error = accountError(body);
   if (!error) return false;
-  // engine_overloaded_error is transient; account/org limit and quota errors
-  // are deterministic for this request and must not enter another retry loop.
   if (error.type === "engine_overloaded_error") return false;
   return error.type === "rate_limit_reached_error"
     || error.type === "exceeded_current_quota_error"
@@ -77,10 +63,6 @@ function terminalAccountLimit(body: unknown): boolean {
 
 function nonRetryingMessage(body: unknown): string {
   const message = accountError(body)?.message || "Moonshot account limit reached";
-  // The pinned agent's generic retry classifier intentionally treats the words
-  // "429" and "rate limit" as transient. Preserve useful provider detail while
-  // rewriting those markers because this response has already been classified
-  // as a terminal account/org limit.
   return message
     .replace(/rate[_ -]?limit(?:ed|ing)?/gi, "account limit")
     .replace(/too many requests/gi, "provider request budget")
@@ -95,7 +77,6 @@ function responseWithBody(response: Response, body: string): Response {
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
 }
 
-/** Sleep without making provider retry delays un-abortable. */
 function abortableSleep(delayMs: number, signal: AbortSignal | null | undefined): Promise<void> {
   if (delayMs <= 0) return Promise.resolve();
   return new Promise((resolve, reject) => {
@@ -115,7 +96,6 @@ function abortableSleep(delayMs: number, signal: AbortSignal | null | undefined)
   });
 }
 
-/** Prevent terminal Moonshot account limits from being retried by either layer. */
 function wrapKimiK3Fetch(fetch: FetchFunction): FetchFunction {
   return async (input, init) => {
     const retryInput = input instanceof Request ? input.clone() : input;
@@ -155,7 +135,6 @@ function wrapKimiK3Fetch(fetch: FetchFunction): FetchFunction {
   };
 }
 
-/** Install the narrow K3 request policy on one session-scoped model runtime. */
 export function installKimiK3Policy(modelRuntime: ModelRuntime): ModelRuntime {
   if (installedRuntimes.has(modelRuntime)) return modelRuntime;
   installedRuntimes.add(modelRuntime);

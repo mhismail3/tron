@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 // Regenerate the vendored model release dates the Gateway serves in `model.list`.
-// This is a maintainer baseline refresh, not a runtime or build dependency.
-// `scripts/models/update-model-release-dates.mjs [--check]`
-
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -14,7 +11,6 @@ const PI_DATA = join(GATEWAY, "node_modules/@earendil-works/pi-ai/dist/providers
 const ALIASES = join(GATEWAY, "src/providers/model-release-date-aliases.json");
 const SNAPSHOT = join(GATEWAY, "src/providers/model-release-dates.json");
 
-/** Provider ids the pinned catalog can serve. */
 async function piProviders() {
   let files;
   try { files = await readdir(PI_DATA); }

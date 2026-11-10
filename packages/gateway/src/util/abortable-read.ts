@@ -1,7 +1,3 @@
-/** Abandon a disposable wait, not the underlying resource's ownership. Use
- * only with a producer that independently bounds active work (a cancellable
- * mutex queue or an admitted reader lease). This cannot make unbounded I/O
- * safe. Late acquired resources are returned to their original owner. */
 export function abortableRead<T>(
   signal: AbortSignal | undefined,
   acquire: () => Promise<T>,
@@ -23,8 +19,6 @@ export function abortableRead<T>(
       return acquire();
     }).then(value => {
       if (settled) {
-        // Cleanup errors cannot resurrect an abandoned request. The resource
-        // owner retains its quota until its physical release completes.
         if (releaseAbandoned) void Promise.resolve().then(() => releaseAbandoned(value)).catch(() => {});
         return;
       }

@@ -1,7 +1,5 @@
 import { authorizationRequestId, HomeTaskAuthorizationError, type HomeTaskAuthorization, type HomeTaskAuthorizationRequest } from "../src/modules/home/home-task-authorization.js";
 
-/** Records an approving decision for one authorization request and returns the
- * one-use grant it mints. A refused first attempt still names its request ID. */
 export async function issueGrant(owner: HomeTaskAuthorization, request: HomeTaskAuthorizationRequest,
   input: { decisionId: string; approved?: boolean; expiresAt: number }) {
   let requestId = authorizationRequestId(request);

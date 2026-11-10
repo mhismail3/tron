@@ -13,8 +13,6 @@ import { ManagedSubagents } from "../../kernel/delegation/managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "../../kernel/delegation/delegated-provider.js";
 import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
-/** Real Gateway -> pinned role -> real Pi child -> shared socket -> local HTTP.
- * Only model responses and external endpoints are controlled. */
 it("both pinned research roles call the same scoped web schema and reject Firecrawl source404", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-shared-web-child-"));
   const agentDir = join(root, "agent"); const cwd = join(root, "project"); const tronHome = join(root, "tron");

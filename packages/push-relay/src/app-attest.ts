@@ -1,6 +1,3 @@
-// @peculiar/x509 resolves its algorithm providers and signature formatters through tsyringe,
-// which needs the Reflect metadata API installed before x509 is evaluated; this import must
-// stay ahead of the x509 import.
 import "reflect-metadata";
 import { decode } from "cbor-x";
 import { BasicConstraintsExtension, KeyUsageFlags, KeyUsagesExtension, X509Certificate, cryptoProvider } from "@peculiar/x509";
@@ -21,7 +18,6 @@ const ALLOWED_CRITICAL_EXTENSIONS = new Set([APP_ATTEST_NONCE_OID, "2.5.29.15", 
 const DEVELOPMENT_AAGUID = utf8("appattestdevelop");
 const PRODUCTION_AAGUID = concatBytes(utf8("appattest"), new Uint8Array(7));
 
-/** A presented attestation or assertion that does not verify: the client's failure, answered as a rejected proof. */
 export class AttestationRejected extends Error {}
 
 export interface VerifiedAttestation {
@@ -50,14 +46,11 @@ export async function verifyAttestation(input: AttestationVerificationInput): Pr
   return verifyAttestationAgainstTrustedRoot(input, APPLE_APP_ATTESTATION_ROOT_PEM);
 }
 
-/** Test seam for executing the complete certificate/nonce/AAGUID path with a
- * generated pinned root. Production registration always calls verifyAttestation. */
 export async function verifyAttestationAgainstTrustedRoot(
   input: AttestationVerificationInput,
   trustedRootPem: string,
 ): Promise<VerifiedAttestation> {
   cryptoProvider.set(crypto);
-  // The trusted root is server configuration: a failure to read it is a server fault.
   const root = new X509Certificate(trustedRootPem);
   return presented(() => verifyPresentedAttestation(input, root));
 }
@@ -145,7 +138,6 @@ export async function verifyAssertion(input: {
   appId: string;
   previousCounter: number;
 }): Promise<number> {
-  // The stored key is server state: one that cannot be imported is a server fault, not a rejected proof.
   const publicKey = await crypto.subtle.importKey(
     "spki",
     decodeBase64Url(input.publicKeySpki).buffer as ArrayBuffer,
@@ -173,7 +165,6 @@ export async function verifyAssertion(input: {
   });
 }
 
-/** Everything read from the presented object is the client's: any failure to parse or verify it is a rejection. */
 async function presented<T>(verify: () => Promise<T>): Promise<T> {
   try {
     return await verify();
@@ -216,8 +207,6 @@ function decodeAuthenticatorData(value: Uint8Array, requireAttestation: boolean)
 }
 
 function appleNonce(der: Uint8Array): Uint8Array | undefined {
-  // Apple specifies SEQUENCE { [1] EXPLICIT OCTET STRING (SIZE(32)) }.
-  // Accept no alternative nesting, duplicate OCTET STRING, or trailing bytes.
   let offset = 0;
   if (der[offset++] !== 0x30) return undefined;
   const sequence = readLength(der, offset); offset = sequence.offset;

@@ -20,8 +20,6 @@ export interface AutomationPage {
   items: AutomationSummary[];
 }
 
-/** One timed part of startup recovery; `detail` is key=value evidence with no
- * target paths or identifiers. */
 type AutomationRecoveryStep = (
   step: "store" | "reconcile-targets" | "scheduler-recover", durationMs: number, detail?: string,
 ) => void;
@@ -213,15 +211,13 @@ export class AutomationService {
     else await this.targets.requireResolvedAutomationWorkspace(target.cwd);
   }
 
-  /** Returns key=value evidence naming how many targets were checked and the
-   * slowest target's kind and duration. */
   private async reconcileTargets(): Promise<string> {
     let recordsChecked = 0;
     let slowestTargetDurationMs = 0;
     let slowestTargetKind: "workspace" | "session" | undefined;
     for (const record of this.store.snapshot()) {
       if (record.activation === "completed") continue;
-      if (record.target.kind === "home") continue; // Keep a stale/disabled Home outbox until explicit maintainer disposition.
+      if (record.target.kind === "home") continue;
       const targetStartedAt = performance.now();
       recordsChecked += 1;
       if (record.target.kind === "workspace") {

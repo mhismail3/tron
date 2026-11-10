@@ -152,8 +152,6 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
           undefined,
           {
             text: run.actionSnapshot.text,
-            // A saved automation names at most one skill or prompt; it runs as a
-            // one-resource message, its text following the expansion (#311).
             ...(resource === undefined ? {} : { resourceInvocations: [{ source: resource.source, name: resource.name, arguments: "" }] }),
             attachmentEnvelope: "",
             attachmentCount: 0,
@@ -207,9 +205,6 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
       };
     } catch (error) {
       if (isUncertainOutcome(error)) {
-        // The slot retains the exact unresolved canonical write as a drain and
-        // eviction blocker. Its automation lease must not disappear merely
-        // because the caller's admission waiter returned uncertainty.
         work.transition("automation-terminal-persistence");
         throw new AutomationAdmissionError("Automation admission has unresolved canonical ownership", false, "admission-outcome-unknown", false, true);
       }
@@ -257,10 +252,6 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     if (invocation?.lifecycle === "outcomeUnknown") return { state: "outcomeUnknown", reason: "recovered-outcome-unknown", invocationId: invocation.invocationId };
     if (!invocation && !marker) {
       if (run.state === "cancelling") return { state: "cancelled", reason: "cancelled-before-admission" };
-      // Pi does not currently expose an owner-safe eager flush for a brand-new
-      // session. Once workspace provisioning entered the durable admitting
-      // state, a missing file cannot prove that provider admission never
-      // happened. Fail closed instead of creating a second user session.
       return run.targetSnapshot.kind === "workspace"
         ? { state: "outcomeUnknown", reason: "workspace-session-outcome-unknown" }
         : { state: "requeue", reason: "no-admission-evidence" };

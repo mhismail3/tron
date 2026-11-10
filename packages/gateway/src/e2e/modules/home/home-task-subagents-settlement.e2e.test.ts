@@ -52,8 +52,6 @@ describe("Home task subagents: settlement and stop", () => {
     expect(await asyncState(launch!.details!.asyncDir as string)).toBe(ending === "error" ? "stopped" : "complete");
     if (ending === "error") await waitFor(() => child.abortedRequests() === 1, "joined child request closed", bound);
 
-    // Corrupt real fixture transcript bytes, not a mock proof object. The status
-    // consumer must refuse despite the terminal task's synthetic zero-run list.
     const slot = await f.registry.acquire(run.sessionId);
     const path = slot.sessionFile!;
     const original = await readFile(path, "utf8");
@@ -94,7 +92,6 @@ describe("Home task subagents: settlement and stop", () => {
     } finally { await writeFile(path, original); }
     expect((await homeOwnerOf(f.registry).taskStatus(run.taskId)).ownerSettlement).toEqual(status.ownerSettlement);
 
-    // Replace the durable task identity while the canonical read is in flight.
     const taskDir = join(f.tronHome, "gateway/home/tasks");
     const taskPath = join(taskDir, (await readdir(taskDir)).find(name => name.endsWith(`-${run.taskId}.json`))!);
     const taskBytes = await readFile(taskPath, "utf8");
@@ -120,7 +117,6 @@ describe("Home task subagents: settlement and stop", () => {
         return fauxAssistantMessage([reportCall("report-early")], { stopReason: "toolUse" });
       },
       async (context: FauxContext) => {
-        // The report waits for the live async run: it is refused, and the run ends before the report is retried.
         seen.refusal = toolResultText(context, "call-report-early");
         child.releaseHeld();
         const slot = await f.registry.acquire(run.sessionId);
@@ -147,7 +143,6 @@ describe("Home task subagents: settlement and stop", () => {
   it("stops a running async run when the task is stopped, and no turn starts after settlement", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
-    // Any model request after the first is a turn the task must not start; the catch-all counts it.
     let parentRequests = 0;
     let unexpectedTurns = 0;
     f.faux.setResponses([
@@ -164,8 +159,6 @@ describe("Home task subagents: settlement and stop", () => {
     expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "async-launch");
     expect(await asyncState(launch!.details!.asyncDir as string)).toBe("stopped");
-    // Default launches create provider-owned missions. Task settlement must join
-    // the exact run's mission update too, or active records escape terminal retention.
     const runId = basename(launch!.details!.asyncDir as string);
     const missionRoot = join(f.agentDir, "missions", "projects");
     const missionFiles = (await readdir(missionRoot, { recursive: true })).filter(path => path.endsWith(".json"));
@@ -180,7 +173,6 @@ describe("Home task subagents: settlement and stop", () => {
     expect(evidence).toEqual({ runState: "stopped", missions: [{ status: "cancelled", run: "stopped" }] });
     await waitFor(() => child.abortedRequests() === 1, "stopped async child request closed", bound);
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
-    // Nothing follows settlement: no model request and no canonical entry after it.
     const slot = await f.registry.acquire(run.sessionId);
     const entries = slot.canonicalSessionEntries().length;
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -245,8 +237,6 @@ describe("Home task subagents: settlement and stop", () => {
   it.each(["ordinary", "late runner terminal state"])("stops a workflow's async child that outlives its completed workflow when the task is stopped while it waits (%s)", async (interleaving) => {
     const f = await fixture(false, false, undefined, true);
     if (interleaving === "late runner terminal state") {
-      // The child's runner records its step stopped, then holds its run's terminal state:
-      // settlement must join the run, not the step (#1021). Fixture disposal unstubs this.
       const preload = fileURLToPath(new URL("../../../../test-support/late-runner-terminal-status-preload.mjs", import.meta.url));
       vi.stubEnv("NODE_OPTIONS", `${process.env.NODE_OPTIONS ?? ""} --import ${preload}`.trim());
       vi.stubEnv("TRON_LATE_RUNNER_TERMINAL_MS", "1500");
@@ -255,15 +245,12 @@ describe("Home task subagents: settlement and stop", () => {
     await writeFile(join(f.cwd, "detached-workflow.js"), DETACHED_WORKFLOW_SCRIPT);
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./detached-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
-      // A turn that ends with its detached child live and no report waits for the child, so the task is held until Stop.
-      // The turn ends only once the child is a live run of the task, as the report gate and the hold read it.
       async () => {
         await waitFor(() => child.heldRequests() === 1, "detached child live before the final reply", bound);
         const slot = await f.registry.acquire(run.sessionId);
         await waitFor(() => slot.ownedTurns.liveSubagentRuns().length === 1, "detached child visible as live", bound);
         return fauxAssistantMessage("Finished without a report.");
       },
-      // The workflow completed at once, so its completion notice can start a follow-up turn of the same task: that turn holds too.
       () => fauxAssistantMessage("Finished without a report."),
     ]);
     const run = await dispatch(f);
@@ -275,7 +262,6 @@ describe("Home task subagents: settlement and stop", () => {
     expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
     const workflowDir = launch!.details!.asyncDir as string;
-    // The workflow itself had completed; its child was stopped by run id and joined before settlement.
     expect(await asyncState(workflowDir)).toBe("complete");
     expect(await asyncState(join(dirname(workflowDir), await workflowChildRunId(workflowDir)))).toBe("stopped");
     await waitFor(() => child.abortedRequests() === 1, "stopped workflow child request closed", bound);
@@ -285,8 +271,6 @@ describe("Home task subagents: settlement and stop", () => {
   it("starts no turn when an async run completes before its task reports", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
-    // The async child finishes while the worker is still working. Its completion is
-    // producer context: it must not wake the sealed task into another model request.
     let reports = 0;
     let unexpectedTurns = 0;
     f.faux.setResponses([
@@ -344,9 +328,6 @@ describe("Home task subagents: settlement and stop", () => {
     ]);
     const run = await dispatch(f);
     await waitFor(() => child.heldRequests() === 1, "async child live", bound);
-    // The Gateway's stop of the run is refused (an injected control failure): the run
-    // stays live, so the join ends at its own bound, well before the 24-hour deadline,
-    // and the task is not allowed to settle as clean. The provider's tool is untouched.
     let stopRefusals = 0;
     const control = vi.spyOn(subagentControl, "controlSubagentRun").mockImplementation(async () => {
       stopRefusals += 1;
@@ -360,7 +341,6 @@ describe("Home task subagents: settlement and stop", () => {
     expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "detached-work-outlived-task" });
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.detached-work", reason: "detached-work-outlived-task" }));
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: null } });
-    // The run is not dropped: it is still live, and it finishes once its child is released.
     const [launch] = (await launchResults(f.registry, run.sessionId)).filter(item => item.toolCallId === "async-launch");
     expect(await asyncState(launch!.details!.asyncDir as string)).toBe("running");
     control.mockRestore();

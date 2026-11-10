@@ -9,21 +9,6 @@ import { waitFor } from "../../../test-support/wait-for.js";
 import * as Protocol from "../../protocol/types.js";
 import { protocolTs } from "../../../../../tools/proof/dafny2wire/dafny2wire.mjs";
 
-/**
- * Wire contract lock (packages/gateway/docs/scenario-locks.md#wire-contract-v7) for the `gateway/protocol` module:
- * the shapes the iOS and Mac clients rely on, recorded from real frames of the real
- * Gateway on a loopback WebSocket (`gateway-lock-harness.ts`).
- *
- * The lock records the declared lockstep contract (`config/GatewayProtocol.json`
- * and the shared `packages/protocol-fixtures` values), the accepted hello frame,
- * the refusal of a client outside the protocol range, and for every method the
- * scenario calls the structure (dotted key paths with leaf types) of its request
- * and of its response or error. Values that vary per run are not shapes, so the
- * golden is stable. Shared tool declaration schemas belong to the full Home
- * schema oracle; other renamed, removed, added or retyped fields fail this lock.
- * A wire change updates both ends in a lockstep slice (AGENTS.md "Architecture invariants").
- */
-
 const MODULE = "gateway/e2e";
 const REPOSITORY = resolve(import.meta.dirname, "..", "..", "..", "..", "..");
 const gateways: LockGateway[] = [];
@@ -32,7 +17,6 @@ afterEach(async () => {
   finally { vi.unstubAllEnvs(); }
 });
 
-/** One raw handshake: the frames received and how the socket closed. */
 async function handshake(gateway: LockGateway, protocolVersion: number): Promise<{ frames: unknown[]; close: { code: number; reason: string } | null }> {
   const socket = new WebSocket(gateway.socketUrl, { headers: { authorization: `Bearer ${gateway.token}` } });
   const frames: unknown[] = [];
@@ -75,8 +59,6 @@ describe("gateway/protocol wire contract locks", () => {
   });
 
   it("protocol 8: handshake, refusal and the method shapes clients use", async () => {
-    // This lock is the unbranded wire. A supervising Gateway's inherited identity
-    // is not a fixture input; the supervised variant above captures it explicitly.
     vi.stubEnv("TRON_GATEWAY_SOURCE_REVISION", "");
     vi.stubEnv("TRON_GATEWAY_BUILD_FINGERPRINT", "");
     vi.stubEnv("TRON_GATEWAY_RUNTIME_EPOCH", "");
@@ -121,9 +103,6 @@ describe("gateway/protocol wire contract locks", () => {
     await call("session.prompt", { commandId: gateway.commandId(), sessionId: "missing-session", text: "refused" });
     await call("no.such.method", {});
 
-    // The generated decoders (packages/core/wire/Protocol.dfy) are the protocol's validators: every typed
-    // value the Gateway sent in this scenario is accepted strictly (no unknown, missing or mistyped field)
-    // and decodes to itself.
     const result = (method: string) => calls.find((entry) => entry.method === method)!.response.result as Record<string, unknown>;
     const snapshots = client.events.filter((event) => event.topic === "session.snapshot").map((event) => event.payload);
     const typed: Array<[string, (value: unknown) => unknown, unknown[]]> = [

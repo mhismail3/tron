@@ -5,11 +5,6 @@ import { GatewayError } from "../errors.js";
 
 const LOCK_NAME = ".tron-gateway-runtime.lock";
 
-/**
- * The embedded session format has no cross-process lock. Keep one Gateway
- * owner per agent directory so two homes cannot accidentally share canonical
- * JSONL sessions (or their model/settings stores).
- */
 async function acquireAgentRuntimeLock(agentDir: string): Promise<() => Promise<void>> {
   const directory = resolve(agentDir);
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -38,18 +33,12 @@ export async function acquireAgentRuntimeLocks(
   try {
     for (const directory of unique) releases.push(await acquireAgentRuntimeLock(directory));
   } catch (error) {
-    // Snapshot the reverse order without mutating the acquisition list. This
-    // also keeps a partially acquired aggregate safe to inspect while it is
-    // being unwound.
     for (const release of [...releases].reverse()) await release();
     throw error;
   }
   const releaseOrder = [...releases].reverse();
   let releasePromise: Promise<void> | undefined;
   return (): Promise<void> => {
-    // All callers, including concurrent shutdown paths, await one release
-    // operation. proper-lockfile release functions are not themselves
-    // idempotent, so the aggregate owns that guarantee.
     releasePromise ??= (async () => {
       for (const release of releaseOrder) await release();
     })();

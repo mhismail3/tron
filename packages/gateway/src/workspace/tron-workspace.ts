@@ -7,9 +7,6 @@ import { readSecureJson } from "../foundation/secure-json.js";
 import { durableAtomicWriteJson, syncDurably } from "../foundation/durable-json.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 
-/** The capabilities that record their namespace's initialization beside the
- * workspace root. Adding one here is what lets a missing namespace be reported
- * as lost state instead of a fresh installation. */
 export type TronWorkspaceFeature = "profile" | "episodic" | "home-tasks" | "apps";
 
 export type TronWorkspaceUnavailableCause =
@@ -21,8 +18,6 @@ function validInitializationRecord(value: unknown): value is { version: 1 } {
     && Object.keys(value).length === 1 && (value as { version?: unknown }).version === 1;
 }
 
-/** Only owns internal-workspace initialization and availability. It neither
- * selects session cwd nor scans content nor owns extension data schemas. */
 export class TronWorkspace {
   private home: string;
   private root: string;
@@ -47,8 +42,6 @@ export class TronWorkspace {
     this.options.unavailable?.(cause);
   }
 
-  /** Inspection must not acquire the live owner's lock or create a missing
-   * workspace. Offline migration CLIs use this existing-path descriptor. */
   static async describeExisting(tronHome: string): Promise<TronWorkspaceDescriptor> {
     const workspace = new TronWorkspace(tronHome);
     try {
@@ -91,8 +84,6 @@ export class TronWorkspace {
           onCompromised: () => {
             this.failure = "owned_elsewhere";
             this.unavailable("owned-elsewhere");
-            // proper-lockfile has already retired this ownership. Do not try
-            // to release an unowned lock or fail unrelated runtime shutdown.
             this.release = undefined;
           },
         });
@@ -101,7 +92,6 @@ export class TronWorkspace {
       cause = "invalid-record";
       const read = await readSecureJson<unknown>(marker, 128);
       if (read.present && !validInitializationRecord(read.value)) throw new Error("Invalid workspace initialization record");
-      // A missing established root is loss of data, not a new installation.
       cause = "unsafe-directory";
       try { this.identity = await this.directory(this.root, !read.present); }
       catch (error) {
@@ -118,7 +108,6 @@ export class TronWorkspace {
       if (this.closed) { this.identity = undefined; await this.release?.(); this.release = undefined; }
     } catch {
       this.unavailable(cause);
-      // Preserve invalid data; unrelated project sessions remain available.
       const release = this.release;
       this.release = undefined;
       await release?.().catch(() => {});
@@ -135,21 +124,17 @@ export class TronWorkspace {
         if (current.dev === this.identity.dev && current.ino === this.identity.ino) {
           return { root: this.root, available: true };
         }
-      } catch { /* Unavailable is a fact, never permission to recreate. */ }
+      } catch { }
       this.unavailable("root-changed");
     }
     return { root: this.root, available: false, reason: this.failure };
   }
 
-  /** Feature initialization evidence lives beside the workspace root so loss of
-   * a feature namespace cannot be mistaken for a fresh installation. */
   async featureInitialized(feature: TronWorkspaceFeature): Promise<boolean> {
     if (!(await this.describe()).available) throw new Error(`${feature}: Tron workspace is unavailable`);
     return TronWorkspace.featureInitializedExisting(this.home, feature);
   }
 
-  /** Offline readers share the canonical marker admission without acquiring
-   * ownership, initializing directories, or starting an automatic writer. */
   static async featureInitializedExisting(home: string, feature: TronWorkspaceFeature): Promise<boolean> {
     const marker = tronHomePath(home, "gateway/workspace-state", `${feature}-initialized.json`);
     try {
@@ -167,9 +152,6 @@ export class TronWorkspace {
   }
 
   async markFeatureInitialized(feature: TronWorkspaceFeature): Promise<void> {
-    // Separate feature files remove cross-feature lost updates. This queue
-    // serializes same-feature check/publication so concurrent initialization
-    // does not republish valid evidence.
     const write = this.markerWrites.then(async () => {
       if (await this.featureInitialized(feature)) return;
       await durableAtomicWriteJson(this.featureMarker(feature), { version: 1 });
@@ -178,8 +160,6 @@ export class TronWorkspace {
     await write;
   }
 
-  /** Read-only resolution for display. The document producer creates files/;
-   * displaying a missing directory must never mutate the workspace. */
   async filesRoot(): Promise<string> {
     if (!(await this.describe()).available) {
       throw new GatewayError("conflict", "Tron internal workspace is unavailable; restore it before using internal files");
@@ -200,8 +180,6 @@ export class TronWorkspace {
     const release = this.release;
     this.identity = undefined;
     await release?.();
-    // Keep the release callback until it has retired successfully so a
-    // registry retry can prove the workspace lock was actually released.
     if (this.release === release) this.release = undefined;
   }
 }

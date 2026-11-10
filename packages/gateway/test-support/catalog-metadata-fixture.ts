@@ -2,11 +2,6 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { CatalogMetadataIndexRow } from "../src/sessions/catalog-metadata-index.js";
 
-/** Synthetic catalog metadata rows shaped like the live store measured for
- * #2164 (mean ~1.6 KiB per row: a ~170-byte canonical path, a ~930-byte first
- * message preview, mostly delegated children of one workspace). No content
- * comes from a real catalog; every value is derived from the row number, so a
- * parent test and its crash child build byte-identical sets. */
 const WORDS = ["catalog", "gateway", "session", "shard", "manifest", "review", "worker", "settle", "verify", "report",
   "branch", "merge", "fixture", "boundary", "durable", "rename", "restart", "migrate", "bounded", "signal"];
 
@@ -21,8 +16,6 @@ function preview(seed: number, bytes: number): string {
   return words.join(" ").slice(0, bytes);
 }
 
-/** `variant` changes each row's facts without moving it, so two variants of the
- * same count are two different cuts over one set of paths. */
 export function realisticCatalogRow(root: string, index: number, variant = 0): CatalogMetadataIndexRow {
   const workspace = "--Users-example-Workspace-project--";
   const stamp = `2026-10-${String(1 + (index % 28)).padStart(2, "0")}T${String(index % 24).padStart(2, "0")}-00-00-000Z`;
@@ -54,7 +47,6 @@ export function realisticCatalogRows(root: string, count: number, variant = 0): 
   return Array.from({ length: count }, (_, index) => realisticCatalogRow(root, index, variant));
 }
 
-/** Rows compared as a set: a store does not promise the caller's order. */
 export function sortedCatalogRows(rows: readonly CatalogMetadataIndexRow[] | undefined): string[] | undefined {
   return rows?.map((row) => JSON.stringify(row)).sort();
 }

@@ -1,16 +1,10 @@
 import type { FileHandle } from "node:fs/promises";
 
-// Above Tron's largest admitted prompt line (including base64 uploads), but
-// below V8's string ceiling. Catalog metadata must never accumulate an arbitrary
-// canonical line inside readline's stream callback, outside its owner's catch.
 const MAX_CATALOG_LINE_BYTES = 64 * 1_048_576;
 export class CatalogLineLimitError extends Error {
   constructor() { super("Catalog JSONL line exceeds 64 MiB"); }
 }
 
-/** The caller owns the handle and its identity/stability checks. Decode only
- * after bounding bytes, preserving UTF-8 split across reads and readline's final
- * unterminated-line behavior. Pieces are joined once, not copied on every read. */
 export async function* readCatalogLines(handle: FileHandle, start = 0, endExclusive = Infinity): AsyncGenerator<string> {
   const buffer = Buffer.alloc(64 * 1_024);
   let position = start;

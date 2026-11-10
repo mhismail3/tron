@@ -13,7 +13,6 @@ const EXPOSURES = ["codemode", "codemode-deferred", "deferred", "direct", "hidde
 export type McpExposure = typeof EXPOSURES[number];
 export type McpScope = { scope: "global" } | { scope: "project"; cwd: string; trusted: true };
 
-/** Secret storage is owned by the host; tests inject a fake instead of touching Keychain. */
 export interface McpCredentialOwner {
   store(scope: McpScope, server: string, token: string): Promise<string>;
   remove(scope: McpScope, server: string): Promise<void>;
@@ -100,9 +99,6 @@ async function runProcess(command: string, args: string[], options: { cwd: strin
       timeoutGroups = child.pid ? mcpChildProcessGroups(child.pid) : [];
       child.kill("SIGTERM");
       timeoutEscalation = setTimeout(() => {
-        // A CLI that survives SIGTERM can start a stdio server after the first snapshot. Its children
-        // are reachable by parent only while the CLI lives, so list them again before killing it.
-        // Pi's detached stdio process groups are ours only if this CLI directly created their leader.
         if (child.pid) {
           timeoutGroups = [...new Set([...timeoutGroups, ...mcpChildProcessGroups(child.pid)])];
           signalGroup(child.pid, "SIGKILL");
@@ -147,8 +143,6 @@ export class McpAdminService {
     return [this.cliPath, "mcp", ...(command ? [command] : []),
       ...(scope.scope === "project" && command !== "list" ? ["-l"] : []), ...args.slice(1)];
   }
-  /** The bundled CLI resolves its agent root (global `mcp.json`, trust store, `mcp-auth.json`) from this
-   * variable, so the owner's root is bound at spawn instead of inherited from the ambient process env. */
   private cliEnvironment(): NodeJS.ProcessEnv {
     return { ...process.env, PI_CODING_AGENT_DIR: this.agentDir };
   }
@@ -178,8 +172,6 @@ export class McpAdminService {
       const row = item as Record<string, unknown>;
       if (typeof row.name !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(row.name)) return [];
       const strings = (value: unknown, limit: number): string[] => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string").slice(0, limit).map(entry => entry.slice(0, 256)) : [];
-      // `source` is a filesystem path and stays on the Mac. `error` can carry a
-      // stdio server's stderr tail, so it is bounded and stripped of control bytes.
       const exposure = (EXPOSURES as readonly string[]).includes(row.exposure as string) ? row.exposure as string : "codemode";
       const error = typeof row.error === "string" && row.error.length > 0
         ? row.error.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "").slice(0, 2_048) : undefined;

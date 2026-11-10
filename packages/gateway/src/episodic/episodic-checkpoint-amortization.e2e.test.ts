@@ -13,9 +13,6 @@ function message(index: number, text: string): EpisodicMessageRecord {
 }
 const lineBytes = (record: unknown) => Buffer.byteLength(`${JSON.stringify(record)}\n`);
 
-// A checkpoint rewrites the whole live catalog. A large Home memory (Stable: 15k
-// messages, 68 MB) must not be rewritten after every few appended records, or each
-// small append costs a full rewrite while the memory's mutex holds every tool read.
 it("checkpoints a large memory only once its append logs outgrow the live catalog", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-episodic-amortized-"));
   const workspace = new TronWorkspace(join(root, "home"));
@@ -45,10 +42,8 @@ it("checkpoints a large memory only once its append logs outgrow the live catalo
     }
     expect(await store.shouldCheckpoint(liveBytes)).toBe(true);
 
-    // The batched checkpoint writer still publishes every record readably.
     await store.checkpoint({ messages: live, nodes: [], state, watermark: index });
     const read = await store.read();
-    // More than one ~1 MiB write batch, every record back in order with its text.
     expect(liveBytes).toBeGreaterThan(2 * 1024 * 1024);
     expect([...read.messages.values()].map(record => [record.index, record.text])).toEqual(live.map(record => [record.index, record.text]));
     const entries = await readdir(join(root, "home/workspace/state/episodic/home"));

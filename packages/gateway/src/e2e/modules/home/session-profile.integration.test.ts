@@ -17,8 +17,6 @@ type Tools = { availableTools: { name: string }[] };
 
 it("refuses virtual explicit choices for a Home creation-profile runtime without settings services", async () => {
   const base = await fixture();
-  // The shared task fixture composes Settings. This boundary explicitly omits
-  // that service in a separate real Registry and separate canonical store.
   const registry = await createTestRegistry({
     agentDir: base.agentDir, tronHome: join(base.root, "settings-free"), trust: base.trust,
     machineId: "settings-free-profile", idleRuntimeMs: Infinity, gatewayModelRuntime: base.gateway,
@@ -77,8 +75,6 @@ it("classifies a canonical append from the live record, not its fixed runtime pr
   const before = await readFile(slot.sessionFile!, "utf8");
   const owner = homeOwnerOf(f.registry);
   const state = owner.chapterStateFor.bind(owner);
-  // Fault seam: the real owner never reports an unrecorded id as sealed. This
-  // probe detects a fixed Home profile replacing live append classification.
   vi.spyOn(owner, "chapterStateFor").mockImplementation(sessionId => sessionId === slot.id
     ? { ...state(sessionId), sealed: true } : state(sessionId));
   expect(owner.chapterStateFor(slot.id).sealed).toBe(true);

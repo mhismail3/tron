@@ -22,29 +22,19 @@ import { liveActivitySubagentRuns, extensionActivityOwnsLiveWork, upsertExtensio
 const EXTENSION_ARTIFACT_MISSING_GRACE_MS = 30_000;
 
 export class OwnedTurnOwner {
-  /** K5 owns run/lifecycle admission. Native invocation rows are SDK progress
-   * projections; this bounded view also retains completed work for Manage Session. */
   readonly extensionActivities = new Map<string, ExtensionRunActivity>();
 
-  /** Monotonic lifecycle projection ordering and terminal latches are runtime
-   * facts; producer timestamps are display evidence only. */
   readonly extensionActivitySequences = new Map<string, number>();
 
   liveActivityRevision = 0;
 
   extensionActivityAsOf = new Date().toISOString();
 
-  /** Gateway-owned correlation keeps one activity identity across Pi lifecycle
-   * payloads and independently-written async artifacts. */
   readonly extensionRunOwnership = new Map<string, {
     toolCallId: string;
     asyncDir?: string;
     terminal: boolean;
-    /** Gateway-observed instant of this run's paused process-terminal proof;
-     * absent while the run owns live processes or is not paused. */
     pausedProcessQuiescentAt?: string;
-    /** Exact detached child run IDs by workflow key, excluding admitted paused
-     * exit proofs. Status and Stop consume this same artifact-frame binding. */
     detachedChildKeys?: ReadonlyMap<string, string>;
   }>();
 
@@ -58,14 +48,8 @@ export class OwnedTurnOwner {
     bindingRetries: number;
   }>();
 
-  /** Ticket of the latest artifact read begun for, or invalidation of, each tool
-   * call. A watcher read that sees a later ticket discards its bytes. */
   readonly extensionActivityReadGenerations = new Map<string, number>();
 
-  /** Ticket of the latest read published per tool call. Watcher, discovery and
-   * drain reads run concurrently and finish in any order; none may replace a
-   * frame built from bytes read after its own. Bounded by the runtime map plus
-   * removed rows that an older in-flight read could still re-admit. */
   readonly extensionActivityPublishedReads = new Map<string, number>();
 
   private extensionArtifactReadTickets = 0;
@@ -81,24 +65,16 @@ export class OwnedTurnOwner {
   readonly extensionReceiptOwners = new Map<string, ArtifactReceiptOwner>();
   readonly artifacts = new SubagentArtifactStatus(this);
 
-  /** The live report-owner binding. Creation seeds it once; only an idle rebind replaces it. */
   worker: HomeTaskReportOwner | undefined;
   readonly observers = new Map<string, (terminal: OwnedOperationTerminal) => Promise<void> | void>();
-  /** A task worker's operation between turns: its last turn ended with live owned runs and no
-   * report, so the dispatcher's observer is held here instead of settling the task. A provider
-   * wake starts the next turn of the same task (`wakeOperationId` set once that turn runs). Only
-   * this instance holds it: a restart leaves a waiting task to cold reconciliation. */
   waitingTask: { observer: (terminal: OwnedOperationTerminal) => Promise<void> | void; terminal: OwnedOperationTerminal; wakeOperationId?: string } | undefined;
 
   constructor(readonly operations: OwnedTurnRuntime) {}
 
-  /** Resume the settled worker in its actual native lane. State and validation belong
-   * here; SDK reconstruction, canonical evidence and publication use the same frame. */
   async bindWorker(report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<void> {
     await this.operations.lane.run(async () => {
       this.operations.assertUsable();
       this.operations.assertChapterWritable();
-      // Any live work in this session refuses the rebind, named.
       const blocking = this.operations.dependencies.workRegistry.sessionWorkKinds(this.operations.id, exceptWorkToken);
       const drain = this.operations.administrativeDrainBlockers().map(fact => fact.category);
       if (this.operations.runtime.session.isStreaming || blocking.length || drain.length) {
@@ -132,8 +108,6 @@ export class OwnedTurnOwner {
     });
   }
 
-  /** Failed admission owns no turn. Retire its exact binding and rebuild the
-   * native toolset without its report callbacks before releasing its lease. */
   async releaseUnadmittedWorker(report: HomeTaskReportOwner): Promise<void> {
     report.retire();
     await this.operations.lane.run(async () => {
@@ -149,16 +123,12 @@ export class OwnedTurnOwner {
   }
 
   async notifyOwnedTerminal(terminal: OwnedOperationTerminal): Promise<void> {
-    // A held task's next turn reports to the task, even when Home's steering started that turn;
-    // the steering's own observer still learns its terminal.
     const own = this.observers.get(terminal.operationId);
     const wake = this.waitingTask?.wakeOperationId === terminal.operationId ? this.waitingTask.observer : undefined;
     const observer = wake ?? own;
     if (!observer) return;
     this.observers.delete(terminal.operationId);
     if (wake && own) await own(terminal);
-    // Only the task's own turns (its first operation, then each wake) hold or settle it; a steer
-    // or other owned operation reports to its own observer and never touches the wait.
     if (this.worker && (terminal.operationId === this.worker.identity.operationId || this.waitingTask?.wakeOperationId === terminal.operationId)) {
       if (this.taskTurnAwaitsWake(terminal)) {
         this.waitingTask = { observer, terminal };
@@ -169,7 +139,6 @@ export class OwnedTurnOwner {
     await observer(terminal);
   }
 
-  /** A message the maintainer sent, or Home's exact-operation steering, to this worker's task. */
   sharedTaskSteering(ownership: { readonly taskFence?: TaskWorkerControl } | undefined): boolean {
     if (!this.worker) return false;
     if (!ownership) return true;
@@ -177,21 +146,14 @@ export class OwnedTurnOwner {
     return !!fence && fence.taskId === this.worker.identity.taskId && fence.operationId === this.worker.identity.operationId;
   }
 
-  /** The task operation a turn reports under. A wake that continues the held task is the task's
-   * next turn, so its report seals the task's operation, not the wake's own. */
   taskTurnOperationId(operationId: string): string {
     return this.waitingTask?.wakeOperationId === operationId && this.worker ? this.worker.identity.operationId : operationId;
   }
 
-  /** The task operation the live turn belongs to, or undefined when no turn runs. Task controls
-   * target the task's operation, so a provider wake's turn (its own operation) is the live task turn (#1251). */
   liveTaskOperationId(): string | undefined {
     return this.operations.activeOperationId === undefined ? undefined : this.taskTurnOperationId(this.operations.activeOperationId);
   }
 
-  /** A task turn that completed normally, without a report, while owned runs are live. The
-   * provider's completion or supervisor request wakes the same task for its next turn. A sealed or
-   * stopping task, a length, error or aborted turn, and a task with no live run settle now. */
   private taskTurnAwaitsWake(terminal: OwnedOperationTerminal): boolean {
     if (terminal.lifecycle !== "completed" || !this.worker?.acceptsSteering) return false;
     const last = this.operations.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant");
@@ -199,9 +161,6 @@ export class OwnedTurnOwner {
       && this.operations.hasDetachedDashboardWork();
   }
 
-  /** An administrative drain refuses the provider wake a held task waits for, and a refused wake
-   * is never replayed, so the task can never continue in this process. Once no owned run is live
-   * it settles from its last turn's terminal (no report: resumable), and the drain can complete. */
   async releaseWaitingTaskForDrain(): Promise<void> {
     if (!this.waitingTask || this.waitingTask.wakeOperationId !== undefined || this.operations.hasDetachedDashboardWork()) return;
     const { observer, terminal } = this.waitingTask;
@@ -209,19 +168,14 @@ export class OwnedTurnOwner {
     await observer(terminal);
   }
 
-  /** Task cancellation follows the root prompt owner, not its disposable
-   * presentation primitive (automatic compaction/retry may have another ID). */
   async cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
     if (!this.worker || this.worker.identity.operationId !== operationId) throw new GatewayError("conflict", "Task cancellation owner changed");
-    // Between turns no turn runs to abort: the held observer settles the waiting task now. The
-    // runs it still owns are stopped and joined by settlement, as for an interrupted turn.
     if (this.waitingTask && this.waitingTask.wakeOperationId === undefined) {
       const { observer, terminal } = this.waitingTask;
       this.waitingTask = undefined;
       await observer({ lifecycle: "interrupted", operationId, invocationId: terminal.invocationId, errorCode: TASK_STOP_WAITING });
       return;
     }
-    // A provider wake's turn is the task's running turn: its abort is the task's Stop.
     const turnOperationId = this.waitingTask?.wakeOperationId ?? operationId;
     if (this.operations.activeOperationId !== turnOperationId && this.operations.operation?.id !== turnOperationId) return;
     await this.operations.abort("agent", turnOperationId, reason);
@@ -229,13 +183,7 @@ export class OwnedTurnOwner {
 
 
 
-  /** The run ids settlement stops through the provider. A live run is stopped as itself,
-   * and a workflow's stop reaches its children. A run that completed while runner-backed
-   * children stay live cannot be stopped by its own state, so each live child is named by
-   * its run id from the run's status. */
   asyncStopTargets(): string[] {
-    // Selection has no awaits: a refresh cannot reorder the map mid-selection,
-    // and Stop cannot disagree with status by re-reading a different artifact.
     return this.liveExtensionActivities().flatMap(activity => {
       const binding = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId);
       return binding?.asyncDir === undefined ? [] : liveActivitySubagentRuns(this, activity).map(run => run.runId);
@@ -243,22 +191,16 @@ export class OwnedTurnOwner {
   }
 
 
-  /** The live subagent runs this worker shows in task status. Read from the same live
-   * projection as the report gate and settlement, never persisted. The run id is the
-   * provider's; a run not yet published is identified by its launch call. */
   liveSubagentRuns(): HomeTaskSubagentRun[] {
     return this.liveExtensionActivities().flatMap(activity => liveActivitySubagentRuns(this, activity));
   }
 
 
-  /** The activities that own live work under the one liveness rule below. Dashboard
-   * accounting, drain, settlement and the report gate all read this list. */
   liveExtensionActivities(): ExtensionRunActivity[] {
     return [...this.extensionActivities.values()].filter(activity => extensionActivityOwnsLiveWork(this, activity));
   }
 
 
-  /** Provider artifact shape policy lives in the delegated-provider module. */
   extensionArtifactPathAllowed(asyncPath: string): boolean {
     return delegatedArtifactPathAllowed(asyncPath, this.operations.cwd, this.operations.dependencies.delegatedArtifactRoot);
   }
@@ -274,10 +216,6 @@ export class OwnedTurnOwner {
   }
 
 
-  /** Return only the exact installed controller already admitted for subagent
-   * projection. Pi can reload a package through its resolved local path,
-   * so the opaque installed-owner identity—not the mutable source label—is the
-   * authority boundary. */
   trustedSubagentController(): ToolDefinition | undefined {
     const session = this.operations.runtime?.session;
     if (!session) return undefined;
@@ -290,19 +228,11 @@ export class OwnedTurnOwner {
   }
 
 
-  /** Run identities and exact directories ambient discovery can attribute to
-   * this slot. Every route this slot can accept requires one of them: a
-   * canonical JSONL fact, a live ownership binding or a projected activity row
-   * names the run, and the artifact's declared directory must agree with the
-   * directory it was found in. A directory none of them names can only be
-   * rejected, so the registry skips it instead of reopening its `status.json` on
-   * every pass (G-8d). Run identities never contain a path separator, so one set
-   * can hold both keys. */
   extensionAmbientArtifactAttribution(): ReadonlySet<string> {
     const attributed = new Set<string>();
     const addDirectory = (asyncDir: string): void => {
       attributed.add(resolve(asyncDir));
-      try { attributed.add(realpathSync(asyncDir)); } catch { /* a directory that is gone stays attributable lexically */ }
+      try { attributed.add(realpathSync(asyncDir)); } catch { }
     };
     for (const [runId, binding] of this.extensionRunOwnership) {
       attributed.add(runId);
@@ -319,8 +249,6 @@ export class OwnedTurnOwner {
   }
 
 
-  /** Exact directories already bound by a live tool result outrank ambient
-   * discovery, especially while administrative drain needs terminal evidence. */
   ownedExtensionArtifactDirectories(): string[] {
     const terminalStates = new Set(["completed", "failed", "stopped", "rejected"]);
     const candidates: Array<{ directory: string; updatedAt: string }> = [];
@@ -401,18 +329,11 @@ export class OwnedTurnOwner {
   }
 
 
-  /** Called only by the Gateway-scoped bounded artifact discovery owner or by
-   * a watcher attached after this slot proved canonical ownership. The outcome
-   * tells a caller whether it may record this exact artifact as dealt with: an
-   * offer the slot could not decide (`transient`) must leave no record, or a
-   * run known only from a saved session log is never offered again (G-8a). */
   discoverExtensionArtifact(asyncDir: string): Promise<ExtensionArtifactDiscoveryOutcome> {
     return refreshSubagentActivityFromArtifact(this, asyncDir);
   }
 
 
-  /** Report admission uses the same fenced refresh as live artifact watchers,
-   * including completed workflow roots whose children still own live work. */
   async reconcileLiveExtensionArtifacts(): Promise<void> {
     for (const activity of this.liveExtensionActivities()) {
       const binding = activity.runId ? this.extensionRunOwnership.get(activity.runId) : undefined;
@@ -422,9 +343,6 @@ export class OwnedTurnOwner {
     }
   }
 
-  /** Administrative drain gets a direct, bounded reconciliation lane for
-   * exact-owned artifacts instead of depending on watcher delivery or ambient
-   * discovery scheduling. Genuine nonterminal work remains a blocker. */
   async reconcileOwnedExtensionArtifactsForDrain(): Promise<void> {
     if (this.operations.runAttention.completionOwnershipQueue.length > 0 && !this.operations.runAttention.attentionBarrier) {
       await this.operations.runAttention.drainCompletionOwnership().catch(() => {
@@ -453,8 +371,6 @@ export class OwnedTurnOwner {
     }
     for (const directory of next) if (!tracked.children.has(directory)) {
       try {
-        // Observe from the admitted parent's tree so a not-yet-created child
-        // directory and later atomic status writes share one edge subscription.
         const childName = basename(directory);
         const watcher = watch(dirname(directory), { recursive: true }, (eventType, filename) => {
           const path = filename?.toString();
@@ -463,24 +379,15 @@ export class OwnedTurnOwner {
             tracked.onChange(eventType, "status.json");
           }
         });
-        // Failure stays local to this child's observation. Neither the root
-        // watcher nor its other authoritative edges are retired by that error.
         watcher.on("error", () => tracked.onChange("change", "status.json"));
         tracked.children.set(directory, watcher);
-        // The root read that named this child ran before it was subscribed, so a
-        // terminal write in between would be lost. Re-read once after subscribing.
         tracked.onChange("change", "status.json");
       } catch {
-        // Optional observation cannot refuse otherwise valid root evidence.
       }
     }
   }
 
 
-  /** Starts one artifact read before its first await; the caller finishes it on
-   * every exit. The watcher lane passes its tool call so an older in-flight
-   * watcher read stands down; publication order across lanes is
-   * `extensionArtifactReadSuperseded`'s. */
   beginExtensionArtifactRead(toolCallId?: string): number {
     const ticket = ++this.extensionArtifactReadTickets;
     if (toolCallId !== undefined) this.extensionActivityReadGenerations.set(toolCallId, ticket);
@@ -495,9 +402,6 @@ export class OwnedTurnOwner {
   }
 
 
-  /** True when a read begun after this one already published for the tool call.
-   * Callers check before claiming any effect and record in the same synchronous
-   * frame as their publication, so the published bytes only move forward. */
   extensionArtifactReadSuperseded(toolCallId: string, ticket: number): boolean {
     return (this.extensionActivityPublishedReads.get(toolCallId) ?? 0) > ticket;
   }
@@ -508,10 +412,6 @@ export class OwnedTurnOwner {
   }
 
 
-  /** Called after a row leaves the runtime map. A watcher read still in flight
-   * sees its generation missing and stands down. The published ticket outlives
-   * the row until every read begun before it has finished, because an older
-   * discovery read may still re-admit the row from canonical ownership. */
   forgetExtensionArtifactReads(toolCallId: string): void {
     this.extensionActivityReadGenerations.delete(toolCallId);
     this.pruneExtensionArtifactReadTickets();
@@ -563,7 +463,6 @@ export class OwnedTurnOwner {
   ): boolean {
     const existing = this.extensionRunOwnership.get(runId);
     if (existing && existing.toolCallId !== binding.toolCallId) {
-      // Only a synthetic placeholder may be replaced by a real Pi identity.
       if (!existing.toolCallId.startsWith("subagent:") || binding.toolCallId.startsWith("subagent:")) return false;
     }
     const asyncDir = existing?.asyncDir ?? binding.asyncDir;
@@ -572,8 +471,6 @@ export class OwnedTurnOwner {
       toolCallId: binding.toolCallId,
       ...(asyncDir ? { asyncDir } : {}),
       terminal: Boolean(existing?.terminal || binding.terminal),
-      // Each admitted frame states the proof it observed: the bound instant is
-      // current, never a latch, so resumed live work clears it again.
       ...(binding.pausedProcessQuiescentAt
         ? { pausedProcessQuiescentAt: binding.pausedProcessQuiescentAt }
         : {}),
@@ -637,7 +534,6 @@ export class OwnedTurnOwner {
       });
       void refreshExtensionActivityFromArtifact(this, toolCallId, realAsyncDir);
     } catch {
-      // A missing or inaccessible extension artifact remains a generic live row.
     }
   }
 
@@ -710,9 +606,6 @@ export class OwnedTurnOwner {
       throw new GatewayError("conflict", "The subagent execution changed before it could be stopped", true);
     }
 
-    // A synchronous subagent is the parent session's current foreground tool.
-    // Fence the same settled abort path used by the ordinary composer control
-    // to the operation captured when this exact transcript lease opened.
     if (route.kind === "foreground") {
       if (!expectedOperationId || route.expectedOperationId !== expectedOperationId) {
         throw new GatewayError("conflict", "The foreground operation changed before it could be stopped", true);
@@ -726,15 +619,10 @@ export class OwnedTurnOwner {
   }
 
 
-  /** Whether this session owns a run: one its canonical history launched (a launch or a resume
-   * result), or a child run a workflow of this session names in its own provider status. Task
-   * controls use it to refuse a control of any run the task did not start, including a foreign
-   * workflow's child. Only this owner decides, so a control and a reply cannot disagree. */
   async ownsSubagentRun(runId: string): Promise<boolean> {
     const facts = canonicalExtensionRunFacts(this);
     if (facts.has(runId)) return true;
     for (const fact of facts.values()) {
-      // The status reader opens only a canonical directory: a launch result's path may name a symlinked root.
       const directory = fact.asyncDir === undefined ? undefined : this.canonicalExtensionArtifactDirectory(fact.asyncDir);
       if (directory === undefined) continue;
       const status = await this.artifacts.readExtensionStatusArtifact(directory, false).catch(() => undefined);
@@ -745,8 +633,6 @@ export class OwnedTurnOwner {
   }
 
 
-  /** Whether a supervisor request came from a run this session owns. The request is canonical
-   * evidence: its `subagent_supervisor_request` message names the child's run. */
   async ownsSupervisorRequest(requestId: string): Promise<boolean> {
     const request = this.operations.sessionManager.getBranch().findLast(entry => entry.type === "custom_message"
       && entry.customType === "subagent_supervisor_request" && (entry.details as { requestId?: unknown } | undefined)?.requestId === requestId);
@@ -764,7 +650,6 @@ export class OwnedTurnOwner {
     await refreshExtensionActivityFromArtifact(this, ownership.toolCallId, asyncDir);
   }
 
-  /** Canonical branch changes discard the old branch's disposable run projection. */
   resetArtifactBranch(): void {
     this.clearExtensionActivityWatchers();
     this.extensionActivities.clear();
@@ -773,7 +658,6 @@ export class OwnedTurnOwner {
     this.pruneExtensionArtifactReadTickets();
   }
 
-  /** Retire current watches and fence outstanding watched reads before physical SDK disposal. */
   retireArtifactWatches(): void {
     this.clearExtensionActivityWatchers();
     this.extensionArtifactMissingSince.clear();

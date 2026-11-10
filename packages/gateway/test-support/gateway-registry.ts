@@ -16,7 +16,6 @@ import type { HomeComposition } from "../src/modules/home/home-module.js";
 import type { HomeOwner } from "../src/modules/home/home-owner.js";
 
 type RegistryOptions = Omit<ConstructorParameters<typeof RuntimeRegistry>[0], "modules" | "createModelRuntime" | "settingsSchema" | "homeTaskDiagnostic">;
-/** Home's composition inputs a test may supply; the rest are the registry's own. */
 type HomeTestOptions = Omit<HomeComposition, "tronHome" | "agentDir" | "trust" | "machineId" | "homeTaskDiagnostic" | "modelQueue" | "runtime" | "settings" | "knowledge" | "modelRuntime"> & {
   homeTaskDiagnostic?: NonNullable<HomeComposition["homeTaskDiagnostic"]>;
 };
@@ -51,15 +50,12 @@ export function recentModelsOf(registry: RuntimeRegistry): RecentModelStore {
   return owner;
 }
 
-/** The Home owner the composition built for this registry. */
 export function homeOwnerOf(registry: RuntimeRegistry): HomeOwner {
   const home = homes.get(registry);
   if (!home) throw new Error("This registry was not built by createTestRegistry");
   return home();
 }
 
-/** One real registry fixture: the production composition, then the real registry.
- * Options remain the boundary's own inputs; no production overrides or test hooks. */
 export async function createTestRegistry(options: RegistryOptions & HomeTestOptions & { projectOptions?: ConstructorParameters<typeof import("../src/modules/projects/project-lifecycle.js").ProjectLifecycle>[2] } & Omit<ModuleOwners, "registry" | "sessionSearch" | "home" | "openAIModelEligibility" | "display"> & { browserLiveViews?: BrowserLiveViewRegistry; providerUsage?: ModelQueueOptions["usage"]; modelQueueDiagnostic?: ModelQueueOptions["log"]; modelRuntimeFactory?: () => Promise<ModelRuntime>; openAIModelEligibility?: OpenAIModelEligibility; knowledge?: HomeComposition["knowledge"]; sessionSearch?: () => SessionSearchService | undefined; settings?: HomeComposition["settings"] }): Promise<RuntimeRegistry> {
   const { projectOptions, notifications, knowledge = () => undefined, settings = () => undefined, browserLiveViews, providerUsage, modelQueueDiagnostic, connections, scheduleToolOperations, sessionSearch, recentModelsChanged, modelRuntimeFactory, openAIModelEligibility = new OpenAIModelEligibility(), homeDiagnostic, homeMemoryDiagnostic, homeRequestDiagnostic, homeMemorySummarizer, homeWebTransport, triggerSources, ...registryOptions } = options;
   const modelQueue = options.gatewayModelRuntime ? new ModelQueueOwner({

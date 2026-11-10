@@ -4,30 +4,19 @@ import type { ExtensionRunActivity } from "../../protocol/types.js";
 import { extensionRunChildProducerId, type ExtensionRunChildIdentityStrategy } from "../projection/extension-run-projection.js";
 
 const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
-/** Only RuntimeSlot's private recovery descriptor builder mints this annotation.
- * Sharing its symbol preserves that identity; JSON/status content cannot carry it. */
 export const RECOVERY_SESSION_OWNER = Symbol("recovery-session-owner");
 
-/** The parent state admission reads. Each callback is invoked at the exact point
- * the admission needs it, so no parent file or identity is cached here. */
 export interface ChildSessionAdmissionCallbacks {
   parentSessionFile(): string | undefined;
   parentSessionId(): string;
   isEmbeddedLifecycleArtifact(value: unknown): boolean;
 }
 
-/**
- * Admits the child-session files a delegated run's lifecycle evidence names, by
- * exact canonical containment, header identity and file identity, and keeps the
- * bounded index of admitted paths. RuntimeSlot keeps the process-to-child bindings
- * and calls `clear` at its reset and dispose cuts.
- */
 export class ChildSessionAdmission {
   private readonly validatedChildSessionPaths = new Map<string, string>();
 
   constructor(private readonly callbacks: ChildSessionAdmissionCallbacks) {}
 
-  /** The canonical file last admitted for this exact child ref and producer. */
   path(ref: string, producerId: string): string | undefined {
     return this.validatedChildSessionPaths.get(`${ref}\0${producerId}`);
   }
@@ -50,9 +39,6 @@ export class ChildSessionAdmission {
     const declaredRun = [root?.runId, root?.asyncId]
       .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
     const embeddedHeader = this.callbacks.isEmbeddedLifecycleArtifact(value);
-    // Exact producer run ownership is established before a child path can
-    // enrich the already tool-owned activity. Generic nested records cannot
-    // nominate arbitrary sessions.
     if (declaredRun !== activity.runId) return references;
     const visit = (candidate: unknown, depth: number, index: number, isChild: boolean): void => {
       if (depth > 4 || candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) return;
@@ -154,15 +140,8 @@ export class ChildSessionAdmission {
     const freshContext = pathParts.length === 3 && pathParts[0] !== "forks"
       && pathParts[2] === "session.jsonl" && /^run-\d+$/u.test(pathParts[1]!);
     if (!forkContext && !freshContext) return undefined;
-    // A fresh path may be reserved by the root run (ordinary single/parallel/
-    // chain) or by a detached workflow child. Keep that filesystem owner
-    // separate from the stable child producer identity used by process rows.
-    // Fork paths encode neither, so their exact artifact child identity remains
-    // mandatory; filenames and transcript presentation never become evidence.
     const pathOwnerId = freshContext ? pathParts[0] : undefined;
     if (freshContext && pathOwnerId !== expectedRunId && pathOwnerId !== declaredSessionOwnerId) return undefined;
-    // A path proves containment, never child ownership. Every admitted context
-    // also needs a distinct producer identity from the trusted lifecycle shape.
     if (!declaredChildId) return undefined;
     const producerId = declaredChildId;
     if (Buffer.byteLength(producerId) > 256 || /[\\/\0]/u.test(producerId)) return undefined;

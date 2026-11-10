@@ -19,8 +19,6 @@ function copy<T>(value: T): T { return structuredClone(value); }
 export class ConnectionOwner implements ConnectionAccess {
   constructor(private readonly tronHome: string) {}
 
-  /** Read-only: this owner never initializes, migrates or writes state. A
-   * missing file is an empty projection. */
   async snapshot(): Promise<ConnectionOwnerSnapshot> {
     return this.snapshotOf(await this.load());
   }

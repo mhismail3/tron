@@ -2,8 +2,6 @@ import type { DisplayOwner } from "../../display/display-modules.js";
 import { GatewayError } from "../../errors.js";
 import { SOURCE_BYTES } from "./swift-app-format.js";
 
-/** The existing display owner grants and pins these exact bytes. Apps never
- * opens a client-supplied path or invents a second artifact grant. */
 export async function readSwiftDisplaySource(lease: Awaited<ReturnType<DisplayOwner["acquireArtifact"]>>): Promise<string> {
   try {
     if (lease.totalSize < 1 || lease.totalSize > SOURCE_BYTES || lease.size !== lease.totalSize || lease.rangeStart !== 0) {

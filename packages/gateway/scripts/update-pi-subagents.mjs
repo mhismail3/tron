@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Prepare a reviewed provider build from immutable git objects, never deploy it. */
+// Prepare a reviewed provider build from immutable git objects, never deploy it.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -11,7 +11,6 @@ const PIN = "pi-subagents-pin.json";
 const NESTED_CONFIG = ["--config", "vitest.nested.config.ts"];
 const UPSTREAM = "https://github.com/nicobailon/pi-subagents.git";
 const hash = (bytes, algorithm) => createHash(algorithm).update(bytes).digest("hex");
-/** `.node-version` and the npm of that Node's archive (config/ci-toolchain.env). */
 function repositoryToolchain() {
   const repository = join(GATEWAY, "../..");
   const npm = /^TRON_NODE_NPM_VERSION=(\S+)$/mu.exec(readFileSync(join(repository, "config/ci-toolchain.env"), "utf8"))?.[1];
@@ -23,17 +22,12 @@ const commitId = (value) => typeof value === "string" && /^[0-9a-f]{40}$/u.test(
 export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spawnSync } = {}) {
   const root = resolve(gatewayDir);
   if (!commitId(commit)) throw new Error("fork commit must be one full 40-character commit hash (archives are not accepted)");
-  // The staging root is also the exclusive invocation lease. Its owner alone
-  // may retire it; an interrupted owner is never silently swept by another run.
   const staging = join(root, ".pi-subagents-update-staging");
   try { mkdirSync(staging, { mode: 0o700 }); }
   catch (error) {
     if (error.code === "EEXIST") throw new Error("provider update already running or interrupted: inspect the staging owner before removing .pi-subagents-update-staging");
     throw error;
   }
-  // Explicit probe/fixture retirement contract: descendants record failed
-  // joins here, outside their disposable roots. Only this updater owns the
-  // path; a record means staging remains owned and must not be removed.
   const processOwnerFailure = join(staging, "process-owner-failure.jsonl");
   const created = [];
   let published = false;
@@ -55,16 +49,11 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     if (repository !== null && forkRepo !== undefined && forkRepo !== repository) throw new Error("--fork-repo must match the pinned fork.repository");
     const source = forkRepo ?? repository;
     if (typeof source !== "string" || !source) throw new Error("fork.repository must be a repository URL or null with --fork-repo");
-    // A new candidate is built with the repository toolchain and records it; the
-    // current pin's nodeVersion/npmVersion stay the provenance of its own artifacts.
     const toolchain = repositoryToolchain();
     if (process.versions.node !== toolchain.node) throw new Error(`use the repository-pinned Node ${toolchain.node} (scripts/tron-node exec), not ${process.versions.node}`);
     if (invoke("npm", ["--version"]) !== toolchain.npm) throw new Error(`use npm ${toolchain.npm} paired with the repository-pinned Node`);
     invoke(process.execPath, [join(root, "scripts/check-pi-subagents.mjs")]);
 
-    // One invocation owns staging, including all package-script home/cache writes.
-    // Immutable publications are exclusive creates; exception rollback cannot
-    // remove an older artifact or an unrelated file.
     for (const path of ["home", "tmp", "export", "candidate/scripts", "candidate/artifacts"]) mkdirSync(join(staging, path), { recursive: true });
     const env = { PATH: process.env.PATH, HOME: join(staging, "home"), TMPDIR: join(staging, "tmp"), PYTHONDONTWRITEBYTECODE: "1", npm_config_cache: join(staging, "home/cache"), npm_config_engine_strict: "true", npm_config_fetch_retries: "0", npm_config_fetch_timeout: "30000" };
     const upstream = current.upstream;
@@ -116,16 +105,12 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     copyFileSync(join(root, "scripts/build-pi-subagents-closure.py"), join(candidateRoot, "scripts/build-pi-subagents-closure.py"));
     invoke("python3", ["-X", "faulthandler", join(candidateRoot, "scripts/build-pi-subagents-closure.py")], candidateRoot, env);
     candidate.closure.sha512 = hash(readFileSync(join(candidateRoot, paths.closure)), "sha512");
-    // Validate both selections before the pin can name new files.
     for (const input of [previous.sourceArchive.path, previous.lockfile.path, previous.closure.path]) copyFileSync(join(root, input), join(candidateRoot, input));
     copyFileSync(join(root, "scripts/check-pi-subagents.mjs"), join(candidateRoot, "scripts/check-pi-subagents.mjs"));
     writeFileSync(join(candidateRoot, PIN), JSON.stringify(candidate, null, 2) + "\n");
     invoke(process.execPath, [join(candidateRoot, "scripts/check-pi-subagents.mjs")], candidateRoot, env);
-    // Qualify the exact unpublished bytes in their own payload lifetime. The
-    // repository pin stays current until both real execution gates have settled.
     for (const path of ["src", "test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json"]) cpSync(join(root, path), join(candidateRoot, path), { recursive: true });
     symlinkSync(join(root, "node_modules"), join(candidateRoot, "node_modules"));
-    // Nested gates pass NESTED_CONFIG: their files run one at a time, and the main config excludes them.
     const gate = (label, file, reportName, reportEnv, config = ["--maxWorkers=2"]) => {
       const reportPath = join(staging, reportName);
       try {
@@ -137,15 +122,12 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     };
     const executionGate = gate("offline real-Gateway execution gate", "src/e2e/kernel/delegation/managed-subagents.integration.test.ts", "activation.json", "TRON_SUBAGENTS_REPORT", NESTED_CONFIG);
     const rollbackProbe = gate("previous-candidate-previous rollback probe", "src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts", "rollback.json", "TRON_SUBAGENTS_ROLLBACK_REPORT", NESTED_CONFIG);
-    // Refusal of a verified build with an invalid extension entry: each case is its own
-    // nested run and reports by exit status. A refusal regression must still block publication.
     invoke(process.execPath, [join(root, "node_modules/vitest/vitest.mjs"), "run", ...NESTED_CONFIG, "src/kernel/delegation/managed-subagents.invalid-entry.integration.test.ts"], candidateRoot, { ...env, TRON_TEST_PROCESS_OWNER_FAILURE: processOwnerFailure });
     if (existsSync(processOwnerFailure)) throw new Error("probe process join failed before publication");
     for (const path of Object.values(paths)) {
       const bytes = readFileSync(join(candidateRoot, path));
       const destination = join(root, path);
       const file = openSync(destination, "wx");
-      // Ownership begins at exclusive creation, before a write can fail partway.
       created.push(destination);
       try { writeFileSync(file, bytes); } finally { closeSync(file); }
     }
@@ -163,8 +145,6 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     throw error;
   } finally {
     if (existsSync(processOwnerFailure)) {
-      // Catch above restores publications first. Do not race unjoined writers
-      // with recursive removal or let another update sweep this owner away.
       const failure = readFileSync(processOwnerFailure, "utf8").slice(0, 4_096).trim();
       throw new Error(`probe process join failed; staging preserved at ${staging}: ${failure}`);
     }

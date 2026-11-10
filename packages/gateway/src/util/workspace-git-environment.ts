@@ -1,6 +1,3 @@
-/** Explicit workspace operations select Git state through cwd, never through a
- * surrounding hook's repository/index/object paths. Keep ordinary user config
- * and each subprocess owner's separate execution/retirement policy intact. */
 export function workspaceGitEnvironment(): NodeJS.ProcessEnv {
   const environment = { ...process.env };
   for (const key of [

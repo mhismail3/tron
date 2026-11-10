@@ -7,18 +7,12 @@ import { SessionAttentionStore } from "./session-attention-store.js";
 const T0 = "2026-01-01T00:00:00.000Z";
 const T1 = "2026-01-01T00:01:00.000Z";
 
-/**
- * `gateway/projection` session attention store: every write path, its refusals, the
- * projection it leaves and the exact document each step commits. The committed corpus
- * read-back is `store-session-archive-attention`.
- */
 it("session-attention-paths: complete, set, acknowledge, rekey, prune, remove and admission", async () => {
   const home = await mkdtemp(join(tmpdir(), "tron-session-attention-"));
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(Date.parse(T0));
   onTestFinished(async () => { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); });
   const path = join(home, "gateway", "session-attention.json");
-  /** The committed document, or `undefined` before the first write. */
   const committed = async () => readFile(path, "utf8").then((text) => JSON.parse(text) as unknown,
     (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
   let store = new SessionAttentionStore(home);
@@ -113,7 +107,6 @@ it("session-attention-paths: complete, set, acknowledge, rekey, prune, remove an
   expect(await store.complete("e", "e-1", true), "an observed completion clears the manual mark").toEqual(mutation(true, 1, 2, false));
   expect(await committed()).toEqual(stored({ e: record(1, 1, false, ["e-1"], 2) }, T1));
 
-  // Admission of a hand-written document: refused documents are kept as written, never reset.
   const reopen = async (document: unknown) => { await writeFile(path, JSON.stringify(document)); await new SessionAttentionStore(home).initialize(); };
   const valid = record(2, 1, false, ["x-1", "x-2"], 3);
   const document = (sessions: unknown, extra: Record<string, unknown> = {}) => ({ version: 1, reconciledThrough: T0, sessions, ...extra });

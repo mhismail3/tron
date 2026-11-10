@@ -76,7 +76,6 @@ describe("compaction cancellation with the pinned runtime", { concurrent: false 
     try {
       await registry.initialize();
       const slot = await registry.create(cwd);
-      // A snapshot is published only for a subscriber, so this test is one.
       registry.subscribe("test-audience", slot.id);
       session = (slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
       const model = faux.getModel();
@@ -116,7 +115,6 @@ describe("compaction cancellation with the pinned runtime", { concurrent: false 
         && entry.data.receiptKind === "terminal" && entry.data.operationId === operationId)?.data)
         .toMatchObject({ lifecycle: "interrupted", errorCode: "user-abort" });
 
-      // Stop is scoped to the cancelled request, not a persistent ban on compaction.
       faux.setResponses(Array.from({ length: 6 }, () => fauxAssistantMessage("Fresh response after Stop.")));
       await slot.prompt("Continue after Stop.");
       await waitFor(() => !slot.isBusy, "the slot to go idle");
@@ -124,7 +122,6 @@ describe("compaction cancellation with the pinned runtime", { concurrent: false 
       expect(session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "stop" });
       expect(slot.snapshot().phase).toBe("idle");
     } finally {
-      // Failure cleanup must also release the *second* summary on the unfixed SDK path.
       cleaningUp = true;
       session?.settingsManager.applyOverrides({ compaction: { enabled: false } });
       session?.abortCompaction();
@@ -178,7 +175,6 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
   disposals.push(async () => { await registry.dispose(); await rm(root, { recursive: true, force: true }); });
   await registry.initialize();
   const slot = await registry.create(cwd);
-  // A snapshot is published only for a subscriber, so this fixture is one.
   registry.subscribe("test-audience", slot.id);
   const session = (slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
   await slot.setModel(faux.getModel().provider, faux.getModel().id);
@@ -186,7 +182,6 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
   await slot.prompt("Establish the API contract");
   await waitFor(() => !slot.isBusy, "the slot to go idle");
   const update = async (compaction: Record<string, unknown>) => {
-    // Through the one change path, as the iPhone or an agent changes it.
     const keys: Record<string, string> = {
       enabled: "context.compaction.enabled", reserveTokens: "context.compaction.reserveTokens", keepRecentTokens: "context.compaction.keepRecentTokens",
       thinkingLevel: "model.thinking[role=summarizer]", instructions: "context.compaction.instructions",
@@ -282,8 +277,6 @@ describe("compaction operation admission and authoritative reconciliation", { co
     const switchModel = (modelId: string) => service.invoke(client, "settings.change", sessionSettingChange("model", {
       sessionId: fresh.id, expectedRuntimeGeneration: fresh.snapshot().runtimeGeneration, expectedModel: fresh.snapshot().model ?? null, provider: item.faux.getModel().provider, modelId, commandId: `model-change-${++command}`,
     }));
-    // Negative control: losing the initiating token recreates the original
-    // self-block through the real service and session admission boundary.
     const setModel = fresh.setModel.bind(fresh);
     const droppedToken = vi.spyOn(fresh, "setModel").mockImplementation((provider, modelId) => setModel(provider, modelId));
     await expect(switchModel("fixture")).rejects.toMatchObject({ code: "busy" });
@@ -451,8 +444,6 @@ describe("compaction operation admission and authoritative reconciliation", { co
         expect(item.registry.administrativeWorkRegistry.size).toBeGreaterThan(0);
         const receipts = (await item.entries()).filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.receiptKind === "start");
         expect(receipts.at(-1)?.data.lifecycle).toBe("staged");
-        // This mock deliberately ignores AbortSignal; keep its owner visible until
-        // the held auth call returns rather than asserting false cancellation.
       }
       release();
       await stopping;
@@ -483,9 +474,6 @@ describe("compaction operation admission and authoritative reconciliation", { co
     expect((await item.entries()).some(entry => entry.type === "compaction")).toBe(false);
   });
 
-  /** Manual compaction owns the session lane for its whole summary. Messages
-   * sent meanwhile join a Gateway-owned queue (Pi's own front end keeps the
-   * same "after compaction" queue) instead of waiting invisibly inside RPCs. */
   async function blockedManualCompaction(item: Awaited<ReturnType<typeof boundaryFixture>>, replies: string[]) {
     let releaseSummary!: () => void;
     const summaryBarrier = new Promise<void>(resolve => { releaseSummary = resolve; });
@@ -510,15 +498,10 @@ describe("compaction operation admission and authoritative reconciliation", { co
     .map(entry => JSON.stringify(entry.message.content));
 
   it("queues every prompt sent during manual compaction and delivers them in order afterwards", async () => {
-    // Incident 2026-09-27: a prompt sent during manual compaction waited inside
-    // its RPC with no projection, so a reconnecting phone saw nothing, and a
-    // second message could not be queued at all.
     const item = await boundaryFixture();
     const { compacting, release } = await blockedManualCompaction(item, ["Answered first", "Answered second"]);
     try {
       expect(item.slot.snapshot().acceptsQueuedPrompts).toBe(true);
-      // Admission into the waiting queue is the RPC result; it does not wait
-      // for the minute-long summary.
       const first = await item.slot.prompt("Have it pick up where it left off", [], "steer");
       const second = await item.slot.prompt("Then summarize the result", [], "followUp");
       const waiting = item.slot.snapshot();
@@ -545,9 +528,6 @@ describe("compaction operation admission and authoritative reconciliation", { co
       expect(secondIndex).toBeGreaterThan(firstIndex);
       expect(entries.filter(entry => entry.message?.role === "assistant").map(entry => entry.message.content[0]?.text).slice(-2))
         .toEqual(["Answered first", "Answered second"]);
-      // One visible owner per message through the handoff: never a queued card
-      // and a pending prompt for the same message at once, and never absent
-      // before its canonical user entry exists.
       for (const snapshot of item.snapshots.slice(start)) {
         const pendingID = snapshot.pendingPrompt?.id;
         if (pendingID) expect(snapshot.queuedItems.some(queued => queued.id === pendingID)).toBe(false);
@@ -579,7 +559,6 @@ describe("compaction operation admission and authoritative reconciliation", { co
 
       const cleared = await item.slot.prompt("Clear this one", [], "steer");
       expect(item.slot.snapshot().queuedItems.map(queued => queued.id)).toEqual([kept.operationId, cleared.operationId]);
-      // Clearing while compacting removes the whole waiting queue at once.
       await item.slot.clearQueue();
       expect(item.slot.snapshot()).toMatchObject({ phase: "compacting", queuedItems: [] });
       const survivor = await item.slot.prompt("Only this one runs", [], "steer");
@@ -931,8 +910,6 @@ describe("compaction operation admission and authoritative reconciliation", { co
         return fauxAssistantMessage("The API contract remains authoritative. Continue the latest request.");
       }
       ordinary += 1;
-      // Captured verbatim from opencode-go rejecting an oversized conversation:
-      // it matches none of the pinned SDK's overflow patterns.
       return ordinary === 1
         ? fauxAssistantMessage("", { stopReason: "error", errorMessage: "413: {\"type\":\"server_error\",\"code\":\"server_error\",\"message\":\"Error from provider (Console Go): Upstream request failed: [server_error] Upstream response was not valid JSON\"}" })
         : fauxAssistantMessage("Recovered after the provider request-size rejection");
@@ -945,7 +922,6 @@ describe("compaction operation admission and authoritative reconciliation", { co
     expect(summaries).toBeGreaterThan(0);
     const entries = await item.entries();
     expect(entries.filter(entry => entry.type === "compaction")).toHaveLength(1);
-    // Provider text stays intact; the classification prefix is what the SDK recovered from.
     expect(entries.find(entry => entry.message?.role === "assistant" && entry.message.stopReason === "error")?.message.errorMessage)
       .toContain("context_length_exceeded: 413:");
     expect(entries.find(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.operationId === operationId && entry.data.receiptKind === "terminal")?.data.lifecycle).toBe("completed");
@@ -1020,9 +996,6 @@ describe("compaction operation admission and authoritative reconciliation", { co
     }
   });
 
-  // Pi >= 1.2 counts a starting run as busy (pi #10739): a continuation an extension
-  // sends during the pending prompt's preflight compaction joins that prompt's run
-  // instead of displacing it with a second run. One run, attributed to the prompt.
   it("joins a public compaction continuation sent during preflight into the pending prompt's run", async () => {
     const item = await boundaryFixture(8_000, compactionContinuationExtension);
     await item.update({ enabled: true });
@@ -1035,7 +1008,6 @@ describe("compaction operation admission and authoritative reconciliation", { co
     const requests: string[][] = [];
     item.faux.setResponses(Array.from({ length: 3 }, () => async (context: { messages: Array<{ role: string; content: unknown }> }) => {
       if (getCurrentSystemPrompt(context.messages as never).includes("User-configured summary focus:")) return fauxAssistantMessage("Preserved API contract.");
-      // Pi converts a custom message to a user message for the provider.
       requests.push(context.messages.filter(message => message.role !== "system").slice(-2).map(message => `${message.role}:${JSON.stringify(message.content)}`));
       return fauxAssistantMessage("Answered with the continuation");
     }) as never);
@@ -1044,8 +1016,6 @@ describe("compaction operation admission and authoritative reconciliation", { co
     await expectSettled(item);
     expect(stagedId).toBeDefined();
     expect(agentStarts).toBe(1);
-    // Exactly one model request after the summary: the prompt with the continuation
-    // steered into its run, neither lost nor replayed.
     expect(requests).toEqual([[
       `user:${JSON.stringify([{ type: "text", text: "The original pending request must not be lost or replayed" }])}`,
       `user:${JSON.stringify([{ type: "text", text: "Continue after compaction" }])}`,

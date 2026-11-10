@@ -5,7 +5,6 @@ export interface HomeTaskAuthorizationRequest {
   intentDigest: string;
   target: string;
   authorizationScope: string;
-  /** Supplied by the restore authority; this owner never creates or advances it. */
   restoreEpoch: string;
 }
 
@@ -38,7 +37,6 @@ export interface HomeTaskOneUseGrant {
 }
 
 export interface HomeTaskAuthorizationState {
-  /** Durable compare-and-replace revision, advanced only by the store. */
   revision: number;
   scopes: HomeTaskAuthorizationScope[];
   requests: Array<{ id: string; request: HomeTaskAuthorizationRequest }>;
@@ -54,7 +52,6 @@ export interface HomeTaskAuthorizationStore {
 interface HomeTaskAuthorizationOptions {
   store: HomeTaskAuthorizationStore;
   now?: () => number;
-  /** Canonicalizes and verifies that the directory is trusted at decision time. */
   resolveTrustedTarget(target: string): Promise<string | undefined>;
   diagnostic?: (record: HomeTaskAuthorizationDiagnostic) => void;
 }
@@ -77,7 +74,6 @@ export class HomeTaskAuthorizationError extends Error {
   }
 }
 
-/** Owns task authorization decisions, separately from task execution state. */
 export class HomeTaskAuthorization {
   private readonly mutex = new AsyncMutex();
   private readonly now: () => number;
@@ -86,8 +82,6 @@ export class HomeTaskAuthorization {
     this.now = options.now ?? Date.now;
   }
 
-  /** Appends the first standing scope of a freshly initialized namespace. The
-   * store refuses a second active scope, so no earlier scope is retired here. */
   async enableInitialScope(restoreEpoch: string): Promise<HomeTaskAuthorizationScope> {
     return this.mutex.run(async () => {
       const state = await this.options.store.load();
@@ -100,8 +94,6 @@ export class HomeTaskAuthorization {
     });
   }
 
-  /** Explicit maintainer control only. A restore never renews one-use grants or
-   * resurrects revoked scopes; their original authority remains inspectable. */
   async reconfirmPermissions(restoreEpoch: string): Promise<void> {
     await this.mutex.run(async () => {
       const state = await this.options.store.load();
@@ -188,8 +180,6 @@ export class HomeTaskAuthorization {
           this.diagnostic("refused", undefined, "scope-reconfirmation-required");
           throw new HomeTaskAuthorizationError("scope-reconfirmation-required");
         }
-        // The exact binding owns request identity across refusals/restart. A
-        // decided request cannot mint a second grant by asking again.
         const binding = { ...request, target };
         const requestId = authorizationRequestId(binding);
         if (!state.requests.some(candidate => candidate.id === requestId)) {
@@ -232,7 +222,6 @@ export class HomeTaskAuthorization {
   }
 }
 
-/** Explicit key order makes identity independent of transport object order. */
 export function authorizationRequestId(request: HomeTaskAuthorizationRequest): string {
   return createHash("sha256").update(JSON.stringify([request.intentDigest, request.target,
     request.authorizationScope, request.restoreEpoch])).digest("hex");

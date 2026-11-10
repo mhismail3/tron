@@ -1,8 +1,6 @@
 import { GatewayError } from "../../errors.js";
 import type { HomeTaskRecord } from "./home-task-store.js";
 
-/** Resume links, not titles (nor reused fixture session IDs), define a delegation.
- * This is a disposable read projection; original operation records stay immutable. */
 export function homeTaskLineages(records: HomeTaskRecord[]): HomeTaskRecord[][] {
   const byId = new Map(records.map(task => [task.taskId, task]));
   const groups = new Map<string, HomeTaskRecord[]>();
@@ -24,7 +22,6 @@ export function homeTaskLineages(records: HomeTaskRecord[]): HomeTaskRecord[][] 
   return [...groups.values()].map(lineage => lineage.sort((a, b) => a.createdAt - b.createdAt || a.taskId.localeCompare(b.taskId)));
 }
 
-/** A successor refused before admission never took over its worker. */
 export function currentHomeTask(lineage: HomeTaskRecord[]): HomeTaskRecord {
   return lineage.findLast(task => task.operationId !== null || task.lifecycle !== "terminal") ?? lineage[0]!;
 }

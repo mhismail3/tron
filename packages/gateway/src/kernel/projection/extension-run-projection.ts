@@ -17,7 +17,6 @@ const MAX_TEXT_BYTES = 2_048;
 const MAX_EXTENSION_ACTIVITY_COUNT = 32;
 const MAX_EXTENSION_ACTIVITY_BYTES = 256 * 1_024;
 export const MAX_EXTENSION_LIFECYCLE_HEADER_BYTES = 32 * 1_024;
-/** Shared bound for runtime-slot and registry extension artifact reads. */
 export const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 
 interface ExtensionLifecycleProjection {
@@ -81,8 +80,6 @@ function headerValueEnd(bytes: Uint8Array, start: number): number | undefined {
   return undefined;
 }
 
-/** Parse only the complete first lifecycleProjection property. This scanner
- * never searches later keys or parses report-bearing status content. */
 export function hasExtensionLifecycleProjectionProperty(bytes: Uint8Array): boolean {
   const bounded = bytes.subarray(0, Math.min(bytes.length, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES));
   let index = 0;
@@ -121,8 +118,6 @@ export function parseExtensionLifecycleProjectionHeader(bytes: Uint8Array): unkn
 }
 
 const lifecycleProjectionStates = new Set(["queued", "running", "complete", "failed", "partial", "paused", "stopped", "rejected"]);
-// runId/workflowKey are private producer-header identity fields. They never
-// widen the public snapshot; id/workflowKey remains the stable workflow row key.
 const lifecycleProjectionNodeKeys = new Set(["id", "runId", "workflowKey", "kind", "label", "state", "startedAt", "updatedAt", "endedAt", "sessionFile", "sessionOwnerId", "activity", "hostStep", "children"]);
 const lifecycleProjectionActivityKeys = new Set(["state", "currentTool", "lastActivityAt", "currentToolStartedAt", "turnCount", "toolCount"]);
 const lifecycleProjectionHostKeys = new Set(["kind", "provider", "role", "state", "verdict", "reasonCode", "detail", "target", "stale", "report"]);
@@ -132,9 +127,6 @@ function boundedProjectionTime(value: unknown): boolean {
 }
 
 function boundedProjectionString(value: unknown, maximumCharacters: number, required = false, maximumBytes = maximumCharacters * 4): boolean {
-  // The producer caps display strings by JavaScript string length, not UTF-8
-  // bytes. Keep the Gateway byte bound too, but do not reject valid emoji/CJK
-  // values that occupy more than one byte per character.
   return typeof value === "string" && (!required || value.length > 0)
     && value.length <= maximumCharacters && Buffer.byteLength(value) <= maximumBytes && !/[\0]/u.test(value);
 }
@@ -180,10 +172,6 @@ function validProjectionNode(value: unknown, depth: number, runId: string, root:
   if (root && ((node.runId ?? node.id) !== runId || (node.kind !== "subagent" && node.kind !== "workflow")
     || node.startedAt === undefined || node.updatedAt === undefined)) return false;
   if (node.kind === "host-step" && node.hostStep === undefined) return false;
-  // Child completion may be reported without a child-local end timestamp;
-  // the producer's canonical root timestamp remains the lifecycle authority.
-  // A terminal root still needs an end timestamp because RuntimeSlot's
-  // artifact admission requires one for the parent activity.
   if (root && terminalLifecycleStates.has(extensionLifecycleState(node.state)) && node.endedAt === undefined) return false;
   if (node.children !== undefined) {
     if (!Array.isArray(node.children) || node.children.length > 32 || depth >= MAX_DEPTH) return false;
@@ -282,8 +270,6 @@ export function lifecycleProjectionArtifact(projection: ExtensionLifecycleProjec
   };
 }
 
-/** Stable native identity. It is intentionally independent of run/artifact
- * correlation so replacing a producer artifact cannot re-key a native row. */
 export function extensionActivityId(sessionId: string, toolCallId: string): string {
   return `extension-activity:${createHash("sha256").update(`${sessionId}\0${toolCallId}`).digest("hex").slice(0, 32)}`;
 }
@@ -386,8 +372,6 @@ type ExtensionArtifactAdmission =
   | { accepted: true; artifact: Record<string, unknown> }
   | { accepted: false; reason: "invalid-timestamp" | "missing-terminal-time" | "malformed-artifact" };
 
-/** Admit the current versioned status artifact contract with a bounded reason.
- * Historical artifacts are accepted only after exact ownership is proven. */
 export function inspectExtensionLifecycleArtifact(
   value: unknown,
   options: { exactOwnedLegacy?: boolean } = {},
@@ -412,8 +396,6 @@ export function inspectExtensionLifecycleArtifact(
   const state = extensionLifecycleState(artifact.state ?? artifact.status);
   const startedAt = artifact.startedAt;
   const lastUpdate = artifact.lastUpdate;
-  // completedAt is the supported older spelling of endedAt. If both are
-  // present, an invalid primary value must not be hidden by the alias.
   const terminalAt = artifact.endedAt !== undefined ? artifact.endedAt : artifact.completedAt;
   for (const timestamp of [startedAt, lastUpdate]) {
     if (!Number.isSafeInteger(timestamp) || (timestamp as number) < 0) {
@@ -447,10 +429,6 @@ export function admitExtensionLifecycleArtifact(
   return admission.accepted ? admission.artifact : undefined;
 }
 
-/** A recovered steering target means this paused producer has been replaced by
- * a new async run. The producer keeps the source artifact resumable for
- * explicit history, but it no longer represents live work. Ambiguous recovery
- * claims fail closed so a malformed status file cannot settle another run. */
 export function recoveredReplacementClaim(artifact: Record<string, unknown>): { replacementRunId: string; recoveredAt: number } | undefined {
   const steering = record(artifact.steering);
   const recent = steering && Array.isArray(steering.recent) ? steering.recent : [];
@@ -472,12 +450,6 @@ export function recoveredReplacementClaim(artifact: Record<string, unknown>): { 
   return { replacementRunId, recoveredAt };
 }
 
-/** A paused workflow is logically resumable but owns no live OS work after the
- * producer has durably observed its exact runner and writer process trees exit.
- * This proof affects administrative quiescence and presentation settlement
- * only; it never fabricates a terminal workflow lifecycle or success result.
- * The returned instant is the Gateway-admitted observation time, which is the
- * only timestamp a settlement may publish. */
 export function observedPausedProcessTerminalAt(
   artifact: Record<string, unknown>,
   runId: string,
@@ -512,8 +484,6 @@ export function observedPausedProcessTerminalAt(
   return matchingRunnerCount === 1 ? new Date(proof.observedAt as number).toISOString() : undefined;
 }
 
-/** Gateway sequence admission used by every producer projection. Producer
- * timestamps are intentionally absent from this decision. */
 export function admitExtensionRunActivity(previous: ExtensionRunActivity | undefined, candidate: ExtensionRunActivity): ExtensionRunActivity {
   if (!previous) return candidate;
   const previousTerminal = previous.lifecycle && terminalLifecycleStates.has(previous.lifecycle.state);
@@ -526,8 +496,6 @@ export function admitExtensionRunActivity(previous: ExtensionRunActivity | undef
   return candidate;
 }
 
-/** Strictly admits the additive producer lifecycle vocabulary. Unsupported
- * values are unknown rather than silently becoming running. */
 export function extensionLifecycleState(value: unknown, fallback: ExtensionRunLifecycleState = "unknown"): ExtensionRunLifecycleState {
   if (value === "partial") return "failed";
   if (typeof value === "string" && lifecycleStates.has(value as ExtensionRunLifecycleState)) return value as ExtensionRunLifecycleState;
@@ -546,8 +514,6 @@ interface NormalizedExtensionArtifact {
   durationMs?: number;
 }
 
-/** Purely normalize producer artifact state and timestamps. Filesystem
- * admission, ownership, receipts, and watcher policy remain RuntimeSlot work. */
 export function normalizeExtensionArtifact(
   value: Record<string, unknown>,
   options: { now: string; fallbackStartedAt?: string; fallbackUpdatedAt?: string; useArtifactStartedAt?: boolean },
@@ -595,10 +561,6 @@ function attention(value: unknown): ExtensionRunAttention {
   return "none";
 }
 
-/** The run state its producer reported. For a proven foreground pi-subagents
- * result (`piForeground`), a child its parent's stop ended carries `stopped: true`
- * (pi-subagents' own renderers read it the same way), so a result list whose every
- * result was stopped reports a stopped run. Other producers report only state/status. */
 function reportedRunState(details: Record<string, unknown> | undefined, foregroundSubagent: boolean): unknown {
   const explicit = details?.state ?? details?.status;
   if (explicit !== undefined || !foregroundSubagent) return explicit;
@@ -656,10 +618,6 @@ function progressRecord(value: unknown): Record<string, unknown> | undefined {
 
 export type ExtensionRunChildIdentityStrategy = "declared" | "piForeground" | "piArtifact";
 
-/** Resolve only producer-authored child identities. The two pi-subagents
- * strategies are selected by RuntimeSlot after proving the installed extension
- * owner or its exact owned lifecycle artifact. Array position is never trusted
- * for a generic extension. */
 export function extensionRunChildProducerId(
   value: unknown,
   index: number,
@@ -785,8 +743,6 @@ function detailsFrom(value: unknown): Record<string, unknown> | undefined {
   return record(root?.details) ?? root;
 }
 
-/** True for the synchronous child/result contract. RuntimeSlot still proves
- * the installed pi-subagents owner before selecting its positional identity. */
 export function usesForegroundSubagentChildIdentity(
   value: unknown,
   options: { allowTerminalResults?: boolean } = {},
@@ -810,16 +766,9 @@ export function usesForegroundSubagentChildIdentity(
     if (explicitIndexes.some((index) => index === undefined || index < 0 || index >= MAX_CHILDREN_TOTAL)) return false;
     return new Set(explicitIndexes).size === explicitIndexes.length;
   }
-  // Terminal foreground results omit index; their bounded producer-owned array
-  // order is the same child order used by live progress for this exact tool.
-  // Running frames never receive this positional exception.
   return progress.length === 0 && options.allowTerminalResults === true;
 }
 
-/** Exact current foreground pi-subagents progress convention. RuntimeSlot
- * applies this only after proving the canonical tool belongs to the installed
- * pi-subagents extension; generic extensions must keep using the stricter
- * runId/asyncId convention below. */
 export function hasForegroundSubagentRunActivity(value: unknown): boolean {
   const details = detailsFrom(value);
   if (!details || !["single", "parallel", "chain"].includes(text(details.mode, 32) ?? "")) return false;
@@ -842,8 +791,6 @@ export function hasForegroundSubagentRunActivity(value: unknown): boolean {
   });
 }
 
-/** Generic extension tools remain ordinary service/tool activity. Only an
- * explicit delegated-run convention may create the ambient lifecycle hub. */
 export function hasStructuredExtensionRunActivity(value: unknown): boolean {
   const details = detailsFrom(value);
   if (!details) return false;
@@ -873,11 +820,8 @@ export function extensionActivityStatusFromTool(
   const reported = extensionLifecycleState(reportedRunState(details, foregroundSubagent));
   const reportedTerminal = ["completed", "failed", "stopped", "rejected"].includes(reported);
   const reportedCurrent = ["queued", "running", "paused"].includes(reported);
-  // asyncDir is an explicit detached-run receipt. The outer extension tool has
-  // returned, but the delegated workflow has not reached a terminal state.
   const detachedCurrent = extensionRunAsyncDir(value) !== undefined && !reportedTerminal;
   const terminal = reportedTerminal || (!reportedCurrent && !detachedCurrent && fallback !== "running");
-  // A reported stop is not a failure, even when it ended the tool call in error.
   const status = reportedCurrent || detachedCurrent
     ? "running"
     : reported === "failed" ? "failed" : reported === "stopped" ? "completed"
@@ -885,12 +829,6 @@ export function extensionActivityStatusFromTool(
   return { status, terminal, reportedTerminal };
 }
 
-/**
- * Extracts the public progress convention used by extension-owned delegated
- * runs without depending on a package name or rendered widget text. Unknown
- * detail shapes still receive a truthful generic activity row from the tool
- * lifecycle; this function only enriches it when structured progress exists.
- */
 export function projectExtensionRunActivity(
   value: unknown,
   base: {
@@ -898,23 +836,19 @@ export function projectExtensionRunActivity(
     toolCallId: string;
     source: ExtensionToolOrigin;
     title: string;
-    /** Gateway-owned execution mode override after filesystem ownership admission. */
     mode?: string;
     status: ExtensionRunStatus;
-    /** Lifecycle terminal events outrank advisory artifact/detail state. */
     authoritativeStatus?: boolean;
     startedAt: string;
     updatedAt: string;
     completedAt?: string;
     durationMs?: number;
     previous?: ExtensionRunActivity;
-    /** Gateway facts are optional for old callers and make the projector deterministic in tests. */
     activityId?: string;
     sequence?: number;
     observedAt?: string;
     terminalAt?: string;
     recentUntil?: string;
-    /** Gateway-selected identity contract after extension/artifact ownership proof. */
     childIdentityStrategy?: ExtensionRunChildIdentityStrategy;
   },
 ): ExtensionRunActivity {
@@ -945,8 +879,6 @@ export function projectExtensionRunActivity(
     && terminalStatus === undefined
     && !priorTerminal
     && !base.authoritativeStatus;
-  // Only an admitted artifact directory can keep a launcher-owned run live.
-  // asyncId by itself is correlation evidence, not observable lifecycle.
   const activityStatus: ExtensionRunStatus = base.authoritativeStatus
     ? base.status
     : terminalStatus
@@ -958,8 +890,6 @@ export function projectExtensionRunActivity(
     .map((item, index) => child(item, index, activityStatus, 0, childBudget, base.childIdentityStrategy ?? "declared"))
     .filter((item): item is ExtensionRunChild => Boolean(item));
   const firstProgress = candidates.length > 0 ? progressRecord(candidates[0]) : undefined;
-  // Aggregate fields belong to the lifecycle root. A first child must never
-  // win merely because it happens to be present in the payload.
   const aggregateProgress = progressRecord(details?.aggregate ?? details?.progressState);
   const runId = text(details?.runId ?? details?.asyncId, 256) ?? previous?.runId;
   const lastActivityAt = isoTime(details?.lastActivityAt ?? aggregateProgress?.lastActivityAt ?? firstProgress?.lastActivityAt ?? details?.updatedAt) ?? previous?.lastActivityAt;
@@ -1023,8 +953,6 @@ export function projectExtensionRunActivity(
   } satisfies ExtensionRunActivity;
 }
 
-/** Returns the extension-owned artifact directory only for a structured run
- * detail. Callers must apply their own filesystem allowlist before reading it. */
 export function extensionRunAsyncDir(value: unknown): string | undefined {
   const details = detailsFrom(value);
   return text(details?.asyncDir, 2_048);

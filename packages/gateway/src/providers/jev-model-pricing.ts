@@ -1,8 +1,6 @@
 import type { AnyModel } from "../kernel/pi/ai.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 
-/** Tron pins the model identity to Pi's catalog, but retains a qualified cost
- * because TypeSafe's catalog currently reports zero rather than billable price. */
 export const JEV_CLASSIFIER = { provider: "typesafe", model: "jev-latest", inputUsdPerMillion: 0.042, outputUsdPerMillion: 0 } as const;
 
 function withJevEstimate(model: AnyModel): AnyModel {
@@ -22,11 +20,6 @@ function withJevEstimateList<T extends AnyModel>(models: readonly T[]): readonly
   return models.map((model) => withJevEstimate(model) as T);
 }
 
-/**
- * Tron-owned price metadata for TypeSafe's classifier, applied at the catalog
- * boundary before any consumer (including Pi extensions) resolves the model.
- * It changes only the returned catalog view, never Pi's persisted models.json.
- */
 export function applyJevModelPricing(runtime: ModelRuntime): ModelRuntime {
   const wrapped = new Set(["getModelOfType", "getModelsOfType", "getAllModels", "getAllAvailable", "getAvailableOfType"]);
   return new Proxy(runtime, {

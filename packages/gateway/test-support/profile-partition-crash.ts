@@ -14,8 +14,6 @@ async function loader(root: string) {
 registerHooks({ resolve(specifier, context, next) { try { return next(specifier, context); } catch (error) { if (specifier.endsWith('.js')) return next(specifier.slice(0,-3)+'.ts',context); throw error; } } });\n`);
   return path;
 }
-/** A real heap ceiling proves current-file admission is independent of retired
- * history. The caller owns a sealed synthetic archive outside the workspace. */
 export async function boundedProfilePartition(root: string, home: string, assignments: ProfileAssignment[]) {
   const hook = await loader(root), program = join(root, "bounded-child.mjs"), input = join(root, "bounded-input.json");
   await writeFile(input, JSON.stringify({ assignments }));
@@ -36,8 +34,6 @@ try { const {assignments}=JSON.parse(await fs.readFile(input,'utf8'));
   return { code, signal, stdout, stderr };
 }
 
-/** Test-only instrumentation delegates every real journal/file operation and
- * SIGKILLs only its owned subprocess at observed durability boundaries. */
 export async function crashProfilePartition(root: string, home: string, assignments: ProfileAssignment[], cut: string, audit: { context: unknown; undoChangeId?: string }): Promise<void> {
   const hook = await loader(root), program = join(root, "partition-child.mjs"), input = join(root, "partition-input.json");
   await writeFile(input, JSON.stringify({ assignments, audit }));

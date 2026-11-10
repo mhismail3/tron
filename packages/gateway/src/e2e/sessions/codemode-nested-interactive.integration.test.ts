@@ -46,7 +46,7 @@ describe("codemode nested interactive tools", () => {
       secret: Buffer.alloc(32, 9).toString("base64url") as const,
       previewsEnabled: false, relayOrigin: "https://push.example.test",
     };
-    const hourlyLimit = 1; // Only explicit alerts are enabled here; the second is refused by the relay backstop.
+    const hourlyLimit = 1;
     const relayDeliveryKinds: string[] = [];
     let relayRequestCount = 0;
     const relay = {
@@ -136,9 +136,6 @@ describe("codemode nested interactive tools", () => {
       version: 1, answers: [{ questionId: "question-0", optionIds: ["question-0-option-0"] }],
     }, false);
     const answered = new Set([first.id]);
-    // The slot keeps raising interactions until the run settles, so answering one
-    // is part of the wait's own step; the shared hang bound names the state that
-    // never arrived (epic #400).
     await waitFor(() => {
       const pending = slot.snapshot().extensionPresentation.pendingInteractions.find((item) => !answered.has(item.id));
       if (pending) {

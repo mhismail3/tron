@@ -9,8 +9,6 @@ import { AGENT_COMMAND_NICENESS, DirectBashProcessOwner } from "./direct-bash-pr
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
-// Agent commands saturating the host must not starve the Gateway's interactive
-// requests: the shell and every descendant run lowered, the Gateway does not.
 it.skipIf(process.platform === "win32")("runs an agent command and its grandchild at the lowered niceness, leaving the Gateway and user commands at their own", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-agent-priority-"));
   roots.push(root);
@@ -28,7 +26,6 @@ it.skipIf(process.platform === "win32")("runs an agent command and its grandchil
   };
   const lowered = String(Math.min(20, before + AGENT_COMMAND_NICENESS));
   expect(await niceness("agent")).toEqual([lowered, lowered]);
-  // A user's own `!` command is not agent work: it keeps the Gateway's priority.
   expect(await niceness("user")).toEqual([String(before), String(before)]);
   expect(getPriority()).toBe(before);
 });

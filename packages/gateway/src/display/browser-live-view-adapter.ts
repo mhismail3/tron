@@ -31,13 +31,6 @@ function isTrustedBrowserOwner(owner: ExtensionOwner, toolName: string): boolean
   return toolName === "agent_browser" && TRUSTED_BROWSER_EXTENSION_SOURCES.has(owner.source);
 }
 
-/**
- * Adapts the trusted provider's native browser binding (including failed actions
- * and exact retirement), or its explicit structured `get cdp-url`, into a view. Model text, arbitrary URLs and stream
- * status ports never establish browser authority. The CDP UUID is retained as
- * the endpoint generation; the owning runtime generation is also required by
- * the caller and is never derived from the unsafe native launchHash number.
- */
 export function observeTrustedAgentBrowserResult(input: {
   owner: ExtensionOwner;
   toolName: string;
@@ -53,8 +46,6 @@ export function observeTrustedAgentBrowserResult(input: {
   const result = record(input.result);
   const details = record(result?.details);
   if (!result || !Array.isArray(result.content) || !details || details.agentBrowserStarted !== true) return input.result;
-  // Provider-normalized metadata covers args, semantic, batch and isolated
-  // script results without a second parser or a hidden, potentially launching CLI call.
   const binding = record(details.browserBinding);
   const bound = binding?.schema === "agent-browser.browser-binding.v1"
     && (binding.state === "active" || (binding.state === "closed" && binding.owned === true))
@@ -80,12 +71,9 @@ export function observeTrustedAgentBrowserResult(input: {
       title: "Browser view",
       fallbackText: "The original browser is no longer available.",
     };
-    // A delayed close affects only its exact endpoint/generation, never a scope alias.
     const descriptor = bound && binding.state === "closed"
       ? input.views.retireBrowser(registration)
       : input.views.register(registration);
-    // Pi sends tool content to the model; details alone only serves UI. Make
-    // the opaque handle usable without asking the model to inspect host state.
     const source = { kind: "browser_live", viewId: descriptor.viewId, generation: descriptor.generation };
     return { ...result,
       content: explicitGet

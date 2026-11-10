@@ -5,13 +5,8 @@ import type { SessionArchiveFilter, SessionSummary } from "../protocol/types.js"
 interface SessionListPage {
   sessions: SessionSummary[];
   listRevision: number;
-  /** The projection token this page's rows belong to. A first page that named
-   * a retained token is answered `notModified` by the service instead of a
-   * page, so only ordinary pages carry it to the client. */
   projectionToken: string;
   nextCursor?: string;
-  /** Visible archived sessions for the requesting scope. Present only on the
-   * first `exclude` page. */
   archivedCount?: number;
 }
 
@@ -21,7 +16,6 @@ interface SessionListPageSource {
   readonly listRevision: number;
   readonly count: number;
   readonly compactByteEstimate: number;
-  /** Present only for an `exclude` source; `only` lists the archived rows. */
   readonly archivedCount?: number;
   page(offset: number, limit: number): Promise<SessionSummary[]>;
 }
@@ -47,15 +41,6 @@ interface SessionListLease {
   lastAccess: number;
 }
 
-/**
- * Bounded, disposable immutable projections for session.list traversals.
- * Cursors are authenticated and bound to one client, scope, offset, revision,
- * and materialization. Canonical catalog truth remains in RuntimeRegistry.
- *
- * RuntimeRegistry supplies a generation-keyed compact page source for indexed
- * catalog snapshots. Leases share that source; only selected rows are hydrated
- * and encoded-budget checked per response.
- */
 export class SessionListPaginationStore {
   private readonly leases = new Map<string, SessionListLease>();
   private readonly generations = new Map<string, CatalogGeneration>();
@@ -96,9 +81,6 @@ export class SessionListPaginationStore {
   ): Promise<SessionListPage> {
     this.prune();
     this.validateSource(source, limit);
-    // Hydration and wire validation happen before admitting a lease. A broken
-    // source or oversized first page therefore cannot leak traversal state or
-    // evict a valid lease.
     const page = await this.hydratePage(source, 0, limit);
     const count = source.archivedCount === undefined ? {} : { archivedCount: source.archivedCount };
     if (source.count <= limit) {
@@ -142,14 +124,10 @@ export class SessionListPaginationStore {
     try {
       sessions = await this.hydratePage(generation.source, parsed.offset, limit);
     } catch (error) {
-      // Runtime page sources are immutable in-memory projections. A rejected or
-      // malformed slice is a permanent contract violation for this traversal.
       this.leases.delete(lease.id);
       this.pruneGenerations();
       throw error;
     }
-    // Another request can evict or release this lease while a custom/test page
-    // source is suspended. Never mint a cursor for retired ownership.
     if (this.leases.get(lease.id) !== lease) this.invalidCursor();
     const nextOffset = parsed.offset + sessions.length;
     if (nextOffset >= lease.sessionCount) this.leases.delete(lease.id);

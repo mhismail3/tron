@@ -16,29 +16,19 @@ type ProcessActivityExpiryCallback = (frame: ProcessActivityExpiryFrame) => void
 const terminalStates = new Set(["completed", "failed", "stopped", "rejected", "interrupted"]);
 const MAX_TERMINAL_TOMBSTONES = 2_048;
 
-/** A paused row is settled only once the Gateway has observed its exact
- * process-terminal proof; the projection carries that observation instant as
- * `terminalAt`. Settled paused rows keep their `paused` state for presentation
- * but own no live work and age out exactly like finished rows. A paused row
- * without that proof is still winding down and stays active. */
 function isSettledProcessLifecycle(lifecycle: SessionProcessLifecycle): boolean {
   return terminalStates.has(lifecycle.state)
     || lifecycle.state === "paused" && lifecycle.terminalAt !== undefined;
 }
 
-/** Live process ownership: work Tron can still observe or abort. */
 export function isActiveProcessLifecycle(lifecycle: SessionProcessLifecycle): boolean {
   return !isSettledProcessLifecycle(lifecycle)
     && (lifecycle.state === "queued" || lifecycle.state === "running" || lifecycle.state === "paused");
 }
 
-/** Gateway-owned five-minute partition for disposable process presentation.
- * Canonical history is read independently and is never removed here. */
 export class ProcessActivityRecency {
   private readonly activities = new Map<string, SessionProcessActivity>();
   private readonly deadlines: RecencyDeadlines;
-  /** Bounded non-presentational terminal latches prevent a late artifact from
-   * resurrecting work after its five-minute row has expired. */
   private readonly terminalTombstones = new Set<string>();
   private readonly callbacks = new Set<ProcessActivityExpiryCallback>();
   private revision = 0;
@@ -53,8 +43,6 @@ export class ProcessActivityRecency {
   }
 
   upsert(activity: SessionProcessActivity): { activity: SessionProcessActivity; accepted: boolean } {
-    // Unknown is unavailable evidence, not ambient work. Never retain it in
-    // the registry-global recency owner where it has no terminal deadline.
     if (activity.lifecycle.state === "unknown" || activity.visibility === "unknown") {
       const previous = this.activities.get(activity.processId);
       return { activity: previous ? this.wire(previous) : { ...activity, visibility: "unknown" }, accepted: false };
@@ -74,7 +62,7 @@ export class ProcessActivityRecency {
     const recentUntil = normalized.lifecycle.recentUntil;
     this.deadlines.admit(activity.processId, recentUntil === undefined ? undefined : Date.parse(recentUntil));
     this.revision += 1;
-    this.expireDue(false); // Also installs the nearest remaining expiry timer.
+    this.expireDue(false);
     return { activity: this.wire(normalized), accepted: true };
   }
 
@@ -109,9 +97,6 @@ export class ProcessActivityRecency {
     const terminalMs = terminalAt === undefined ? Number.NaN : Date.parse(terminalAt);
     const plausibleTerminal = Number.isFinite(terminalMs)
       && terminalMs <= this.clock.wallNow() + MAX_PROCESS_TIMESTAMP_FUTURE_SKEW_MS;
-    // A malformed/future producer timestamp must never extend ambient
-    // visibility. Give it an already-due deadline so the disposable row is
-    // retired while canonical history retains the original timestamp.
     const recentUntil = plausibleTerminal
       ? new Date(terminalMs + PROCESS_ACTIVITY_RECENT_MS).toISOString()
       : terminal ? new Date(this.clock.wallNow()).toISOString() : undefined;

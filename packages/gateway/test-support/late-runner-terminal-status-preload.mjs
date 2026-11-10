@@ -1,7 +1,3 @@
-// Preload for a subagent runner process (#1021): hold the runner's own terminal
-// status.json publication for TRON_LATE_RUNNER_TERMINAL_MS, widening the window in
-// which the child's step already reads terminal while its run still reads running.
-// Only the runner that owns the status (its `pid`) is delayed; the Gateway is not.
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 

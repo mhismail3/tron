@@ -27,38 +27,27 @@ interface SettingsModelDependencies {
   tronHome: string;
   trust: Pick<TrustService, "inspect" | "canonicalDirectory">;
   modelRuntime: ModelRuntime;
-  /** The tools a target's selection can name (`catalog.tools`): a chat's live
-   * registry, or the built-in and opt-in extension tools of a scope. */
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
-  /** One private SSH resource owner, shared with the endpoint and CLI. */
   macTerminalKeys?: Pick<MacTerminalService, "read" | "set" | "enabled" | "setEnabled">;
 }
 
 export interface ToolCatalogEntry { name: string; description?: string; resource: Record<string, unknown> }
 
-/**
- * The settings model's read side: loads each store a target's layers read,
- * from its owner, and resolves (docs/settings-model.md section 3).
- * Reading an untrusted project's `.pi/settings.json` is pure JSON parsing.
- */
 export class SettingsStoreAdapter {
   readonly admitModelChoice = assertNewModelChoice;
   private outside: OutsideChanges | undefined;
 
   constructor(private readonly dependencies: SettingsModelDependencies) {}
 
-  /** The Project root that keys a path's Project store and trust decision. */
   async projectRoot(path: string): Promise<string> {
     return (await this.dependencies.trust.inspect(path)).projectDir;
   }
 
-  /** The outside-change owner every settings read reconciles through (doc 5.6). */
   observeOutside(outside: OutsideChanges): void {
     if (this.outside && this.outside !== outside) throw new Error("Settings already have an outside-change owner");
     this.outside = outside;
   }
 
-  /** The readers the outside-change owner compares with: the same parse rules as resolution. */
   get outsideChanges(): OutsideChanges | undefined { return this.outside; }
 
   get observedReaders(): ObservedReaders {
@@ -79,7 +68,6 @@ export class SettingsStoreAdapter {
   }
 
 
-  /** Gateway-owned keys no pi file holds (Binding `gateway`); only the change path writes it. */
   get gatewaySettingsPath(): string {
     return tronHomePath(this.dependencies.tronHome, "gateway/settings/gateway.json");
   }
@@ -88,7 +76,6 @@ export class SettingsStoreAdapter {
     return { format: formatContext(runtime), options: optionSources(runtime) };
   }
 
-  /** `settings.options` (docs/settings-model.md 7.5): the choices a key's control offers. */
   async options(target: SettingsTarget, session: SessionSettingsSource | undefined, request: SettingsOptionsRequest, resolve: (keys: readonly string[]) => Promise<Resolution>): Promise<SettingsOptionsResult> {
     const key = this.schema.KEYS.find(candidate => candidate.id === request.key);
     if (!key) throw new GatewayError("invalid_request", `Unknown setting ${request.key}`);
@@ -107,7 +94,6 @@ export class SettingsStoreAdapter {
       case "catalog.thinkingLevels": {
         const model = await this.followedModel(runtime, request.qualifiers, resolve);
         const supported = model ? getSupportedThinkingLevels(model) : [];
-        // pi reports only "off" for a model without reasoning: there is no level to offer.
         const levels = supported.length === 1 && supported[0] === "off" ? [] : supported;
         const declared = new Map(this.schema.schemaKey("model.thinking[role=chat]").type.options!.map(option => [option.value, option]));
         return { ...base, options: levels.map(level => ({ value: level, label: declared.get(level)?.label ?? level,
@@ -116,7 +102,6 @@ export class SettingsStoreAdapter {
       case "catalog.tools": {
         if (!this.dependencies.toolCatalog) throw new GatewayError("unsupported", "This Gateway has no tool catalog");
         const catalog = await this.dependencies.toolCatalog(target);
-        // A chosen name the catalog no longer offers stays listed, so it can be cleared.
         const chosen = (await resolve([key.id])).keys[0]?.value;
         const names = new Set(catalog.map(tool => tool.name));
         const missing = (Array.isArray(chosen) ? chosen as string[] : []).filter(name => !names.has(name));
@@ -130,8 +115,6 @@ export class SettingsStoreAdapter {
     }
   }
 
-  /** The registered model a model-qualified option list follows: its `model`
-   * qualifier, else the target's resolved chat model (doc 7.5). */
   private async followedModel(runtime: ModelRuntime, qualifiers: Qualifiers | undefined, resolve: (keys: readonly string[]) => Promise<Resolution>): Promise<Model<any> | undefined> {
     if (qualifiers?.model !== undefined) {
       const ref = parseContextModelKey(qualifiers.model);
@@ -161,14 +144,9 @@ export class SettingsStoreAdapter {
     const storeState = options.storeState !== false;
     if (target.kind === "session" && !session) throw new GatewayError("invalid_request", "A session target needs its session");
     const cwd = target.kind === "project" ? target.cwd : target.kind === "session" && !session!.home ? session!.cwd : undefined;
-    // The Project store is `.pi/` at the chat's Project root (decision 31), the
-    // `projectDir` Tron gives pi; trust names that root for every chat in it.
     const inspection = cwd === undefined ? undefined : await stage("settings.store.trust-inspection", () => this.dependencies.trust.inspect(cwd));
     const observed: ObservedStore[] = [{ kind: "global" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" },
       ...(inspection ? projectStores(inspection.projectDir) : [])];
-    // Every read compares the stores with what Tron last observed first (F2):
-    // file events are only prompts, so a dropped event cannot hide a change.
-    // One repository read serves both the comparison and the git-state badges.
     const head = storeState && inspection
       ? await stage("settings.store.project-git-head", () => gitHeadState(inspection.projectDir))
       : undefined;
@@ -312,7 +290,6 @@ export class SettingsStoreAdapter {
     return this.validatedStore(await readBoundedJsonObject(this.profilePath, 256 * 1024, "Home profile"), "home", "Home profile");
   }
 
-  /** A Tron-owned store's declared fields, each admitted by its key's type. */
   private async validatedStore(document: Record<string, unknown>, layer: "home" | "global", label: string): Promise<Record<string, unknown>> {
     for (const key of this.schema.KEYS) {
       const binding = key.layers[layer];
@@ -328,13 +305,10 @@ export class SettingsStoreAdapter {
     return document;
   }
 
-  /** pi's own reader, so migrations and parse rules match the runtime exactly. */
   private piDocuments(cwd: string): { global: Record<string, unknown>; project: Record<string, unknown>; projectUnreadable?: true } {
     const manager = SettingsManager.create(cwd, this.dependencies.agentDir, { projectTrusted: true });
     const errors = manager.drainErrors();
     if (errors.some(error => error.scope === "global")) throw new GatewayError("conflict", "Canonical settings could not be loaded");
-    // An unparseable project file (unresolved merge markers) is an empty, unreadable
-    // layer: it is reported, and a write to it fails without touching it (doc 5.7).
     const projectUnreadable = errors.some(error => error.scope === "project");
     return {
       global: manager.getGlobalSettings() as Record<string, unknown>,
@@ -370,7 +344,6 @@ function readPath(document: Record<string, unknown>, path: readonly string[]): u
   return value;
 }
 
-/** A JSON store's text, or undefined when the store does not exist yet. */
 async function readStore(path: string): Promise<string | undefined> {
   try { return await readFile(path, "utf8"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
@@ -404,15 +377,12 @@ function formatContext(runtime: ModelRuntime): FormatContext {
   return { modelName: (ref) => runtime.getModel(ref.provider, ref.id)?.name };
 }
 
-/** A tool's description as one option line. */
 function firstSentence(text: string): string {
   const line = text.trim().split("\n")[0]!;
   const end = line.search(/[.!?](\s|$)/);
   return end === -1 ? line : line.slice(0, end + 1);
 }
 
-/** The registered models as the model picker lists them: the display name, and
- * whether this account can use each one (the same test `model.list` applies). */
 async function catalogModelEntries(runtime: ModelRuntime): Promise<Array<{ provider: string; id: string; name: string; available: boolean; virtual: boolean }>> {
   const eligibility = openAIModelEligibility(runtime);
   await eligibility?.refresh();
@@ -429,14 +399,11 @@ async function catalogModelEntries(runtime: ModelRuntime): Promise<Array<{ provi
   return eligibility?.orderAccountModels(projected) ?? projected;
 }
 
-/** The catalog cursor is the offset of the next page, as a decimal string. */
 function catalogCursorOffset(cursor: string): number {
   if (!/^(0|[1-9][0-9]{0,8})$/u.test(cursor)) throw new GatewayError("invalid_request", "Invalid settings options cursor");
   return Number(cursor);
 }
 
-/** Named option sources (doc 4.1 `optionsSource`). Capability clamping uses
- * pi's own `clampThinkingLevel`, so this names existing behaviour (doc 3.6). */
 function optionSources(runtime: ModelRuntime): OptionSources {
   return {
     clamp(source, dependency, value) {
@@ -449,9 +416,6 @@ function optionSources(runtime: ModelRuntime): OptionSources {
   };
 }
 
-/** The model a context window's bounds come from: the registered model, never a
- * session's budgeted copy (SessionContextWindowPolicy wraps a session runtime's
- * `getModel` with the chat's current window, which would shrink the maximum to it). */
 function limitsModel(runtime: ModelRuntime, ref: { provider: string; id: string }): Model<any> | undefined {
   return runtime.getPhysicalModel(ref.provider, ref.id) ?? runtime.getModel(ref.provider, ref.id);
 }

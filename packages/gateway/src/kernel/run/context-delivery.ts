@@ -10,7 +10,6 @@ export async function deliverPromptInput(
   context: { readonly inboxAttributedMessages: Set<string>; persistCanonicalCustomEntry(type: string, data: JsonValue, identity: string): Promise<void> },
   session: AgentSession, message: InputMessage, committed?: () => Promise<void>,
 ): Promise<void> {
-  // Recover missing attribution without appending the firing or replaying its turn.
   const existing = message.details.trigger ? session.sessionManager.getBranch().find(candidate => candidate.type === "custom_message"
     && (candidate.details as { eventId?: unknown } | undefined)?.eventId === message.details.eventId) : undefined;
   if (existing && (existing.type !== "custom_message" || existing.customType !== message.customType

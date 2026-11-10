@@ -14,24 +14,14 @@ export interface HistoryPage {
   totalEntries: number;
 }
 
-/** Node kind per canonical entry type. `satisfies Record<…>` fails the build when
- * the pinned SDK adds or removes an entry type, so a new type must be classified
- * here instead of publishing its raw name as a node kind, and it types every
- * value as a declared `SessionTreeNode` kind. */
 const kindNames = {
   message: "message", label: "label", compaction: "compaction", usage: "usage",
   thinking_level_change: "thinkingChange", model_change: "modelChange", branch_summary: "branchSummary",
   custom_message: "customMessage", custom: "customEntry", session_info: "sessionInfo", context_edit: "contextEdit",
 } satisfies Record<SessionEntry["type"], SessionTreeNode["kind"]>;
 
-/** One content block as it appears in canonical JSONL: Pi's own block shapes,
- * plus the tolerated `text` an older or foreign writer may have persisted on a
- * thinking block. The runtime guards below still accept anything a malformed
- * file can hold. */
 type PersistedContentBlock = PiMessageContentBlock & { text?: string };
 
-/** Walk only the selected entry's authored content; list previews never project
- * entire transcript bodies or register media blobs. Images stay media, not base64 text. */
 function* contentBlocks(content: string | Array<PersistedContentBlock>): Generator<string> {
   if (typeof content === "string") { yield content; return; }
   if (!Array.isArray(content)) return;
@@ -43,9 +33,6 @@ function* contentBlocks(content: string | Array<PersistedContentBlock>): Generat
       case "toolCall": yield `Tool call: ${part.name}\n${JSON.stringify(part.arguments ?? {}, null, 2)}`; break;
       case "image": yield `Image (${part.mimeType ?? "image"})`; break;
       default: {
-        // Unreachable for the pinned SDK: every block type is classified above.
-        // A new SDK block type fails this assignment instead of being serialized
-        // as opaque JSON in every preview.
         part satisfies never;
         yield JSON.stringify(part, null, 2);
       }
@@ -53,11 +40,8 @@ function* contentBlocks(content: string | Array<PersistedContentBlock>): Generat
   }
 }
 
-/** Human preview for Pi's model-attributed usage record (cache warming). */
 const USAGE_ENTRY_PREVIEW = "Cache warmed";
 
-/** Bounded usage counters for the history entry metadata, shared by assistant
- * messages and Pi's own usage records. */
 function boundedUsageCounters(usage: unknown): Record<string, JsonValue> {
   const counters: Record<string, JsonValue> = {};
   if (!usage || typeof usage !== "object" || Array.isArray(usage)) return counters;
@@ -98,14 +82,9 @@ function* entryBlocks(entry: SessionEntry): Generator<string> {
       yield `Replacement: ${JSON.stringify(entry.replacement)}`;
       return;
     case "usage":
-      // Model-attributed usage is canonical metadata with no authored content; a
-      // detail read says what the record is, and the metadata carries the
-      // bounded provider/model/counter facts.
       yield USAGE_ENTRY_PREVIEW;
       return;
     default: {
-      // Unreachable for the pinned SDK: every entry type is classified above.
-      // A new SDK entry type fails this assignment instead of yielding nothing.
       entry satisfies never;
       return;
     }
@@ -113,8 +92,6 @@ function* entryBlocks(entry: SessionEntry): Generator<string> {
 }
 
 function entryPreview(entry: SessionEntry): string {
-  // Tool arguments/extension data can be huge: previews describe their actual
-  // kind without serializing them. Full values are an explicit detail read.
   if (entry.type === "message" && entry.message.role === "system") return "System context message";
   if (entry.type === "custom") return entry.customType.slice(0, 240);
   if (entry.type === "context_edit") return `Model context edit: ${entry.targetId}`;
@@ -143,8 +120,6 @@ function entryPreview(entry: SessionEntry): string {
   return entry.type;
 }
 
-/** Canonical append order is the ordering authority, including clock-skewed
- * timestamps. Cursors anchor both ordinal and identity, never a mutable offset alone. */
 export function historyPage(manager: SessionManager, runtimeGeneration: string, cursor?: HistoryCursor): HistoryPage {
   const entries = manager.getEntries();
   if (cursor && (!Number.isSafeInteger(cursor.ordinal) || cursor.ordinal < 0
@@ -157,7 +132,6 @@ export function historyPage(manager: SessionManager, runtimeGeneration: string, 
   const selected = entries.slice(start, end);
   const wanted = new Set(selected.map(e => e.id));
   const childCounts = new Map<string, number>();
-  // Metadata only: no getTree() recursion, body flattening or durable index.
   for (const entry of entries) if (entry.parentId && wanted.has(entry.parentId)) childCounts.set(entry.parentId, (childCounts.get(entry.parentId) ?? 0) + 1);
   const path = new Set(manager.getBranch().filter(e => wanted.has(e.id)).map(e => e.id));
   const nodes = selected.reverse().map((entry): SessionTreeNode => {
@@ -165,8 +139,6 @@ export function historyPage(manager: SessionManager, runtimeGeneration: string, 
       ? entry.message.role as "user" | "assistant" | "toolResult" : undefined;
     const bookmarkTargetId = entry.type === "label" && manager.getEntry(entry.targetId) ? entry.targetId : undefined;
     const label = manager.getLabel(bookmarkTargetId ?? entry.id);
-    // A pathological canonical identifier/label must fail explicitly rather
-    // than exceed the mobile frame budget or acquire an ambiguous truncated ID.
     for (const value of [entry.id, entry.parentId, label, bookmarkTargetId]) {
       if (value !== undefined && value !== null && Buffer.byteLength(value) > 1_024) {
         throw new GatewayError("conflict", "History entry metadata exceeds the supported bound. Use JSONL Export to inspect it.");
@@ -175,8 +147,6 @@ export function historyPage(manager: SessionManager, runtimeGeneration: string, 
     return { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp,
       kind: entry.type === "message" && entry.message.role === "bashExecution" ? "bash"
         : entry.type === "message" && entry.message.role === "system" ? "systemMessage"
-        // A foreign entry type from a newer writer has no declared kind; keep its
-        // raw name visible rather than mislabelling it as session metadata.
         : (kindNames[entry.type] ?? entry.type),
       ...(role ? { role } : {}), ...(label ? { label } : {}),
       ...(bookmarkTargetId ? { bookmarkTargetId } : {}), preview: entryPreview(entry),
@@ -216,7 +186,6 @@ export function historyEntry(manager: Pick<SessionManager, "getEntry">, runtimeG
     first = false;
     take(block);
   }
-  // Keep at most one native-reader page, not another full joined message.
   if (offset > total || offset > 0 && /[\uDC00-\uDFFF]/.test(text[0] ?? "")) {
     throw new GatewayError("invalid_request", "Invalid entry content position");
   }
@@ -247,9 +216,6 @@ export function historyEntry(manager: Pick<SessionManager, "getEntry">, runtimeG
     metadata.usage = boundedUsageCounters(entry.usage);
     if (entry.note !== undefined) metadata.note = entry.note;
   }
-  // Scalar metadata is deliberately separate from content and remains bounded
-  // even for malformed/custom producers. Do not send tool arguments, image
-  // bytes or arbitrary extension details through this side channel.
   for (const [key, value] of Object.entries(metadata)) {
     if (typeof value === "string" && value.length > 1_024) {
       metadata[key] = value.slice(0, 1_024);

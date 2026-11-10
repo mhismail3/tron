@@ -19,7 +19,6 @@ interface ComponentRegistryOptions {
   readonly maxRecords?: number;
 }
 
-/** Bounded identity/generation ownership for retained Pi component factories. */
 export class ComponentRegistry {
   private readonly records = new Map<string, ComponentRecord>();
   private readonly generations = new Map<string, number>();
@@ -32,9 +31,6 @@ export class ComponentRegistry {
   get mountedRecords(): readonly ComponentRecord[] { return [...this.records.values()].filter((record) => record.state === "mounted"); }
 
   set(key: string, factory: RemoteComponentFactory): boolean {
-    // Reject before touching the current generation. In particular, a retired
-    // registry must not remove an existing record while rejecting a late
-    // replacement.
     if (this.retired) return false;
     const maximumRecords = this.options.maxRecords ?? 24;
     if (this.pendingFactories >= maximumRecords) return false;

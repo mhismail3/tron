@@ -20,8 +20,6 @@ export interface HomeAppendGuardServices {
   diagnostic: HomeDiagnostic;
 }
 
-/** One fence belongs to one slot across runtime rebuilds and rekeys. Weak
- * binding releases the guard with that slot; no second lifecycle map is needed. */
 export function homeAppendGuardHook(services: () => HomeAppendGuardServices): (context: CanonicalAppendContext) => CanonicalAppendPolicy {
   const guards = new WeakMap<object, HomeAppendGuard>();
   return context => {
@@ -122,11 +120,9 @@ class HomeAppendGuard implements CanonicalAppendPolicy {
           settledEntries,
         });
       } finally {
-        // The Stop settled, so release its fence even if reading the crossing failed.
         if (this.limitStop === crossing) delete this.limitStop;
       }
     }, error => {
-      // An unjoined Stop keeps the admission fence, as the writer still owns work.
       this.context.diagnostic({ code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });
     }).catch(error => {
       this.context.diagnostic({ code: "home-chapter-limit-stop-failed", message: String(error).slice(0, 256) });

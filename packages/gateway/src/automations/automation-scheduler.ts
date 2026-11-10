@@ -129,10 +129,6 @@ export class AutomationScheduler {
           : { state: "outcomeUnknown", reason: "gateway-restarted-without-terminal-evidence" };
       } catch (error) {
         if (error instanceof GatewayError && error.retryable && error.diagnosticReason === "catalog_not_ready") {
-          // The catalog owner has not published a cut yet, so this run's outcome
-          // cannot be decided: committing one would clear the run marker without
-          // evidence and lose the session's record. Leave the record untouched
-          // for a later pass or the next restart.
           this.onDiagnostic(
             `Automation recovery deferred until the session catalog is ready: ${error.message}`,
             record.id,
@@ -199,17 +195,12 @@ export class AutomationScheduler {
     await Promise.all([...this.active.values()].map(active => this.requestCancellationWithGrace(active, "gateway-shutdown")));
   }
 
-  /** Resolving a durable unknown outcome cannot retire an executing owner. */
   assertRunRetired(runId: string): void {
     if (this.active.has(runId) || this.dispatchReservations.has(runId)) {
       throw uncertainOutcome("Automation execution or its terminal acknowledgement is still owned; wait for retirement before resolving the run");
     }
   }
 
-  /** Read-only admission query for another owner: this exact canonical session
-   * already has a dispatched reservation or a running automation execution.
-   * The reservation window exists before the executor takes its session lease,
-   * so a lease check alone cannot see it. */
   hasSessionRun(sessionId: string): boolean {
     for (const active of this.active.values()) {
       if (active.sessionId === sessionId) return true;
@@ -223,9 +214,6 @@ export class AutomationScheduler {
   async dispose(): Promise<void> {
     this.beginDrain();
     this.cancelPendingAdmissions();
-    // Completion is not retirement: dispatch includes durable terminal evidence
-    // and the executor's exact marker/lease acknowledgement. On expiry retain
-    // all owners and report a blocker, never a successful disposal.
     const retired = await this.settleWithinGrace(Promise.all([
       ...(this.scanPromise ? [this.scanPromise] : []),
       ...this.pendingDispatches,
@@ -318,8 +306,6 @@ export class AutomationScheduler {
     const run = record.currentRun;
     if (!run || run.runId !== runId) throw new GatewayError("conflict", "Automation run is no longer active", true);
     const active = this.active.get(runId);
-    // A queued projection may still have a durable claim in flight. Its
-    // reservation owns cancellation until dispatch publishes or retires it.
     if (!active && !this.dispatchReservations.has(runId) && (run.state === "queued" || run.state === "waiting")) {
       await this.commitTerminal(record.id, run.runId, { state: "cancelled", reason: "user-cancelled" });
       this.wake();
@@ -380,8 +366,6 @@ export class AutomationScheduler {
       const run = record.currentRun!;
       const runId = run.runId;
       if (this.dispatchReservations.has(runId)) continue;
-      // Existing-session runs serialize on their canonical session. Workspace
-      // runs already have a unique predetermined session identity.
       const sessionKey = run.executionSessionId;
       if (!sessionKey) throw new GatewayError("conflict", "Ordinary automation has no execution session");
       if (activeSessions.has(sessionKey)) continue;
@@ -506,9 +490,6 @@ export class AutomationScheduler {
       const cancellation = this.cancellationRequests.get(run.runId);
       this.cancellationRequests.delete(run.runId);
       if (isUncertainOutcome(error) || error instanceof AutomationAdmissionError && error.outcomeUnknown) {
-        // The executor still owns a lease/work token when canonical admission
-        // could not be proven. Keep the same reservation visible to resolution
-        // and disposal instead of losing that owner when start() rejects.
         admission.blocked = true;
         await this.commitTerminal(claimed.id, run.runId, { state: "outcomeUnknown", reason: "admission-outcome-unknown" });
       } else if (cancellation) {
@@ -535,9 +516,6 @@ export class AutomationScheduler {
       };
     });
     if (admission.controller.signal.aborted || running.currentRun?.runId !== run.runId) {
-      // Admission was cancelled or a durable state owner retired this run while
-      // start() was suspended. Keep the reservation until the returned owner
-      // actually settles; never publish running or infer retirement from abort.
       await handle.cancel(this.cancellationRequests.get(run.runId) ?? "gateway-shutdown").catch((error) => {
         this.onDiagnostic(error instanceof Error ? error.message : String(error), claimed.id, run.runId);
       });
@@ -666,8 +644,6 @@ export class AutomationScheduler {
         try {
           await this.onBlocked(settled, settled.lastRun);
         } catch (error) {
-          // The run is already durably terminal. Advisory notification failure
-          // is observable but can never rewrite or strand that result.
           this.onDiagnostic(error instanceof Error ? error.message : String(error), automationId, runId);
         }
       }
@@ -727,9 +703,6 @@ export class AutomationScheduler {
   ): Promise<void> {
     const cancelled = await this.settleWithinGrace(this.requestCancellation(active, reason));
     if (!cancelled.settled) {
-      // The cancellation call itself never resolved. The run may already be
-      // stopping, so record an unknown outcome rather than claiming it was
-      // cleanly rejected.
       await this.commitTerminal(active.automationId, active.runId, {
         state: "outcomeUnknown",
         reason: `${reason}-cancellation-timeout`,
@@ -767,9 +740,6 @@ export class AutomationScheduler {
     }
   }
 
-  /** Bounds one settlement step against the shared cancellation grace. A
-   * non-settling promise is never reported as settled, and the caller keeps its
-   * own durable outcome-unknown record. */
   private async settleWithinGrace<T>(promise: Promise<T>): Promise<{ settled: true; result: { ok: true; value: T } | { ok: false; error: unknown } } | { settled: false }> {
     let timer: NodeJS.Timeout | undefined;
     const graceExpired = new Promise<{ settled: false }>((resolve) => {

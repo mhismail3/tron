@@ -23,7 +23,6 @@ interface GatewayWorkFact {
   token: string;
   kind: GatewayWorkKind;
   sessionId?: string;
-  /** The RPC method an `rpc-mutation` entry executes; diagnostics only. */
   method?: string;
   hostEpoch: string;
   admittedAt: string;
@@ -53,18 +52,12 @@ interface GatewayWorkAdmission {
 export interface GatewayWorkHandle {
   readonly token: string;
   readonly settled: Promise<void>;
-  /** `sessionId` binds work admitted before its session existed to that session, once. */
   transition(kind: GatewayWorkKind, sessionId?: string): void;
   progress(): void;
   markSuspect(): void;
   settle(): void;
 }
 
-/**
- * Bounded process-local ownership for work accepted by this Gateway epoch.
- * Tokens are never persisted and never expire by age. An entry leaves only by
- * exact owner settlement or a cancellation callback followed by owner settlement.
- */
 export class GatewayWorkRegistry {
   private readonly entries = new Map<string, GatewayWorkEntry>();
   private readonly sessionObservers = new Set<(sessionId: string) => void>();
@@ -86,8 +79,6 @@ export class GatewayWorkRegistry {
     if (!Number.isSafeInteger(maximumEntries) || maximumEntries < 1) {
       throw new Error("Gateway work registry bound is invalid");
     }
-    // Keep terminal settlement capacity independent from normal admission.
-    // The production derived half covers 16 slots * 64 retained activities.
     const derivedReserve = maximumEntries > 1 ? Math.floor(maximumEntries / 2) : 0;
     this.normalAdmissionLimit = maximumEntries - derivedReserve;
     this.derivedAdmissionLimit = derivedReserve;
@@ -95,14 +86,10 @@ export class GatewayWorkRegistry {
 
   get size(): number { return this.entries.size; }
   get isAdmissionOpen(): boolean { return this.admissionsOpen; }
-  /** Exclusion is for one enclosing RPC's own domain admission check only;
-   * administrative drain and eviction use the unfiltered query. */
   hasSessionWork(sessionId: string, exceptToken?: string): boolean {
     return [...this.entries.values()].some((entry) => entry.sessionId === sessionId && entry.token !== exceptToken);
   }
 
-  /** The distinct kinds of live work on one session, for an admission that must
-   * name what refused it. Same exclusion rule as `hasSessionWork`. */
   sessionWorkKinds(sessionId: string, exceptToken?: string): GatewayWorkKind[] {
     return [...new Set([...this.entries.values()]
       .filter((entry) => entry.sessionId === sessionId && entry.token !== exceptToken)
@@ -117,10 +104,7 @@ export class GatewayWorkRegistry {
   private publishSessionChange(sessionId: string | undefined): void {
     if (!sessionId) return;
     for (const observer of this.sessionObservers) {
-      // Disposable publication cannot strand a token before its caller receives
-      // the handle, or prevent drain waiters from observing exact settlement.
-      // Transport owns publication failures; reconnect obtains a fresh snapshot.
-      try { observer(sessionId); } catch { /* advisory projection */ }
+      try { observer(sessionId); } catch { }
     }
   }
 
@@ -131,9 +115,6 @@ export class GatewayWorkRegistry {
     return this.admit(admission, false);
   }
 
-  /** Admit settlement work derived from an exact token/artifact accepted before
-   * the drain cutoff. Callers must already own that authority; this is not an
-   * external admission surface. */
   beginDerived(admission: GatewayWorkAdmission): GatewayWorkHandle {
     if (!this.derivedAdmissionsOpen) {
       throw new GatewayError("busy", "Gateway drain has completed", true);
@@ -225,9 +206,6 @@ export class GatewayWorkRegistry {
   beginDrain(): void { this.admissionsOpen = false; }
   completeDrain(): void { this.derivedAdmissionsOpen = false; }
 
-  /** Cancellation is fenced by the exact callback installed at admission.
-   * Cancellation acknowledgement does not itself classify work as successful;
-   * the owner still removes the token through settle(). */
   async requestCancellation(): Promise<void> {
     this.cancellationRequested = true;
     await Promise.allSettled([...this.entries.values()].map((entry) => this.cancelEntry(entry)));

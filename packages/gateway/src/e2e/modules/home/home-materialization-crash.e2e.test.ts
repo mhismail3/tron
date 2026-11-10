@@ -70,8 +70,6 @@ async function makeRegistry(root: string, lifecycle: RuntimeLifecycleRecord[] = 
   });
   try {
     await registry.initialize();
-    // Initialization starts the catalog; cold acquisition requires its first
-    // complete cut, as it does at Gateway startup before listener readiness.
     await waitFor(async () => {
       try { await registry.list(); return true; }
       catch (error) {
@@ -94,8 +92,6 @@ async function fixture() {
   const cwd = join(directory, "workspace");
   await mkdir(cwd, { recursive: true });
   await mkdir(join(root, "agent"), { recursive: true });
-  // Use the same cwd-derived canonical directory as Registry, including realpath
-  // normalization on hosts where the system temporary directory is a symlink.
   const trust = new TrustService(join(root, "agent"));
   const canonicalCwd = await trust.canonicalDirectory(cwd);
   const sessionDirectory = join(root, "agent", "sessions", `--${resolve(canonicalCwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`);
@@ -136,8 +132,6 @@ async function fixture() {
   return { root, recordPath, owner, workspace, expectedPath, sessionDirectory, flushConversation };
 }
 
-/** Freeze the *actual writer*, not a free-standing promise. The old owner never
- * reaches acknowledgement or disposal before the fresh Registry reads disk. */
 function freezeWrite(recordPath: string, cut: "after-write" | "before-write" | "after-rename") {
   const frozen = barrier();
   publication.intercept = async (path, document, publish) => {
@@ -330,8 +324,6 @@ describe("Home materialization crash recovery", () => {
       }, "Home reloaded and all stale slots retired", { boundMs: 5_000, intervalMs: 25 });
       expect(await homeOwnerOf(registry).status()).toMatchObject({ available: true, enabled: false });
       const rebuilt = await registry.acquire(designation.sessionId);
-      // Compare identity as a scalar: failure reporting must not traverse an
-      // obsolete slot's retired extension-host getters.
       expect(rebuilt !== live).toBe(true);
       expect(live.isDisposed).toBe(true);
       expect(lifecycle.filter(record => record.reason === "publication-uncertain")).toMatchObject([{ event: "runtime.evicted", sessionId: designation.sessionId }]);

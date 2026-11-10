@@ -16,16 +16,12 @@ const eligible = (record: AutomationRecord, run: AutomationRun) => record.activa
 const stale = (run: AutomationRun, route: InputTriggerRoute | undefined) => run.homeDelivery && route && run.targetSnapshot.kind === "home"
   && (run.targetSnapshot.homeId !== route.homeId || run.targetSnapshot.routeGeneration !== route.routeGeneration || run.executionSessionId !== route.sessionId);
 
-/** The automation ledger is the outbox. No Home-side queue can lose a run on
- * definition edits, history pruning, cancellation, or an interrupted acknowledgement. */
 export class AutomationHomeTrigger implements InputTriggerInbox {
   private ready = false;
 
   constructor(private readonly store: AutomationStore, private readonly sessionFile: (id: string) => Promise<string | undefined>,
     private readonly currentRoute: () => InputTriggerRoute | undefined) {}
 
-  /** Producer recovery precedes source availability, even when Home is paused.
-   * Unpersisted claims must not require a new Home turn to become cancellable. */
   async initialize(): Promise<void> {
     if (this.ready) return;
     for (const record of this.store.snapshot()) for (const run of runs(record)) {
@@ -65,8 +61,6 @@ export class AutomationHomeTrigger implements InputTriggerInbox {
     if (!this.ready) throw new GatewayError("busy", "Home automation delivery is recovering", true);
     try {
       const candidates: Array<{ record: AutomationRecord; run: AutomationRun; message: InputMessage; persisted: boolean }> = [];
-      // Partial inputs join this activation's batch, but stay unacknowledged
-      // until it actually appends/binds its root. Recovery is not another wake.
       for (const record of this.store.snapshot()) for (const run of runs(record)) {
         if (!run.homeDelivery) continue;
         const proof = await this.proof(record, run);
@@ -94,8 +88,6 @@ export class AutomationHomeTrigger implements InputTriggerInbox {
         const count = item.persisted ? 3 : 2;
         if (tokens < cost || bytes < size || entries < count) continue;
         const claimed = await this.claim(item.record.id, item.run, route, operationId, delivery, envelope.signal);
-        // A selection snapshot is not a receipt: cancellation, pause or a
-        // changed claim may have won while the durable mutation waited.
         if (!claimed) continue;
         tokens -= cost; bytes -= size; entries -= count;
         selected.push({ ...item, run: claimed });
@@ -155,8 +147,6 @@ export class AutomationHomeTrigger implements InputTriggerInbox {
     });
   }
 
-  /** An explicit outcome resolution may arrive while the new Home is paused.
-   * Only stale claims are reconsidered here; current in-flight claims stay owned. */
   async reconcileStale(id: string, runId: string): Promise<void> {
     const record = this.store.get(id);
     const run = runs(record).find(run => run.runId === runId);

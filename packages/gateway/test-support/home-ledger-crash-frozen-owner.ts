@@ -1,7 +1,3 @@
-/** A frozen writer cannot publish any later state. The fresh owner sees only
- * the completed durable writes, just as after abandonment at a crash cut.
- * The caller owns restoring its interception; this harness creates no timer,
- * process, alternate journal or production hook. */
 export function freezeHomeLedgerWriter<Args extends unknown[], Result>(
   write: (...args: Args) => Promise<Result>,
   cut: (result: Result) => boolean,

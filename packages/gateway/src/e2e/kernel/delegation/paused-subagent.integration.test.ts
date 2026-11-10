@@ -11,9 +11,6 @@ import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 import type { RuntimeSlot } from "../../../kernel/run/runtime-slot.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 
-/** Retained, regenerable evidence for one run of this file. The path is stable
- * and gitignored, so an operator can inspect exactly which lifecycle facts the
- * real artifact projection published for a paused or rediscovered subagent. */
 const REPORT_PATH = join(process.cwd(), "test-results", "paused-subagent.integration.json");
 const report: {
   generatedAt: string;
@@ -92,9 +89,6 @@ function processRows(slot: RuntimeSlot): SessionProcessActivity[] {
   return slot.snapshot().processActivities ?? [];
 }
 
-/** The exact producer shape of one paused async workflow: a launcher tool
- * result proves ownership, and `status.json` plus the `process-terminal.json`
- * sidecar carry the lifecycle the Gateway projects. */
 it("settles a paused subagent row as recent only after the observed process-terminal proof", async () => {
   const fixture = await pausedFixture("settlement");
   const { slot, manager } = fixture;
@@ -109,8 +103,6 @@ it("settles a paused subagent row as recent only after the observed process-term
   const started = Date.now() - 60_000;
   const childEndedAt = started + 30_000;
   const proofObservedAt = started + 35_000;
-  // Canonical launch evidence lives in the slot's own session manager, the
-  // owner of the JSONL the projection reads.
   const slotManager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } })
     .runtime.session.sessionManager;
   const launch = (toolCall: string, run: string, directory: string) => slotManager.appendMessage({
@@ -134,7 +126,6 @@ it("settles a paused subagent row as recent only after the observed process-term
       startedAt: started,
       lastUpdate,
       ...(state === "paused" ? { endedAt: childEndedAt } : {}),
-      // The producer keeps counting its own elapsed time while a run is paused.
       durationMs: lastUpdate - started,
       steps: [{
         index: 0,
@@ -181,7 +172,6 @@ it("settles a paused subagent row as recent only after the observed process-term
   expect(liveRow!.visibility).toBe("active");
   record("running", { row: liveRow!, overview: slot.snapshot().processOverview });
 
-  // Winding down: paused without the proof owns no settlement fact yet.
   await writeStatus("paused", childEndedAt + 1_000, "paused");
   await writeProof("pending");
   await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
@@ -198,7 +188,6 @@ it("settles a paused subagent row as recent only after the observed process-term
     hasActiveSubagents: fixture.latestSummary()?.hasActiveSubagents,
   });
 
-  // Settled: the exact-owned proof has observed every paused process exit.
   await writeProof("observed");
   await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
   const settled = processRows(slot).find((row) => row.processId === liveRow!.processId)!;
@@ -207,8 +196,6 @@ it("settles a paused subagent row as recent only after the observed process-term
   expect(settled.lifecycle.terminalAt).toBe(terminalAt);
   expect(settled.lifecycle.recentUntil).toBe(new Date(proofObservedAt + 5 * 60_000).toISOString());
   expect(settled.visibility).toBe("recent");
-  // Frozen at the Gateway-observed settlement instant, never the producer's
-  // still-counting elapsed counter.
   expect(settled.durationMs).toBe(proofObservedAt - started);
   expect(slot.snapshot().processOverview).toMatchObject({ activeCount: 0, recentCount: 1 });
   expect(slot.administrativeDrainBlockers().some((fact) => fact.category === "detached-extension-run")).toBe(false);
@@ -220,8 +207,6 @@ it("settles a paused subagent row as recent only after the observed process-term
     hasActiveSubagents: fixture.latestSummary()?.hasActiveSubagents,
   });
 
-  // A resume is a new run id: it appears as its own active row and the settled
-  // paused row keeps the exact facts it already published.
   const replacementRunId = "resumed-run";
   const replacementToolCallId = "resumed-tool";
   const replacementDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "run-2");
@@ -260,10 +245,6 @@ it("settles a paused subagent row as recent only after the observed process-term
   });
 });
 
-/** A Gateway restart or a slot reload rediscovers runs that finished long ago.
- * Their terminal instant is the producer's recorded end, never the moment the
- * Gateway happened to read the artifact: otherwise every old run returns as
- * "recent" with a duration that counts from its start to now. */
 it("keeps a rediscovered terminal run's own end instant, so an old run does not return as recent", async () => {
   const fixture = await pausedFixture("rediscovery");
   const { slot } = fixture;
@@ -289,7 +270,6 @@ it("keeps a rediscovered terminal run's own end instant, so an old run does not 
       isError: false,
       timestamp: startedAt,
     });
-    // The producer's shape for a workflow that failed 28 ms after launch.
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
       lifecycleArtifactVersion: 3,
       runId,
@@ -319,7 +299,6 @@ it("keeps a rediscovered terminal run's own end instant, so an old run does not 
   }
   const old = rows.find((row) => row.runId === "old-failed-run");
   const recent = rows.find((row) => row.runId === "recent-failed-run");
-  // The run that ended a minute ago is still recent; the three-day-old one is not.
   expect(recent?.visibility).toBe("recent");
   expect(old === undefined || old.visibility !== "recent").toBe(true);
   expect(activities.find((item) => item.runId === "old-failed-run")?.visibility === "current").toBe(false);

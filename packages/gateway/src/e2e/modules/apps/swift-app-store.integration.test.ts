@@ -1,23 +1,4 @@
 import { displayOwnerOf, createTestRegistry } from "../../../../test-support/gateway-registry.js";
-/**
- * Installed Swift apps (#1157), end to end through a real RuntimeRegistry and
- * GatewayService: a faux model offers source in an ordinary session, the paired
- * phone explicitly reviews/installs it, and its RPCs (`apps.list/get/state/commit`) read and write
- * the same `state/apps/<id>/` store, across a Gateway restart.
- *
- * Failure modes:
- *  F1 an installed app is missing from apps.list, or apps.get returns a clipped source;
- *  F2 a commit replayed with its commandId applies twice, or a stale revision overwrites;
- *  F3 an over-bound or malformed commit changes state;
- *  F4 reinstalling an app loses its data;
- *  F5 state does not survive a Gateway restart;
- *  F6 remove leaves the app listed or readable, or the tool hides that data was deleted;
- *  F7 the tool reads a source outside its root, through a link, or a non-.swift file;
- *  F8 a vanished state/apps after creation reads as a fresh, empty install.
- *  F9 while the Gateway drains, the phone cannot read its apps, or a commit is admitted.
- *
- * The retained artifact is `test-results/swift-app-store/report.json`.
- */
 import { execFileSync } from "node:child_process";
 import { constants } from "node:fs";
 import { lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
@@ -102,8 +83,6 @@ async function fixture() {
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 interface ToolResult { isError: boolean; text: string; details: Record<string, unknown> }
 
-/** Real tool turn, then explicit paired-phone review/install of successful offers.
- * Selected instance identities come from accepted installs, never fresh reads. */
 async function agentCalls(f: Fixture, gatewayNow: Gateway, calls: Array<Record<string, unknown>>): Promise<ToolResult[]> {
   const slot = await gatewayNow.registry.create(f.cwd);
   const model = f.faux.getModel();
@@ -151,7 +130,6 @@ async function rpcError(g: Gateway, method: string, params: Record<string, unkno
   throw new Error(`${method} unexpectedly succeeded`);
 }
 
-/** A realistic app source past safeJson's 100,000-character clip, so a clipped get is visible. */
 function bigSource(marker: string): string {
   const rows = Array.from({ length: 5_000 }, (_, index) => `        Text("row ${index} ${marker}")`).join("\n");
   return `import SwiftUI\n\nstruct ContentView: View {\n    var body: some View {\n        List {\n${rows}\n        }\n    }\n}\n// end ${marker}\n`;
@@ -180,7 +158,6 @@ describe("installed Swift apps through the Gateway", () => {
     expect(renamed.app).toMatchObject({ id: "managed", name: "Renamed app", revision: 1 });
     expect(await rpc(f, "apps.rename", rename)).toEqual(renamed);
     expect((await rpcError(f, "apps.rename", { commandId: "manage-rename-2", appId: "managed", name: " " })).code).toBe("invalid_request");
-    // A rename keeps the program identity: its source revision fence is unchanged.
     expect(await rpc(f, "apps.commit", { commandId: "manage-after-rename", appId: "managed", expectedRevision: 1, expectedSourceRevision: 1, set: [{ key: "count", value: 5 }] })).toEqual({ appId: "managed", revision: 2 });
 
     const stale = await rpcError(f, "apps.reset", { commandId: "manage-reset-stale", appId: "managed", expectedRevision: 1 });
@@ -189,7 +166,6 @@ describe("installed Swift apps through the Gateway", () => {
     expect(await rpc(f, "apps.reset", reset)).toEqual({ appId: "managed", revision: 3 });
     expect(await rpc(f, "apps.reset", reset)).toEqual({ appId: "managed", revision: 3 });
     expect(await rpc(f, "apps.state", { appId: "managed" })).toEqual({ appId: "managed", revision: 3, entries: [] });
-    // An open program computed from the previous state cannot overwrite the reset.
     expect((await rpcError(f, "apps.commit", { commandId: "manage-after-reset", appId: "managed", expectedRevision: 2, expectedSourceRevision: 1, set: [{ key: "count", value: 9 }] })).code).toBe("conflict");
 
     await f.registry.dispose();
@@ -238,7 +214,6 @@ describe("installed Swift apps through the Gateway", () => {
     expect(info.capabilities).toContain(SWIFT_APPS_CAPABILITY);
     expect(await rpc(f, "apps.list")).toEqual({ apps: [] });
 
-    // F1: the agent installs; the phone lists and reads the exact source.
     const [installed] = await agentCalls(f, f, [{ action: "offer", feeds: [], appId: "builds", name: "Tron builds", icon: "shippingbox", source: { kind: "path", path: "Builds.swift" } }]);
     expect(installed!.isError).toBe(false);
     expect(installed!.text).toContain("explicit Install App review");
@@ -250,7 +225,6 @@ describe("installed Swift apps through the Gateway", () => {
     expect((await stat(join(directory, "data.sqlite"))).isFile()).toBe(true);
     expect(await readFile(join(directory, "sources", `${(got.app as Record<string, unknown>).sourceSha256}.swift`), "utf8")).toBe(sourceV1);
 
-    // F2: commits are revisioned and receipt-idempotent.
     expect(await rpc(f, "apps.state", { appId: "builds" })).toEqual({ appId: "builds", revision: 0, entries: [] });
     const commit = { commandId: "commit-0001", appId: "builds", expectedRevision: 0, set: [{ key: "filter", value: "Optimized" }, { key: "starred", value: ["f95544a20", { pinned: true, count: 2 }] }] };
     expect(await rpc(f, "apps.commit", commit)).toEqual({ appId: "builds", revision: 1 });
@@ -259,7 +233,6 @@ describe("installed Swift apps through the Gateway", () => {
     expect(stale.code).toBe("conflict");
     expect(stale.message).toContain("revision 1, not 0");
 
-    // F3: over-bound or malformed commits change nothing.
     const refusals = await Promise.all([
       rpcError(f, "apps.commit", { commandId: "commit-0003", appId: "builds", expectedRevision: 1, set: [{ key: "big", value: "x".repeat(300_000) }] }),
       rpcError(f, "apps.commit", { commandId: "commit-0004", appId: "builds", expectedRevision: 1, set: [], remove: [] }),
@@ -275,7 +248,6 @@ describe("installed Swift apps through the Gateway", () => {
       { key: "filter", value: "Optimized" }, { key: "starred", value: ["f95544a20", { pinned: true, count: 2 }] },
     ] });
 
-    // F4 + agent seeding: reinstall from internal files keeps data; the agent commits too.
     const files = join(f.tronHome, "workspace", "files", "apps");
     await mkdir(files, { recursive: true });
     const sourceV2 = "import SwiftUI\nstruct ContentView: View { var body: some View { Text(\"v2\") } }\n";
@@ -292,14 +264,12 @@ describe("installed Swift apps through the Gateway", () => {
     ] });
     expect(((await rpc(f, "apps.get", { appId: "builds" })).app as Record<string, unknown>)).toMatchObject({ name: "Builds", revision: 2 });
 
-    // F5: a restarted Gateway reads the same apps and state.
     await f.registry.dispose();
     registries.splice(registries.indexOf(f.registry), 1);
     const restarted = await gateway(f.root, f.faux);
     expect((await rpc(restarted, "apps.get", { appId: "builds" })).source).toBe(sourceV2);
     expect((await rpc(restarted, "apps.state", { appId: "builds" })).revision).toBe(2);
 
-    // F6: removal is explicit about deleting data, and the app is gone everywhere.
     const [removed] = await agentCalls(f, restarted, [{ action: "remove", appId: "builds", expectedInstanceId: restarted.instances.get("builds") }]);
     expect(removed!.isError).toBe(false);
     expect(removed!.text).toBe("Removed builds: its source and all of its stored data were deleted.");
@@ -339,7 +309,6 @@ describe("installed Swift apps through the Gateway", () => {
       if (operation === "reinstall") {
         await expect(agentCalls(f, f, [install])).rejects.toThrow(/state|schema/i);
       } else {
-        // Revision zero must not become valid again after the original data vanished.
         const params = operation === "state" ? { appId: "kept" } : {
           commandId: "after-loss", appId: "kept", expectedRevision: damage === "linked" ? 1 : 0, set: [{ key: "replacement", value: true }],
         };
@@ -379,8 +348,6 @@ describe("installed Swift apps through the Gateway", () => {
       report.cases.push({ name: "fifo-refused-without-writer", regularSourceInstalled: true });
     } finally {
       clearTimeout(timer);
-      // Release a regressed blocking open before disposing its runtime. This
-      // writer is cleanup only: the outcome above must settle without one.
       const release = await open(fifo, constants.O_RDWR | constants.O_NONBLOCK);
       await release.close();
       await pending;
@@ -395,7 +362,6 @@ describe("installed Swift apps through the Gateway", () => {
     await symlink(join(f.root, "Outside.swift"), join(f.cwd, "Link.swift"));
     await writeFile(join(f.cwd, "Real.swift"), "import SwiftUI\n");
 
-    // F7
     const denied = ["../Outside.swift", join(f.root, "Outside.swift"), "notes.txt", ".Hidden.swift", "Link.swift"];
     const results = await agentCalls(f, f, [
       ...denied.map(path => ({ action: "offer", feeds: [], appId: "denied", name: "Denied", source: { kind: "path", path } })),
@@ -404,7 +370,6 @@ describe("installed Swift apps through the Gateway", () => {
     expect(results.map(result => result.isError)).toEqual([true, true, true, true, true, false]);
     expect(((await rpc(f, "apps.list")).apps as Array<{ id: string }>).map(app => app.id)).toEqual(["real"]);
 
-    // F8: the recorded container vanished; reads and installs refuse rather than start over.
     await rm(join(f.tronHome, "workspace", "state", "apps"), { recursive: true });
     expect((await rpcError(f, "apps.list", {})).message).toContain("missing after they were created");
     const [reinstall] = await agentCalls(f, f, [{ action: "offer", feeds: [], appId: "real", name: "Real", source: { kind: "path", path: "Real.swift" } }]);
@@ -420,7 +385,6 @@ describe("installed Swift apps through the Gateway", () => {
     const [installed] = await agentCalls(f, f, [{ action: "offer", feeds: [], appId: "kept", name: "Kept", source: { kind: "path", path: "App.swift" } }]);
     expect(installed!.isError).toBe(false);
 
-    // F9: reads are disposable and stay available; a mutation would outlive the drain.
     f.registry.beginAdministrativeDrain();
     expect(((await rpc(f, "apps.list")).apps as Array<{ id: string }>).map(app => app.id)).toEqual(["kept"]);
     expect((await rpc(f, "apps.get", { appId: "kept" })).source).toBe("import SwiftUI\n");

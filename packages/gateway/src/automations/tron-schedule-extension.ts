@@ -59,7 +59,6 @@ export function createTronScheduleExtension(input: {
   return (pi) => {
     pi.registerTool({
       name: "schedule",
-      // docs/settings-model.md 5.4: declares it reads no open-world content.
       annotations: { openWorldHint: false },
       label: "Schedule",
       description: "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays; optional expiresAt is an ISO expiry timestamp. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session, create a new session in its workspace per run, or send an attributed message to Home. Home messages never grant maintainer authority and wake at most once per automation per 60 seconds.",

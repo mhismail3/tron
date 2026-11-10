@@ -9,13 +9,6 @@ import { GatewayServer } from "./server.js";
 import type { PeerPathLookup, PeerPathReader } from "./tailscale-peer.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
-// Failure mode this file exists to catch (real loopback socket, real clock):
-// the Gateway's pong to a client ping is written behind stream frames that are
-// still queued in the OrderedOutboundQueue, not yet handed to the socket. A
-// phone whose probe then waits behind the whole backlog misses its 8-second
-// pong deadline on a healthy link (#700, #186). Frames already handed to the
-// socket may legitimately precede the pong; frames still queued must not.
-
 const NO_TAILSCALE_PATH: PeerPathReader = { lookup: async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerPathSource: "not-tailscale", peerRelay: "" }) };
 
 const BACKLOG_TOPIC = "test.backlog";
@@ -42,9 +35,6 @@ async function unusedPort(): Promise<number> {
   return address.port;
 }
 
-/** Connects one local client, fills the Gateway's outbound queue while the
- * client stops reading, pings, then resumes reading and reports the order in
- * which the backlog frames and the pong arrived. */
 async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendingAtPing: number }> {
   const root = await mkdtemp(join(tmpdir(), "tron-server-pong-backlog-"));
   const devices = new DeviceStore(root, "machine");
@@ -86,8 +76,6 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
   socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, diagnostics: { clientId: "client-pong", attemptId: "initial", epoch: "1" } }));
   await waitFor(() => connection()?.ready === true, "hello");
 
-  // Stop reading: the kernel buffers fill and the Gateway's writes stall, so
-  // every later stream frame stays in the OrderedOutboundQueue.
   const transport = (socket as unknown as { _socket: { pause(): void; resume(): void } })._socket;
   transport.pause();
   const pad = "x".repeat(BACKLOG_PAD_BYTES);
@@ -100,8 +88,6 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
   };
   await waitFor(() => pendingBeforePing() >= MINIMUM_PENDING_FRAMES, "queued backlog");
 
-  // Sampled at the Gateway's own ping event, before ws writes the automatic
-  // pong, so the count is the queue as the ping found it.
   let pendingAtPing: number | undefined;
   connection().socket.once("ping", () => { pendingAtPing = pendingBeforePing(); });
   socket.ping();
@@ -116,9 +102,6 @@ async function pongAgainstBacklog(): Promise<{ backlogBeforePong: number; pendin
 describe("Gateway pong against a queued stream backlog", () => {
   it("answers a client ping before frames still queued in the outbound queue", async () => {
     const { backlogBeforePong, pendingAtPing } = await pongAgainstBacklog();
-    // Every backlog frame that was still queued when the ping arrived must come
-    // after the pong: the pong may follow only the frames already handed to the
-    // socket (the rest of the total minus the pending ones).
     expect(pendingAtPing).toBeGreaterThanOrEqual(MINIMUM_PENDING_FRAMES);
     expect(backlogBeforePong).toBeLessThanOrEqual(BACKLOG_FRAMES - pendingAtPing);
   });

@@ -9,7 +9,6 @@ type RelayFetch = (input: string, init: RequestInit) => Promise<RelayFetchRespon
 
 const RESPONSE_MAX_BYTES = 16 * 1_024;
 const REQUEST_MAX_BYTES = 2 * 1_024;
-// APNs owns a bounded 15-second provider request; the caller must not abort first.
 const TIMEOUT_MS = 20_000;
 const PUBLIC_HOST_LABEL = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
@@ -98,15 +97,9 @@ export class PushRelayClient {
     }
     const result = exactResult(parsed);
     if (response.status === 200 && result) {
-      // Compatibility with relays predating the explicit in_progress status.
-      // Re-querying this exact ID is still safe: their ledger never starts a
-      // second APNs request, and the Gateway retry schedule remains bounded.
       if (result.status === "ambiguous" && result.reason === "provider_outcome_unknown") return { status: "in_progress", reason: result.reason };
       return result;
     }
-    // The relay intentionally exposes one bounded error key. An unknown,
-    // disabled, or mismatched grant is recoverable only by rotating the mobile
-    // capability; retrying this credential can never reach APNs.
     const relayError = parsed && typeof parsed === "object" && !Array.isArray(parsed)
       && Object.keys(parsed).length === 1 && typeof (parsed as Record<string, unknown>).error === "string"
       ? (parsed as Record<string, string>).error
@@ -128,7 +121,7 @@ export class PushRelayClient {
       try {
         const value = JSON.parse(text) as Record<string, unknown>;
         if (Object.keys(value).length === 2 && value.version === 1 && value.revoked === true) return "revoked";
-      } catch { /* retry below */ }
+      } catch { }
     }
     return "retryable";
   }

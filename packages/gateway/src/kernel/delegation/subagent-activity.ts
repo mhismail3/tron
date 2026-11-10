@@ -45,8 +45,6 @@ export function updateNestedExtensionActivity(turns: OwnedTurnOwner,
 }
 
 
-/** Status, report admission and Stop select the same exact executions. A completed
- * workflow is not stoppable: its live detached children must be named instead. */
 export function liveActivitySubagentRuns(turns: OwnedTurnOwner, activity: ExtensionRunActivity): HomeTaskSubagentRun[] {
   if (extensionActivityOwnsOwnLiveWork(turns, activity)) return [{
     runId: activity.runId ?? activity.toolCallId,
@@ -64,10 +62,6 @@ export function liveActivitySubagentRuns(turns: OwnedTurnOwner, activity: Extens
 }
 
 
-/** One liveness rule for detached extension work, shared by dashboard
- * accounting, administrative drain and task settlement. An async run is live
- * while it is, and also while a workflow child it launched is: a workflow can
- * complete while its detached children keep running. */
 export function extensionActivityOwnsLiveWork(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
   return extensionActivityOwnsOwnLiveWork(turns, activity) || liveWorkflowChildren(turns, activity).length > 0;
 }
@@ -82,19 +76,6 @@ function extensionActivityOwnsOwnLiveWork(turns: OwnedTurnOwner, activity: Exten
 }
 
 
-/** A detached row is live only while a lifecycle the Gateway watches can settle it.
- * Three routes qualify:
- * - The row's owner is the installed delegated provider.
- * - The row has no owner: an ownerless origin is the Gateway's own provider
- *   attribution (`delegatedProviderOrigin`'s fallback for artifact-discovered runs).
- * - Any tool's row whose run is bound to that exact tool call with a provider artifact
- *   directory the Gateway admitted. Its watcher reads that directory's lifecycle files,
- *   and their terminal state settles the row, so it is live, self-settling work. This
- *   is the accepted rule and the behaviour locks pin it.
- * Result fields `runId`/`state` without an admitted directory (a `schedule` runNow's
- * queued automation run) describe state another owner keeps. Nothing here would ever
- * settle them, so they never become live work, a drain blocker or a running dashboard
- * phase. */
 function delegatedLifecycleOwner(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
   const ownerId = activity.source.owner?.id;
   if (ownerId === undefined || ownerId === turns.subagentExtensionOrigin().owner?.id) return true;
@@ -103,10 +84,6 @@ function delegatedLifecycleOwner(turns: OwnedTurnOwner, activity: ExtensionRunAc
 }
 
 
-/** Live runner-backed workflow children of a run, in the states of the run itself.
- * A child's state is its lifecycle when projected, else its coarse status. Their
- * exact-owned paused-process proof is admitted with the detached-child binding,
- * never copied from untrusted tool-result presentation fields. */
 function liveWorkflowChildren(turns: OwnedTurnOwner, activity: ExtensionRunActivity): ExtensionRunChild[] {
   const detached = activity.runId === undefined ? undefined : turns.extensionRunOwnership.get(activity.runId)?.detachedChildKeys;
   if (!detached?.size) return [];
@@ -117,15 +94,11 @@ function liveWorkflowChildren(turns: OwnedTurnOwner, activity: ExtensionRunActiv
 }
 
 
-/** A run stays observed while it is running or a runner-backed child is live, so the
- * child's own status change still reaches the projection and the join. */
 export function extensionActivityWatchRequired(turns: OwnedTurnOwner, activity: ExtensionRunActivity): boolean {
   return activity.status === "running" || liveWorkflowChildren(turns, activity).length > 0;
 }
 
 
-/** The Gateway-admitted settlement instant of one paused activity, recorded
- * when its artifact frame proved every process had exited. */
 export function pausedProcessSettlementAt(turns: OwnedTurnOwner, activity: ExtensionRunActivity): string | undefined {
   if (activity.lifecycle?.state !== "paused" || !activity.runId) return undefined;
   const ownership = turns.extensionRunOwnership.get(activity.runId);
@@ -133,9 +106,6 @@ export function pausedProcessSettlementAt(turns: OwnedTurnOwner, activity: Exten
 }
 
 
-/** Rebuild terminal extension cards from canonical receipts before backfilling
- * tool results. This preserves the canonical terminalAt across a restart;
- * receipts are authoritative when the disposable result projection is rebuilt. */
 export function hydrateCanonicalExtensionActivities(turns: OwnedTurnOwner): void {
   const branch = turns.operations.sessionManager.getBranch();
   const receipts = extensionActivityReceipts(branch, turns.operations.id);
@@ -183,8 +153,6 @@ export function upsertExtensionActivity(turns: OwnedTurnOwner, activity: Extensi
 }
 
 
-/** Evict disposable rows by bucket, never allowing a recent terminal row to
- * displace queued/running/paused work from the 64-entry runtime map. */
 export function trimExtensionActivities(turns: OwnedTurnOwner): void {
   while (turns.extensionActivities.size > 64) {
     const candidates = [...turns.extensionActivities.entries()];
@@ -209,8 +177,6 @@ export function trimExtensionActivities(turns: OwnedTurnOwner): void {
 }
 
 
-/** Canonical JSONL facts are the only reacquisition evidence for an
- * artifact-created activity. Runtime maps are intentionally disposable. */
 export function canonicalExtensionRunFacts(turns: OwnedTurnOwner): Map<string, CanonicalExtensionRunFact> {
   const facts = new Map<string, CanonicalExtensionRunFact>();
   const recoveryReceipts: Array<{ sourceRunId: string; replacementRunId: string; toolCallId: string }> = [];
@@ -220,20 +186,12 @@ export function canonicalExtensionRunFacts(turns: OwnedTurnOwner): Map<string, C
     if (entry.type !== "message") continue;
     const message = entry.message as unknown as Record<string, unknown>;
     if (message.role !== "toolResult") continue;
-    // Details.runId is untrusted presentation data. Require the canonical
-    // tool identity and prove that its tool is currently extension-owned;
-    // otherwise arbitrary tool results must not claim an artifact run.
     const toolCallId = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
     const toolName = typeof message.toolName === "string" ? message.toolName : undefined;
-    // Supervisor receipts reference the target run; they never launch or own
-    // it. Counting a reply as a second owner blocks its terminal artifact.
     if (!toolCallId || !toolName || toolName === DELEGATED_SUPERVISOR_TOOL_NAME || !turns.operations.extensionToolOrigin(toolName)) continue;
     const details = message.details !== null && typeof message.details === "object" && !Array.isArray(message.details)
       ? message.details as Record<string, unknown>
       : undefined;
-    // Auto-recovery returns a management receipt, not a second launcher
-    // result. It can authorize only the exact provider-owned source run and
-    // replacement pair; supervisor references never enter this path.
     const steering = details?.steering !== null && typeof details?.steering === "object" && !Array.isArray(details.steering)
       ? details.steering as Record<string, unknown>
       : undefined;
@@ -260,8 +218,6 @@ export function canonicalExtensionRunFacts(turns: OwnedTurnOwner): Map<string, C
       || details?.status === "complete"
       || details?.status === "completed"
       || details?.status === "stopped";
-    // An async launcher acknowledgement has no child results and no explicit
-    // terminal state; it remains live after the foreground tool returns.
     const detached = typeof details?.asyncId === "string"
       && (!Array.isArray(details.results) || details.results.length === 0)
       && !explicitTerminal;
@@ -283,17 +239,11 @@ export function canonicalExtensionRunFacts(turns: OwnedTurnOwner): Map<string, C
     } else if (toolCallId.startsWith("subagent:") && previous.toolCallId && !previous.toolCallId.startsWith("subagent:")) {
       previous.terminal ||= terminal;
     } else {
-      // Distinct real tool calls sharing a runId are ambiguous. Retaining an
-      // arbitrary last writer would let a foreign artifact rebind the first.
       delete previous.toolCallId;
       previous.ambiguous = true;
       previous.terminal ||= terminal;
     }
   }
-  // Bind an auto-recovery receipt to the original canonical launch. The
-  // replacement has no distinct toolResult, so its artifact receives a
-  // stable synthetic owner derived from this exact handoff, never from its
-  // name/path alone. Conflicting handoffs fail closed on both runs.
   for (const receipt of recoveryReceipts) {
     const source = facts.get(receipt.sourceRunId);
     if (!source || source.ambiguous || !source.toolCallId) continue;
@@ -356,7 +306,6 @@ export function appendExtensionActivityReceipt(turns: OwnedTurnOwner, activity: 
     if (turns.extensionReceiptWrites.get(receipt.activityId) === write) turns.extensionReceiptWrites.delete(receipt.activityId);
     turns.releaseExtensionReceiptOwnership(receipt.activityId, owner);
   }, () => {
-    // Retain and identify the exact failed owner; drain recovery is process replacement.
     owner.markSuspect();
   });
   return write;
@@ -375,8 +324,6 @@ export function updateExtensionActivity(turns: OwnedTurnOwner,
   durationMs?: number,
   persistReceipt = true,
 ): ExtensionRunActivity | undefined {
-  // The native supervisor is ordinary control-tool activity, not a new
-  // delegated execution, even when its receipt includes the target runId.
   if (!extensionOrigin || toolName === DELEGATED_SUPERVISOR_TOOL_NAME) return undefined;
   const current = turns.extensionActivities.get(toolCallId);
   const foregroundSubagentOwner = turns.isForegroundSubagentTool(toolName, extensionOrigin);
@@ -389,8 +336,6 @@ export function updateExtensionActivity(turns: OwnedTurnOwner,
   const activityKey = current?.activityId ?? extensionActivityId(turns.operations.runtime.session.sessionManager.getSessionId(), toolCallId);
   const terminalStates = ["completed", "failed", "stopped", "rejected"];
   if (current?.lifecycle && terminalStates.includes(current.lifecycle.state)) {
-    // Terminal admission is a Gateway fact: neither wall-clock order nor a
-    // producer's later contradictory terminal may replace it.
     if (status === "running") return current;
     const requestedTerminal = status === "failed" ? "failed" : "completed";
     if (requestedTerminal !== current.lifecycle.state) return current;
@@ -399,17 +344,10 @@ export function updateExtensionActivity(turns: OwnedTurnOwner,
   }
   const sequence = (turns.extensionActivitySequences.get(activityKey) ?? current?.lifecycle?.sequence ?? 0) + 1;
   turns.extensionActivitySequences.set(activityKey, sequence);
-  // Returning an async launch receipt completes only the outer tool call. The
-  // delegated run remains current until its lifecycle artifact reaches a
-  // terminal state; treating this acknowledgement as terminal made pills
-  // flash directly into Recently Finished with a near-zero duration.
   const requestedAsyncDir = extensionRunAsyncDir(value);
   const asyncDir = requestedAsyncDir ? turns.canonicalExtensionArtifactDirectory(requestedAsyncDir) : undefined;
   const invalidDetachedDirectory = requestedAsyncDir !== undefined && asyncDir === undefined;
   const derivedStatus = extensionActivityStatusFromTool(value, status, childIdentityStrategy === "piForeground");
-  // An async acknowledgement without an admitted observable directory cannot
-  // author a detached live row. Settle the launcher projection instead of
-  // creating unwatched runtime/drain ownership.
   const terminal = invalidDetachedDirectory ? true : derivedStatus.terminal;
   const reportedTerminal = derivedStatus.reportedTerminal;
   const effectiveStatus = invalidDetachedDirectory ? (status === "failed" ? "failed" : "completed") : derivedStatus.status;
@@ -447,8 +385,6 @@ export function updateExtensionActivity(turns: OwnedTurnOwner,
     turns.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
     return current;
   }
-  // A synchronous result can be the first lifecycle payload carrying runId.
-  // Re-key any artifact-created synthetic row to the real Pi tool call.
   const ownership = activity.runId ? turns.extensionRunOwnership.get(activity.runId) : undefined;
   const syntheticToolCallId = ownership?.toolCallId?.startsWith("subagent:")
     ? ownership.toolCallId
@@ -503,13 +439,7 @@ export function updateExtensionActivity(turns: OwnedTurnOwner,
 }
 
 
-/** Lifecycle updates are compact presentation deltas, not transcript
- * changes. Avoid rebuilding and sending the canonical transcript for every
- * status artifact heartbeat. */
 export function publishExtensionActivity(turns: OwnedTurnOwner, activity: ExtensionRunActivity): void {
-  // The projection's `asOf` is refresh time, not execution recency. Artifact
-  // reconciliation can publish an old terminal run during a cold open; use
-  // the activity's own timestamp so observation alone cannot refresh history.
   turns.operations.noteDashboardActivity(activity.updatedAt);
   if (turns.operations.hasDetachedDashboardWork() && !turns.operations.activityHeartbeat) turns.operations.startActivityHeartbeat();
   turns.operations.emit("session.extensionActivity", safeJson({
@@ -519,16 +449,11 @@ export function publishExtensionActivity(turns: OwnedTurnOwner, activity: Extens
   }));
   turns.operations.publishProcessesForToolCall(activity.toolCallId);
   turns.operations.workerSettlement.publish("detached");
-  // Detached lifecycle updates do not rebuild the full transcript snapshot,
-  // but they are authoritative live catalog activity and must reorder rows.
   turns.operations.publishSummary();
   if (!turns.operations.hasCurrentDashboardWork()) turns.operations.stopActivityHeartbeat();
 }
 
 
-/** Recency is the sole expiry owner. At the wall-clock boundary remove the
- * disposable ambient rows, advance this slot's revision, and publish one
- * authoritative snapshot rather than waiting for a client request. */
 export function onExtensionActivityExpiry(turns: OwnedTurnOwner, frame: ActivityExpiryFrame): void {
   if (turns.operations.disposed) return;
   let removed = false;

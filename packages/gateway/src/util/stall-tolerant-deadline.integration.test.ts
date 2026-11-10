@@ -10,7 +10,6 @@ it("still expires work that remains unsettled after a stall", async () => {
   const expired = new Promise<void>((resolve) => { expire = resolve; });
   const deadline = new StallTolerantDeadline(200, expire);
   stallEventLoop(1_000);
-  // The late timer re-arms instead of expiring in the stalled turn.
   await new Promise<void>((resolve) => setImmediate(resolve));
   expect(deadline.expired).toBe(false);
   await expired;

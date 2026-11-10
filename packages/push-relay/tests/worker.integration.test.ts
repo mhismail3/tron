@@ -289,8 +289,6 @@ describe("v3 Worker boundary", () => {
     let frozen = false;
     vi.spyOn(crypto.subtle, "digest").mockImplementation(async (algorithm, data) => {
       const result = await digest(algorithm, data);
-      // Freeze at the authentication body hash, without bypassing the real
-      // admission boundary.
       if (!frozen && new TextDecoder().decode(data) === notification.body) {
         frozen = true;
         entered.resolve();
@@ -306,8 +304,6 @@ describe("v3 Worker boundary", () => {
         expect(registered.status).toBe(201);
         release.resolve();
         expect(await (await pending).json()).toMatchObject({ status: "accepted_by_apns" });
-        // Admission persists the hash of the exact authenticated body, so the
-        // replacement token cannot be admitted under a stale body identity.
         expect(state.storage.sql.exec<{ body_hash: string }>(
           "SELECT body_hash FROM relay_requests WHERE request_id = ?", requestId,
         ).one().body_hash).toBe(await sha256Hex(utf8(notification.body as string)));
@@ -353,9 +349,6 @@ describe("v3 Worker boundary", () => {
           expect(providerFetch).toHaveBeenCalledTimes(1);
           return;
         }
-        // invalid_token would also disable the unchanged grant in the Gateway.
-        // An explicit non-delivery for the retired token instead permits the
-        // existing bounded retry with the same request ID and one quota charge.
         expect(await (await pending).json()).toEqual({
           status: "retryable", reason: "apns_token_changed", retryAfterSeconds: 30,
         });
@@ -440,7 +433,6 @@ describe("v3 Worker boundary", () => {
   test("reports a storage fault inside the registration transaction as a server fault, not a conflict, and rolls it back", async () => {
     const registration = await assertionRegistration();
     await seedGrantForAssertion(registration);
-    // A real SQLite failure on the installation write: the server's own storage, not a replayed or stale proof.
     await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
       state.storage.sql.exec("CREATE TRIGGER lock_storage_fault BEFORE UPDATE ON installations BEGIN SELECT RAISE(ABORT, 'storage fault'); END");
     });
@@ -564,8 +556,6 @@ describe("v3 Worker boundary", () => {
     const providerFetch = vi.fn(async () => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", providerFetch);
 
-    // Hold both signatures after the grant lookup, making the stale-read
-    // interleaving deterministic without sleeps or production-only hooks.
     const sign = crypto.subtle.sign.bind(crypto.subtle);
     let release!: () => void;
     const barrier = new Promise<void>((resolve) => { release = resolve; });
@@ -617,9 +607,6 @@ describe("v3 Worker boundary", () => {
       return result;
     });
     try {
-      // Both handler lifetimes belong to this one test-owned DO request. This
-      // lets the real revoke commit while authentication is held, without an
-      // unresolved SELF response escaping its Workers I/O context.
       await runInDurableObject(stub(), async (instance: PushRegistry) => {
         const pending = instance.fetch(new Request("https://push.test/v3/notifications", notification));
         try {
@@ -698,8 +685,6 @@ describe("v3 Worker boundary", () => {
   });
 
   test("reports an unreadable stored assertion key as a server fault, not a rejected proof", async () => {
-    // initializeAndSeed stores 'test-spki' for this installation: the server's own state, which
-    // no client presentation can repair. The valid assertion must not be blamed on the client.
     const registration = await assertionRegistration();
     await initializeAndSeed();
     const response = await SELF.fetch("https://push.test/v3/installations", registration.request);

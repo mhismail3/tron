@@ -37,17 +37,12 @@ interface AuthOperation {
   callback: OAuthCallbackCapture | undefined;
   timer: NodeJS.Timeout;
   admittedAt: number;
-  /** True after the user answered or a callback was relayed, until the
-   * provider asks for more input. Only a completing login may hold a drain. */
   completing: boolean;
   work?: GatewayWorkHandle;
-  /** Settles when Pi's login promise for this exact operation settles. */
   settled: Promise<void>;
   notify?: (event: AuthEvent) => void;
 }
 
-/** Result of `auth.begin`: either a new admission or the recovered active
- * operation for the same owner/provider/auth-method/target. */
 interface AuthAdmission {
   operationId: string;
   recovered: boolean;
@@ -114,7 +109,7 @@ function boundedError(value: unknown): string {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   for (let end = available; end >= Math.max(0, available - 3); end -= 1) {
     try { return `${decoder.decode(encoded.subarray(0, end))}${suffix}`; }
-    catch { /* Remove only an incomplete terminal UTF-8 sequence. */ }
+    catch { }
   }
   return suffix;
 }
@@ -131,8 +126,6 @@ function normalizedLoopbackHost(hostname: string): OAuthCallbackCapture["host"] 
   return undefined;
 }
 
-/** Derive callback admission exclusively from the provider-authored authorization
- * URL. A mobile client is never allowed to choose a Gateway-local destination. */
 function callbackCapture(event: AuthEvent): OAuthCallbackCapture | undefined {
   if (event.type !== "auth_url" || typeof event.url !== "string") return undefined;
   try {
@@ -178,9 +171,6 @@ export class AuthBroker {
   private readonly operations = new Map<string, AuthOperation>();
   private readonly retiredOperations = new Map<string, RetiredAuthOperation>();
   private readonly beginReceipts = new Map<string, BeginReceipt>();
-  /** Latest Pi login promise per serialized provider resource. A successor
-   * starts only after its predecessor settles, so shared callback listeners
-   * and replacement operations never race their predecessor's resources. */
   private readonly unsettledLogins = new Map<string, Promise<void>>();
   private readonly getDeviceId: (() => string) | undefined;
 
@@ -224,12 +214,8 @@ export class AuthBroker {
     }
   }
 
-  /** Admitted operations, currently or awaiting their provider. The bound and
-   * its release are asserted through this count: capacity alone is observable
-   * only as a later `busy` refusal, which a leaked slot also produces. */
   get activeOperationCount(): number { return this.operations.size; }
 
-  /** Coalesce user-resource changes and apply them between global auth operations. */
   requestGlobalProviderRefresh(refresh: () => Promise<void>): void {
     this.pendingGlobalProviderRefresh = refresh;
     this.drainGlobalProviderRefresh();
@@ -250,7 +236,6 @@ export class AuthBroker {
     );
   }
 
-  /** Publish Pi's provider-authored authorization URL through the operation. */
   openMcpAuthorizationUrl(operationId: string, url: string, sessionId: string, server: string): void {
     const operation = this.operations.get(operationId);
     const target = operation?.target as { kind?: unknown; sessionId?: unknown; server?: unknown } | undefined;
@@ -262,19 +247,6 @@ export class AuthBroker {
     this.log("info", "MCP authorization URL was routed to its session operation", "mcp.auth-url.routed");
   }
 
-  /**
-   * Admit, recover, or replace one authentication operation. Admission is
-   * synchronous because device admission requires it; a replacement's provider
-   * login is deferred until its predecessor's Pi login promise settles.
-   *
-   * - A retried command ID returns its original admission.
-   * - An active operation with the same owner/provider/auth-method/target is
-   *   recovered (delivery rebound, bounded state replayed) before capacity is
-   *   enforced, so a client that lost its operation ID never consumes a slot.
-   * - `replaceOperationId` naming that exact active operation retires it and
-   *   admits a successor. A stale ID (already retired) admits or recovers
-   *   normally; one naming a different key is a conflict.
-   */
   start(
     clientId: string,
     providerId: string,
@@ -309,9 +281,6 @@ export class AuthBroker {
     }
 
     const key = recoveryKey(ownerIdentity, providerId, authType, targetKey);
-    // Pi's ChatGPT and Codex legacy OAuth listeners both bind port 1455.
-    // Serialize those provider logins process-wide so the second flow cannot
-    // start in fallback/manual mode while the first owns the callback listener.
     const loginKey = authType === "oauth" && (providerId === "openai" || providerId === "openai-codex")
       ? "oauth-callback-port-1455"
       : key;
@@ -393,9 +362,6 @@ export class AuthBroker {
 
     const notify = (event: AuthEvent) => {
       if (this.operations.get(operation.id) !== operation) return;
-      // A fixed provider callback port can be held by another active login.
-      // Relaying this operation's callback there would deliver its code to
-      // the wrong listener, so withhold the capture and keep manual entry.
       let capture = callbackCapture(event);
       if (capture && [...this.operations.values()].some((other) => other !== operation
         && other.callback?.host === capture!.host && other.callback.port === capture!.port)) capture = undefined;
@@ -552,9 +518,6 @@ export class AuthBroker {
     if (capture.expectedState !== undefined && callback.searchParams.get("state") !== capture.expectedState) {
       throw new GatewayError("invalid_request", "Authentication callback state does not match the active operation");
     }
-    // Claim before I/O. A local connection failure can be outcome-unknown if
-    // the provider listener accepted the one-use code and closed before its
-    // response reached us, so replay must never issue a second callback GET.
     capture.claimed = true;
     try {
       await this.relayCallback(capture, query);
@@ -602,20 +565,12 @@ export class AuthBroker {
     return true;
   }
 
-  /** A transport connection is disposable. Authentication remains owned by the
-   * authenticated device identity and can be rebound through auth.resume. */
   detachClient(clientId: string): void {
     for (const operation of this.operations.values()) {
       if (operation.deliveryClientId === clientId) operation.deliveryClientId = undefined;
     }
   }
 
-  /**
-   * A restart retires every login anyway. Cancel the ones waiting on the user
-   * now, so an abandoned sheet cannot hold the drain until its timeout; a login
-   * that is completing (answer submitted, credential possibly being written)
-   * keeps its work entry and the drain waits for it.
-   */
   cancelWaitingForRestart(): void {
     for (const operation of [...this.operations.values()]) {
       if (operation.completing) continue;
@@ -677,7 +632,6 @@ export class AuthBroker {
 
   private retire(operation: AuthOperation, reason: string, completion?: AuthCompletion): boolean {
     if (!this.operations.delete(operation.id)) return false;
-    // Provider IDs, methods and reasons only; never prompts, answers or credentials.
     const outcome = completion?.success ? "succeeded" : "ended";
     this.log(
       completion?.success ? "info" : "warning",
@@ -755,9 +709,6 @@ export class AuthBroker {
   }
 
   private complete(operation: AuthOperation, success: boolean, error?: unknown): void {
-    // The SDK can commit auth.json, then reject its local snapshot sync on our
-    // cancellation. Recognize that exact committed result, not an arbitrary
-    // synchronization failure or a provider that merely ignored cancellation.
     if (this.operations.get(operation.id) !== operation && operation.controller.signal.aborted
       && error instanceof CredentialSynchronizationError && error.providerId === operation.providerId
       && error.operation === "login" && error.credential?.type === operation.authType
@@ -771,9 +722,6 @@ export class AuthBroker {
     };
     const deliveryClientId = operation.deliveryClientId;
     if (!this.retire(operation, success ? "Authentication flow ended" : "Provider reported a login failure", completion)) {
-      // A resolved login (or the verified post-commit abort above) establishes
-      // canonical credentials even when the UI operation ended first. Correct
-      // its tombstone without replaying the credential mutation.
       if (!success) return;
       this.log("info", `Provider login for ${operation.providerId} (${operation.authType}) stored its credential after the operation ended`, "auth.login.succeeded");
       const retired = this.retiredOperations.get(operation.id);

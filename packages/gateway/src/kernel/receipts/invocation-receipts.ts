@@ -6,7 +6,6 @@ import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "../r
 import { MAX_ID_BYTES, MAX_NAME_BYTES, validOrigin, validText, validTimestamp } from "./receipt-fields.js";
 import { core as lifecycle, type Fact, type Kind, type Life, type Mark, type Refusal } from "../../core/receipts/invocation-lifecycle/facade.js";
 
-/** Internal folded lifecycle derived from canonical invocation receipts. */
 export interface InvocationProjection {
   version: 1;
   invocationId: string;
@@ -14,11 +13,7 @@ export interface InvocationProjection {
   source: InvocationSource;
   name?: string;
   arguments?: string;
-  /** User-authored text for image-bearing prompts, whose canonical message Pi may
-   * append resize notes to, and for skill/prompt invocations, whose canonical
-   * message is the expansions followed by this text. */
   submittedText?: string;
-  /** Ordered invoked resources: skills and prompts, or one extension command. */
   resourceInvocations?: ResourceInvocation[];
   lifecycle: InvocationLifecycle;
   canonicalEntryId?: string;
@@ -28,10 +23,7 @@ export interface InvocationProjection {
   updatedAt: string;
 }
 
-/** The Home task result custom message a Home wake is bound to. */
-
 export const HOME_TASK_RESULT_MESSAGE = "tron.home-task-result.v1";
-/** Canonical, non-context receipt family for Gateway invocation causality. */
 export const INVOCATION_RECEIPT_TYPE = "tron.chat-invocation.v1";
 const INVOCATION_RECEIPT_WRITER = "gateway";
 const MAX_RECEIPT_BYTES = 400 * 1_024;
@@ -40,11 +32,8 @@ const LIFECYCLES = new Set<InvocationLifecycle>([
   "staged", "accepted", "queued", "running", "waitingForInput", "retrying", "settling", "completed", "failed", "interrupted", "outcomeUnknown",
 ]);
 const KINDS = new Set(["start", "transition", "terminal", "binding"] as const);
-/** Gateway-authored sources without a user-authored name. An older Gateway that
- * does not know a source skips its receipt (rollback degrades to unattributed work). */
 export type InvocationSource = "plain" | "skill" | "prompt" | "extension" | "subagentWake" | "homeWake";
 const SOURCES = new Set<InvocationSource>(["plain", "skill", "prompt", "extension", "subagentWake", "homeWake"]);
-/** Sources that carry no name or arguments: a plain prompt or a Gateway-authored wake. */
 const UNNAMED_SOURCES: ReadonlySet<unknown> = new Set<InvocationSource>(["plain", "subagentWake", "homeWake"]);
 
 type ReceiptKind = "start" | "transition" | "terminal" | "binding";
@@ -61,7 +50,6 @@ interface InvocationReceiptCommon {
   createdAt: string;
 }
 
-/** One skill or prompt a message invoked; the receipt's `submittedText` carries the message text. */
 export interface InvokedResource {
   source: "skill" | "prompt";
   name: string;
@@ -69,12 +57,8 @@ export interface InvokedResource {
 
 interface InvocationStartReceipt extends InvocationReceiptCommon {
   receiptKind: "start";
-  /** The first invoked resource's name for skill/prompt sources. */
   name?: string;
   arguments?: string;
-  /** Every skill and prompt the message invoked, in order (#311). A start
-   * receipt written before multi-resource messages names one resource through
-   * `source`, `name` and `arguments` only, and stays readable as that one. */
   resources?: InvokedResource[];
   submittedText?: string;
   lifecycle: "staged";
@@ -92,7 +76,6 @@ interface InvocationTerminalReceipt extends InvocationReceiptCommon {
   name?: string;
   origin?: ChatOrigin;
   retryable?: boolean;
-  /** Terminal errors are codes, never arbitrary extension payloads. */
   errorCode?: string;
 }
 
@@ -148,10 +131,7 @@ const ALLOWED_KEYS: Record<ReceiptKind, ReadonlySet<string>> = {
   binding: new Set([...COMMON_KEYS, "canonicalEntryId", "parentEntryId"]),
 };
 
-/** Add the Gateway writer marker and reject an oversized encoded record. */
 export function makeInvocationReceipt(data: InvocationReceiptInput): InvocationReceiptData {
-  // Semantic identity must never be silently shortened. Request boundaries
-  // reject oversized values before this builder is reached.
   const receipt = { ...data, writer: INVOCATION_RECEIPT_WRITER } as InvocationReceiptData;
   const parsed = parseInvocationReceipt(receipt);
   if (!parsed) throw new GatewayError("invalid_request", "Gateway could not construct a valid invocation receipt");
@@ -196,15 +176,7 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
   return r as unknown as InvocationReceiptData;
 }
 
-/**
- * Read only Gateway-authored records. Same-id identical records are harmless
- * duplicate delivery; same-id contradictory records are rejected rather than
- * allowing an extension to rewrite a terminal fact.
- */
 export function invocationReceipts(entries: readonly SessionEntry[], sessionId?: string): InvocationReceiptData[] {
-  // A branch with no invocation receipt has nothing to fold, and a snapshot
-  // projection runs this over the whole branch on every build: skip indexing
-  // every entry for a record set that stays empty (G-2).
   if (!entries.some((entry) => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE)) return [];
   const records = new Map<string, InvocationReceiptData>();
   const entriesById = new Map(entries.map(entry => [entry.id, entry]));
@@ -214,7 +186,6 @@ export function invocationReceipts(entries: readonly SessionEntry[], sessionId?:
     if (!receipt || (sessionId !== undefined && receipt.sessionId !== sessionId)) continue;
     if (receipt.receiptKind === "binding") {
       const target = entriesById.get(receipt.canonicalEntryId);
-      // A Home wake binds the result message that triggered it, never a user message.
       const valid = receipt.source === "homeWake"
         ? target?.type === "custom_message" && (target.customType === HOME_TASK_RESULT_MESSAGE || target.customType === SETTINGS_OUTCOME_MESSAGE || target.customType === INPUT_TRIGGER_MESSAGE || target.customType === INPUT_TRIGGER_RESUME_MESSAGE)
         : target?.type === "message" && target.message.role === "user";
@@ -244,8 +215,6 @@ export function invocationReceipts(entries: readonly SessionEntry[], sessionId?:
       boundInvocations.add(record.invocationId);
     }
   }
-  // Map insertion order is canonical branch order. Sequence is a bounded live
-  // presentation fact only and can repeat across writes in one Gateway revision.
   return values;
 }
 
@@ -276,18 +245,9 @@ function startOrigin(start: InvocationReceiptCommon): ChatOrigin {
   return ("origin" in start ? start.origin as ChatOrigin | undefined : undefined) ?? { kind: start.source === "extension" ? "extension" : "user", confidence: "receipt" };
 }
 
-/**
- * Fold a session's receipts into each invocation's lifecycle, or throw for the first receipt that contradicts
- * the ones before it. Proof block receipts/invocation-lifecycle (packages/core) decides the fold: which receipt
- * is refused and why, each invocation's lifecycle, and which receipts its canonical entry, retryable flag and
- * time come from. This function states each receipt to the block as a fact (numbers for the invocation and the
- * canonical entry; whether its operation, source, name and origin are those of its invocation's first start
- * receipt) and writes the block's answer back from the receipts it names.
- */
 export function invocationProjection(receipts: readonly InvocationReceiptData[]): InvocationProjection[] {
   const invocations = new Map<string, number>();
   const entries = new Map<string, number>();
-  // Per invocation number: its first start receipt, and the position of its first receipt with a retryable flag.
   const starts: Array<InvocationReceiptData | undefined> = [];
   const firstFlagAt: number[] = [];
   const facts = receipts.map((receipt, position): Fact => {
@@ -322,8 +282,6 @@ export function invocationProjection(receipts: readonly InvocationReceiptData[])
   });
   const folded = lifecycle.Fold(facts);
   if (folded.$ === "Stopped") throw new Error(REFUSALS[folded.why]);
-  // The numbers above count distinct ids from 0, so each is below the number of facts and the block never
-  // answers Unfit; if the numbering ever broke, the fold stops here rather than project a wrong history.
   if (folded.$ === "Unfit") throw new Error("invocation receipts are not numbered for the fold");
   return folded.cells.map((cell): InvocationProjection => {
     const start = receipts[cell.start] as InvocationStartReceipt;
@@ -341,7 +299,6 @@ export function invocationProjection(receipts: readonly InvocationReceiptData[])
       origin: startOrigin(start),
       sequence: start.sequence, updatedAt: receipts[cell.updated]!.createdAt,
     };
-    // The canonical entry and the retryable flag are written in the order their receipts came.
     const bound = cell.entryAt < 0 ? undefined : (receipts[cell.entryAt] as InvocationBindingReceipt).canonicalEntryId;
     const flagAt = cell.retryable.$ === "FlagOf" ? firstFlagAt[facts[cell.start]!.inv]! : -1;
     if (bound && (flagAt < 0 || cell.entryAt < flagAt)) projection.canonicalEntryId = bound;

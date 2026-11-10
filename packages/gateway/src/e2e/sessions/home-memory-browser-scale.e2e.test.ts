@@ -1,16 +1,4 @@
 import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
-/**
- * Manage Home → Memory at a real Home's scale (#940): three chapters, 1200+
- * messages and tens of megabytes of canonical JSONL, built through the real
- * RuntimeRegistry and Gateway RPC surface with a faux compactor.
- *
- * The browser's reads are disposable and the Gateway cancels them after
- * DISPOSABLE_READ_DEADLINE_MS (5000 ms). This journey measures the CPU work of the
- * first page, paging, a chapter scope, a part (zoom) and an evidence read, and proves the
- * answers equal the ones a read that proves all history from its first byte gives.
- *
- * Retained artifact: `test-results/home-memory-browser-scale/report.json`, including the last browser phase and safe failure category when a read refuses.
- */
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,12 +22,9 @@ const PROVIDER = "tron-home-scale";
 const MODEL = { provider: PROVIDER, id: "chat" };
 const MEMORY_MODEL = { provider: `${PROVIDER}-memory`, id: "compactor" };
 const REPORT_PATH = "test-results/home-memory-browser-scale/report.json";
-/** The Gateway's disposable-read deadline (transport/server.ts). */
 const DEADLINE_MS = 5_000;
-/** Each warm browser read must answer within a fifth of the deadline. */
 const BUDGET_MS = DEADLINE_MS / 5;
 const CHAPTERS = 3;
-/** Appended per chapter; with each chapter's opening prompt/reply, 1200+ messages. */
 const MESSAGES_PER_CHAPTER = 405;
 const client = { id: "scale", identity: "device:home-scale", isLocal: false, unsubscribe: () => {} } as unknown as ClientContext;
 
@@ -54,7 +39,6 @@ afterAll(async () => {
   await writeFile(join(process.cwd(), REPORT_PATH), `${JSON.stringify(report, null, 2)}\n`);
 });
 
-/** Summaries near the node bound, like a real Home's. */
 const summarizer: EpisodicSummarizer = async request => fauxAssistantMessage(
   `SCALE-SUMMARY ${request.turns.length} ${"recalled detail about earlier Home work ".repeat(11)}`.slice(0, 480));
 
@@ -93,11 +77,6 @@ async function closeGateway(gateway: Gateway): Promise<void> {
 const status = async (g: Gateway) => await g.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
 const view = async (g: Gateway, params: Record<string, unknown>) => await g.service.invoke(client, "home.memory.view", params) as unknown as HomeMemoryView;
 
-/** A read's cost is the CPU time the Gateway's thread spends answering it. That is
- * the read's own work: host load deschedules the thread and stretches wall time, but
- * not this, so the budget and the warm-versus-full-proof ratio judge the read rather
- * than the host (#1051). Memory is frozen before the timed reads, so nothing else
- * runs on this thread meanwhile. */
 async function timedRead<T>(read: () => Promise<T>): Promise<{ value: T; ms: number }> {
   const cpu = process.threadCpuUsage();
   const value = await read();
@@ -105,7 +84,6 @@ async function timedRead<T>(read: () => Promise<T>): Promise<{ value: T; ms: num
   return { value, ms: Math.round((used.user + used.system) / 100) / 10 };
 }
 
-/** Deterministic, varied canonical content: a real Home's tool results dominate its bytes. */
 function appendHistory(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, chapter: number): void {
   for (let index = 0; index < MESSAGES_PER_CHAPTER; index += 1) {
     const tag = `c${chapter}-m${index}`;
@@ -123,8 +101,6 @@ function appendHistory(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, ch
 
 describe("Home memory browser at scale", () => {
   const membership: { root?: string; g?: Gateway; faux?: ReturnType<typeof fauxProvider>; slot?: Awaited<ReturnType<RuntimeRegistry["acquire"]>> } = {};
-  // Building 362 canonical messages and their real derived forest is fixture
-  // preparation, not a browser-latency oracle. Keep the behavior test at 15s.
   beforeAll(async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-home-resolution-"));
     membership.root = root;
@@ -226,8 +202,6 @@ describe("Home memory browser at scale", () => {
           await waitFor(() => !slot.isBusy || undefined, "first chapter turn");
           await g.service.invoke(client, "home.pauseMemory", { commandId: "scale-pause" });
         } else {
-          // Seal the previous chapter as the size rollover would; paused memory
-          // still materializes the next chapter without dispatching a turn.
           const owner = homeOwnerOf(g.registry) as unknown as {
             options: { sessions: { chapterMetrics: (id: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
             chapterQuiescent(id: string): Promise<void>;
@@ -253,9 +227,6 @@ describe("Home memory browser at scale", () => {
       const sourceBytes = (await Promise.all(chapterIds.map(async id => (await stat((await g.registry.acquire(id)).sessionFile!)).size))).reduce((a, b) => a + b, 0);
       const buildMs = Math.round(performance.now() - buildStarted);
 
-      // ---- timed reads, as the browser issues them --------------------------------
-      // `fresh` drops the owner's chapter proofs before each read: every read then
-      // proves all of Home's history from its first byte, as before #940.
       const reads = async (gateway: Gateway, fresh = false, label = "read") => {
         const timed = async <T>(stage: string, read: () => Promise<T>) => {
           markStage(stage);
@@ -290,15 +261,13 @@ describe("Home memory browser at scale", () => {
           ms: { firstPage: first.ms, pages: pageMs, chapter: chapter.ms, part: part.ms, evidence: evidence.ms },
         };
       };
-      const warm = await reads(g, false, "warm"); // Ingested already; this is the browser's steady state.
-      const again = await reads(g, false, "repeat");         // Repeat: identical answers, steady-state timings.
+      const warm = await reads(g, false, "warm");
+      const again = await reads(g, false, "repeat");
       expect(again.values).toEqual(warm.values);
 
       const beforeRestart = warm.values.pages;
       expect(beforeRestart).toHaveLength(6);
 
-      // A restart refolds the demand-built journal; a particular binary tiling
-      // is not promised. Keep coverage and cursor identity strict for either layout.
       markStage("close old Gateway");
       await closeGateway(g);
       markStage("open restarted Gateway");
@@ -337,11 +306,9 @@ describe("Home memory browser at scale", () => {
       expect(warm.values.chapter.totalMessages).toBeLessThan(first.totalMessages);
       expect(warm.values.part.lines).toHaveLength(2);
 
-      // ---- old path: every read proves all chapters from their first byte ------
       const full = await reads(g, true, "cold full proof after restart");
       expect(full.values).toEqual(afterRestart.values);
 
-      // A cold proof the deadline cancels still completes for the retry (Reload).
       (homeOwnerOf(g.registry) as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs();
       markStage("cancelled cold proof request");
       const cancelled = new AbortController();
@@ -353,8 +320,6 @@ describe("Home memory browser at scale", () => {
       expect(retry.value).toEqual(first);
       const afterRetry = await timedRead(() => view(g, { limit: 30 }));
 
-      // A live turn appends to the active chapter: reads extend its proof by the
-      // new bytes only. Navigation is not an append and re-proves the chapter.
       const dropProofs = () => { (homeOwnerOf(g.registry) as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs(); };
       const active = await g.registry.acquire(chapterIds[2]!);
       for (let index = 0; index < 4; index += 1) {
@@ -377,10 +342,6 @@ describe("Home memory browser at scale", () => {
       markStage("reprove after navigation");
       expect(await view(g, { limit: 30 })).toEqual(navigated);
 
-      // A start without its durable catalog document (the first start after an upgrade, or
-      // a corrupt document) publishes its first catalog cut only after reconciling the
-      // folder. A browser read that arrives first must wait for that cut: it read the
-      // missing cut as a sealed chapter with no file and refused the read (#968).
       const beforeColdCatalog = await view(g, { limit: 30 });
       markStage("close for a restart without the catalog document");
       await closeGateway(g);
@@ -404,8 +365,6 @@ describe("Home memory browser at scale", () => {
       });
       process.stdout.write(`home-memory-browser-scale: ${JSON.stringify(report)}\n`);
       for (const ms of steady) expect(ms).toBeLessThan(BUDGET_MS);
-      // Load-independent scaling check, both sides measured in this run: a warm read
-      // must not cost what proving all history costs (the pre-#940 per-read cost).
       const median = (values: number[]) => [...values].sort((x, y) => x - y)[Math.floor(values.length / 2)]!;
       const fullProof = [full.ms.firstPage, ...full.ms.pages, full.ms.chapter, full.ms.part, full.ms.evidence];
       expect(median(steady) * 10).toBeLessThan(median(fullProof));

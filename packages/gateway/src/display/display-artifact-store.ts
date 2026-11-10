@@ -20,13 +20,9 @@ export const DISPLAY_MAXIMUM_ARTIFACT_BYTES = 2 * 1_024 * 1_024 * 1_024;
 const DEFAULT_MAXIMUM_LOGICAL_BYTES = 32 * 1_024 * 1_024 * 1_024;
 const DEFAULT_MAXIMUM_ITEMS = 16_384;
 const DEFAULT_MINIMUM_FREE_BYTES = 1 * 1_024 * 1_024 * 1_024;
-// Display reads reserve their allowance before verification/open and an ingest
-// copies up to 2 GiB into staging, so these caps are fixed bounds rather than
-// tuning knobs (`packages/gateway/docs/connection-resilience.md`).
 const MAXIMUM_ACTIVE_READERS = 4;
 const MAXIMUM_ACTIVE_INGESTS = 2;
 
-/** Closed artifact-kind admission, shared with the `tron.display.v1` projection. */
 export function isDisplayArtifactKind(value: unknown): value is DisplayArtifactKind {
   return (DISPLAY_ARTIFACT_KINDS as readonly string[]).includes(String(value));
 }
@@ -51,7 +47,6 @@ function inside(root: string, candidate: string): boolean {
   return delta === "" || (!delta.startsWith(`..${sep}`) && delta !== ".." && !isAbsolute(delta));
 }
 
-// A fatal decoder throws on invalid UTF-8; the caller reports it as a request error.
 function isValidUtf8(bytes: Uint8Array): boolean {
   try {
     new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -61,8 +56,6 @@ function isValidUtf8(bytes: Uint8Array): boolean {
   }
 }
 
-/** Only source-path access errors become an unavailable resource; raw errors
- * from staging, publication and durable storage must remain operational failures. */
 function refuseUnavailableSource(error: unknown): never {
   if (["ENOENT", "ENOTDIR", "ENAMETOOLONG", "EACCES", "EPERM", "ELOOP"].includes((error as NodeJS.ErrnoException)?.code ?? "")) {
     throw new GatewayError("invalid_request", "Display source is unavailable or unreadable");
@@ -153,8 +146,6 @@ function signatureMatches(prefix: Buffer, classification: { mimeType: string; ki
     case "audio/mp4": return prefix.length >= 12 && prefix.subarray(4, 8).toString("ascii") === "ftyp";
     case "audio/mpeg": return ascii.startsWith("ID3") || (prefix[0] === 0xff && (prefix[1] ?? 0) >= 0xe0);
     case "audio/wav": return ascii.startsWith("RIFF") && ascii.slice(8, 12) === "WAVE";
-    // Text-like kinds have no container signature; ingest validates the whole
-    // staged file as UTF-8 without NUL bytes.
     default: return true;
   }
 }
@@ -172,10 +163,6 @@ export class DisplayArtifactStore {
   private readonly index = new Map<string, DisplayArtifactMetadata>();
   private readonly activeReaderCounts = new Map<string, number>();
   private readonly verifiedDigests = new Set<string>();
-  /** Artifact ids whose durable bytes remain present but could not be validated
-   * because storage returned an operational error during startup. Keep them out
-   * of the rebuilt index and orphan sweep rather than turning uncertainty into
-   * destructive cleanup. */
   private readonly unavailableArtifacts = new Set<string>();
   private readonly verificationFlights = new Map<string, Promise<void>>();
   private activeReaders = 0;
@@ -227,9 +214,6 @@ export class DisplayArtifactStore {
           if (!isMetadata(metadata, entry.name, this.maximumItemBytes)) {
             throw new GatewayError("conflict", "Display artifact metadata is invalid");
           }
-          // Revocation can commit empty ownership and crash before the lane
-          // removes the folder: empty-owner metadata is startup cleanup only,
-          // never restored authority (`packages/gateway/docs/connection-resilience.md`).
           if (metadata.owners.length === 0) {
             await rm(folder, { recursive: true, force: true });
             continue;
@@ -253,9 +237,6 @@ export class DisplayArtifactStore {
           if (isConfirmedArtifactCorruption(error)) {
             await rm(folder, { recursive: true, force: true });
           } else {
-            // Operational I/O failure is not evidence of corruption. Preserve
-            // the canonical artifact and its immutable object, but keep the id
-            // unavailable until a later initialization can validate it.
             this.unavailableArtifacts.add(entry.name);
           }
         }
@@ -408,9 +389,6 @@ export class DisplayArtifactStore {
         if (!info.isFile() || info.size !== input.size) throw new GatewayError("conflict", "Display object digest collision");
         await this.verify(input.digest, input.size, object, true);
       }
-      // Retained metadata proves this canonical inode was synchronized before
-      // publication. An unreferenced object (including a prior failed attempt)
-      // still needs synchronization; syncing discarded duplicate staging does not.
       if (![...this.index.values()].some(metadata => metadata.digest === input.digest)) {
         const handle = await open(object, "r");
         try { await syncDurably(handle); } finally { await handle.close(); }
@@ -446,9 +424,6 @@ export class DisplayArtifactStore {
     });
   }
 
-  /** Retain immutable bytes in a caller-owned staging path, without exporting
-   * the canonical object's path. The caller must synchronize its destination
-   * directory before acknowledgement. Cross-device callers must publish a copy. */
   async linkArtifact(id: string, sessionID: string, expectedDigest: string, destination: string): Promise<boolean> {
     this.validateID(id);
     return this.serialize(async () => {
@@ -512,8 +487,6 @@ export class DisplayArtifactStore {
       );
     }
     const path = join(this.artifactDirectory, id, "content");
-    // Reserve before validation/open yields; otherwise concurrent acquisitions
-    // all pass the same cap and revocation can remove a file being admitted.
     this.activeReaders += 1;
     this.activeReaderCounts.set(id, (this.activeReaderCounts.get(id) ?? 0) + 1);
     let handle: Awaited<ReturnType<typeof open>> | undefined;
@@ -534,8 +507,6 @@ export class DisplayArtifactStore {
       handle = await open(path, "r");
       const info = await handle.stat();
       if (!info.isFile() || info.size !== metadata.size) throw new GatewayError("not_found", "Display artifact is unavailable");
-      // Share FileHandle's close ownership, including unread conditional GETs.
-      // A raw numeric fd lets stream.destroy() race handle.close() with EBADF.
       const stream: ReadStream = handle.createReadStream({ autoClose: false, start, end });
       return {
         mimeType: metadata.mimeType,
@@ -560,9 +531,6 @@ export class DisplayArtifactStore {
     await this.serialize(() => this.revokeOwner(id, sessionID));
   }
 
-  /** Removes only provisional/noncanonical ownership for one loaded session.
-   * The caller supplies references from the complete canonical JSONL tree, not
-   * merely the active branch, so branch navigation remains reversible. */
   async reconcileSession(sessionID: string, canonicalArtifactIDs: ReadonlySet<string>): Promise<void> {
     if (!validIdentity(sessionID) || canonicalArtifactIDs.size > this.maximumItems) {
       throw new GatewayError("invalid_request", "Display artifact reconciliation identity is invalid");
@@ -586,15 +554,12 @@ export class DisplayArtifactStore {
     const metadata = this.index.get(id);
     if (!metadata?.owners.includes(sessionID)) return;
     const owners = metadata.owners.filter((owner) => owner !== sessionID);
-    // Revocation removes future authority durably, even while a reader owns
-    // the bytes. Empty ownership survives a crash only as startup cleanup.
     const next = { ...metadata, owners };
     await durableAtomicWriteJson(join(this.artifactDirectory, id, "metadata.json"), next);
     this.index.set(id, next);
     await this.removeUnowned(id);
   }
 
-  /** Called only under the mutation lane; reader retirement joins that lane. */
   private async removeUnowned(id: string): Promise<void> {
     const metadata = this.index.get(id);
     if (!metadata || metadata.owners.length > 0 || (this.activeReaderCounts.get(id) ?? 0) > 0) return;
@@ -610,7 +575,6 @@ export class DisplayArtifactStore {
 
   async maintain(resolveLiveSessionIDs?: () => Promise<ReadonlySet<string>>, removingSessionID?: string): Promise<void> {
     await this.serialize(async () => {
-      // A queued grant must commit before orphan membership is captured.
       const liveSessionIDs = await resolveLiveSessionIDs?.();
       let removedDirectories = false;
       try {
@@ -620,21 +584,13 @@ export class DisplayArtifactStore {
           const removing = owners.length === 0 && (this.activeReaderCounts.get(id) ?? 0) === 0;
           if (owners.length !== metadata.owners.length) {
             const next = { ...metadata, owners };
-            // Retained readers/owners need durable revocation metadata. With no
-            // reader or owner left, durably delete the directory instead of
-            // synchronizing an empty-owner document immediately before erasing it.
             if (!removing) await durableAtomicWriteJson(join(this.artifactDirectory, id, "metadata.json"), next);
             this.index.set(id, next);
           }
-          // A last reader can release while the metadata sync above yields.
-          // Decide whether this call deletes at the same synchronous cut as
-          // removeUnowned, not from the earlier publication decision.
           if (owners.length === 0 && (this.activeReaderCounts.get(id) ?? 0) === 0) removedDirectories = true;
           await this.removeUnowned(id);
         }
       } finally {
-        // Synchronize once for the entire cut, including removals completed
-        // before a later operational error; never acknowledge volatile deletion.
         if (removedDirectories) {
           const directory = await open(this.artifactDirectory, "r");
           try { await syncDurably(directory); } finally { await directory.close(); }
@@ -672,9 +628,6 @@ export class DisplayArtifactStore {
   }
 
   private async removeObjectIfUnreferenced(digest: string): Promise<void> {
-    // An unavailable artifact is a reference and quota authority even though
-    // its metadata could not be read. Do not let releasing a known sibling
-    // turn uncertainty into destructive object cleanup.
     if (this.unavailableArtifacts.size > 0
       || [...this.index.values()].some((value) => value.digest === digest)) return;
     await rm(this.objectPath(digest), { force: true });
@@ -682,8 +635,6 @@ export class DisplayArtifactStore {
   }
 
   private async removeOrphanObjects(): Promise<void> {
-    // An unavailable artifact may still own an object whose metadata could not
-    // be read. Defer the sweep rather than risk deleting canonical bytes.
     if (this.unavailableArtifacts.size > 0) return;
     const referenced = new Set([...this.index.values()].map((value) => value.digest));
     const shards = await readdir(this.objectDirectory, { withFileTypes: true });

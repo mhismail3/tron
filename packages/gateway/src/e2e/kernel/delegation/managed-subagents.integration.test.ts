@@ -15,8 +15,6 @@ import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 
-/** Real Gateway/SDK execution; only the external model output is scripted.
- * The fixture owns home/cache/session state and disposes the runtime before files. */
 it.each([
   { conflict: false, bound: true, foreignHome: false },
   { conflict: true, bound: true, foreignHome: false },
@@ -45,8 +43,6 @@ it.each([
   const facts: Record<string, unknown> = { passed: false };
   try {
     await Promise.all([mkdir(agentDir), mkdir(cache), mkdir(cwd)]);
-    // The workspace is its own Project root even when TMPDIR lies inside a Git
-    // checkout, as it does under update-pi-subagents' staging gate.
     expect(spawnSync("git", ["-C", cwd, "init", "-q"], { env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" } }).status).toBe(0);
     expect(await readdir(agentDir)).toEqual([]);
     expect(await readdir(cache)).toEqual([]);
@@ -56,7 +52,6 @@ it.each([
     delete process.env[DELEGATED_PROVIDER_ROOT_ENV];
     delete process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT;
     if (bound) delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
-    // Deny all TCP, including loopback: this case needs no HTTP fixture.
     net.Socket.prototype.connect = function () {
       networkAttempts++;
       throw new Error("Network denied during managed subagent activation/execution");
@@ -128,8 +123,6 @@ it.each([
       try { unexpectedSlot = await registry.create(cwd); }
       catch (error) { failure = error; }
       if (unexpectedSlot) {
-        // A negative control may admit the provider. Join its real execution
-        // before asserting refusal so disposal cannot race session-start work.
         await unexpectedSlot.setModel(model.provider, model.id);
         await unexpectedSlot.prompt("Launch offline-worker and report completion");
         await waitFor(() => !unexpectedSlot!.isBusy, "unexpected unbound child completion");
@@ -177,7 +170,6 @@ it.each([
       ignoredUserResourcesAbsent: true,
     };
     expect(resources.subagents.some((agent) => agent.name === "offline-worker")).toBe(true);
-    // Subagent detail (#1655): the definition body, credential-redacted, with no file path.
     const detail = await slot.subagentDetail("detail-probe") as unknown as Record<string, unknown>;
     expect(detail).toMatchObject({ name: "detail-probe", description: "Detail probe", source: "project", distribution: "local", contentTruncated: false });
     expect(detail.content).toContain("Delegated body line.");

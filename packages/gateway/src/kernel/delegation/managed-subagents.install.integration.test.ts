@@ -71,15 +71,11 @@ it("installs the real pinned closure in an empty home, admits its tool, and disc
   expect(catalog.diagnostic).toBeUndefined();
   expect(catalog.subagents.length).toBeGreaterThan(0);
   expect(catalog.subagents.some((agent) => agent.filePath?.startsWith(root))).toBe(true);
-  // Admission is idempotent only for the original verified selection. An
-  // extension object admitted in one home cannot become another home's owner.
   expect(() => provider.admit(loaded.extensions)).not.toThrow();
   const foreign = new ManagedSubagents(home);
   cpSync(root, foreign.root, { recursive: true, verbatimSymlinks: true });
   delegatedProviderEnvironment(delegatedArtifactRoot(home));
   expect(() => foreign.admit(loaded.extensions)).toThrow(/different verified root/);
-// Cold real-extension loading measured 22s alongside rollback, even with the
-// install shared. Bound only this real I/O case at roughly 3x that duration.
 });
 
 it("loads one peer-free install through two host SDK payload paths with exact host export identity", () => {
@@ -114,15 +110,12 @@ it("loads one peer-free install through two host SDK payload paths with exact ho
     cpSync(join(gatewayRoot, "node_modules", "@earendil-works", "pi-coding-agent"), sdkRoot, { recursive: true });
     symlinkSync(join(gatewayRoot, "node_modules"), join(payload, "node_modules"));
     const output = execFileSync(process.execPath, [script, join(sdkRoot, "dist", "index.js"), payload, providerEntry, probe], {
-      // Cold host-loader I/O exceeded 8s under parallel verification.
       timeout: 24_000, encoding: "utf8", env: { PATH: process.env.PATH!, HOME: home, TMPDIR: home,
         [DELEGATED_PROVIDER_ROOT_ENV]: process.env[DELEGATED_PROVIDER_ROOT_ENV],
         PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT },
     });
     expect(JSON.parse(output.trim())).toEqual({ moduleIdentity: true, providerTool: true, networkAttempts: 0 });
   }
-// Two separate SDK module lifetimes measured 23s under parallel verification;
-// sharing provider bytes cannot remove their cold real-loader work.
 });
 
 it("refuses package writes through the loader view without dropping canonical declarations", async () => {
@@ -159,7 +152,6 @@ it("refuses an unknown loaded extension registering the reserved subagent tool",
 });
 
 it("refuses a tampered installed byte for both admission and discovery", async () => {
-  // Only this destructive case owns a copy; admission cases share immutable bytes.
   const provider = new ManagedSubagents(home);
   delegatedProviderEnvironment(delegatedArtifactRoot(home));
   cpSync(root, provider.root, { recursive: true, verbatimSymlinks: true });
@@ -205,8 +197,6 @@ it("refuses a foreign extension claiming the provider tool after load", async ()
 it("refuses a forged receipt and exposes no uninstalled provider", () => {
   const provider = new ManagedSubagents(home);
   expect(() => provider.verify()).toThrow(/managed pi-subagents unavailable/);
-  // Receipt refusal happens before reading installed entries; no second install
-  // is needed to exercise this admission boundary.
   const root = provider.root;
   mkdirSync(root, { recursive: true });
   writeFileSync(join(root, "tron-install-receipt.json"), JSON.stringify({ version: "0.59.0", sha512: "forged" }));

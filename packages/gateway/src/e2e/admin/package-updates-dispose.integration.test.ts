@@ -6,9 +6,6 @@ import { expect, it } from "vitest";
 import { startLockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-// #2242: a package update check still running when its Gateway is disposed (its caller
-// stopped waiting) kept spawning version-query children that wrote under the root the
-// harness was removing (ENOTEMPTY). Disposal joins admitted work before removing it.
 it("disposes only after an admitted package update check has settled", async () => {
   const outside = await mkdtemp(join(tmpdir(), "tron-package-dispose-outside-"));
   const root = await mkdtemp(join(tmpdir(), "tron-package-dispose-"));

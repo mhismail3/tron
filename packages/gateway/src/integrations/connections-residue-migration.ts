@@ -7,20 +7,6 @@ import { syncDurably } from "../foundation/durable-json.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 import { validateConnectionState } from "./connection-contract.js";
 
-/**
- * One-shot, backed-up removal of retired connection residue (#2327), run by the
- * maintainer; never at startup. Production has no connection definitions, RPCs
- * or adapters, so setup operations and receipts can never complete or be read
- * again, and Raindrop collection mappings have no consumer. The migration drops
- * every setup operation and receipt and each instance's `raindropCollections`,
- * keeping the instances and their credential references. It is idempotent (a
- * second run plans nothing), clones the original into an empty backup directory
- * with a digest manifest before publishing, replaces the file by rename only if its
- * bytes are unchanged when checked just before, and `--restore` puts back only
- * bytes it published. Run it with no other writer of the file. Delete
- * this module, with the Raindrop mapping validator, once the live run is verified.
- */
-
 const STATE_MAX_BYTES = 4 * 1_048_576;
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
@@ -45,7 +31,6 @@ export async function planConnectionsResidue(tronHome: string): Promise<ResidueP
   return { ...plan, before, after: Buffer.from(`${JSON.stringify(after, null, 2)}\n`, "utf8") };
 }
 
-/** Backs up, then replaces the file in the same directory only if its bytes are unchanged. */
 export async function applyConnectionsResidue(plan: ResiduePlan, backup: string): Promise<boolean> {
   if (!plan.before || !plan.after) return false;
   await mkdir(backup, { recursive: true, mode: 0o700 });
@@ -55,8 +40,6 @@ export async function applyConnectionsResidue(plan: ResiduePlan, backup: string)
   if (!(await readFile(original)).equals(plan.before)) throw new Error(`${plan.path} changed while it was backed up; rerun with a new backup directory`);
   const manifest: Manifest = { version: 1, path: plan.path, before: digest(plan.before), after: digest(plan.after) };
   await writeFile(join(backup, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-  // A manifest names only a published migration, so restore never acts on a
-  // refused one; a failure after the rename (directory sync) keeps it.
   try { await publish(plan.path, plan.after, plan.before); }
   catch (error) {
     if (!(await readFile(plan.path)).equals(plan.after)) await rm(join(backup, "manifest.json"), { force: true });

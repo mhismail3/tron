@@ -32,8 +32,6 @@ async function fixture() {
   return { root, outside, project, storeIds };
 }
 
-// Known projects are bounded only by the disk: registering many projects must not
-// evict the oldest, which would lose their outside-change provenance.
 it("keeps every known project's observed state however many are registered", async () => {
   const { outside, project, storeIds } = await fixture();
   try {
@@ -45,7 +43,6 @@ it("keeps every known project's observed state however many are registered", asy
     expect((await storeIds()).filter(id => id.startsWith("project:")).length).toBe(70);
     expect((await storeIds()).filter(id => id.startsWith("project-mcp:")).length).toBe(70);
 
-    // The first-registered project still compares against its baseline.
     await writeFile(join(projects[0]!, ".pi", "settings.json"), `${JSON.stringify({ defaultThinkingLevel: "high" })}\n`);
     await outside.reconcile(projectStores(projects[0]!));
     expect(Object.values(await outside.marks({ kind: "project", root: projects[0]! }))).toEqual([
@@ -64,13 +61,11 @@ it("forgets a project whose root was removed from disk", async () => {
     await outside.reconcile([...projectStores(kept), ...projectStores(removed)]);
     expect(await storeIds()).toEqual([`project-mcp:${kept}`, `project-mcp:${removed}`, `project:${kept}`, `project:${removed}`].sort());
 
-    // Any later persisted change prunes the removed root, even one it was not read for.
     await rm(removed, { recursive: true, force: true });
     await writeFile(join(kept, ".pi", "settings.json"), `${JSON.stringify({ defaultThinkingLevel: "high" })}\n`);
     await outside.reconcile(projectStores(kept));
     expect(await storeIds()).toEqual([`project-mcp:${kept}`, `project:${kept}`]);
 
-    // Reading the removed root again does not recreate it as an empty baseline.
     await outside.reconcile(projectStores(removed));
     expect(await storeIds()).toEqual([`project-mcp:${kept}`, `project:${kept}`]);
   } finally {

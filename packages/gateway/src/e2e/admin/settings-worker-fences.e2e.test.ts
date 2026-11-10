@@ -11,8 +11,6 @@ import { DEFAULT_MAX_UPLOAD_BYTES } from "../../config.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 
-/** Real Home/worker routine changes and client Session fences at the Gateway RPC boundary.
- * Approval decisions are retired; routine changes retain their original domain/SDK assertions. */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-worker-fences.json");
 const transcript: Array<{ case: string; steps: Array<Record<string, unknown>> }> = [];
 afterEach(async () => { await disposeFixtures(); });
@@ -101,14 +99,11 @@ describe("settings worker changes and Session fences", () => {
     expect((await f.settingsChanges.history({ key: "run.retry.maxRetries" })).entries).toEqual([]);
     const snapshot = slot.snapshot();
     const fence = { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model, revision: snapshot.revision };
-    // A context window applies at the revision it read: a fence without one is refused before the dry run too.
     const contextWindow = [{ key: "model.contextWindow", layer: "session", op: "set", value: 100_000, qualifiers: { model: `${f.model.provider}/${f.model.id}` } }];
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, fence: { runtimeGeneration: fence.runtimeGeneration, model: fence.model }, changes: contextWindow, dryRun: true }))
       .rejects.toMatchObject({ code: "invalid_request", message: expect.stringMatching(/revision/) });
-    // Active tools never needed a fence (the iPhone sends none), so they are still admitted without one.
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, dryRun: true,
       changes: [{ key: "tools.active", layer: "session", op: "set", value: ["read"] }] })).resolves.toMatchObject({ dryRun: true, status: "applied" });
-    // With the fence it read, the same dry run and change pass.
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, fence, changes, dryRun: true })).resolves.toMatchObject({ dryRun: true, status: "applied" });
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target, fence, changes })).resolves.toMatchObject({ status: "applied" });
     transcript.push({ case: "fence-less Chat change refused at submission", steps: [{ refusals }] });

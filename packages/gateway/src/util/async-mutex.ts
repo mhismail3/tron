@@ -4,15 +4,7 @@ export class AsyncMutex {
   private locked = false;
   private readonly waiting = new Set<() => void>();
 
-  /** Cancellation removes a queued read. An already running operation still
-   * owns the lock and its result until it actually settles; a disposable caller
-   * may separately abandon that wait with abortableRead and release late values.
-   * Accepted mutations never inherit a transport signal. */
   run<T>(operation: () => Promise<T> | T, signal?: AbortSignal): Promise<T> {
-    // The lock hands over inside the previous holder's `release()`, so a queued
-    // operation would otherwise run inside that holder's async context: it would
-    // see the previous caller's owner, invocation and request-span stores. Capture
-    // the context this caller runs in and give the operation that one instead.
     const context = AsyncLocalStorage.snapshot();
     return new Promise<T>((resolve, reject) => {
       if (signal?.aborted) { reject(signal.reason); return; }
@@ -35,7 +27,6 @@ export class AsyncMutex {
       };
       const start = (): void => {
         started = true;
-        // Preserve asynchronous admission even when the mutex was idle.
         void Promise.resolve().then(() => {
           signal?.throwIfAborted();
           return context(operation);

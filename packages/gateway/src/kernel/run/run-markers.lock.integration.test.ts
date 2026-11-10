@@ -6,12 +6,6 @@ import { join } from "node:path";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { RunMarkerStore } from "./run-markers.js";
 
-/**
- * `gateway/run` run-marker store: mark, assistant completion, terminal reassertion and
- * clear, their bounds and conflicts, the exact documents each commits, and which
- * hand-written markers a read admits. The committed-corpus
- * read-back is `store-run-markers`.
- */
 it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", async () => {
   const home = await mkdtemp(join(tmpdir(), "tron-run-markers-"));
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -26,7 +20,6 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
   });
   const at = (minute: number) => `2026-01-01T00:${String(minute).padStart(2, "0")}:00.000Z`;
   const second = (n: number) => `2026-01-01T00:00:0${n}.000Z`;
-  /** Every marker document in the directory, by session, parsed. */
   const markers = async (): Promise<Record<string, unknown>> => {
     const names = await readdir(directory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
     return Object.fromEntries(await Promise.all(names.sort().map(async (name) =>
@@ -51,8 +44,6 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
   await store.markAssistantCompletion("s1", "op-2", "c-2", at(1));
   const s1Completed = doc("s1", [op("op-1", second(0)), op("op-2", second(1), ["c-2", at(1)])]);
   expect(await markers(), "complete s1 op-2").toEqual({ s1: s1Completed });
-  // A repeat writes nothing: the document would be identical, so its inode (a
-  // durable write publishes a new file by rename) is the evidence.
   const inode = async (sessionId: string) => (await lstat(join(directory, `${sessionId}.json`))).ino;
   const completedInode = await inode("s1");
   await store.markAssistantCompletion("s1", "op-2", "c-2", at(1));
@@ -107,10 +98,6 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
   await store.clear("s9");
   expect(await markers(), "clear all of an unknown session").toEqual({ s2 });
   expect(await all(), "evidence and interrupted ids after clearing").toEqual({ evidence: { s2: s2.operations }, interrupted: ["s2"] });
-  // One session lane serializes every write, including a call that arrives while an
-  // earlier queued write is in flight. The store's own file-system option holds the
-  // second write inside its directory step; the third call must wait for it, never
-  // read the marker beside it and lose its operation.
   {
     let calls = 0;
     let entered!: () => void;
@@ -130,7 +117,6 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
     await first;
     await held;
     const late = lanes.mark("s5", "op-c");
-    // Correct code never reaches a third write before the second is released.
     const overtook = await Promise.race([third.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500))]);
     release();
     await Promise.all([queued, late]);
@@ -179,8 +165,6 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
   await store.clear("current-complete", "b");
   const afterClear = { ...afterFresh, "current-complete": doc("current-complete", [operation("a", { assistantCompletionId: "c-a", assistantCompletedAt: at(9) })]) };
   expect(await markers(), "clear one operation of the current marker").toEqual(afterClear);
-  // A temporary name already taken is not this write's to remove: fixed temporary-name
-  // bytes make the collision deterministic, and the foreign file must survive the refusal.
   {
     const foreign = join(directory, `s4.json.${process.pid}.${"ab".repeat(6)}.tmp`);
     await writeFile(foreign, "foreign");

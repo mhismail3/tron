@@ -8,13 +8,6 @@ import type { TrustService } from "../kernel/resources/trust-service.js";
 
 export const HOOKS_CAPABILITY = "hooks.v1";
 
-/** Session-free hooks for one scope (Global, or one project folder).
- *
- * Pi exposes handler registrations only by loading extension modules; that load
- * is shared with `packages.list` (`loadSessionFreeExtensions`) and never opens a
- * session. This read is serialized, tracked as drain-aware administrative work
- * and bounded by the same projection envelope `session.resources` uses —
- * exactly the `packages.list` treatment. */
 export class HookResources {
   private readonly mutex = new AsyncMutex();
 

@@ -80,20 +80,13 @@ import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArt
 import { runtimeIdentity } from "./transport/runtime-identity.js";
 import { tronHomePath } from "./foundation/tron-home-layout.js";
 
-// Time since process start when this module's import graph finished loading
-// (performance.now() counts from the process time origin).
 const moduleGraphLoadedAt = performance.now();
 const config = await loadConfig();
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 await ensureDelegatedArtifactRoot(delegatedRoot);
-// The installed provider receives its supported root before Pi loads any
-// extensions. Existing installed packages are never rewritten in place.
 delegatedProviderEnvironment(delegatedRoot);
-// Managed subagent children read the subagent model queue from this projection.
 process.env[MODEL_QUEUE_PROJECTION_ENV] = modelQueueProjectionPath(config.tronHome);
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
-// After Pi's agent-bin projection (made while loading settings) and before extension or model
-// discovery: bundled commands precede that mutable projection; Homebrew's bin comes last.
 configureSupervisedNodeCommandEnvironment();
 configureAgentBinEnvironment(config.agentDir);
 configureHomebrewPath();
@@ -102,9 +95,6 @@ const releaseAgentRuntimeLock = await acquireAgentRuntimeLocks([
   ...(configuredSessionDir ? [configuredSessionDir] : []),
 ]);
 const releaseRuntimeLock = releaseAgentRuntimeLock;
-// Keep the bootstrap transaction inside a top-level catch: composition or
-// listen initialization failures must release locks immediately rather than
-// relying on the stale-lock timeout or a later process signal.
 try {
 process.env.PI_CODING_AGENT_DIR = config.agentDir;
 process.env.PI_CODING_AGENT ??= "true";
@@ -116,8 +106,6 @@ const logger = new GatewayLogger(gatewayLogPath, {
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
 });
-// Activate this payload's exact offline closure before any Pi discovery. A
-// restart verifies/reuses the immutable root; damaged roots fail startup closed.
 const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, logger);
 {
   const identity = runtimeIdentity();
@@ -128,15 +116,6 @@ const managedSubagents = ManagedSubagents.activateForStartup(config.tronHome, lo
   );
 }
 
-/*
- * Startup accounting. Each checkpoint records the time since the previous one,
- * so a restart's `gateway.startup-step` records add up to process start →
- * listening without gaps: `modules` is process start to the loaded import
- * graph, `config-and-locks` runs until the logger exists, and later steps
- * name what just finished. `gateway.stopped` records the old process's
- * shutdown; the remaining gap to the next `gateway.started` minus its
- * `durationMs` is launchd and the launcher.
- */
 let startupCheckpointAt = 0;
 const startupSteps: StartupStepTiming[] = [];
 function startupCheckpoint(step: string, at = performance.now()): void {
@@ -172,7 +151,6 @@ await notifications.initialize();
 startupCheckpoint("notifications");
 
 const openAIModelEligibility = new OpenAIModelEligibility();
-// One usage owner: Providers usage and the model queues' 95% skip share its cache.
 const providerUsage = new ProviderUsageOwner();
 const modelRuntime = await createProviderModelRuntime(config.agentDir);
 openAIModelEligibility.attachRuntime(modelRuntime);
@@ -184,7 +162,6 @@ const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
 const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 const display = new DisplayOwner(displayArtifacts, browserLiveViews, () => sessions);
-// Security owns the private user SSH service; composition has no lifecycle logic.
 const macTerminalKeys = new MacTerminalService(config.tronHome);
 const settingsSchema = createGatewaySettingsSchema();
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
@@ -201,7 +178,6 @@ const settingsModel = new SettingsModel(new SettingsStoreAdapter({
 }));
 let settingsChanges: SettingsChangePath;
 const settingsRecord = new SettingsChangeRecord(config.tronHome);
-// Outside changes (settings-model.md 5.6): reads compare Global/Project with what Tron last saw.
 const outsideSettings = new OutsideChanges(settingsSchema, config.tronHome, config.agentDir, settingsRecord, settingsModel.owner.observedReaders);
 settingsModel.owner.observeOutside(outsideSettings);
 const modelConfig = new ModelConfigService(config.agentDir);
@@ -254,8 +230,6 @@ const homeComposition: HomeComposition = {
   homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
   homeMemoryDiagnostic: (record) => {
     if (record.event === "home.memory-ingest") {
-      // A code, never the failure's own message: an episodic ingest failure can
-      // name the canonical session path.
       logger.log("warning", "Home memory could not ingest committed entries", {
         event: "home.memory-ingest", source: "home", reason: record.reason,
       });
@@ -267,9 +241,6 @@ const homeComposition: HomeComposition = {
       ...(record.counts === undefined ? {} : { counts: record.counts }),
     });
   },
-  // Home is used deliberately, one turn at a time, so one line per activation is
-  // both affordable and the only place a turn's effective size and the readiness
-  // wait it took are visible. No message text, entry id or nonce is included.
   homeRequestDiagnostic: (record) => {
     if (record.event === "response-timing") {
       logger.log("info", "Tron Home response timing", {
@@ -324,13 +295,9 @@ let automationToolOperations!: GatewayScheduleToolOperations;
 const scheduleToolOperations: ScheduleToolOperations = {
   execute: (sessionId, toolCallId, request) => automationToolOperations.execute(sessionId, toolCallId, request),
 };
-// One sampler for the process: the transport records its own traffic and logs
-// the record, the registry reports catalog walks and answers its inventory.
 const resourceSampler: ResourceSampler = new ResourceSampler({
   readRuntimes: (): Promise<readonly ResourceRuntimeEntry[]> => sessions.resourceInventory(),
 });
-// Late-bound: the scheduler is constructed after the registry, and archiving
-// must not hide a session whose automation run is already dispatched.
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
 const persistenceDiagnostic = (sessionId: string, code: string) => logger.log("warning", "Session persistence diagnostic", {
   event: code, source: "session", sessionId,
@@ -361,7 +328,6 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
   },
   persistenceDiagnostic,
   archiveDiagnostic: (diagnostic) => diagnostic.outcome === "failure"
-    // Privacy: outcome and stage only. No session ID or path reaches logs.
     ? logger.log("warning", `Session archive state was not persisted (${diagnostic.stage})`, {
       event: "sessions.archive.persist-failed", source: "sessions", outcome: diagnostic.outcome, code: diagnostic.stage,
     })
@@ -369,9 +335,6 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
-  // Load and eviction are transitions at info: the byte budget's decisions have
-  // to be attributable to one session from the log alone, and the reason has to
-  // separate a budget eviction from an idle or requested one.
   runtimeLifecycleRecord: (record) => logger.log("info",
     `Session runtime ${record.event === "runtime.loaded" ? "loaded" : "evicted"} (${record.reason})`, {
       event: record.event,
@@ -381,8 +344,6 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
       counts: {
         transcriptBytes: record.transcriptBytes,
         estimatedHeapBytes: record.estimatedHeapBytes,
-        // The budget is pressure rather than a gate, so a load it could not fit
-        // is served and flagged here instead.
         ...(record.overBudget === true ? { overBudget: 1 } : {}),
       },
     }),
@@ -436,14 +397,11 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
     `Extension artifact discovery stopped early after ${entries} root entries, ${statusReads} artifact reads, ${work} routed reads and ${dropped} candidates its routing budget cut`,
     { event: "extension.discovery-truncated", source: "sessions", counts: { entries, statusReads, work, dropped } },
   ),
-  // Both of these are handled background failures outside any request span, so
-  // they keep their own warning record.
   catalogIndexFailure: (stage, durationMs, detail) => logger.log(
     "warning",
     `Catalog metadata index ${stage} failed${detail ? ` (${detail.reason}${detail.shard ? ` shard ${detail.shard}` : ""}${detail.bytes !== undefined ? `: ${detail.bytes} of ${detail.limit} bytes` : detail.limit !== undefined ? `: ${detail.rows} of ${detail.limit} rows` : ""})` : ""}; rows remain unproven until canonical metadata can be read`,
     {
       event: "catalog-index.failure", source: "sessions", step: stage, durationMs,
-      // The shard is its hexadecimal number as a counter, so a reader can aggregate it.
       ...(detail ? { reason: detail.reason, counts: {
         ...(detail.shard ? { shard: Number.parseInt(detail.shard, 16) } : {}),
         ...(detail.rows !== undefined ? { rows: detail.rows } : {}),
@@ -462,9 +420,6 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
     `Session catalog ${outcome}${trigger ? ` (${trigger})` : ""}: ${added} added, ${removed} removed, ${modified} modified, ${unproven} unproven over ${files} files in ${durationMs}ms`,
     { event: "catalog.reconciled", source: "sessions", outcome, ...(trigger ? { trigger } : {}), durationMs, counts: { files, added, removed, modified, unproven } },
   ),
-  // One row the watcher changed for one file, outside any request span. Debug:
-  // the detail belongs in a diagnostic export's buffer, not in the persisted
-  // volume budget, and a Gateway-owned change is not reported here.
   catalogChanged: ({ sessionId, outcome, durationMs }) => logger.log(
     "debug",
     `Catalog row ${outcome} for ${sessionId} in ${durationMs}ms`,
@@ -488,7 +443,6 @@ let sessionSearch: SessionSearchService | undefined;
 let sessionSearchIndex: SessionSearchIndex | undefined;
 try {
   sessionSearchIndex = await SessionSearchIndex.open(tronHomePath(config.tronHome, "gateway/session-search.sqlite"));
-  // Home's session_search research tool is this owner's only reader, through the composition.
   sessionSearch = new SessionSearchService(sessions, sessionSearchIndex);
 } catch (error) {
   sessionSearchIndex?.close();
@@ -506,8 +460,6 @@ const packages = new PackageService(
   managedSubagents,
   outsideSettings,
 );
-// Hook listings load extensions for a scope without a session; the owner never
-// touches a runtime, so no session or global registration is involved.
 const hookResources = new HookResources(config.agentDir, trust, workRegistry, managedSubagents);
 const scopeToolCatalog = new ScopeToolCatalog(config.agentDir, trust, workRegistry, managedSubagents);
 const automationStore = new AutomationStore(config.tronHome, {
@@ -527,9 +479,6 @@ const automationScheduler = new AutomationScheduler(automationStore, automationE
   onHomePending: () => home().notifyTrigger(),
   onDiagnostic: (message, automationId, runId) => logAutomationDiagnostic(logger, message, automationId, runId),
   onBlocked: async (record, run) => {
-    // Workspace targets have no stable session route until a run is created;
-    // never fabricate one for a blocked definition. Existing targets retain
-    // the established session notification route.
     if (record.target.kind !== "existingSession") return;
     await notifications.enqueue({
       sessionId: record.target.sessionId,
@@ -544,8 +493,6 @@ const automationScheduler = new AutomationScheduler(automationStore, automationE
   },
 });
 automationSchedulerForArchive = automationScheduler;
-// Parts of the `automation-recovery` startup step, as a separate event so the
-// startup steps of one restart still sum without double counting.
 automations = new AutomationService(automationStore, automationScheduler, sessions, (step, durationMs, detail) => {
   logger.log("info", `Automation recovery ${step} took ${Math.round(durationMs)} ms${detail ? ` (${detail})` : ""}`, {
     event: "automation.recovery-step", source: "automations", step, durationMs,
@@ -557,7 +504,6 @@ automationToolOperations = new GatewayScheduleToolOperations(automations, receip
 let stopping = false;
 let sessionSearchWarmTask: Promise<void> | undefined;
 let uploadStoragePressure: "normal" | "low" | "exhausted" = "normal";
-/** How often bounded artifact maintenance runs as a background slice. */
 const STORAGE_MAINTENANCE_INTERVAL_MS = 10 * 60_000;
 function recordShutdownStep(step: string, durationMs: number): void {
   logger.log("info", `Gateway shutdown step ${step} took ${Math.round(durationMs)} ms`, {
@@ -571,8 +517,6 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
   const stopDrainId = drainAcceptedWork ? sessions.administrativeDrainSnapshot().drainId : undefined;
   service.dispose();
   const stoppingAt = performance.now();
-  // The last record of this process: the next process's gateway.started
-  // follows after launchd and the launcher.
   const recordStopped = (code: number): void => logger.log(code === 0 ? "info" : "warning", `Gateway stopped (exit ${code}) after ${Math.round(performance.now() - stoppingAt)} ms of shutdown`, {
     event: "gateway.stopped", source: "lifecycle", code: String(code), pid: process.pid, durationMs: performance.now() - stoppingAt,
   });
@@ -583,8 +527,6 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     automations.beginDrain();
     workRegistry.beginDrain();
     sessionSearch?.cancelWarmup();
-    // Before the owners it drives are disposed: the scheduler arms no further
-    // slice, and a slice already in flight settles on its own.
     backgroundWork.stop();
     await shutdownStep("transport-close", () => transport.close(), recordShutdownStep);
     if (!drainAcceptedWork) {
@@ -593,8 +535,6 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
         workRegistry.requestCancellation(),
       ]); }, recordShutdownStep);
     }
-    // Administrative restart and stop arrive here only after canonical drain
-    // completion; neither may trade accepted work for a cleanup deadline.
     if (drainAcceptedWork) {
       await shutdownStep("work-settle", () => workRegistry.waitUntilSettled(), recordShutdownStep);
     } else {
@@ -613,8 +553,6 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
         { event: "gateway.shutdown-cleanup-expired", source: "lifecycle" },
       );
     }
-    // Accepted mutation owners settle above. Retire file-event admission and
-    // join comparisons/observers before their runtime and notification targets.
     await shutdownStep("outside-settings-dispose", () => outsideSettings.dispose(), recordShutdownStep);
     await shutdownStep("notifications-dispose", async () => { notifications.dispose(); }, recordShutdownStep);
     await shutdownStep("automations-dispose", () => automations.dispose(), recordShutdownStep);
@@ -627,9 +565,6 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     if (forced) clearTimeout(forced);
     if (exitCode === 0 && stopDrainId) {
-      // One atomic receipt survives transport retirement and log rotation. The
-      // accepted drain UUID plus Mac's captured PID/start identity exclude stale
-      // processes/attempts; this is completion, never permission to SIGKILL exit 0.
       const path = tronHomePath(config.tronHome, "gateway/stop-completed.json");
       const temporary = `${path}.${process.pid}.tmp`;
       try {
@@ -652,7 +587,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
   }
 }
 
-const DRAIN_STALL_LIMIT_MS = 180_000; // Bounds accepted work that stops making drain progress.
+const DRAIN_STALL_LIMIT_MS = 180_000;
 type AdministrativeExitMode = "restart" | "stop";
 interface AdministrativeExitOwner {
   mode: AdministrativeExitMode;
@@ -762,7 +697,6 @@ async function runStopDrain(): Promise<void> {
   }
 }
 
-// The one settings change path (settings-model.md 5), for agents' tool and the slots alike.
 settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, {
   setTrust: async (project, decision) => trust.setAndApply(
     project,
@@ -795,8 +729,6 @@ const service = new GatewayService({
   globalProviderResources,
   logger,
   receipts,
-  // LaunchAgent/supervisor restarts unsuccessful exits. Administrative
-  // restart drains accepted agent work before using the deliberate restart code.
   requestRestart,
   requestStop,
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
@@ -855,8 +787,6 @@ await transport.listen(async () => {
   startupCheckpoint("listener-bind");
   await sessions.initialize((phase) => transport.setStartupPhase(phase));
   startupCheckpoint("session-registry");
-  // Installed native owners and presentation observers now exist; inspection
-  // alone never arms approval expiry against stores that are still opening.
   await settingsChanges.start();
   sessionSearchWarmTask = (async () => {
     if (stopping || !sessionSearch) return;
@@ -883,9 +813,6 @@ await transport.listen(async () => {
   });
   transport.setStartupPhase("automation-recovery");
   await automations.initialize().catch((error) => {
-    // The owner may not have published a cut yet (a large catalog with no
-    // durable document). Automation targets are re-checked on the next start;
-    // failing startup here would turn a slow first read into a crash-loop.
     if (!(error instanceof GatewayError) || !error.retryable || error.diagnosticReason !== "catalog_not_ready") throw error;
     logger.log("warning", "Automation recovery deferred: the session catalog is not ready", {
       event: "automation.recovery-deferred", source: "automations", reason: error.diagnosticReason,
@@ -896,11 +823,6 @@ await transport.listen(async () => {
   await sessions.initializeBlobStorage();
   startupCheckpoint("blob-storage");
 });
-// G-13's startup budget: this process's own start, process start to serving.
-// The restart case reads this record (its durationMs, counts.budgetMs and
-// slowest step) from the fixture's Gateway log, so the start is attributable
-// from either side; it judges the criterion on its own close → listening span,
-// which also covers this process's predecessor's shutdown.
 {
   const budget = startupBudget(performance.now(), startupSteps);
   logger.log(
@@ -912,12 +834,10 @@ await transport.listen(async () => {
     },
   );
 }
-// Serving already; these records account for post-listen recovery work.
 await sessions.recoverCanonicalAttention();
 startupCheckpoint("attention-recovery");
 await home().recoverTasks();
 startupCheckpoint("home-task-recovery");
-// The first session start would otherwise transform the managed closure itself.
 void managedSubagents.prepareSessionTransforms().then((prepared) => { if (prepared) startupCheckpoint("subagent-transforms"); });
 const maintainStorage = async (): Promise<void> => {
   try {
@@ -944,10 +864,6 @@ const maintainStorage = async (): Promise<void> => {
   }
 };
 await maintainStorage();
-// The one background-work scheduler. The jobs that used to own a timer of their
-// own (catalog reconciliation registers itself, receipt pruning and storage
-// maintenance below) now take turns one slice at a time, each yielding to the
-// loop, and wait while a request is in flight or the loop is behind.
 backgroundWork.register({
   name: "command-receipts.prune",
   intervalMs: COMMAND_RECEIPT_PRUNE_INTERVAL_MS,
@@ -958,15 +874,8 @@ backgroundWork.register({
   intervalMs: STORAGE_MAINTENANCE_INTERVAL_MS,
   slice: () => maintainStorage(),
 });
-// A signal that ignored the signal handlers above would start the scheduler
-// after `shutdown()` stopped it, and its jobs would run against owners being
-// disposed.
 if (!stopping) backgroundWork.start({
   requestsInFlight: requestsCompetingForLoop,
-  // One record per slice, and one per starved spell: the scheduler's own cost
-  // and its pauses have to be visible without a per-tick record. The job is the
-  // step, so a slice or a backlog can be read out of the log without parsing
-  // the message.
   onSlice: ({ job, outcome, durationMs, waitedMs, error }) => logger.log(
     outcome === "failed" ? "warning" : "debug",
     `Background slice ${job} ${outcome} in ${Math.round(durationMs)}ms after waiting ${Math.round(waitedMs)}ms`,

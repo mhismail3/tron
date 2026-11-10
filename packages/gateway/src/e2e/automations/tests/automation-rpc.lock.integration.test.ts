@@ -4,8 +4,6 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../../test-support/gateway-lock-harness.js";
 
-// The unchanged scheduler and owned-run tests own cancellation/terminal evidence.
-// This lock adds only the missing real-socket preview, revision fence and restart cuts.
 it("previews schedules, fences stale writes and keeps definitions across a Gateway restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-automation-rpc-lock-"));
   let gateway: LockGateway | undefined;

@@ -1,10 +1,3 @@
-/**
- * Home controls the workers it starts through its `task` tool with the smallest calls a model
- * makes first try (#961). Home runs on a local Anthropic Messages endpoint, so every definition
- * and call crosses pi-ai's real request builder and response parser: the test reads the tool
- * definition the model actually receives and the tool results it actually reads back. Workers run
- * on the faux model in a real RuntimeRegistry, and their stuck command is a real bash process.
- */
 import { createServer, type Server } from "node:http";
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import type { AddressInfo } from "node:net";
@@ -35,16 +28,11 @@ afterAll(async () => {
 type Body = { tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>; messages: Array<{ role: string; content: string | Array<ToolResult | { type: "text"; text: string } | { type: "tool_use"; id: string }> }> };
 type ToolResult = { type: "tool_result"; tool_use_id: string; content: Array<{ type: string; text?: string }> | string; is_error?: boolean };
 
-/** A minimal Anthropic Messages endpoint for Home. Scripted calls belong to their
- * exact user input; an automatic task-result wake must not consume the next call. */
 async function homeEndpoint() {
   const requests: Body[] = [];
   const calls: Array<{ id: string; prompt: string; name: string; input: unknown }> = [];
   const server = createServer((request, response) => {
     let raw = "";
-    // Decode the whole stream, not each chunk: a chunk may end inside a
-    // multi-byte character (the prompt's ’), which per-chunk decoding turns into
-    // U+FFFD and so changes the recorded prefix bytes (#2228).
     request.setEncoding("utf8");
     request.on("data", chunk => { raw += chunk; });
     request.on("end", () => {
@@ -75,12 +63,10 @@ async function homeEndpoint() {
   return { port: (server.address() as AddressInfo).port, requests, calls };
 }
 
-/** The newest user message text a faux worker turn saw. */
 const lastUser = (context: Context) => {
   const content = context.messages.findLast(message => message.role === "user")?.content;
   return typeof content === "string" ? content : (content ?? []).map(part => part.type === "text" ? part.text : "").join("");
 };
-/** A gate a held worker provider turn waits on; Stop's abort also ends it. */
 function gate() {
   let open!: () => void;
   const opened = new Promise<void>(resolve => { open = resolve; });
@@ -91,13 +77,9 @@ function gate() {
 }
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
-/** The scripted caller's idle observation is not an admission reservation: a task
- * result can wake Home before prompt reaches the session lane. The optional fixture
- * barrier forces exactly that interleaving without delaying or mocking the runtime. */
 async function promptHomeControl(home: RuntimeSlot, text: string, afterIdle?: () => Promise<void>) {
   await waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null, "Home idle");
   await afterIdle?.();
-  // Explicit follow-up is admitted both when idle and when the wake won the lane.
   return home.prompt(text, [], "followUp");
 }
 
@@ -188,9 +170,6 @@ describe("Home's task tool on the wire (#961)", () => {
       } finally { finishWorker.open(); finishWake.open(); }
       try {
         await waitFor(() => results.length === 1 && settleHeld > 0, "control answered and the wake settlement started");
-        // Idle is the public completion point: it must not precede the wake's
-        // durable acknowledgement, which is still held here. The bound is the window in
-        // which no idle may occur; the old order went idle within milliseconds.
         const idleEarly = await waitFor(() => !home.isBusy || undefined, "home idle", { boundMs: 1500 }).then(() => true, () => false);
         expect(idleEarly).toBe(false);
       } finally { holdSettle.open(); }
@@ -205,13 +184,9 @@ describe("Home's task tool on the wire (#961)", () => {
       models: [{ id: MODEL_ID, name: "Home (local wire)", reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 4_096 }],
     } } });
     const home = await f.registry.acquire(f.home.sessionId);
-    // The memory summarizer is the fixture's stub; Home only needs a configured memory model.
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
-    // With the settings owner installed (as gateway-main does first), the choice is Home's saved model.
     await home.setModel(PROVIDER, MODEL_ID);
 
-    /** One Home turn in which the model makes exactly `input` as its `task` call; returns the
-     * tool result the model reads back on the wire. */
     const homeCalls = async (name: string, input: Record<string, unknown>) => {
       const before = wire.requests.length;
       const id = `control_${before}`;
@@ -231,7 +206,6 @@ describe("Home's task tool on the wire (#961)", () => {
       return { isError: result.is_error === true, text, json: () => JSON.parse(text) as Record<string, any> };
     };
 
-    // 1. The definition the model receives: one flat object, every field named and described.
     await homeCalls("task", { action: "list" });
     const definition = wire.requests[0]!.tools!.find(tool => tool.name === "task")!;
     const schema = definition.input_schema as { type: string; properties: Record<string, { description?: string; enum?: string[] }>; required: string[] };
@@ -241,7 +215,6 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(schema.required).toEqual(["action"]);
     for (const [field, property] of Object.entries(schema.properties)) expect(property.description, field).toBeTruthy();
     expect(definition.description).toMatch(/stop \{taskId\}/u);
-    // The settings tool reaches Home the same way: flat, so its worker target (#1336) is visible.
     const settingsDefinition = wire.requests[0]!.tools!.find(tool => tool.name === "settings")!;
     const settingsSchema = settingsDefinition.input_schema as { properties: Record<string, { description?: string; enum?: string[] }>; required: string[] };
     expect(Object.keys(settingsSchema.properties).sort()).toEqual(["action", "changes", "dryRun", "keys", "reason", "taskId"]);
@@ -250,8 +223,6 @@ describe("Home's task tool on the wire (#961)", () => {
     for (const [field, property] of Object.entries(settingsSchema.properties)) expect(property.description, field).toBeTruthy();
     evidence.push({ definition, settingsDefinition });
 
-    // The worker: its first turn holds until Home steers it; the steer arrives in its next turn,
-    // which runs a command that ignores SIGTERM and would sleep for ten minutes.
     const pidFile = join(f.cwd, "stuck.pid");
     const firstTurn = gate(), resumedTurn = gate();
     const seen: string[] = [];
@@ -271,7 +242,6 @@ describe("Home's task tool on the wire (#961)", () => {
       return fauxAssistantMessage("working");
     }));
 
-    // 2. Home delegates; list (status without taskId) shows the running worker and its controls.
     const delegated = await homeCalls("delegate", { taskId: "wire-worker", title: "Wire worker", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: f.model.id }, reason: "The scripted worker model" });
     expect(delegated.isError, delegated.text).toBe(false);
@@ -283,8 +253,6 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(row.operationId).toMatch(/^task-/u);
     const workerSession = row.sessionId as string;
 
-    // 2b. Rename the running worker while its provider request is held in flight (#1336): the
-    // canonical session name changes, the task and session lists show it, and the run continues.
     const worker = await f.registry.acquire(workerSession);
     const sessionName = async () => (await f.registry.catalog("all")).sessions.find(session => session.id === workerSession)?.name;
     expect(await sessionName()).toBe("Wire worker");
@@ -299,7 +267,6 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(worker.canonicalSessionEntries().filter(entry => entry.type === "session_info").map(entry => (entry as { name?: string }).name))
       .toEqual(["Wire worker", "Renamed wire worker"]);
     expect((await homeOwnerOf(f.registry).taskStatus("wire-worker")).intent.text).toContain("Finite work");
-    // Invalid inputs and targets are refused with the fix named; nothing is renamed.
     const blank = await homeCalls("task", { action: "rename", taskId: "wire-worker", title: "   " });
     expect(blank.isError).toBe(true);
     expect(blank.text).toMatch(/"title" must be 1 to 80 characters on one line/u);
@@ -309,14 +276,12 @@ describe("Home's task tool on the wire (#961)", () => {
     const unknownTask = await homeCalls("task", { action: "rename", taskId: "wire-wroker", title: "Other" });
     expect(unknownTask.isError).toBe(true);
     expect(unknownTask.text).toMatch(/no task "wire-wroker"/u);
-    // Only Home's own session holds task control: the worker's session naming itself as Home is refused.
     await expect(homeOwnerOf(f.registry).taskTool(workerSession, { action: "rename", taskId: "wire-worker", title: "Hijacked" }))
       .rejects.toThrow(/Home task control is unavailable/u);
     expect(await sessionName()).toBe("Renamed wire worker");
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "rename", disposition: "accepted" }));
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "rename", disposition: "refused", reason: "invalid_request" }));
 
-    // 3. Steer with only taskId and text: the running worker receives it without stopping.
     const steered = await homeCalls("task", { action: "steer", taskId: "wire-worker", text: "STEER-ONE" });
     expect(steered.isError, steered.text).toBe(false);
     expect(steered.json()).toMatchObject({ accepted: true, taskId: "wire-worker", operationId: row.operationId });
@@ -326,7 +291,6 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(seen.some(text => text.includes("STEER-ONE"))).toBe(true);
     expect((await homeOwnerOf(f.registry).taskStatus("wire-worker")).lifecycle).toBe("active");
 
-    // 4. Stop with only taskId ends the worker stuck in the command and kills it.
     const stopStarted = Date.now();
     const stopped = await homeCalls("task", { action: "stop", taskId: "wire-worker" });
     expect(stopped.isError, stopped.text).toBe(false);
@@ -337,35 +301,29 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(stopMs).toBeLessThan(30_000);
     evidence.push({ stuckPid, stopMs });
 
-    // A control that does not apply names the state and what to do instead.
     const late = await homeCalls("task", { action: "steer", taskId: "wire-worker", text: "too late" });
     expect(late.isError).toBe(true);
     expect(late.text).toMatch(/"wire-worker" is settled \(interrupted: task-stop\), so steer does not apply\. Use resume/u);
 
-    // 5. Resume with only taskId continues the same worker session in place.
     const resumed = await homeCalls("task", { action: "resume", taskId: "wire-worker" });
     expect(resumed.isError, resumed.text).toBe(false);
     expect(resumed.json()).toMatchObject({ accepted: true, taskId: "wire-worker.resume-1", sessionId: workerSession, resumes: "wire-worker" });
     await waitFor(() => turns > 0 && seen.at(-1)!.includes("Continue Home task"), "the resumed worker's turn");
-    // The explicit rename survives the stop and the in-place resume: no delegate title is reapplied.
     expect(await sessionName()).toBe("Renamed wire worker");
     expect((await homeOwnerOf(f.registry).taskStatus("wire-worker.resume-1")).title).toBe("Renamed wire worker");
 
-    // 6. Steer again by the original taskId: it reaches the worker's current, resumed task.
     const again = await homeCalls("task", { action: "steer", taskId: "wire-worker", text: "STEER-TWO" });
     expect(again.isError, again.text).toBe(false);
     expect(again.json()).toMatchObject({ accepted: true, taskId: "wire-worker.resume-1", resolvedFrom: "wire-worker", sessionId: workerSession });
     resumedTurn.open();
     await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("wire-worker.resume-1")).lifecycle === "terminal", "the resumed task reporting");
     expect((await homeOwnerOf(f.registry).taskStatus("wire-worker.resume-1")).terminalEvidence).toMatchObject({ outcome: "final" });
-    // The persisted title is read from the canonical session file once the runtime is released.
     const file = (await readdir(join(f.root, "sessions"), { recursive: true })).map(String).find(name => name.endsWith(".jsonl") && name.includes(workerSession));
     const persisted = (await readFile(join(f.root, "sessions", file!), "utf8")).split("\n").filter(Boolean).map(line => JSON.parse(line) as { type: string; name?: string })
       .filter(entry => entry.type === "session_info").map(entry => entry.name);
     expect(persisted).toEqual(["Wire worker", "Renamed wire worker"]);
     evidence.push({ renamed: renamed.json(), persisted });
 
-    // 7. A mistyped taskId and a guessed field are refused with the fix in the message.
     const missing = await homeCalls("task", { action: "status", taskId: "wire-wroker" });
     expect(missing.isError).toBe(true);
     expect(missing.text).toMatch(/no task "wire-wroker"\. Close matches: "wire-worker"/u);
@@ -379,8 +337,6 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(report.isError, report.text).toBe(false);
     expect(report.json()).toMatchObject({ taskId: "wire-worker", offset: 0 });
 
-    // Retro reads the real admitted/resumed operations and the existing durable
-    // token owner through Home's provider-visible tool, never opens the worker.
     const taskDirectory = join(f.tronHome, "gateway", "home", "tasks");
     const files = (await readdir(taskDirectory)).sort();
     const beforeMetrics = await Promise.all(files.map(file => readFile(join(taskDirectory, file), "utf8")));
@@ -399,7 +355,6 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(metrics.scorecard.resumesPerTask).toMatchObject({ status: "partial", value: 1, denominator: 1, admittedResumes: 1 });
     for (const field of ["approvalToMain", "deployLag", "mainReds", "flakeRate"])
       expect(metrics.scorecard[field]).toMatchObject({ status: "unavailable", value: null });
-    // The record-only view names no other tool for the fields it cannot compute.
     for (const field of ["deployLag", "mainReds", "flakeRate"])
       expect(metrics.scorecard[field]).toMatchObject({ reason: "unavailable in this record-only view" });
     expect(JSON.stringify(metrics)).not.toContain("Finite work");
@@ -424,7 +379,6 @@ describe("Home's task tool on the wire (#961)", () => {
 describe("Stop of a worker blocked in a tool that ignores cancellation (#961)", () => {
   it("abandons the stuck call after the grace, settles the task as stopped and resumes it in place", async () => {
     const f = await fixture();
-    // A project tool that never returns and ignores its abort signal, as a blocked extension or MCP call does.
     const extensionDir = join(f.cwd, ".pi", "extensions");
     await mkdir(extensionDir, { recursive: true });
     await writeFile(join(extensionDir, "hang.ts"), `export default function (pi) {
@@ -460,9 +414,6 @@ describe("Stop of a worker blocked in a tool that ignores cancellation (#961)", 
 describe("Interrupt of a worker's in-flight command (#1189)", () => {
   it("ends only the running command and its whole tree; the worker reads the interrupt, then the steer, and reports", async () => {
     const f = await fixture();
-    // The shell trap proves SIGINT cleanup. One child shares its process group;
-    // another runs in its own session, as gate shards and XCTest do, so only
-    // the descendant cut reaches it.
     await writeFile(join(f.cwd, "stuck.sh"), `trap 'echo released > released; exit 130' INT
 sleep 600 &
 echo $! > group-child.pid
@@ -479,9 +430,7 @@ wait
         const result = context.messages.findLast(message => message.role === "toolResult");
         results.push(JSON.stringify(result?.content ?? null));
         seen.push(lastUser(context));
-        // The steer follows the interrupted result directly.
         order.push(context.messages.slice(-2).map(message => message.role).join(","));
-        // Next, a command that ignores SIGINT and SIGTERM, as a wedged child can.
         return fauxAssistantMessage([fauxToolCall("bash", { command: "trap '' INT TERM; echo $$ > stubborn.pid; exec sleep 600" }, { id: "stubborn" })], { stopReason: "toolUse" });
       },
       (context: Context) => {
@@ -501,21 +450,17 @@ wait
     expect(interrupted).toMatchObject({ accepted: true, action: "interrupt", taskId: "lander", sessionId: run.sessionId, interrupted: ["bash"] });
     await waitFor(() => Object.values(pids).every(value => !alive(value)), "the command's whole process tree to end");
     const killMs = Date.now() - started;
-    // SIGINT reached the command first, so its cleanup ran; the child in its own session, which
-    // the group signal misses, still got SIGTERM before any SIGKILL.
     expect(await readFile(join(f.cwd, "released"), "utf8")).toBe("released\n");
     expect(await readFile(join(f.cwd, "terminated"), "utf8")).toBe("terminated");
 
     expect(killMs).toBeLessThan(5_000);
     expect((await homeOwnerOf(f.registry).taskStatus("lander")).lifecycle).toBe("active");
 
-    // The maintainer's interrupt escalates to SIGKILL for a command that ignores SIGINT and SIGTERM.
     await waitFor(async () => (await pid("stubborn.pid")) > 0, "the stubborn command running");
     const stubborn = await pid("stubborn.pid");
     const operationId = (await homeOwnerOf(f.registry).taskStatus("lander")).operationId!;
     const escalation = Date.now();
     expect(await homeOwnerOf(f.registry).interruptTask({ taskId: "lander", operationId })).toEqual({ interrupted: ["bash"] });
-    // The escalation itself takes 10 s (SIGINT, 5 s, SIGTERM, 5 s, SIGKILL), over the shared bound.
     await waitFor(() => !alive(stubborn), "the stubborn command to be killed", { boundMs: 20_000 });
     const escalationMs = Date.now() - escalation;
     expect(escalationMs).toBeGreaterThanOrEqual(9_000);
@@ -529,7 +474,6 @@ wait
     expect(results[1]).toMatch(/Interrupted by the maintainer: this bash call was cancelled/u);
     evidence.push({ case: "interrupt-in-flight-command", pids, killMs, escalationMs, results: results.map(text => text.slice(0, 400)), steer: seen[0] });
 
-    // Interrupt applies only to a running worker.
     await expect(homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "interrupt", taskId: "lander" })).rejects.toThrow(/is settled .*so interrupt does not apply/u);
   }, 60_000);
 });

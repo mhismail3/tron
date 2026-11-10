@@ -20,15 +20,11 @@ const MODEL_ID = "home-model";
 const OTHER_MODEL_ID = "home-model-2";
 const VIRTUAL_MODEL_ID = "home-router";
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
-/** Long enough that a faux stream is still running when the cache warmer fires
- * (the SDK's minimum warm delay is one second), and no longer: each stream chunk is
- * paced at 300 tokens/s, so this streams for about 1.5 s. */
 const SLOW_RESPONSE = "streaming reply ".repeat(120);
 const LARGE_PROMPT = "context ".repeat(1_000);
 const SYSTEM_SENTINEL = "HOME-SYSTEM-SENTINEL";
 const APPEND_SENTINEL = "HOME-APPEND-SENTINEL";
 
-/** Retained, regenerable evidence for this suite. */
 const report: { suite: string; cases: Array<{ name: string; outcome: "passed" | "failed"; detail?: string }> } = {
   suite: "home-designation",
   cases: [],
@@ -67,8 +63,6 @@ afterAll(async () => {
 
 const client = { id: "terminal", identity: "device:home-designation", isLocal: false } as ClientContext;
 
-/** Home has no memory defaults (decision D4): a Home session serves requests only
- * once its memory is configured. Cases that need a Home run configure it here. */
 async function configureHomeMemory(f: Fixture): Promise<void> {
   await setHomeMemoryModels(f.registry, [MODEL]);
 }
@@ -112,13 +106,8 @@ async function openRegistry(f: {
     broadcast: (sessionId, topic) => { f.events.push({ sessionId, topic }); },
     sessionSummaryChanged: () => {},
     sessionListChanged: () => {},
-    // The notify module is host-owner conditional for every profile, so the
-    // fixture offers its owner and the curated Home list is exercised in full.
     notifications: { enqueue: async () => "queued" } as unknown as NotificationService,
     homeDiagnostic: (diagnostic) => f.diagnostics.push(diagnostic),
-    // Home's memory compactor runs on the Gateway's ModelRuntime. These cases
-    // inject its summarizer so no model is ever reached for it, exactly as the
-    // Gateway injects the Knowledge model for its own calls.
     homeMemorySummarizer: () => async () => fauxAssistantMessage("HOME-MEMORY-LINE"),
   });
   registries.push(registry);
@@ -159,8 +148,6 @@ async function fixture(label: string, options: { cacheWarming?: boolean; virtual
       { id: MODEL_ID, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 300 } },
       { id: OTHER_MODEL_ID, cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 300 } },
     ],
-    // Slow enough that a long response keeps its run live across the SDK's
-    // one-second minimum cache-warm delay.
     tokensPerSecond: 300,
   });
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
@@ -182,15 +169,10 @@ async function fixture(label: string, options: { cacheWarming?: boolean; virtual
   f.registry = opened.registry;
   f.service = opened.service;
   await f.registry.initialize();
-  // Gateway startup retires abandoned task identities after its listener serves (gateway-main).
   await homeOwnerOf(f.registry).recoverTasks();
   return f;
 }
 
-/** Dispose the Gateway and open a new one over the same installation: the same
- * thing a Gateway restart does. */
-/** Wait for the restarted Gateway's first catalog cut, so membership reads are
- * proven rather than merely unavailable. */
 async function waitForCatalog(f: Fixture): Promise<void> {
   const deadline = performance.now() + 15_000;
   const cut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
@@ -229,7 +211,6 @@ function activeTools(context: ContextEnvelope): string[] {
 }
 
 function extensionNames(context: ContextEnvelope): string[] {
-  // Tron registers its modules inline, so Pi reports them as `<inline:name>`.
   return context.extensions.map((extension) => extension.name.replace(/^<inline:/, "").replace(/>$/, "")).sort();
 }
 
@@ -244,7 +225,6 @@ async function designate(f: Fixture, commandId: string, model: { provider: strin
   }) as unknown as HomeDesignation;
 }
 
-/** Home's model as its saved settings resolve it: its one model authority. */
 async function homeModel(f: Fixture): Promise<unknown> {
   const owners = (f.registry as unknown as { settingsOwners: { model: { resolve(target: unknown, session: undefined, keys: string[]): Promise<{ keys: Array<{ value: unknown }> }> } } }).settingsOwners;
   return (await owners.model.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"])).keys[0]?.value;
@@ -257,8 +237,6 @@ async function homeStatus(f: Fixture): Promise<HomeStatus> {
 const HOME_EXTENSIONS = [
   "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify", "tron-projects", "tron-settings", "tron-web-research",
 ];
-/** The curated Home profile's executable tool set: the allowlist, sorted the way
- * the assertions read it. */
 const HOME_TOOLS = [
   "ask_user", "bash", "date", "delegate", "display", "edit", "find", "grep", "ls", "memory_search", "notify", "obligation",
   "profile", "projects", "read", "session_read", "session_search", "settings", "task", "web_search", "write", "zoom",
@@ -326,8 +304,6 @@ describe("Tron Home designation", () => {
     let admissionError: unknown;
     try {
       const admitted = await f.registry.acquire(designation.sessionId);
-      // Negative-control path: without the guard the former Home is an ordinary
-      // runtime and sends its canonical transcript to the provider.
       f.faux.setResponses([fauxAssistantMessage("unprotected Home request")]);
       await admitted.prompt("must not reach provider after corruption");
       await waitUntil(() => f.faux.state.callCount === requestsBeforeCorruption + 1);
@@ -356,8 +332,6 @@ describe("Tron Home designation", () => {
     expect(registeredTools(ordinaryContext)).toContain("write");
     expect(registeredTools(ordinaryContext)).toContain("bash");
 
-    // Negative control: a registry with no Home at all. Its ordinary session
-    // must load exactly what this registry's ordinary session loads.
     const control = await fixture("control");
     const controlSlot = await control.registry.create(control.cwd);
     await controlSlot.setModel(PROVIDER, MODEL_ID);
@@ -369,24 +343,18 @@ describe("Tron Home designation", () => {
     expect(await homeStatus(f)).toEqual({
       available: true, enabled: false, live: false, sessionPresent: false, taskRecovery: { available: true },
       memory: { configured: false, open: false, paused: false },
-      // Derived by HomeOwner.status (#505): an undesignated Home names its one recovery action.
       phase: "undesignated", activation: { available: false },
       readiness: { ready: false, gaps: ["not-designated"] }, recovery: { action: "designate" },
-      // Process facts shown in every phase (#930): no worker runs before designation.
       hostPressure: expect.objectContaining({ level: expect.stringMatching(/^(normal|elevated|critical)$/u) }),
       workers: { running: 0 },
     });
 
-    // The default-model branch: no model named means this Gateway's default.
     const designation = await designate(f, "home-designate-1", null);
     expect(designation.generation).toBe(1);
     expect(await homeModel(f)).toEqual(MODEL);
 
-    // The first runtime of the new Home is already the Home profile, read from
-    // the live session rather than from the record.
     const home = await f.registry.acquire(designation.sessionId);
     const homeContext = await contextOf(home);
-    // The neutral directory, resolved the way the trust store resolves it.
     expect(home.cwd).toBe(await realpath(join(f.tronHome, "gateway", "home", "workspace")));
     expect(activeTools(homeContext)).toEqual(HOME_TOOLS);
     expect(registeredTools(homeContext)).toEqual(HOME_TOOLS);
@@ -397,37 +365,28 @@ describe("Tron Home designation", () => {
       expect(extensionNames(homeContext)).not.toContain(excluded);
     }
 
-    // Ordinary sessions are untouched by the designation.
     expect(activeTools(await contextOf(ordinary))).toEqual(activeTools(ordinaryContext));
     expect(extensionNames(await contextOf(ordinary))).toEqual(extensionNames(ordinaryContext));
 
     expect(await homeStatus(f)).toMatchObject({
       available: true, enabled: true, homeId: designation.homeId,
       sessionId: designation.sessionId, bindingRevision: 1, generation: 1, live: true, sessionPresent: true,
-      // Home has no memory defaults: until its background models are set, the
-      // projection says so, every activation refuses, and status names the fix.
       memory: { configured: false, open: false, paused: false },
       phase: "blocked", activation: { available: false },
       readiness: { ready: false, gaps: ["memory-not-configured"] }, recovery: { action: "configure-memory" },
     });
 
-    // Idempotent, and a replayed command id returns the same result.
     expect(await designate(f, "home-designate-1")).toEqual(designation);
     expect(await designate(f, "home-designate-2")).toEqual(designation);
     expect(f.diagnostics.map((diagnostic) => diagnostic.outcome)).toEqual(["designated"]);
 
-    // Home compaction is off for this session only; the ordinary session keeps
-    // the canonical budget.
     expect(home.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: false });
     expect(ordinary.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: true });
     expect(home.snapshot().compactionPolicy?.next.enabled).toBe(true);
 
-    // Manual compaction is refused at admission, before the SDK would refuse it.
     await expect(home.compact()).rejects.toMatchObject({ code: "conflict" });
     expect(home.snapshot().phase).toBe("idle");
 
-    // A virtual model is refused for Home and for the Home session, and the
-    // recorded model is unchanged.
     await expect(f.service.invoke(client, "home.designate", {
       commandId: "home-designate-virtual",
       model: { provider: PROVIDER, id: VIRTUAL_MODEL_ID },
@@ -435,8 +394,6 @@ describe("Tron Home designation", () => {
     await expect(home.setModel(PROVIDER, VIRTUAL_MODEL_ID)).rejects.toMatchObject({ code: "invalid_request" });
     expect(await homeModel(f)).toEqual(MODEL);
 
-    // An active Home slot cannot be rekeyed by a fork. Configure memory so
-    // the source has a real canonical turn rather than an admission refusal.
     await configureHomeMemory(f);
     f.faux.setResponses([fauxAssistantMessage("home reply")]);
     await home.prompt("hello home");
@@ -451,8 +408,6 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("excludes the agent directory's SYSTEM.md and APPEND_SYSTEM.md from Home", async () => {
-    // The curated profile drops the agent-directory system prompt files
-    // too, and an ordinary session in the same installation still loads them.
     const f = await fixture("systemprompt");
     await writeFile(join(f.agentDir, "SYSTEM.md"), `${SYSTEM_SENTINEL}\n`);
     await writeFile(join(f.agentDir, "APPEND_SYSTEM.md"), `${APPEND_SENTINEL}\n`);
@@ -472,8 +427,6 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("refuses a profile change while the session is running, deterministically", async () => {
-    // The run is held open by a response that waits for this test, so the
-    // refusal is not a race with a timed-out stream.
     const f = await fixture("busy");
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
@@ -500,13 +453,10 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("replaces the live runtime in place, keeping the slot, its subscribers and the session", async () => {
-    // A profile change never retires the slot, so the session (which
-    // may never have been written) and its subscribers survive.
     const f = await fixture("lifecycle");
     const designation = await designate(f, "home-designate-lifecycle");
     const home = await f.registry.acquire(designation.sessionId);
     expect(activeTools(await contextOf(home))).toEqual(HOME_TOOLS);
-    // Never prompted, so nothing has been written for it yet.
     expect(home.sessionFile).toBeTypeOf("string");
     expect(existsSync(home.sessionFile!)).toBe(false);
 
@@ -518,10 +468,7 @@ describe("Tron Home designation", () => {
     expect(await f.service.invoke(client, "home.disable", { commandId: "home-disable-2" }) as unknown as HomeDesignation)
       .toEqual(disabled);
 
-    // The same slot object, still live, still unpersisted, and now ordinary.
     expect(await f.registry.acquire(designation.sessionId)).toBe(home);
-    // The never-written session is still here: the replacement reused it rather
-    // than retiring the slot.
     expect(existsSync(home.sessionFile!)).toBe(false);
     expect(home.snapshot().revision).toBeGreaterThan(before.revision);
     const ordinaryContext = await contextOf(home);
@@ -529,14 +476,11 @@ describe("Tron Home designation", () => {
     expect(extensionNames(ordinaryContext)).toContain("tron-core");
     expect(home.snapshot().compactionPolicy?.currentBudgets).toMatchObject({ enabled: true });
     expect(await homeStatus(f)).toMatchObject({ enabled: false, live: true, sessionPresent: true });
-    // The replacement published to the session's subscribers, which the slot
-    // never dropped: it reuses the same session identity.
     const published = f.events.filter((event) => event.sessionId === designation.sessionId).map((event) => event.topic);
     expect(published).toContain("session.resourcesChanged");
     expect(published).toContain("session.snapshot");
     f.registry.unsubscribe("test-audience", designation.sessionId);
 
-    // A command id replayed after the disable still returns its original result.
     expect(await designate(f, "home-designate-lifecycle")).toEqual(designation);
 
     const reenabled = await f.service.invoke(client, "home.designate", {
@@ -549,8 +493,6 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("keeps the transcript's declared loadout across a profile change, and setTools restores the tools", async () => {
-    // The disable does not rewrite the chat's declared loadout, so the
-    // ACTIVE set stays Home's until the user changes it.
     const f = await fixture("loadout");
     f.faux.setResponses([fauxAssistantMessage("home reply")]);
     const designation = await designate(f, "home-designate-loadout");
@@ -564,9 +506,6 @@ describe("Tron Home designation", () => {
 
     await f.service.invoke(client, "home.disable", { commandId: "home-disable-loadout" });
     const context = await contextOf(home);
-    // An ordinary profile registers the ordinary tools, so the declared Home
-    // loadout activates only that part of it; the memory tools are gone with the
-    // Home-only module.
     expect(activeTools(context)).toEqual(HOME_TOOLS.filter((name) => registeredTools(context).includes(name)));
     expect(activeTools(context)).not.toContain("zoom");
     expect(registeredTools(context)).toEqual(registeredTools(await contextOf(ordinary)));
@@ -575,15 +514,11 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("mints a fresh Home session when the recorded session is gone", async () => {
-    // Designate and disable before any prompt, then restart the Gateway. The
-    // never-written session is gone from the catalog, so the record is dangling.
     const f = await fixture("dangling");
     const designation = await designate(f, "home-designate-dangling");
     expect(homeOwnerOf(f.registry).profileFor(designation.sessionId)).toBe("home");
     await f.service.invoke(client, "home.disable", { commandId: "home-disable-dangling" });
     await reopen(f);
-    // Let the restarted Gateway finish its first catalog cut, so membership is
-    // proven rather than merely unavailable.
     await waitForCatalog(f);
 
     expect(await homeStatus(f)).toMatchObject({
@@ -608,7 +543,6 @@ describe("Tron Home designation", () => {
     f.faux.setResponses([fauxAssistantMessage("persist virtual transcript")]);
     await home.prompt("persist disabled transcript");
     await waitUntil(() => home.snapshot().configurationBlocker === null);
-    // An outside edit of Home's saved settings, which the change path would refuse.
     const profilePath = join(f.tronHome, "gateway", "home", "profile.json");
     const profile = JSON.parse(await readFile(profilePath, "utf8").catch(() => "{}")) as { model?: Record<string, unknown> };
     await writeFile(profilePath, `${JSON.stringify({ ...profile, model: { ...profile.model, chat: { provider: PROVIDER, id: VIRTUAL_MODEL_ID } } })}\n`, { mode: 0o600 });
@@ -645,13 +579,11 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("applies Home's saved physical model when re-enabling a Home whose session moved on", async () => {
-    // Re-enable keeps Home's saved model, and the live session is brought back to it.
     const f = await fixture("model", { virtualModel: true });
     const designation = await designate(f, "home-designate-model");
     const home = await f.registry.acquire(designation.sessionId);
     await f.service.invoke(client, "home.disable", { commandId: "home-disable-model" });
 
-    // An ordinary session may take a virtual model; Home must not.
     await home.setModel(PROVIDER, VIRTUAL_MODEL_ID);
     expect(home.snapshot().model).toMatchObject({ id: VIRTUAL_MODEL_ID });
     expect(await homeModel(f)).toEqual(MODEL);
@@ -663,7 +595,6 @@ describe("Tron Home designation", () => {
     expect(activeTools(await contextOf(home))).toEqual(HOME_TOOLS);
     expect(await homeModel(f)).toEqual(MODEL);
 
-    // A model applied to the enabled Home is its saved model from then on.
     await home.setModel(PROVIDER, OTHER_MODEL_ID);
     expect(await homeModel(f)).toEqual({ provider: PROVIDER, id: OTHER_MODEL_ID });
     await expect(f.service.invoke(client, "home.designate", {
@@ -673,11 +604,7 @@ describe("Tron Home designation", () => {
   });
 
   homeCase("sends zero cache-warming requests for Home while an ordinary session still warms", async () => {
-    // The SDK's warmer calls the model runtime directly,
-    // outside every request wrapper, and its extension decision listener fails
-    // open, so tron-home must be the only answer for a Home session.
     const f = await fixture("warming", { cacheWarming: true });
-    // The SDK's minimum warm delay comes from the model's prompt-cache lifetime.
     const model = f.runtime.getModel(PROVIDER, MODEL_ID)!;
     (model as unknown as { promptCache: { short: number } }).promptCache = { short: 11 };
     const warmCalls: number[] = [];
@@ -693,8 +620,6 @@ describe("Tron Home designation", () => {
     await configureHomeMemory(f);
     const home = await f.registry.acquire(designation.sessionId);
     const homeSession = (home as unknown as { runtime: { session: AgentSession } }).runtime.session;
-    // The first prompt records the usage the warm decision prices; the second is
-    // still streaming when its warm timer fires.
     f.faux.setResponses([response("home reply")]);
     await home.prompt(LARGE_PROMPT);
     await waitUntil(() => home.snapshot().configurationBlocker === null, 20_000);
@@ -705,8 +630,6 @@ describe("Tron Home designation", () => {
     expect(warmCalls).toEqual([]);
     await waitUntil(() => home.snapshot().configurationBlocker === null, 30_000);
 
-    // Control: an ordinary session in the same registry and on the same model
-    // does warm, so Home's zero is the profile and not a disabled warmer.
     const ordinary = await f.registry.create(f.cwd);
     await ordinary.setModel(PROVIDER, MODEL_ID);
     f.faux.setResponses([response("ordinary reply")]);
@@ -716,7 +639,6 @@ describe("Tron Home designation", () => {
     await ordinary.prompt("warm this request");
     await waitUntil(() => warmCalls.length > 0, 10_000);
     expect(warmCalls.length).toBeGreaterThan(0);
-    // Home still never warmed.
     expect(homeSession.cacheWarmingStatus).toMatchObject({ reason: "stopped by extension" });
     await waitUntil(() => ordinary.snapshot().configurationBlocker === null, 30_000);
   });

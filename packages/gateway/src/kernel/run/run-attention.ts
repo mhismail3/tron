@@ -11,11 +11,7 @@ type CompletionOwnershipItem = {
   fallbackWork?: GatewayWorkHandle;
 };
 
-/** Runtime completion ownership; durable attention remains with its store. */
 export class RunAttentionOwner {
-  /** `message_end` precedes Pi's synchronous canonical append. Capture immutable
-   * operation ownership in that callback turn so an immediate extension
-   * continuation cannot inherit the completion's already-consumed owner. */
   private readonly pendingAssistantBindings = new Map<object, {
     operationId?: string;
     ownsPromptOperation: boolean;
@@ -36,11 +32,7 @@ export class RunAttentionOwner {
 
   releaseAssistant(message: object): void { this.pendingAssistantBindings.delete(message); }
 
-  /** Exact successful canonical assistant completion awaiting durable attention admission. */
   pendingAssistantCompletion: CanonicalAssistantCompletion | undefined;
-  /** Exact completions retain canonical attention order. Their durable stamps
-   * are started independently so a failed projection head cannot hide a newer
-   * continuation from restart reconciliation. */
   readonly completionOwnershipQueue: CompletionOwnershipItem[] = [];
   attentionBarrier: Promise<void> | undefined;
   rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
@@ -61,9 +53,6 @@ export class RunAttentionOwner {
     if (item.stamp) return item.stamp;
     const { completion } = item;
     if (!completion.operationId) return Promise.resolve();
-    // A task's root marker belongs to the whole delegated operation, not one
-    // reply: notices/reminders can produce several completions before report.
-    // Terminal invocation cleanup/task acknowledgement retire the root marker.
     if (completion.operationId === this.operations.ownedTurns.worker?.identity.operationId) return Promise.resolve();
     const stamp = this.operations.runPersistence.trackOwnershipWrite(() => this.operations.runPersistence.retryDurableWrite(
       `marker:completion:${completion.operationId}:${completion.id}`,
@@ -85,15 +74,10 @@ export class RunAttentionOwner {
     let item = this.completionOwnershipQueue.find((candidate) => candidate.completion.id === completion.id);
     if (item) {
       const existingOperationId = item.completion.operationId;
-      // The first callback-turn binding is immutable. A later settlement view
-      // may fill a missing owner, but mutable runtime state cannot replace one.
       if (!existingOperationId && completion.operationId) {
         item.completion = { ...item.completion, operationId: completion.operationId };
       }
     } else {
-      // Canonical append admission is the single observation boundary. Later
-      // attention settlement and agent_settled notification handling must read
-      // this same disposition rather than resampling a close/completion race.
       this.operations.runTerminal.completionObserved(completion.id);
       const operationId = completion.operationId ?? this.operations.runTerminal.completionOperationId(completion.id);
       const exactOwner = operationId ? this.operations.runWork.get(operationId) : undefined;
@@ -136,8 +120,6 @@ export class RunAttentionOwner {
         }
         this.completionOwnershipQueue.shift();
         item.fallbackWork?.settle();
-        // Normal completions already retired their operation token before the
-        // final snapshot. Queue retirement must also publish configuration ready.
         this.operations.publishConfiguration();
       }
       this.operations.manualCompaction.startPendingManualCompaction();
@@ -181,16 +163,10 @@ export class RunAttentionOwner {
     const completionIndex = entries.findIndex(entry => entry.id === item.completion.id);
     if (completionIndex < start.entryIndex) return;
     item.observationSettled = true;
-    // The deduplication record belongs only to the operation whose eventual
-    // agent_settled callback can consume it. A completion from an earlier
-    // operation in a queued run may settle after its callback ownership ended.
     if (this.operations.activeOperationId === operationId) {
       this.operations.runTerminal.observationFor(operationId).observedCompletionId = item.completion.id;
     }
     if (this.operations.hasActiveAgentRun && this.operations.activeOperationId === operationId) {
-      // The same foreground operation can continue after a completion (for
-      // example, a consumed steer). Advance to the exact next canonical entry;
-      // its later completion owns only the remaining range.
       this.operations.runTerminal.observationFor(operationId).cursor = { entryIndex: completionIndex + 1 };
     } else {
       this.operations.runTerminal.retireOperationObservation(operationId);
@@ -225,17 +201,12 @@ export class RunAttentionOwner {
       const pendingOwner = this.operations.runTerminal.completionOperationId(completion.id);
       if (pendingOwner) delete this.operations.runTerminal.operationObservations.get(pendingOwner)!.pendingCompletionId;
       if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
-      // A continuation may already own the agent while this older durable write
-      // unwinds. Settlement retires only its exact completion; the newer run
-      // remains operationally running and owns final idle transition.
       if (this.operations.hasActiveAgentRun) {
         this.ensureAgentProjection();
         this.operations.publishSnapshot();
         return;
       }
       if (this.operations.manualCompaction.pendingManualCompaction) {
-        // Compaction owns a separate marker. Start it only after the preceding
-        // response's attention fact and exact marker retirement are durable.
         this.operations.phase = "idle";
         this.operations.revision += 1;
         this.operations.publishSnapshot();
@@ -249,9 +220,6 @@ export class RunAttentionOwner {
       this.operations.revision += 1;
       this.operations.publishSnapshot();
     } catch (error) {
-      // The failed exact completion stays at the ownership-lane head and retains
-      // its durable marker. Reconciliation retries it before any continuation
-      // marker or later completion can advance.
       this.operations.phase = "interrupted";
       this.operations.revision += 1;
       this.operations.publishSnapshot();
@@ -264,8 +232,6 @@ export class RunAttentionOwner {
       try {
         await this.attentionBarrier;
       } catch (error) {
-        // A failed queue head remains retryable below; only an unowned barrier
-        // failure is terminal to reconciliation.
         if (this.completionOwnershipQueue.length === 0) throw error;
       }
     }

@@ -13,16 +13,6 @@ import { waitFor } from "../../../../test-support/wait-for.js";
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 import type { RuntimeSlot } from "../../../kernel/run/runtime-slot.js";
 
-/**
- * The Project layer is the worktree root's `.pi/` (settings-model decision 31),
- * through the Tron-patched SDK's `projectDir`. A real RuntimeRegistry, real Git
- * repository and linked worktree, a faux model and a real stdio MCP server prove
- * that a chat in a subdirectory loads root settings, resources and MCP while its
- * own cwd, tools and nested AGENTS.md stay intact.
- */
-
-// One stdio MCP server per configuration; `where` reports the directory the
-// server process was started in.
 const SERVER = `
 import { writeFileSync } from "node:fs";
 import readline from "node:readline";
@@ -111,7 +101,6 @@ export default function (pi) {
     await writeJson(join(linked, ".pi", "settings.json"), { retry: { maxRetries: 5 } });
     await writeJson(join(linked, ".pi", "mcp.json"), { mcpServers: {} });
     const linkedNested = join(linked, "packages", "app");
-    // A Tron Home workspace that a repository happens to enclose stays its own root.
     const homeWorkspace = join(repo, "tron-home", "workspace");
     await mkdir(homeWorkspace, { recursive: true });
 
@@ -132,7 +121,6 @@ export default function (pi) {
     const builtInMaxRetries = SettingsManager.inMemory().getRetrySettings().maxRetries;
     const evidence: Record<string, unknown> = {};
 
-    // Trust is decided for the root: the nested chat asks for the root's decision.
     const undecided = await registry.create(nested).then(() => undefined, (error: unknown) => error);
     expect(undecided).toBeInstanceOf(GatewayError);
     expect((undecided as GatewayError).details).toMatchObject({ cwd: nested, projectDir: repo, requiresDecision: true });
@@ -140,8 +128,6 @@ export default function (pi) {
     expect(decided).toMatchObject({ cwd: nested, projectDir: repo, savedDecision: true });
     expect((await trust.inspect(repo)).savedDecision).toBe(true);
 
-    // Inside `.git` there is no work tree, so the cwd is its own Project; the
-    // standalone Home workspace's explicit decision never reaches the root.
     expect((await trust.inspect(join(repo, ".git"))).projectDir).toBe(join(repo, ".git"));
     expect(await trust.set(homeWorkspace, false)).toMatchObject({ cwd: homeWorkspace, projectDir: homeWorkspace, savedDecision: false });
     const homeRepository = join(homeWorkspace, "task-repo");
@@ -176,7 +162,6 @@ export default function (pi) {
     const firstRootServer = Number(await readFile(join(root, "root.pid"), "utf8"));
     evidence.nested = { cwd: slot.cwd, projectDir: slot.projectDir, maxRetries: 7, mcpTools: mcpTools(slot), mcpServerCwd: repo, toolCwd: nested, nestedAgentsMd: true };
 
-    // An outside edit of the root follows on reload; an edit of the nested .pi does not.
     await writeJson(join(repo, ".pi", "settings.json"), { retry: { maxRetries: 8 } });
     await writeJson(join(repo, ".pi", "mcp.json"), { mcpServers: mcpServer("root2") });
     await writeJson(join(nested, ".pi", "settings.json"), { retry: { maxRetries: 50 } });
@@ -188,7 +173,6 @@ export default function (pi) {
     evidence.outsideEdit = { maxRetries: 8, mcpTools: mcpTools(slot), nestedEditIgnored: true, replacedServerStopped: true };
     evidence.boundaries = { gitDirectoryIsOwnProject: true, homeWorkspaceStandalone: true, repositoryInsideHomeKeepsItsRoot: true, rootDecisionKept: true };
 
-    // A linked worktree is its own Project: its own decision and its own values.
     const linkedUndecided = await registry.create(linkedNested).then(() => undefined, (error: unknown) => error);
     expect((linkedUndecided as GatewayError).details).toMatchObject({ projectDir: linked, requiresDecision: true });
     await trust.set(linkedNested, true);
@@ -198,14 +182,12 @@ export default function (pi) {
     expect(maxRetries(slot)).toBe(8);
     evidence.linkedWorktree = { projectDir: linked, maxRetries: 5, mainChatMaxRetries: 8 };
 
-    // Outside a repository the chat's cwd is its Project, as before.
     await trust.set(plain, true);
     const plainSlot = await registry.create(plain);
     expect(plainSlot.projectDir).toBe(plain);
     expect(maxRetries(plainSlot)).toBe(11);
     evidence.standalone = { cwd: plain, projectDir: plain, maxRetries: 11 };
 
-    // Revoking the root's trust reloads the nested chat without project settings or MCP.
     const rootServer = Number(await readFile(join(root, "root2.pid"), "utf8"));
     await trust.setAndApply(nested, false,
       (inspection) => registry.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),

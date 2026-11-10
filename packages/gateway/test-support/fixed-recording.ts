@@ -2,17 +2,8 @@ import crypto from "node:crypto";
 import { syncBuiltinESMExports } from "node:module";
 import { vi } from "vitest";
 
-/** The clock every corpus recording runs under. */
 export const CORPUS_EPOCH = Date.parse("2026-01-01T00:00:00.000Z");
 
-/**
- * Run a corpus recording under a fixed clock and a counted `randomUUID`, so recording
- * the same store twice writes the same bytes (packages/gateway/docs/scenario-locks.md#persisted-stores-v4). Owners keep
- * their production id and clock sources: the test replaces the process's `Date` and
- * `crypto.randomUUID` for the recording only. `syncBuiltinESMExports` carries the
- * replacement to every module's named `randomUUID` import, including the Pi SDK's
- * session entry ids (the first eight characters, so the counter leads).
- */
 export async function recordFixed<T>(run: () => Promise<T>): Promise<T> {
   const restore = countRandomUUID();
   try {
@@ -25,10 +16,6 @@ export async function recordFixed<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-/**
- * Replace the process's `crypto.randomUUID` with a counter until the returned restore
- * runs, so generated ids are part of a byte-stable recording.
- */
 function countRandomUUID(): () => void {
   const original = crypto.randomUUID;
   let next = 0;

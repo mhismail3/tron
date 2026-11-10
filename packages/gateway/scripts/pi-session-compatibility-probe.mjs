@@ -1,18 +1,5 @@
 #!/usr/bin/env node
-/**
- * Exercise Pi's public persistence APIs in an isolated directory. This file is
- * intentionally a subprocess worker; the rollback orchestrator supplies the
- * package root so no canonical user directory is ever consulted.
- *
- * Failure modes this probe exists to make visible (see check-pi-sdk-rollback.mjs
- * for the cross-version assertions):
- * - an MCP server name that round-trips through `mcp.json` as a different server
- *   (renamed, dropped, or refused), so the tools the user configured are gone;
- * - an MCP OAuth credential that the runtime that wrote it can still resolve and
- *   the next runtime cannot, so a Gateway rollback silently signs the user out.
- * Both are read back through Pi's own public entry (`pi mcp list --json`) so the
- * reported state is the running runtime's resolution, not this probe's guess.
- */
+// Exercise Pi's public persistence APIs in an isolated directory.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -86,7 +73,6 @@ function readJson(path) {
   try { return JSON.parse(readFileSync(path, "utf8")); } catch { return undefined; }
 }
 
-/** This runtime's own `pi` entry, read from the `bin.pi` it declares. */
 function mcpCliPath() {
   try {
     const bin = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"))?.bin;
@@ -97,14 +83,6 @@ function mcpCliPath() {
   } catch { return undefined; }
 }
 
-/**
- * Run this runtime's own `pi mcp` CLI. Bounded and killed on timeout, and
- * asynchronous so a server this process serves stays answerable. The budget is
- * half the orchestrator's per-probe budget, because the `write` action runs
- * `pi mcp add` and `pi mcp list` back to back; the orchestrator additionally
- * kills this probe's whole process group, so a probe killed from above cannot
- * leave this child behind.
- */
 function runMcpCli(args) {
   const cliPath = mcpCliPath();
   if (!cliPath) return Promise.resolve(undefined);
@@ -122,24 +100,7 @@ function runMcpCli(args) {
   });
 }
 
-/**
- * Seed the on-disk state a pre-upgrade Gateway leaves: one hyphenated server
- * with `direct` exposure, and its OAuth credential.
- *
- * `mcp.json` is written by the runtime's own `pi mcp add`, so the seeded config
- * is what that runtime produces rather than this probe's guess at the file
- * format. A runtime that predates Pi's MCP support has no writer; the documented
- * `mcpServers` shape is then the user's own configuration file. Pi exposes no
- * public writer for the OAuth credential store, so that credential is seeded in
- * the key shape this runtime's store uses: the server URL before Pi 1.0, and the
- * server's tool namespace with the URL from 1.0 (a 1.x Gateway has already
- * re-keyed any older entry; `pi-sdk-baseline.json` records that 0.99 -> 1.0 delta).
- */
 async function writeMcpSeed() {
-  // `pi mcp add` is the runtime's own writer for `mcp.json`, so the seeded config
-  // is what that runtime produces. A runtime without Pi's built-in MCP extension
-  // has no such command; the documented `mcpServers` shape is then the user's own
-  // configuration file.
   if (typeof pi.createMcpExtension === "function" && mcpCliPath()) {
     const added = await runMcpCli(["mcp", "add", MCP_SERVER, "--url", mcpUrl, "--exposure", "direct"]);
     if (added && added.code !== 0) throw new Error(`pi mcp add failed: ${added.stderr.trim() || `exit ${added.code}`}`);
@@ -150,13 +111,6 @@ async function writeMcpSeed() {
   writeFileSync(mcpAuthPath, `${JSON.stringify({ [credentialKey]: { clientInformation: { client_id: "probe-client", redirect_uris: ["http://127.0.0.1:1/callback"] }, tokens: { access_token: MCP_ACCESS_TOKEN, token_type: "Bearer", expires_in: 3600 }, tokensExpireAt: Date.now() + 3_600_000 } }, null, 2)}\n`);
 }
 
-/**
- * What this runtime resolves from the seeded config and credential store.
- * `pi mcp list --json` exits 1 when a configured server is not connected, so a
- * non-zero exit is a reported state, not a probe failure. Credential keys are
- * read on both sides of the listing: a runtime that re-keys the store does it
- * while it resolves the server, so only the after-keys show what it left.
- */
 async function mcpState() {
   const credentialsBefore = Object.keys(readJson(mcpAuthPath) ?? {}).sort();
   const onDisk = { config: readJson(mcpConfigPath)?.mcpServers ?? {} };

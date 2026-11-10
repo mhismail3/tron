@@ -1,6 +1,4 @@
-// Purpose: the one seeded generator for the proof tool tests. mulberry32 steps in exact 32-bit integer
-// arithmetic, so its stream does not fall into the short cycles a floating-point LCG (whose product passes 2^53)
-// falls into; rnd() returns a float in [0, 1).
+// Purpose: the one seeded generator for the proof tool tests.
 export function mulberry32(seed) {
   let s = seed | 0;
   return () => {

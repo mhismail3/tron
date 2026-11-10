@@ -3,19 +3,9 @@ import { mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
 
-/*
- * Every fsync the Gateway performs goes through `syncDurably`, so the rate and
- * time of durable synchronization are counted at one primitive and drained by
- * the transport's resource sampler. A store then needs no record of its own on
- * an interactive path (run markers, upload commits, catalog metadata, session
- * exports, workspace and knowledge state, display artifacts). The counters are
- * process global because the primitive is.
- */
 let durableFsyncCount = 0;
 let durableFsyncMs = 0;
 
-/** Closes the fsync window: how many synchronizations completed and how long
- * they took, since this call. */
 export function drainDurableWriteStats(): { count: number; ms: number } {
   const stats = { count: durableFsyncCount, ms: durableFsyncMs };
   durableFsyncCount = 0;
@@ -23,11 +13,6 @@ export function drainDurableWriteStats(): { count: number; ms: number } {
   return stats;
 }
 
-/**
- * Synchronizes one durable handle and counts the fsync that completed. Time is
- * the sync call alone, not the write or rename around it, and a failed sync
- * throws without counting: the sample never reports a write that did not land.
- */
 export async function syncDurably(handle: { sync(): Promise<void> }): Promise<void> {
   const startedAt = performance.now();
   await handle.sync();
@@ -46,17 +31,11 @@ const productionFileSystem: DurableJsonFileSystem = { mkdir, open, rename, rm };
 
 type DurablePublicationError = Error & { publicationVisible?: true };
 
-/** Returns whether an error happened after the replacement was made visible. */
 export function isDurablePublicationUncertain(error: unknown): boolean {
   return typeof error === "object" && error !== null
     && (error as DurablePublicationError).publicationVisible === true;
 }
 
-/**
- * Atomically publishes one owner-only JSON document and synchronizes both the
- * document and directory entry before acknowledgement. The unique temporary
- * file is never reused and is removed only when this call created it.
- */
 export async function durableAtomicWriteJson(
   path: string,
   value: unknown,
@@ -66,7 +45,6 @@ export async function durableAtomicWriteJson(
   await durableAtomicWriteText(path, `${JSON.stringify(value, null, 2)}\n`, mode, fileSystem);
 }
 
-/** The same atomic, synchronized publication for an owner-only text file. */
 export async function durableAtomicWriteText(
   path: string,
   text: string,
@@ -105,9 +83,6 @@ export async function durableAtomicWriteText(
   }
 }
 
-/** Publish one bounded owner-written JSON document. The exact encoded size is
- * checked before the atomic replacement, so an oversized document is never
- * written at all. */
 export async function durablePublishBoundedJson(
   path: string,
   document: unknown,
@@ -118,7 +93,6 @@ export async function durablePublishBoundedJson(
   await durableAtomicWriteJson(path, document);
 }
 
-/** Remove one published document durably. Missing is already the desired state. */
 export async function durableRemove(
   path: string,
   fileSystem: Pick<DurableJsonFileSystem, "open" | "rm"> = productionFileSystem,
@@ -130,8 +104,6 @@ export async function durableRemove(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
-  // Only a removal that reaches the directory sync is a durable write; removing
-  // a file that was already gone fsyncs nothing.
   const directoryHandle = await fileSystem.open(directory, "r");
   try {
     await syncDurably(directoryHandle);

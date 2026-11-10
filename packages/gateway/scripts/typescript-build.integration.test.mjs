@@ -51,29 +51,26 @@ test("real npm/TypeScript checks reuse only no-emit work and retain all failure/
     await writeFile(corpus, "export const corpus = 1;\n");
 
     await run("check");
-    await run("check"); // A second pass must actually reuse the native caches.
+    await run("check");
     await assert.rejects(stat(join(root, "dist")), { code: "ENOENT" });
     await run("build");
     const outputs = ["index.js", "index.d.ts", "index.js.map"].map(file => join(root, "dist", file));
     const original = await Promise.all(outputs.map(file => readFile(file)));
     for (const file of outputs) await rm(file);
-    await run("build"); // A warmed no-emit cache must never suppress emission.
+    await run("build");
     assert.deepEqual(await Promise.all(outputs.map(file => readFile(file))), original);
 
-    // Each scope has a unique unimported root. Cached success must not conceal
-    // a newly introduced error, and cached errors must disappear only on repair.
     for (const path of ["src/unimported.ts", "test-support/unimported.ts", "test-fixtures/pi-sdk/record-corpus.integration.test.ts"]) {
       const file = join(root, path);
       const before = path.startsWith("test-fixtures") ? await readFile(file) : undefined;
       await writeFile(file, "export const wrong: string = 42;\n");
       await run("check", "TS2322");
-      await run("check", "TS2322"); // A cached diagnostic is still a failure.
+      await run("check", "TS2322");
       await run("build", "TS2322");
       if (before) await writeFile(file, before); else await rm(file);
       await run("check");
     }
 
-    // The production root boundary is a semantic guard -- noCheck drops it.
     await writeFile(join(root, "src/index.ts"), "import { helper } from '../test-support/helper.js'; export const outside = helper;\n");
     await run("check", "TS6059");
     await run("check", "TS6059");
@@ -106,12 +103,10 @@ test("real npm/TypeScript checks reuse only no-emit work and retain all failure/
     await run("check", "TS2322");
     await writeFile(join(root, "src/index.ts"), source);
 
-    // Cache damage is not a remembered pass. TypeScript must recheck and report
-    // the actual source error, then accept the repaired program.
     await run("check");
     for (const file of ["production-check.tsbuildinfo", "test-support.tsbuildinfo"]) {
       const path = join(root, "node_modules/.cache/tron", file);
-      await readFile(path); // Corrupt an activated compiler cache, not a stand-in.
+      await readFile(path);
       await writeFile(path, "{broken");
     }
     await writeFile(join(root, "src/index.ts"), "export const wrong: string = 42;\n");

@@ -25,7 +25,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
-    // The foreground child's model request was cut off by the operation abort, not by a Gateway stop.
     expect(child.abortedRequests()).toBe(1);
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
@@ -46,7 +45,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     const run = await dispatch(f);
     await run.completion;
     const results = await launchResults(f.registry, run.sessionId);
-    // Each refused call returns the gate's own reason, never the provider's error for it.
     for (const id of ["foreign-stop", "foreign-steer", "mission"]) {
       expect(results.find(item => item.toolCallId === id)).toMatchObject({ isError: true, content: [{ type: "text", text: HOME_TASK_PRODUCER_REFUSAL_REASON }] });
     }
@@ -70,7 +68,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => child.heldRequests() === 1, "async child live", bound);
     await waitBetweenTurns(slot);
-    // The settlement's join fails before any stop: the task reconciles from its canonical file at once (#1166).
     vi.spyOn(subagentSettlement, "settleTaskSubagents").mockRejectedValue(new Error("injected settlement interruption"));
     await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     await expect(run.completion).resolves.toMatchObject({ lifecycle: "terminal",
@@ -80,7 +77,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     const cold = await f.restart();
     expect(await homeOwnerOf(cold).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal",
       terminalEvidence: { outcome: "unknown", reason: "detached-work-outlived-task" } });
-    // Release the orphaned child and let its runner finish before the fixture is removed.
     const [launch] = (await launchResults(cold, run.sessionId)).filter(item => item.toolCallId === "async-launch");
     child.releaseHeld();
     await waitFor(async () => (await asyncState(launch!.details!.asyncDir as string)) === "complete", "orphaned run finishes", bound);
@@ -98,14 +94,12 @@ describe("Home task subagents: refusals, restarts and reports", () => {
         await waitFor(() => slot.ownedTurns.liveSubagentRuns().length === 1, "detached child visible as live", bound);
         return fauxAssistantMessage("Finished without a report.");
       },
-      // The workflow completed at once, so its completion notice can start a follow-up turn of the same task: that turn holds too.
       () => fauxAssistantMessage("Finished without a report."),
     ]);
     const run = await dispatch(f);
     const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => child.heldRequests() === 1, "detached child live", bound);
     await waitBetweenTurns(slot);
-    // The settlement fails before any stop: the task reconciles from its canonical file at once (#1166).
     vi.spyOn(subagentSettlement, "settleTaskSubagents").mockRejectedValue(new Error("injected settlement interruption"));
     await homeOwnerOf(f.registry).stopTask({ taskId: run.taskId, operationId: run.operationId });
     await expect(run.completion).resolves.toMatchObject({ lifecycle: "terminal",
@@ -113,7 +107,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     await f.registry.dispose();
     await f.registry.administrativeWorkRegistry.waitUntilSettled();
     const cold = await f.restart();
-    // The workflow's own status is complete, but its child's status is not: the task is not clean.
     expect(await homeOwnerOf(cold).taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal",
       terminalEvidence: { outcome: "unknown", reason: "detached-work-outlived-task" } });
     const [launch] = (await launchResults(cold, run.sessionId)).filter(item => item.toolCallId === "workflow-launch");
@@ -134,7 +127,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
         return fauxAssistantMessage([reportCall("report-early")], { stopReason: "toolUse" });
       },
       async (context: FauxContext) => {
-        // The refusal is an ordinary tool error, and the turn continues to this request.
         seen.refusal = toolResultText(context, "call-report-early");
         seen.runDir = launchedAsyncDir(context, "async-launch");
         expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ lifecycle: "active" });
@@ -150,7 +142,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     expect(await asyncState(seen.runDir!)).toBe("complete");
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     expect(result.reportRef).toMatchObject({ resultId: "report-late" });
-    // The run ended on its own before the report, so the Gateway stopped nothing at settlement.
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
     expect(child.abortedRequests()).toBe(0);
   }, 60_000);
@@ -168,8 +159,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
       },
       async (context: FauxContext) => {
         seen.stop = toolResultText(context, "own-stop");
-        // A stop request returns before the run has ended. The run is live until its status is terminal, so the
-        // worker waits for it, then reports.
         const slot = await f.registry.acquire(run.sessionId);
         await waitFor(() => !slot.catalogHasActiveSubagents, "stopped run ended before the report", bound);
         return fauxAssistantMessage([reportCall("report-after-stop")], { stopReason: "toolUse" });
@@ -181,13 +170,9 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     expect(await asyncState(seen.runDir!)).toBe("stopped");
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     expect(result.reportRef).toMatchObject({ resultId: "report-after-stop" });
-    // The worker's own stop is not a Gateway stop: settlement had no live run to stop.
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
-  // #1698: a run's notice that the provider queues into the report turn, before the
-  // report seals, is context for that turn, not a reason for another one. The SDK continues a
-  // run that ends with queued messages, so the sealed boundary must leave none queued.
   it("records a notice queued into the report turn as context and starts no turn after the sealed report", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
@@ -195,8 +180,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch"),
       async (context: FauxContext) => {
-        // This report turn's request has started, so the run's completion notice can only
-        // be steered into it: the child is released here, and the turn waits for the notice.
         await waitFor(() => child.heldRequests() === 1, "async child live", bound);
         seen.runDir = launchedAsyncDir(context, "async-launch");
         child.releaseHeld();
@@ -224,8 +207,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     const receipt = entries.findIndex(entry => entry.type === "custom" && entry.customType === "tron.context-delivery.v4"
       && (entry.data as { targetEntryId?: string })?.targetEntryId === entries[notice]?.id);
     const fact = entries.findIndex(entry => entry.type === "custom" && entry.customType === "tron-home-task-subagents");
-    // The notice stays canonical, receipted evidence, after the report and before the settlement fact,
-    // and no assistant message follows the sealed report.
     expect(notice).toBeGreaterThan(report);
     expect(receipt).toBeGreaterThan(notice);
     expect(fact).toBeGreaterThan(receipt);
@@ -257,7 +238,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     const run = await dispatch(f);
     const result = await run.completion;
     expect(seen.refusal).toMatchObject({ isError: true, text: expect.stringMatching(/^Report refused: 1 subagent run .* still live/) });
-    // The workflow had completed, so only its child kept the run live.
     expect(await asyncState(seen.workflowDir!)).toBe("complete");
     expect(await asyncState(join(dirname(seen.workflowDir!), await workflowChildRunId(seen.workflowDir!)))).toBe("complete");
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
@@ -278,9 +258,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
         const childId = await workflowChildRunId(seen.workflowDir);
         seen.childDir = join(dirname(seen.workflowDir), childId);
         const slot = await f.registry.acquire(run.sessionId);
-        // The workflow returned once its child launched, but disk durability is not Gateway
-        // observation: until its completed frame is admitted the workflow itself is the one
-        // live run (#1693). Cross the real public discovery boundary first.
         await waitFor(async () => await asyncState(seen.workflowDir!) === "complete"
           && await slot.ownedTurns.discoverExtensionArtifact(seen.workflowDir!) === "accepted", "completed workflow frame admitted", bound);
         await waitFor(() => slot.ownedTurns.liveSubagentRuns().length === 1, "detached execution is live", bound);
@@ -302,17 +279,12 @@ describe("Home task subagents: refusals, restarts and reports", () => {
         if (ending === "stop") seen.stop = toolResultText(context, "stop-paused-child");
         else seen.completedRootStop = toolResultText(context, "stop-completed-workflow");
         const slot = await f.registry.acquire(run.sessionId);
-        // Disk durability is not Gateway observation. Cross the real public
-        // discovery boundary before asserting what the report gate admitted;
-        // a watcher may legitimately still hold the preceding paused frame.
         await waitFor(async () => await slot.ownedTurns.discoverExtensionArtifact(seen.workflowDir!) === "accepted", "owned paused workflow frame admitted", bound);
         if (ending === "stop") await waitFor(() => !slot.catalogHasActiveSubagents, "paused child stop joined", bound);
         else await waitFor(() => slot.ownedTurns.liveSubagentRuns().every(row => row.state !== "running" && row.state !== "queued"), "paused child artifact frame observed", bound);
         return fauxAssistantMessage([reportCall("report-paused")], { stopReason: "toolUse" });
       },
       async (context: FauxContext) => {
-        // Known-bad control: preserve the real refusal, then stop the exact child
-        // so even a RED run releases all work instead of timing out in cleanup.
         seen.refusal = toolResultText(context, "call-report-paused");
         return fauxAssistantMessage([fauxToolCall("subagent", { action: "stop", id: basename(seen.childDir!) }, { id: "cleanup-paused-child" })], { stopReason: "toolUse" });
       },
@@ -336,7 +308,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     expect(await asyncState(seen.childDir!)).toBe(ending === "stop" ? "stopped" : "paused");
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagentRuns: { total: 0, runs: [] }, subagents: { started: 1, stoppedAtEnd: 0 } });
-    // Reconciliation must agree with the live report gate, including paused process proof.
     expect(await f.registry.delegation.subagentRunsSettled([seen.workflowDir!])).toBe(true);
   }, 60_000);
 
@@ -378,8 +349,6 @@ describe("Home task subagents: refusals, restarts and reports", () => {
       async (context: FauxContext) => {
         await waitFor(() => child.heldRequests() === 1, "workflow child live", bound);
         seen.workflowDir = launchedAsyncDir(context, "workflow-launch");
-        // The workflow completes with its child. Its completion notice is written after the run became
-        // terminal, so the report races it unless settlement records the notice first.
         child.releaseHeld();
         const slot = await f.registry.acquire(run.sessionId);
         await waitFor(() => !slot.catalogHasActiveSubagents, "workflow ended before the report", bound);
@@ -397,11 +366,9 @@ describe("Home task subagents: refusals, restarts and reports", () => {
       && (entry.data as { targetEntryId?: string })?.targetEntryId === entries[notice]?.id);
     const fact = entries.findIndex(entry => entry.type === "custom" && entry.customType === "tron-home-task-subagents");
     expect(notice).toBeGreaterThanOrEqual(0);
-    // Settlement recorded the notice and its delivery before its fact and evidence cut.
     expect(receipt).toBeGreaterThan(notice);
     expect(fact).toBeGreaterThan(receipt);
     expect(fact).toBe(entries.length - 1);
-    // A canonical read after settlement sees no further append from the run.
     await new Promise(resolve => setTimeout(resolve, 1500));
     expect(slot.canonicalSessionEntries()).toHaveLength(entries.length);
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });

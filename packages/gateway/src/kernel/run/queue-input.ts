@@ -19,14 +19,8 @@ export type RuntimeQueuedMessage = QueuedMessageState & {
   ordinal: number;
 };
 
-/** A prompt accepted while compaction owns admission. Its RPC has already
- * returned; the Gateway owns its projection, edits and removal until it is
- * admitted through the ordinary prompt path after compaction. `admitting`
- * marks the head entry once that admission has captured its content. */
 export type HeldPrompt = RuntimeQueuedMessage & { admitting: boolean };
 
-/** Client-visible prompt content, separate from the Pi runtime text that may
- * carry a resource prefix and attachment envelope. */
 export type PromptQueueDisplay = {
   text: string;
   resourceInvocations?: ResourceInvocation[];

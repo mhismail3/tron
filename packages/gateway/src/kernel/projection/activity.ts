@@ -2,12 +2,10 @@ import type { ExtensionRunActivity, ExtensionRunVisibility, SessionProcessActivi
 import type { ProcessActivityRecency } from "./process-activity-recency.js";
 import { boundProcessActivities, processOverview } from "./process-activity.js";
 
-/** Extension recency is owned by sessions/extension-activity; this port is the only read the projection makes of it. */
 export interface ExtensionActivityVisibilityReader {
   visibility(activity: ExtensionRunActivity): { visibility: ExtensionRunVisibility; remainingMs?: number };
 }
 
-/** Activity producers/expiry remain run-owned; these reads only bound wire views. */
 export interface ActivitySource {
   processActivities: ReadonlyMap<string, SessionProcessActivity>;
   extensionActivities: ReadonlyMap<string, ExtensionRunActivity>;
@@ -47,9 +45,6 @@ export function currentProcessProjection(source: ActivitySource): { activities: 
 }
 
 export function toolProgressWire(source: ActivitySource, state: ToolExecutionState): ToolExecutionState {
-  // Running duration is sampled at delivery time. This keeps reconnect and
-  // delayed/coalesced frames current even when the tool emits no output;
-  // clients then advance the sample locally with a monotonic clock.
   const sampled = state.status === "running"
     ? {
         ...state,

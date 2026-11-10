@@ -1,21 +1,13 @@
 import type { AgentSession } from "../pi/coding-agent.js";
 
-/** How long a tool call may keep running after its turn is cancelled before its result is abandoned. */
 const TOOL_CANCELLATION_GRACE_MS = 2_000;
-/** How long an interrupted command has after each of SIGINT and SIGTERM before the next signal. */
 export const TOOL_INTERRUPT_SIGNAL_GRACE_MS = 5_000;
-/** An interrupted call outlives its whole SIGINT, SIGTERM, SIGKILL escalation before it is abandoned. */
 const TOOL_INTERRUPT_ABANDON_MS = 3 * TOOL_INTERRUPT_SIGNAL_GRACE_MS;
 const BOUNDED = Symbol("tron.boundedToolCancellation");
 
 type AgentToolLike = { name: string; execute: (...args: never[]) => Promise<unknown> };
 type InFlightCall = { readonly name: string; readonly controller: AbortController };
 
-/**
- * The abort reason of a tool call interrupted on its own (#1189): Home or the maintainer
- * cancelled the in-flight call while the turn goes on. The call's tool sees it as
- * `signal.reason`; direct bash escalates SIGINT, SIGTERM, SIGKILL to its process tree.
- */
 export class ToolCallInterrupt extends Error {
   constructor(readonly by: string) {
     super(`interrupted by ${by}`);
@@ -33,24 +25,6 @@ const resultText = (value: unknown): string => {
   return Array.isArray(content) ? content.map(part => part.type === "text" ? part.text ?? "" : "").join("") : "";
 };
 
-/**
- * Bounds every tool call's life after cancellation (#961) and gives each call its own abort
- * that `interruptToolCalls` can fire without cancelling the turn (#1189).
- *
- * Pi's agent loop awaits a tool's `execute` and its `abort()` waits for the loop to go idle, so
- * one tool that ignores its abort signal (an extension or MCP call blocked on I/O) made Stop hang
- * forever and left the worker running. After the grace the call resolves as an error result
- * naming the abandoned tool; the loop then ends the cancelled run and Stop settles. Built-in bash
- * kills its process group on abort and normally settles well inside the grace. The abandoned
- * promise is not awaited; its late result and updates are dropped by the loop.
- *
- * Each call runs under a controller that follows the turn's signal. An interrupt aborts only that
- * controller, with a `ToolCallInterrupt` reason; the call's outcome becomes an error result that
- * says who interrupted it, and the loop continues the turn with it (queued steering follows).
- *
- * Pi assigns the declared tools to `agent.state.tools` whenever it rebuilds the loadout, so the
- * bound wraps each assignment once per session.
- */
 export function boundToolCancellation(session: AgentSession, graceMs = TOOL_CANCELLATION_GRACE_MS): void {
   const state = session.agent.state as { tools: AgentToolLike[] } & { [BOUNDED]?: Set<InFlightCall> };
   if (state[BOUNDED]) return;
@@ -83,7 +57,6 @@ export function boundToolCancellation(session: AgentSession, graceMs = TOOL_CANC
         };
         const abandon = () => {
           if (timer) clearTimeout(timer);
-          // An interrupted call gets its whole signal escalation, unless the turn is stopped too.
           const interrupted = signal?.aborted ? undefined : interrupt();
           const ms = interrupted ? TOOL_INTERRUPT_ABANDON_MS : graceMs;
           timer = setTimeout(() => {
@@ -93,8 +66,6 @@ export function boundToolCancellation(session: AgentSession, graceMs = TOOL_CANC
           }, ms);
           timer.unref?.();
         };
-        // A Stop of an interrupted call cannot abort its controller again; it shortens the
-        // abandonment to Stop's grace (Stop's own process-owner abort ends any bash tree).
         const stopAfterInterrupt = () => { if (interrupt()) abandon(); };
         signal?.addEventListener("abort", stopAfterInterrupt, { once: true });
         if (controller.signal.aborted) abandon();
@@ -117,12 +88,6 @@ export function boundToolCancellation(session: AgentSession, graceMs = TOOL_CANC
   set(get().map(bound));
 }
 
-/**
- * Interrupts the tool calls in flight on `session` now, without cancelling its turn (#1189).
- * The targets are fixed synchronously; `before` (queuing the steer that follows the interrupted
- * results) runs next, so a call that starts meanwhile is never interrupted by mistake. A target
- * that settled or was cancelled meanwhile is left alone. Returns the interrupted tools' names.
- */
 export async function interruptToolCalls(session: AgentSession, interrupt: ToolCallInterrupt, before?: () => Promise<void>): Promise<string[]> {
   const targets = [...(session.agent.state as { [BOUNDED]?: Set<InFlightCall> })[BOUNDED] ?? []];
   if (before) await before();

@@ -48,8 +48,6 @@ describe("context window policy", () => {
 
   it("preserves catalog context and output capacity in real SDK session policy copies", async () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    // The bundled catalog owns these capacities (Pi 1.3.0 raised gpt-6.1-sol to
-    // 500K); the session and policy copies must carry exactly the catalog's.
     for (const [provider, id, contextWindow] of [
       ["anthropic", "claude-sonnet-5-5", 1_000_000], ["openai-codex", "gpt-6.1-sol", 500_000],
     ] as const) {
@@ -115,7 +113,6 @@ describe("context window policy", () => {
     });
     await session.setModel(modelRuntime.getModel(physical.provider, "router")!);
     expect(session.model?.id).toBe("router");
-    // With no successful routed response, declared virtual limits remain unknown.
     expect(policy.snapshot()).toBeUndefined();
     faux.setResponses([(_context, _options, _state, model) => fauxAssistantMessage("physical reply", { provider: model.provider, model: model.id })]);
     await session.prompt("route this");
@@ -149,7 +146,6 @@ describe("context window policy", () => {
     policy.set(astra, 1_050_000);
     expect(session.model).toMatchObject({ contextWindow: 1_050_000, maxTokens: 128_000, cost: astra.cost });
     expect(session.thinkingLevel).toBe("high");
-    // Match provider and id: the bundled catalog lists this model id under other providers with other windows.
     expect(modelRuntime.getModels().find(model => model.provider === astra.provider && model.id === astra.id)?.contextWindow).toBe(272_000);
     expect(session.getContextUsage()?.contextWindow).toBe(1_050_000);
     expect(policy.snapshot()).toMatchObject({ effective: 1_050_000, override: 1_050_000, source: "session", warning: expect.stringContaining("pricing") });
@@ -220,7 +216,6 @@ describe("context window policy", () => {
     expect(first.session.model?.contextWindow).toBe(128_000);
     await first.session.setModel(first.faux.getModel());
     expect(first.session.model?.contextWindow).toBe(1_050_000);
-    // The SDK's silent provider-registration refresh also calls getModel.
     expect(first.modelRuntime.getModel(astra.provider, astra.id)?.contextWindow).toBe(1_050_000);
   });
 

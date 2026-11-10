@@ -4,9 +4,6 @@ import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
 
-/** One real canonical append landing inside a status read's evidence cut: after the
- * cut's first stat and before its read. The append itself is the worker session's own
- * SDK append, as a late provider notice or a resumed successor makes. */
 const appendDuringCut = vi.hoisted(() => ({
   path: undefined as string | undefined,
   append: undefined as (() => Promise<void>) | undefined,

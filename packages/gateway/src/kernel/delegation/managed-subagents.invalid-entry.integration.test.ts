@@ -17,10 +17,6 @@ const gatewayRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const ownTestFile = "managed-subagents.invalid-entry.integration.test.ts";
 const leg = process.env.TRON_SUBAGENTS_INVALID_ENTRY_FIXTURE;
 
-// Valid closure bytes with an invalid manifest entry exercise the installer and
-// both admission paths. Installed-file tampering would only test digest refusal.
-// Each case runs this file in a nested vitest so the pinned closure is its own
-// payload; the nested leg imports only the managed-subagents module it refuses.
 if (!leg) it.each([
   { entries: ["../outside.js"] },
   { entries: ["./missing.js"] },
@@ -56,8 +52,6 @@ if (!leg) it.each([
     await writeFile(join(payload, "pi-subagents-pin.json"), JSON.stringify(pin));
     for (const directory of ["agent", "workspace", "home", "tmp"]) await mkdir(join(root, directory));
     await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", `src/kernel/delegation/${ownTestFile}`, "--reporter=json", `--outputFile.json=${join(root, "child-vitest.json")}`], {
-      // Hang guard only: this file runs alone in the nested pass (vitest.nested.config.ts);
-      // a passing cold child takes about 3-14 s, so a reached bound means a hung child.
       cwd: payload, timeout: 120_000, maxBuffer: 1024 * 1024,
       env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"),
         TRON_SUBAGENTS_INVALID_ENTRY_FIXTURE: root,
@@ -65,7 +59,6 @@ if (!leg) it.each([
         TRON_TEST_PROCESS_OWNER_FAILURE: process.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(root, "process-owner-failure.jsonl"),
         NODE_OPTIONS: `--import=${join(payload, "test-support", "fixture-process-owner.mjs")}` },
     });
-    // Process success alone cannot prove the staged child actually ran its oracle.
     const child = JSON.parse(await readFile(join(root, "child-vitest.json"), "utf8"));
     expect(child).toMatchObject({ numPassedTests: 1, numFailedTests: 0, numPendingTests: 0 });
   } finally {
@@ -74,7 +67,6 @@ if (!leg) it.each([
   }
 }, 150_000);
 
-// Runs in the nested child only: the staged payload's pin selects the invalid closure.
 if (leg) it("refuses the staged invalid extension entry", async () => {
   const root = await realpath(process.env.TRON_SUBAGENTS_INVALID_ENTRY_FIXTURE!);
   const agentDir = join(root, "agent");
@@ -84,8 +76,6 @@ if (leg) it("refuses the staged invalid extension entry", async () => {
     PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: join(root, "unavailable-inherited-host"),
     npm_config_cache: join(root, "npm-cache"), npm_config_offline: "true", npm_config_registry: "http://registry.invalid" };
   Object.assign(process.env, overrides);
-  // Match Gateway startup: bind this process's delegated artifact root before the
-  // managed loader reads any extension entry.
   delegatedProviderEnvironment(overrides.PI_SUBAGENTS_TEMP_ROOT);
   const managedSubagents = new ManagedSubagents(tronHome);
   const installedRoot = managedSubagents.install();

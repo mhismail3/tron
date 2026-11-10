@@ -10,7 +10,6 @@ function normalizeReleaseDate(value) {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === normalized ? normalized : undefined;
 }
 
-/** Extract normalized provider/id facts from a models.dev payload. */
 export function releaseDatesFromCatalog(catalog, providers, aliases = {}) {
   const coverage = new Set(providers);
   for (const target of Object.values(aliases)) if (typeof target === "string") coverage.add(target);

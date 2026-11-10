@@ -1,13 +1,10 @@
 import { GatewayError } from "../../errors.js";
 
-/** Admission, rollover, the canonical growth observer and the chapter-list read share these exact boundaries. */
 export const HOME_HARD_BYTES = 200 * 1_024 * 1_024;
 export const HOME_HARD_ENTRIES = 100_000;
-/** Crossing a soft limit seals the chapter at the next quiescent turn boundary. */
 export const HOME_SOFT_BYTES = 24 * 1_024 * 1_024;
 export const HOME_SOFT_ENTRIES = 50_000;
 
-/** Physical chapter state for one session id, as the Home chapter ledger answers it to mutation owners. */
 export interface HomeChapterState {
   sessionId: string;
   sealed: boolean;
@@ -37,12 +34,10 @@ export class SealedChapterMutationError extends GatewayError {
   }
 }
 
-/** A session the chapter ledger does not seal (ordinary sessions, and Home chapters before they are sealed) is writable. */
 export function unsealedHomeChapterState(sessionId: string): HomeChapterState {
   return { sessionId, sealed: false };
 }
 
-/** Slot-owner refusal; materialization is allowed only for the slot bound to the exact durable attempt and path. */
 export function assertChapterWritable(state: HomeChapterState, ownsMaterialization = false): void {
   if (!state.sealed || (state.materializing && ownsMaterialization)) return;
   throw new SealedChapterMutationError(state);

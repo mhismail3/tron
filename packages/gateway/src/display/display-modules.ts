@@ -14,7 +14,6 @@ import { createTronNativeCaptureExtension } from "./tron-native-capture-extensio
 
 type DisplayRuntime = { readonly disposed: boolean; toolResultReferences(): ToolReferences };
 
-/** Native session facts, never a second catalog, deletion flag or runtime owner. */
 interface DisplaySessions {
   acquire(sessionID: string): Promise<DisplayRuntime>;
   liveRuntime(sessionID: string): DisplayRuntime | undefined;
@@ -22,10 +21,7 @@ interface DisplaySessions {
   sessionIDsForStorageMaintenance(): Promise<ReadonlySet<string>>;
 }
 
-/** Display owns resource authorization and lifetime; the kernel owns native sessions
- * and the exact-leaf projection cut. Physical store writes keep their own durability lane. */
 export class DisplayOwner {
-  // Keep the diagnosing signal stable while ownership moves out of Registry.
   private readonly lane = new RequestSpanLane("registry.display-lane");
 
   constructor(
@@ -55,8 +51,6 @@ export class DisplayOwner {
   }
 
   async grantReferences(previousId: string, nextId: string, runtime: DisplayRuntime): Promise<void> {
-    // Publish inherited owner links before identity commit; retention never grants
-    // read authority by itself, and arbitrary transcript data cannot repair a link.
     for (const artifactID of this.artifactIDs(runtime)) {
       await this.artifacts.grant(artifactID, nextId, previousId);
     }

@@ -2,14 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_MODEL, SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-/**
- * Exact-tap refusals and a once-only effect for the shared change card at the
- * client socket of a real Gateway process (#2232): a source Gateway process, a
- * device paired through `POST /v1/pair` and the Mac's local credential over the
- * production loopback WebSocket, and a scripted HTTP provider as the only
- * scripted party. Home's model asks for a task-budget raise, which needs the card.
- */
-
 const gateways: GatewayProcess[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -36,10 +28,8 @@ async function homeWithBudget(): Promise<{ gateway: GatewayProcess; phone: Proce
   await ok(phone, "settings.change", { commandId: "tap-background-queue", target: { kind: "home" }, changes: [
     { key: "model.queue[role=background]", layer: "session", op: "set", value: [`${SCRIPTED_PROVIDER}/${BACKGROUND_MODEL}`] },
   ] });
-  // Home memory's summaries go to the background model, answered apart from the scripted turns.
   gateway.provider.answerModel(BACKGROUND_MODEL, () => ({ chunks: ["Memory line."] }));
   await open(phone, homeId);
-  /** Home's model requests one budget change; resolves with the settled turn or its pending card. */
   const budgetChange = async (outputTokens: number, label: string) => {
     gateway.provider.script([
       () => ({ toolCalls: [{ id: `budget-${label}`, name: "settings", arguments: { action: "change", reason: `Budget ${label}`,
@@ -54,7 +44,6 @@ async function homeWithBudget(): Promise<{ gateway: GatewayProcess; phone: Proce
       return home.phase === "idle" && JSON.stringify(home.transcript).includes(`Budget ${label} handled.`) ? { home } : undefined;
     }, `budget ${label} reached its card or settled`);
   };
-  // An initial budget applies without a card; a raise needs one.
   const initial = await budgetChange(100, "initial");
   expect(initial.card).toBeUndefined();
   return { gateway, phone, mac, homeId, budgetChange };
@@ -76,10 +65,8 @@ describe("the shared change card across the client socket of a real Gateway proc
       hostEpoch: card.hostEpoch, presentationRevision: card.presentationRevision, value, ...overrides,
     });
     const exact = { digest: card.review.digest, approved: true };
-    // The Mac's local client has the session open too: its refusal is the device rule, not a missing subscription.
     await open(mac, homeId);
     const refusals = [
-      // A local (Mac) answer is not a paired-device tap.
       [await answer(mac, {}, exact), "invalid_request"],
       [await answer(phone, {}, { digest: "0".repeat(64), approved: true }), "invalid_request"],
       [await answer(phone, { hostEpoch: "retired" }, exact), "conflict"],
@@ -88,15 +75,12 @@ describe("the shared change card across the client socket of a real Gateway proc
     for (const [response, code] of refusals) {
       expect(response.ok, JSON.stringify(response)).toBe(false);
       expect(response.error.code, JSON.stringify(response)).toBe(code);
-      // Local and wrong-digest answers share the exact-review refusal (semantic-ui-broker.ts).
       if (code === "invalid_request") expect(response.error.message).toBe("Native change response does not match its exact review");
     }
-    // Each refusal left the card pending and wrote nothing.
     expect((await open(phone, homeId)).extensionPresentation.pendingInteractions.map((item: { id: string }) => item.id)).toEqual([card.id]);
     expect(await budget()).toEqual({ outputTokens: 100 });
     expect(await history()).toEqual(historyBefore);
 
-    // Two exact taps race: one is answered, the other finds no card, the effect lands once.
     const taps = await Promise.all([answer(phone, {}, exact), answer(phone, {}, exact)]);
     expect(taps.filter((tap) => tap.ok).map((tap) => tap.result)).toEqual([{ answered: true }]);
     expect(taps.filter((tap) => !tap.ok).map((tap) => tap.error.code)).toEqual(["not_found"]);
@@ -110,7 +94,6 @@ describe("the shared change card across the client socket of a real Gateway proc
     expect(raised[0]).toMatchObject({ status: "applied", after: { outputTokens: 200 } });
     expect(settled.transcript.find((item: Record<string, any>) => item.role === "toolResult" && item.toolCallId === "budget-raise"))
       .toMatchObject({ isError: false });
-    // A fresh exact tap after acceptance finds no card and changes nothing.
     const after = await answer(phone, {}, exact);
     expect(after.ok, JSON.stringify(after)).toBe(false);
     expect(after.error.code).toBe("not_found");

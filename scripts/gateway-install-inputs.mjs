@@ -41,9 +41,6 @@ const INSTALL_DRIFT = "TRON_GATEWAY_INSTALL_DRIFT";
 const REPAIR_TIMEOUT_MS = 10 * 60_000;
 const REPAIR_OUTPUT_TAIL = 4_096;
 
-// Every refusal raised through lockError means "the install does not match the
-// lock", which `npm ci` is the canonical repair for. Structural refusals (symlinked
-// package directories, unsafe scopes) are plain errors and are never auto-repaired.
 function lockError(message, mode) {
   const remedy = mode === "production" ? "npm ci --omit=dev" : "npm ci";
   const error = new Error(`${message}; restore the canonical Gateway install with ${remedy}`);
@@ -117,14 +114,6 @@ async function walkNested(root, packageRoot, result) {
   } catch (error) { if (error?.code !== "ENOENT") throw error; }
 }
 
-/**
- * Prove a conventional npm ci install against this Gateway's lockfile. npm's
- * hidden lock intentionally omits root metadata and platform-inapplicable
- * optional packages, so compare its applicable package records, then check the
- * package folders and their actual name/version metadata rather than trusting
- * npm ls or the hidden lock alone. The hidden-lock mtime is only npm's own
- * fast-path heuristic; this function always walks the installed package tree.
- */
 export async function verifyGatewayInstallInputs(gatewayRoot, { mode = "full" } = {}) {
   if (mode !== "full" && mode !== "production") throw new TypeError(`unsupported Gateway install mode: ${mode}`);
   const root = resolve(gatewayRoot);
@@ -192,7 +181,6 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
-/** The exact manual repair, runnable from any shell, with the same pinned Node/npm. */
 export function gatewayInstallRepairCommand(gatewayRoot, runtimeBin) {
   return `cd ${shellQuote(resolve(gatewayRoot))} && PATH=${shellQuote(resolve(runtimeBin))}:"$PATH" npm ci`;
 }
@@ -203,8 +191,6 @@ function runNpmCi(root, runtimeBin, timeoutMs) {
     const keep = (chunk) => { output = (output + chunk.toString()).slice(-REPAIR_OUTPUT_TAIL); };
     const child = spawn(join(runtimeBin, "node"), [join(runtimeBin, "npm"), "ci", "--no-audit", "--no-fund", "--prefer-offline"], {
       cwd: root,
-      // Lifecycle scripts resolve `node` from
-      // PATH; put the pinned runtime first so they never pick an ambient Node.
       env: { ...process.env, PATH: `${runtimeBin}:${process.env.PATH ?? "/usr/bin:/bin"}` },
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
@@ -223,16 +209,6 @@ function runNpmCi(root, runtimeBin, timeoutMs) {
   });
 }
 
-/**
- * Prove the full (compile) install, repairing lock drift with `npm ci` first.
- *
- * A checkout's `node_modules` drifts whenever `main` moves the lock without a
- * reinstall, and Rebuild from Source used to refuse on it (#1010). Only this
- * development install is repaired, with the given pinned runtime (`node` and
- * `npm` in runtimeBin); a payload's runtime tree is never installed here. npm ci
- * replaces only `node_modules`: the manifest and lock must stay byte-identical,
- * and the install must verify afterwards, or this fails with the exact command.
- */
 export async function ensureGatewayInstallInputs(gatewayRoot, { runtimeBin, timeoutMs = REPAIR_TIMEOUT_MS, onRepair = () => {} } = {}) {
   const root = resolve(gatewayRoot);
   try {
@@ -278,7 +254,6 @@ async function sourceInputFiles(repositoryRoot) {
   return [...new Set(files)].sort();
 }
 
-/** Digest the explicit source inputs that are compiled, copied or validated. */
 export async function gatewayBuildInputFingerprint(repositoryRoot) {
   const root = resolve(repositoryRoot);
   const hash = createHash("sha256");

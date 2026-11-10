@@ -8,20 +8,6 @@ import type { PushRelayClient } from "./relay-client.js";
 import { GatewayService, type ClientContext } from "../transport/gateway-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
-/**
- * Failure modes this case owns against the real RPC handlers and one real
- * on-disk credential document:
- * 1. a single unread row older than the newest page lit the bell but was absent
- *    from every page and unattainable through a client-side "Unread" filter;
- * 2. the retired offset+revision cursor failed with `conflict` as soon as the
- *    inbox changed, and could return or skip rows after reads between pages;
- * 3. read-all marked the whole inbox, including alerts the user never saw;
- * 4. reading a row already evicted by the bound failed as `not_found`;
- * 5. each mutation broadcast `notification.inbox.changed` with an empty payload,
- *    forcing the client to refetch without a revision or unread count.
- * Retained, regenerable evidence for one run lives at
- * `packages/gateway/test-results/notification-inbox.integration.json`.
- */
 const REPORT_PATH = join(process.cwd(), "test-results", "notification-inbox.integration.json");
 const report: {
   generatedAt: string;
@@ -46,7 +32,6 @@ afterEach(async () => {
 const INBOX_ROWS = 62;
 const createdAt = (index: number): string => new Date(Date.parse("2026-01-01T00:00:00.000Z") + index * 1_000).toISOString();
 const rowId = (index: number): string => `notification-${index.toString().padStart(6, "0")}`;
-/** The keyset key a client derives from the newest row it has displayed. */
 const keyOf = (item: Pick<NotificationInboxItem, "createdAt" | "id">): string => `${Date.parse(item.createdAt)}.${item.id}`;
 
 function row(index: number, unread: boolean): NotificationInboxEntry {
@@ -77,8 +62,6 @@ async function fixture() {
   roots.push(root);
   const store = new NotificationGrantStore(root);
   await store.initialize();
-  // The newest row and the single oldest row are the two unread alerts: the
-  // oldest one is exactly the row the retired client-side filter could not see.
   await store.update((document) => {
     document.inbox = Array.from({ length: INBOX_ROWS }, (_, index) => row(index, index === 0 || index === INBOX_ROWS - 1));
     return document;
@@ -118,8 +101,6 @@ describe("notification inbox RPCs over a real credential document", () => {
     expect(first.notifications.some((item) => item.id === rowId(0))).toBe(false);
     expect(first.notifications.filter((item) => item.isUnread).map((item) => item.id)).toEqual([rowId(INBOX_ROWS - 1)]);
 
-    // Every row is reachable exactly once, and the unread filter surfaces the
-    // oldest alert that the first page could never show.
     const walked: string[] = first.notifications.map((item) => item.id);
     const second = await list({ cursor: first.nextCursor!, limit: 50 });
     walked.push(...second.notifications.map((item) => item.id));
@@ -131,13 +112,10 @@ describe("notification inbox RPCs over a real credential document", () => {
     expect(unread.notifications.map((item) => item.id)).toEqual([rowId(INBOX_ROWS - 1), rowId(0)]);
     expect(unread.nextCursor).toBeUndefined();
 
-    // Marking a read row does not invalidate the page cursor the client holds.
     await invoke(service, "notification.inbox.read", { commandId: "command-read-mid", id: second.notifications[0]!.id });
     const resumed = await list({ cursor: first.nextCursor!, limit: 50 });
     expect(resumed.notifications.map((item) => item.id)).toEqual(second.notifications.map((item) => item.id));
 
-    // A cut at the second-newest row acknowledges the whole older history and
-    // leaves the alert the user has not seen unread.
     const cut = keyOf(first.notifications[1]!);
     const partial = await invoke(service, "notification.inbox.readAll", { commandId: "command-read-all-cut", through: cut });
     expect(partial).toEqual({ changed: 1 });
@@ -154,8 +132,6 @@ describe("notification inbox RPCs over a real credential document", () => {
     expect(final.unreadCount).toBe(0);
     expect(final.notifications.every((item) => !item.isUnread)).toBe(true);
 
-    // An evicted row is an idempotent no-op, and a malformed cursor or missing
-    // cut is rejected instead of silently returning a wrong page.
     await expect(invoke(service, "notification.inbox.read", { commandId: "command-read-evicted", id: "notification-evicted" }))
       .resolves.toEqual({ changed: false });
     await expect(invoke(service, "notification.inbox.list", { cursor: "revision:50" }))
@@ -163,7 +139,6 @@ describe("notification inbox RPCs over a real credential document", () => {
     await expect(invoke(service, "notification.inbox.readAll", { commandId: "command-read-all-missing-cut" }))
       .rejects.toMatchObject({ code: "invalid_request" });
 
-    // The coalesced broadcast carries the committed state, not an empty payload.
     await waitFor(() => broadcasts.at(-1)?.unreadCount === 0, "the coalesced read-all broadcast");
     const lastBroadcast = broadcasts.at(-1)!;
     expect(lastBroadcast.revision).toEqual(expect.any(String));

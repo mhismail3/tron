@@ -1,10 +1,5 @@
 import { lstatSync, readFileSync } from "node:fs";
 
-// package.json is the sole Pi SDK version authority. Keep this runtime check
-// strict so a malformed or partially updated package cannot report a false
-// Gateway identity to clients. The one exception is pi-coding-agent while
-// pi-coding-agent-patch.json declares Tron's patched tarball of the same
-// release; scripts/check-pi-sdk.mjs validates that tarball and its lock entry.
 function boundedPackageJson(name: string): unknown {
   const url = new URL(`../../../${name}`, import.meta.url);
   const info = lstatSync(url);

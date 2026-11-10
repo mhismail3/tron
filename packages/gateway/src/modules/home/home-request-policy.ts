@@ -14,52 +14,10 @@ import type { HomeContextSection } from "../../protocol/types.js";
 import { HomeResponseTiming, type HomeResponseSample } from "./home-response-timing.js";
 import { homeToolAvailable } from "./home-runtime-policy.js";
 
-/*
- * Tron Home's request seam (gist §7).
- *
- * A Home activation is one admitted input and everything it triggers: its tool
- * loop, the SDK's retries and continuations, and any steering or follow-up that
- * joins the same run. Every provider request of an activation carries only:
- *
- *   1. Home's system prompt, frozen for that activation at its first request,
- *   2. ONE request-local memory view frozen for that activation, and
- *   3. the activation's native messages, from its exact start entry onward.
- *
- * Prior activations are never re-sent, and the memory view is never persisted:
- * Home's continuity is the memory, not the transcript. Every activation, user or
- * wake, reaches the provider through this seam, so Home needs no SDK hook for its
- * system prompt.
- *
- * The seam is three wrappers, outermost first:
- *
- *  - `wrapPrepareRequest` replaces the messages the agent loop is about to
- *    convert. It is installed outermost, so the context it rewrites is the
- *    SDK's own canonical projection.
- *  - `wrapTransformContext` is installed outermost on `Agent.transformContext`,
- *    i.e. after every SDK context stage, and records the single-use expectation
- *    for the provider request. It frames the request's system messages as one
- *    head holding the frozen system prompt, the shape the SDK's forced-prompt
- *    projection gave it. A digest taken at `prepareRequest` time can never
- *    match: the SDK's extension `context` handlers and hidden-declaration
- *    projection run after the outermost `prepareRequest` (#412 qualification).
- *  - `wrapStreamFunction` is installed INNERMOST on the provider stream, so it
- *    validates the exact request the provider-facing base stream receives, after
- *    `abortAwareStream` and the compaction policy's rewrite. An outermost guard
- *    would run before those and never see the compaction summary focus.
- *
- * Every wrapper fails closed: no open activation, no provider request. The
- * refusal is a canonical assistant error entry the user can read, never a
- * retried provider call.
- */
-
-/** Custom-message type of the in-request memory view. It is never persisted. */
 const HOME_MEMORY_CUSTOM_TYPE = "tron.home-memory.v1";
-/** Marker prefix that makes the activation nonce greppable in one request. */
 export const HOME_NONCE_MARKER = "tron.home-nonce:";
-/** Head-room kept below the model's context window by every Home request. */
 const HOME_RESERVE_TOKENS = 1_024;
 
-/** Why a Home request was refused. Bounded and reported; observable. */
 export type HomeRefusalReason =
   | "no-activation"
   | "system-unavailable"
@@ -79,14 +37,6 @@ export type HomeRefusalReason =
   | "stream-replayed"
   | "context-mutated";
 
-/**
- * The text an SDK-visible refusal carries: one fixed sentence per reason. Pi's
- * transient-error classifier matches substrings of the error text (`500`, `timeout`,
- * `overloaded`, a retry phrase), so a refusal that embeds a count, an ID, a path or a
- * memory message can be retried as if the provider failed, and a deterministic refusal
- * then runs its retry budget. The variable detail stays on the refusal record that
- * `home.context` reports (`lastRefusalReason`, `lastRefusalDetail`).
- */
 const HOME_REFUSAL_SENTENCES: Record<HomeRefusalReason, string> = {
   "no-activation": "no Home activation is open for this provider request.",
   "system-unavailable": "Home's system prompt could not be prepared for this activation.",
@@ -107,19 +57,12 @@ const HOME_REFUSAL_SENTENCES: Record<HomeRefusalReason, string> = {
   "context-mutated": "the context handlers changed the activation's view.",
 };
 
-/** The SDK-visible message of a refusal: the reason and its fixed sentence. */
 function homeRefusalMessage(reason: HomeRefusalReason): string {
   return `Home request refused (${reason}): ${HOME_REFUSAL_SENTENCES[reason]}`;
 }
 
-/** The memory reasons a view source may raise. */
 type HomeMemoryRefusalReason = Extract<HomeRefusalReason, `memory-${string}`>;
 
-/**
- * What the memory view source refuses with. The seam keeps the memory's own
- * reason, because "not configured" and "blocked" are states the user fixes while
- * "the view source threw" is a defect; both fail closed with zero requests.
- */
 export class HomeMemoryRefusal extends Error {
   constructor(
     readonly reason: HomeMemoryRefusalReason,
@@ -130,69 +73,43 @@ export class HomeMemoryRefusal extends Error {
   }
 }
 
-/** The refusal an activation ended with, as `home.context` reports it. */
 interface HomeRefusal {
   reason: HomeRefusalReason;
   detail: string;
 }
 
-/** What started an activation: a maintainer message, or a settled task result that woke Home. */
 type HomeActivationKind = "user" | "wake";
 
-/** The sizes of the last request one activation prepared, as `home.context` reports them. */
 interface HomeRequestStep {
-  /** Effective-size estimate of the request, in tokens: the sum of `sections`. */
   effectiveTokens: number;
-  /** UTF-8 bytes and lines of the frozen memory view this request carried. */
   viewBytes: number;
   viewLines: number;
-  /** The model's context window this activation was measured against, 0 when the
-   * model declares none. */
   contextWindow: number;
-  /** The request's effective tokens by section. Every message is counted once. */
   sections: HomeContextSection[];
 }
 
-/** Home's system prompt for one activation, as its two parts. The request carries
- * their concatenation, `instructions` then `profile`. */
 export interface HomeSystemPrompt {
-  /** The SDK's base prompt followed by Home's operating context. */
   instructions: string;
-  /** The learned-profile section. */
   profile: string;
-  /** Active profile notes the section lists. */
   profileNotes: number;
 }
 
-/** What identifies one activation to the memory view source. */
 export interface HomeActivationIdentity {
   operationId: string;
   nonce: string;
-  /** The canonical leaf captured immediately before the input reached Pi. */
   boundaryEntryId: string | null;
 }
 
-/** The frozen view one activation receives, and how long it waited for it. */
 export interface HomeActivationView {
   text: string;
-  /** The view as request blocks (`viewPieces`); they rejoin to `text`. */
   pieces: string[];
-  /** Milliseconds spent waiting for the memory to cover the activation's start;
-   * 0 when every line it needed was already built. */
   waitedMs: number;
 }
 
-/**
- * One bounded record per activation and per refusal. Home is used deliberately,
- * one turn at a time, so one line per activation is the only place the effective
- * size of a request and the readiness wait are visible at all; nothing here
- * carries message text, an entry id or the activation nonce.
- */
 export type HomeRequestRecord =
   | HomeResponseSample
   | {
     event: "activation";
-    /** Effective-size estimate of the request this activation sent, in tokens. */
     effectiveTokens: number;
     contextWindow: number;
     viewLines: number;
@@ -209,35 +126,20 @@ export type HomeRequestRecord =
   };
 
 interface HomeRequestPolicyOptions {
-  /**
-   * The frozen memory view for one activation. Called at most once per
-   * activation, at its first `prepareRequest` step; a throw or rejection fails
-   * that activation closed before any provider call. The wait for the memory to
-   * cover the activation start is abortable through the request's signal.
-   */
   prepareMemoryView: (activation: HomeActivationIdentity, signal: AbortSignal | undefined) => Promise<HomeActivationView>;
-  /** Home's full system prompt for one activation, from the SDK's base prompt
-   * captured at admission. Called at most once per activation, at its first
-   * `prepareRequest` step; a rejection fails that activation closed. */
   prepareSystemPrompt: (base: string, activation: HomeActivationKind) => Promise<HomeSystemPrompt>;
-  /** Where the seam reports its bounded per-activation and refusal records. */
   onRecord?: (record: HomeRequestRecord) => void;
 }
 
-/** The evidence of one activation, as `home.context` reports it. Only fields of
- * that activation: its start entry, whether it is open, the last request it
- * prepared, and its own refusal when it was refused. */
 interface HomeActivationEvidence {
   activationStartEntryId: string | null;
   activationOpen: boolean;
   kind: HomeActivationKind;
-  /** When the activation was admitted, as an ISO-8601 instant. */
   startedAt: string;
   step?: HomeRequestStep;
   refusal?: HomeRefusal;
 }
 
-/** Raised for every refusal. Never retryable and never provider-visible. */
 export class HomeRequestPolicyError extends Error {
   constructor(
     readonly reason: HomeRefusalReason,
@@ -252,22 +154,15 @@ interface ActivationState extends HomeActivationIdentity {
   cancellation: AbortController;
   kind: HomeActivationKind;
   startedAt: string;
-  /** The SDK's idle system prompt at admission, before any run changed it. Home
-   * loads no extension that sets prompt sections (`noExtensions` plus Tron's Home
-   * modules), so this is Pi's base prompt (#1312). */
   systemBase: string;
   system: Promise<HomeSystemPrompt> | undefined;
   view: Promise<HomeActivationView> | undefined;
   viewRefusal: HomeRequestPolicyError | undefined;
-  /** True while this activation's first request has not been recorded yet. */
   unrecorded: boolean;
-  /** The last request this activation prepared. */
   step: HomeRequestStep | undefined;
-  /** This activation's own last refusal, if it was refused. */
   refusal: HomeRefusal | undefined;
 }
 
-/** An activation's own message, with the canonical entry it projects from. */
 interface TailMessage {
   message: AgentMessage;
   entry: number;
@@ -275,7 +170,6 @@ interface TailMessage {
 
 interface RewrittenContext {
   messages: AgentMessage[];
-  /** The memory message plus the activation's native messages, in request order. */
   nonSystem: AgentMessage[];
   excludedMessages: number;
   memory: AgentMessage;
@@ -285,17 +179,11 @@ interface RewrittenContext {
 const MAXIMUM_RECORDED_TRANSFORMS = 64;
 
 export class HomeRequestPolicy {
-  /** Native Stop/disposal invalidates pending inputs across physical runtime replacement. */
   readonly inputCancellation = { epoch: 0 };
   private activation: ActivationState | undefined;
-  /** The last settled activation's evidence, kept so `home.context` can report
-   * it after the run ends. Replaced whole, never merged field by field. */
   private lastClosed: HomeActivationEvidence | undefined;
   private expectedDigest: string | undefined;
-  /** The exact non-system request messages `prepareRequest` returned for the current request. */
   private expectedNonSystemMessages: AgentMessage[] | undefined;
-  /** Whether each recent `transformContext` pass kept the activation's non-system
-   * messages by object identity, oldest first. Bounded, and surviving settlement. */
   private readonly transformIdentities: boolean[] = [];
 
   readonly responseTiming: HomeResponseTiming;
@@ -304,18 +192,10 @@ export class HomeRequestPolicy {
     this.responseTiming = new HomeResponseTiming(sample => options.onRecord?.(sample));
   }
 
-  /** The SDK's context stage clones messages, so this is the one place the
-   * identity claim is observed rather than inferred (the fidelity check's
-   * equal-value fallback is what Gateway sessions use). */
   recentTransformIdentities(): readonly boolean[] {
     return this.transformIdentities;
   }
 
-  /**
-   * The evidence of Home's current or last activation: the start entry `admit`
-   * captured, whether it is still open, the last request it prepared, and its own
-   * refusal. `undefined` before the first activation.
-   */
   contextEvidence(): HomeActivationEvidence | undefined {
     const activation = this.activation;
     if (activation) {
@@ -331,16 +211,7 @@ export class HomeRequestPolicy {
     return this.lastClosed;
   }
 
-  /**
-   * Opens an activation for `operationId`. `boundaryEntryId` is the canonical
-   * leaf captured immediately before the input reached Pi, which is the exact
-   * activation start: the input's own entry is appended inside `session.prompt`
-   * afterwards, and steering later inserts entries after it, never before it.
-   */
   admit(operationId: string, boundaryEntryId: string | null, systemBase: string, kind: HomeActivationKind): void {
-    // A displaced activation means the previous operation settled without a
-    // matching `settle`, or a new run began first. Replacing it is the only safe
-    // choice: the old boundary can no longer be trusted.
     this.activation?.cancellation.abort();
     this.activation = {
       operationId,
@@ -361,13 +232,10 @@ export class HomeRequestPolicy {
     this.expectedNonSystemMessages = undefined;
   }
 
-  /** Closes the activation when Tron settles that exact operation. */
   settle(operationId: string | undefined): void {
     if (!operationId) return;
     const activation = this.activation;
     if (activation?.operationId !== operationId) return;
-    // The whole activation moves, so `home.context` can never report one
-    // activation's start entry with another's sizes.
     this.lastClosed = {
       activationStartEntryId: activation.boundaryEntryId,
       activationOpen: false,
@@ -382,16 +250,6 @@ export class HomeRequestPolicy {
     this.expectedNonSystemMessages = undefined;
   }
 
-  /**
-   * Follows a foreground ownership transfer inside one activation.
-   *
-   * Tron reassigns `activeOperationId` when a dequeued follow-up retrospectively
-   * takes over the already-started run and when a queue admission is
-   * reclassified as an ordinary prompt. The run, its boundary entry and its
-   * frozen memory view are unchanged — only the operation identity Tron reports
-   * is — so the activation is renamed, or its later `settle` would never match
-   * and it would outlive the run.
-   */
   transferOperation(from: string | undefined, to: string): void {
     if (!from || from === to) return;
     this.responseTiming.transfer(from, to);
@@ -399,13 +257,10 @@ export class HomeRequestPolicy {
     this.activation.operationId = to;
   }
 
-  /** Stop addresses this exact activation, including its pre-provider view wait. */
   cancel(operationId: string | undefined): void {
     if (operationId && this.activation?.operationId === operationId) this.activation.cancellation.abort();
   }
 
-  /** Use the same frozen view and cut as preparation, before inbox writes.
-   * Fresh headroom excludes the incoming message, not the durable memory prefix. */
   async deliveryHeadroom(session: AgentSession, input: AgentMessage, systemPrompt: string, signal?: AbortSignal): Promise<{ tokens: number; freshTokens: number; signal: AbortSignal }> {
     const activation = this.requireActivation();
     const view = await this.memoryView(activation, signal);
@@ -415,35 +270,23 @@ export class HomeRequestPolicy {
     const cut = this.cut(projection, this.boundaryIndex(projection, activation), activation, view);
     const window = session.model?.contextWindow ?? 0;
     const nonSystem = cut.messages.filter(message => message.role !== "system").reduce((total, message) => total + estimateTokens(message), 0);
-    // Replace recorded text, but preserve and charge the same declarations as
-    // the outgoing head. Summing historical system deltas would double-charge it.
     const incomingSystem = estimateTokens(systemMessage(systemPrompt, cut.messages));
     const prefix = nonSystem + incomingSystem;
     const freshTokens = Math.max(0, window - HOME_RESERVE_TOKENS - prefix);
     return { tokens: Math.max(0, freshTokens - estimateTokens(input)), freshTokens, signal: activation.cancellation.signal };
   }
 
-  /** Outer `Agent.prepareRequest`: rebuild the request from the activation, not from canonical history. */
   wrapPrepareRequest(session: AgentSession, inner: PrepareRequest | undefined): PrepareRequest {
     return async (request, signal) => {
       const update = inner ? await inner(request, signal) : undefined;
       const context = update?.context ?? request.context;
       const activation = this.requireActivation();
-      // The projection, and the proof that the request is exactly it, come FIRST:
-      // a request some other `prepareRequest` rewrite changed is a refusal, not
-      // something to spend a multi-second memory wait on.
       const projectionBefore = session.sessionManager.buildSessionProjection();
       this.assertProjectionFidelity(context.messages, projectionBefore, activation);
       const boundaryBefore = this.boundaryIndex(projectionBefore, activation);
       const excludedBefore = excludedMessages(projectionBefore, boundaryBefore);
       const system = await this.systemPromptFor(activation);
       const memoryView = await this.memoryView(activation, signal);
-      // The wait can last seconds, so the projection the cut is computed from is
-      // read again afterwards. What must not have moved is the part this request
-      // does NOT send: the history up to and including the activation's start.
-      // Entries appended after the boundary during the wait are the activation's
-      // own — a steering message arrives at exactly this point, and the tail
-      // below picks it up — so they are expected, not a change.
       const projection = session.sessionManager.buildSessionProjection();
       const boundaryIndex = this.boundaryIndex(projection, activation);
       const excluded = excludedMessages(projection, boundaryIndex);
@@ -472,8 +315,6 @@ export class HomeRequestPolicy {
       const viewBytes = utf8Bytes(memoryView.text);
       const viewLines = memoryView.text === "" ? 0 : memoryView.text.split("\n").length;
       activation.step = { effectiveTokens, viewBytes, viewLines, contextWindow, sections };
-      // Once per activation, not once per request: a tool loop or a retry is the
-      // same activation and its effective size and wait are already reported.
       if (activation.unrecorded) {
         activation.unrecorded = false;
         this.options.onRecord?.({
@@ -492,12 +333,6 @@ export class HomeRequestPolicy {
     };
   }
 
-  /**
-   * Outermost `Agent.transformContext` — the last point the seam observes before
-   * `convertToLlm`. It refuses unless the activation's non-system messages came
-   * through the context stages unchanged, then records the single-use
-   * expectation the innermost stream guard requires.
-   */
   wrapTransformContext(
     inner: ((messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>) | undefined,
     convertMessages: Agent["convertToLlm"],
@@ -515,18 +350,11 @@ export class HomeRequestPolicy {
       }
       const framed = homeSystemFrame(transformed, homeSystemText(await this.systemPromptFor(activation)), activation.kind);
       this.assertContextNotMutated(framed, activation);
-      // Use the same settings-aware converter as this agent's loop; bare
-      // conversion would reject Pi's supported image-blocking replacement.
       this.expectedDigest = digestLlmMessages(await convertMessages(framed));
       return framed;
     };
   }
 
-  /**
-   * Innermost `Agent.streamFunction`: refuse anything that changed after the
-   * context stages. The expectation is single-use, so only this request's
-   * `transformContext` pass can authorize exactly one provider call.
-   */
   wrapStreamFunction(stream: StreamFn): StreamFn {
     return (model, context, options) => {
       const activation = this.requireActivation();
@@ -572,11 +400,6 @@ export class HomeRequestPolicy {
     return activation;
   }
 
-  /**
-   * The activation's frozen view. Computed at its first request and reused by
-   * every later step of the same activation, so a tool loop or an SDK retry
-   * cannot re-render (and cannot re-wait on) the memory.
-   */
   private async memoryView(activation: ActivationState, signal: AbortSignal | undefined): Promise<HomeActivationView> {
     if (activation.viewRefusal) throw activation.viewRefusal;
     activation.view ??= (async () => {
@@ -589,10 +412,6 @@ export class HomeRequestPolicy {
     return activation.view;
   }
 
-  /** Home's system prompt for this activation. It is composed once from the base
-   * captured at admission and frozen, so every request of the activation carries
-   * the same bytes. A failure refuses the activation, and the refusal is cached
-   * with the prompt, as the memory view's is. */
   private systemPromptFor(activation: ActivationState): Promise<HomeSystemPrompt> {
     activation.system ??= this.options.prepareSystemPrompt(activation.systemBase, activation.kind).catch(error => {
       throw this.refuse("system-unavailable", error instanceof Error ? error.message : String(error), activation);
@@ -600,7 +419,6 @@ export class HomeRequestPolicy {
     return activation.system;
   }
 
-  /** A memory refusal keeps its own reason; anything else is a view failure. */
   private viewRefusal(error: unknown, activation: ActivationState): HomeRequestPolicyError {
     const detail = error instanceof Error ? error.message : String(error);
     if (error instanceof HomeMemoryRefusal) return this.refuse(error.reason, detail, activation);
@@ -622,12 +440,6 @@ export class HomeRequestPolicy {
     return index;
   }
 
-  /**
-   * Asserts that the request context the SDK handed us is exactly its own
-   * canonical projection. Message entries project by reference; synthesized
-   * entries (custom messages, compaction summaries) allocate per call, so deep
-   * equality is the fallback and the weaker answer is reported.
-   */
   private assertProjectionFidelity(
     expected: readonly AgentMessage[],
     projection: SessionProjection,
@@ -655,23 +467,6 @@ export class HomeRequestPolicy {
     }
   }
 
-  /**
-   * Refuses unless the activation's non-system messages survived the context
-   * handlers unchanged: same count, same order, and nothing added, dropped or
-   * rewritten.
-   *
-   * Object identity is never preserved for a Gateway session, because the SDK's
-   * context stage clones every message before any extension sees it
-   * (`structuredClone` in `ExtensionRunner.emitContext`, which runs even with no
-   * handler registered — verified in #412). Identity stays the primary
-   * assertion and equal-value replacement the fallback; the observed mode is
-   * recorded so the weaker answer is visible rather than implied.
-   *
-   * System messages are exempt: the SDK's own hidden-declaration and
-   * forced-prompt stages rewrite them, and the forced prompt collapses them into
-   * one head. A handler that injects a system message is therefore not detected
-   * here; no Gateway-shipped extension registers a `context` handler.
-   */
   private assertContextNotMutated(transformed: readonly AgentMessage[], activation: ActivationState): void {
     const expected = this.expectedNonSystemMessages;
     if (!expected) {
@@ -720,9 +515,6 @@ export class HomeRequestPolicy {
       const withinActivation = index > boundaryIndex;
       for (const message of entry.messages as AgentMessage[]) {
         if (message.role === "system") {
-          // The session's own system message is hoisted so a provider always
-          // receives it first, even when it was appended inside the very first
-          // activation.
           systems.push(message);
           continue;
         }
@@ -730,9 +522,6 @@ export class HomeRequestPolicy {
         else excludedMessages += 1;
       }
     });
-    // The view first, as its cache blocks (#2228), and the per-activation nonce
-    // last: anything that changes every activation must follow the view, or no
-    // request could re-read the view from a provider's cache (gist §8).
     const memory: AgentMessage = {
       role: "custom",
       customType: HOME_MEMORY_CUSTOM_TYPE,
@@ -767,27 +556,16 @@ export class HomeRequestPolicy {
   }
 }
 
-/** The system prompt text one request carries: its instructions, then its profile section. */
 function homeSystemText(prompt: HomeSystemPrompt): string {
   return `${prompt.instructions}\n\n${prompt.profile}`;
 }
 
-/** A settled task result delivered into the canonical session (`home-wake-inbox.ts`). */
 function isTaskResult(message: AgentMessage): boolean {
   return message.role === "custom" && [HOME_TASK_RESULT_MESSAGE, INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE].includes((message as { customType: string }).customType);
 }
 
-/** A memory view line is `start+span|text`, one per summary (`episodic-memory.ts`). */
 const MEMORY_SUMMARY_LINE = /^\d+\+\d+\|/u;
 
-/**
- * The request's estimated size by section, in request order. The frozen system prompt replaces
- * recorded system text/sections; its preserved declarations are charged once with `instructions`.
- * The activation's own messages split into its input (the user message, or a wake's
- * trigger result), the task results it delivered and the chapter's remaining turns, so each message
- * is counted once and the sections sum to the request. A wake's trigger is the result it started
- * from, so the wake's `results` are the other results it delivered.
- */
 function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: HomeActivationView,
   kind: HomeActivationKind): HomeContextSection[] {
   const tail = cut.tail;
@@ -818,8 +596,6 @@ function requestSections(system: HomeSystemPrompt, cut: RewrittenContext, view: 
   ];
 }
 
-/** One replacement head for framing and both budget checks. Declarations belong
- * to instructions; a separately counted profile has no declarations of its own. */
 function systemMessage(text: string, messages?: readonly AgentMessage[], kind?: HomeActivationKind): AgentMessage {
   const current = messages ? getCurrentSystemMessage(messages as never) : undefined;
   const toolsAdded = kind === undefined ? current?.toolsAdded : current?.toolsAdded?.filter(tool => homeToolAvailable(tool.name, kind));
@@ -827,15 +603,10 @@ function systemMessage(text: string, messages?: readonly AgentMessage[], kind?: 
     timestamp: current?.timestamp ?? (messages ? Date.now() : 0) } as AgentMessage;
 }
 
-/** Frames a request's system messages as one head holding Home's system prompt,
- * shaped as the SDK's forced-prompt projection shapes its head: the tools the
- * request declares stay on it, and every other system message is dropped. */
 function homeSystemFrame(messages: readonly AgentMessage[], system: string, kind: HomeActivationKind): AgentMessage[] {
   return [systemMessage(system, messages, kind), ...messages.filter(message => message.role !== "system")];
 }
 
-/** The messages a request starting after `boundaryIndex` would NOT send: the
- * canonical history up to and including the activation's start entry. */
 function excludedMessages(projection: SessionProjection, boundaryIndex: number): AgentMessage[] {
   const messages: AgentMessage[] = [];
   projection.entries.forEach((entry, index) => {
@@ -844,8 +615,6 @@ function excludedMessages(projection: SessionProjection, boundaryIndex: number):
   return messages;
 }
 
-/** Identity first, then value, exactly as the request's own fidelity check does:
- * the SDK allocates fresh objects for synthesized entries. */
 function messagesMatch(left: readonly AgentMessage[], right: readonly AgentMessage[]): boolean {
   if (left.length !== right.length) return false;
   for (let index = 0; index < left.length; index += 1) {
@@ -863,25 +632,13 @@ function activationIdentity(activation: ActivationState): HomeActivationIdentity
   };
 }
 
-/** Stable digest of the LLM messages one provider request would carry. */
 function digestLlmMessages(messages: unknown): string {
   return createHash("sha256").update(JSON.stringify(messages)).digest("hex");
 }
 
-/**
- * Place Home's cache breakpoint on the memory message of an Anthropic Messages
- * payload (#2228): on the view's last whole line group (`viewPieces`), the last
- * block every later request sends unchanged until a rebalance, or on the header
- * when the view has no whole group yet. Never on the partial last group, the
- * footer or the nonce, which change between activations. It runs as Home's
- * `before_provider_request` handler, after this seam validated the request, and
- * changes only `cache_control` fields (cache-layout.ts).
- */
 export function markHomeMemoryCache(payload: unknown): unknown {
   const messages = (payload as { messages?: unknown } | null)?.messages;
   if (!Array.isArray(messages)) return payload;
-  // The memory message is the first whose last block is the nonce this seam
-  // appended (`cut`); it always precedes the activation's own messages.
   const index = messages.findIndex((message) => {
     const content = (message as { content?: unknown } | null)?.content;
     const last = Array.isArray(content) ? content.at(-1) as { type?: unknown; text?: unknown } | undefined : undefined;
@@ -889,8 +646,6 @@ export function markHomeMemoryCache(payload: unknown): unknown {
   });
   if (index < 0) return payload;
   const blocks = (messages[index] as { content: unknown[] }).content;
-  // [header, ...groups, footer, nonce]: the last group is third from the end,
-  // so a block a provider places ahead of the header shifts the mark's index, not its block.
   let mark = blocks.length - 3;
   if (mark < 0) return payload;
   const lines = viewGroupLines(blocks[mark]);
@@ -898,24 +653,12 @@ export function markHomeMemoryCache(payload: unknown): unknown {
   return markAnthropicBlocks(payload, index, [mark]);
 }
 
-/** The number of `id+n|text` lines a view group block holds, or undefined for any other block. */
 function viewGroupLines(block: unknown): number | undefined {
   const text = (block as { type?: unknown; text?: unknown } | null)?.text;
   if ((block as { type?: unknown } | null)?.type !== "text" || typeof text !== "string") return undefined;
   return /^(?:\d+\+\d+\|[^\n]*\n)+$/u.test(text) ? text.split("\n").length - 1 : undefined;
 }
 
-/**
- * Home's requests ask pi-ai for long prompt-cache retention (#491): Anthropic's
- * one-hour TTL where the model supports it, OpenAI's longest retention. Home is
- * used on and off through a day, so a five-minute cache would expire between
- * most turns, and Home's view is a long prefix that is worth keeping. pi-ai maps
- * `long` per provider.
- *
- * The override is a write on `runtime`, which must be the Home session's own
- * view of the shared runtime (`sessionRuntimeView`), never the shared runtime
- * itself: ordinary sessions keep pi-ai's default retention.
- */
 export function applyHomeCacheRetention(runtime: ModelRuntime): ModelRuntime {
   const stream = runtime.streamSimple.bind(runtime);
   runtime.streamSimple = ((model, context, options) =>
@@ -923,7 +666,6 @@ export function applyHomeCacheRetention(runtime: ModelRuntime): ModelRuntime {
   return runtime;
 }
 
-/** Occurrences of the activation nonce anywhere in one request's messages. */
 function countNonce(messages: readonly unknown[], nonce: string): number {
   return JSON.stringify(messages).split(nonce).length - 1;
 }

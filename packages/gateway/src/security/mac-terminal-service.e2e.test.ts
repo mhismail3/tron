@@ -90,7 +90,6 @@ it("accepts only the assigned Tailnet IPv4, never LAN, loopback, wildcard or IPv
   const ip = initial.hosts[0]!;
   expect(ip).toMatch(/^100\./u);
   if (process.env.TRON_MAC_TERMINAL_EXPOSURE_CONTROL === "wildcard") {
-    // Test-only known-bad control: actual native sshd, not canned socket output.
     const key = join(root, "wildcard-host");
     await run("/usr/bin/ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", key]);
     const config = join(root, "wildcard.conf");
@@ -107,7 +106,7 @@ it("accepts only the assigned Tailnet IPv4, never LAN, loopback, wildcard or IPv
   expect(await listeners(service.port)).toEqual([`tcp4 ${ip}.${service.port}`]);
   const status = await service.status("fixture-phone");
   expect(status.serviceState).toBe("running");
-  expect(status.enrolled).toBe(false); // Enable has not published a phone key.
+  expect(status.enrolled).toBe(false);
   expect(status.hostKeys).toHaveLength(1);
   expect(status.hostFingerprint).toMatch(/^SHA256:/u);
 });
@@ -120,10 +119,6 @@ it("owns authorization and launchd recovery while preserving host identity and t
   await expect(phone.ssh("printf MUST_NOT_RUN")).rejects.toThrow(/Permission denied \(publickey\)/u);
   await service.set("fixture-phone", phone.publicKey);
   expect(await phone.ssh("test -t 0 && test -t 1 && printf PRIVATE_PTY_42 && tty", ["-tt"])).toContain("PRIVATE_PTY_42/dev/ttys");
-  // The companion Gateway/native-client case independently proves from=
-  // denial after TCP/auth on a loopback control using this production store.
-  // Binding a LAN source to this Mac’s utun destination fails in routing and
-  // is deliberately NOT accepted as an authorization-denial oracle.
   const key = await readFile(service.hostKeyPath);
   const host = (await service.status()).hostKeys;
   const name = `tron-private-${randomBytes(6).toString("hex")}`;
@@ -141,7 +136,7 @@ it("owns authorization and launchd recovery while preserving host identity and t
   const job = await run("/bin/launchctl", ["print", `gui/${process.getuid!()}/${service.label}`]);
   const pid = Number(job.match(/^\s*pid = (\d+)/mu)?.[1]);
   expect(pid).toBeGreaterThan(0);
-  process.kill(pid, "SIGTERM"); // Exactly the fixture-owned native process.
+  process.kill(pid, "SIGTERM");
   await until(async () => (await service.status()).serviceState === "running"
     && !(await run("/bin/launchctl", ["print", `gui/${process.getuid!()}/${service.label}`])).includes(`pid = ${pid}\n`));
   expect((await phone.ssh(`${tmux} display-message -p -t ${name} '#{pane_pid}'`)).trim()).toBe(shell);

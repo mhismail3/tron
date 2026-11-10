@@ -82,8 +82,6 @@ export function transcriptPage(source: PageSource,
       );
     return {
       ...page,
-      // Exact presentation binding precedes receipt I/O. Retain the owning
-      // invocation's semantics in that interval without a second binding map.
       items: page.items.map(item => {
         const semantic = item.kind === "message" && item.role === "user" && !item.semantic?.invocationId
           ? source.internalWakeSemantic(source.presentationIDs.get(item.id) ?? item.id) : undefined;
@@ -108,8 +106,6 @@ export function processHistory(source: PageSource, cursor?: string, limit = 25, 
 export function processDetail(source: PageSource, processId: string, expectedHistoryRevision?: string): SessionProcessActivity | undefined {
   source.assertNoTrustReload();
   try {
-    // History detail is canonical-only. Mutable mounted state has its own
-    // process revision and must never be returned under a history revision.
     return processHistoryDetail(source.runtime.session.sessionManager, processId, expectedHistoryRevision);
   } catch (error) {
     if (error instanceof Error && error.message.includes("generation conflict")) {

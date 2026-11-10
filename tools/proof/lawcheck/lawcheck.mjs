@@ -1,19 +1,5 @@
 #!/usr/bin/env node
-// Purpose: `scripts/tron proof check`: incremental, cached Dafny checking of proof blocks, scoped to
-// "this block and below", with the pinned toolchain only (tools/proof/README.md "Check").
-//
-// A block is a directory under <root>/blocks holding block.json:
-//   {"interface": [laws files], "impl": [definition and proof files], "deps": [block names]}
-// Paths are relative to <root>; the block's name is its directory relative to <root>/blocks.
-// A dependent may use ONLY its deps' interfaces (Dafny abstract-module refinement). Impl files include only
-// the block's own files and its transitive deps' interface files; interface files include only interface
-// files (dependents follow them). Therefore
-//   key(block) = H(toolchain pin, this checker, own files, interfaces of every transitive dep)
-// so an impl/proof edit re-checks that block alone and a law edit re-checks it and every block above it.
-// Passing keys are cached per worktree (<git dir>/proof/lawcheck-cache.json unless --cache).
-//
-// Exit 0: every requested block passed (checked or cached). 1: a block failed; blocks above it are not
-// run. 2: usage, block-graph or toolchain error.
+// Purpose: `scripts/tron proof check`: incremental, cached Dafny checking of proof blocks, scoped to "this block and below", with the pinned toolchain only (tools/proof/README.md "Check").
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
@@ -24,7 +10,6 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../../..");
 const PIN = join(HERE, "../dafny.pin");
-// Flags are part of every key: a change to them re-checks everything.
 const VERIFY_FLAGS = ["verify", "--cores", "1", "--verify-included-files", "--verification-time-limit", "60"];
 
 class UsageError extends Error {}
@@ -70,7 +55,6 @@ function findBlocks(root) {
   return blocks;
 }
 
-// Transitive deps of `name`, deps first; rejects unknown deps and cycles.
 function below(blocks, name, done = new Set(), path = []) {
   const b = blocks.get(name);
   if (!b) throw new UsageError(`unknown block ${name}${path.length ? ` (dep of ${path.at(-1)})` : ""}`);
@@ -80,7 +64,6 @@ function below(blocks, name, done = new Set(), path = []) {
   return done;
 }
 
-// Dafny source with comments blanked (strings kept), so an `include` cannot hide behind a comment.
 function code(text) {
   let out = "";
   for (let i = 0; i < text.length;) {
@@ -91,7 +74,6 @@ function code(text) {
     } else if (text.startsWith("//", i)) {
       while (i < text.length && text[i] !== "\n") { out += " "; i++; }
     } else if (text.startsWith("/*", i)) {
-      // Dafny block comments nest.
       let depth = 0;
       do {
         if (text.startsWith("/*", i)) { depth++; out += "  "; i += 2; }
@@ -103,9 +85,6 @@ function code(text) {
   return out;
 }
 
-// What a block's files may include: impl files see the block's own files and its transitive deps'
-// interfaces; interface files see only interface files (own or deps'), because a dependent follows them
-// transitively and its key covers only interfaces. Anything else would let a block see what its key omits.
 function checkIncludes(root, blocks, b) {
   const deps = [...below(blocks, b.name)].filter((d) => d !== b.name);
   const laws = new Set([...b.interface, ...deps.flatMap((d) => blocks.get(d).interface)].map((f) => resolve(root, f)));
@@ -114,7 +93,6 @@ function checkIncludes(root, blocks, b) {
     for (const f of files.map((x) => resolve(root, x))) {
       const text = code(readFileSync(f, "utf8"));
       const found = [...text.matchAll(/\binclude\s*@?"([^"]+)"/g)];
-      // Fail closed: every `include` token must be one this check understood.
       if (found.length !== [...text.matchAll(/\binclude\b/g)].length) throw new UsageError(`${b.name}: ${relative(root, f)} has an include this check cannot read`);
       for (const m of found) {
         if (!visible.has(resolve(dirname(f), m[1]))) throw new UsageError(`${b.name}: ${relative(root, f)} includes ${m[1]}, which is neither ${what}`);

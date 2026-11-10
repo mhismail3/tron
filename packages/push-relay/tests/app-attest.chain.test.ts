@@ -1,4 +1,3 @@
-// app-attest must load first: it installs the Reflect polyfill that @peculiar/x509 needs.
 import { AttestationRejected, verifyAttestation, verifyAttestationAgainstTrustedRoot, type AttestationVerificationInput } from "../src/app-attest";
 import * as x509 from "@peculiar/x509";
 import { encode } from "cbor-x";
@@ -6,7 +5,6 @@ import { describe, expect, test } from "vitest";
 import { base64Url, concatBytes, ownedBuffer, sha256, utf8 } from "../src/crypto";
 
 const algorithm = { name: "ECDSA", namedCurve: "P-256", hash: "SHA-256" } as const;
-// x509's verify() also checks validity against the wall clock, so the fixtures are valid around it.
 const now = new Date();
 const notBefore = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 const notAfter = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
@@ -36,7 +34,6 @@ async function authority(name: string, issuer?: Authority): Promise<Authority> {
   return { certificate, keys };
 }
 
-/** A development App Attest attestation whose chain ends at a generated root. */
 async function attestation() {
   const root = await authority("Test App Attest Root");
   const intermediate = await authority("Test App Attest Intermediate", root);

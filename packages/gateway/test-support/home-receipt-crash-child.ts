@@ -12,8 +12,6 @@ const binding = (JSON.parse(await readFile(join(root, "home.json"), "utf8")) as 
 const sessionDirectory = join(root, "sessions");
 await mkdir(sessionDirectory, { recursive: true });
 const freeze = async (): Promise<never> => {
-  // Reuse the ledger harness's concrete parent-owned lifetime, not an unresolved
-  // top-level promise (which alone permits Node to exit before SIGKILL).
   process.stdin.resume();
   writeFileSync(marker, `${cut}\n`);
   return new Promise<never>(() => {});
@@ -28,8 +26,6 @@ await store.execute("device:receipt-crash", "home.prompt", "home-receipt-crash-c
   manager.newSession({ id: binding.physicalSessionId });
   manager.appendThinkingLevelChange("off");
   manager.appendMessage({ role: "user", content: "canonical input before receipt crash", timestamp: Date.now() });
-  // First conversation flush is the pinned SDK's persistence boundary; no fake
-  // JSONL, synthetic receipt file, or graceful disposal stands in for it.
   manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "canonical response before receipt crash" }],
     api: "openai-completions", provider: "faux", model: "chat", stopReason: "stop", timestamp: Date.now(),
     usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,

@@ -6,27 +6,6 @@ import { startScriptedChild, type ChildModelServer } from "../../../../test-supp
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../../../test-support/scenario-lock.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 
-/**
- * Kernel subagent lock (packages/gateway/docs/scenario-locks.md#locks) for the `gateway/delegation`
- * module: one foreground subagent run through the real managed pi-subagents
- * install, a real child Pi process and the real `RuntimeRegistry`. The parent's
- * model is the faux provider; the child's model is the scripted local HTTP model
- * server the Home task subagent cases use, which answers `CHILD-DONE`.
- *
- * This lock enters at the registry, not the WebSocket: the delegation kernel's
- * contract is the session's canonical record and its process activity, which
- * the transport only projects. It runs in the nested serial pass
- * (`vitest.nested.config.ts`) because it activates the managed install and
- * spawns a real child. It records the parent's provider requests, canonical
- * JSONL, the settled subagent process activity and the child's canonical
- * session. The entries no other lock covers stay in the narrowed
- * `locks/delegation-subagent.golden.json`: both sessions' system entries (the
- * parent's prompt with the `subagent` tool and its skills, the `task-child`
- * prompt with its acceptance contract) and the parent's settings,
- * context-window and extension-activity entries. The golden's `inlineTrace`
- * keeps the rest of the trace in order, with references to those entries.
- */
-
 const MODULE = "gateway/e2e";
 const BOUND = { boundMs: 30_000 };
 const servers: ChildModelServer[] = [];
@@ -43,7 +22,6 @@ function narrowed(entry: TraceValue): boolean {
     || (record.type === "custom" && NARROWED_ENTRY_TYPES.has(String(record.customType)));
 }
 
-/** A session's entries split into the narrowed golden's entries and the inline trace, which keeps each narrowed entry's place. */
 function split(entries: TraceValue[]): { kept: TraceValue[]; inline: TraceValue[] } {
   const kept: TraceValue[] = [];
   const inline = entries.map((entry) => {

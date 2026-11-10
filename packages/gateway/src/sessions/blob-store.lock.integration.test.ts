@@ -5,12 +5,6 @@ import { expect, it, onTestFinished, vi } from "vitest";
 import type { GatewayError } from "../errors.js";
 import { BlobStore, type BlobByteRange } from "./blob-store.js";
 
-/**
- * `gateway/session-catalog` blob store behind `gateway/blobs/` and `gateway/exports/`:
- * limits, initialization, memory and file registration, byte-range leases, reader and
- * production bounds, capacity, expiry, retirement under a held lease, and disposal,
- * with the files each file-backed step leaves.
- */
 it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose", async () => {
   const home = join(await realpath(await mkdtemp(join(tmpdir(), "tron-blob-store-"))), "home");
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -22,13 +16,11 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   await mkdir(sources, { recursive: true });
   const source = async (name: string, content: string) => { const path = join(sources, name); await writeFile(path, content); return path; };
   const limits = { maximumItemBytes: 64, maximumItems: 4, maximumTotalBytes: 160, maximumReaders: 2, maximumFileProductions: 1 };
-  /** The blob directory's files, name to size; `undefined` when it does not exist. */
   const files = async (): Promise<Record<string, number> | undefined> => {
     const names = await readdir(directory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
     if (names === undefined) return undefined;
     return Object.fromEntries(await Promise.all(names.sort().map(async (name) => [name, (await stat(join(directory, name))).size])));
   };
-  /** What `work` was told: its result, or its refusal (a Gateway error's code, retryability and details). */
   const outcome = async (work: () => unknown) => {
     try { return { result: await work() }; } catch (error) {
       const gateway = error as GatewayError;
@@ -62,7 +54,7 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
     const id = derived.registerData(Buffer.from("x"), "text/plain");
     const leases = [];
     let readers = 0;
-    try { for (; readers < 64; readers += 1) leases.push(await derived.acquire(id)); } catch { /* the bound */ }
+    try { for (; readers < 64; readers += 1) leases.push(await derived.acquire(id)); } catch { }
     let open!: () => void;
     const gate = new Promise<void>((resolve) => { open = resolve; });
     const productions = Array.from({ length: 8 }, () => derived.withFileProductionAdmission(() => gate));
@@ -92,7 +84,6 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
     return { ...shape, body: Buffer.concat(chunks).toString("utf8") };
   };
 
-  // Blob ids are content addresses over the type and the bytes.
   const text = store.registerData(Buffer.from("hello blob store"), "text/plain");
   expect(text, "register memory data").toBe("0JrOadWbu7XyXTIyhzIuzeMJwv8acNt6dU2KJOzRZwE");
   expect(store.registerData(Buffer.from("hello blob store"), "text/plain"), "the same content and type is the same blob").toBe(text);
@@ -143,7 +134,6 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   expect(await store.withFileProductionAdmission(async () => { throw new Error("asynchronous failure"); }).catch((error: Error) => error.message)).toBe("asynchronous failure");
   expect(await store.withFileProductionAdmission(async () => "admitted"), "a production that rejects releases its admission").toBe("admitted");
 
-  // Free the memory blobs for the file paths: thirty-one idle minutes expire every one.
   advance(31 * 60_000);
   store.prune();
   expect(await outcome(() => read(text)), "prune expires every idle blob").toEqual(notAvailable);
@@ -158,7 +148,6 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   expect(await files(), "and leaves no staging file").toEqual({ [fileName!]: 13 });
   expect(await outcome(() => read(file)), "read a file blob").toEqual(range("exported text", 0, 13));
   expect(await outcome(() => read(file, { start: 9, end: 12 })), "read a file blob range").toEqual(range("text", 9, 13));
-  // A file blob whose file is gone, or no longer a file, is retired as missing.
   const replaced = async (name: string, replace: (path: string) => Promise<void>) => {
     const before = new Set(await readdir(directory));
     const id = await store.registerFile(await source(name, `${name} body`), "text/plain");
@@ -201,7 +190,6 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   }), "a store with no directory refuses files").toEqual(fileStorageUnavailable);
 
   {
-    // A retired file blob held by two leases keeps its file until the last one releases.
     const shared = join(home, "gateway", "blobs-shared");
     const twice = new BlobStore(limits, Date.now, shared);
     await twice.initialize();
@@ -216,9 +204,6 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
     await twice.dispose();
   }
 
-  // Prune removes an idle file blob's file in a detached cleanup, so every check that
-  // prunes one joins that removal through the public API before reading the files:
-  // the last lease's release, or disposal.
   const held = await store.acquire(file);
   const emptyLease = await store.acquire(empty);
   advance(31 * 60_000);

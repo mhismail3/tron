@@ -10,7 +10,6 @@ import { waitFor } from "../../../test-support/wait-for.js";
 import { INVOCATION_RECEIPT_TYPE } from "../../kernel/receipts/invocation-receipts.js";
 import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 
-/** Repeatable evidence for #311: `npx vitest run src/e2e/sessions/multi-resource-message.e2e.test.ts`. */
 const REPORT = "test-results/multi-resource-message.json";
 
 afterEach(disposeFixtures);
@@ -48,15 +47,11 @@ describe("one message invoking several skills and prompts (#311)", () => {
     const params = { commandId: "multi-resource-0001", sessionId: slot.id, text: "/compact the parser", resourceInvocations };
     const first = await service.invoke(client, "session.prompt", params) as { operationId: string };
     await waitFor(() => requests.length === 1 && !slot.isBusy, "the composed message to settle");
-    // Resubmitting the same command returns its receipt; it never sends the message twice.
     expect(await service.invoke(client, "session.prompt", params)).toEqual(first);
 
-    // The model receives each expansion in chip order and the typed text once. Text that
-    // looks like an extension command is message text, not a command.
     const skillBlock = `<skill name="review" location="${skillPath}">\nReferences are relative to ${join(f.agentDir, "skills", "review")}.\n\nREVIEW SKILL BODY\n</skill>`;
     expect(requests).toEqual([`${skillBlock}\n\nWRITE TESTS for the change\n\nUPDATE DOCS\n\n/compact the parser`]);
 
-    // The receipt records the whole ordered set and the typed text.
     const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
     const start = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE).map(entry => entry.data)
       .find(receipt => receipt.receiptKind === "start");
@@ -64,7 +59,6 @@ describe("one message invoking several skills and prompts (#311)", () => {
       resources: [{ source: "skill", name: "review" }, { source: "prompt", name: "tests" }, { source: "prompt", name: "docs" }] });
     expect(start).not.toHaveProperty("arguments");
 
-    // The sent row shows every invoked resource and only the typed text, live and after a cold restart.
     const projected = (transcript: Array<{ role?: string; content?: unknown; semantic?: Record<string, unknown> }>) => {
       const row = transcript.find(item => item.role === "user")!;
       return { text: (row.content as Array<{ type: string; text?: string }>)[0]?.text, resources: row.semantic?.resourceInvocations, kind: row.semantic?.kind };
@@ -72,7 +66,6 @@ describe("one message invoking several skills and prompts (#311)", () => {
     const expected = { text: "/compact the parser", resources: resourceInvocations, kind: "resourcePrompt" };
     const live = projected(slot.snapshot().transcript as never);
     expect(live).toEqual(expected);
-    // An extension command is exclusive, and a resource is listed at most once.
     await expect(service.invoke(client, "session.prompt", { commandId: "multi-resource-0002", sessionId: slot.id, text: "now",
       resourceInvocations: [{ source: "extension", name: "compact", arguments: "now" }, resourceInvocations[0]] }))
       .rejects.toMatchObject({ code: "invalid_request" });

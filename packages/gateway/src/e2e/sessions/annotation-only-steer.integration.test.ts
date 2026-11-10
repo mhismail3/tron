@@ -5,8 +5,6 @@ import { describe, expect, it } from "vitest";
 import { startLockGateway } from "../../../test-support/gateway-lock-harness.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
-// Annotation-only means no typed body, not empty wire text: the composer sends
-// the quote/comment envelope unchanged through both prompt admission routes.
 const annotation = "<annotation>\n> Tron project (6 notes): rule — keep one owner.\n\nApply this rule.\n</annotation>";
 
 describe("annotation-only queued steering over the Gateway socket", () => {

@@ -34,15 +34,9 @@ import { SessionAttentionStore } from "../src/kernel/projection/session-attentio
 import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { TronWorkspace } from "../src/workspace/tron-workspace.js";
 
-/**
- * The stores the persisted-store corpus holds (packages/gateway/docs/scenario-locks.md#persisted-stores-v4): for each,
- * how its real owner records representative synthetic data and how the current
- * owner reads it back. `tron-store-corpus.ts` stages, records and compares them.
- */
 const MACHINE = "corpus-machine";
 const IDENTITY = "device:corpus-phone";
 
-/** Fixed identities the recorder chooses, kept verbatim by normalization. */
 export const CORPUS_IDS = {
   session: "01a00000-0000-7000-8000-00000000c0a1",
   otherSession: "01a00000-0000-7000-8000-00000000c0a2",
@@ -54,29 +48,16 @@ export const CORPUS_IDS = {
 };
 
 export interface StoreSpec {
-  /** Module id owning the store and its golden. */
   readonly module: string;
-  /** Lock name: `locks/<name>.golden.json` beside the module's lock test. */
   readonly name: string;
-  /** Home-relative paths (prefixes) the store owns, recorded in the lock. */
   readonly paths: readonly string[];
-  /** A store that cannot be committed as bytes, recorded live by each lock run instead.
-   * The lock then also pins the persisted files' normalized content, so a format
-   * change still appears as a golden diff. */
   readonly live?: string;
-  /** Files an owner deliberately renews on open, excluded from the no-write check:
-   * only time-bounded operational state qualifies, never user data. */
   readonly renewed?: readonly string[];
-  /** Recording it again (`recordFixed`) writes the committed bytes; its lock proves that.
-   * A function first names the values the host file system assigns in a file's text. */
   readonly reproducible?: true | ((path: string, text: string) => string);
-  /** Write representative data with the real owner (recording only). */
   record(home: string): Promise<void>;
-  /** Open the store with the current owner and return its public projection. */
   read(home: string): Promise<unknown>;
 }
 
-/** Run with the home's workspace, which one process may own at a time, then release it. */
 async function withWorkspace<T>(home: string, use: (workspace: TronWorkspace) => Promise<T>): Promise<T> {
   const value = new TronWorkspace(home);
   await value.initialize();
@@ -97,16 +78,12 @@ async function settingsPath(home: string, knowledge?: ProfileStore) {
   return { model, record, path };
 }
 
-/** Tron Home's designation owner over a fixed session port: designation names sessions
- * the run module owns, so the corpus gives it the two corpus session ids. */
 function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
   return new HomeOwner({
     tronHome: home,
     trust: new TrustService(join(home, "agent")),
     workspace,
-    // Designation and status never dispatch a task, so the task namespace is never read.
     taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
-    // Designation and status never materialize a successor runtime or watch global resources.
     runtimes: {
       sessionFile: async () => undefined,
       sessionPresent: async (id: string) => id === CORPUS_IDS.session,
@@ -130,7 +107,6 @@ function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
 export const STORES: readonly StoreSpec[] = [
   {
     module: "gateway/admin", name: "store-settings",
-    // Canonical values and permanent change/Undo history; no settings approval store.
     paths: ["agent/settings.json", "gateway/settings"],
     reproducible: true,
     async record(home) {
@@ -151,7 +127,6 @@ export const STORES: readonly StoreSpec[] = [
   {
     module: "gateway/security", name: "store-devices",
     paths: ["gateway/devices.json", "gateway/local-auth.json"],
-    // The pairing invitation expires after ten minutes and opening the store renews it.
     renewed: ["gateway/enrollment.json"],
     async record(home) {
       const devices = new DeviceStore(home, MACHINE);
@@ -278,13 +253,10 @@ export const STORES: readonly StoreSpec[] = [
   {
     module: "gateway/machine", name: "store-uploads",
     paths: ["gateway/uploads", "gateway/upload-bodies", "gateway/upload-objects", "gateway/upload-imports"],
-    // Metadata names the body by absolute path and the logical body must be a hard
-    // link of its content object; Git preserves neither.
     live: "absolute body paths and hard-linked objects",
     async record(home) {
       const uploads = new UploadStore(home, 1_048_576);
       const saved = await uploads.save("corpus-note.txt", "text/plain", Buffer.from("corpus upload body\n"));
-      // A prompt materializes its attachments into the session that owns them from then on.
       await uploads.materialize([saved.id], CORPUS_IDS.session);
     },
     async read(home) {
@@ -325,7 +297,6 @@ export const STORES: readonly StoreSpec[] = [
     module: "gateway/apps", name: "store-swift-apps",
     paths: ["workspace/state/apps"],
     record: (home) => withWorkspace(home, async (workspace) => {
-      // Historical bytes are a retained reader oracle, not a reason to keep a v1 writer.
       const destination = join((await workspace.describe()).root, "state/apps");
       await cp(join(import.meta.dirname, "../test-fixtures/tron-corpus/home/workspace/state/apps"), destination, { recursive: true });
       await chmod(destination, 0o700);
@@ -345,8 +316,6 @@ export const STORES: readonly StoreSpec[] = [
       const owner = homeOwner(home, workspace);
       await owner.initialize();
       await owner.designate({ model: { provider: "corpus-provider", id: "corpus-model" } }, () => ({ provider: "corpus-provider", id: "corpus-default" }));
-      // Designation also records a trust decision for Home's workspace, keyed by its
-      // absolute path: that is the trust store's (machine-specific), not Home's record.
       await rm(join(home, "agent", "trust.json"), { force: true });
     }),
     read: (home) => withWorkspace(home, async (workspace) => {
@@ -375,8 +344,6 @@ export const STORES: readonly StoreSpec[] = [
         const sessionId = manager.getSessionId();
         const memory = await EpisodicMemory.open({
           workspace, sessionId, sessionSource: singleChapterSource(sessionId, manager.getSessionFile()!),
-          // Summarize the source, not the instruction suffix: this locks stored
-          // records independently of summary-prompt wording.
           summarizer: async (request) => {
             const stretch = /<stretch>\n([\s\S]*)\n<\/stretch>/u.exec(request.turns[0]!.text)![1]!;
             return fauxAssistantMessage(`Corpus summary: ${stretch.replace(/\s+/gu, " ").trim().slice(-120)}`);
@@ -402,15 +369,12 @@ export const STORES: readonly StoreSpec[] = [
   {
     module: "gateway/home", name: "store-home-profile",
     paths: ["workspace/files/Profile.json", "gateway/settings"],
-    // Record the current-format Profile owner and its Changes entries together;
-    // no retired Knowledge reader or duplicated historical corpus is involved.
     live: "current-format Profile notes and their Changes entries recorded by their owning stores",
     record: (home) => withWorkspace(home, async (workspace) => {
       const knowledge = new ProfileStore(workspace);
       const { path } = await settingsPath(home, knowledge);
       const profile = new HomeProfileItems(() => knowledge);
       const context = (commandId: string) => ({ actor: { kind: "ui" as const, id: IDENTITY }, author: { kind: "maintainer" as const }, commandId, reason: "Corpus profile" });
-      // Home learns unconfirmed items; the maintainer confirms, supersedes and retires them.
       const learned = await profile.change(path, [
         { action: "learn", kind: "preference", text: "Prefers concise answers" },
         { action: "learn", kind: "standing-decision", text: "Lands with plain Git" },
@@ -431,7 +395,6 @@ export const STORES: readonly StoreSpec[] = [
   {
     module: "gateway/display", name: "store-display-artifacts",
     paths: ["gateway/display-artifacts"],
-    // An artifact's content is a hard link of its content object; Git preserves no link.
     live: "hard-linked content objects",
     async record(home) {
       const workspace = join(home, "..", "display-workspace");
@@ -442,7 +405,6 @@ export const STORES: readonly StoreSpec[] = [
       const store = new DisplayArtifactStore(home, { minimumFreeBytes: 0, uuid: () => `00000000-0000-4000-8000-${String(++next).padStart(12, "0")}` });
       await store.initialize();
       const report = await store.ingest(workspace, "corpus-report.md", CORPUS_IDS.session);
-      // Identical bytes share one content object.
       await store.ingest(workspace, "corpus-copy.md", CORPUS_IDS.session);
       await store.grant(report.id, CORPUS_IDS.otherSession, CORPUS_IDS.session);
     },

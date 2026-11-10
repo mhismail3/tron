@@ -19,19 +19,12 @@ import {
 } from "./session-free-extensions.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 
-/** Per-kind cap on the names one installed package reports. `provides` is a
- * presentation summary; the flat `resources` inventory stays authoritative for
- * every resolved path. */
 const MAX_PROVIDES_NAMES_PER_KIND = 256;
 const MAX_PROVIDES_DIAGNOSTIC_CHARACTERS = 512;
 const SKILL_FILE_NAME = "SKILL.md";
-/** A package manifest larger than this is not read for its Node requirement. */
 const MAX_PACKAGE_MANIFEST_BYTES = 1_024 * 1_024;
 const MAX_NODE_RANGE_CHARACTERS = 128;
 
-/** One installed package as the package owner reports it: the configured source
- * and scope, whether a resource filter applies, and the installed root when the
- * package is present on disk. */
 export interface InstalledPackage {
   source: string;
   scope: "user" | "project";
@@ -39,18 +32,12 @@ export interface InstalledPackage {
   installedPath?: string;
 }
 
-/** An installed-package row with the names it provides. */
 type PackageProvidesEntry = InstalledPackage & {
   provides: PackageProvides;
   conflict?: PackageConflict;
   nodeRequirement?: PackageNodeRequirement;
 };
 
-/** The installed package's `engines.node` against the Node running this Gateway,
- * which is the Node every package runs in. npm only prints `EBADENGINE` at
- * install time, so this projection is where the mismatch stays visible (#243).
- * It warns and never blocks (D-2): a missing, unreadable or oversized manifest,
- * or no declared range, yields no requirement. */
 async function packageNodeRequirement(
   installedPath: string | undefined,
   runtime: string = process.versions.node,
@@ -71,7 +58,6 @@ async function packageNodeRequirement(
   return {
     range: boundedRange(declared),
     runtime,
-    // npm's own engine check: prereleases of the runtime still count.
     status: semver.satisfies(runtime, declared, { includePrerelease: true }) ? "satisfied" : "unsatisfied",
   };
 }
@@ -82,10 +68,6 @@ function boundedRange(range: string): string {
 
 type ResourceKind = "skills" | "prompts" | "themes";
 
-/** The name a resolved package resource presents under: a skill is the directory
- * holding its `SKILL.md` (or a root-level `.md` file's own name), a prompt and a
- * theme are their file names without the extension. Pi derives the same names
- * when it loads them. */
 function providesResourceName(kind: ResourceKind, path: string): string {
   const name = basename(path);
   if (kind === "skills") return name === SKILL_FILE_NAME ? basename(dirname(path)) : name.replace(/\.md$/, "");
@@ -98,16 +80,10 @@ function boundedNames(names: Iterable<string>): string[] {
   return [...unique].sort().slice(0, MAX_PROVIDES_NAMES_PER_KIND);
 }
 
-/** Pi records an installed package's configured source and scope on each
- * resource and extension it contributes, so the resolution `packages.list`
- * already performs — and the extension load — pair with a package entry without
- * resolving anything a second time. */
 function isPackageOwned(sourceInfo: { source: string; scope: string; origin: string }, pkg: InstalledPackage): boolean {
   return sourceInfo.source === pkg.source && (pkg.source === MANAGED_SUBAGENTS_SOURCE || sourceInfo.origin === "package" && sourceInfo.scope === pkg.scope);
 }
 
-/** Only resources the package filter left enabled are provided: a pattern that
- * turns a resource off means the install does not contribute it. */
 function resourceNames(kind: ResourceKind, resources: ResolvedResource[], pkg: InstalledPackage): string[] {
   return boundedNames(resources
     .filter((resource) => resource.enabled && isPackageOwned(resource.metadata, pkg))
@@ -123,10 +99,6 @@ function extensionNames(extensions: Extension[], pkg: InstalledPackage): Pick<Pa
   };
 }
 
-/** pi-subagents' own agents ship inside the pi-subagents package, and a package
- * may declare agent directories of its own, so the definition file's location
- * under the package's installed root is the attribution evidence. An agent
- * without a reported file is attributed to no package. */
 function subagentNames(subagents: AvailableSubagent[], pkg: InstalledPackage): string[] {
   if (pkg.installedPath === undefined) return [];
   const prefix = pkg.installedPath.endsWith(sep) ? pkg.installedPath : `${pkg.installedPath}${sep}`;
@@ -142,8 +114,6 @@ interface PackageProvidesInput {
   subagents: AvailableSubagent[];
 }
 
-/** The `provides` object for one installed package: names only, every kind
- * capped, and empty when the package contributes nothing of that kind. */
 function packageProvides(input: PackageProvidesInput): PackageProvides {
   const { pkg, resources, extensions, subagents } = input;
   const registered = extensionNames(extensions, pkg);
@@ -165,9 +135,7 @@ interface PackageProvidesRequest {
   settingsManager: SettingsManager;
   packages: InstalledPackage[];
   resources: ResolvedPaths;
-  /** Overrides the shared session-free extension load (used by tests). */
   loadExtensions?: (agentDir: string, trust: TrustService, cwd?: string) => Promise<SessionFreeExtensionLoad>;
-  /** Overrides loading pi-subagents' own discovery module (used by tests). */
   loadDiscovery?: (packageRoot: string) => Promise<unknown>;
 }
 
@@ -177,10 +145,6 @@ interface PackageProvidesResult {
   diagnostic?: string;
 }
 
-/** Builds every installed package's `provides` for `packages.list`, failing soft
- * per kind: failed extension loading or failed subagent discovery leaves the
- * kinds that did resolve in place and returns one bounded `providesDiagnostic`,
- * so the package read itself never fails because of `provides`. */
 export async function loadPackageProvides(request: PackageProvidesRequest): Promise<PackageProvidesResult> {
   const diagnostics: string[] = [];
   let extensions: Extension[] = [];

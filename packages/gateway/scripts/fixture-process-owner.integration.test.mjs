@@ -34,7 +34,6 @@ for (const exit of ["normal", "failure", "signal"]) test(`joins a detached grand
     fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
     setInterval(() => { fs.mkdirSync(${JSON.stringify(join(root, "writes"))}, {recursive:true}); fs.writeFileSync(${JSON.stringify(join(root, "writes", "live"))}, String(Date.now())); }, 1);`;
   const runner = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(writer)}], {detached:true, stdio:'ignore'}).unref(); setInterval(() => {}, 1000);`;
-  // Two detached boundaries: joining only the direct runner leaves a writer.
   const host = spawn(process.execPath, ["--import", preload, "-e", `
     const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(runner)}], {detached:true,stdio:'ignore'}); child.unref();
     const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(runnerFile)}, String(child.pid));
@@ -59,7 +58,7 @@ for (const exit of ["normal", "failure", "signal"]) test(`joins a detached grand
     for (const pid of [runnerPid, writerPid].filter(Boolean)) {
       if (exists(pid)) { process.kill(-pid, "SIGKILL"); await waitFor(() => !exists(pid)); }
     }
-    await rm(fixture, { recursive: true }); // exactly one removal, no rmdir retries
+    await rm(fixture, { recursive: true });
   }
 });
 
@@ -74,10 +73,6 @@ for (const transition of ["already zombie", "zombie during signal", "reaped duri
     const signalFile = join(root, "signal-complete");
     const failureFile = join(fixture, "process-owner-failure.jsonl");
     const proofFile = join(fixture, "joined.json");
-    // Python deliberately holds an unreaped, detached child. No host-wide load:
-    // TERM lets the parent reap; the signal-race handshake holds the zombie
-    // until the actual OS signal completes. The outer owner joins this parent
-    // on every failure path.
     const python = `import os, signal, time, faulthandler
 faulthandler.enable()
 host = os.getppid()

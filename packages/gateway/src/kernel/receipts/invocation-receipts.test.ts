@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { invocationProjection, makeInvocationReceipt } from "./invocation-receipts.js";
 
-/**
- * What invocationProjection returns and refuses. Proof block receipts/invocation-lifecycle decides the fold over
- * facts; these cases pin what this module states to it and writes back: each projection's exact fields and their
- * order, the order of the result, and the message of each refusal.
- */
 let serial = 0;
 const at = (second: number) => new Date(Date.parse("2026-11-09T12:00:00.000Z") + second * 1_000).toISOString();
 const receipt = (invocationId: string, fields: Record<string, unknown>) => makeInvocationReceipt({
@@ -37,7 +32,6 @@ describe("invocation projection", () => {
     const head = ["version", "invocationId", "operationId", "source", "lifecycle", "origin", "sequence", "updatedAt"];
     expect(keys([start("a"), settle("a", "failed", { retryable: true }), bind("a", "e")])).toStrictEqual([...head, "retryable", "canonicalEntryId"]);
     expect(keys([start("a"), bind("a", "e"), settle("a", "failed", { retryable: true })])).toStrictEqual([...head, "canonicalEntryId", "retryable"]);
-    // A first terminal without a flag, the binding, then the same terminal again with one.
     expect(keys([start("a"), settle("a", "failed"), bind("a", "e"), settle("a", "failed", { retryable: true })])).toStrictEqual([...head, "canonicalEntryId", "retryable"]);
     expect(keys([start("a"), settle("a", "failed", { retryable: true }), bind("a", "e"), settle("a", "failed", { retryable: false })])).toStrictEqual([...head, "retryable", "canonicalEntryId"]);
     expect(keys([start("a", { source: "prompt", name: "p", resources: [{ source: "prompt", name: "p" }, { source: "skill", name: "s" }] })]))
@@ -72,9 +66,7 @@ describe("invocation projection", () => {
       ["contradictory terminal invocation receipt", () => [start("a"), settle("a", "completed"), settle("a", "failed")]],
       ["illegal invocation transition", () => [start("a"), move("a", "queued"), move("a", "retrying")]],
       ["illegal invocation transition", () => [start("a"), settle("a", "completed"), move("a", "running")]],
-      // The first refusal names the history: the ownership change comes before the second start.
       ["invocation receipt ownership changed", () => [start("a"), move("a", "running", { operationId: "another" }), start("a")]],
-      // Ownership is checked before a binding's entry, the entry before the invocation.
       ["invocation receipt ownership changed", () => [start("a"), start("b"), bind("a", "e"), bind("b", "e", { operationId: "another" })]],
       ["canonical entry has more than one invocation binding", () => [start("a"), start("b"), bind("a", "e"), bind("b", "f"), bind("b", "e")]],
     ];

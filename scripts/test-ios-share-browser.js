@@ -1,7 +1,3 @@
-// Run with agent_browser.script after defining fixtureUrl (loopback only),
-// artifactRoot (absolute screenshot directory), and phase: 'delivery-layout' or
-// 'keyboard-zoom'. Independent phases fit the tool's 25-call bound. See tools/web/README.md.
-// This drives real generated HTML; it never activates an installation link.
 if (!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(fixtureUrl)) throw new Error("Use an isolated loopback fixture, never the live host");
 if (!["delivery-layout", "keyboard-zoom"].includes(phase)) throw new Error("Choose a documented test phase");
 const checks = [];
@@ -68,8 +64,6 @@ try {
         check(layout.noOverflow && layout.targets && layout.unclipped, `${theme} ${width}px: readable reflow, no clipped content and named 44px targets`);
         layouts.push({ theme, width, ...layout });
       }
-      // Measure actual computed, composited text/background contrast, not CSS
-      // literals. All reading surfaces are opaque; chrome alpha composites below.
       const contrast = await evaluate(`(() => {
         const rgb = value => value.match(/[\\d.]+/g).map(Number);
         const luminance = c => c.slice(0, 3).map(v => { v /= 255; return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }).reduce((s, v, i) => s + v * [.2126, .7152, .0722][i], 0);

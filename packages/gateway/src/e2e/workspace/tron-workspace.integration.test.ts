@@ -81,7 +81,6 @@ describe("Tron workspace through the pinned runtime", () => {
     await f.slot.prompt("after compaction"); await settle(f.slot);
     await f.slot.fork(firstUser.id, "at");
     await f.slot.prompt("after fork"); await settle(f.slot);
-    // Reacquire the original canonical session, not a second runtime client.
     const resumed = await f.registry.acquire(originalId);
     await resumed.prompt("after resume"); await settle(resumed);
     const runId = randomUUID();
@@ -196,7 +195,6 @@ describe("Tron workspace ownership across a separate process", () => {
       await once(child.stdout!, "data");
       expect(await ownedWorkspace(home).describe()).toMatchObject({ available: false, reason: "owned_elsewhere" });
     } finally { child.kill("SIGKILL"); await exited; }
-    // Advance only the abandoned fixture's lock age, avoiding a minute-long test.
     const stale = new Date(Date.now() - 120_000);
     await utimes(`${state}.lock`, stale, stale);
     expect((await ownedWorkspace(home).describe()).available).toBe(true);

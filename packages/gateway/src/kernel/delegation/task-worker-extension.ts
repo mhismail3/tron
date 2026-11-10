@@ -1,25 +1,12 @@
 import type { ExtensionFactory } from "../pi/coding-agent.js";
 
-/** Reviewed provider contract at fork commit f72b623067cdfd797db5dd3a6729cef430c54dbf:
- * the action, supervisor and blocking-wait semantics this gate admits.
- * A pin bump must re-review this gate: until then every action of the new
- * version is refused as unverified. async:false is NOT a foreground guarantee:
- * forceTopLevelAsync overrides it, so the task settles any async run it started
- * (HomeTaskDispatcher). */
 const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.12";
-/** The gate's refusal text. A call it blocks never reaches the provider. It names only what a
- * task still refuses: work that outlives the task, and control of runs the task did not start. */
 export const HOME_TASK_PRODUCER_REFUSAL_REASON = "Home tasks can't schedule work, launch or attach a mission, subscribe to a wake, control a run the task did not start, or use an unverified producer; do the work directly or report back.";
 export const HOME_TASK_SEALED_REASON = "The task report is sealed, so this task has ended; no further work runs.";
 export type HomeTaskProducerRefusal = "subagent-mutation" | "unverified-provider" | "schedule" | "wake-subscription";
 const READ_ONLY_ACTIONS = new Set(["guide", "children.list", "status", "list", "get", "models"]);
-/** Controls a task may use on a run its own session started: the provider's run controls,
- * including a resume, which starts a new run that the task then owns. */
 const OWN_RUN_ACTIONS = new Set(["steer", "resume", "interrupt", "stop", "command.status", "command.yield", "command.cancel"]);
 
-/** A launch is allowed unless it attaches or starts a mission: a mission outlives its run and
- * would keep working after the task's join. Any other action is a read, or a control of a run
- * this session launched, addressed by id (never by dir). A control that attaches a mission is refused. */
 async function subagentRefusal(input: Record<string, unknown>, ownsRun: (runId: string) => Promise<boolean>): Promise<HomeTaskProducerRefusal | undefined> {
   const mission = (input.mission !== undefined && input.mission !== false) || input.missionId !== undefined;
   if (input.action === undefined) return mission ? "subagent-mutation" : undefined;
@@ -30,9 +17,6 @@ async function subagentRefusal(input: Record<string, unknown>, ownsRun: (runId: 
   return "subagent-mutation";
 }
 
-/** Reads are always admitted. A reply answers one pending request by its exact `replyTo`, and it is
- * admitted only when that request came from a run this task owns. `to` and implicit replies do not
- * name the request, so the gate cannot prove their owner and refuses them. */
 async function supervisorRefusal(input: Record<string, unknown>, ownsRequest: (requestId: string) => Promise<boolean>): Promise<HomeTaskProducerRefusal | undefined> {
   if (["status", "pending", "list"].includes(String(input.action))) return undefined;
   if (input.action === "reply" && typeof input.replyTo === "string" && await ownsRequest(input.replyTo)) return undefined;
@@ -42,11 +26,8 @@ async function supervisorRefusal(input: Record<string, unknown>, ownsRequest: (r
 export function createHomeTaskWorkerExtension(input: {
   providerVersion: (toolName: string) => string | undefined;
   refused: (reason: HomeTaskProducerRefusal) => void;
-  /** True once the task's report is sealed: a later call in the same batch is refused. */
   reportSealed: () => boolean;
-  /** True only for a run this session owns (see `OwnedTurnOwner.ownsSubagentRun`). */
   ownsSubagentRun: (runId: string) => Promise<boolean>;
-  /** True only for a supervisor request whose child run this session owns. */
   ownsSupervisorRequest: (requestId: string) => Promise<boolean>;
 }): ExtensionFactory {
   return pi => {
@@ -58,8 +39,6 @@ export function createHomeTaskWorkerExtension(input: {
       else if (event.toolName === "subagent" || event.toolName === "subagent_supervisor" || event.toolName === "bg_wait") {
         if (input.providerVersion(event.toolName) !== HOME_TASK_SUBAGENT_VERSION) reason = "unverified-provider";
         else if (event.toolName === "bg_wait") {
-          // Blocking waits use the operation signal; subscriptions can wake a
-          // settled task session later and are not owned by that signal.
           if (event.input.nonBlocking === true) reason = "wake-subscription";
         } else if (event.toolName === "subagent_supervisor") reason = await supervisorRefusal(event.input, input.ownsSupervisorRequest);
         else reason = await subagentRefusal(event.input, input.ownsSubagentRun);

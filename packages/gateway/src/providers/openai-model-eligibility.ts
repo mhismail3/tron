@@ -9,7 +9,6 @@ const REQUEST_TIMEOUT_MS = 5_000;
 const SUCCESS_TTL_MS = 60_000;
 const MAX_DISCOVERY_MODELS = 25_000;
 const installed = new WeakMap<ModelRuntime, OpenAIModelEligibility>();
-/** Session-local views may delegate lookup without installing filters or owning an attachment. */
 const borrowedOpenAIModelEligibility = Symbol("borrowedOpenAIModelEligibility");
 
 type OpenAIModel = Model<Api>;
@@ -25,7 +24,6 @@ interface EligibilityState {
 }
 type EligibilityUpdate = { fingerprint?: string | undefined; oauth?: boolean | undefined; entries: readonly string[]; displayNames: ReadonlyMap<string, string> };
 interface OpenAIModelEligibilityOptions {
-  /** Production always uses the fixed OpenAI endpoint and global fetch. */
   fetch?: typeof globalThis.fetch;
   now?: () => number;
 }
@@ -64,7 +62,6 @@ function withFilters(runtime: ModelRuntime, provider: Provider, owner: OpenAIMod
   };
 }
 
-/** One Gateway-wide account state; each runtime contributes the SDK's public provider filters. */
 export class OpenAIModelEligibility {
   private readonly fetch: typeof globalThis.fetch;
   private readonly now: () => number;
@@ -73,12 +70,8 @@ export class OpenAIModelEligibility {
   private lastSuccessful: AccountModels | undefined;
   private lastFailure: { fingerprint: string; expiresAt: number } | undefined;
   private flight: DiscoveryFlight | undefined;
-  /** Bumped when a publish changes what the filters answer or the stored-credential set changes. */
   private stateRevision = 0;
-  /** The stored providers and credential types last seen: session runtimes'
-   * configured/OAuth snapshots (`provider.list`'s usage flags) follow them. */
   private storedCredentials: string | undefined;
-  /** The snapshot refresh that applied (or is applying) one state revision. */
   private snapshots: { revision: number; done: Promise<void> } | undefined;
 
   constructor(options: OpenAIModelEligibilityOptions = {}) {
@@ -104,7 +97,6 @@ export class OpenAIModelEligibility {
     };
   }
 
-  /** Caller cancellation only abandons this wait; the Gateway owns auth reads and discovery. */
   async refresh(signal?: AbortSignal): Promise<void> {
     const runtime = this.primaryRuntime();
     if (!runtime || signal?.aborted) return;
@@ -129,8 +121,6 @@ export class OpenAIModelEligibility {
       this.stateRevision += 1;
     }
     const stored = credentials.find(item => item.providerId === "openai");
-    // Discovery is an account-specific OAuth capability, not a generic auth probe:
-    // API keys, absent credentials, and environment auth must never reach this endpoint.
     if (stored?.type !== "oauth") {
       this.lastSuccessful = undefined;
       this.lastFailure = undefined;
@@ -260,15 +250,8 @@ export class OpenAIModelEligibility {
   }
 
   private refreshSnapshots(): Promise<void> {
-    // Only a changed eligibility state or stored-credential set can change the
-    // attached snapshots; attaching a runtime refreshes it through its own
-    // registration. Reloading per read would make `provider.list`/`model.list`
-    // grow with the open sessions.
     const revision = this.stateRevision;
     if (this.snapshots?.revision === revision) return this.snapshots.done;
-    // A provider-scoped SDK refresh first republishes every provider's unfiltered
-    // configured catalog and then reapplies filters only to the named subset, which
-    // would drop other providers' credential filters. Refresh full availability.
     const done = Promise.all([...this.runtimes].map(runtime => runtime.refresh({ allowNetwork: false }).then(() => undefined, () => undefined)))
       .then(() => undefined);
     this.snapshots = { revision, done };
@@ -331,19 +314,10 @@ export class OpenAIModelEligibility {
   }
 }
 
-/** One Home runtime's own view of the shared Gateway model runtime (#480). Session
- * code may replace a method on the runtime it is given: `SessionContextWindowPolicy`
- * replaces `getModel` to project the session's context-window budget. On this view
- * such a write stays with that one runtime, so it neither changes Gateway-wide
- * lookups nor stacks under the next replacement runtime. Every other read and
- * call reaches the shared runtime, bound to it, so provider packages registered
- * there stay visible. Property writes stay local; mutating method calls still
- * reach the shared runtime and must be invoked only by its owner. */
 export function sessionRuntimeView(shared: ModelRuntime): ModelRuntime {
   const own = new Map<PropertyKey, unknown>();
   return new Proxy(shared, {
     get: (target, property) => {
-      // Borrowed eligibility is a read-only lookup, never a new filter installation.
       if (property === borrowedOpenAIModelEligibility) return openAIModelEligibility(target);
       if (own.has(property)) return own.get(property);
       const value: unknown = Reflect.get(target, property, target);
@@ -362,7 +336,6 @@ export function openAIModelEligibility(runtime: ModelRuntime): OpenAIModelEligib
   return installed.get(runtime)
     ?? (runtime as ModelRuntime & { readonly [borrowedOpenAIModelEligibility]?: OpenAIModelEligibility })[borrowedOpenAIModelEligibility];
 }
-/** Only brand-new sessions may replace an ineligible saved preference. */
 export async function initialModel(runtime: ModelRuntime, settings: Pick<SettingsManager, "getDefaultProvider" | "getDefaultModel">): Promise<Model<never> | undefined> {
   const eligibility = openAIModelEligibility(runtime);
   await eligibility?.refresh();
@@ -373,9 +346,6 @@ export async function initialModel(runtime: ModelRuntime, settings: Pick<Setting
     if (savedDefault && eligibility) {
       const available = await runtime.getAvailable();
       if (!eligibility.isEligibleInRuntime(runtime, savedDefault.provider, savedDefault.id)) {
-        // Pi reads a saved default directly, independently of its filtered
-        // available-model snapshot. Only brand-new sessions may replace
-        // that stale preference; existing transcript identities stay intact.
         const fallback = available[0];
         if (!fallback) throw new GatewayError("invalid_request", "Your saved default model is no longer available and no eligible model was found; choose a model or check your provider sign-in.");
         return fallback as Model<never>;

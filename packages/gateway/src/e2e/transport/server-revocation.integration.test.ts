@@ -26,7 +26,6 @@ function gate() {
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
-  // Drain every owner even when an earlier fixture's disposal fails.
   const results = await Promise.allSettled(cleanup.splice(0).map((dispose) => dispose()));
   vi.restoreAllMocks();
   const failures = results.filter((result) => result.status === "rejected");
@@ -48,7 +47,6 @@ async function fixture() {
     releases.forEach((release) => release());
     sockets.forEach((socket) => socket.terminate());
     http.forEach((outgoing) => outgoing.destroy());
-    // RPC rejection is observed by GatewayServer; it is not a disposal error.
     await Promise.allSettled([...pending]);
     await registry?.administrativeWorkRegistry.waitUntilSettled();
     try {
@@ -56,7 +54,6 @@ async function fixture() {
     } finally {
       try {
         await registry?.dispose();
-        // Pairing queues invitation regeneration on this same store mutex.
         await devices?.ensureEnrollment();
       } finally {
         await rm(root, { recursive: true, force: true });
@@ -156,7 +153,7 @@ describe("device revocation at real ownership boundaries", () => {
     const authenticate = internals.authenticateLocked.bind(internals);
     let capturedUnderMutex = false;
     vi.spyOn(internals, "authenticateLocked").mockImplementation(async (token) => {
-      const identity = await authenticate(token); // The real durable credential result, not a pre-read gate.
+      const identity = await authenticate(token);
       capturedUnderMutex = mutexActive;
       captured.release();
       await resume.promise;
@@ -181,7 +178,7 @@ describe("device revocation at real ownership boundaries", () => {
     } else {
       const socket = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: `Bearer ${f.paired.token}` } });
       f.sockets.push(socket);
-      socket.on("error", () => {}); // A legal revocation-first ordering rejects the upgrade.
+      socket.on("error", () => {});
       socket.on("close", () => { finished = true; });
     }
     let revocation: Promise<boolean> | undefined;
@@ -191,15 +188,10 @@ describe("device revocation at real ownership boundaries", () => {
         order.push("retired");
         f.server.disconnectDevice(f.paired.deviceId);
       });
-      // Instrumentation controls scheduling only. If the credential read has
-      // escaped serialization, let the real durable revoke finish before its
-      // captured result resumes. The oracle below is observable publication.
       if (!capturedUnderMutex) await revocation;
       resume.release();
       await revocation;
       await waitFor(() => finished || order.includes("admitted"), "the run to finish or be admitted");
-      // Admission may win, or revalidation may reject after revocation wins;
-      // only publishing an admitted effect AFTER retirement is illegal.
       expect([["admitted", "retired"], ["retired"]]).toContainEqual(order);
       await waitFor(() => finished, "the scheduler run to finish");
       if (requestError) throw requestError;
@@ -271,14 +263,10 @@ describe("device revocation at real ownership boundaries", () => {
     expect(slot.isDisposed).toBe(false);
     expect(slot.isEvictionProtected).toBe(true);
     resume.release();
-    // The response now precedes completed-receipt fsync; wait for the owning
-    // Gateway work registry before reading durable evidence or cleaning up.
     await f.registry.administrativeWorkRegistry.waitUntilSettled();
     expect(await f.receipts.status(f.paired.deviceId, "session.prompt", "revocation-prompt-command")).toMatchObject({ status: "completed" });
     await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(peer.frames.some((frame) => frame.id === "prompt")).toBe(false);
-    // Replay through the durable owner must return its result without invoking
-    // the operation again, even though the originating socket is gone.
     const repeat = vi.fn(async () => ({}));
     await new CommandReceiptStore(f.root).execute(f.paired.deviceId, "session.prompt", "revocation-prompt-command", repeat);
     expect(repeat).not.toHaveBeenCalled();

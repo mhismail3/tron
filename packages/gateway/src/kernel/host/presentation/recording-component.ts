@@ -22,10 +22,6 @@ type DisposableComponent = Component & { dispose?: () => void };
 const MAXIMUM_LINES = 120;
 const MAXIMUM_SOURCE_BYTES = 256 * 1_024;
 
-/**
- * Records the result of the render already requested by pi-tui. Consumers read
- * `capturedLines` and must never call the wrapped component's render method again.
- */
 export class RecordingComponent implements Component {
   private disposed = false;
   private lines?: readonly string[];
@@ -51,8 +47,6 @@ export class RecordingComponent implements Component {
           lines = [this.fallbackLine(safeWidth)];
           this.diagnose("render-invalid", `Component exceeded ${MAXIMUM_LINES} bounded logical lines`);
         } else {
-          // Bound count, element type, and raw bytes before invoking terminal-width
-          // logic or returning anything to the compositor.
           let sourceBytes = 0;
           let invalid = false;
           for (const candidate of rendered) {
@@ -107,7 +101,6 @@ export class RecordingComponent implements Component {
     try {
       this.diagnosticCallback({ code, message: boundedDisplayError(error) });
     } catch {
-      // Diagnostics must not make extension rendering fail.
     }
   }
 }

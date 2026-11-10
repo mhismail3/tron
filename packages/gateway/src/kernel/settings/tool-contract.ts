@@ -1,6 +1,4 @@
 import type { ChangeReview, NativeChangeAcceptance } from "../../protocol/types.js";
-/** The settings model's vocabulary (docs/settings-model.md section 4).
- * Every key's behaviour is data here; nothing outside the schema names a key. */
 export const LAYERS = ["project", "session", "global"] as const;
 
 export type LayerId = typeof LAYERS[number];
@@ -30,19 +28,9 @@ export interface GitResult {
   reason?: string;
   blob?: string;
   warning?: string;
-  /** An outside change or commit fact: the repository's `HEAD` commit and branch then. */
   head?: string;
   branch?: string;
 }
-
-/**
- * The one resolver (docs/settings-model.md section 3, foundation F4).
- *
- * For a target and each key it takes the topmost layer that the target has,
- * that holds a value for the key, that the key allows, and that is applied.
- * It reads stores that were loaded by their owners; it never writes, caches or
- * consults the change record (F2).
- */
 
 export type SettingsTarget =
   | { kind: "global" }
@@ -56,7 +44,6 @@ export interface FixedSetting {
   at: string;
   ref: string;
   qualifiers?: Qualifiers;
-  /** Delegation-time source, kept with the fixed value rather than inferred from current Home. */
   via?: "home-profile:sameAs:home" | "home-profile" | "home-explicit" | "home-fallback";
   reason?: string;
 }
@@ -67,7 +54,6 @@ export interface LayerValue {
   layer: LayerId;
   value?: unknown;
   display?: string;
-  /** False when the target has the layer and it holds a value that does not apply. */
   applied: boolean;
   reason?: "untrusted";
 }
@@ -80,13 +66,11 @@ export interface ResolvedKey {
   value: unknown;
   display: string;
   layer: LayerId;
-  /** False when the topmost value present is not applied (an untrusted project). */
   applied: boolean;
   reason?: "untrusted";
   badges: Badge[];
   fixedAt?: FixedSetting;
   layers: LayerValue[];
-  /** A stored Session/Home override, including one currently masked by Project. */
   overridden?: boolean;
   projectSetting?: { file: string; path: string };
 }
@@ -96,7 +80,6 @@ export interface Diagnostic { key: string; layer: LayerId; reason: "project-forb
 export interface Resolution {
   target: SettingsTarget;
   layers: readonly LayerId[];
-  /** The Project store exists but cannot be parsed (for example merge markers). */
   projectUnreadable?: true;
   projectNotice?: { file: string; message: string };
   keys: ResolvedKey[];
@@ -110,17 +93,9 @@ export interface ChangeRequest {
   layer: LayerId;
   op: "set" | "unset";
   value?: unknown;
-  /** The value the actor read at this layer; `null` means unset. Omitted skips the check. */
   expected?: unknown;
 }
 
-/**
- * The worker's signal after an applied change (#1336). `queued`: one Gateway steer joined
- * the task's ordered steering lane (`operationId` is that steer's own operation); the change
- * is already stored and the worker's next provider request uses it. `not-running`: no live
- * task operation, so the change takes effect when the worker next runs (resume). `failed`:
- * the change is applied and stored, but the steer was refused; the error says why.
- */
 export type SettingsSignal =
   | { status: "queued"; taskId: string; operationId: string; appliesFrom: "next-request" }
   | { status: "not-running"; taskId: string; appliesFrom: "next-run" }
@@ -153,21 +128,14 @@ export interface ChangeResult {
   failure?: string;
 }
 
-/** Only trusted native host code supplies this callback. Approval executes inside
- * the paired-native answer's canonical receipt, never after its acknowledgement. */
 export type ConfirmChange = <T>(review: ChangeReview, apply: (acceptance: NativeChangeAcceptance) => Promise<T>) => Promise<T | undefined>;
 
-/** A delegated worker's settings state beside its resolved keys (#1336). */
 export interface TaskWorkerSettingsState {
-  /** The worker's task operation is live: a change applies from its next provider request. */
   running: boolean;
-  /** What the worker's next provider request uses. */
   selected: { model: string | null; thinking: string };
-  /** What its latest assistant response ran on: the acknowledgment a change took effect. */
   lastResponse: { model: string; thinking: string | null; at: string } | null;
 }
 
-/** The task a `taskId` call resolved to: the worker's current task (a resume continues it). */
 export interface TaskWorkerSettingsView extends TaskWorkerSettingsState {
   taskId: string;
   sessionId: string;
@@ -176,7 +144,6 @@ export interface TaskWorkerSettingsView extends TaskWorkerSettingsState {
   resolvedFrom?: string;
 }
 
-/** The runtime supplies identity and a native confirmation port, never model-provided approval tokens. */
 export interface SettingsToolAccess {
   resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;
   change(changes: ChangeRequest[], input: { reason: string; dryRun?: boolean; toolCallId: string; taskId?: string; confirm?: ConfirmChange }): Promise<ChangeResult & { worker?: TaskWorkerSettingsView }>;

@@ -31,9 +31,6 @@ export async function sendToApns(
   const expiration = Math.max(0, Math.floor(Date.parse(request.expiresAt) / 1000));
   let response: Response;
   try {
-    // Keep the platform-default redirect mode. Deployed Workers reject this
-    // APNs egress before any provider response when redirect is forced to
-    // `error`; the host and path remain closed product-owned projections.
     response = await fetch(`https://${host}/3/device/${target.deviceToken}`, {
       method: "POST",
       signal: AbortSignal.timeout(15_000),

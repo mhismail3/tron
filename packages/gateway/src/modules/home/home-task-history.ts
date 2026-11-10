@@ -11,8 +11,6 @@ const refuse = () => new GatewayError("conflict", "Task history evidence or curs
 const compare = (a: Pick<HomeTaskHistoryItem, "at" | "id">, b: Pick<HomeTaskHistoryItem, "at" | "id">) =>
   Date.parse(b.at) - Date.parse(a.at) || a.id.localeCompare(b.id);
 
-/** Recent task snapshots are capped at twelve. Canonical accepted tool results,
- * not the snapshots copied on resume, own the complete progress history. */
 export async function readHomeTaskHistory(store: HomeTaskStore, sessions: SessionOperations,
   input: { taskId: string; limit?: number; cursor?: string }, signal?: AbortSignal,
   summary?: (value: { taskHash: string; counts: { lineages: number; operations: number; resumes: number; complete: number; rootCreatedAtMs: number } }) => void,
@@ -38,7 +36,6 @@ export async function readHomeTaskHistory(store: HomeTaskStore, sessions: Sessio
       after = value;
     } catch { throw refuse(); }
   }
-  // Refused admissions are retained records, not worker operations or resumes.
   const operations = lineage.filter(task => task.operationId !== null);
   const byTask = new Map(operations.map(task => [task.taskId, task]));
   const checkins = new Map<string, HomeTaskCheckin>();
@@ -68,9 +65,6 @@ export async function readHomeTaskHistory(store: HomeTaskStore, sessions: Sessio
       } else { complete = false; }
     }
   }
-  // Codemode retains nested arguments/status, not their result details. Snapshots
-  // can still supply those exact records; never fabricate an ID or acceptance time
-  // for a nested check-in that has aged out of both sources.
   const key = (operationId: string, value: HomeTaskCheckin | ReturnType<typeof parseHomeTaskCheckinRequest>) =>
     JSON.stringify([operationId, value.step, value.done, value.next, value.blocker ?? null, value.needsAttention === true,
       value.refs?.branch ?? null, value.refs?.commit ?? null, value.refs?.issue ?? null]);
@@ -85,8 +79,6 @@ export async function readHomeTaskHistory(store: HomeTaskStore, sessions: Sessio
     for (const entry of span.run) {
       if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
       const nested = entry.message.nestedCalls;
-      // The SDK owns argument/count limits; incomplete means some calls or full
-      // arguments were omitted, even when every retained call is successful.
       if (nested?.complete === false) complete = false;
       for (const call of nested?.calls ?? []) if (call.name === "checkin" && call.status !== "error") {
         if (call.status !== "ok") { complete = false; continue; }
@@ -110,8 +102,6 @@ export async function readHomeTaskHistory(store: HomeTaskStore, sessions: Sessio
       items.push({ ...operation, id: checkin.id, at: checkin.at, checkin });
   }
   items.sort(compare);
-  // Export after the authoritative whole-lineage read, before pagination. A
-  // repeated read has the same root digest; copied check-ins never add resumes.
   summary?.({ taskHash: createHash("sha256").update(root).digest("hex").slice(0, 16),
     counts: { lineages: 1, operations: operations.length, resumes: Math.max(0, operations.length - 1),
       complete: Number(complete && operations.length > 0 && operations.every(task => task.lifecycle === "terminal")),

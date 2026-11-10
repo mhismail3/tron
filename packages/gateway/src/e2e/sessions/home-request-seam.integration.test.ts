@@ -2,47 +2,6 @@ import { randomUUID } from "node:crypto";
 import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 import type { RunPersistence } from "../../kernel/run/run-persistence.js";
 import type { SettingsChangePath } from "../../kernel/settings/settings-change.js";
-/**
- * Tron Home's request seam inside the real Gateway runtime (`RuntimeRegistry` +
- * `RuntimeSlot`), with the pinned Pi SDK, a faux provider and the real episodic
- * memory behind a deterministic faux compactor.
- *
- * This file is ALSO the pinned-SDK seam regression test. It pins the SDK
- * behaviour the seam depends on and that a reader cannot see from Tron's own
- * source:
- *
- *  - `AgentSession` installs its own `prepareRequest` projection wrapper and
- *    `transformContext` stages that run AFTER the outermost `prepareRequest`,
- *    so a digest taken at `prepareRequest` time can never match the provider
- *    request (hence the expectation is recorded in the outermost
- *    `transformContext` wrapper);
- *  - the SDK's context stage `structuredClone`s every message, so object
- *    identity is never preserved and the mutation check must compare values;
- *  - `agent.streamFunction` is the only provider-facing seam, and it is wrapped
- *    outermost by a compaction policy, so the Home guard must be innermost;
- *  - `session.prompt` appends the input's canonical entry after admission, and
- *    steering inserts entries after it, which is what makes the activation's
- *    captured leaf an exact boundary.
- *
- * C16/C17 register a real SDK context handler through a test-only factory spy.
- * No production injection hook is needed.
- *
- * Every case writes a row into `test-results/home-activation/seam-report.json`
- * and prints a one-line summary.
- *
- * Failure modes these cases exist for: F1 a prior activation leaks into a request, F2 the memory view is
- * persisted, F3 the cut is taken at the last user message and loses the tool
- * loop, F4 a queued follow-up is dropped or split off, F5 an SDK retry re-expands
- * the request, F6 SDK compaction re-sends canonical history, F7 a policy refusal
- * is retried by SDK auto-retry, F8 a post-`prepareRequest` mutation reaches the
- * provider, F9 an un-admitted run is served, F10 an ordinary session is affected,
- * F11 an oversized activation reaches the provider, F12 a reload drops the
- * wrappers, F13 a settled run leaves its activation open, F14 a broken memory
- * serves a request, F15 an unbuilt line is sent instead of waiting, F16 the view
- * changes between two steps of one activation, F17 a designation in flight has no
- * seam on its first runtime, F18 an ordinary session's requests change when a
- * Home is designated.
- */
 import { existsSync } from "node:fs";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -65,13 +24,8 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
 const PROVIDER = "tron-home-seam";
 const MODEL_ID = "fixture";
-// The summarizer is injected, so the memory queue names the session's own registered model.
 const MEMORY_MODEL = { provider: PROVIDER, id: MODEL_ID };
-/** The deterministic compactor's line marker: its presence in a request means the
- * frozen memory view is there, and it never echoes the message it summarizes. */
 const SUMMARY_MARKER = "HOME-SUMMARY";
-/** Long enough that a level-0 node needs a compactor call rather than becoming a
- * verbatim free node, so a summarized message's own text is absent from the view. */
 const FILLER = "these are earlier home words ".repeat(40);
 const REPORT_PATH = "test-results/home-activation/seam-report.json";
 const cases: Array<Record<string, unknown>> = [];
@@ -91,8 +45,6 @@ async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs 
   }
 }
 
-/** Records a provider request. Timestamps are zeroed so two runs of the same
- * input are byte-comparable. */
 function record(context: { messages: Array<{ role: string }> }): CapturedRequest {
   return {
     roles: context.messages.map((message) => message.role),
@@ -100,8 +52,6 @@ function record(context: { messages: Array<{ role: string }> }): CapturedRequest
   };
 }
 
-/** The frozen memory view one provider request carried, without its per-activation
- * nonce, so two steps of one activation can be compared byte-for-byte. */
 function viewOf(request: CapturedRequest): string {
   const start = request.blob.indexOf(HOME_MEMORY_VIEW_MARKER);
   const end = request.blob.indexOf("</chat>", start);
@@ -111,14 +61,10 @@ function viewOf(request: CapturedRequest): string {
 interface CompactorState {
   calls: number;
   entered: number;
-  /** Set while the compactor parks every first attempt, so a case can observe a
-   * readiness wait instead of guessing at one. */
   gate: Promise<void> | undefined;
   release: (() => void) | undefined;
 }
 
-/** A deterministic compactor: a short, bounded line that never echoes its input,
- * so a summarized message's text cannot reappear in the view. */
 function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
   return async (request) => {
     state.calls += 1;
@@ -129,17 +75,13 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
 }
 
 interface FixtureOptions {
-  /** Designate Tron Home through its owner before the cases prompt. */
   home?: boolean;
   extension?: ExtensionFactory;
-  /** Configure Home's memory (only with `home`). */
   memory?: boolean;
-  /** What the Gateway's model resolver says about the memory's model. */
   summarizer?: EpisodicSummarizer;
   settings?: Record<string, unknown>;
   retryBaseDelayMs?: number;
   contextWindow?: number;
-  /** Park the compactor until the case releases it. */
   heldSummarizer?: boolean;
 }
 
@@ -178,9 +120,6 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
   const faux = fauxProvider({
     provider: PROVIDER,
     models: [{ id: MODEL_ID, reasoning: true, ...(options.contextWindow === undefined ? {} : { contextWindow: options.contextWindow }) }],
-    // These are request/compaction boundary tests, not provider-rate tests.
-    // Positive pacing schedules a minimum-delay timer for every 40-byte chunk;
-    // a large C10 reply can exhaust the 10s settlement wait before compaction.
     tokensPerSecond: 0,
     tokenSize: { min: 10, max: 10 },
   });
@@ -203,9 +142,6 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
     sessionListChanged: () => {},
     compactionDiagnostic: (diagnostic) => diagnostics.push(diagnostic as unknown as CapturedDiagnostic),
     homeRequestDiagnostic: (record) => { requestRecords.push(record); },
-    // The compactor model is resolved the way Knowledge resolves its own: from
-    // the Gateway's ModelRuntime. These cases inject a deterministic summarizer
-    // so no provider call is ever made for the memory.
     homeMemorySummarizer: () => summarizer,
   });
   await registry.initialize();
@@ -229,13 +165,9 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
     root, agentDir, cwd, tronHome, registry, slot, session, faux, requests, snapshots, diagnostics, compactor,
     homeSessionId,
     policy: () => homeSessionId === undefined ? undefined : homeOwnerOf(registry).requestPolicyFor(homeSessionId),
-    /** The refusals the seam reported through this registry, oldest first. */
     refusals: () => requestRecords.flatMap(record => record.event === "refused" ? [record] : []),
     memoryStatus: async () => await homeOwnerOf(registry).memoryStatus(),
     response,
-    /** One more session in this registry, in its own directory under the
-     * fixture, or in an existing one (`cwd`) so two sessions can share a working
-     * directory and therefore a system prompt. */
     extra: async (name: string, cwd?: string) => {
       const extraCwd = cwd ?? join(root, name);
       await mkdir(extraCwd, { recursive: true });
@@ -271,7 +203,6 @@ afterAll(async () => {
   process.stdout.write(`home-activation seam: ${cases.length} cases -> ${REPORT_PATH}\n`);
 });
 
-/** Whether the Home's activation is open, as `home.context` reports it. */
 function activationOpen(registry: RuntimeRegistry): boolean {
   const context = homeOwnerOf(registry).contextStatus();
   return context.available && context.activationOpen;
@@ -284,8 +215,6 @@ async function open(label: string, options: FixtureOptions = {}) {
   return item;
 }
 
-/** Home's Session-scope image choice as the paired iPhone makes it through the
- * real change path: the maintainer's own tap applies directly, privacy widening too. */
 async function chooseHomeImages(item: Awaited<ReturnType<typeof homeFixture>>, blocked: boolean): Promise<void> {
   const changes = (item.registry as unknown as { settingsOwners: { changes: SettingsChangePath } }).settingsOwners.changes;
   const applied = await changes.change({ kind: "home" }, [{ key: "context.images.block", layer: "session", op: "set", value: blocked }],
@@ -293,15 +222,12 @@ async function chooseHomeImages(item: Awaited<ReturnType<typeof homeFixture>>, b
   expect(applied.status).toBe("applied");
 }
 
-/** Control the real Home state producer, not a retired slot dependency. */
 function sealChapterState(item: Awaited<ReturnType<typeof homeFixture>>): void {
   const owner = homeOwnerOf(item.registry), read = owner.chapterStateFor.bind(owner);
   const state = vi.spyOn(owner, "chapterStateFor").mockImplementation(id => ({ ...read(id), sealed: true }));
   disposals.push(async () => { state.mockRestore(); });
 }
 
-/** Rationale for the case names: the prototype's numbering (#412) is kept, so
- * this file's rows line up with the qualification evidence it ports. */
 describe("Home request seam inside the Gateway runtime", { concurrent: false }, () => {
   it("single-flights a reserved Home materialization and records its path before returning", async () => {
     const item = await open("reserved-materialization-single-flight", { home: true });
@@ -348,8 +274,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     expect(existsSync(firstSlot.sessionFile!)).toBe(false);
     expect(item.faux.state.callCount).toBe(0);
 
-    // A contender arriving after the shared construction promise resolves, but
-    // before the first canonical flush, must still join the live owner.
     const afterReturn = await homeOwnerOf(item.registry).materializer.materialize(reservedId);
     const afterReturnRecord = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     expect(afterReturn).toBe(firstSlot);
@@ -468,9 +392,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     await coldRegistry.recoverCanonicalAttention();
     expect(homeOwnerOf(coldRegistry).profileFor(item.slot.id)).toBe("ordinary");
     const callsBefore = item.faux.state.callCount;
-    // Disabled changes the profile, not sealed evidence ownership. A cold sealed
-    // chapter opens read-only (#911): the catalog header proved its tail complete
-    // before the SDK opened it, opening writes nothing, and every write refuses.
     const cold = await coldRegistry.acquire(item.slot.id);
     expect(JSON.stringify(cold.canonicalSessionEntries())).toContain("canonical baseline");
     expect(await item.jsonl()).toBe(oldBytes);
@@ -619,21 +540,15 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       await expect(item.slot.prompt("must remain fenced")).rejects.toMatchObject({ details: { outcomeUnknown: true } });
     } finally {
       appendAttempt.mockRestore();
-      // This isolated fixture intentionally poisons one runtime. Remove its
-      // unresolved owner only so the test runner can dispose its temporary tree;
-      // production recovery remains an authoritative reopen, never this reset.
       runtime.runPersistence.durableWrites.clear();
     }
   }, 30_000);
 
-  // F1: Pi's supported image replacement must not look like a context mutation.
-  // Disable resizing here to isolate the settings-aware converter at the guard.
   it("C21 image conversion follows live session settings without rebuilding", async () => {
     const item = await open("c21", { home: true, memory: true, settings: { images: { blockImages: true, autoResize: false } } });
     const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
     item.faux.setResponses([item.response("blocked image response"), item.response("visible image response")]);
     for (const blocked of [true, false]) {
-      // The Session scope, as Manage Session sets it: Tron applies it at each request.
       await chooseHomeImages(item, blocked);
       const text = `C21 image input blocked=${blocked}`;
       const before = item.requests.length;
@@ -651,7 +566,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     }
   }, 30_000);
 
-  // F2: accepting the SDK converter must not authorize arbitrary stream edits.
   it("C22 arbitrary message mutation after context conversion is refused", async () => {
     const item = await open("c22", { home: true, memory: true });
     item.faux.setResponses([item.response("prior activation response")]);
@@ -685,8 +599,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     policy.settle("c22");
   }, 30_000);
 
-  // F4: the default SDK image path must preserve Pi's result for both Home and
-  // an ordinary session.
   it("C23 default image handling matches an ordinary session for both block states", async () => {
     const item = await open("c23", { home: true, memory: true });
     const ordinary = await item.extra("ordinary");
@@ -796,12 +708,8 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     expect(row.viewFrozenAcrossSteps).toBe(true);
     expect(row.nonceAbsentFromJsonl).toBe(true);
     expect(row.viewAbsentFromJsonl).toBe(true);
-    // The SDK's context stage clones every message, so the fidelity check's
-    // identity comparison is a fallback in practice: the header says so, and this
-    // is where the claim is observed rather than inferred.
     expect(transformIdentities.length).toBeGreaterThan(0);
     expect(transformIdentities.every((identity) => identity === false)).toBe(true);
-    // The memory covers the whole first activation by the time the second one runs.
     expect(row.memory.messages).toBeGreaterThanOrEqual(2);
   }, 30_000);
 
@@ -968,7 +876,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const activationOpenAfterFollowUp = activationOpen(item.registry);
     const idleAfterFollowUp = item.slot.snapshot().phase === "idle";
     const callsBefore = item.faux.state.callCount;
-    // The un-admitted run: the SDK path an extension uses, never Tron's admission.
     await item.session.sendCustomMessage(
       { customType: "idle-turn", content: "idle extension turn", display: false },
       { triggerTurn: true },
@@ -1018,16 +925,10 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
   }, 30_000);
 
   it("C7 a blocked memory fails closed with zero further provider requests", async () => {
-    // The first activation of a fresh Home legitimately sends an empty view:
-    // nothing is before it. This case is about the activation AFTER the memory
-    // blocked, and retry is enabled on purpose, so a refused policy error must
-    // not become a provider request, a retry start, or a second error entry.
     const item = await open("c7", {
       home: true,
       memory: true,
       retryBaseDelayMs: 1,
-      // A compactor that can never succeed: the memory blocks permanently, which
-      // is the Home state `Home memory is blocked: ...` names.
       summarizer: async () => fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid_request_error: unsupported message" }),
     });
     item.faux.setResponses([item.response("first activation response")]);
@@ -1099,7 +1000,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
   }, 30_000);
 
   it("C8 defense in depth: either wrapper alone still fails closed", async () => {
-    // (a) The guard alone, with an activation but no prepared request.
     const guarded = await open("c8a", { home: true, memory: true });
     guarded.faux.setResponses([async (context) => { guarded.requests.push(record(context)); return fauxAssistantMessage("unexpected"); }]);
     const policy = guarded.policy()!;
@@ -1115,7 +1015,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       guardOutcome = error instanceof Error ? error.message : String(error);
     }
     policy.settle("c8a");
-    // (b) The `prepareRequest` wrapper alone, with no memory configured.
     const unconfigured = await open("c8b", { home: true });
     unconfigured.faux.setResponses([async (context) => { unconfigured.requests.push(record(context)); return fauxAssistantMessage("unexpected"); }]);
     const unconfiguredPolicy = unconfigured.policy()!;
@@ -1146,8 +1045,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     await item.slot.prompt(longInput("C9 first activation input"));
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     const callsBefore = item.faux.state.callCount;
-    // `sendCustomMessage(..., { triggerTurn: true })` is the SDK path an extension
-    // uses: it starts a run without Tron's prompt admission.
     await item.session.sendCustomMessage(
       { customType: "idle-turn", content: "idle extension turn", display: false },
       { triggerTurn: true },
@@ -1207,9 +1104,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     };
     item.record("C12", row);
     expect(row.providerRequests).toBe(0);
-    // One refusal is zero SDK retries: a deterministic refusal must not run its retry budget.
     expect(row.policyRefusals).toEqual(["context-overflow"]);
-    // The SDK-visible text is the fixed sentence; the counts stay on the refusal record.
     expect(row.canonicalError).toBe("Home request refused (context-overflow): this message and its context exceed the model's window.");
     expect(row.lastRefusalDetail).toContain("120-token window");
   }, 30_000);
@@ -1270,10 +1165,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     item.session.agent.streamFunction = (...args) => {
       const result = stream(...args);
       const providerCallsBefore = item.faux.state.callCount;
-      // Let the first lazy stream pass Home's innermost guard and enter the
-      // provider, then replay while its response is parked and this activation
-      // is still live. Otherwise lazy-stream start order or settlement could
-      // make the replay win the race or observe no activation.
       replay = waitUntil(() => item.faux.state.callCount > providerCallsBefore)
         .then(() => stream(...args))
         .then((value) => value.result())
@@ -1302,8 +1193,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const homeExtensions = item.session.resourceLoader.getExtensions().extensions.map((extension) => extension.path);
     const context = await ordinary.slot.context() as unknown as { extensions: Array<{ name: string }> };
     const ordinaryExtensions = context.extensions.map((extension) => extension.name);
-    // Test the runtime registration boundary: an empty mcp__ tool set would be
-    // inconclusive when the ordinary runtime has no configured MCP server.
     item.record("MCP", { homeExtensions, ordinaryExtensions });
     expect(ordinaryExtensions).toContain("builtin:mcp");
     expect(homeExtensions).not.toContain("builtin:mcp");
@@ -1341,8 +1230,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
         request = JSON.stringify(event.messages);
       });
     } });
-    // No assistant usage exists: Pi must estimate the canonical projection,
-    // including this historical entry that Home excludes from this activation.
     item.session.sessionManager.appendMessage({ role: "user", content: "CANONICAL-ONLY " + "x".repeat(100_000), timestamp: 0 });
     item.faux.setResponses([item.response("usage response")]);
     await item.slot.prompt("usage current input");
@@ -1359,8 +1246,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     item.faux.setResponses([item.response("activation one response"), item.response("activation two response")]);
     await item.slot.prompt(longInput("C18 first activation input"));
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
-    // The compactor is parked inside the first node build, so the memory cannot
-    // cover anything yet.
     await waitUntil(() => item.compactor.entered > 0);
     item.record("C18-wait", {
       compactorEntered: item.compactor.entered,
@@ -1369,8 +1254,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     });
     expect(item.requests.length).toBe(1);
     const second = item.slot.prompt(longInput("C18 second activation input"));
-    // The activation is admitted, and Pi is running it, but no request may be
-    // sent while the lines it would carry are unbuilt.
     await waitUntil(() => activationOpen(item.registry));
     await waitUntil(async () => ((await item.memoryStatus()).episodic?.coverage.summarized ?? 0) === 0);
     const requestsWhileWaiting = item.requests.length;
@@ -1392,12 +1275,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
   }, 30_000);
 
   it("C19 refuses a request that is not the projection without spending the memory wait", async () => {
-    // The projection, and the proof that the request is exactly it, come before
-    // the memory wait: a request some other `prepareRequest` rewrite changed is a
-    // refusal, not something to spend a multi-second wait on. The discriminator is
-    // the wait itself — the compactor is parked, so a refusal that happened after
-    // the wait could never be observed here — and the record of whether the wait
-    // was even entered.
     const item = await open("c19", { home: true, memory: true, heldSummarizer: true });
     item.faux.setResponses([item.response("C19 prior reply")]);
     await item.slot.prompt(longInput("C19 prior activation"));
@@ -1423,16 +1300,11 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     item.record("C19", row);
     expect(row.outcome).toContain("refused");
     expect(row.refusalReason).toBe("projection-mismatch");
-    // No wait was entered: the refusal is decided before it.
     expect(row.enteredDuringRefusal).toBe(0);
   }, 15_000);
 
   it("ordinary negative control: designating Home leaves an ordinary session byte-identical", async () => {
     const item = await open("negative-control", { home: false, memory: false });
-    // Two ordinary sessions in one working directory, one before and one after
-    // Home is designated and its memory configured in this same registry. Their
-    // first provider requests must be byte-identical: a Home designation may not
-    // change what an ordinary session sends.
     const before = await item.extra("ordinary", item.cwd);
     item.faux.setResponses([item.response("before home")]);
     await before.slot.prompt("negative control input");
@@ -1543,9 +1415,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       memory: true,
       settings: { compaction: { enabled: true, reserveTokens: 120_000, keepRecentTokens: 0, instructions: "Retain the API contract" } },
     });
-    // The refusal is decided at admission, so the reply only needs to be a real
-    // prior turn. An 88 KB reply streamed as ~2,200 paced faux chunks took most
-    // of the 10 s wait below on its own.
     item.faux.setResponses([item.response("Prior work ".repeat(400)), item.response("must never be produced")]);
     await item.slot.prompt(longInput("C15 activation input"));
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);

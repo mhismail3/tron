@@ -58,9 +58,6 @@ before(() => {
       const archive = join(gateway, selection.closure.path);
       const listing = spawnSync("tar", ["-tzf", archive], { encoding: "utf8", timeout: 10_000 });
       assert.equal(listing.status, 0, listing.stderr || listing.error?.message);
-      // These mutations exercise graph metadata, not execution. Preserve the
-      // real closure's manifests/locks once, avoiding full runtime-byte repacks
-      // in every case. The provenance test below still checks the actual archive.
       const manifests = listing.stdout.split("\n").filter((entry) => /\/(?:package\.json|package-lock\.json|\.package-lock\.json)$/u.test(entry));
       mkdirSync(join(root, "unpacked"));
       tar(["-xzf", archive, "-C", join(root, "unpacked"), ...manifests]);

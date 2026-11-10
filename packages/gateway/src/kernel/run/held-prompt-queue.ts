@@ -11,12 +11,7 @@ import { MAXIMUM_PROMPT_ATTACHMENTS } from "../resources/prompt-bounds.js";
 import type { HeldPrompt, QueueBehavior, PromptQueueDisplay } from "./queue-input.js";
 
 
-/** Owns accepted pre-admission prompts and the one deferred ordered flush. */
 export class HeldPromptQueue {
-  /** Messages sent while compaction owns admission, in delivery order. Pi
-   * rejects input during manual compaction and its own front end keeps the
-   * same "after compaction" queue; here the Gateway is that front end, so every
-   * client sees, edits and removes these through the ordinary queue contract. */
   private heldPrompts: HeldPrompt[] = [];
   private heldPromptFlush: Promise<void> | undefined;
 
@@ -25,13 +20,9 @@ export class HeldPromptQueue {
   reset(): void { this.heldPrompts = []; }
 
   holdsPromptsForCompaction(text: string, queueDisplay: PromptQueueDisplay | undefined): boolean {
-    // Once any message waits, later ones wait behind it to preserve order even
-    // while the flush is admitting the head after compaction ended.
     if (!(this.operations.phase === "compacting") && this.heldPrompts.length === 0) return false;
     this.operations.assertUsable();
-    // Extension commands execute rather than wait as a message.
     if (queueDisplay?.resourceInvocations?.[0]?.source === "extension") return false;
-    // Skills and prompts make a message whatever its visible text begins with.
     if (queueDisplay?.resourceInvocations !== undefined) return true;
     return this.isMessage(text);
   }
@@ -59,7 +50,6 @@ export class HeldPromptQueue {
     this.operations.runQueue.reconcileQueuedMessages();
     const entry: HeldPrompt = {
       id: randomUUID(),
-      // Pi's front end queues compaction-time input as steering by default.
       behavior: behavior ?? "steer",
       text: display.text,
       attachmentCount: display.attachmentCount,
@@ -76,8 +66,6 @@ export class HeldPromptQueue {
       admitting: false,
     };
     validateQueue([...this.operations.runQueue.queuedMessages, ...this.heldPrompts, entry]);
-    // Accepted queued work: an administrative drain and idle eviction wait for
-    // it exactly as they wait for Pi's queue.
     this.beginWork(entry.id);
     this.heldPrompts.push(entry);
     if (stopRecovery) this.operations.runAbort.stopRecoveryHoldIDs.add(entry.id);
@@ -89,8 +77,6 @@ export class HeldPromptQueue {
   scheduleHeldPromptFlush(): void {
     if (this.heldPromptFlush || this.heldPrompts.length === 0 || (this.operations.phase === "compacting")
       || this.operations.runAbort.stopRecoveryQueueClosed || this.operations.disposed || this.operations.shuttingDown) return;
-    // Deferred: this runs from snapshot publication, which must finish
-    // broadcasting before admission publishes its own transitions.
     this.heldPromptFlush = Promise.resolve()
       .then(() => this.flushHeldPrompts())
       .catch((error) => this.operations.emit("session.diagnostic", safeJson({
@@ -103,9 +89,6 @@ export class HeldPromptQueue {
       });
   }
 
-  /** Admits waiting prompts in order through the ordinary path: the first
-   * starts a run when the session is idle, later ones join Pi's queue with
-   * their requested behavior. A new compaction pauses the flush. */
   private async flushHeldPrompts(): Promise<void> {
     while (this.heldPrompts.length > 0 && !(this.operations.phase === "compacting") && !this.operations.disposed && !this.operations.shuttingDown) {
       const entry = this.heldPrompts[0]!;
@@ -115,15 +98,12 @@ export class HeldPromptQueue {
       } catch (error) {
         if (error instanceof GatewayError && error.code === "busy" && error.retryable
           && !this.operations.lifecycle.isDraining && !this.operations.disposed) {
-          // A prior response is still committing: accepted work waits for it
-          // rather than failing a message whose RPC already succeeded.
           entry.admitting = false;
           await this.operations.waitForStateChange();
           continue;
         }
         this.operations.runWork.settleOperationWork(entry.id);
         const message = error instanceof Error ? error.message : String(error);
-        // Only a proven non-start lets clients restore the draft.
         if (isUncertainOutcome(error)) {
           this.operations.emit("session.diagnostic", safeJson({ code: "held-prompt-outcome-unknown", operationId: entry.id, message }));
         } else {
@@ -154,10 +134,6 @@ export class HeldPromptQueue {
     }
   }
 
-  /** Edits, reorders and removes waiting prompts synchronously: they have no
-   * invocation receipt or Pi queue entry yet, and the lane may belong to the
-   * compaction they are waiting for. The head entry already being admitted is
-   * immutable and stays first. */
   replaceHeldPrompts(
     expectedRevision: number,
     items: Array<Pick<QueuedMessageState, "id" | "behavior" | "text">>,

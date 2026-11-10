@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../../../test-support/home-task-fixture.js";
 import { bindTaskCommandScope, readProcessTable, reapTaskCommandScope, recordTaskCommandGroup, settleTaskCommandScope, taskCommandProcesses, taskCommandRoot } from "../../../kernel/run/task-command-scope.js";
 
-/** Absent, or exited and awaiting launchd's reap (`Z`): either runs nothing. */
 function processTerminal(pid: number): boolean {
   const state = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8", timeout: 2_000 }).stdout.trim();
   return state === "" || state.startsWith("Z");
@@ -16,8 +15,7 @@ function processTerminal(pid: number): boolean {
 
 const started: number[] = [];
 afterEach(async () => {
-  // Whatever the outcome, the test never leaves its adversaries running on the shared Mac.
-  for (const pid of started.splice(0)) { try { process.kill(pid, "SIGKILL"); } catch { /* exited */ } }
+  for (const pid of started.splice(0)) { try { process.kill(pid, "SIGKILL"); } catch { } }
   await disposeFixtures();
 });
 
@@ -27,10 +25,6 @@ describe("Home task command scope", () => {
     const backgroundPid = join(f.cwd, "background.pid");
     const escapedPid = join(f.cwd, "escaped.pid");
     const temporary = join(f.cwd, "temporary.path");
-    // One command that returns while leaving: a background child that re-parents to launchd
-    // in the shell's group, a double-forked grandchild in its own session (`setsid`), and a
-    // temp directory made the way repository scripts make them (macOS `mktemp` without a
-    // template ignores TMPDIR).
     const command = [
       `mktemp -d "$TMPDIR/probe.XXXXXX" > ${JSON.stringify(temporary)}`,
       `sleep 300 >/dev/null 2>&1 & echo $! > ${JSON.stringify(backgroundPid)}`,
@@ -50,7 +44,6 @@ describe("Home task command scope", () => {
     const temporaryPath = (await readFile(temporary, "utf8")).trim();
     expect(pids.every(pid => Number.isSafeInteger(pid) && pid > 1)).toBe(true);
     expect(temporaryPath).not.toBe("");
-    // The task's settlement reaped them before it published: no wait.
     expect(pids.map(pid => processTerminal(pid))).toEqual([true, true]);
     expect(existsSync(temporaryPath)).toBe(false);
     expect(existsSync(join(taskCommandRoot(), run.sessionId))).toBe(false);
@@ -62,7 +55,6 @@ describe("Home task command scope", () => {
 
   it("never reaps a process whose group ID only matches a stale record", async () => {
     await fixture();
-    // An unrelated group leader started after the record: what a reused process-group ID looks like.
     const unrelated = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
     started.push(unrelated.pid!);
     const scope = bindTaskCommandScope("stale-session", "stale-task");
@@ -77,7 +69,6 @@ describe("Home task command scope", () => {
     await fixture();
     const sessionId = "01a1a5a6-4d9f-708a-85fa-e01383b0117b";
     const scope = bindTaskCommandScope(sessionId, "short-task");
-    // Fixtures nest their own roots under it and embed it in byte-bounded data.
     expect(scope.tmp.length - tmpdir().length).toBeLessThanOrEqual(20);
     expect(existsSync(scope.tmp)).toBe(true);
     expect(settleTaskCommandScope(scope, "short-task")).toBe(true);
@@ -90,7 +81,6 @@ describe("Home task command scope", () => {
     await fixture();
     const scope = bindTaskCommandScope("fresh-session", "fresh-task");
     const table = (await readProcessTable())!;
-    // A shell spawned after the sweep's read: its pgid is not in the table yet.
     const shell = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
     started.push(shell.pid!);
     recordTaskCommandGroup(scope, shell.pid!);

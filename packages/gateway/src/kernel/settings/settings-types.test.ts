@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toolSelectionType } from "./settings-types.js";
 
-/**
- * What a tool selection's compose and encode return. Proof block settings/tool-selection decides them over
- * tokens; these cases pin the names around it: entries read as plain names or +name/-name modifiers, the result
- * written back as the same names in the block's order, and stored values that are not lists of strings failing
- * or passing exactly where they did.
- */
 const type = toolSelectionType();
 const compose = (below: unknown, entries: unknown) => type.compose!(below, entries);
 const encode = (chosen: unknown, below: unknown, current: unknown) => type.encode!(chosen, below, current);
@@ -17,12 +11,9 @@ describe("tool selection", () => {
     expect(compose(below, ["+web", "-bash", "+ls"])).toEqual(["read", "edit", "web", "ls"]);
     expect(compose(undefined, ["-read"])).toEqual(["bash", "edit", "write"]);
     expect(compose("not a list", ["+web"])).toEqual(["read", "bash", "edit", "write", "web"]);
-    // A tool already listed is not added again, a missing one is not removed, and an empty name adds nothing.
     expect(compose(below, ["+bash", "-web", "+"])).toEqual(["read", "bash", "edit"]);
-    // Modifiers apply in order: the last one named wins.
     expect(compose(below, ["-bash", "+bash"])).toEqual(["read", "edit", "bash"]);
     expect(compose(below, ["+web", "-web"])).toEqual(["read", "bash", "edit"]);
-    // Only the first of a repeated tool is removed.
     expect(compose(["read", "bash", "read"], ["-read"])).toEqual(["bash", "read"]);
   });
 
@@ -47,7 +38,6 @@ describe("tool selection", () => {
     expect(encode(["read", "edit", "web"], below, ["+ls"])).toEqual(["+web", "-bash"]);
     expect(encode(["read", "edit", "web"], below, undefined)).toEqual(["+web", "-bash"]);
     expect(encode(["bash", "edit", "write", "web"], undefined, [])).toEqual(["+web", "-read"]);
-    // The same selection as below: nothing is stored.
     expect(encode(["read", "bash", "edit"], below, ["+web"])).toBeUndefined();
     expect(encode(["read", "bash", "edit", "write"], undefined, undefined)).toBeUndefined();
   });
@@ -63,11 +53,8 @@ describe("tool selection", () => {
   });
 
   it("treats a stored value that is not a list of strings as it always has", () => {
-    // What lies below passes through by identity, whatever it holds.
     expect(compose(["read", 5], ["+web"])).toEqual(["read", 5, "web"]);
-    // Entries must be strings.
     for (const entries of ["read", 5, null, undefined, {}, [5], ["read", 5], ["+web", 5]]) expect(() => compose(below, entries)).toThrow(TypeError);
-    // What the layer holds now is read only for a choice of plain names, and only up to its first plain name.
     expect(encode(["+web"], below, [7])).toEqual(["+web"]);
     expect(encode(["read"], below, ["bash", 7])).toEqual(["read"]);
     expect(encode(["read"], below, "not a list")).toEqual(["-bash", "-edit"]);

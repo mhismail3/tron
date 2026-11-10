@@ -11,8 +11,6 @@ const parameters = Type.Object({
   }, { additionalProperties: false, description: "Optional crop for a display handle, in display-local points from its top-left corner; must remain within the catalog width/height. Not screenshot pixels." })),
 }, { additionalProperties: false });
 
-/** Canonical session/load owns the handles. No PID/window-ID input, selection
- * fallback, screenshots in tool history, or native input is exposed here. */
 export function createTronNativeCaptureExtension(input: {
   sessionId: () => string;
   views: BrowserLiveViewRegistry;
@@ -20,7 +18,6 @@ export function createTronNativeCaptureExtension(input: {
   return (pi) => {
     pi.registerTool({
       name: "native_capture",
-      // docs/settings-model.md 5.4: declares it reads no open-world content.
       annotations: { openWorldHint: false },
       label: "Mac live view",
       description: "List visible Mac windows and displays (catalog), select an exact returned handle (view), or stop this session's native views (stop). A display handle can show the whole display or an explicit region in display-local points within its catalog width/height. Window handles show the whole selected window. Read-only capture requires the installed Tron Native Host and Screen Recording permission. No keyboard/mouse input. View returns an opaque reference for display with source.kind=native_live; capture starts only while viewed. Visibility changes resume only the retained exact source and crop after the previous stream joins. Stop or source loss ends the reference; list/select again. No raw PID/window/display ID, target rediscovery, or input replay.",
@@ -37,7 +34,6 @@ export function createTronNativeCaptureExtension(input: {
           return { content: [{ type: "text", text: JSON.stringify({ sources }) }], details: { sources } };
         }
         if (params.action === "stop") {
-          // Accepted Stop is a domain command, not a disposable read waiter.
           await input.views.stopNative(sessionId);
           return { content: [{ type: "text", text: "This session's native views are closed." }], details: {} };
         }

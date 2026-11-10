@@ -1,36 +1,4 @@
 import { createTestRegistry } from "../../../test-support/gateway-registry.js";
-/**
- * Reopens the persisted-state upgrade corpus with the installed Pi SDK (#471, layer L1).
- *
- * Failure modes this layer owns (written before the code, and the reason this is
- * a differential check against a generated corpus rather than a hand-authored
- * fixture):
- *
- * 1. A session the previous SDK wrote no longer opens through the real Gateway,
- *    so an existing chat is unreadable after an upgrade.
- * 2. It opens but projects differently, so the phone shows a different
- *    conversation than the one on disk.
- * 3. The per-chat tool selection recorded in the transcript no longer resolves:
- *    a tool the chat had enabled is gone or changed exposure. The 0.99.2 MCP name
- *    mapping (`mcp__my-server__x` -> `mcp__my_server__x`) is exactly this class,
- *    and Tron persists those names.
- * 4. The model the transcript names no longer resolves, because the provider or
- *    model key it persisted was renamed (1.0.3 renames `azure-openai-responses`
- *    to `azure`) or its saved credential is no longer found.
- * 5. A configured MCP server is no longer connected or authenticated, so its
- *    tools disappear (the fixture's OAuth server answers 401 without the
- *    credential the corpus holds).
- * 6. Reopening rewrites the canonical session, silently migrating user state
- *    instead of reading it.
- *
- * Modes 4 and 5 are separate cases so one upgrade run names both deltas: the
- * saved provider keys are read from the agent directory alone, and the sessions
- * are reopened through the Gateway.
- *
- * The corpus and its recorded manifest are produced by
- * `test-fixtures/pi-sdk/record-corpus.integration.test.ts` (`npm run record:pi-corpus`) with
- * the outgoing SDK; see `packages/gateway/README.md`, "Pi SDK maintenance".
- */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -83,7 +51,6 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-/** Content hash per staged session file, so reopening can be proven read-only. */
 async function sessionFileHashes(sessionDir: string, corpusDir: string): Promise<Record<string, string>> {
   const hashes: Record<string, string> = {};
   for (const path of await corpusSessionFiles(corpusDir)) {
@@ -97,11 +64,6 @@ async function readManifest(corpusDir: string): Promise<CorpusObservation> {
   return JSON.parse(await readFile(join(corpusDir, "manifest.json"), "utf8")) as CorpusObservation;
 }
 
-/**
- * Stage the corpus and start the MCP fixtures it points at. The OAuth server is
- * the one the corpus's `corpus-oauth` server authenticates against, so its
- * persisted credential has to be exercised against a live server.
- */
 async function stageWithServers(corpusDir: string = CORPUS_SOURCE_DIR): Promise<StagedCorpusPaths> {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-corpus-reopen-")));
   roots.push(root);
@@ -116,13 +78,6 @@ async function stageWithServers(corpusDir: string = CORPUS_SOURCE_DIR): Promise<
   return staged;
 }
 
-/**
- * The one accepted delta from the 1.0.4-written corpus to Pi 1.3.0: a resumed
- * session keeps the tools `tool_search` loaded during it (pi #10785), where 1.0.4
- * dropped them on reopen. Those names, read from the recorded projection's
- * `details.loaded`, join the recorded selection as the deferred tools they are;
- * any other added, missing or re-exposed tool still fails.
- */
 function withRestoredSearchLoads(recorded: CorpusObservation["sessions"][number]): CorpusObservation["sessions"][number]["activeTools"] {
   const loaded = new Set(recorded.projection.flatMap((row) => {
     const item = row as { toolName?: string; details?: { loaded?: unknown } };
@@ -130,7 +85,6 @@ function withRestoredSearchLoads(recorded: CorpusObservation["sessions"][number]
   }));
   const names = new Set(recorded.activeTools.map((tool) => tool.name));
   return [...recorded.activeTools, ...[...loaded].filter((name) => !names.has(name)).map((name) => ({ name, exposure: "deferred" }))]
-    // Code-unit order, as the observation sorts names.
     .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
 }
 
@@ -139,10 +93,6 @@ describe("persisted-state upgrade corpus", () => {
     const manifest = await readManifest(CORPUS_SOURCE_DIR);
     const staged = await stageWithServers();
     const observed = await observeProviders(await corpusModelRuntime(staged.agentDir, corpusFauxProvider()), manifest.providers);
-    // `azure-openai-responses` is the provider key 1.0.3 renames to `azure`. The
-    // rename is detected by the model, which the settings and the transcripts
-    // name; the credential read catches a store that stops returning the
-    // persisted provider id at all (a re-key or a rewrite).
     expect(observed, "every saved provider key and model must still resolve").toEqual(manifest.providers);
   }, 30_000);
 
@@ -163,9 +113,6 @@ describe("persisted-state upgrade corpus", () => {
       "the corpus catalog's complete cut");
     await registry.catalog("all");
     const sessionIds = manifest.sessions.map((session) => session.sessionId);
-    // Readiness is reported as a soft failure so the rest of the invariants are
-    // still observed in the same run: a renamed or unauthenticated MCP server
-    // shows up both as the missing tool here and as an unresolved selection below.
     let unready: Error | undefined;
     try {
       await waitForRecordedServerTools(registry, sessionIds, manifest.servers);
@@ -176,9 +123,6 @@ describe("persisted-state upgrade corpus", () => {
 
     expect(observed.sessions.map((session) => session.sessionId), "every recorded session must reopen").toEqual(sessionIds);
     expect.soft(unready?.message ?? null, "every persisted MCP tool must still register").toBeNull();
-    // Soft assertions: one upgrade run reports every invariant that stopped
-    // holding (a renamed MCP tool, a model that fell back, a changed projection)
-    // instead of only the first one.
     for (const [index, session] of observed.sessions.entries()) {
       const recorded = manifest.sessions[index]!;
       const where = `session ${session.sessionId}`;
@@ -190,10 +134,6 @@ describe("persisted-state upgrade corpus", () => {
       expect.soft(session.transcriptTotal, `${where}: the transcript must project the same number of rows`).toEqual(recorded.transcriptTotal);
       expect.soft(session.projection, `${where}: the projection must equal the recorded projection`).toEqual(recorded.projection);
     }
-    // The corpus's documented coverage is asserted against the committed JSONL,
-    // not against prose: a regeneration that silently loses a shape (a codemode
-    // call that parses as a subtraction, a tool search that loads nothing) fails
-    // here even though every reopen invariant would still hold.
     const shapes = scenarioShapes(await corpusSessionEntries(sessionIds[0]!, CORPUS_SOURCE_DIR));
     expect.soft(missingScenarioShapes(shapes), "the committed corpus must cover every shape this layer claims")
       .toEqual([]);
@@ -201,8 +141,6 @@ describe("persisted-state upgrade corpus", () => {
       .toEqual(CORPUS_MCP_SERVERS.map((name) => ({
         name, tools: manifest.servers.find((server) => server.name === name)?.tools ?? [],
       })));
-    // Reopening is a read: a migration that rewrites the canonical file would
-    // silently change user state instead of reading it.
     expect.soft(await sessionFileHashes(staged.sessionDir, CORPUS_SOURCE_DIR), "reopening must not rewrite the canonical sessions")
       .toEqual(before);
   }, 60_000);

@@ -9,22 +9,15 @@ import { MAX_EXTENSION_ARTIFACT_BYTES, observedPausedProcessTerminalAt } from ".
 import { homeTaskOperationSpan } from "./task-report.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON, HOME_TASK_SEALED_REASON } from "./task-worker-extension.js";
 
-/** The worker's canonical settlement fact: the Gateway's own task-end stops of its
- * async subagent runs. Written at most once per operation, and only when the task
- * had async runs to account for; its absence proves zero stops. */
 export const HOME_TASK_SUBAGENTS = "tron-home-task-subagents";
 
 export interface HomeTaskSubagents {
-  /** `subagent` launches the task admitted (foreground or async) in this operation. */
   started: number;
-  /** Async runs the Gateway stopped at settlement, or null when that is not proven. */
   stoppedAtEnd: number | null;
 }
 
 interface HomeTaskSubagentsEntry { receiptId: string; operationId: string; stoppedAtEnd: number | null }
 
-/** A live subagent run of a task's worker, as task status shows it. Projected from the live
- * slot on each read and never persisted with the task. */
 export interface HomeTaskSubagentRun {
   runId: string;
   agent: string;
@@ -32,26 +25,15 @@ export interface HomeTaskSubagentRun {
   startedAt: string;
   lastActivityAt: string | null;
 }
-/** The live runs in task status: at most `HOME_TASK_STATUS_RUN_LIMIT` of them, newest first,
- * with `total` counting every live run. Empty once the task has settled. */
 export interface HomeTaskSubagentRuns { total: number; runs: HomeTaskSubagentRun[] }
 export const HOME_TASK_STATUS_RUN_LIMIT = 20;
 
-/** How long task-end settlement waits for the runs it stopped to become terminal. A
- * stopped runner aborts its request and writes its terminal status within seconds; a
- * run still live after this bound (a refused stop, an unreadable status) keeps the
- * detached outcome instead of holding the sealed task open until its 24-hour deadline. */
 export const HOME_TASK_SUBAGENT_STOP_JOIN_MS = 60_000;
 
 export const subagentsReceiptId = (operationId: string) => `subagents:${operationId}`;
 
-/** The provider's completion notice for an async run: a `subagent-notify` custom message. It has
- * no structured run identity; its text names the run (the async directory line, or the workflow
- * run and child lines), so a run is matched by its run id in that text. */
 const HOME_TASK_SUBAGENT_NOTICE = "subagent-notify";
 
-/** The async run ids whose completion notice is not yet canonical evidence: no recorded notice
- * names the run. A notice is recorded once the Gateway's delivery receipt for it exists. */
 export function undeliveredSubagentNotices(entries: readonly FileEntry[], runIds: readonly string[]): string[] {
   const receipted = new Set<string>();
   for (const entry of entries) {
@@ -69,15 +51,8 @@ function customMessageText(content: unknown): string {
   return Array.isArray(content) ? content.flatMap(part => part?.type === "text" && typeof part.text === "string" ? [part.text] : []).join("\n") : "";
 }
 
-/** Terminal outcomes need no process proof; paused history needs the same exact
- * runner-exit proof used by live report admission, not a fabricated outcome. */
 const SETTLED_RUN_STATES = new Set(["complete", "failed", "partial", "stopped", "rejected"]);
 
-/** A launch is a `subagent` call with no `action` that the task admitted, or a `resume`
- * the task admitted (on its own run, which starts a new run the task then owns): the gate
- * blocked the others before the provider saw them. A provider that then rejects an admitted
- * call before creating a run still counts as admitted, because its result carries no run
- * identity to tell the two apart. Other management calls never count. */
 export function homeTaskSubagentLaunches(runEntries: readonly FileEntry[]): Array<{ toolCallId: string; asyncDir: string | undefined }> {
   const launchCalls = new Set<string>();
   for (const entry of runEntries) {
@@ -117,8 +92,6 @@ export function parseHomeTaskSubagentsEntry(data: unknown, operationId: string):
   return value as unknown as HomeTaskSubagentsEntry;
 }
 
-/** The operation's subagent facts from one canonical cut. Entries after the
- * operation's marker are the only ones that belong to it. */
 export function homeTaskSubagentsProjection(entries: readonly FileEntry[], operationId: string): HomeTaskSubagents {
   const runEntries = homeTaskOperationSpan(entries, operationId).run;
   const launches = homeTaskSubagentLaunches(runEntries);
@@ -126,15 +99,9 @@ export function homeTaskSubagentsProjection(entries: readonly FileEntry[], opera
   if (facts.length > 1) throw new GatewayError("conflict", "Conflicting task subagent evidence");
   const fact = facts[0];
   if (fact?.type === "custom") return { started: launches.length, stoppedAtEnd: parseHomeTaskSubagentsEntry(fact.data, operationId).stoppedAtEnd };
-  // No settlement fact: the Gateway stops runs only at settlement, so zero stops is
-  // proven exactly when the task launched no async run.
   return { started: launches.length, stoppedAtEnd: launches.some(launch => launch.asyncDir !== undefined) ? null : 0 };
 }
 
-/** Cold reconciliation has no runtime to stop a run through. It proves a run ended
- * from the provider's own status file under the admitted artifact root, and from the
- * status of each async workflow child the run launched: a workflow can complete while
- * those children run on. Anything it cannot prove is treated as live, never as ended. */
 export async function homeTaskSubagentRunsSettled(asyncDirs: readonly string[], artifactRoot: string): Promise<boolean> {
   for (const asyncDir of asyncDirs) {
     if (!delegatedArtifactPathAllowed(asyncDir, artifactRoot, artifactRoot)) return false;
@@ -164,8 +131,6 @@ async function runSettled(asyncDir: string, status: Record<string, unknown>): Pr
 
 const runStatus = (asyncDir: string) => runArtifact(asyncDir, "status.json");
 
-/** Cold and live readers share the full-status bound. Bound the actual read,
- * not just a stat before a provider's atomic replacement or append. */
 async function runArtifact(asyncDir: string, name: "status.json" | "process-terminal.json"): Promise<Record<string, unknown> | undefined> {
   let handle;
   try {

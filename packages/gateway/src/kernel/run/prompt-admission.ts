@@ -59,12 +59,8 @@ operations: RunOperations<unknown>,
         await operations.persistTaskMarker(operationId);
       } else if ((ownership?.kind === "subagentWake" || operations.ownedTurns.sharedTaskSteering(ownership)) && operations.ownedTurns.waitingTask && operations.ownedTurns.waitingTask.wakeOperationId === undefined
         && operations.ownedTurns.worker.acceptsSteering && operations.activeOperationId === undefined && operations.operation === undefined && !session.isStreaming) {
-        // The provider's wake, or the maintainer's or Home's message (#929), continues the task this
-        // operation holds open between turns; its marker stays the first one.
       } else {
         const fence = ownership?.taskFence;
-        // The maintainer and Home share one ordered steering lane per worker (#929): a maintainer
-        // message to a running task joins that lane whatever behavior the composer chose.
         if (!ownership && operations.ownedTurns.worker.acceptsSteering) behavior = "steer";
         if (behavior !== "steer" || operations.ownedTurns.liveTaskOperationId() !== operations.ownedTurns.worker.identity.operationId
           || !session.isStreaming || !operations.ownedTurns.worker.acceptsSteering
@@ -80,8 +76,6 @@ operations: RunOperations<unknown>,
     const prepared = preparePromptInput(operations, session, text, images, queueDisplay, ownership);
     text = prepared.text;
     const { composedResources, isExactExtensionCommand } = prepared;
-    // Only direct input grants maintainer authority. Every producer-owned
-    // activation (including scheduler and extension input) is a wake for Home.
     const homeDelivery = ownership ? "wake" : "user";
     if (!session.isStreaming) {
       await session.settingsManager.flush();
@@ -100,8 +94,6 @@ operations: RunOperations<unknown>,
     if (ownership && ownership.kind !== "subagentWake" && ownership.kind !== "homeWake") operations.ownedTurns.observers.set(operationId, ownership.onTerminal);
     let operationWork!: GatewayWorkHandle;
     let preflightStarted = false;
-    // Whether Pi had no run (starting or live) when this input was admitted; a
-    // command can then own only a start that its own handler began.
     const runIdleAtAdmission = !operations.runtime.session.isStreaming;
     let acceptedResolve!: (accepted: boolean) => void;
     const accepted = new Promise<boolean>((resolve) => { acceptedResolve = resolve; });
@@ -111,40 +103,22 @@ operations: RunOperations<unknown>,
     let queueDisposition: Promise<QueueAdmissionDisposition> | undefined;
     let resolveQueueDisposition: ((disposition: QueueAdmissionDisposition) => void) | undefined;
     let startPersisted = false;
-    /** The phase this admission replaced when it marked the session running. */
     let phaseBeforeAdmission: SessionPhase | undefined;
     try {
-      // Retained archive state is cleared here, inside the same lane critical
-      // section that admits this run and after every synchronous rejection
-      // above. A prompt can therefore never start while the session is hidden
-      // from the dashboard, and a store failure rejects the prompt retryably.
       await operations.dependencies.beforeRunAdmission(operations.id);
-      // Attention, settings and archive I/O can yield to canonical writes or
-      // a seal. Recheck the physical target before invocation/SDK effects.
       operations.assertHomePromptAdmission();
       operations.runInvocations.invocations.set(invocationId, invocation);
       while (operations.runInvocations.invocations.size > 128) operations.runInvocations.invocations.delete(operations.runInvocations.invocations.keys().next().value!);
       operationWork = operations.runWork.beginOperationWork(operationId);
       if (redelivery) operations.lifecycle.cancelPreflight(operationId);
-      // Exact preflight ownership begins synchronously before marker I/O, so a
-      // drain that starts while the marker is pending snapshots this owner.
       operations.lifecycle.beginPreflight(operationId);
       preflightStarted = true;
 
-      // Canonical invocation ownership must precede every extension side
-      // effect. This custom entry is intentionally hidden from model context
-      // and ordinary transcript projection, but survives runtime restart.
       const startReceipt = promptStartReceipt(operations, operationId, intent);
-      // Durable staging precedes the Pi call so an extension handler can
-      // never emit output before Gateway has recorded its invocation owner.
       if (!redelivery) await operations.runInvocations.persistInvocationReceipt(startReceipt, operationWork);
       startPersisted = true;
       operations.assertHomePromptAdmission();
 
-      // Receipt persistence and extension hooks may outlive the run that was
-      // active at RPC entry. Re-evaluate at the last Gateway-owned boundary,
-      // then let queue_update/message_start provide the exact disposition if
-      // Pi crosses from streaming to idle inside its asynchronous input hook.
       queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
       if (session.isStreaming && !behavior && !isExactExtensionCommand) {
         throw new GatewayError("busy", "Session is running; choose steer or follow-up");
@@ -166,8 +140,6 @@ operations: RunOperations<unknown>,
       let homeWakeTrigger: InputTrigger | undefined;
       if (isExactExtensionCommand) {
         operations.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
-        // Exact commands run before Pi's preflight callback and can wait on UI
-        // indefinitely. Persist the provisional admission before invoking Pi.
         await operations.enqueueMarkerOwnership(operationId);
         operations.revision += 1;
         operations.publishSnapshot();
@@ -176,29 +148,17 @@ operations: RunOperations<unknown>,
         if ((ownership?.kind === "subagentWake" || operations.ownedTurns.sharedTaskSteering(ownership)) && operations.ownedTurns.waitingTask && operations.ownedTurns.waitingTask.wakeOperationId === undefined) {
           operations.ownedTurns.waitingTask.wakeOperationId = operationId;
         }
-        // The canonical leaf immediately before Pi sees the input is the exact
-        // activation start: the input's own entry is appended inside
-        // `session.prompt` below, and steering later inserts entries after it,
-        // never before it.
-        // Gateway owns preflight even before Pi creates an Agent controller
-        // (including auth and compaction preparation). It is not idle work.
         phaseBeforeAdmission = operations.phase;
         operations.phase = "running";
         operations.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
         operations.pendingPromptMessage = undefined;
         operations.pendingPrompt = ownership?.kind === "homeWake" ? undefined : operations.promptDisplay(operationId, text, images, queueDisplay);
-        // A waiting message becomes this pending prompt in the same
-        // publication, so it is never shown twice or not at all.
         if (held) operations.heldQueue.removeHeldPrompt(held.id);
         operations.revision += 1;
-        // Publish before entering Pi preflight. Automatic compaction can begin
-        // inside that call before the RPC receives its admission result.
         operations.publishSnapshot();
         operations.homeRequestPolicy?.admit(operationId, session.sessionManager.getLeafId() ?? null, session.systemPrompt, homeDelivery);
         operations.operationWasHomeWake = ownership?.kind === "homeWake";
         if (operations.homeRequestPolicy) {
-          // Inbox admission runs on this session's lane: every later prompt waits
-          // for it. A slow one is the first thing to name when Home stops answering (#906).
           const inboxAdmissionStarted = performance.now();
           try {
           homeWakeTrigger = await operations.dependencies.modules.policy("inputAdmission")?.().admit(operations.id, operationId, homeDelivery, message => deliverPromptInput(operations, session, message,
@@ -224,13 +184,7 @@ operations: RunOperations<unknown>,
         ...(ownership?.kind === "subagentWake" ? { expandPromptTemplates: ownership.expandPromptTemplates }
           : composedResources !== undefined ? { expandPromptTemplates: false } : {}),
         preflightResult: (disposition) => {
-          // Pi calls back only after it has handled, queued, or started the
-          // prompt. Rejections do not call this hook; the SDK promise's
-          // rejection handler below resolves admission as false.
           handledWithoutAgent = disposition === "handled";
-          // Pi has no active Agent signal during pre-prompt compaction. Stop
-          // must also revoke this exact pending prompt at SDK admission; an
-          // aborted summary alone does not prevent Agent.prompt() starting.
           if (ownership?.signal?.aborted || operations.runAbort.abortedOperations.has(operationId)
             || (operations.ownedTurns.worker && operationId !== operations.ownedTurns.worker.identity.operationId && operations.ownedTurns.waitingTask?.wakeOperationId !== operationId
               && (!operations.ownedTurns.worker.acceptsSteering || operations.ownedTurns.liveTaskOperationId() !== operations.ownedTurns.worker.identity.operationId))) {
@@ -242,8 +196,6 @@ operations: RunOperations<unknown>,
             acceptedResolve(false);
             throw preflightFailure;
           }
-          // agent_start can fire synchronously before this Gateway promise
-          // resumes. Record the SDK's disposition now, not one turn later.
           invocation.lifecycle = "accepted";
           operations.runInvocations.invocations.set(invocationId, invocation);
           operations.noteAcceptedSteering(operationId);
@@ -251,10 +203,6 @@ operations: RunOperations<unknown>,
           acceptedResolve(true);
         },
       }));
-      // Pi awaits an extension command handler before invoking its preflight
-      // callback. The Gateway has already durably admitted the exact command
-      // and started its SDK promise, so release the RPC response while this
-      // session lane continues to serialize the handler and its side effects.
       if (isExactExtensionCommand) {
         if (!ownership) operations.homeRequestPolicy?.responseTiming.accepted(operationId);
         ownership?.onAdmitted?.(invocationId);
@@ -271,8 +219,6 @@ operations: RunOperations<unknown>,
         operations.pendingPromptMessage = undefined;
       }
       if (operations.pendingExtensionCommand?.id === operationId) operations.pendingExtensionCommand = undefined;
-      // An admission that failed before any run started gives back the phase it
-      // took (#881): a "running" session with nothing running admits nothing.
       if (phaseBeforeAdmission !== undefined && operations.phase === "running" && !operations.hasActiveAgentRun
         && operations.activeOperationId === undefined && operations.operation === undefined) {
         operations.phase = phaseBeforeAdmission;
@@ -303,12 +249,6 @@ operations: RunOperations<unknown>,
       operations.runInvocations.invocations.delete(invocationId);
       operations.runWork.settleOperationWork(operationId);
       if (!startPersisted) operations.ownedTurns.observers.delete(operationId);
-      // Once the canonical start receipt is durable the prompt may already
-      // have reached extension hooks or the provider. Report its failure as an
-      // unknown outcome so the idempotency receipt cannot be replayed, matching
-      // the outcome-unknown terminal receipt recorded above.
-      // A Home refusal names its own cause, so the client reads it first. It stays an
-      // unknown outcome: the start receipt is durable, so the prompt must not replay.
       throw startPersisted
         ? asUncertainOutcome(operations.dependencies.modules.policy("requestPolicy")?.().isRefusal(error) ? new GatewayError("conflict", error.message) : error,
           "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
@@ -319,10 +259,6 @@ operations: RunOperations<unknown>,
       isExactExtensionCommand, acceptedResolve, resolveQueueDisposition,
     }, sdkRun, () => queuesIntoActiveRun);
 
-    // Successful Pi dispositions are reported by the callback; rejected
-    // prompts do not call it and are resolved by the SDK promise rejection
-    // handler. A local timeout could reject while an input handler later
-    // accepts canonical work, so admission remains callback/rejection-owned.
     const admitted = await accepted;
     if (queuesIntoActiveRun && admitted) {
       operations.runQueue.reconcileQueuedMessages();
@@ -330,9 +266,6 @@ operations: RunOperations<unknown>,
       queuesIntoActiveRun = disposition === "queued";
       if (disposition === "queued" && held) operations.heldQueue.removeHeldPrompt(held.id);
       if (disposition === "queued" && preflightStarted) {
-        // Queued input has an accepted queue owner, not an active preflight.
-        // Releasing this exact owner lets a later Stop-redelivery reuse the
-        // same operation identity through ordinary admission.
         operations.lifecycle.cancelPreflight(operationId);
         preflightStarted = false;
       }
@@ -359,19 +292,11 @@ operations: RunOperations<unknown>,
     if ((!queuesIntoActiveRun || !admitted) && operations.runQueue.pendingQueueAdmission?.id === operationId) {
       operations.runQueue.pendingQueueAdmission = undefined;
     }
-    // Pi >= 1.2 counts a run busy from the moment it prepares (through
-    // before_agent_start), so a turn an extension command triggered can still
-    // be starting, with no Agent run yet, when Pi reports the command handled.
-    // That start is the command's own: admit it once. A start already
-    // observed consumed its admission; a command admitted while a run was
-    // live or settling owns no start.
     const commandTurnStarting = isExactExtensionCommand && handledWithoutAgent && runIdleAtAdmission
       && operations.runtime.session.isStreaming && !operations.runtime.session.state.isStreaming;
     operations.lifecycle.resolvePreflight(operationId, admitted && !queuesIntoActiveRun && (!handledWithoutAgent || commandTurnStarting));
     attempt.admissionAccepted = admitted;
     if (!admitted) {
-      // A preflight callback is a disposition, not SDK settlement. Join the
-      // exact promise before retiring its marker or publishing idle.
       await attempt.run.catch(() => {});
       const stopped = operations.runAbort.abortedOperations.has(operationId);
       const terminalLifecycle = stopped ? "interrupted" : "failed";
@@ -436,16 +361,12 @@ operations: RunOperations<unknown>,
         createdAt: new Date().toISOString(),
       }), operationWork);
     } catch (error) {
-      // Admission has already been accepted by Pi. A receipt write failure is
-      // a durability diagnostic, never evidence that execution was rejected.
       operations.emit("session.diagnostic", safeJson({
         code: "invocation-acceptance-receipt-failed",
         operationId,
         message: error instanceof Error ? error.message : String(error),
       }));
     }
-    // Admission and Stop retain the same invocation object across receipt
-    // awaits; a late accepted transition cannot replace its recorded reason.
     invocation.lifecycle = queuesIntoActiveRun ? "queued" : "accepted";
     invocation.updatedAt = new Date().toISOString();
     operations.runInvocations.invocations.set(invocationId, invocation);
@@ -458,10 +379,6 @@ operations: RunOperations<unknown>,
       operationWork.transition("foreground-agent-operation");
       const markerWrite = operations.enqueueMarkerOwnership(operationId);
       count("session.prompt.marker-persist");
-      // Prompt admission is already authoritative in Pi. Keep the marker owner
-      // tracked for drain and later settlement, but do not hold the response on
-      // its fsync; observing the rejection also prevents a detached write from
-      // becoming an unhandled rejection.
       void markerWrite.catch(() => {});
     }
     operations.revision += 1;
@@ -478,9 +395,6 @@ operations: RunOperations<unknown>,
         await attempt.finishCommand();
       }
     } else if (attempt.runSettled) {
-      // Handles input action:"handled" and rejected accepted calls without
-      // touching a newer operation. `finally` can mark runSettled one
-      // microtask before `run` exposes its outcome, so join it explicitly.
       const terminalLifecycle = await attempt.run.then(
         () => "completed" as const,
         () => "failed" as const,
