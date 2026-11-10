@@ -178,7 +178,7 @@ supervise() {
     (
       exec 7>&-
       IFS= read -r -u 8 go && [[ "$go" == start ]] || exit 0
-      exec 8<&- env -u TRON_DATA_DIR -u PI_CODING_AGENT_DIR -u TRON_AGENT_DIR_NAME \
+      exec 8<&- env -u TRON_DATA_DIR -u PI_CODING_AGENT_DIR \
         TRON_HOME_NAME=.tron-dev TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 \
         ${PROOF_TRAFFIC_ENV:+"$PROOF_TRAFFIC_ENV"} \
         "$LAUNCHER" --host "$HOST" --port 9848
