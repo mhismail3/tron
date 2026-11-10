@@ -164,7 +164,8 @@ def nested_files() -> tuple[set, set]:
 
 
 # Python tests that read this Mac's own state run here, never on the mini: test-core.py verifies each block's review
-# row against the reviewer's transcript in this Mac's Pi session store (tools/proof/README.md).
+# row against the reviewer's transcript in this Mac's Pi session store (tools/proof/README.md). Grow it only for
+# tests that read this Mac's own state.
 PYTHON_HERE = {"tools/proof/tests/test-core.py"}
 
 
