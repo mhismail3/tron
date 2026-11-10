@@ -1257,6 +1257,9 @@ out = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--outputFile=")
 with open("runs.jsonl", "a") as runs:
     runs.write(json.dumps({"home": os.environ["HOME"], "held": os.environ.get("TRON_FULL_GATEWAY_LOCK_HELD"),
                            "pid": os.getpid()}) + "\\n")
+if os.environ.get("FIXTURE_IGNORE_TERM"):
+    import signal
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 source = pathlib.Path("src/store/store.ts").read_text()
 if "hang = false" in source:
     child = subprocess.Popen(["sleep", "300"])
@@ -1378,6 +1381,30 @@ class MutateTests(VerifyCase):
             self.fail(f"the unmutated run {run['pid']} outlived mutate:\n{output}")
         self.assertFalse(Path(run["home"]).exists(), output)
         self.assertEqual(len(runs.read_text().splitlines()), 1, "no mutant may run after the interrupt")
+
+    def test_a_second_interrupt_during_the_stop_grace_still_kills_the_group(self) -> None:
+        process = self.mutate("--timeout", "1", env={"FIXTURE_RUN_SECONDS": "300", "FIXTURE_IGNORE_TERM": "1"})
+        runs = self.repo.path / "packages/gateway/runs.jsonl"
+        deadline = time.time() + 60
+        while not runs.exists() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertTrue(runs.exists(), "the unmutated run never started")
+        run = json.loads(runs.read_text().splitlines()[0])
+        process.send_signal(signal.SIGTERM)
+        time.sleep(2)
+        os.kill(run["pid"], 0)
+        process.send_signal(signal.SIGTERM)
+        output, _ = process.communicate(timeout=60)
+        self.assertNotEqual(process.returncode, 0, output)
+        for _ in range(100):
+            try:
+                os.kill(run["pid"], 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(run["pid"], signal.SIGKILL)
+            self.fail(f"the unmutated run {run['pid']} outlived a second interrupt during the stop grace:\n{output}")
 
     def test_mutants_run_through_the_gateway_runner_under_the_host_lock(self) -> None:
         import fcntl

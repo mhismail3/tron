@@ -73,25 +73,35 @@ def main(argv: list[str]) -> int:
     def run_locks(timeout: float | None) -> dict | str | None:
         """The run's vitest summary, "timeout", or None when no readable report proves the tests ran."""
         report_path.unlink(missing_ok=True)
-        process = subprocess.Popen(command, cwd=verify.ROOT / verify.GATEWAY, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, start_new_session=True,
-                                   env={**os.environ, HELD_BY_CALLER: "1"})
+        stops = {signal.SIGINT, signal.SIGTERM}
+        process = None
+        signal.pthread_sigmask(signal.SIG_BLOCK, stops)
         try:
+            process = subprocess.Popen(command, cwd=verify.ROOT / verify.GATEWAY, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, start_new_session=True,
+                                       env={**os.environ, HELD_BY_CALLER: "1"},
+                                       preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_UNBLOCK, stops))
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, stops)
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             return "timeout"
         finally:
-            if process.poll() is None:
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, stops)
+            if process is not None:
                 try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                    process.wait(timeout=10)
-                except (OSError, subprocess.TimeoutExpired):
-                    pass
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except OSError:
-                pass
-            process.wait()
+                    if process.poll() is None:
+                        try:
+                            os.killpg(process.pid, signal.SIGTERM)
+                            process.wait(timeout=10)
+                        except (OSError, subprocess.TimeoutExpired):
+                            pass
+                finally:
+                    signal.pthread_sigmask(signal.SIG_BLOCK, stops)
+                    try:
+                        verify.signal_group(process.pid, signal.SIGKILL)
+                        process.wait()
+                    finally:
+                        signal.pthread_sigmask(signal.SIG_UNBLOCK, stops)
         try:
             return json.loads(report_path.read_text())
         except (OSError, ValueError):
