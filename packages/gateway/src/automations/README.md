@@ -13,7 +13,10 @@ definition, retry or ledger. iOS and the first-party `schedule` tool (including 
 `automation-store.ts`, `automation-home-trigger.ts`, `schedule.ts`,
 `schedule-module.ts` (optional-owner descriptor), `tron-schedule-extension.ts` and `zone-table.ts` (a timezone's
 UTC offsets around an instant, from Intl: the trusted input of proof block `schedule/calendar`, read by its
-shadow until that block's cut-over). Store: `gateway/automations/`, strict schema-version-2
+shadow until that block's cut-over). `schedule.ts` decides once and interval occurrences by calling proof block
+`schedule/occurrence` ([`gateway/core`](../core/schedule/occurrence/facade.ts), generated from `packages/core`): it
+converts timestamps to milliseconds and back and holds no copy of that arithmetic; calendar occurrences are
+still decided in `schedule.ts`. Store: `gateway/automations/`, strict schema-version-2
 owner-only documents, each with one definition, one ordinary nonterminal run or a
 Home message outbox (`currentRun` plus `pendingHomeRuns`), and 64 retained terminal runs. Older shapes are not admitted, migrated or projected. Writes
 sync the file and its directory before acknowledgement.

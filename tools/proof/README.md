@@ -104,10 +104,11 @@ law-kind table and five gates, each bound to the block hash:
   `~/.tron/agent/sessions` (read, never written), so a committed review holds no machine path; it must match
   exactly one transcript.
 - **Mutation:** the `report` for the current hash and checker, PASS (with `--recheck`, re-run with 12 samples).
-- **Shadow:** `SHADOW.json` match at the current hash and compiled core; cut-over needs real traffic over 7
-  (high-stakes) or 3 (leaf) days.
-- **Ready for cut-over:** only with `--recheck`, which re-runs the shadow too, and only with a real-traffic
-  shadow over the tier's window.
+- **Shadow** (a shadowed block): `SHADOW.json` match at the current hash and compiled core; cut-over needs
+  real traffic over 7 (high-stakes) or 3 (leaf) days.
+- **Ready for cut-over** (a shadowed block): only with `--recheck`, which re-runs the shadow too, and only
+  with a real-traffic shadow over the tier's window.
+- **Cut over** (a block its shell runs, `block.json` `shell`): replaces the two rows above and names the shell.
 
 A gate for another hash shows STALE. Exit 1 lists packet problems: a missing English comment, a law lemma not
 found, a lemma neither a law nor a declared helper, a law-marked lemma not listed, an escape hatch, an
@@ -123,7 +124,7 @@ one). Seams (shell files under `packages/gateway/src/`), with the oracle each bl
 
 | Block | Seam | Recorded | Oracle's generated inputs |
 |---|---|---|---|
-| `schedule/occurrence`, `schedule/calendar` | `next/first/classifyDueOccurrence` (`automations/schedule.ts`) | once and interval triggers under the first, calendar triggers under the second; nested calls are not seams | calendar: core fed `automations/zone-table.ts`'s Intl table (also on replay); TS throws (a skipped civil date) counted as `tsRefused` |
+| `schedule/calendar` | `next/first/classifyDueOccurrence` (`automations/schedule.ts`) | calendar triggers only (once and interval triggers are decided by block `schedule/occurrence`, which its shell runs); nested calls are not seams | core fed `automations/zone-table.ts`'s Intl table (also on replay); TS throws (a skipped civil date) counted as `tsRefused` |
 | `settings/precedence` | `resolveInstance` (`kernel/settings/settings-resolver.ts`) | `precedenceFacts` (per layer: in target, bound, per-model and plain value, applied; default token 0) and the fold before clamping; a composing value as null | real `resolveSettings`/`composedBelow` over a synthetic schema; compose builds a term, so its order is exact |
 | `settings/tool-selection` | `toolSelectionType().compose/encode` (`kernel/settings/settings-types.ts`) | `toolSelectionFacts` (empty name 0); a non-list below/current is none; a list holding a non-string is not recorded | plain names, modifiers, repeats and the empty name over every kind of selection below |
 | `receipts/invocation-lifecycle` | `invocationProjection` (`kernel/receipts/invocation-receipts.ts`) | `invocationLifecycleFacts` and the projections or refusal reason; not above 64 receipts, once per history (snapshots refold branches) | legal moves with duplicate/contradictory terminals, orphans, foreign owners, renames, origin changes, rebinds; 1 in 10 with tokens shifted sparse or past the core's array limit (its fallback) |
@@ -166,28 +167,46 @@ core to check `coreJsHash`, and `--recheck` re-runs the shadow.
 `oracles/<block>.mjs` compare a compiled core with the shipped TypeScript it models on seeded generated
 inputs (one generator, `oracles/random.mjs`: exact 32-bit mulberry32, which does not cycle early), or with `--replay <files>` on recorded calls (the recorded TypeScript output is the expectation), and
 print `{requests, agree, diffs}` (exit 0 iff all agree, 1 on a mismatch, 2 on a record it cannot read); a block's `mutate.json` uses its oracle
-both as a mutation oracle (`law-gap` detection) and as its shadow command. `oracles/schedule-occurrence.mjs`
-imports `packages/gateway/src/automations/schedule.ts` through `oracles/gateway-source.mjs` (module hooks
+both as a mutation oracle (`law-gap` detection) and as its shadow command. An oracle
+imports the shipped Gateway source it compares with through `oracles/gateway-source.mjs` (module hooks
 that map the sources' `./x.js` imports to `.ts` and apply Node's TypeScript transform) and calls the core
-through the block's generated façade; the other oracles do the same for their blocks (table above). Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
+through the block's generated façade (table above). A block its shell runs has no oracle, shadow or replay:
+the TypeScript it was compared with is gone. Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
 the corpus, and exit 2 on a corpus file they cannot read. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 
 ## Façade
 
-`dafny2wire/facade.mjs` (`proof facade <block> [--check] [--root <dir>]`) writes `packages/core/dist/<block>/core.js`,
-the block's `translate` file compiled by the pinned Dafny (unedited, with a generated header), and `facade.ts`, a
-typed TypeScript wrapper generated from the datatypes and compiled signatures of the block's laws: `load(corePath)`
-binds it to any compiled core (the checked-in one, or a mutant or fresh translation for oracles), and `core` is the
-bound checked-in one. It exposes every compiled function and predicate of the laws (ghost and commented-out
-declarations are not compiled, so not exposed) and checks each stated precondition before calling, because
-compiled code does not check `requires`. Types: `int` -> `number` and `nat` -> `number >= 0` (safe integers, checked
-both ways), `bool` -> `boolean`, `seq<T>` -> a readonly array of `T` (also nested and as a field), a datatype of nullary constructors -> a string union of their names, a
-one-constructor datatype named like its type -> a plain object, any other datatype -> an object tagged by `$`; an
-unknown constructor is a `TypeError` in either direction. Refused before anything compiles: Dafny 3 `function method`
-syntax, preconditions other than a call of a compiled predicate on parameters, generic functions, and any other
-Dafny type (an unused generic datatype is ignored). `--check` regenerates into a temporary directory and exits 1 if
+`dafny2wire/facade.mjs` (`proof facade <block> [--check] [--root <dir>]`) writes a block's compiled core and
+`facade.ts`, a typed TypeScript wrapper generated from the datatypes and compiled signatures of the block's laws.
+The façade exposes every compiled function and predicate of the laws (ghost and commented-out declarations are
+not compiled, so not exposed) and checks each stated precondition before calling, because compiled code does not
+check `requires`. Refused before anything is written: Dafny 3 `function method` syntax, preconditions other than
+a call of a compiled predicate on parameters, generic functions, and any Dafny type the block's kind does not
+carry (an unused generic datatype is ignored). `--check` regenerates into a temporary directory and exits 1 if
 the checked-in files differ.
+
+**A block its shell runs** (`block.json` `shell`, a directory relative to the repository) is written there as
+`core.mjs` and `facade.ts`. `core.mjs` imports nothing: it is the output of `dafny translate js` without the
+Dafny runtime, byte for byte, after a generated header and before one `export { <module> as compiled }` line.
+The compiled functions of such a block may not use the runtime, with one exception: a runtime helper that is a
+closed function (it names nothing else of the runtime; today integer division and modulo on numbers) is copied
+verbatim into the header from the runtime the same compiler emits. Any other use (an unbounded `int`, building a
+sequence, datatype `==`, a tuple) is refused, naming the function and the compiled line; only the members the
+compiler emits for the runtime's own use (`toString`, `equals`, a newtype's `_Is` and `IntegerRange`) may mention
+it. Types: a newtype over a literal integer range within the JavaScript safe integers -> `number`, checked to be
+an integer in that range in both directions; `bool` -> `boolean`; `seq<T>` -> a readonly array of `T`; a datatype
+of nullary constructors -> a string union of their names, a one-constructor datatype named like its type -> a
+plain object, any other datatype -> an object tagged by `$`; an unknown constructor is a `TypeError` in either
+direction. `bind(compiled)` binds the façade to another translation of the block; `core` is the checked-in one.
+
+**A shadowed block** is written to `packages/core/dist/<block>` as `core.js`, compiled with the Dafny runtime
+(unedited, with a generated header), and a `facade.ts` that evaluates it: `load(corePath)` binds it to any
+compiled core (the checked-in one, or a mutant or fresh translation for oracles), and `core` is the bound
+checked-in one. Types there: `int` -> `number` and `nat` -> `number >= 0` (safe integers, converted to and from
+the runtime's BigNumber and checked both ways), and the datatype, `bool` and `seq<T>` forms above. No shell can
+run such a core, because the runtime needs the `bignumber.js` package: a block is rewritten to the form above
+before its cut-over, and this form goes with the last shadowed block.
 
 ## Wire
 
@@ -248,11 +267,12 @@ STALE; and `proof shadow` records a match or mismatch only from a comparison tha
 its exit status (`tests/fixtures/mutate-variants/shadow-stub.mjs`). The oracle and `law-gap` path is exercised by the first core block's real oracle, not by this test.
 
 `scripts/tron test tooling tools/proof/tests/test-core.py` is the gate test of the real blocks, declared by
-`packages/core/package.module.json`, so any change under `packages/core` runs it: `proof check` passes on a
-fresh cache, and for each block with a `mutate.json` the regenerated packet equals the committed `LAWS.md`
-and shows proof PASS, a current mutation PASS, a current shadow match, and a `REVIEW.json` for the current
-block hash with every law ACCEPT, and `proof facade --check` finds `dist/` fresh. An edit that skips any gate
-fails it.
+`packages/core/package.module.json` and by the generated cores' module (`packages/gateway/src/core`), so any
+change under either runs it: `proof check` passes on a fresh cache, and for each block with a `mutate.json` the
+regenerated packet equals the committed `LAWS.md` and shows proof PASS, a current mutation PASS and a
+`REVIEW.json` for the current block hash with every law ACCEPT, and `proof facade --check` finds the generated
+core and façade fresh; a shadowed block also shows a current shadow match and still matches today's TypeScript.
+An edit that skips any gate fails it.
 
 `scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: `--protocol --check`
 passes; the protocol's codecs, on 12 seeded values of each of its datatypes, encode exactly what
@@ -276,13 +296,18 @@ and nothing for a value outside the block's domain, that invocation receipt fold
 reasons, once per history and not above the receipt bound, and
 that the daily cap and retention hold.
 
-`scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the fixture block
-`demo/counter` (`tests/fixtures/facade`): it exposes exactly the compiled declarations (a multi-line datatype in
+`scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the shadowed
+fixture block `demo/counter` (`tests/fixtures/facade`): it exposes exactly the compiled declarations (a multi-line datatype in
 full, an opaque function; no ghost or commented-out one), round trips values (sequences, nested and as fields),
 refuses unknown constructors, a non-array sequence, non-integers, negative naturals, a broken precondition and an out-of-range result; `--check` fails on a hand edit of
-either file; and `function method`, an uncheckable precondition and an unsupported type are refused.
+either file; and `function method`, an uncheckable precondition and an unsupported type are refused. And of the
+fixture block `demo/meter`, which names a shell: its `core.mjs` lands in the shell's directory, imports nothing,
+holds the compiler's module output byte for byte and exactly one copied helper, and loads with no
+`node_modules` above it; numbers cross only as integers of their newtype's range and preconditions are checked;
+`--check` fails on a hand edit of either file; and datatype equality, building a sequence, an `int` and a
+newtype whose range is not literal are each refused, naming the function, with nothing written.
 
 `scripts/tron-node exec node --test tools/proof/tests/replay.test.mjs` replays a corpus of recorder-format
-calls of the shipped schedule functions through the real block: two faithful days are a real-traffic match
+calendar calls of the shipped schedule functions through the real block `schedule/calendar`: two faithful days are a real-traffic match
 over two days, a recorded output nudged by 1 ms is a mismatch naming that record, `--days 1` replays only the
 newest day, and a malformed line, a foreign record or an empty corpus is an error.

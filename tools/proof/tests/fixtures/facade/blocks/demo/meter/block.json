@@ -1,0 +1,1 @@
+{"interface": ["laws/demo/Meter.dfy"], "impl": ["blocks/demo/meter/Block.dfy"], "deps": [], "shell": "packages/shell/meter"}

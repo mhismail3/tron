@@ -5,11 +5,13 @@ For every block with a mutate.json, with the pinned toolchain and the repository
 
 1. `scripts/tron proof check` passes on a fresh cache (every block verified now, not remembered).
 2. `scripts/tron proof packet <block>` regenerates exactly the committed LAWS.md, has no packet problems,
-   and its gates hold for the current sources: proof PASS, mutation report PASS and not STALE, shadow
-   match and not STALE, REVIEW.json for the current block hash with every law ACCEPT.
-3. `scripts/tron proof facade <block> --check`: the checked-in compiled core and façade in
-   packages/core/dist/<block> are exactly what the current sources generate.
-4. `scripts/tron proof shadow <block>` still matches today's shipped TypeScript.
+   and its gates hold for the current sources: proof PASS, mutation report PASS and not STALE, REVIEW.json
+   for the current block hash with every law ACCEPT.
+3. `scripts/tron proof facade <block> --check`: the checked-in compiled core and façade are exactly what the
+   current sources generate.
+4. A block no shell runs yet (no block.json "shell") is shadowed: its recorded shadow matches and is not
+   STALE, and `scripts/tron proof shadow <block>` still matches today's shipped TypeScript. A block its shell
+   runs has no TypeScript to compare with.
 
 And for the protocol source packages/core/wire/Protocol.dfy: the Gateway's protocol types are what it
 generates, and its TypeScript and Swift codecs agree (the protocol test of wire.test.mjs).
@@ -63,9 +65,6 @@ class CoreBlocksTest(unittest.TestCase):
                                  f"LAWS.md is not the current packet: run scripts/tron proof packet {block} --write")
                 self.assertRegex(rows["Proof (pinned Dafny, --verify-included-files)"], r"\| PASS: ")
                 self.assertRegex(rows["Mutation check"], r"^\| Mutation check \| PASS: ")
-                self.assertRegex(rows["Shadow"], r"^\| Shadow \| match: ")
-                self.assertNotIn("STALE", rows["Shadow"])
-                self.assertNotIn("not checked", rows["Shadow"])
                 current = re.search(r"Block hash: `([0-9a-f]{16})`", packet.stdout).group(1)
                 review = json.loads((directory / "REVIEW.json").read_text())
                 self.assertEqual(review["packetHash"], current, "REVIEW.json is for another version of the block")
@@ -73,6 +72,13 @@ class CoreBlocksTest(unittest.TestCase):
                 self.assertEqual({law: review["laws"].get(law, {}).get("verdict") for law in laws}, {law: "ACCEPT" for law in laws})
                 facade = tron("facade", block, "--check")
                 self.assertEqual(facade.returncode, 0, facade.stdout + facade.stderr)
+                if "shell" in json.loads((directory / "block.json").read_text()):
+                    self.assertIn("Cut over", rows)
+                    self.assertNotIn("Shadow", rows)
+                    continue
+                self.assertRegex(rows["Shadow"], r"^\| Shadow \| match: ")
+                self.assertNotIn("STALE", rows["Shadow"])
+                self.assertNotIn("not checked", rows["Shadow"])
                 # The shadow comparison still runs against today's shipped TypeScript (a change there, such as a
                 # new import, must not break the block's oracle).
                 with tempfile.TemporaryDirectory(prefix="tron-proof-shadow.") as tmp:

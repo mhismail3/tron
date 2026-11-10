@@ -6,8 +6,9 @@ import { DAILY_RECORD_CAP, RETAINED_DAYS, TRAFFIC_SCHEMA, openTrafficRecorder } 
 
 /**
  * The Debug-only proof traffic recorder (tools/proof/README.md "Traffic corpus"): refused everywhere but an
- * opted-in Debug Gateway; a seeded schedule journey through the real seams writes a corpus that replays
- * through the same TypeScript to the recorded outputs; the daily cap and retention hold.
+ * opted-in Debug Gateway; a seeded schedule journey through the real seams writes a corpus (of its calendar
+ * calls: once and interval triggers are decided by their proof block and are not seams) that replays through
+ * the same TypeScript to the recorded outputs; the daily cap and retention hold.
  */
 const homes: string[] = [];
 const home = (): string => { const dir = mkdtempSync(join(tmpdir(), "tron-proof-traffic-")); homes.push(dir); return dir; };
@@ -72,19 +73,20 @@ describe("proof traffic recorder", () => {
     };
     const outputs = calls.map((call) => run(recorded, call));
 
-    // One record per seam call (the 200 helper first() calls above included) and none for a nested internal
-    // call; once and interval triggers go to block schedule/occurrence, calendar triggers to schedule/calendar.
-    const records = [...corpus(dataDir, "schedule/occurrence"), ...corpus(dataDir, "schedule/calendar")]
-      .sort((left, right) => (left.seq as number) - (right.seq as number));
-    expect(records).toHaveLength(calls.length + 200);
+    // One record per calendar seam call (the helper first() calls above included) and none for a nested internal
+    // call. Once and interval triggers are decided by proof block schedule/occurrence itself and record nothing.
+    const calendar = calls.map((call, index) => ({ call, index })).filter(({ call }) => (call[1][0] as { kind: string }).kind === "calendar");
+    expect(readdirSync(join(dataDir, "gateway/proof-traffic/schedule"))).toEqual(["calendar"]);
+    const records = corpus(dataDir, "schedule/calendar").sort((left, right) => (left.seq as number) - (right.seq as number));
+    expect(records).toHaveLength(calendar.length + calendar.length / 3);
     expect(new Set(records.map((r) => r.schema))).toEqual(new Set([TRAFFIC_SCHEMA]));
     expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i + 1));
     expect(records.every((r) => ["next", "first", "classify"].includes(r.seam as string))).toBe(true);
     for (const record of records) {
-      const kind = ((record.input as Record<string, unknown>).trigger as { kind: string }).kind;
-      expect(record.block).toBe(kind === "calendar" ? "schedule/calendar" : "schedule/occurrence");
+      expect(record.block).toBe("schedule/calendar");
+      expect(((record.input as Record<string, unknown>).trigger as { kind: string }).kind).toBe("calendar");
     }
-    expect(records.filter((r) => r.block === "schedule/calendar").length).toBeGreaterThan(100);
+    expect(records.length).toBeGreaterThan(100);
 
     // Replay: the same TypeScript, recorder off, gives every recorded output back.
     vi.unstubAllEnvs();
@@ -96,8 +98,8 @@ describe("proof traffic recorder", () => {
         : [input.trigger, input.nextOccurrenceAt, input.nowMs, input.policy];
       expect(JSON.parse(JSON.stringify(run(plain, [record.seam as string, args]) ?? null))).toEqual(record.output);
     }
-    const journey = records.slice(200);
-    expect(journey.map((r) => r.output)).toEqual(outputs.map((o) => JSON.parse(JSON.stringify(o ?? null))));
+    const journey = records.slice(calendar.length / 3);
+    expect(journey.map((r) => r.output)).toEqual(calendar.map(({ index }) => JSON.parse(JSON.stringify(outputs[index] ?? null))));
   });
 
   it("records the settings precedence fold of every resolved key, with tokens instead of values", async () => {
