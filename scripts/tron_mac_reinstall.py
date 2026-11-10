@@ -36,8 +36,6 @@ def require(condition, message):
 
 
 def exists(path):
-    # lexists() also hides permission/I/O errors as absence. Optional credentials
-    # and browser state must never silently disappear from the backup inventory.
     try:
         os.lstat(path)
         return True
@@ -47,8 +45,6 @@ def exists(path):
 
 def safe_path(path):
     path = Path(os.path.abspath(path))
-    # macOS publishes these two system aliases; user-owned symlink components
-    # remain forbidden. This also makes receipts invariant to /tmp spelling.
     if sys.platform == 'darwin' and path.parts[1:2] in (('tmp',), ('var',)):
         path = Path('/private') / path.relative_to('/')
     for part in [*reversed(path.parents), path]:
@@ -130,7 +126,6 @@ def exclusive(root):
             raise Stop('busy: another reinstall or cutover command is running') from None
         yield
     finally:
-        # Keep the inode stable: unlinking a held lock admits a second owner.
         os.close(fd)
 
 
@@ -159,8 +154,7 @@ def acl_digest(path):
     LIBC.acl_free.argtypes = [ctypes.c_void_p]
     acl = LIBC.acl_get_link_np(os.fsencode(path), 0x100)
     if not acl and ctypes.get_errno() == errno.ENOENT:
-        # Darwin represents an existing item's absent extended ACL as ENOENT.
-        path.lstat()  # A vanished item is not an empty ACL.
+        path.lstat()
         return None
     require(bool(acl), 'metadata-unreadable: cannot inspect ACL')
     text = None
@@ -179,14 +173,13 @@ def xattr_digests(path):
     if sys.platform != 'darwin':
         return {name: hashlib.sha256(os.getxattr(path, name, follow_symlinks=False)).hexdigest()
                 for name in sorted(os.listxattr(path, follow_symlinks=False))}
-    # Python's os xattr API is Linux-only in some supported Python builds.
     LIBC.listxattr.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
     LIBC.listxattr.restype = ctypes.c_ssize_t
     LIBC.getxattr.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p,
                              ctypes.c_size_t, ctypes.c_uint32, ctypes.c_int]
     LIBC.getxattr.restype = ctypes.c_ssize_t
     encoded = os.fsencode(path)
-    size = LIBC.listxattr(encoded, None, 0, 1)  # XATTR_NOFOLLOW
+    size = LIBC.listxattr(encoded, None, 0, 1)
     require(0 <= size <= 1024 * 1024, 'metadata-unreadable: invalid extended attribute inventory')
     if not size:
         return {}
@@ -221,7 +214,6 @@ def tree_manifest(root):
         item['xattrs'] = xattr_digests(path)
         if stat.S_ISLNK(info.st_mode):
             target = os.readlink(path)
-            # Preserve links as bytes. Copying never traverses them.
             item.update(type='link', target=target)
         elif stat.S_ISREG(info.st_mode):
             item.update(type='file', size=info.st_size, sha256=digest_file(path))
@@ -244,9 +236,6 @@ def manifest_digest(manifest):
 def copied_entry_matches(actual, expected):
     if sys.platform != 'darwin':
         return actual == expected
-    # macOS assigns the copying process's provenance even when copyfile succeeds
-    # at copying all xattrs. Do not forge/remove that OS-owned attribution.
-    # Live source comparisons remain exact; retirement has its own root-only rule.
     def portable(entry):
         return {**entry, 'xattrs': {name: value for name, value in entry['xattrs'].items()
                                   if name not in ('com.apple.provenance', 'com.apple.quarantine')}}
@@ -263,9 +252,6 @@ def copied_tree_matches(actual, expected):
 
 
 def retired_channel_matches(actual, expected):
-    # Darwin can reassign provenance on the directory passed to renamex_np.
-    # Only that root attribution may differ; nested entries and all other
-    # metadata remain exact. Keep the original source manifest unchanged.
     if actual is None or expected is None:
         return actual is expected
     if actual.keys() != expected.keys():
@@ -283,7 +269,6 @@ def retired_channel_matches(actual, expected):
 
 
 def sync_tree(root, manifest):
-    # Receipt durability must not get ahead of the copied file data/metadata.
     for name, item in manifest.items():
         if item['type'] == 'file':
             fd = os.open(root / name, os.O_RDONLY | os.O_NOFOLLOW)
@@ -303,8 +288,6 @@ def copy_metadata(source, destination, data=False):
         if LIBC.copyfile(os.fsencode(source), os.fsencode(destination), None, flags):
             raise OSError(ctypes.get_errno(), 'copyfile failed')
         if source.is_symlink():
-            # COPYFILE_STAT does not preserve a link's own mode on macOS. Never
-            # follow the target: it may be missing or outside the backed-up tree.
             os.chmod(destination, stat.S_IMODE(source.lstat().st_mode), follow_symlinks=False)
     else:
         if data:
@@ -332,8 +315,6 @@ def copy_tree(source, destination, expected, scratch):
             continue
         if name in actual:
             continue
-        # Temporary leaves live outside the copied tree. A crash cannot expose
-        # partial bytes as a valid file or send the next copy through a symlink.
         fd, temporary = tempfile.mkstemp(dir=scratch, prefix='.copy-')
         os.close(fd)
         temporary = Path(temporary)
@@ -363,7 +344,7 @@ def copy_tree(source, destination, expected, scratch):
 def rename_exclusive(source, destination):
     """Atomic no-clobber rename; a pre-check plus ordinary rename is insufficient."""
     if sys.platform == 'darwin':
-        function, flags = LIBC.renamex_np, 4  # RENAME_EXCL
+        function, flags = LIBC.renamex_np, 4
         function.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
         result = function(os.fsencode(source), os.fsencode(destination), flags)
     else:
@@ -378,19 +359,15 @@ def rename_exclusive(source, destination):
 
 
 def command(argv, category, timeout=1200, env=None, accepted=(0,)):
-    # Capture into an anonymous file, not unbounded RAM or user-facing logs.
     with tempfile.TemporaryFile() as output:
         child = subprocess.Popen([str(arg) for arg in argv], stdout=output, stderr=subprocess.STDOUT,
                                  env=env, start_new_session=True)
         try:
             code = child.wait(timeout=timeout)
         except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            # Only signal this command's owned process group, never a live app or
-            # service. Do not escalate to SIGKILL when cooperative exit fails.
             try:
                 os.killpg(child.pid, signal.SIGTERM)
             except (ProcessLookupError, PermissionError):
-                # Already exited: macOS answers EPERM while it awaits reaping (ESRCH once reaped).
                 pass
             try:
                 child.wait(timeout=5)
@@ -433,7 +410,6 @@ class MacPlatform:
             command(['/bin/bash', REPO / 'scripts/verify-mac-install.sh', '--artifact-only'],
                     'artifact-validation', env=env)
             command([REPO / 'packages/mac-app/scripts/verify-signed-pi-payload.sh', app], 'signed-runtime-smoke')
-        # Include CodeResources: the Mach-O cdhash alone does not identify resources.
         return {'team': team[1], 'cdhash': cdhash[1],
                 'resources': digest_file(safe_path(app / 'Contents/_CodeSignature/CodeResources'))}
 
@@ -448,11 +424,6 @@ class MacPlatform:
             result = subprocess.run(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{label}'],
                                     capture_output=True, timeout=15)
             if result.returncode == 0:
-                # Quit stops the Stable Gateway and the native host but keeps
-                # their approved registrations (the Gateway's exit policy
-                # prevents relaunch; the host starts only on demand). Offline
-                # means no running process, so only these stopped Release
-                # jobs pass; any legacy or Debug owner still refuses.
                 if label in ('com.tron.server', 'com.tron.mac.native-host') and stopped_launchd_job(result.stdout):
                     continue
                 raise Stop(f'service-loaded: {label}; choose Quit Tron in the menu bar and wait for it to finish')
@@ -481,8 +452,6 @@ class MacPlatform:
                 'fsevents-guard-install', timeout=180)
         loaded = command(['/bin/launchctl', 'print', f'gui/{os.getuid()}/com.tron.server'],
                          'agent-authority-verification', timeout=15).decode()
-        # The canonical verifier pins the selected signed runtime. With no path
-        # overrides in that job, its current config resolves the Stable default.
         for key in ('PI_CODING_AGENT_DIR', 'TRON_DATA_DIR', 'TRON_HOME_NAME'):
             require(not re.search(r'^\s*' + key + r'\s*(?:=>|=)', loaded, re.M),
                     'custom-agent-authority: loaded job has a path override; verify its owner before proceeding')
@@ -634,9 +603,6 @@ class Reinstall:
     def sources(self):
         sources = {'agent': self.source_agent(), 'old-app': self.platform.installed,
                    'browser-config': self.home / '.pi/config/pi-agent-browser-native/config.json',
-                   # Stable and Debug share this exact machine identity. It is
-                   # backed up as its own component so a cutover cannot create
-                   # or retire a second authority by accident.
                    'machine-group': self.home / '.tron/internal/machine-group-id'}
         for path in sorted((self.home / '.tron').iterdir()):
             if path.name not in self.excluded_state_entries():
@@ -680,8 +646,6 @@ class Reinstall:
             require(not components, 'restart-incomplete-step: unexpected partial backup inventory')
         elif previous['phase'] not in ('backing-up', 'awaiting-replacement', 'awaiting-resume'):
             raise Stop('restart-incomplete-step: operation phase cannot be restarted')
-        # Copying is reversible: incomplete bytes stay as predecessor evidence,
-        # while the new operation takes a fresh inventory after restart.
         self.begin(Path(previous['app']), predecessor=previous, bundled_selection=carried_selection)
 
     def abandon(self):
@@ -699,7 +663,6 @@ class Reinstall:
         irreversible = 'bundledSelection' in self.receipt or self.receipt['phase'] == 'awaiting-resume'
         require(candidate_installed or not irreversible,
                 'abandon-irreversible: an irreversible step has passed; resume or roll back this operation instead')
-        # Recorded before archiving the pointer: an interrupted archive reruns with the same evidence.
         self.receipt['abandonment'] = {'installedApp': 'candidate' if candidate_installed else 'original'}
         self.save()
         rename_exclusive(self.store / 'active.json', self.operation / 'abandoned-active.json')
@@ -712,7 +675,6 @@ class Reinstall:
         scratch = private_dir(self.operation / 'scratch', create=True)
         components = self.receipt['components']
         if not components:
-            # Freeze every source before copying anything; absence is recorded too.
             sizes = {}
             self.receipt['sourcePaths'] = {name: str(path) for name, path in sources.items()}
             for name, source in sources.items():
@@ -750,10 +712,7 @@ class Reinstall:
         self.verify_bundled_selection()
         self.layout()
         self.verify_backups()
-        # Reject data changes during an interrupted offline window.
         for name, source in self.sources().items():
-            # The installed app is the sole intentional change in this window;
-            # its replacement identity was checked by continue_offline.
             if name == 'old-app' and app_replaced:
                 continue
             expected = read_json(self.operation / f'{name}.json')
@@ -842,8 +801,6 @@ class Reinstall:
         app_replaced = installed == self.receipt['candidate']
         require(app_replaced or installed == self.receipt['original'],
                 'unexpected-installed-app: preserve operation for review')
-        # Replacing the app never waives the backup/data gate. Run it before
-        # publishing either next action, including repeated awaiting-resume calls.
         self.before_activation(app_replaced=app_replaced)
         if app_replaced:
             self.save('awaiting-resume')

@@ -1,10 +1,3 @@
-// Integration test for `scripts/tron proof mutate` and `scripts/tron proof packet` (tools/proof/README.md
-// "Mutation" and "Packet"): the real CLIs with the pinned toolchain on a copy of the fixture block demo/clamp
-// (tests/fixtures/mutate; test input, not a core block). One journey through the five gate cases:
-// the real laws PASS (with six proven equivalences); a weakened law FAILS with a survivor; a false
-// equivalence claim is REJECTED; a mutant only an unmapped helper catches is not a kill; a law proof that
-// runs out of resources (fixture block demo/timeout) is unknown, never a kill; and the packet renders each
-// law from the laws file and shows the review and the mutation report STALE after an impl or a law edit.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -15,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const FIXTURES = join(ROOT, "tools/proof/tests/fixtures");
-const ALWAYS_HI = "Clamp/branch/hi < x->true#1"; // returns hi for every x >= lo: only L2 (and its helper) catch it
+const ALWAYS_HI = "Clamp/branch/hi < x->true#1";
 
 test("mutation and packet gates fail for the right reasons", (t) => {
   const base = mkdtempSync(join(tmpdir(), "tron-proof-gates-"));
@@ -31,40 +24,34 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   };
   const variant = (name) => join(FIXTURES, "mutate-variants", name);
 
-  // 1. Real laws: every valid mutant is killed by a law or proven equivalent.
   const real = mutate(join(root, "blocks/demo/clamp/mutation-report.json"));
   assert.equal(real.status, 0);
   assert.deepEqual([real.summary.pass, real.summary.valid, real.summary.killed, real.summary.accepted, real.summary.survived, real.summary.unknown], [true, 16, 10, 6, 0, 0]);
   for (const r of Object.values(real.byId).filter((x) => x.status !== "killed")) assert.match(r.accepted, /^equivalent \(proven\): /, r.id);
   assert.deepEqual(real.byId[ALWAYS_HI].killedBy, ["L2 inside"]);
 
-  // 2. Weakened law: the mutant only L2 caught now survives, so the gate fails.
   const weak = mutate(join(base, "weak.json"), "--laws", variant("weak-L2.dfy"));
   assert.equal(weak.status, 1);
   assert.deepEqual([weak.summary.pass, weak.summary.survived, weak.byId[ALWAYS_HI].status], [false, 1, "survived"]);
   assert.match(weak.summary.inputsHash, /^override:/);
 
-  // 3. False equivalence: claiming that survivor equivalent is checked, its proof fails, and it stays a survivor.
   const claimed = mutate(join(base, "false-equivalence.json"), "--laws", variant("weak-L2.dfy"), "--config", variant("false-equivalence.json"), "--only", ALWAYS_HI);
   assert.equal(claimed.status, 1);
   const rejected = claimed.byId[ALWAYS_HI];
   assert.deepEqual([rejected.status, rejected.accepted, claimed.summary.accepted], ["survived", undefined, 0]);
   assert.ok(rejected.acceptanceRejected.some((line) => /Equiv\.dfy\(\d+,\d+\): Error: a postcondition could not be proved/.test(line)), rejected.acceptanceRejected.join("\n"));
 
-  // 4. Vacuous law: only the unmapped helper AtLow fails, which is never a kill.
   const vacuous = mutate(join(base, "vacuous.json"), "--laws", variant("vacuous-L2.dfy"), "--only", ALWAYS_HI);
   assert.equal(vacuous.status, 1);
   const unmapped = vacuous.byId[ALWAYS_HI];
   assert.deepEqual([unmapped.status, unmapped.killedBy, unmapped.unmapped, vacuous.summary.unknown], ["unmapped", [], ["Clamp.AtLow"], 1]);
 
-  // 5. Timeout: mutants that change F(1) make T1's proof run out of resources; retried alone, still unknown.
   const timeout = mutate(join(base, "timeout.json"), "demo/timeout");
   assert.equal(timeout.status, 1);
   const unknown = Object.values(timeout.byId).filter((r) => r.status === "unknown-timeout");
   assert.deepEqual([timeout.summary.pass, timeout.summary.killed, timeout.summary.unknown, unknown.length], [false, 0, 5, 5]);
   for (const r of unknown) assert.deepEqual([r.killedBy, r.timeouts, r.retried], [[], 1, true], r.id);
 
-  // 6. Packet: gate results are bound to the block hash; an edit makes the review and the report STALE.
   const packet = () => {
     const run = cli("packet", "demo/clamp");
     assert.equal(run.status, 0, run.stderr);
@@ -72,7 +59,6 @@ test("mutation and packet gates fail for the right reasons", (t) => {
     return { md: run.stdout, hash: /Block hash: `([0-9a-f]{16})`/.exec(run.stdout)[1], proof: row("Proof (pinned Dafny, --verify-included-files)"), review: row("Independent review"), mutation: row("Mutation check") };
   };
   const before = packet();
-  // Each law is rendered from the laws file: its English and its bodiless statement, not the refining proof.
   assert.ok(before.md.includes([
     "## L2 inside", "", "**In plain English.** L2 inside: a value already inside [lo, hi] is returned unchanged.", "",
     "```dafny", "lemma L2Inside(lo: int, hi: int, x: int)", "  requires lo <= x <= hi", "  ensures Clamp(lo, hi, x) == x", "```",
@@ -96,7 +82,6 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   assert.match(edited.review, new RegExp(`NOT ACCEPTED: STALE \\(reviewed ${before.hash}, current ${edited.hash}\\)`));
   assert.match(edited.mutation, new RegExp(`^\\| Mutation check \\| STALE \\(report for ${before.hash}\\) PASS: `));
 
-  // A law edit also changes the hash: the laws file is part of what every gate result is bound to.
   writeFileSync(block, readFileSync(block, "utf8").replace("// Definition and the proofs", "// Definition and proofs"));
   assert.equal(packet().hash, before.hash);
   const laws = join(root, "laws/demo/Clamp.dfy");

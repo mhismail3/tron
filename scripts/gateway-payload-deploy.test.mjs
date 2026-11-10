@@ -16,15 +16,10 @@ import {
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 
-// One chmod process per tree: a per-entry walk of a fixture's ~9k npm files
-// costs more than the test it cleans up after.
 async function makeTreeWritable(root) {
   await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 30_000 }).catch(() => {});
 }
 
-// Fixture bases are built once per file and never handed to a test. Each test
-// receives a copy-on-write clone (`cp -c` keeps modes and relative symlinks), so
-// one test's mutation cannot reach a later test or the base.
 let fixtureBaseRootPromise;
 const fixtureBases = new Map();
 after(async () => {
@@ -53,9 +48,6 @@ async function pinnedNpmRoot() {
     const repoRoot = fileURLToPath(new URL("../", import.meta.url));
     const nodeVersion = (await readFile(join(repoRoot, ".node-version"), "utf8")).trim();
     assert.equal(process.version, `v${nodeVersion}`, "payload tests require the repository-pinned Node version");
-    // The npm tree that ships with the running pinned Node (asserted above); the
-    // digest below proves it is the archive tree. No separate toolchain install
-    // is a hidden prerequisite (a missing .ci-tools failed tests 15-22 together).
     const nodeRoot = process.env.TRON_NODE_ROOT
       ? resolve(process.env.TRON_NODE_ROOT)
       : resolve(dirname(process.execPath), "..");
@@ -64,7 +56,6 @@ async function pinnedNpmRoot() {
     try { await lstat(npmRoot); }
     catch (error) {
       if (error?.code !== "ENOENT" || !nodeRoot.includes("/Contents/Resources/Gateway/runtime")) throw error;
-      // The signed app runtime keeps the verified npm tree next to its Node binary.
       npmRoot = join(nodeRoot, `npm-${process.arch}`);
       await lstat(npmRoot);
     }
@@ -114,41 +105,6 @@ async function addRuntimeNodeAliases(root) {
 
 const execFileAsync = promisify(execFile);
 
-// macOS 15 refuses rename(2) of a directory its non-root owner cannot write
-// (EACCES); macOS 26 permits it, so a plain run on a newer host cannot see the
-// kernel check. Enforce that rule on every directory rename the deploy module
-// makes for the duration of one operation.
-
-// Entry modes keyed by path relative to root. Links are recorded without a mode:
-// their own inode mode is not a payload authority and must not be touched.
-
-// Representative payload entries: executables with and without owner-only bits,
-// setuid/setgid, read-only and unreadable files, nested directories with restrictive
-// modes, and an in-tree link. An out-of-tree link target lives beside the root.
-
-// Sealing sets exactly these modes and never follows or re-modes a link: an
-// out-of-tree target keeps its mode, and a refused escaping link leaves the tree
-// unsealed instead of half-sealed.
-
-// Sealing refuses an unsupported entry before any mode changes. Unsealing opens
-// each directory before reading it, so it may already have opened directories
-// when it refuses; cleanup removes that tree either way. A failed staging tree
-// with an unreadable directory must still unseal, or cleanup cannot remove it.
-
-// Modes are not part of the fingerprint, so sealing a real payload must keep its
-// fingerprint, and its runtime executables must stay executable for admission.
-
-// Failure modes (#116), each observed through the real publication paths:
-// 1. stagePayload freezes its staging root before renaming it into versions/,
-//    so macOS 15 refuses the rename and dev/Stable staging cannot publish.
-// 2. buildSourcePayload regresses to the same freeze-then-rename order.
-// 3. keeping the root writable across the rename but not sealing it afterwards
-//    publishes a version whose root stays writable.
-// 4. any nested directory or file stays writable after publication.
-
-// A source build that compiles to an import outside app/ must fail before it
-// is published, so it never becomes a selectable candidate.
-
 async function makePreflightFixture(root) {
   return cloneFixture("preflight", root, buildPreflightFixture);
 }
@@ -182,11 +138,6 @@ async function buildPreflightFixture(root) {
   return payload;
 }
 
-// Failure mode (#107): `scripts/tron dev` computes the stage arguments in
-// tron-dev-state.mjs `candidate-source` while this module owns the manifest
-// validator; when the two drift (a short or `-dirty` revision), start/restart
-// cannot stage any candidate. Run the real stage CLI with exactly what
-// tron-dev passes, from a dirty and a clean checkout.
 test("tron-dev candidate source stages through the real payload manifest validator", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-dev-candidate-stage-"));
   try {
@@ -221,9 +172,6 @@ test("tron-dev candidate source stages through the real payload manifest validat
   }
 });
 
-// The manifest and selection key sets, schema and kinds are shared with the
-// launcher and the bundler through gateway-payload-contract.json. The writers
-// here emit the on-disk documents the launcher reads.
 const payloadContract = JSON.parse(await readFile(
   new URL("../packages/mac-app/scripts/gateway-payload-contract.json", import.meta.url), "utf8"));
 
@@ -254,10 +202,6 @@ test("deploy writers emit the shared payload and selection contract", async () =
   }
 });
 
-// #722: the installed apply CLI must use today's trusted source builder, not
-// yesterday's copied build implementation. The fixture builder stages a real
-// immutable payload; the installed helper still owns credential and promotion
-// admission. No listener, launcher, or live home is involved.
 test("source apply uses the trusted checkout builder and retains installed promotion admission", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-updater-")));
   try {
@@ -295,8 +239,6 @@ test("source apply uses the trusted checkout builder and retains installed promo
     const invoke = version => execFileAsync(process.execPath, [deploy, "apply", "--channel", "stable",
       "--mode", "source", "--candidate-version", version, "--command-id", `source-build-${version}`],
     { env: environment, timeout: 120_000 });
-    // It must reach the installed credential gate after the source's new build
-    // behavior has published a candidate. The old helper fails before staging.
     await assert.rejects(invoke("new-builder"), error => {
       assert.match(error.stderr, /local Gateway credential is missing or unsafe/);
       return true;
@@ -315,8 +257,6 @@ test("source apply uses the trusted checkout builder and retains installed promo
     assert.equal(builderRecord.commandId, "source-build-new-builder");
     assert.match(builderRecord.builderSha256, /^[a-f0-9]{64}$/);
 
-    // Even a source builder returning a real but subsequently corrupted artifact
-    // cannot bypass the installed helper's fingerprint check or publish selection.
     await writeFile(join(home, "gateway/local-auth.json"), JSON.stringify({
       version: 2, purpose: "local-wrapper-health", bearerToken: "f".repeat(32), lastUpdated: new Date().toISOString(),
     }), { mode: 0o600 });
@@ -348,19 +288,6 @@ test("source apply uses the trusted checkout builder and retains installed promo
   }
 });
 
-// Failure mode (#124): `scripts/tron dev handoff` admits the selected candidate
-// from its clean source record before this helper takes the dev operation
-// lock. A Debug apply or rollback accepted from iOS in between can select
-// another (dirty or unrecorded) payload that is running and ready, so the
-// pre/post identity proof passes for it. The handoff must copy only the exact
-// admitted version and fingerprint, re-checked under the lock.
-
-// #515: stage Debug on the installed signed runtime only when its validated
-// Node contract matches; the handoff continues to compare runtime bytes exactly.
-
-// Native fixtures model changed signature bytes without requiring signing keys.
-// All Mach-O magic forms and extensionless executables share the same stage owner.
-
 test("runBounded settles at the kill deadline when a descendant retains pipes", async () => {
   const started = Date.now();
   await assert.rejects(
@@ -370,14 +297,6 @@ test("runBounded settles at the kill deadline when a descendant retains pipes", 
   assert.ok(Date.now() - started < 4_000);
 });
 
-// #729: an old Gateway that finished its shutdown but stayed inside its own
-// exit kept the deploy at `draining` forever. Each case below is a real
-// process with a real TCP listener, read through the deploy's own ps/lsof
-// probes. The old Gateway's port stays open while it drains accepted work and
-// closes only when its shutdown begins.
-// The release timer starts only once this fixture has captured the listener (the deploy's
-// drain likewise starts from a captured identity), so a slow lsof under load cannot find the
-// port already closed.
 async function oldGatewayFixture({ releaseAfterMs, then }) {
   const program = `
     const server = require("node:net").createServer().listen(0, "127.0.0.1", () => {
@@ -438,11 +357,6 @@ for (const scenario of [
   });
 }
 
-// A crash at either pointer write while rolling back leaves a state the launcher starts from.
-// Without a pending-attempt marker (the explicit `rollback` command after a ready deploy) the
-// rollback target must stay selected by current.json or previous.json. With a `launched` marker
-// the launcher restores the marker's previous selection only while current.json still names
-// the marker's candidate (tron-gateway-launcher.c refuses a mismatch), so it must.
 test("a crash inside the rollback keeps a startable selection (#2316 F8)", async () => {
   for (const marker of [false, true]) for (const crashAt of ["current.json", "previous.json"]) {
     const root = await mkdtemp(join(tmpdir(), "tron-rollback-crash-"));
@@ -456,7 +370,6 @@ test("a crash inside the rollback keeps a startable selection (#2316 F8)", async
       await writeFile(paths.current, `${JSON.stringify(pointer("failed", "b"))}\n`);
       if (marker) await writeFile(paths.pending, `${JSON.stringify({ schema: 1, kind: "tron-gateway-pending-attempt", channel: "dev", attempt: "launched",
         version: "failed", payloadFingerprint: "b".repeat(64), previousVersion: "good", previousFingerprint: "a".repeat(64) })}\n`);
-      // The child dies at the instant it would rename that pointer into place.
       const preload = join(root, "crash-at-rename.mjs");
       await writeFile(preload, [
         'import fs from "node:fs";',
@@ -482,16 +395,6 @@ test("a crash inside the rollback keeps a startable selection (#2316 F8)", async
   }
 });
 
-// #699: a Debug promotion whose candidate never relaunches must recover without
-// the Stable path. The real promote CLI drives an owned stand-in Gateway process
-// on a private port: it drains and exits 75 like the Gateway, and the candidate
-// never listens. The relaunching owner is a model of scripts/tron-dev's
-// supervisor, which relaunches the current selection only after an exit 75 and
-// otherwise exits `failed`. Failure modes:
-// 1. dev recovery reaches the Stable launchd kickstart (Stable error text);
-// 2. the prior selection is not restored;
-// 3. with no supervisor left, the failure does not name its recovery command,
-//    or a relaunch of the restored selection is not accepted as the recovery.
 const FAKE_GATEWAY = `
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
@@ -572,16 +475,12 @@ test("a failed Debug promotion restores the prior selection and never takes the 
     };
 
     for (const supervisorLive of [false, true]) {
-      // Each case starts on the prior selection, served by its first child.
       assert.equal(await currentVersion(), "prior");
       const port = await freePort();
       const first = launch(port, staged.prior);
       await waitForListener(port);
-      // The stand-in supervisor relaunches on exit 75, and only the restored
-      // prior selection ever listens; the candidate never produces a listener.
       first.once("exit", async (code) => {
         if (!supervisorLive || code !== 75) return;
-        // Bounded: if the selection is never restored, nothing relaunches and the case fails.
         for (let attempt = 0; attempt < 200; attempt += 1) {
           if (await currentVersion().catch(() => undefined) === "prior") {
             await new Promise((done) => setTimeout(done, 500));

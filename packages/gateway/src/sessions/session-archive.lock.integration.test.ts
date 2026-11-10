@@ -7,18 +7,12 @@ import { SessionArchiveStore } from "./session-archive-store.js";
 const T0 = "2026-01-01T00:00:00.000Z";
 const T1 = "2026-01-01T00:00:01.000Z";
 
-/**
- * `gateway/session-catalog` session archive store: every write path, its refusals,
- * the change revision and the exact document each step commits. The committed
- * corpus read-back is `store-session-archive-attention`.
- */
 it("session-archive-paths: archive, rekey, prune, remove and admission", async () => {
   const home = await mkdtemp(join(tmpdir(), "tron-session-archive-"));
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(Date.parse(T0));
   onTestFinished(async () => { vi.useRealTimers(); await rm(home, { recursive: true, force: true }); });
   const path = join(home, "gateway", "session-archive.json");
-  /** The committed document, or `undefined` before the first write. */
   const committed = async () => readFile(path, "utf8").then((text) => JSON.parse(text) as unknown,
     (error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
   const sessions = (records: Record<string, string>) =>
@@ -72,8 +66,6 @@ it("session-archive-paths: archive, rekey, prune, remove and admission", async (
   expect(await store.remove("c"), "remove c again").toBe(false);
   expect(store.revision).toBe(1);
 
-  // Admission of a hand-written document: the current owner reads exactly what it
-  // would write and refuses anything else, by document or by record.
   const reopen = async (document: unknown) => {
     await writeFile(path, JSON.stringify(document));
     const reopened = new SessionArchiveStore(home);

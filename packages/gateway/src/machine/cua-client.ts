@@ -36,9 +36,6 @@ function parseCuaOutput(stdout: string, endpointGeneration: string, kind: "obser
   return { status: refused ? "refused" : uncertain ? "outcomeUnknown" : "completed", output, endpointGeneration };
 }
 
-/** One extension load owns one endpoint binding and one accepted CLI await.
- * The Native Host owns the daemon. A lost endpoint cannot redirect an action to
- * a successor; only an explicit observation may establish a fresh binding. */
 export class CuaComputerClient {
   private endpoint: NativeAutomationEndpoint | undefined;
   private pending: Promise<CuaComputerResult> | undefined;
@@ -120,8 +117,6 @@ export class CuaComputerClient {
       }
       const endpoint = this.endpoint!;
       if (observation) {
-        // Cua expires idle CLI sessions. Only a fresh observation may revive
-        // this load's exact session; never revive or replay an input action.
         const { stdout } = await execFileAsync(DRIVER, ["call", "start_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
           { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
         const activation = parseCuaOutput(stdout, endpoint.generation);
@@ -142,16 +137,12 @@ export class CuaComputerClient {
       let imagePath: string | undefined;
       if (IMAGES.has(tool) && args.include_screenshot !== false) {
         directory = await mkdtemp(join(tmpdir(), "tron-computer-"));
-        // Cua returns canonical paths. Resolve our owned directory before
-        // dispatch so macOS /var → /private/var does not discard valid images.
         directory = await realpath(directory);
         imagePath = join(directory, "observation.png");
         args.screenshot_out_file = imagePath;
       }
       signal?.throwIfAborted();
       if (this.closed) throw new Error("Computer session ended before dispatch");
-      // No waiter signal/timeout: do not kill an accepted native invocation.
-      // Overflow/transport failure is uncertainty; it never triggers replay.
       const { stdout } = await execFileAsync(DRIVER, ["call", tool, JSON.stringify(args), "--socket", endpoint.socket], {
         env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true,
       });
@@ -178,7 +169,7 @@ export class CuaComputerClient {
             || width > 8192 || height > 8192 || width * height > 32_000_000 || width !== output.screenshot_width || height !== output.screenshot_height) throw new Error("Invalid computer PNG dimensions");
           image = { type: "image", data: bytes.toString("base64"), mimeType: "image/png" };
         } finally { await file.close(); }
-        delete output.screenshot_file_path; // The temporary file is not durable authority.
+        delete output.screenshot_file_path;
       }
       if (directory) { await rm(directory, { recursive: true, force: true }); directory = undefined; }
       signal?.throwIfAborted();
@@ -197,8 +188,6 @@ export class CuaComputerClient {
       return { ...result, ...(image ? { image } : {}) };
     } catch (error) {
       this.invalidateObservation();
-      // Keep the old descriptor for shutdown; only an explicit observation may
-      // rebind after a failed invocation, never an action or automatic retry.
       this.refreshEndpoint = true;
       throw new Error(`Computer operation unavailable or uncertain; observe before acting again. ${error instanceof Error ? error.message : String(error)}`);
     } finally { if (directory) await rm(directory, { recursive: true, force: true }); }
@@ -213,7 +202,7 @@ export class CuaComputerClient {
     if (this.closing) return this.closing;
     this.closed = true;
     this.closing = (async () => {
-      await this.pending?.catch(() => {}); // Invocation reports its own result/error.
+      await this.pending?.catch(() => {});
       const endpoint = this.endpoint; this.endpoint = undefined;
       if (!endpoint) return;
       for (;;) {
@@ -221,8 +210,6 @@ export class CuaComputerClient {
           { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
         const result = JSON.parse(stdout) as Record<string, unknown>;
         if (result.code === "session_cleanup_pending") {
-          // The driver's documented idempotent cleanup operation is still
-          // joining native work. Poll that receipt, never repeat the action.
           await delay(100); continue;
         }
         if (result.active !== false || result.code !== undefined || result.error !== undefined) throw new Error("Cua session cleanup was not confirmed");

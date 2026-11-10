@@ -1,10 +1,5 @@
 import { defineConfig } from "vitest/config";
 
-/** Mac Terminal's journey (README "Mac Terminal") drives a real sshd on this
- * Mac's Tailscale address with the iPhone app's Swift SSH client, so it needs
- * the host on its tailnet and a Swift 6.2 toolchain. It runs on request
- * (`npm run test:mac-terminal`),
- * not in the hosted `npm test` pass, whose runners have neither. */
 export const macTerminalTestFiles = ["src/e2e/security/mac-terminal.e2e.test.ts", "src/security/mac-terminal-service.e2e.test.ts"];
 
 export default defineConfig({

@@ -3,9 +3,6 @@ import { GatewayError } from "../errors.js";
 import type { DisplayArtifactStore } from "./display-artifact-store.js";
 import type { DisplayArtifactDescriptor, DisplayMarkdownImage } from "../modules/display/contract.js";
 
-/** Snapshot standalone relative image blocks, never a live filesystem resolver.
- * Child artifacts use the same branch admission, retention and media bounds as
- * the document. No source paths or external fetch authority reach the client. */
 export async function ingestMarkdownImages(
   store: DisplayArtifactStore, root: string, path: string, sessionID: string,
   document: DisplayArtifactDescriptor, signal?: AbortSignal,
@@ -37,17 +34,12 @@ export async function ingestMarkdownImages(
       if (!destination || seen.has(destination)) continue;
       seen.add(destination);
       if (seen.size > 16) break;
-      // A document grants only visible children of its own source directory.
-      // Do not normalize traversal, URL syntax or encoded path separators into
-      // authority; ingest additionally rejects symlinks and uses no-follow opens.
       if (destination.length > 4_096 || /[:%?#\\]/.test(destination)
         || destination.split("/").some(part => !part || part.startsWith(".") || Buffer.byteLength(part) > 255)
         || !/\.(png|jpe?g|gif|webp)$/i.test(destination)) continue;
       let artifact: DisplayArtifactDescriptor;
       try { artifact = await store.ingest(root, join(dirname(path), destination), sessionID); }
       catch (error) {
-        // Missing or refused children remain explicit unavailable image blocks;
-        // operational storage failures must not be disguised as a valid snapshot.
         if (error instanceof GatewayError && ["invalid_request", "conflict"].includes(error.code)) continue;
         throw error;
       }

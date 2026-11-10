@@ -38,7 +38,6 @@ export function validateQueue(items: Array<Pick<QueuedMessageState, "text" | "at
   }
 }
 
-/** The receipt form of a composed message's skills and prompts. */
 export function invocationResources(resources: readonly ResourceInvocation[] | undefined): InvokedResource[] | undefined {
   return resources?.map(({ source, name }) => {
     if (source === "extension") throw new Error("An extension command is not a composed resource");
@@ -49,19 +48,15 @@ export function invocationResources(resources: readonly ResourceInvocation[] | u
 export function resourceIsInvocable(commands: readonly CommandInfo[], resource: ResourceInvocation): boolean {
   const catalogName = canonicalResourceName(resource.source, resource.name);
   const matches = commands.filter(command => command.source === resource.source && command.name === catalogName);
-  // A skill or prompt sharing an extension command's name is ambiguous to pick.
   const shadowed = resource.source !== "extension"
     && commands.some(command => command.source === "extension" && command.name === catalogName);
   return matches.length === 1 && !shadowed;
 }
 
-/** Serialized edits retain the one queue owner's identities and SDK effect order. */
 export class RunQueueCommands {
   constructor(private readonly operations: RunOperations<unknown>) {}
 
   async clearQueue(): Promise<void> {
-    // Waiting prompts are not admitted yet, so they clear immediately instead
-    // of behind the compaction that owns the session lane.
     this.operations.assertUsable();
     this.operations.heldQueue.clearWaiting();
     this.operations.runQueue.reconcileQueuedMessages();
@@ -86,8 +81,6 @@ export class RunQueueCommands {
     });
   }
 
-  /** A held prompt keeps its visible runtime text (admission composes it); a
-   * message in Pi's queue is recomposed with its skills and prompts. */
   editedQueueItem<T extends RuntimeQueuedMessage>(
     previous: T,
     item: Pick<QueuedMessageState, "behavior" | "text">,
@@ -117,7 +110,6 @@ export class RunQueueCommands {
         if (!item.resourceInvocations.every(resource => resourceIsInvocable(commands, resource))) {
           throw new GatewayError("conflict", "A queued resource is no longer unambiguous for this session", true);
         }
-        // A composed message is never a command, whatever its text begins with.
         continue;
       }
       if (!item.runtimeText.startsWith("/")) continue;
@@ -135,8 +127,6 @@ export class RunQueueCommands {
     if (this.operations.heldQueue.entries.length > 0) {
       this.operations.assertUsable();
       this.operations.runQueue.reconcileQueuedMessages();
-      // Pi's queue and the held queue have different owners and admission
-      // states; one atomic edit across both is not offered.
       if (this.operations.runQueue.queuedMessages.length > 0 || this.operations.runQueue.pendingQueueAdmission) {
         throw new GatewayError("conflict", "Messages are still moving into the active queue. Try again in a moment.", true);
       }
@@ -182,8 +172,6 @@ export class RunQueueCommands {
       this.operations.runQueue.suppressQueueEvents = true;
       try {
         session.clearQueue();
-        // Publish in requested order: each item passes Pi's async input hooks and is queued before the next
-        // starts, so a slow hook cannot let a later item of the same behavior enter Pi's queue first.
         const dispositions: Array<"handled" | "queued"> = [];
         for (const item of next) {
           dispositions.push(item.behavior === "steer"
@@ -194,8 +182,6 @@ export class RunQueueCommands {
           dispositions[index] === "handled" ? [item.id] : []));
       } catch (error) {
         rebuildError = error;
-        // Queue replacement is one mutation. Do not retain a partially rebuilt
-        // queue whose items have no coherent invocation ownership.
         session.clearQueue();
       } finally {
         this.operations.runQueue.suppressQueueEvents = false;
@@ -236,9 +222,6 @@ export class RunQueueCommands {
         const resourceInvocations = item.resourceInvocations;
         const invocationName = previousInvocation.name;
         if (!resourceInvocations || !invocationName) throw new Error("revised resource invocation is unavailable");
-        // Start receipts are immutable. Editing a queued message's text terminalizes
-        // the prior intent and starts a replacement invocation while retaining
-        // the queue operation ID used by native row identity.
         await this.operations.runInvocations.terminalizeInvocation(item.id, "interrupted", "queue-edited");
         const invocationId = randomUUID();
         const createdAt = new Date().toISOString();

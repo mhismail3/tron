@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
-# Stage the app inputs into the bundler-owned fresh directory. Dependency
-# installation, fingerprinting and publication remain the bundler's lifecycle.
+# Stage the app inputs into the bundler-owned fresh directory.
 set -euo pipefail
 [[ $# == 2 ]] || { echo 'usage: stage-gateway-app.sh GATEWAY_DIR APP_DIR' >&2; exit 64; }
 GATEWAY_DIR="$1"
 APP_DIR="$2"
 REPO_ROOT="$(cd "$GATEWAY_DIR/../.." && pwd)"
-# The caller may time out this shell and immediately remove its staging tree.
-# Keep every writer in Bash's owned job table; interruption must join it first.
 stop_stage() {
   local status="$1" child
   trap - EXIT HUP INT TERM
@@ -25,9 +22,6 @@ stage_child cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
 stage_child cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
 stage_child cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"
 stage_child cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
-# npm ci installs the Tron-patched pi-coding-agent from its declared tarball,
-# so the declaration and tarball are staged before installation. third_party/ is not
-# artifacts/, which source updates rewrite to the pi-subagents pin set.
 stage_child cp "$GATEWAY_DIR/pi-coding-agent-patch.json" "$APP_DIR/"
 stage_child python3 - "$GATEWAY_DIR" "$APP_DIR" <<'PY'
 import json, pathlib, shutil, sys
@@ -38,8 +32,6 @@ if relative.is_absolute() or '..' in relative.parts or relative.parts[:2] != ('t
 (target / relative).parent.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(source / relative, target / relative)
 PY
-# Pin metadata and both immutable selections share the fingerprinted app tree.
-# No provider is installed into a runtime home during packaging.
 stage_child cp "$GATEWAY_DIR/pi-subagents-pin.json" "$APP_DIR/"
 stage_child cp "$GATEWAY_DIR/scripts/check-pi-subagents.mjs" "$GATEWAY_DIR/scripts/install-pi-subagents.mjs" "$APP_DIR/scripts/"
 stage_child python3 - "$GATEWAY_DIR" "$APP_DIR" <<'PY'

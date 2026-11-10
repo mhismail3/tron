@@ -62,8 +62,6 @@ function gateway(host, channel, kind) {
 process.on('SIGTERM', () => { for (const server of servers) server.close(); process.exit(0); });
 """
 
-# Only macOS observations are synthetic. In particular Python, the verifier's
-# JSON identity predicate, the Node client and WS/TLS negotiation are real.
 PLATFORM = r"""import json, os, pathlib, subprocess, sys
 name=pathlib.Path(sys.argv[0]).name
 args=sys.argv[1:]

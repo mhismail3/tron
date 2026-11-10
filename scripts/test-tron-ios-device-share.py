@@ -93,8 +93,6 @@ def fixture_ipa(tmp: Path) -> Path:
 
 
 def preview_page(directory: Path) -> None:
-    # A fresh, explicitly selected output protects prior review evidence. Only
-    # the real publisher renders HTML; these synthetic IPAs cannot be installed.
     directory.mkdir(parents=True, exist_ok=False)
     samples = [
         ("111111111", "More useful build diagnostics", "Clearer connection errors and build details.", "optimized", "preview/build-diagnostics"),
@@ -125,13 +123,10 @@ def fixture_journey() -> None:
                            check=True, capture_output=True, text=True)
             if n == 0:
                 removed_build = next((served / "builds").iterdir()).name
-            time.sleep(1.05)  # build ids carry a one-second UTC timestamp
+            time.sleep(1.05)
         builds = sorted(p.name for p in (served / "builds").iterdir())
         check(len(builds) == 5 and builds[0].endswith("-0000002ab"), "retention keeps the newest 5 builds")
 
-        # Observe entry into the real flock syscall in a spawned publisher, not
-        # a timing guess about whether Python has finished starting. The wrapper
-        # only signals a pipe; the actual OS lock and complete publisher run.
         before = (served / "index.html").read_bytes()
         read_fd, write_fd = os.pipe()
         wrapper = """import fcntl, os, runpy, sys
@@ -174,8 +169,6 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
         check(len(builds) == 5 and builds[-1].endswith("-fffffffab"),
               "serialized publish still retains five builds with the new build first")
 
-        # Missing CSS must fail before touching an existing tree, not leave a
-        # half-published page. Run a real isolated copy with no asset present.
         copied = tmp / "missing-css" / "scripts" / PUBLISH.name
         copied.parent.mkdir(parents=True)
         shutil.copyfile(PUBLISH, copied)
@@ -197,7 +190,6 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
         try:
             local = f"http://127.0.0.1:{port}"
             for _ in range(50):
-                # A server that exited cannot answer; say why instead of reporting a refused connection.
                 if server.poll() is not None:
                     check(False, f"share server exited {server.returncode} before listening: "
                                  f"{server_log.read_text().strip()[-400:]}")

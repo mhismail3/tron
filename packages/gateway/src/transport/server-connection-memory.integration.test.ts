@@ -10,22 +10,6 @@ import { GatewayServer } from "./server.js";
 import { StallSampler, type HostMemory } from "./stall-diagnostics.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
-// Failure modes this file exists to catch (real sockets, injected host probe):
-// 1. A phone's `connection.closed` and `connection.opened` records say nothing
-//    about the host, so the 2026-09-27 drop/reconnect cycles at 19.8 GB of swap
-//    stay an unexplained transport fault.
-// 2. Every boundary record probes the host for itself, so the reconnect storm
-//    caused by paging adds a `sysctl` pair per record.
-// 3. The host sample is taken once and never refreshed, so a drop hours later
-//    reports the numbers captured before the squeeze.
-// 4. The Mac app's constant local-probe records gain host facts, multiplying
-//    them per probe instead of per phone connection.
-// 5. A record read hours after the sample was taken has no age, so a cache that
-//    a lost probe race left frozen reads as the host state at the drop; and the
-//    fields the interpret table compares against (the swap total, the kernel's
-//    memory level) are not in the line at all.
-
-/** The 2026-09-27 incident: swap nearly exhausted while phones reconnected. */
 const DURING_SQUEEZE: HostMemory = {
   freeBytes: 1_240_000_000,
   totalBytes: 36_000_000_000,
@@ -34,7 +18,6 @@ const DURING_SQUEEZE: HostMemory = {
   pressure: "critical",
   memoryAvailablePercent: 4,
 };
-/** The same Mac after the idle simulators were shut down. */
 const AFTER_CLEANUP: HostMemory = {
   freeBytes: 30_400_000_000,
   totalBytes: 36_000_000_000,
@@ -65,13 +48,10 @@ async function unusedPort(): Promise<number> {
 
 interface Harness {
   port: number;
-  /** Counts every host probe and answers with what `sample` currently holds. */
   probe: ReturnType<typeof vi.fn>;
-  /** Replaces what the next host probe answers. */
   sample: (next: HostMemory) => void;
   pairedToken: string;
   localToken: string;
-  /** Opens one socket, sends hello and returns it once its open record landed. */
   connect: (token: string) => Promise<WebSocket>;
   records: (event: string) => Array<[string, string, Record<string, unknown>]>;
 }
@@ -87,7 +67,6 @@ async function startGateway(): Promise<Harness> {
   const probe = vi.fn(async () => current);
   const sampler = new StallSampler({ sampleHost: probe, observeGc: () => () => {} });
   const logger = { log: vi.fn() };
-  // Only the heartbeat interval is virtual: socket I/O and waits stay real.
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   const gateway = new GatewayServer({ display: {} as never,
     host: "127.0.0.1",
@@ -140,9 +119,6 @@ async function startGateway(): Promise<Harness> {
 }
 
 describe("host memory in connection records", () => {
-  // Failure mode 1: the record an operator reads when the phone drops at high
-  // swap must carry the host's memory pressure and swap, including the first
-  // connection after a Gateway start.
   it("states the host's swap and memory pressure when a paired phone drops and reconnects", async () => {
     const harness = await startGateway();
     const socket = await harness.connect(harness.pairedToken);
@@ -160,14 +136,12 @@ describe("host memory in connection records", () => {
     expect(closed[1]).toContain(`swapUsedBytes=${DURING_SQUEEZE.swapUsedBytes}`);
     expect(closed[1]).toContain(`memoryPressure=${DURING_SQUEEZE.pressure}`);
 
-    // The reconnect after the drop reports the same host state.
     const reconnect = await harness.connect(harness.pairedToken);
     expect(harness.records("connection.opened").at(-1)![1]).toContain(`swapUsedBytes=${DURING_SQUEEZE.swapUsedBytes}`);
     reconnect.close();
     await waitFor(() => harness.records("connection.closed").length === 2, "second close record");
   });
 
-  // Failure mode 2: four boundary records must not become four host probes.
   it("probes the host on a heartbeat cadence rather than once per connection record", async () => {
     const harness = await startGateway();
     const paired = await harness.connect(harness.pairedToken);
@@ -179,7 +153,6 @@ describe("host memory in connection records", () => {
     expect(harness.probe).toHaveBeenCalledTimes(1);
   });
 
-  // Failure mode 3: a stale sample would report the pre-squeeze host forever.
   it("reports the host state sampled after the squeeze, not the state captured at startup", async () => {
     const harness = await startGateway();
     const during = await harness.connect(harness.pairedToken);
@@ -199,19 +172,12 @@ describe("host memory in connection records", () => {
     await waitFor(() => harness.records("connection.closed").length === 2, "close after cleanup");
   });
 
-  // Failure mode 5: a record can carry pre-squeeze numbers, because the sample
-  // is only refreshed on a heartbeat and a probe that loses its 1 s race is
-  // discarded. Without the sample's age, and without the swap total and the
-  // kernel's memory level the interpret table reads, the drop still cannot be
-  // judged from the line.
   it("states the sample's age, the swap total and the kernel's memory level", async () => {
     const harness = await startGateway();
     const during = await harness.connect(harness.pairedToken);
     during.close();
     await waitFor(() => harness.records("connection.closed").length === 1, "close during the squeeze");
 
-    // The Mac is no longer squeezed and no tick has run, so the record below
-    // still holds the squeeze sample and only its age says so.
     harness.sample(AFTER_CLEANUP);
     await new Promise((resolve) => setTimeout(resolve, 20));
     const after = await harness.connect(harness.pairedToken);
@@ -226,9 +192,6 @@ describe("host memory in connection records", () => {
     await waitFor(() => harness.records("connection.closed").length === 2, "second close record");
   });
 
-  // Failure mode 4: the Mac app's local probes reconnect constantly; host facts
-  // belong to the phone's boundary, not to every probe line. The paired socket
-  // in the same run is the positive control for the absent fields.
   it("leaves the Mac app's local probe records free of host facts", async () => {
     const harness = await startGateway();
     const paired = await harness.connect(harness.pairedToken);

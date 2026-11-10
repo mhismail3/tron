@@ -12,10 +12,6 @@ const gateway = fileURLToPath(new URL("../../..", import.meta.url));
 const run = promisify(execFile);
 
 let staged: { root: string; app: string; source: string; preparation?: Promise<unknown> } | undefined;
-// Copying/validating the real payload is preparation, not offline activation.
-// Record ownership before the first fallible step so failed setup is cleaned too.
-// The staging source is this checkout seen through a test-owned view whose dist
-// is emitted from this commit, so a missing or stale checkout build never decides.
 beforeAll(async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-subagents-staged-"));
   const app = join(root, "app"), repo = join(root, "repo"), source = join(repo, "packages", "gateway");
@@ -31,8 +27,6 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(async () => {
   if (!staged) return;
-  // Even a runner hook timeout cannot authorize deleting a still-owned copy.
-  // Setup reports its own failure; this owner joins before removing its tree.
   await staged.preparation?.catch(() => undefined);
   await rm(staged.root, { recursive: true, force: true });
 });
@@ -42,8 +36,6 @@ it("activates a real staged Mac app offline without checkout pin or artifact acc
   const reportPath = process.env.TRON_SUBAGENTS_PAYLOAD_REPORT ?? join(gateway, "test-results", "managed-subagents.payload.json");
   const report: Record<string, unknown> = { passed: false };
   try {
-    // Dependency installation remains the separate npm-ci step. The prepared
-    // app shares only that exact SDK tree, never pin/archive/source authority.
     const script = `import net from 'node:net';
       net.Socket.prototype.connect = function () { throw new Error('network denied'); };
       const { ManagedSubagents } = await import('./dist/kernel/delegation/managed-subagents.js');
@@ -60,7 +52,6 @@ it("activates a real staged Mac app offline without checkout pin or artifact acc
     const pin = JSON.parse(await readFile(join(app, "pi-subagents-pin.json"), "utf8"));
     const receipt = JSON.parse(await readFile(join(activated.root, "tron-install-receipt.json"), "utf8"));
     expect(receipt).toEqual({ version: pin.version, forkCommit: pin.fork.commit, sha512: pin.closure.sha512 });
-    // The operator installer is a shipped entrypoint too, not a checkout script.
     await run(process.execPath, ["scripts/install-pi-subagents.mjs", join(root, "home")], { cwd: app, timeout: 15_000 });
     await run(process.execPath, ["scripts/check-pi-subagents.mjs"], { cwd: app, timeout: 15_000 });
     const trustedChecker = join(gateway, "scripts/check-pi-subagents.mjs");
@@ -89,10 +80,7 @@ it("joins an interrupted staging writer before the caller can remove its tree", 
   try {
     await mkdir(bin);
     await run("mkfifo", [gate], { timeout: 15_000 });
-    // Keep both FIFO ends open so release cannot race the writer's open or EOF.
     gateWriter = await open(gate, constants.O_RDWR | constants.O_NONBLOCK);
-    // Gate the real first copy, not a substitute staging algorithm. On release
-    // the same writer execs actual cp with the production script's arguments.
     const copy = join(bin, "cp");
     await writeFile(copy, '#!/bin/bash\nset -e\nexec 3< "$TRON_STAGE_COPY_GATE"\nprintf "writer:%s\\n" "$$"\nIFS= read -r _ <&3\nexec /bin/cp "$@"\n');
     await chmod(copy, 0o755);
@@ -118,7 +106,7 @@ it("joins an interrupted staging writer before the caller can remove its tree", 
     child.stderr.resume();
     owned = { child, exited, closed };
     const writer = await awaitsWithin(writerReady, "real staging copy entered its gate");
-    child.kill("SIGTERM"); // Same signal as execFile's timeout, not a process-tree kill.
+    child.kill("SIGTERM");
     witness.shellExit = await awaitsWithin(exited, "interrupted stager joined its writer");
     let alive = true;
     try { process.kill(writer, 0); } catch (error) {
@@ -130,8 +118,6 @@ it("joins an interrupted staging writer before the caller can remove its tree", 
     expect(witness.shellExit).toEqual({ code: 143, signal: null });
   } finally {
     if (owned && owned.child.exitCode === null && owned.child.signalCode === null) owned.child.kill("SIGTERM");
-    // Also release a faulty stager that waits without stopping its writer.
-    // This lets the failing old-script control finish its actual copy safely.
     if (gateWriter) {
       try { if (owned) await gateWriter.write("continue\n"); } finally { await gateWriter.close(); }
     }

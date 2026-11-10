@@ -1,18 +1,5 @@
 #!/usr/bin/env node
-/**
- * Rebuild Tron's patched pi-coding-agent tarball from its declared inputs and
- * compare it with the committed artifact. pi-coding-agent-patch.json owns the
- * inputs: the upstream release tag, the checked-in patch, the published pi-ai
- * model data the release bundled, and the pinned Node/npm toolchain.
- *
- * The unpatched tag is built and packed first and must reproduce the published
- * registry tarball byte for byte, which proves the toolchain and inputs; only
- * then is the patch applied and pi-coding-agent rebuilt. The default run only
- * verifies; `--write` replaces the artifact and records the artifact and patch
- * digests after a deliberate patch change. It never installs into the Gateway.
- *
- * usage: node scripts/build-pi-coding-agent-patch.mjs [--upstream GIT-URL-OR-PATH] [--write] [--keep]
- */
+// Rebuild Tron's patched pi-coding-agent tarball from its declared inputs and compare it with the committed artifact.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -36,7 +23,6 @@ function argument(name) {
 }
 
 const write = process.argv.includes("--write");
-// A deliberate patch change is recorded by --write, so its old digest is not checked then.
 const { value: pin, issues } = readPiCodingAgentPatch(gatewayDir, { requireSources: !write });
 if (!pin) throw new Error(`${PATCH_PIN_FILE} is not valid:\n- ${issues.join("\n- ")}`);
 const node = process.versions.node;
@@ -57,8 +43,6 @@ try {
   if (commit !== pin.upstream.tagCommit) throw new Error(`${pin.upstream.tag} is ${commit}, expected ${pin.upstream.tagCommit}`);
   run("git", ["-C", source, "checkout", "-q", "--detach", commit]);
 
-  // pi-ai generates its model catalog from the network at release time. The
-  // published pi-ai tarball is the exact catalog that the release bundled.
   run("npm", ["pack", `${pin.modelData.package}@${pin.modelData.version}`, "--pack-destination", work, REGISTRY], { cwd: work, env, capture: true });
   const modelTarball = join(work, readdirSync(work).find((name) => name.endsWith(".tgz")));
   if (sha512Integrity(modelTarball) !== pin.modelData.integrity) throw new Error(`${pin.modelData.package}@${pin.modelData.version} integrity differs from ${PATCH_PIN_FILE}`);
@@ -87,8 +71,6 @@ try {
   const outside = touched.filter((path) => path !== "package-lock.json" && !path.startsWith("packages/coding-agent/") && !path.startsWith("packages/evals/"));
   if (outside.length > 0) throw new Error(`the patch changes packages this script does not rebuild: ${outside.join(", ")}`);
   run("git", ["-C", source, "apply", "--whitespace=nowarn", patchPath]);
-  // The bundled entries (bin pi, ./rpc-entry) inline their dependencies, so a patch that moves a
-  // dependency pin reinstalls from its lockfile; the build then bundles the versions it declares.
   if (touched.includes("package-lock.json")) run("npm", ["ci", REGISTRY], { cwd: source, env });
   run("npm", ["run", "clean"], { cwd: codingAgent, env });
   run("npm", ["run", "build"], { cwd: codingAgent, env });

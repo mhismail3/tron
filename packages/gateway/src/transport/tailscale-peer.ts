@@ -1,19 +1,6 @@
 import { classifyPeer, readTailscaleStatus, runBoundedCommand, type BoundedCommand, type TailscaleStatusRead } from "../platform/tailscale-status.js";
 
-/**
- * Transport's bounded Tailscale peer-path lookup for inbound-silence records.
- * The platform probe supplies the same host facts used by diagnostics. It answers
- * "was the Tailscale path to that device up?" from the peer's own socket
- * address, without polling Tailscale on a timer and without blocking a
- * heartbeat: one read serves every socket that goes silent in the same window.
- */
-
-/** One wall-clock bound for the whole status read, per candidate and in total.
- * The record is diagnostic, so an unreadable status becomes `unknown` instead
- * of a heartbeat that waits on a process. */
 const TAILSCALE_LOOKUP_TIMEOUT_MS = 2_000;
-/** Every lookup in this window reuses one result: a burst of silent sockets
- * costs one CLI run, not one per socket. */
 const TAILSCALE_RESULT_REUSE_MS = 10_000;
 
 export interface PeerPathLookup extends ReturnType<typeof classifyPeer> {
@@ -27,10 +14,6 @@ export interface PeerPathReader {
   lookup(remoteAddress: string): Promise<PeerPathLookup>;
 }
 
-/** Tailscale hands out 100.64.0.0/10 and fd7a:115c:a1e0::/48. Any other
- * address — the loopback a local client uses, or the phone's LAN address on the
- * pinned direct endpoint — cannot appear in `status`, so it is `unknown`
- * without spawning the CLI for it. */
 function isTailscaleAddress(address: string): boolean {
   if (address.startsWith("fd7a:115c:a1e0:")) return true;
   const octets = address.split(".");
@@ -51,7 +34,6 @@ export class TailscalePeerPaths implements PeerPathReader {
   ) {}
 
   async lookup(remoteAddress: string): Promise<PeerPathLookup> {
-    // A dual-stack listener reports an IPv4 peer as `::ffff:100.x.y.z`.
     const address = remoteAddress.startsWith("::ffff:") ? remoteAddress.slice(7) : remoteAddress;
     if (!isTailscaleAddress(address)) return { peerPath: "unknown", peerPathSource: "not-tailscale", peerRelay: "" };
     const status = await this.status();
@@ -71,14 +53,6 @@ export class TailscalePeerPaths implements PeerPathReader {
     };
   }
 
-  /** One read per reuse window and one read in flight. The read is bounded by
-   * one wall-clock timer, not by `execFile` settling: a killed child whose
-   * grandchild holds the pipe open never fires the callback, and a read that
-   * never settles would keep `inFlight` set and suppress every later silence
-   * record for the life of the process. `execFile` also ends the child with
-   * SIGKILL at its own timeout, so one ignored SIGTERM cannot leave a process
-   * running per reuse window. A failed read is cached like a successful one, so
-   * a missing CLI cannot spawn a process per silent socket. */
   private status(): Promise<TailscaleStatusRead> {
     const cached = this.cached;
     if (cached !== undefined && this.now() - cached.at < TAILSCALE_RESULT_REUSE_MS) return Promise.resolve(cached.status);
@@ -99,8 +73,6 @@ export class TailscalePeerPaths implements PeerPathReader {
     return read;
   }
 
-  /** One candidate failing falls through to the next; the bounded read retains
-   * failure categories so silence records distinguish a timeout from no CLI. */
   private async read(): Promise<TailscaleStatusRead> {
     return readTailscaleStatus(this.run, TAILSCALE_LOOKUP_TIMEOUT_MS);
   }

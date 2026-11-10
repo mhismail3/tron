@@ -36,7 +36,7 @@ it("the Gateway update configuration is synchronized before configure returns, a
   const sourceRoot = await realpath(resolve(import.meta.dirname, "../../../../.."));
   drainDurableWriteStats();
   const config = await update.configure({ sourceRoot });
-  expect(drainDurableWriteStats().count).toBe(2); // the document, then its directory entry
+  expect(drainDurableWriteStats().count).toBe(2);
   const path = join(tronHome, "gateway", "update-config.json");
   expect(await readFile(path, "utf8")).toBe(`${JSON.stringify(config)}\n`);
   expect((await stat(path)).mode & 0o777).toBe(0o600);
@@ -45,8 +45,6 @@ it("the Gateway update configuration is synchronized before configure returns, a
 it("all rebuilds share repository identity, preserve invalid-path errors, and reject linked markers", async () => {
   const { root, update, install, mac } = await fixture();
   const sourceRoot = join(root, "checkout");
-  // Repository identity is not a promise that every operation's helper exists.
-  // Those helpers evolve independently of an already-installed Gateway.
   for (const marker of ["packages/gateway/package.json", "packages/ios-app/project.yml", "scripts/tron"]) {
     await mkdir(dirname(join(sourceRoot, marker)), { recursive: true });
     await writeFile(join(sourceRoot, marker), "identity fixture\n");

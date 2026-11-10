@@ -28,10 +28,8 @@ class JevEvaluationError extends Error {
 }
 
 interface JevDispatchContext {
-  /** Per-call bound, not a workflow allowance. Workflow owners reserve separately. */
   maxChargeCents?: number;
   beforeDispatch?: () => Promise<void>;
-  /** Called immediately before classify is handed to Pi. */
   onDispatch?: (certainty: "sent") => Promise<void> | void;
 }
 
@@ -93,7 +91,6 @@ function answerRecord(result: Record<string, unknown>, request: JevDecisionReque
   return answers;
 }
 
-/** Bounded adapter over Pi's classifier path; Pi owns provider auth and HTTP dispatch. */
 export class JevDecisionClient {
   constructor(private readonly runtime: ModelRuntime, private readonly fetchImpl?: typeof fetch) {}
   async evaluate(request: JevDecisionRequest, signal: AbortSignal, context: JevDispatchContext = {}): Promise<JevDecisionResponse> {

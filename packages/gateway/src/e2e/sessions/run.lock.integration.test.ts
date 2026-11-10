@@ -7,20 +7,6 @@ import { expectRequestShapes, expectSystemShapes } from "../../../test-support/l
 import { awaitsWithin } from "../../../test-support/wait-for.js";
 import { compactionScenario, EXTENSION_UI_OPTIONS, extensionUiScenario, gate, openLockSession, promptStreamScenario, type LockSession } from "../../../test-support/lock-scenarios.js";
 
-/**
- * Kernel run locks (packages/gateway/docs/scenario-locks.md#locks) for the `gateway/run` module:
- * prompt/stream, steer, abort, compaction and extension UI, each through the
- * real Gateway over a loopback WebSocket (`gateway-lock-harness.ts`) with the
- * faux provider as the only scripted party.
- *
- * Each lock asserts its effects by name: the invocation receipts the run
- * persists (kind, lifecycle and identity), the canonical entry types, the
- * transcript rows the client reads (semantic visibility, context effect,
- * lifecycle, tool and content text), the responses each request returned, each
- * provider request's messages, and the `session-shapes` shape of each provider
- * request and system entry (the model-visible prompt and tools).
- */
-
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -41,13 +27,11 @@ async function openSession(name: string, options?: LockGatewayOptions): Promise<
   return session;
 }
 
-/** Settle the run and read what it left: normalized exchanges and provider requests, the raw canonical JSONL and the client's transcript. */
 async function finish(session: Session, shape: string): Promise<RunLockTrace> {
   await session.gateway.settled(session.sessionId);
   const transcript = await session.client.request("session.transcript", { sessionId: session.sessionId });
   expect(transcript.ok, JSON.stringify(transcript)).toBe(true);
   const recorded = session.gateway.record();
-  // The raw file, so receipt identities can be compared; `canonical()` normalizes every id to `<id>`.
   const slot = await session.gateway.registry.acquire(session.sessionId);
   const canonicalJsonl = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line) as unknown);
   expectSystemShapes(normalizeTraceValue(canonicalJsonl, session.gateway.normalization) as unknown[], [`${shape}#0`]);
@@ -55,12 +39,10 @@ async function finish(session: Session, shape: string): Promise<RunLockTrace> {
     providerRequests: recorded.providerRequests, canonicalJsonl, transcript: transcript.result };
 }
 
-/** The results of every recorded response to `method`, in request order. */
 function results(trace: RunLockTrace, method: string): unknown[] {
   return trace.exchanges.filter((exchange) => exchange.method === method).map((exchange) => exchange.response?.result);
 }
 
-/** The roles of the canonical message entries, in file order. */
 function canonicalRoles(trace: RunLockTrace): string[] {
   return trace.canonicalJsonl.flatMap((entry) => {
     const message = (entry as { message?: { role?: string } }).message;
@@ -68,7 +50,6 @@ function canonicalRoles(trace: RunLockTrace): string[] {
   });
 }
 
-/** Every canonical entry's type, custom entries as `custom:<customType>`, in file order. */
 function canonicalTypes(trace: RunLockTrace): string[] {
   return trace.canonicalJsonl.map((entry) => {
     const { type, customType } = entry as { type?: string; customType?: string };
@@ -91,14 +72,6 @@ function receiptData(trace: RunLockTrace): Receipt[] {
   });
 }
 
-/**
- * Each persisted chat-invocation receipt as `kind:lifecycle`, in file order,
- * after checking its identity: every invocation writes start, transition,
- * binding and terminal under one operation, from the Gateway for a plain user
- * prompt in this session. The i-th invocation (by its start) binds the
- * canonical message holding `prompts[i]`, and the client's transcript row for
- * that prompt carries the same invocation and operation.
- */
 function receipts(trace: RunLockTrace, prompts: readonly string[]): string[] {
   const data = receiptData(trace);
   const invocations = new Map<string, Receipt[]>();
@@ -125,7 +98,6 @@ function receipts(trace: RunLockTrace, prompts: readonly string[]): string[] {
   return data.map((receipt) => `${receipt.receiptKind}:${receipt.lifecycle ?? ""}`);
 }
 
-/** Each provider request's messages as `role:text`, with tool calls `[name]` and tool results `(name)`. */
 function requestMessages(trace: RunLockTrace): string[][] {
   return trace.providerRequests.map((request) => request.messages.map((message) => {
     const { role, text, toolCalls, toolName } = message as { role: string; text?: string; toolCalls?: string[]; toolName?: string };
@@ -133,14 +105,6 @@ function requestMessages(trace: RunLockTrace): string[][] {
   }));
 }
 
-/**
- * The transcript rows the client reads, each as `head | [tags] | content...`:
- * the head is a message's role (and stop reason) or the row's kind; the tags are
- * its semantic visibility, context effect and lifecycle, tool name and outcome,
- * thinking level and model provider; content is each part's text (`thinking:`
- * prefixed), a tool call as `call:<name>`, then an error message or summary.
- * Texts over 80 characters keep their head and length.
- */
 function transcriptRows(trace: RunLockTrace): string[] {
   const clip = (text: string): string => text.length > 80 ? `${text.slice(0, 80)}…(${text.length})` : text;
   return trace.transcript.items.map((item) => {
@@ -164,7 +128,6 @@ describe("gateway/run kernel locks", () => {
     const session = await openSession("run-prompt-stream");
     await promptStreamScenario(session);
     const trace = await finish(session, "chat");
-    // The idle snapshot a client opens before the first prompt.
     const [opened] = results(trace, "session.open") as Array<{ completionRevision: number; session: Record<string, unknown> }>;
     expect(opened!.completionRevision).toBe(0);
     expect(opened!.session).toMatchObject({
@@ -221,7 +184,6 @@ describe("gateway/run kernel locks", () => {
     });
     expect(texts.map((text) => ["hold a turn open", "steer the run", "then follow up"].findIndex((needle) => text.includes(needle))))
       .toEqual([0, 1, 2]);
-    // The steer joins the live run's next model call; the follow-up runs after it, each with its own receipts.
     expect(requestMessages(trace)).toEqual([
       ["user:hold a turn open"],
       ["user:hold a turn open", "assistant:[read]", "toolResult:lock notes\n(read)", "user:steer the run"],
@@ -272,11 +234,9 @@ describe("gateway/run kernel locks", () => {
     const trace = await finish(session, "chat");
     const assistant = trace.canonicalJsonl.find((entry) => (entry as { message?: { role?: string } }).message?.role === "assistant");
     expect((assistant as { message: { stopReason?: string } }).message.stopReason).toBe("aborted");
-    // The aborted turn's terminal receipt is interrupted; the model was asked once.
     expect(receipts(trace, ["start a turn to abort"])).toEqual(["start:staged", "transition:accepted", "binding:", "terminal:interrupted"]);
     expect(receiptData(trace)[3]).toMatchObject({ operationId: admitted.result.operationId, errorCode: "user-abort" });
     expect(canonicalTypes(trace)).toEqual([...SESSION_PREAMBLE, RECEIPT, RECEIPT, "message", "message", RECEIPT, "message", RECEIPT]);
-    // The interrupted prompt's row says so; the aborted reply carries the provider's reason.
     expect(transcriptRows(trace)).toEqual([
       "modelChange | [visible none tron-lock-run-abort]",
       "thinkingChange | [visible none off]",
@@ -294,7 +254,6 @@ describe("gateway/run kernel locks", () => {
     const trace = await finish(session, "chat");
     expect(canonicalTypes(trace)).toEqual([...SESSION_PREAMBLE, RECEIPT, RECEIPT, "message", "message", RECEIPT, "message", RECEIPT, RECEIPT, RECEIPT,
       "message", RECEIPT, "message", RECEIPT, "compaction"]);
-    // The summary the next model call sees: the history summary, then the split turn's prefix.
     const compaction = trace.canonicalJsonl.find((entry) => (entry as { type?: unknown }).type === "compaction") as
       { summary?: string; firstKeptEntryId?: string; details?: unknown };
     expect(compaction.summary).toBe("Summary: two answered turns about the lock context.\n\n---\n\n**Turn Context (split turn):**\n\nTurn prefix: the second question.");
@@ -310,7 +269,6 @@ describe("gateway/run kernel locks", () => {
       "assistant:stop | [visible modelInput] | Second answer. lock context lock context lock context lock context lock context …(1055)",
       "compaction | [visible none] | Summary: two answered turns about the lock context.\n\n---\n\n**Turn Context (split …(123)",
     ]);
-    // Two chat turns, then the history summary and the split-turn prefix requests.
     expectRequestShapes(trace.providerRequests, ["chat", "chat", "compactionSummary", "compactionSummary"]);
     const long = "lock context ".repeat(80);
     expect(requestMessages(trace).slice(0, 2)).toEqual([["user:first question"], ["user:first question", `assistant:First answer. ${long}`, "user:second question"]]);
@@ -324,7 +282,6 @@ describe("gateway/run kernel locks", () => {
     const session = await openSession("run-extension-ui", EXTENSION_UI_OPTIONS);
     const { pending } = await extensionUiScenario(session);
     expect(pending).toMatchObject({ invocationId: expect.any(String), operationId: expect.any(String), owner: { id: expect.any(String) } });
-    // The client saw one select, owned by the extension, with its title and options.
     expect(pending).toMatchObject({ method: "select", title: "Choose a lock path", options: ["Keep", "Change"], presentationRevision: 1,
       owner: { kind: "extension", source: "auto", title: "Lock Select" } });
     const trace = await finish(session, "chatWithExtensionSelect");
@@ -332,7 +289,6 @@ describe("gateway/run kernel locks", () => {
     expect(JSON.stringify(result)).toContain("chosen: Keep");
     expect((result as { message: { details?: unknown } }).message.details).toEqual({ answer: "Keep" });
     expect(receipts(trace, ["ask me which path"])).toEqual(ONE_TURN);
-    // The pending select belongs to the turn's invocation and operation.
     expect(pending).toMatchObject({ invocationId: receiptData(trace)[0]!.invocationId, operationId: receiptData(trace)[0]!.operationId });
     expect(results(trace, "extension.respond")).toEqual([{ answered: true }]);
     expect(canonicalTypes(trace)).toEqual([...SESSION_PREAMBLE, RECEIPT, RECEIPT, "message", "message", RECEIPT, "message", "message", "message", RECEIPT]);

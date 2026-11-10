@@ -122,7 +122,6 @@ def graph(root: Path, package: str, tracked: set) -> tuple[set, set]:
         raise IndexError_(f"cannot open {store_path}: {_error(lib, error)}")
     prefix = os.path.realpath(root) + os.sep
     units, records = [], {}
-    # Every apply returns false when it stopped early; a partial read is refused, never reported as fewer edges.
     if not lib.indexstore_store_units_apply_f(store, 0, None,
                                               unit_applier(lambda _, name: units.append(_text(name)) or True)):
         raise IndexError_(f"incomplete unit listing in {store_path}")
@@ -154,7 +153,7 @@ def graph(root: Path, package: str, tracked: set) -> tuple[set, set]:
             usr = _text(lib.indexstore_symbol_get_usr(lib.indexstore_occurrence_get_symbol(item)))
             if not usr:
                 return True
-            if roles & (DEFINITION | DECLARATION):  # a protocol requirement is declared, not defined
+            if roles & (DEFINITION | DECLARATION):
                 definitions[usr].add(path)
             if roles & REFERENCE:
                 references[path].add(usr)

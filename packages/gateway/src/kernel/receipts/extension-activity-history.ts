@@ -1,11 +1,5 @@
 import type { ExtensionOwner, ExtensionRunActivity, ExtensionRunAttention, ExtensionRunChild, ExtensionRunLifecycleState, ExtensionToolOrigin } from "../../protocol/types.js";
-/** This module must stay free of runtime imports: it is loaded in a worker thread
- * under `node --experimental-strip-types`, which does not resolve the `.js`
- * specifiers the rest of the Gateway uses. The bounded page
- * assembler process history uses therefore lives here. */
 
-/** Reserved Pi custom-entry type. Custom entries are canonical JSONL facts but
- * are intentionally not transcript messages or model context. */
 export const EXTENSION_ACTIVITY_RECEIPT_TYPE = "tron.extension-activity.v1";
 
 export interface ExtensionActivityReceipt {
@@ -13,7 +7,6 @@ export interface ExtensionActivityReceipt {
   activityId: string;
   sessionId: string;
   owner?: ExtensionOwner;
-  /** Legacy display fallback, accepted only when owner is absent. */
   source?: string;
   toolCallId: string;
   runId?: string;
@@ -23,7 +16,6 @@ export interface ExtensionActivityReceipt {
   terminalAt: string;
   observedAt: string;
   durationMs?: number;
-  /** Durable summaries intentionally exclude child task/output/path/timing data. */
   summary?: { children?: Array<{ id: string; producerId?: string; sessionOwnerId?: string; label: string; parentId?: string; state: ExtensionRunLifecycleState; attention: ExtensionRunAttention; childSessionRef?: string }>; toolCount?: number; turnCount?: number };
 }
 
@@ -54,8 +46,6 @@ function nonnegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
-/** Canonical captured owners are classified here once for every receipt reader.
- * Historic package/build provenance is not a UI capability discriminator. */
 export function classifyCapturedExtensionOwner(owner: ExtensionOwner): ExtensionOwner & { kind: "subagent" | "extension" } {
   const subagent = /^npm:pi-subagents(?:@[^\s/]+)?$/u.test(owner.source)
     || /^tron:pi-subagents@[^\s/#]+#[a-f0-9]{128}$/u.test(owner.source);
@@ -68,7 +58,6 @@ function ownerValue(value: unknown): ExtensionOwner | undefined {
   const id = bounded(candidate.id, 256);
   const title = bounded(candidate.title, 256);
   const source = bounded(candidate.source, 256);
-  // Extension source is an opaque package identity, never a filesystem path.
   if (!id || !title || !source || /(?:[\\/]|^[A-Za-z]:|^file:)/u.test(source)) return undefined;
   if (candidate.kind !== undefined && candidate.kind !== "subagent" && candidate.kind !== "extension") return undefined;
   return classifyCapturedExtensionOwner({ id, title, source,
@@ -166,9 +155,6 @@ function admitExtensionActivityReceipt(value: unknown, expectedSessionId?: strin
   const owner = candidate.owner === undefined ? undefined : ownerValue(candidate.owner);
   if (candidate.owner !== undefined && owner === undefined) return undefined;
   const source = bounded(candidate.source, 256);
-  // A producer path is not a stable owner identity and must never be persisted
-  // as the receipt fallback. Owners captured at the extension boundary are
-  // opaque and may contain any source string.
   if (!owner && (!source || /(?:[\\/]|^[A-Za-z]:)/u.test(source))) return undefined;
   const summaryValue = candidate.summary;
   const summary = summaryValue && typeof summaryValue === "object" && !Array.isArray(summaryValue) ? summaryValue as Record<string, unknown> : undefined;
@@ -229,8 +215,6 @@ function admitExtensionActivityReceipt(value: unknown, expectedSessionId?: strin
   };
 }
 
-/** Reads reserved custom entries only. Callers may pass SessionManager.getEntries()
- * without exposing the entries to ordinary transcript projection. */
 export function extensionActivityReceipts(entries: readonly unknown[], sessionId: string): Array<{ id?: string; parentId?: string | null; receipt: ExtensionActivityReceipt }> {
   const result: Array<{ id?: string; parentId?: string | null; receipt: ExtensionActivityReceipt }> = [];
   for (const value of entries) {
@@ -298,11 +282,6 @@ export function extensionReceiptActivity(receipt: ExtensionActivityReceipt): Ext
   };
 }
 
-/** One bounded cursor page over an already-filtered history list. Process and
- * extension activity history share the cursor shape (`revision:query:offset`),
- * the JSON byte budget, and the omission rule: a row that only exhausts this
- * page's remainder belongs at the next cursor, while a row too large for an
- * otherwise empty page is consumed and counted as omitted. */
 interface BoundedHistoryPage<Row> {
   activities: Row[];
   nextCursor?: string;
@@ -310,25 +289,18 @@ interface BoundedHistoryPage<Row> {
 }
 
 export function boundedHistoryPage<Row>(options: {
-  /** Rows the caller already filtered, sorted and deduplicated. */
   rowCount: number;
-  /** Projects one row for the page; called only for rows in page range. */
   project: (index: number) => Row;
-  /** Cursor from this page's own scope; undefined starts at the first row. */
   cursor: string | undefined;
   revision: string;
-  /** Binds the cursor to the caller's exact filter scope. */
   query: string;
   limit: number;
   maximumPage: number;
   maximumBytes: number;
-  /** Names the page in cursor failures, for example "process history". */
   label: string;
 }): BoundedHistoryPage<Row> {
   let offset = 0;
   if (options.cursor) {
-    // An unrecognized cursor shape is a conflict rather than a client error: a
-    // cursor from another paging scope or an older Gateway must restart paging.
     const parts = options.cursor.split(":");
     if (parts.length !== 3) throw new Error(`${options.label} cursor conflict`);
     const [cursorRevision, cursorQuery, encodedOffset] = parts;

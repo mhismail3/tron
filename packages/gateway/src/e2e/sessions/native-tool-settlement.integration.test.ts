@@ -18,8 +18,6 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-/** This peer models independently accepted native work, not a desktop executor.
- * Closing its caller's socket does not settle the accepted effect/cleanup. */
 async function nativePeer() {
   const started = deferred<string>();
   const cancelled = deferred<void>();
@@ -80,8 +78,6 @@ async function nativePeer() {
 }
 
 function extensionSource(port: number, waiterOnly: boolean): string {
-  // The bad control deliberately conflates cancellation of a socket waiter with
-  // settlement. Never use that branch in a native capability implementation.
   return `import { createConnection } from "node:net";
 export default function (pi) {
   pi.registerTool({
@@ -128,8 +124,6 @@ export default function (pi) {
 `;
 }
 
-// Uses the production runtime with a private canonical session and fake model;
-// no active session, credential store, native permission or GUI is consulted.
 describe("native-tool settlement qualification with the pinned runtime", { concurrent: false }, () => {
   for (const waiterOnly of [false, true]) {
     it(waiterOnly
@@ -189,8 +183,6 @@ describe("native-tool settlement qualification with the pinned runtime", { concu
         let drainSettled = false;
         draining = registry.waitUntilIdle().then(() => { drainSettled = true; });
         if (waiterOnly) {
-          // This is the intentionally incorrect outcome the positive oracle
-          // must distinguish. No actual native cleanup has been permitted yet.
           await awaitsWithin(Promise.all([stopping, draining]), "bad-control early settlement");
           expect(peer.active).toBe(true);
           expect(stopSettled).toBe(true);
@@ -229,8 +221,6 @@ describe("native-tool settlement qualification with the pinned runtime", { concu
         } finally {
           if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
           else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
-          // A failed cleanup retains its private evidence rather than deleting
-          // resources still reachable by an unretired runtime.
           if (retired) await rm(root, { recursive: true, force: true });
         }
       }

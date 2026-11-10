@@ -8,8 +8,6 @@ import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 
-/** The wrapper credential document written by the credential store and read by
- * the terminal client. One shape rule decides which of these documents is valid. */
 interface LocalAuthDocument {
   version: 2;
   bearerToken: string;
@@ -17,10 +15,8 @@ interface LocalAuthDocument {
   lastUpdated: string;
 }
 
-/** Internal credential-bearing record. Never expose this over RPC or auth context. */
 interface DeviceRecord {
   id: string;
-  /** Pairing-time fallback name; mutable labels and observations are separate. */
   name: string;
   tokenHash: string;
   createdAt: string;
@@ -35,7 +31,6 @@ export interface DeviceIdentity {
 
 interface DeviceListEntry {
   id: string;
-  /** Effective display name: custom label, observed Mac name, then pairing name. */
   name: string;
   createdAt: string;
   customLabel?: string;
@@ -314,9 +309,6 @@ export class DeviceStore {
         throw new GatewayError("conflict", "Paired device capacity is full; revoke an old device before pairing another");
       }
       document.devices.push(record);
-      // Consume first: once pairing has been accepted, a persistence failure
-      // must not leave the invitation reusable. Regenerate explicitly while
-      // still holding the mutex if the device write fails.
       try {
         await durableRemove(this.enrollmentPath);
         await durableAtomicWriteJson(this.devicePath, document);
@@ -324,7 +316,7 @@ export class DeviceStore {
         await this.ensureEnrollmentLocked(new Date()).catch(() => {});
         throw error;
       }
-      queueMicrotask(() => { void this.ensureEnrollment().catch(() => { /* The next owned enrollment request retries storage failure. */ }); });
+      queueMicrotask(() => { void this.ensureEnrollment().catch(() => { }); });
       return { deviceId: record.id, token };
     });
   }
@@ -340,9 +332,6 @@ export class DeviceStore {
     return device ? { kind: "device", deviceId: device.id } : null;
   }
 
-  /** Authenticate and synchronously register/start the next effect under the
-   * durable credential mutex. The callback must not return a promise: admitted
-   * streams and provider work run without holding this mutex across awaits. */
   async authenticateAndAdmit<T>(token: string | undefined, register: (identity: { kind: "local" } | DeviceIdentity) => T, signal?: AbortSignal): Promise<T | null> {
     if (!token) return null;
     return abortableRead(signal, () => this.mutex.run(async () => {
@@ -352,7 +341,6 @@ export class DeviceStore {
     }, signal));
   }
 
-  /** Revalidate a device and synchronously create one owner-bound operation. */
   async admitDevice<T>(deviceId: string, register: () => T, signal?: AbortSignal): Promise<T | undefined> {
     return abortableRead(signal, () => this.mutex.run(async () => {
       const document = await this.readDevices();
@@ -400,8 +388,6 @@ export class DeviceStore {
   }
 
   async updateObservedName(deviceId: string, observedName: string): Promise<boolean> {
-    // A cosmetic observation cannot invalidate an otherwise admitted install.
-    // Keep the last known label when platform metadata is empty or unsafe.
     if (!isObservedName(observedName)) return false;
     return this.mutex.run(async () => {
       const document = await this.readDevices();
@@ -417,7 +403,6 @@ export class DeviceStore {
     });
   }
 
-  /** Revalidate an admitted device identity without projecting bearer material. */
   async hasDevice(deviceId: string): Promise<boolean> {
     const document = await this.readDevices();
     return document.devices.some((device) => device.id === deviceId);
@@ -431,15 +416,9 @@ export class DeviceStore {
       try {
         await durableAtomicWriteJson(this.devicePath, { version: 1, devices: next });
       } catch (error) {
-        // The writer positively observed our replacement rename. Under this
-        // mutex no competing credential mutation can restore the removed device.
-        // Retire transport even if further storage reads are unavailable; a
-        // failed fsync is not permission to keep revoked connections alive.
         if (isDurablePublicationUncertain(error)) onRevoked();
         throw error;
       }
-      // The replacement above is the authority cut. Publication is deliberately
-      // synchronous and precedes install cleanup or any other long effect.
       onRevoked();
       return true;
     });

@@ -7,12 +7,6 @@ import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { GatewayLogger } from "../../transport/logger.js";
 import { waitForStopDrain } from "../../sessions/restart-drain.js";
 
-// #2256: a Home `schedule runNow` result carries `details.runId` and `state: "queued"`.
-// Projected as delegated-run shaped activity, it stayed live work for the life of the
-// process, so an intentional stop waited on a `detached-extension-run` forever. The
-// Gateway, the real `schedule` tool, the Automation owners and the stop drain are all
-// production; only the model is scripted.
-
 const gateways: LockGateway[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -45,7 +39,6 @@ it("a Home schedule runNow leaves no drain blocker, and the intentional stop com
   expect(created.isError, JSON.stringify(created)).not.toBe(true);
   const ranNow = await call({ action: "runNow", automationId: created.details.id, expectedRevision: created.details.revision });
   expect(ranNow.isError, JSON.stringify(ranNow)).not.toBe(true);
-  // The incident's exact result shape: the delegated-run convention, owned by the Automation store.
   expect(ranNow.details).toMatchObject({ runId: expect.any(String), state: "queued" });
   const runId = ranNow.details.runId as string;
   await waitFor(async () => (await phone.request("automation.run.get", { automationId: created.details.id, runId })).result?.state === "succeeded", "the automation run settled");
@@ -57,7 +50,6 @@ it("a Home schedule runNow leaves no drain blocker, and the intentional stop com
 
   const logPath = join(gateway.root, "logs", "gateway.jsonl");
   await mkdir(join(gateway.root, "logs"), { recursive: true });
-  // Served as under launchd; the harness records the exit request and the test runs the drain.
   vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
   const stop = await phone.request("gateway.stop", { commandId: gateway.commandId() });
   expect(stop.ok, JSON.stringify(stop)).toBe(true);

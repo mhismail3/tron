@@ -71,8 +71,6 @@ async function fixture() {
   f.faux.setResponses(Array.from({ length: 100 }, () => responder as never));
   const settled = () => waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null && home.snapshot().phase === "idle" || undefined, "Home idle");
   const cards = new Map<string, { key: string; interaction: Extract<ExtensionInteraction, { method: "change" }> }>();
-  // The agent tool only creates. Trust and untrust are paired-native project
-  // reviews (agents change trust through the settings tool).
   async function request(args: { action: string; name: string }) {
     if (args.action !== "create") {
       const native = await service.invoke(phone, "projects.change", { commandId: `native-request-${++command}`,
@@ -144,7 +142,6 @@ describe("Gateway project lifecycle", () => {
     expect(await f.service.invoke(phone, "projects.change", { ...args, reason: "Different payload" })).toEqual(pending);
     expect((await f.decide(pending)).status).toBe("applied");
     await writeFile(f.path("native-original/data"), "retained native bytes");
-    // A review alone changes nothing; only the separate confirmation applies it.
     const unconfirmed = await ask("untrust", "native-original");
     expect(unconfirmed.status).toBe("review");
     expect((await list()).projects.find(row => row.name === "native-original")?.trust?.effectiveDecision).toBe(true);
@@ -293,7 +290,6 @@ if (args.includes("worktree")) {
     const realGit = (await exec("/usr/bin/which", ["git"])).stdout.trim();
     const bin = join(f.root, "failing-init-bin"), counter = join(f.root, "init-calls");
     await mkdir(bin);
-    // Real Git for every read; `init` blocks the canonical audit file, then fails.
     await writeFile(join(bin, "git"), `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = init ]; then
@@ -357,18 +353,13 @@ exec ${JSON.stringify(realGit)} "$@"
       const first = await read(), second = await read();
       return first.ms <= second.ms ? first : second;
     };
-    // Calibrated on this host and run, so load changes neither side of the bound.
     const bare = await best(list);
-    // Production holds ~900 settled tasks (about 13 KB each) and `projects.list` scales with them.
     const store = (homeOwnerOf(f.registry) as unknown as { tasks: { store: { initialize(): Promise<boolean>; put(record: unknown, expected: number | null): Promise<unknown> } } }).tasks.store;
     await store.initialize();
     const intent = { text: "x".repeat(8_000) };
     await store.put({ version: 1, taskId: "history-0", revision: 1, homeId: "home", generation: 1, routeGeneration: 1, intent,
       intentDigest: createHash("sha256").update(intent.text).digest("hex"), target: f.root, grantRef: null, scopeRef: null,
       lifecycle: "pending", sessionId: null, operationId: null, stopIntent: null, spend: null, reportRef: null, terminalEvidence: null, wake: null }, null);
-    // This is a persisted-history read oracle, not 300 sequential admissions.
-    // Derive fixture bytes/name from one real publication; production readers
-    // still validate every record. Do not copy the store's filename algorithm.
     const directory = join(f.tronHome, "gateway", "home", "tasks");
     const templateName = (await readdir(directory)).find(name => name.endsWith("-history-0.json"))!;
     const template = JSON.parse(await readFile(join(directory, templateName), "utf8"));
@@ -389,7 +380,6 @@ exec ${JSON.stringify(realGit)} "$@"
     expect(withHistory.page.projects.map(row => row.name)).toEqual(names);
     expect(withHistory.page.projects.every(row => row.eligibility.untrust.allowed && row.eligibility.trust.allowed)).toBe(true);
     evidence.push({ projectsListHistory: { projects: names.length, tasks: 300, bareMs: Math.round(bare.ms), oneTaskPassMs: Math.round(pass.ms), listMs: Math.round(withHistory.ms) } });
-    // A task pass per project eligibility check (and per page of tasks) is the measured defect: one pass is the whole budget.
     expect(withHistory.ms).toBeLessThan(bare.ms + 8 * pass.ms);
   });
 
@@ -563,7 +553,6 @@ exec ${JSON.stringify(realGit)} "$@"
       expect(f.events.slice(start).filter(event => event.topic === "session.resourcesChanged")).toEqual([]);
       expect((await f.trust.inspect(source)).effectiveDecision).toBe(true);
     } finally {
-      // Fault-injection cleanup on the known-bad base, not production recovery.
       if (!slot.isDisposed) await f.registry.commitProjectReload(source);
     }
   });

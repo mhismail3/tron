@@ -10,7 +10,6 @@ export interface SwiftAppManifestV2 extends ManifestFields {
   version: 2;
   instanceId: string;
   feeds: string[];
-  /** Exact source/config revisions; old v1 attribution is deliberately unknown. */
   history: SwiftAppRevision[];
 }
 export type SwiftAppManifest = SwiftAppManifestV1 | SwiftAppManifestV2;
@@ -47,7 +46,6 @@ function validFields(record: Record<string, unknown>, id: string): boolean {
     && typeof record.updatedAt === "string" && Number.isFinite(Date.parse(record.updatedAt));
 }
 function unreadable(id: string): never { throw new GatewayError("conflict", `App ${id} has an unreadable or newer manifest; it was left unchanged`); }
-/** Named persisted consumer: never adds feeds, upgrades, or rewrites v1 on read. */
 function readSwiftAppManifestV1(record: Record<string, unknown>, id: string): SwiftAppManifestV1 {
   if (record.version !== 1 || !exact(record, ["version", ...fields]) || !validFields(record, id)) unreadable(id);
   return record as unknown as SwiftAppManifestV1;

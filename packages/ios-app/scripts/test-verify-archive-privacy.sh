@@ -7,8 +7,6 @@ verifier="$script_dir/verify-archive-privacy.sh"
 manifest="$package_root/Sources/PrivacyInfo.xcprivacy"
 root="$(mktemp -d "${TMPDIR:-/tmp}/tron-privacy-archive.XXXXXX")"
 trap 'rm -rf "$root"' EXIT
-# The fixture app declares the canonical protocol; a literal went stale at each
-# lockstep bump (#113) and failed the valid archive.
 protocol="$(PYTHONPATH="$package_root/../../scripts" python3 -c 'from gateway_protocol_contract import load_contract; print(load_contract().protocol_version)')"
 
 fakebin="$root/bin"

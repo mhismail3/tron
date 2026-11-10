@@ -7,7 +7,6 @@ import { invocationReceipts } from "../receipts/invocation-receipts.js";
 import { canonicalToolResultCallIDsFromBranch, fitSessionSnapshot, projectMessage, type TranscriptPage } from "./projection.js";
 import { boundExtensionActivities } from "./extension-run-projection.js";
 
-/** Synchronous reads of run-owned facts. No run state or canonical entries are copied here. */
 interface SnapshotSource {
   displayProjection: ToolDisplayProjection;
   assertNoTrustReload(): void;
@@ -54,9 +53,6 @@ interface SnapshotSource {
 }
 
 export class SnapshotProjection {
-  /** Snapshot-derived SDK scans are exact but need not repeat while the
-   * RuntimeSlot revision is unchanged. A canonical event/rebind/branch change
-   * increments revision before publication, naturally invalidating this cut. */
   private derived: {
     revision: number;
     model: AgentSession["model"];
@@ -65,8 +61,6 @@ export class SnapshotProjection {
     latestCacheHitRate?: number;
   } | undefined;
 
-  /** The snapshot body. `snapshot` attributes it to the request that asked for
-   * it; a state change with no request measures it where it publishes. */
   build(source: SnapshotSource, sequence: number): SessionSnapshot {
     source.assertNoTrustReload();
     const session = source.runtime.session;
@@ -93,10 +87,6 @@ export class SnapshotProjection {
     const compactionPolicy = source.compactionPolicies.get(session)?.snapshot();
     const stats = derived.stats;
     const latestCacheHitRate = derived.latestCacheHitRate;
-    // Pi exposes streamingMessage before an async message_start hook returns,
-    // so the SDK object may establish the initial Gateway identity. Once that
-    // exact object is canonically bound, however, Pi can retain it briefly;
-    // never let a snapshot recreate a second stream ID from that stale value.
     const sdkStreamingMessage = session.state.streamingMessage;
     const streamingMessage = source.streamPresentationId
       ? (sdkStreamingMessage ?? source.latestStreamingMessage)
@@ -121,15 +111,8 @@ export class SnapshotProjection {
         );
       })()
       : undefined;
-    // One synchronous branch cut supplies both the bounded page and the
-    // paged-out tool-result ownership check. Neither projection is cached; Pi
-    // remains authoritative and the cut is discarded after this snapshot.
     const canonicalBranch = session.sessionManager.getBranch();
     const canonicalTranscriptPage = source.transcriptPage(undefined, undefined, undefined, undefined, canonicalBranch);
-    // A replacement keeps its origin's live command, and the fork copies that
-    // command's start row under the origin's identity. Only a start receipt this
-    // session wrote may project the live lifecycle; the inherited row keeps its
-    // stored state while the origin owns the terminal receipt.
     const liveCommand = source.pendingExtensionCommand;
     const liveCommandOwned = liveCommand !== undefined && invocationReceipts(canonicalBranch, source.id)
       .some(receipt => receipt.receiptKind === "start" && receipt.operationId === liveCommand.id);
@@ -146,35 +129,23 @@ export class SnapshotProjection {
               : item),
         }
       : canonicalTranscriptPage;
-    // transcriptPage is intentionally bounded; use the same full canonical
-    // branch cut for ownership so paged-out results cannot leave a duplicate
-    // runtime row.
     const canonicalToolResultIDs = canonicalToolResultCallIDsFromBranch(canonicalBranch);
     const queuedItems = source.projectedQueue();
     const processProjection = source.currentProcessProjection();
-    // Compaction cannot take Agent input, but the Gateway queues it until the
-    // summary settles, so clients may still request steer/follow-up delivery.
     const acceptsQueuedPrompts = (session.isStreaming && !source.isAgentAdmissionSettling)
       || source.phase === "compacting";
     const activeToolSegmentId = acceptsQueuedPrompts && source.effectivePhase === "running"
       ? source.activeToolSegmentId()
       : undefined;
-    // Archive state is not canonical session content: it is read from its owner
-    // for each snapshot so an archive commit never has to reach into the slot.
     const archivedAt = source.dependencies.archivedAt(source.id);
-    // Canonical receipts are authoritative after runtime recreation; live maps
-    // only enrich the current projection and never replace persisted facts.
     return fitSessionSnapshot({
       sessionId: session.sessionId,
       runtimeGeneration: source.runtimeGeneration,
       revision: source.revision,
       eventSequence: sequence,
       phase: source.effectivePhase,
-      // Phase is presentation state; Pi streaming is the exact authority for
-      // whether a new prompt can request steer/follow-up delivery right now.
       acceptsQueuedPrompts,
       configurationBlocker: source.configurationBlocker(),
-      // Home is a role, not a generated conversation title. Never rewrite its canonical name or ID.
       ...(source.isHomeChapter ? { name: "Home" } : session.sessionName ? { name: session.sessionName } : {}),
       cwd: session.sessionManager.getCwd(),
       ...(session.sessionManager.getHeader()?.parentSession ? { parentSessionId: session.sessionManager.getHeader()!.parentSession } : {}),
@@ -218,8 +189,6 @@ export class SnapshotProjection {
         const visible = [...source.extensionActivities.values()]
           .map((activity) => ({ activity, visibility: source.extensionActivityVisibility(activity) }))
           .filter(({ visibility }) => visibility === "current" || visibility === "recent")
-          // Current work is always retained ahead of recent terminal rows when
-          // count or byte bounds force omission.
           .sort((left, right) => {
             const bucket = (visibility: string) => visibility === "current" ? 0 : 1;
             return bucket(left.visibility) - bucket(right.visibility)

@@ -46,7 +46,6 @@ if [[ -z "$origin" ]]; then
   "$SCRIPT_DIR/bundle-gateway.sh" --skip-install --skip-download >/dev/null 2>&1
   status=$?
   set -e
-  # Fail-closed exit status is the contract; the message wording is not.
   [[ $status -eq 3 ]] || {
     echo "unconfigured official payload did not fail closed: status $status" >&2
     exit 1

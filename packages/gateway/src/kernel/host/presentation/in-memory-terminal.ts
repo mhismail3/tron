@@ -13,19 +13,12 @@ const REMOTE_CAPABILITIES: TerminalCapabilities = {
 
 let capabilitiesInitialized = false;
 
-/** Initializes the process-wide public pi-tui capability cache exactly once. */
 function initializeRemoteTuiCapabilities(): void {
   if (capabilitiesInitialized) return;
   setCapabilities(REMOTE_CAPABILITIES);
   capabilitiesInitialized = true;
 }
 
-/**
- * A fixed 80x24 terminal for driving public pi-tui composition without touching
- * stdin or stdout. Mounted components are read through RecordingComponent, so
- * terminal output, cursor and title writes are discarded and no input is ever
- * delivered.
- */
 export class InMemoryTerminal implements Terminal {
   constructor() { initializeRemoteTuiCapabilities(); }
 

@@ -6,7 +6,6 @@ import {
   validTimestamp,
 } from "./receipt-fields.js";
 
-/** Canonical, non-context extension notification persisted in Pi JSONL. */
 export const EXTENSION_NOTIFICATION_RECEIPT_TYPE = "tron.extension-notification.v1";
 const EXTENSION_NOTIFICATION_WRITER = "gateway";
 const MAX_RECEIPT_BYTES = 40 * 1_024;

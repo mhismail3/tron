@@ -8,19 +8,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 
-// #729: a supervised restart logged `gateway.stopped` and then never left the
-// process table, because Node's own exit teardown blocked. launchd only
-// relaunches after the process is gone, so the deploy waited forever and Stable
-// stayed down. These runs restart a real source Gateway with the deploy's own
-// authenticated client.
-//
-// #1120: the native hang is libuv's at-exit join of a threadpool worker that
-// never returns to take the exit message (in production, workers stranded in a
-// Darwin psynch condition wait). A preload that parks one real worker in
-// open(2) on a FIFO reproduces that join on demand, with the incident's main
-// thread stack. A preload that blocks every `exit` listener still exercises the
-// restart watcher for a JavaScript-level stall.
-
 const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
 const resolverPreload = join(gatewayRoot, "test-support", "home-ledger-crash-preload.mjs");
 const deployModule = pathToFileURL(join(gatewayRoot, "..", "..", "scripts", "gateway-payload-deploy.mjs")).href;
@@ -60,9 +47,6 @@ async function restartSupervisedGateway(options: { hangExit: ExitHang; method?: 
   for (const directory of ["home", "tmp", "agent", join("payload", "app", "dist")]) {
     await mkdir(join(root, directory), { recursive: true });
   }
-  // The supervised marker requires a payload root holding a regular entrypoint.
-  // This Gateway runs from source, so the payload's runtime contract stays
-  // inactive while `gateway.restart` is admitted exactly as under launchd.
   await writeFile(join(payloadRoot, "app", "dist", "index.js"), "");
   const preloads = ["--import", pathToFileURL(resolverPreload).href];
   if (options.hangExit === "exit-listener") {
@@ -70,7 +54,6 @@ async function restartSupervisedGateway(options: { hangExit: ExitHang; method?: 
     await writeFile(hang, "process.on('exit', () => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0); });\n");
     preloads.push("--import", pathToFileURL(hang).href);
   } else if (options.hangExit === "threadpool-worker") {
-    // No writer ever opens the FIFO, so this worker never rejoins the pool.
     const fifo = join(root, "never-opened.fifo");
     execFileSync("mkfifo", [fifo]);
     const hang = join(root, "park-threadpool-worker.mjs");
@@ -160,8 +143,6 @@ describe("Gateway exit after a supervised restart", () => {
     const events = result.records.map((record) => record.event);
     const stalled = result.records.find((record) => record.event === "gateway.exit-stalled");
     report.push({ case: "exit blocks", code: result.code, signal: result.signal, exitMs: result.exitMs, stalled });
-    // launchd's KeepAlive (SuccessfulExit=false) relaunches after a signal death
-    // exactly as after exit 75, so the kill preserves the requested restart.
     expect(result.signal).toBe("SIGKILL");
     expect(events.indexOf("gateway.stopped")).toBeGreaterThanOrEqual(0);
     expect(events.indexOf("gateway.exit-stalled")).toBeGreaterThan(events.indexOf("gateway.stopped"));

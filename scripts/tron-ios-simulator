@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Reuse one local iPhone simulator and preserve the paired Development app container.
-
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,8 +10,6 @@ SIMULATOR_ID="${TRON_IOS_SIMULATOR_ID:-}"
 BUNDLE_ID="com.tron.mobile.beta"
 SIMULATOR_OWNER="$ROOT_DIR/scripts/ios-test-simulator.py"
 LOCKER="$ROOT_DIR/scripts/ios-test-lock.py"
-# One host-wide lease for the one remembered Development simulator, whichever
-# worktree runs this helper.
 LEASE_LOCK="$STATE_DIR/ios-simulator.lease.lock"
 
 usage() {
@@ -62,24 +59,16 @@ die() {
     exit 1
 }
 
-# Re-run this command under the Development simulator's lease, unless this
-# process is that leased command. The holder exits 73 naming the owner when
-# another command holds it.
 hold_development_lease() {
     if [[ -n "${TRON_IOS_TEST_LEASE_LOCK:-}" && "$TRON_IOS_TEST_LEASE_LOCK" -ef "$LEASE_LOCK" ]]; then
         return
     fi
-    # `install` builds with xcodebuild, so it also takes one of the three
-    # host-wide simulator slots (waiting for it); start and stop are brief.
     local slot=()
     [[ "$1" != install ]] || slot=(--host-slot)
     exec python3 "$LOCKER" --lock "$LEASE_LOCK" --resource "Development simulator" \
         --worktree "$ROOT_DIR" ${slot[@]+"${slot[@]}"} -- "$0" "$@"
 }
 
-# Each worktree builds into its own DerivedData: two worktrees' installs never
-# share build products, while the simulator and its paired app container stay
-# shared by design.
 derived_data_path() {
     if [ -n "${TRON_IOS_SIMULATOR_DERIVED_DATA:-}" ]; then
         printf '%s\n' "$TRON_IOS_SIMULATOR_DERIVED_DATA"
@@ -149,8 +138,6 @@ launch_development() {
 }
 
 simulator_uptime() {
-    # The same uptime `scripts/tron-ios-test status --all` prints, from the same
-    # owner: the boot process of the remembered simulator.
     local uptime
     uptime="$(python3 "$SIMULATOR_OWNER" development-uptime --development-state "$STATE_FILE" 2>/dev/null || true)"
     printf '%s\n' "${uptime:-unknown}"

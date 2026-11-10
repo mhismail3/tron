@@ -2,12 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
-/**
- * Core prompt journeys at the real Gateway-process boundary (#2142): a source
- * Gateway process, the production loopback WebSocket and local credential, and
- * a scripted HTTP provider as the only scripted party.
- */
-
 const gateways: GatewayProcess[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -21,7 +15,6 @@ async function openAndSync(client: ProcessClient, sessionId: string): Promise<Sn
   return opened.result.session as Snapshot;
 }
 
-/** A fresh connection's authoritative snapshot, as a reconnecting phone reads it. */
 async function freshSnapshot(gateway: GatewayProcess, sessionId: string): Promise<Snapshot> {
   const client = await gateway.connect();
   try { return await openAndSync(client, sessionId); } finally { await client.close(); }
@@ -67,15 +60,12 @@ describe("prompt journeys across the real Gateway process", () => {
       const admitted = await phone.request("session.prompt", { commandId: "prompt-once-command", sessionId, text: prompt });
       expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
       await awaitsWithin(reached, "the provider streamed its first chunk");
-      // The phone observes the reply partially while the run is still live.
       await waitFor(async () => phone.events.some((event) => event.sessionId === sessionId
         && JSON.stringify(event.payload).includes(head)) || undefined, "the phone saw the partial reply");
       const live = await freshSnapshot(gateway, sessionId);
       expect(live.phase).toBe("running");
       expect((live.operation as { id?: string } | undefined)?.id).toBe(admitted.result.operationId);
 
-      // A duplicate submit of the same command while the reply is in flight (as a
-      // phone that lost the admission response sends): the receipt answers, nothing is admitted.
       const retried = await phone.request("session.prompt", { commandId: "prompt-once-command", sessionId, text: prompt });
       expect(retried.ok, JSON.stringify(retried)).toBe(true);
       expect(retried.result.operationId).toBe(admitted.result.operationId);
@@ -94,7 +84,6 @@ describe("prompt journeys across the real Gateway process", () => {
       expect(status.result).toEqual({ status: "completed", result: { operationId: admitted.result.operationId } });
       await phone.close();
 
-      // The canonical record, read back by a new Gateway process, holds the same single turn.
       await gateway.restart();
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
       expect(gateway.provider.requests).toHaveLength(1);

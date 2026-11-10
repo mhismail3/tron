@@ -29,7 +29,6 @@ const MAX_DOCUMENT_BYTES = 64 * 1_024;
 const MAX_DISCOVERY_BYTES = 2 * 1_024 * 1_024;
 const MAX_PATH_BYTES = 4_096;
 const MAX_TARGETS = 256;
-/** Every persisted iOS install failure projects as one bounded line. */
 const INSTALL_FAILURE: FailureLine = {
   maximum: 2_048,
   fallback: "The iOS install helper failed.",
@@ -46,7 +45,6 @@ type IosDeviceInstallBuildMode = "fast-debug" | "optimized";
 type IosDeviceInstallState = "requested" | "running" | "succeeded" | "failed";
 
 interface IosPhysicalDeviceTarget {
-  /** Owner-only CoreDevice identifier. Never project this field over RPC. */
   identifier: string;
   name: string;
   deviceType: string;
@@ -96,9 +94,6 @@ interface ActiveInstall {
   startedAt: string;
 }
 
-/** Lists physical targets. `reach` names one bound device whose CoreDevice
- * tunnel discovery opens first: `devicectl` reports a paired phone as connected
- * only while a tunnel is open, and nothing else opens one on demand. */
 type IosDeviceTargetDiscovery = (reach?: string) => Promise<IosPhysicalDeviceTarget[]>;
 type IosDeviceInstallLauncher = (request: {
   tronHome: string;
@@ -263,12 +258,6 @@ function activePath(tronHome: string): string {
   return join(installRoot(tronHome), "active.json");
 }
 
-/** `active.json` is the advisory pointer to one in-flight install, and its schema
- * is bumped whenever the pointer shape changes (`7f23eba1a` bumped it to 2). A
- * document that declares any other schema cannot be read by this Gateway, so it
- * is leftover pointer state from an install this Gateway no longer owns: the
- * owner clears it and reports no active install. A document that declares the
- * current schema and still fails admission stays fatal. */
 async function readActiveInstall(tronHome: string): Promise<ActiveInstall | undefined> {
   const path = activePath(tronHome);
   const value = await readDocument(path);
@@ -281,9 +270,6 @@ async function readActiveInstall(tronHome: string): Promise<ActiveInstall | unde
   return activeDocument(value);
 }
 
-/** Admit only bounded physical-iOS fields from `devicectl list devices`:
- * serials, UDIDs and other raw properties are dropped. The real discovery runs
- * `xcrun`, so this admission is the only in-process witness of the field set. */
 function admitDevicectlTargets(value: unknown): IosPhysicalDeviceTarget[] {
   const devices = record(record(value)?.result)?.devices;
   if (!Array.isArray(devices) || devices.length > MAX_TARGETS) {
@@ -324,8 +310,6 @@ function admitDevicectlTargets(value: unknown): IosPhysicalDeviceTarget[] {
 
 async function defaultDiscoverTargets(reach?: string): Promise<IosPhysicalDeviceTarget[]> {
   if (reach !== undefined && IDENTIFIER.test(reach)) {
-    // Opening the tunnel is best effort: an unreachable phone still lists as
-    // disconnected below and is refused with the ordinary retryable error.
     await execFileAsync("/usr/bin/xcrun", ["devicectl", "device", "info", "details", "--device", reach], {
       timeout: 20_000,
       maxBuffer: 256 * 1_024,
@@ -539,12 +523,8 @@ export class IosDeviceInstallService {
           true,
         );
       }
-      // A missing binding is not permission to choose another connected phone.
       const targets = await this.discoverTargets(config.target.identifier);
       const currentTarget = targets.find((candidate) => candidate.identifier === config.target?.identifier);
-      // Each refusal names the stored binding and the one failed check
-      // (discovery, connection, Developer Mode) instead of one combined cause,
-      // short enough for the iOS toast's three-line title.
       if (!currentTarget) {
         throw new GatewayError(
           "not_found",
@@ -580,8 +560,6 @@ export class IosDeviceInstallService {
         }
         await removeIfExists(activePath(this.options.tronHome));
       }
-      // Publish only the exact connected target admitted by this discovery.
-      // The Gateway caller holds the paired-device lane through this callback.
       await observeName?.(currentTarget.name);
       const startedAt = new Date().toISOString();
       const status: IosDeviceInstallStatus = {
@@ -640,9 +618,6 @@ function appendTail(current: string, chunk: Buffer): string {
   return Buffer.from(next).subarray(-maximum).toString("utf8").replace(/^�+/u, "");
 }
 
-/** The fixed repository helper invocation: no RPC-supplied command or scheme
- * can reach it. The install itself runs detached, so its argv is the only
- * in-process witness of what is launched. */
 function iosDeviceInstallInvocation(
   sourceRoot: string,
   targetIdentifier: string,
@@ -668,9 +643,6 @@ function bundledXcodegen(runtimeExecutable: string): string | undefined {
   } catch { return undefined; }
 }
 
-/** The allow-listed helper environment, including the payload's own XcodeGen.
- * The install runs detached, so this environment is the only in-process witness
- * of what a PATH-injected tool could otherwise reach. */
 function iosDeviceInstallHelperEnvironment(
   config: IosDeviceInstallConfig,
   inherited: NodeJS.ProcessEnv = process.env,

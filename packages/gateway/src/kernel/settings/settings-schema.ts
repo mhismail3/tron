@@ -4,13 +4,6 @@ import { type Control, type Effect, type Timing, type ValueType, type Writer, DE
 import { MODEL_QUEUE_ROLES, modelQueueKey, type QualifierName, type Direction } from "./tool-contract.js";
 import type { StoreLayer } from "./settings-types.js";
 
-/**
- * Canonical setting declarations (docs/settings-contract.md F1): the resolver,
- * change path and generic iOS renderer share these layers, stores, timing,
- * floors, writers and display metadata. A new key is one entry here.
- */
-
-/** A section's `description` is the one line a client shows beside its title. */
 interface SectionDeclaration { id: string; title: string; description: string; order: number; harness: boolean; note?: string; chatInline?: boolean }
 
 export const SECTIONS: readonly SectionDeclaration[] = [
@@ -27,37 +20,25 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, harness: false, note: "Stored on this iPhone. It never changes what the agent does." },
 ];
 
-/** Where a layer stores a key (doc 3.2). Paths may hold `{model}`, which a
- * `model` qualifier fills with `provider/id`. A pi binding's `qualified` path is
- * the per-model instance within this scope. Specificity is resolved before
- * choosing among scopes; it never lets a lower scope outrank a higher one. */
 export type Binding =
   | { store: "pi"; path: readonly string[]; qualified?: readonly string[] }
   | { store: "pi-model-ref" }
   | { store: "session"; field: "model" | "thinking" | "contextWindow" | "tools" }
   | { store: "session-settings"; path: readonly string[] }
-  /** A read-only delegation snapshot in canonical Session fixed provenance. */
   | { store: "session-launch" }
   | { store: "home"; path: readonly string[] }
   | { store: "trust" }
-  /** Private native-service authorized_keys (security/mac-terminal.ts):
-   * one Mac Terminal key per paired iPhone, qualified by `device`. */
   | { store: "mac-terminal" }
   | { store: "mac-terminal-service" }
-  /** `<tronHome>/gateway/settings/gateway.json`: Gateway-owned behaviour no pi
-   * file holds, by path (Global scope only; only the change path writes it). */
   | { store: "gateway"; path: readonly string[] };
 
 export type TimingDeclaration = Timing | { widen: Timing; narrow: Timing };
 
 export interface KeyDeclaration {
-  /** Stable dotted id plus any fixed qualifier, e.g. `model.ref[role=worker]`. */
   id: string;
   group: string;
   subgroup?: string;
-  /** Fixed qualifier values this instance is declared for (e.g. role). */
   fixed?: Partial<Record<QualifierName, string>>;
-  /** A dynamic qualifier whose instances are enumerated from the stores. */
   qualifier?: QualifierName;
   type: ValueType;
   optionsSource?: { name: string; dependsOn: readonly string[] };
@@ -65,39 +46,26 @@ export interface KeyDeclaration {
   projectSettable: boolean;
   layers: Partial<Record<Exclude<StoreLayer, "default">, Binding>>;
   home?: { layers: readonly Exclude<StoreLayer, "default">[]; defaultValue?: unknown };
-  /** The default value. `undefined` means none: the key is unset. */
   defaultValue?: unknown;
-  /** A default that depends on the instance (a floor's default is that key's code floor). */
   defaultValueFor?: (qualifiers: Partial<Record<QualifierName, string>>) => unknown;
   timing: TimingDeclaration;
   effect: Effect;
-  /** Trust/authority, privacy or spend widening, and any install or irreversible effect, require a native tap. */
   tap?: "trust" | "privacy" | "spend" | "install" | "irreversible";
-  /** How a change's direction is read; undeclared directions default to widening. */
   direction?: (before: unknown, after: unknown) => Direction;
-  /** Who may request a change. This list is the grant (decision 34): there is
-   * no per-task or per-chat grant beside it, and a task worker may change
-   * exactly the keys an ordinary chat's agent may. */
   writers: readonly Writer[];
   redacted?: boolean;
   label: string;
   help: string;
   order: number;
   importance: "essential" | "advanced";
-  /** Declared editing surface. Absent keys retain inspection and explicit reset only. */
   control?: Control;
   fallback?: Control;
   confirm?: string;
-  /** What to type into a text field or a list's new value (#939): the format in
-   * a short sentence, and a realistic example shown as the field's placeholder.
-   * Every editable text and string-list key has one. */
   entry?: EntryGuidance;
 }
 
 export interface EntryGuidance { hint: string; example: string }
 
-/** The maintainer, Home, an ordinary chat's agent and a task worker. A key an
- * agent may change, a task worker may change too (decision 34). */
 const ANY_ACTOR: readonly Writer[] = ["ui", "home", "agent", "worker"];
 
 const THINKING = [
@@ -122,7 +90,6 @@ const QUEUE = [
 const larger = (before: unknown, after: unknown): Direction =>
   typeof before === "number" && typeof after === "number" && after < before ? "narrow" : "widen";
 const turnsOn = (_before: unknown, after: unknown): Direction => after === true ? "narrow" : "widen";
-/** Trust: granting widens, revoking or clearing narrows. */
 const grants = (_before: unknown, after: unknown): Direction => after === true ? "widen" : "narrow";
 const toolsDirection = (before: unknown, after: unknown): Direction => {
   const was = new Set(Array.isArray(before) ? before as string[] : []);
@@ -149,8 +116,6 @@ function thinkingBudgetsType(): ValueType {
   };
 }
 
-/** A Home task's token budget (doc 6.1): the task record's own spend counters,
- * the only spend Tron measures (home.md Spend). An absent field is no limit. */
 const TASK_BUDGET_FIELDS = ["inputTokens", "outputTokens"] as const;
 function taskBudgetType(): ValueType {
   const max = 10_000_000_000;
@@ -172,7 +137,6 @@ function taskBudgetType(): ValueType {
   };
 }
 
-/** A budget widens when any limited field rises or is removed (no limit). */
 const raisesBudget = (before: unknown, after: unknown): Direction => {
   const was = (before ?? {}) as Record<string, number>, next = (after ?? {}) as Record<string, number>;
   return TASK_BUDGET_FIELDS.some(field => was[field] !== undefined && (next[field] === undefined || next[field]! > was[field]!)) ? "widen" : "narrow";
@@ -207,7 +171,6 @@ const thinkingType = types.choice(THINKING, true);
 
 export function createSettingsSchema(homeToolNames: readonly string[], compactionInstructionLimit: number, validateTerminalKey: (value: unknown, label: string) => string) {
   const KEYS: readonly KeyDeclaration[] = ([
-    // Model ---------------------------------------------------------------
     {
       id: "model.ref[role=chat]", sessionOverridable: true, projectSettable: true, group: "model", fixed: { role: "chat" }, type: types.modelRef(),
       optionsSource: { name: "catalog.models", dependsOn: [] },
@@ -217,7 +180,7 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     },
     {
       id: "model.thinking[role=chat]", sessionOverridable: true, projectSettable: true, group: "model", fixed: { role: "chat" }, qualifier: "model", type: thinkingType,
-      defaultValue: "medium", // Pinned SDK DEFAULT_THINKING_LEVEL; capability clamping is resolver-owned.
+      defaultValue: "medium",
       optionsSource: { name: "catalog.thinkingLevels", dependsOn: ["model.ref[role=chat]"] },
       layers: {
         session: { store: "session", field: "thinking" }, home: { store: "home", path: ["thinking", "chat"] },
@@ -248,8 +211,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       importance: "advanced",
     },
     ...MODEL_QUEUE_ROLES.map((role, index): KeyDeclaration => ({
-      // An ordered fallback queue (settings-model.md 6.3): the first available
-      // model runs; a usage-limit error or a provider at 95% usage moves to the next.
       id: modelQueueKey(role), sessionOverridable: true, projectSettable: false, group: "workers", fixed: { role }, type: modelQueueType(role),
       defaultValue: [],
       layers: { ...(role === "background" ? {} : { session: { store: "session-launch" as const } }),
@@ -265,11 +226,8 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       timing: "fixed", effect: "delegate", writers: ["ui", "home"],
       label: "Worker thinking", help: "The thinking level Home's task workers start with.", order: 41, importance: "essential",
     },
-    // Context -------------------------------------------------------------
     {
       id: "context.compaction.enabled", sessionOverridable: true, projectSettable: true, home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.boolean(),
-      // The compaction owner captures the shared resolver's Project > Session >
-      // Global result at the operation boundary.
       layers: sessionPi("compaction", "enabled"), defaultValue: true, timing: "live", effect: "next-compaction",
       writers: ANY_ACTOR, label: "Automatic compaction", help: "Summarize older conversation when the context fills.",
       order: 10, importance: "essential",
@@ -309,7 +267,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       label: "Block images", help: "Replace images with a placeholder for the model.", order: 70, importance: "advanced", control: "toggle",
       confirm: "Allowing images again lets the model see image content.",
     },
-    // Tools ---------------------------------------------------------------
     {
       id: "tools.active", sessionOverridable: true, projectSettable: false, group: "tools", type: toolSelectionType(),
       optionsSource: { name: "catalog.tools", dependsOn: [] },
@@ -344,7 +301,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       label: "Command prefix", help: "Text run before every shell command.", order: 50, importance: "advanced", control: "text",
       entry: { hint: "Shell code run before each command, on one line.", example: "shopt -s expand_aliases" },
     },
-    // Permissions ---------------------------------------------------------
     {
       tap: "trust", id: "permissions.projectTrust", sessionOverridable: false, projectSettable: false, group: "trust", qualifier: "project", type: types.boolean(["Trusted", "Not trusted"]),
       layers: { global: { store: "trust" } }, timing: "live", effect: "reload", direction: grants,
@@ -352,9 +308,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       order: 10, importance: "essential", control: "toggle", confirm: "Trusting a project runs its extensions and hooks.",
     },
     {
-      // A paired iPhone's key in the private native SSH service, after host trust.
-      // Adding one lets that iPhone's Secure Enclave key log in over Tailscale,
-      // so it is a credential addition (approve); removing it is a revocation.
       tap: "trust", id: "permissions.macTerminalKey", sessionOverridable: false, projectSettable: false, group: "connections", subgroup: "Mac Terminal", qualifier: "device",
       type: {
         kind: "text",
@@ -393,14 +346,12 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       control: "choice", confirm: "Always trust loads every new project's extensions and hooks without asking.",
     },
     {
-      // Home's tasks read it at dispatch: a raise waits for the next task, a lower applies next turn.
       tap: "spend", id: "permissions.budget.task", sessionOverridable: true, projectSettable: false, group: "workers", type: taskBudgetType(),
       layers: { home: { store: "home", path: ["budget", "task"] }, global: { store: "gateway", path: ["taskBudget"] } }, timing: { narrow: "live", widen: "fixed" }, effect: "delegate",
       direction: raisesBudget, writers: ["ui", "home"],
       label: "Task budget", help: "Tokens one Home task may use, cached included. Empty is no limit.",
       order: 50, importance: "essential", control: "list", confirm: "Raising a task budget lets Home's tasks spend more.",
     },
-    // Run -----------------------------------------------------------------
     {
       id: "run.queue.steeringMode", sessionOverridable: true, projectSettable: true, group: "run", subgroup: "Queue", type: types.choice(QUEUE),
       layers: sessionPi("steeringMode"), defaultValue: "one-at-a-time", timing: "live", effect: "next-turn", writers: ANY_ACTOR,
@@ -479,7 +430,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       direction: (_b, a) => a === "idle" ? "widen" : "narrow", writers: ["ui", "home"],
       label: "Cache warming", help: "Keep prompt caches warm between runs. Costs money.", order: 130, importance: "advanced",
     },
-    // Sources -------------------------------------------------------------
     ...(["extensions", "skills", "prompts", "themes"] as const).map((name, index): KeyDeclaration => ({
       ...(name === "extensions" || name === "skills" ? { tap: "trust" as const } : {}), id: `sources.${name}`, sessionOverridable: false, projectSettable: true, home: { layers: [] }, group: "sources", subgroup: "Search paths", type: types.stringList(500),
       layers: both(pi(name)), timing: "fixed", effect: "reload", direction: toolsDirection,
@@ -498,13 +448,9 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     {
       tap: "trust", id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
       writers: ["ui", "home"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
-      // pi runs the first value as the program and passes the rest before its own npm arguments.
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
     },
-    // Setup ---------------------------------------------------------------
     {
-      // No writer: the runtime snapshots its session folder under the ownership
-      // lock at start, so it changes only while the Gateway is stopped.
       id: "setup.sessionDir", sessionOverridable: false, projectSettable: false, group: "setup", type: types.text(4_096), layers: { global: pi("sessionDir") }, timing: "live", effect: "restart",
       writers: [], label: "Session folder", help: "Where chats are stored. Applies after a restart.",
       order: 10, importance: "advanced", control: "text",
@@ -525,8 +471,6 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
     return key;
   }
 
-  /** The section group and label of a recorded key or subject, or undefined for one this
-   * Gateway no longer declares. */
   function auditSubject(id: string): { label: string; group: string } | undefined {
     if (id === HOME_PROFILE_SUBJECT.id) return HOME_PROFILE_SUBJECT;
     return KEYS.find(key => key.id === id) ?? recordSubject(id);
@@ -540,12 +484,9 @@ export type SettingsSchema = ReturnType<typeof createSettingsSchema>;
 
 
 
-/** Apply a key\u0027s declared Home scope before resolution and presentation. */
 export function keyForHome(key: KeyDeclaration, home: boolean): KeyDeclaration {
   if (!home) return key;
   const layers = key.home ? Object.fromEntries(Object.entries(key.layers).filter(([layer]) => key.home!.layers.includes(layer as Exclude<StoreLayer, "default">))) : { ...key.layers };
-  // The restricted Home recipe owns its request overrides. The active chapter
-  // keeps SDK boundary snapshots, never a second settings override.
   if (key.sessionOverridable && layers.session?.store === "session-settings" && !layers.home) {
     layers.home = { store: "home", path: ["settings", ...layers.session.path] };
   }
@@ -558,39 +499,25 @@ export function keyDefault(key: KeyDeclaration, qualifiers: Partial<Record<Quali
   return key.defaultValueFor ? key.defaultValueFor(qualifiers) : key.defaultValue;
 }
 
-/** Request binding, timing and effect—not a presentation group—own SDK admission.
- * Optional provider fields are replaced at the final provider boundary; fixed
- * directions are retained in the canonical Chat request snapshot. */
 export function hasRuntimeRequestApplier(key: KeyDeclaration): boolean {
   return key.layers.session?.store === "session-settings" && (key.timing === "fixed" || (key.timing === "live" && ["next-turn", "next-request"].includes(key.effect))
     || (key.effect === "next-request" && typeof key.timing !== "string"));
 }
 
-/** Compaction keys reach a chat through its CompactionOperationPolicy at the
- * next compaction boundary, not through the request settings. */
 export function hasCompactionApplier(key: KeyDeclaration): boolean {
   return key.layers.session?.store === "session-settings" && key.effect === "next-compaction";
 }
 
-/** Whether a Session-scope value of this key has a runtime owner that honours it. */
 export function hasSessionSettingsApplier(key: KeyDeclaration): boolean {
   return hasRuntimeRequestApplier(key) || hasCompactionApplier(key);
 }
 
-/**
- * Record subjects: configuration that has its own owner and editor rather than a
- * schema key (doc 7.6 hand-built screens), compared with what Tron last observed
- * so an outside edit is recorded, shown in Changes and pushed by its floor (doc
- * 5.6). One subject instance per entry of `container`; values are compared by
- * digest only. They never resolve as settings.
- */
 export interface RecordSubject {
   id: string;
   label: string;
   group: string;
   container: string;
   qualifier: QualifierName;
-  /** Fixed in code; decision 13: Tools and credential-bearing changes push. */
 }
 
 export const RECORD_SUBJECTS: readonly RecordSubject[] = [
@@ -602,12 +529,6 @@ export function recordSubject(id: string): RecordSubject | undefined {
   return RECORD_SUBJECTS.find(subject => subject.id === id);
 }
 
-/**
- * Home's learned profile items (doc 6.4): Knowledge notes, changed by Home's `profile`
- * tool and the maintainer's `home.profileChange` through the change path, which records
- * one instance per note (qualifier `note`). Not a key: an item never resolves as a
- * setting, and Knowledge stays its store.
- */
 export const HOME_PROFILE_SUBJECT = { id: "home.profile.item", label: "Profile item", group: "context", qualifier: "note" as const, };
 
 

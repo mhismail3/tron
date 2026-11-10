@@ -14,8 +14,6 @@ import type { HomeOwner } from "./home-owner.js";
 import { scanReservedHomeSession } from "./home-session-recovery.js";
 import { HOME_SESSION_PROFILE_NAME } from "./home-session-profile.js";
 
-/** Home's reserved-successor procedure: claim, recover or create the chapter's
- * session, then publish the observed materialization (kernel.md §5). */
 export class HomeChapterMaterializer {
   constructor(
     private readonly owner: HomeOwner,
@@ -24,10 +22,6 @@ export class HomeChapterMaterializer {
     private readonly diagnostic: HomeDiagnostic | undefined,
   ) {}
 
-  /**
-   * One reservation-scoped materialization promise. Callers await this before
-   * dispatching their own input, so joining never consumes or replays a command.
-   */
   async materialize(sessionId: string): Promise<RuntimeSlot> {
     const { slot: existingSlot, existing } = await this.runtimes.materializeRuntime(sessionId, () => this.create(sessionId));
     if (!existing) return existingSlot;
@@ -66,22 +60,11 @@ export class HomeChapterMaterializer {
       throw new GatewayError("conflict", "Home chapter recovery is blocked by uncertain session evidence");
     }
     this.diagnostic?.({ outcome: "chapter-recovery", reason: scan.action });
-    // Pi's public newSession API selects a timestamped path but stages setup
-    // entries: no file is persisted until the first user or assistant entry.
-    // Once a previous attempt durably named a different
-    // path, absence is not permission to silently replace that binding: no
-    // verified exact-path adapter exists in the pinned SDK, so preserve and
-    // block rather than create evidence outside the recorded attempt.
     if (chapter.expectedPath && scan.action === "absent") {
       throw new GatewayError("conflict", "Home recovery is blocked because its recorded chapter path is absent");
     }
 
-    // Resolve the sealed predecessor before reserving a new durable path. A
-    // failed read must not strand an otherwise absent materialization attempt.
     const previousId = scan.action === "absent" ? this.owner.settingsPredecessor(sessionId) : undefined;
-    // A never-prompted live predecessor can still have SDK-staged choices and
-    // no physical file. Its sealed slot is the canonical owner; cold reads must
-    // instead prove the exact durable file and may not treat absence as defaults.
     const previous = previousId ? await this.runtimes.canonicalEntries(previousId) : undefined;
     const previousFromLive = previous?.live === true;
     const previousEntries = previous?.entries ?? undefined;
@@ -93,8 +76,6 @@ export class HomeChapterMaterializer {
       profile: HOME_SESSION_PROFILE_NAME,
       prepare: async () => {
         if (scan.action === "adopt") {
-          // The scan adopts only the path it was given, so a mismatch means the
-          // durable reservation names a different file.
           if (chapter.expectedPath !== scan.path) {
             throw new GatewayError("conflict", "Home chapter recovery path no longer matches its durable reservation");
           }
@@ -102,15 +83,11 @@ export class HomeChapterMaterializer {
           if (manager.getSessionId() !== sessionId || manager.getSessionFile() !== scan.path) {
             throw new GatewayError("conflict", "Home chapter recovery did not reopen the exact reserved session");
           }
-          // The durable path was recorded by the earlier process; this attempt
-          // rebinds it before any runtime can submit canonical input.
           await this.owner.recordReservedChapterPath(sessionId, attemptId, scan.path);
         } else {
           manager = SessionManager.create(cwd.cwd, sessionDirectory);
           const createdPath = manager.newSession({ id: sessionId });
           if (!createdPath) throw new GatewayError("internal", "Home chapter creation did not reserve a session path");
-          // Carry authorization ceilings and the explicit chapter window, not
-          // derived tool/model/thinking/run choices owned by Home's live recipe.
           if (previousBranch) {
             const requestPins = readSessionRequestPins(previousBranch);
             if (Object.keys(requestPins).length) manager.appendCustomEntry(SESSION_SETTINGS_ENTRY, { settings: {}, requestPins });

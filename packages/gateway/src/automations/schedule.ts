@@ -50,8 +50,6 @@ export function classifyDueOccurrence(
   const result = trigger.kind === "calendar"
     ? calendar.Classify(zone(trigger, nowMs), calendarOf(trigger), stored, nowMs, p)
     : occurrence.Classify(timed(trigger), stored, nowMs, p);
-  // The stored occurrence keeps its stored text when it is kept (not yet due) or is a once trigger's own time;
-  // other due and next occurrences are written anew.
   const due = stored <= nowMs;
   const text = (at: Opt) => at.$ === "None" ? undefined : !due || trigger.kind === "once" ? nextOccurrenceAt : timestamp(at);
   const dispatchAt = text(result.dispatchAt);

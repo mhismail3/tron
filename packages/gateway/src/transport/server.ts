@@ -28,25 +28,12 @@ import { isTailscaleAddress } from "../config.js";
 import { OrderedOutboundQueue, UNKNOWN_OUTBOUND_TOPIC, type OutboundFrame } from "./ordered-outbound-queue.js";
 import { handleUploadHttp } from "./upload-http.js";
 
-// Retain only recent former IDs while an active subscription is rekeyed. Older
-// IDs are stale control paths and may safely require a fresh session.open.
 export const MAXIMUM_REKEYED_SESSION_IDS = 64;
 const MAXIMUM_UNANSWERED_HEARTBEATS = GATEWAY_CONNECTION_POLICY.missedHeartbeatLimit;
-/** Application-defined close code for a socket replaced by its own identity. */
 export const SUPERSEDED_CLOSE_CODE = 4000;
 
-/**
- * permessage-deflate for paired devices, which reach the Gateway over a radio.
- * Local-credential clients (Mac app, CLI) stay uncompressed. Measurements and
- * bounds: packages/gateway/docs/connection-resilience.md#frame-compression.
- * Context takeover and window bits stay at ws defaults on purpose: setting
- * serverNoContextTakeover or a numeric window option makes ws answer a legal
- * offer (including URLSession's parameterless one) with HTTP 400.
- */
 const PAIRED_PER_MESSAGE_DEFLATE: PerMessageDeflateOptions = {
   zlibDeflateOptions: { level: 6, memLevel: 8 },
-  // ws's zlib limiter is process-global and shared by inflate and deflate;
-  // two slots leave the rest of libuv's four-thread pool to file I/O.
   concurrencyLimit: 2,
 };
 
@@ -54,24 +41,12 @@ function diagnosticRequestID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, 160);
 }
 
-// A caller mistake or expected backpressure is handled (warning); only an
-// unexpected fault or an internal error means someone should look (error).
 function transportFailureLevel(error: unknown): "warning" | "error" {
   return error instanceof GatewayError && error.code !== "internal" && !Object.hasOwn(error, "cause") ? "warning" : "error";
 }
 
-/** Per-RPC completions under this bound are debug detail; slower ones warn. */
 const SLOW_RPC_WARNING_MS = 1_000;
-// Prompt acknowledgement has a 250 ms qualification target; warn at that boundary to retain actionable latency evidence.
 const SLOW_PROMPT_WARNING_MS = 250;
-/**
- * The only methods a `cancel` frame may end (`C-6`). A disposable read computes
- * an answer nothing consumes once its client stops waiting for it; an accepted
- * mutation, an admitted prompt and `session.sync` all have an owner that must
- * settle them whatever the client does with its wait, so a cancel for any other
- * method is ignored. Owner-module READ contracts describe their RPCs; this
- * transport set owns cancel-frame eligibility, separately from deadlines below.
- */
 export const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
   "session.open",
   "session.list",
@@ -86,29 +61,9 @@ export const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
   "provider.list",
   "provider.usage",
 ]);
-/** A projection that cannot answer within this bound is answering nobody: the
- * client already stopped waiting or will, so the Gateway stops the read. */
 const DISPOSABLE_READ_DEADLINE_MS = 5_000;
-/** A cold `session.open` may parse a large transcript before its subscription
- * commits, so it is the one disposable read with a longer bound. */
 const SESSION_OPEN_DEADLINE_MS = 10_000;
-/** What a shed response tells the client to wait. The pressure that shed the
- * read is still there, so a retry without a pause would be shed again; the
- * phone bounds this hint to 10 s of its own. */
 const SHED_RETRY_AFTER_MS = 1_000;
-/**
- * Server-side deadline per disposable read (`G-12`): one table, so a read that
- * has no entry has no deadline. Every entry is a `DISPOSABLE_READ_METHODS`
- * member — those still keep their cancel policy — and an admitted mutation or
- * prompt is deliberately absent: its owner settles it durably whatever the
- * client does with its wait.
- *
- * Three disposable reads (`model.list`, `provider.list`, `provider.usage`) are
- * absent because their own owners allow longer than any bound a client would
- * tolerate, and shedding below the owner's own bound would throw away an answer
- * the owner is about to produce: `provider.usage` answers a typed "timed out"
- * snapshot after up to 10 s per fetch. A read outside this table is never shed.
- */
 export const DISPOSABLE_READ_DEADLINES_MS: ReadonlyMap<string, number> = new Map([
   ["session.open", SESSION_OPEN_DEADLINE_MS],
   ["session.list", DISPOSABLE_READ_DEADLINE_MS],
@@ -118,16 +73,8 @@ export const DISPOSABLE_READ_DEADLINES_MS: ReadonlyMap<string, number> = new Map
   ["home.memory.view", DISPOSABLE_READ_DEADLINE_MS],
   ["home.memory.evidence", DISPOSABLE_READ_DEADLINE_MS],
 ]);
-/** An upgrade that reaches hello within this bound is debug detail; every
- * abandoned or rejected upgrade, and any slower one, warns. */
 const UPGRADE_SLOW_WARNING_MS = 1_000;
-/** A socket this long without an inbound frame has missed at least one of the
- * phone's 10-second pings, and liveness was expected: one record per silence
- * episode says so, where a per-tick record would repeat for as long as the path
- * stays down. */
 const INBOUND_SILENCE_WARNING_MS = 12_000;
-/** A heartbeat this late means the event loop stalled long enough for clients
- * to notice; shorter timer jitter is normal and not recorded. */
 const EVENT_LOOP_DELAY_WARNING_MS = 1_000;
 
 function diagnosticErrorCode(error: unknown): string {
@@ -147,13 +94,8 @@ function diagnosticErrorDetails(error: unknown): { operationId?: string; ageMs?:
   };
 }
 
-// HTTP admission is intentionally independent from route payload limits: it
-// bounds the lifetime of transport requests while UploadStore, BlobStore and
-// live-view leases retain ownership of their own staged bytes/readers/viewers.
 export const HTTP_REQUEST_IDLE_TIMEOUT_MS = 30_000;
 export const HTTP_HEADERS_TIMEOUT_MS = 15_000;
-// Preserve Node's finite five-minute body allowance for large slow uploads;
-// request receipt and transport inactivity are different bounds.
 const HTTP_REQUEST_TIMEOUT_MS = 300_000;
 const HTTP_SHUTDOWN_GRACE_MS = 1_000;
 const HTTP_MAXIMUM_CONNECTIONS = 128;
@@ -162,10 +104,6 @@ const HTTP_MAXIMUM_REQUESTS = 128;
 const HTTP_MAXIMUM_REQUESTS_PER_IDENTITY = 16;
 const HTTP_MAXIMUM_REQUESTS_PER_ADDRESS = 32;
 export const HTTP_MAXIMUM_REQUESTS_PER_CONNECTION = 8;
-// Both listeners this transport owns — the main one and the LAN lane — take
-// their bounds from here: the lane serves the same routes to the same peers out
-// of the same connection budget, so a slower bound there would let a peer that
-// has not signed in hold slots the phone's own leg needs.
 export const HTTP_LISTENER_LIMITS: LanListenerLimits = {
   headersTimeout: HTTP_HEADERS_TIMEOUT_MS,
   requestTimeout: HTTP_REQUEST_TIMEOUT_MS,
@@ -184,7 +122,6 @@ interface HttpLeaseState {
   released: boolean;
 }
 
-/** One bounded admission owner for authenticated and pre-auth HTTP requests. */
 class HttpTransportAdmission {
   private active = 0;
   private readonly identities = new Map<string, number>();
@@ -283,49 +220,25 @@ interface ActiveSessionSynchronization {
   timeout: NodeJS.Timeout;
   requestId: string;
   subscriptionToken: string;
-  /** Updated if its canonical session forks while acknowledgement is pending. */
   sessionId: string;
-  /** Request IDs whose delivered response carried this barrier's token. A
-   * cancel for a `session.open` that was already answered revokes the barrier
-   * only once no other delivered response still carries it (`C-6`). */
   deliveredRequests: Set<string>;
 }
 
-/**
- * One shared `session.open` attempt per connection and session (`C-6`). A
- * retried open joins it instead of failing as a duplicate, so the answer the
- * first attempt is already computing is the one the retry receives, and the
- * attempt is abandoned only when its last waiting request leaves: a cancellation
- * that arrives while a retry still waits must not throw the retry's answer away.
- */
 interface SessionOpenFlight {
-  /** The request whose synchronization this attempt installs and owns. */
   readonly requestId: string;
-  /** The shared attempt's signal; aborted when its last waiter leaves. */
   readonly controller: AbortController;
-  /** The shared invocation, published by the request that created the flight. */
   attempt?: Promise<JsonValue>;
-  /** Requests still waiting for this attempt's answer. */
   waiters: number;
-  /** Set once a response carrying this attempt's result reached the client. */
   answered?: boolean;
-  /** Releases the synchronization this attempt installed, registered by the
-   * request that owns its barrier while another request may still deliver it. */
   releaseAbandoned?: () => void;
 }
 
-/** One admitted request, the owner of its abort signal and its span. */
 interface InFlightRpc {
   readonly controller: AbortController;
   readonly method: string;
   readonly startedAt: number;
   readonly span: RequestSpan;
-  /** Set with the stage it was in when an explicit `cancel` frame arrived. A
-   * socket retirement leaves it unset: that request reports `connectionClosed`. */
   cancelledStage?: string;
-  /** Set with the reason when this read outlived its own deadline, so the one
-   * record for the request is `gateway.shed` instead of `rpc.completed` and the
-   * abort is answered instead of silently dropped (`G-12`). */
   shedReason?: "deadline";
 }
 
@@ -343,9 +256,6 @@ function existingSessionOpenOwner(
   synchronizations: ReadonlyMap<string, ActiveSessionSynchronization>,
   sessionId: string,
 ): string | undefined {
-  // Only genuinely in-flight opens are rejected. An installed subscription is
-  // not an open owner: beginSynchronization replaces it deterministically so
-  // reconnecting clients always converge instead of deadlocking on conflict.
   return pendingSessionOpens.get(sessionId)?.requestId
     ?? synchronizations.get(sessionId)?.requestId;
 }
@@ -363,22 +273,16 @@ function clearRequestSynchronizations(
   }
 }
 
-/** Hello `diagnostics` tokens: bounded, and safe to write into records verbatim. */
 const PEER_DIAGNOSTIC_TOKEN = /^[A-Za-z0-9-]{1,64}$/u;
 
-/** The peer's O-1 correlation key, carried on every connection-scoped record. */
 interface PeerDiagnostics {
   peerClientId?: string;
   peerAttemptId?: string;
   peerEpoch?: string;
 }
 
-/** How far an upgrade got, in the order its phases run. */
 type UpgradePhase = "request" | "auth" | "handshake" | "hello";
 
-/** Which listener accepted a connection: the LAN endpoint (E-3a), the main
- * listener at a Tailscale address, or the main listener at any other address
- * (the developer loopback default). The phone names the same two real legs. */
 type ConnectionTransport = "lan" | "tailscale" | "primary";
 
 interface HttpConnectionTrace {
@@ -389,36 +293,22 @@ interface HttpConnectionTrace {
   tlsFailed?: boolean;
 }
 
-/** One `http.upgrade` record is written per upgrade, at whichever point it ends:
- * hello, a refusal, or the peer leaving before hello. */
 interface UpgradeTrace {
-  /** The listener the upgrade reached, so the record says which leg it used. */
   transport: ConnectionTransport;
-  /** The TCP accept, before Node parsed the upgrade request. */
   acceptAt: number;
   transportTrace: HttpConnectionTrace | undefined;
-  /** The upgrade handler entry; the auth phase is measured from here. */
   startedAt: number;
-  /** Null until the credential wait settles. */
   authMs: number | null;
-  /** Null until the WebSocket handshake completes; the hello phase runs after. */
   handshakeAt: number | null;
-  /** Set once the connection exists, so an upgrade that dies before hello still
-   * joins its own `connection.closed` record. */
   connectionId?: string;
   reported: boolean;
 }
 
-/** A frame the ws library itself refused — an oversized payload or a malformed
- * frame — carries a `WS_ERR_*` code; a path failure carries a socket error code
- * or none. */
 function isFrameRefusal(error: Error): boolean {
   const code: unknown = (error as { code?: unknown }).code;
   return typeof code === "string" && code.startsWith("WS_ERR_");
 }
 
-/** The structured ending of one upgrade. `reason` is what triage groups on; the
- * message carries the human detail. */
 interface UpgradeEnding {
   reason:
     | "request_capacity" | "unexpected_path" | "warming_up" | "shutting_down"
@@ -426,40 +316,24 @@ interface UpgradeEnding {
     | "superseded" | "device_revoked"
     | "authentication_timeout" | "handshake_refused" | "hello_timeout" | "hello_required"
     | "protocol_mismatch" | "invalid_frame" | "hello";
-  /** The O-1 peer key, once hello named it. */
   peer?: PeerDiagnostics;
-  /** The version a refused hello asked for: whether the phone or the Gateway is
-   * the stale build. */
   peerProtocolVersion?: number;
-  /** Overrides the level rule for an ending the Gateway expects and clients
-   * retry: readiness and shutdown refusals are info, not a warning. */
   level?: LogLevel;
 }
 
-/** The wire close reason for a protocol mismatch: the version range is the only
- * fact that tells the peer whether its own app or this Gateway is the stale
- * build, and a close code alone cannot carry it (F-3). Fits the WebSocket
- * control-frame reason bound of 123 bytes. */
 function protocolMismatchCloseReason(): string {
   return JSON.stringify({ code: "protocol_mismatch", gatewayProtocol: PROTOCOL_VERSION, minProtocol: MIN_PROTOCOL_VERSION });
 }
 
-/** One episode of inbound silence, from its last frame to the next one. */
 interface SilenceEpisode {
   startedAt: number;
   resumedAt?: number;
   reported: boolean;
-  /** Silence already observed when this episode was detected. */
   detectedMs: number;
-  /** How long the Gateway's unanswered ping had been waiting at detection, or
-   * null when the client's own pings were the liveness signal that stopped. */
   detectedPingMs: number | null;
-  /** The shared, bounded peer-path read; it never rejects and never blocks the
-   * heartbeat. */
   peer: Promise<PeerPathLookup>;
 }
 
-/** Diagnostics only: an invalid token is dropped, never a reason to reject hello. */
 function peerDiagnostics(value: unknown): PeerDiagnostics {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
   const fields = value as Record<string, unknown>;
@@ -480,19 +354,11 @@ interface Connection {
   identity: string;
   isLocal: boolean;
   socket: WebSocket;
-  /** The peer's socket address; joins it to its Tailscale peer, never logged. */
   remoteAddress: string;
-  /** Set by the upgrade that created this connection; see `UpgradeTrace`. */
   upgrade: UpgradeTrace;
-  /** Empty until hello; see `peerDiagnostics`. */
   peer: PeerDiagnostics;
-  /** The open inbound-silence episode, if the socket is silent now. */
   silence?: SilenceEpisode | undefined;
   unansweredHeartbeats: number;
-  // When the Gateway's own last ping went out, cleared by any inbound frame.
-  // `unansweredHeartbeats` counts ticks, including ticks that skipped the ping
-  // for a client that had just spoken, so only this field says a ping is
-  // actually outstanding; the silent record reports how long it has waited.
   pingOutstandingSince: number | null;
   ready: boolean;
   presentationOnly: boolean;
@@ -500,12 +366,8 @@ interface Connection {
   requestControllers: Map<string, InFlightRpc>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
   subscriptionTokens: Map<string, string>;
-  // A fork may occur after session.open but before session.sync. Retain the
-  // former ID only while its carried subscription remains current.
   rekeyedSessionIds: Map<string, string>;
   synchronizationBytes: number;
-  // Reserved before asynchronous service invocation so overlapping opens for
-  // the same connection/session share their attempt instead of both running.
   pendingSessionOpens: Map<string, SessionOpenFlight>;
   outbound: OrderedOutboundQueue;
   closeInitiated: boolean;
@@ -517,12 +379,8 @@ interface Connection {
   revokeCloseScheduled: boolean;
   admittedAt: number;
   lastInboundAt: number | null;
-  // Messages and client pings only. A pong answers the Gateway's own ping, so
-  // it never proves that the client will speak again without being asked.
   lastClientInitiatedInboundAt: number | null;
-  // The client's own WebSocket pings, the one signal that it speaks unprompted.
   lastClientPingAt: number | null;
-  // Successful ordered application-frame callbacks, not send start or pong traffic.
   lastWriteProgressAt: number | null;
   helloTimer: NodeJS.Timeout;
 }
@@ -548,7 +406,6 @@ interface PreparedOutboundFrame extends BufferedSessionEncoding {
   readonly nodes?: number;
 }
 
-/** What `outboundFrameIdentity` adds to one encoded frame (`G-4`). */
 interface OutboundFrameIdentity {
   readonly topic: string;
   readonly key?: string;
@@ -558,53 +415,30 @@ interface OutboundFrameIdentity {
   readonly rebaseline?: () => OutboundFrame | undefined;
 }
 
-/**
- * The wire topic of one outbound frame, and — when a newer frame can replace it
- * in an unsent queue — what identifies the state it carries (`G-4`). Only a
- * `session.snapshot` supersedes sequenced state: it is the one frame that
- * carries the whole current state of its session, so the newest of them can
- * stand in for the sequences the queue dropped with it. A session summary is
- * replaced by key alone, because it states its own revision and carries no
- * sequence. A frame with neither is always delivered.
- */
 function outboundFrameIdentity(
   connection: Connection,
   value: unknown,
   prepared: PreparedOutboundFrame,
   maximumBytes: number,
 ): OutboundFrameIdentity {
-  // An oversized projection is sent as a compact resync notice instead: that
-  // notice is its own frame and is never superseded by the projection it
-  // replaced.
   if (prepared.fallback) return { topic: "transport.resyncRequired" };
   const frame = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
   const topic = typeof frame.topic === "string" ? frame.topic : typeof frame.type === "string" ? frame.type : UNKNOWN_OUTBOUND_TOPIC;
   const payload = typeof frame.payload === "object" && frame.payload !== null ? frame.payload as Record<string, unknown> : {};
   const sessionId = typeof frame.sessionId === "string" ? frame.sessionId : undefined;
   if (topic === "session.summary") {
-    // A summary is a global event; the session it describes is its payload.
     const summarySessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
     return summarySessionId === undefined ? { topic } : { topic, key: `session.summary:${summarySessionId}` };
   }
   if (sessionId === undefined) return { topic };
   const sequence = typeof payload.eventSequence === "number" ? payload.eventSequence : undefined;
   if (sequence === undefined) return { topic };
-  // Every sequenced session frame is described by the session, the runtime
-  // generation its sequence belongs to and that sequence, so a newer snapshot
-  // knows which of its session's frames its own state re-states and which ones
-  // are fences it must not be dropped across (`SNAPSHOT_STATED_TOPICS` in `ordered-outbound-queue.ts`).
   const runtimeGeneration = typeof payload.runtimeGeneration === "string" ? payload.runtimeGeneration : undefined;
   const sequenced: OutboundFrameIdentity = {
     topic, sessionId, sequence,
     ...(runtimeGeneration === undefined ? {} : { runtimeGeneration }),
   };
   if (topic !== "session.snapshot") return sequenced;
-  // Superseding a snapshot is only safe when the client can still accept what
-  // follows: the replacement is a `session.rebaseline`, which the phone admits
-  // as fresh authority even when its `eventSequence` jumps forward
-  // (`SessionRebaselineAdmission`). It needs the subscription credential the
-  // client installed, so a session this connection holds no token for
-  // supersedes nothing.
   const subscriptionToken = connection.subscriptionTokens.get(sessionId);
   if (subscriptionToken === undefined) return sequenced;
   const rebaseline = (): OutboundFrame | undefined => {
@@ -619,8 +453,6 @@ function outboundFrameIdentity(
     return {
       encoded: encoded.output,
       bytes: encoded.outputBytes,
-      // A rebaseline too large to encode is still the frame the client needs to
-      // fail closed: the compact notice retires its subscription instead.
       topic: encoded.fallback ? "transport.resyncRequired" : "session.rebaseline",
       sessionId,
       sequence,
@@ -667,16 +499,11 @@ function prepareOutboundFrame(value: unknown, maximum: number): PreparedOutbound
     : undefined;
 }
 
-/** A server's `connection` event is typed as a `Duplex`, but the accepted
- * socket is the net.Socket whose address the per-address bound counts. */
 function acceptedSocketAddress(socket: Duplex): string {
   const address = (socket as { remoteAddress?: unknown }).remoteAddress;
   return typeof address === "string" ? address : "unknown";
 }
 
-/** The source port of an accepted socket, or undefined when the socket is not a
- * TCP one. It joins a TLS socket to the socket it wrapped: the two report the
- * same peer, and only one live connection holds an address and port pair. */
 function acceptedSocketPort(socket: Duplex): number | undefined {
   const port = (socket as { remotePort?: unknown }).remotePort;
   return typeof port === "number" ? port : undefined;
@@ -713,22 +540,14 @@ async function readBoundedBody(request: IncomingMessage, maximum: number): Promi
 
 export class GatewayServer {
   private readonly server: HTTPServer;
-  // ws negotiates extensions per server instance; the upgrade handler picks
-  // one by the authenticated credential kind.
   private readonly localSockets: WebSocketServer;
   private readonly pairedSockets: WebSocketServer;
   private readonly clients = new Map<string, Connection>();
   private readonly httpSockets = new Set<Duplex>();
-  /** Pending WebSocket upgrades, ended by shutdown with the Gateway as the
-   * cause: a socket the Gateway destroys is not a peer departure. */
   private readonly pendingUpgrades = new Set<() => void>();
   private readonly httpConnectionsByAddress = new Map<string, number>();
-  /** One physical accept owns the trace; its TLS wrapper shares it. No request
-   * contents or peer address are retained in diagnostic records. */
   private readonly httpSocketTraces = new WeakMap<object, HttpConnectionTrace>();
   private readonly httpAdmission: HttpTransportAdmission;
-  /** The transport's only Tailscale reader; it shares one bounded status read
-   * between every socket that goes silent in the same window. */
   private readonly peerPaths: PeerPathReader;
   private readonly pairingLimiter = new RateLimiter(10, 10 * 60_000);
   private readonly heartbeat: NodeJS.Timeout;
@@ -737,15 +556,9 @@ export class GatewayServer {
   private readonly disposableReadDeadlines: ReadonlyMap<string, number>;
   private readonly resourceSampler: ResourceSampler;
   private readonly resourceTimer: NodeJS.Timeout;
-  /** One resource sample reads the runtime inventory; a slow one must not
-   * overlap the next minute's window. */
   private resourceSampleInFlight = false;
-  /** The second, TLS-only listener for the private LAN; undefined when the
-   * Gateway was composed without one. */
   private readonly lanEndpoint: LanEndpoint | undefined;
-  /** The main listener's leg, named on every upgrade record. */
   private readonly primaryTransport: ConnectionTransport;
-  /** Whether the current run of sampler faults has already been reported. */
   private resourceSampleFailureReported = false;
   private ready = false;
   private shuttingDown = false;
@@ -763,8 +576,6 @@ export class GatewayServer {
       maximumOutboundBytes?: number;
       maximumSynchronizationBytes?: number;
       synchronizationTimeoutMs?: number;
-      /** The disposable-read deadline table (`G-12`). The module table unless a
-       * caller overrides it, like the other named bounds above. */
       disposableReadDeadlinesMs?: ReadonlyMap<string, number>;
       maximumHttpConnections?: number;
       maximumHttpRequests?: number;
@@ -777,12 +588,10 @@ export class GatewayServer {
       service: GatewayService;
       logger: GatewayLogger;
       liveViews?: BrowserLiveViewRegistry;
-      /** Synchronous canonical-branch admission inside the device credential cut. */
       authorizeBrowserLiveView?: (sessionId: string, viewId: string, generation: string) => boolean;
       stallSampler?: StallSampler;
       resourceSampler?: ResourceSampler;
       peerPathReader?: PeerPathReader;
-      /** The pinned LAN listener (E-3a). Absent means no second listener. */
       lanEndpoint?: LanEndpointConfig;
     },
   ) {
@@ -791,8 +600,6 @@ export class GatewayServer {
     this.resourceSampler = options.resourceSampler ?? new ResourceSampler();
     this.peerPaths = options.peerPathReader ?? new TailscalePeerPaths();
     this.primaryTransport = isTailscaleAddress(options.host) ? "tailscale" : "primary";
-    // Sampled off every record path: the heartbeat keeps this current, and a
-    // phone that reconnects in the first interval still carries host evidence.
     this.stallSampler.refreshHostSample();
     const maximumHttpConnections = options.maximumHttpConnections ?? HTTP_MAXIMUM_CONNECTIONS;
     if (!Number.isSafeInteger(maximumHttpConnections) || maximumHttpConnections < 1) {
@@ -802,16 +609,11 @@ export class GatewayServer {
       options.maximumHttpRequests,
       options.maximumHttpRequestsPerIdentity,
     );
-    // Both listeners take their bounds from one object: the lane serves the
-    // same routes to the same peers out of the same connection budget.
     const listenerLimits = HTTP_LISTENER_LIMITS;
     this.server = createServer(httpListenerOptions(listenerLimits), (request, response) => void this.handleHttp(request, response, this.primaryTransport));
     this.server.timeout = listenerLimits.idleTimeout;
     this.server.on("connection", (socket) => this.admitHttpConnection(socket, maximumHttpConnections, this.primaryTransport));
     this.server.on("clientError", (error, socket) => this.httpClientError(error, socket));
-    // The LAN listener shares this transport's admission, capacity, heartbeat,
-    // revocation and hello; only its address, its certificate and the routes it
-    // refuses are its own.
     if (options.lanEndpoint) {
       this.lanEndpoint = new LanEndpoint({
         ...options.lanEndpoint,
@@ -826,7 +628,6 @@ export class GatewayServer {
         onUpgrade: (request, socket, head) => void this.handleUpgrade(request, socket, head, "lan"),
       });
     }
-    // maxPayload bounds each inbound message after inflation as well as on the wire.
     this.localSockets = new WebSocketServer({ noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: false });
     this.pairedSockets = new WebSocketServer({
       noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: PAIRED_PER_MESSAGE_DEFLATE,
@@ -836,8 +637,6 @@ export class GatewayServer {
       const heartbeatAt = performance.now();
       const timerDelayMs = heartbeatTimerDelay(heartbeatAt - this.lastHeartbeatAt);
       this.lastHeartbeatAt = heartbeatAt;
-      // Every heartbeat closes a window, so a delayed record's GC and
-      // utilization cover exactly the delayed interval.
       const stallWindow = this.stallSampler.closeWindow();
       if (timerDelayMs >= EVENT_LOOP_DELAY_WARNING_MS) {
         const pressure = this.pressureDiagnostic();
@@ -849,15 +648,10 @@ export class GatewayServer {
           });
         });
       }
-      // Keeps the host sample behind the connection records current. On a tick
-      // that already probed the host for a stall this starts nothing extra.
       this.stallSampler.refreshHostSample();
       for (const connection of this.clients.values()) {
         if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN) continue;
         this.observeInboundSilence(connection, heartbeatAt);
-        // Retire only after three complete heartbeat intervals received no frame.
-        // One delayed timer or transiently starved callback cannot destroy a
-        // healthy epoch; the fourth tick observes and retires the three misses.
         if (shouldTerminateHeartbeat(connection.unansweredHeartbeats)) {
           const heartbeatQueue = connection.outbound.snapshot();
           this.options.logger.log(
@@ -868,11 +662,6 @@ export class GatewayServer {
           connection.socket.terminate();
           continue;
         }
-        // Every tick counts, so a dead client is retired on the same tick
-        // whether or not it was pinged. A client whose own frames arrived
-        // within the last interval is already proving liveness (the phone pings
-        // every 10 s); pinging it would only add a wakeup on both ends. Silent
-        // and pong-only clients are still pinged on every tick.
         connection.unansweredHeartbeats += 1;
         const clientInitiatedAt = connection.lastClientInitiatedInboundAt;
         if (clientInitiatedAt === null
@@ -883,14 +672,10 @@ export class GatewayServer {
       }
     }, GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs);
     this.heartbeat.unref();
-    // The resource record is the Gateway's only periodic whole-process picture;
-    // one minute is the cadence the sampler's volume estimate assumes.
     this.resourceTimer = setInterval(() => void this.publishResources(), RESOURCE_SAMPLE_INTERVAL_MS);
     this.resourceTimer.unref();
   }
 
-  /** Every physical socket of every listener enters here, so the capacity bound
-   * counts the Gateway's whole HTTP surface, not one address. */
   private admitHttpConnection(socket: Duplex, maximumHttpConnections: number, transport: ConnectionTransport): void {
     const address = acceptedSocketAddress(socket);
     const addressConnections = this.httpConnectionsByAddress.get(address) ?? 0;
@@ -926,8 +711,6 @@ export class GatewayServer {
     });
   }
 
-  /** A TLS wrapper and its accepted socket share one trace and one close
-   * record. The bounded live socket set is already the admission authority. */
   private adoptAcceptedSocketTrace(socket: Duplex): HttpConnectionTrace | undefined {
     const existing = this.httpSocketTraces.get(socket);
     if (existing) return existing;
@@ -947,8 +730,6 @@ export class GatewayServer {
   }
 
   private observeTransportEnd(socket: Duplex, trace: HttpConnectionTrace): void {
-    // Install before ws: its socket error handler consumes the TCP error rather
-    // than forwarding it to WebSocket's error event.
     socket.on("error", (error) => this.noteTransportError(error, socket));
     socket.once("timeout", () => { if (trace.transportEnd !== "reset") trace.transportEnd = "timeout"; });
     socket.once("end", () => { if (trace.transportEnd === "none") trace.transportEnd = "fin"; });
@@ -958,7 +739,6 @@ export class GatewayServer {
     const trace = this.adoptAcceptedSocketTrace(socket);
     if (!trace) return;
     const code = (error as NodeJS.ErrnoException).code;
-    // Only platform error identifiers, never error messages or rawPacket.
     if (code && /^[A-Z][A-Z0-9_]{0,63}$/u.test(code)) trace.code = code;
     if (code === "ECONNRESET") trace.transportEnd = "reset";
     else if (code === "ETIMEDOUT" || code === "ERR_HTTP_REQUEST_TIMEOUT" || code === "ERR_TLS_HANDSHAKE_TIMEOUT") trace.transportEnd = "timeout";
@@ -967,9 +747,6 @@ export class GatewayServer {
 
   private httpClientError(error: Error, socket: Duplex): void {
     this.noteTransportError(error, socket);
-    // Owning clientError replaces Node's default responder (including HTTPS's
-    // TLS-error retirement). Preserve its response/header guard and immediate
-    // destroy; ending an incomplete TLS handshake can otherwise hang forever.
     const code = (error as NodeJS.ErrnoException).code;
     const activeResponse = (socket as Duplex & { _httpMessage?: ServerResponse })._httpMessage;
     if (socket.writable && !activeResponse?.headersSent && (code?.startsWith("HPE_") || code === "ERR_HTTP_REQUEST_TIMEOUT")) {
@@ -984,11 +761,6 @@ export class GatewayServer {
   private async publishResources(): Promise<void> {
     if (this.shuttingDown) return;
     if (this.resourceSampleInFlight) {
-      // A sample that never settles (a `stat` on a stuck filesystem, an
-      // inventory read that hangs) would otherwise stop `gateway.resources` in
-      // silence: every later tick returns here and the window it would have
-      // closed is never reported. One record per run says so with the same
-      // flag, so a skipped window cannot flood the log.
       if (!this.resourceSampleFailureReported) {
         this.resourceSampleFailureReported = true;
         this.options.logger.log("warning", "Gateway resource sample skipped; the previous sample is still running", {
@@ -1007,10 +779,6 @@ export class GatewayServer {
       });
       this.resourceSampleFailureReported = false;
     } catch (error) {
-      // A sampler fault must never take the transport down, but a window that
-      // keeps failing would otherwise stop `gateway.resources` in silence (the
-      // histogram was already reset with the lost window). One record per run of
-      // failures says so without flooding the log.
       if (!this.resourceSampleFailureReported) {
         this.resourceSampleFailureReported = true;
         this.options.logger.log("warning", "Gateway resource sample failed; the next window retries", {
@@ -1038,12 +806,8 @@ export class GatewayServer {
         });
       });
       this.options.logger.log("info", "Gateway listener bound; startup warmup beginning", { event: "gateway.bound", source: "transport" });
-      // The LAN listener binds after the main one so a LAN failure can never
-      // cost the Gateway its primary surface; `start` never throws.
       await this.lanEndpoint?.start();
       await afterBind();
-      // A signal may close the transport while warmup is suspended. Never let
-      // that in-flight callback publish readiness after shutdown has begun.
       if (this.shuttingDown) throw new GatewayError("busy", "Gateway shutdown began during startup", true);
       this.ready = true;
     } catch (error) {
@@ -1053,11 +817,8 @@ export class GatewayServer {
     this.options.logger.log("info", `Gateway listening on ${this.options.host}:${this.options.port}`, { event: "gateway.listening", source: "transport" });
   }
 
-  /** Move connection-local ownership with the registry's canonical rekey. */
   rekeySession(previousSessionId: string, nextSessionId: string): void {
     if (previousSessionId === nextSessionId) return;
-    // Process identities include the canonical parent ID. Retire read-only
-    // child leases instead of silently carrying stale authorization across a fork.
     this.options.service.releaseSessionProcessTranscripts(previousSessionId);
     for (const connection of this.clients.values()) {
       const sourceSynchronization = connection.synchronizations.get(previousSessionId);
@@ -1065,9 +826,6 @@ export class GatewayServer {
       const pendingOwner = connection.pendingSessionOpens.get(previousSessionId);
       if (!sourceSynchronization && sourceToken === undefined && pendingOwner === undefined) continue;
 
-      // A destination owner can only be stale here: RuntimeRegistry prevents
-      // two live slots from owning the replacement ID. Retire it locally
-      // without unsubscribing the merged registry subscriber set.
       const destinationSynchronization = connection.synchronizations.get(nextSessionId);
       if (destinationSynchronization && destinationSynchronization !== sourceSynchronization) {
         clearTimeout(destinationSynchronization.timeout);
@@ -1079,10 +837,6 @@ export class GatewayServer {
       connection.subscriptionTokens.delete(previousSessionId);
       connection.synchronizations.delete(previousSessionId);
       if (sourceToken !== undefined) connection.subscriptionTokens.set(nextSessionId, sourceToken);
-      // session.open reserves its requested ID before the asynchronous acquire.
-      // A fork can rekey that slot before beginSynchronization runs; retain the
-      // old alias for duplicate-open rejection while moving the canonical owner
-      // to the replacement ID used by synchronization admission and cleanup.
       if (pendingOwner !== undefined) connection.pendingSessionOpens.set(nextSessionId, pendingOwner);
       if (sourceSynchronization) {
         sourceSynchronization.sessionId = nextSessionId;
@@ -1100,7 +854,6 @@ export class GatewayServer {
     }
   }
 
-  /** Resolve a session ID through this connection's rekey aliases. */
   private resolveSessionId(connection: Connection, sessionId: string): string {
     const seen = new Set<string>();
     let current = sessionId;
@@ -1113,20 +866,14 @@ export class GatewayServer {
     return sessionId;
   }
 
-  /** Drop this connection's rekey aliases that name the given session. */
   private clearRekeyedSessionIds(connection: Connection, sessionId: string): void {
     for (const [former, current] of connection.rekeyedSessionIds) {
       if (former === sessionId || current === sessionId) connection.rekeyedSessionIds.delete(former);
     }
   }
 
-  /** Revoke one installed subscription with its pending barrier and every
-   * connection-local projection of that session. */
   private revokeInstalledSubscription(connection: Connection, sessionId: string, token: string): boolean {
     sessionId = this.resolveSessionId(connection, sessionId);
-    // The installed token is the ownership proof. The synchronization map is
-    // only a pending barrier and may already have been removed after a
-    // compact resync fallback was enqueued.
     if (connection.subscriptionTokens.get(sessionId) !== token) return false;
     const synchronization = connection.synchronizations.get(sessionId);
     if (synchronization) {
@@ -1141,9 +888,6 @@ export class GatewayServer {
     return true;
   }
 
-  /** Revoke one pending synchronization, if this connection still owns it. A
-   * later session.open may have replaced this request's owner; in that case
-   * only the current token may revoke the runtime subscription. */
   private revokeSynchronization(
     connection: Connection,
     sessionId: string,
@@ -1156,30 +900,16 @@ export class GatewayServer {
   }
 
   broadcastSession(sessionId: string, topic: string, payload: JsonValue): void {
-    // No audience, no work: a frame nobody can receive is not prepared at all
-    // (encoded, measured, fitted to a compression context), so a state change
-    // for a session with no subscriber costs the summary and nothing else.
     let recipients = 0;
     for (const client of this.clients.values()) {
       if (client.ready && client.subscriptionTokens.has(sessionId)) recipients += 1;
     }
-    // The snapshot build is counted here, where the recipients that can receive
-    // it are known, and before the no-recipient return: a projection built for a
-    // subscriber this transport has no ready socket for is recorded as
-    // unaudienced, which is the window's lost-audience warning rather than a
-    // normal minute. Serializing a frame the client cannot take is still skipped.
     if (topic === "session.snapshot") this.resourceSampler.recordSnapshotBuild(recipients);
     if (recipients === 0) return;
     const event: BufferedSessionEvent = { type: "event", topic, sessionId, payload };
-    // Prepare once for this broadcast operation. Each connection still owns
-    // admission, queue accounting, revocation, and write-failure isolation.
     const prepared = this.prepareBroadcastFrame(event);
     for (const client of this.clients.values()) {
       if (!client.ready || !client.subscriptionTokens.has(sessionId)) continue;
-      // While a synchronization quarantine owns this session's catch-up, its
-      // barrier is the only delivery path: the event is flushed exactly once
-      // after the acknowledgement. Sending it here as well would deliver every
-      // in-window event twice and break the client's contiguous replay.
       const barrier = client.synchronizations.get(sessionId)?.barrier;
       const deliverable = barrier ? barrier.offer(event, prepared ?? null) : event;
       if (deliverable) this.sendOutcome(client, deliverable, prepared ?? null);
@@ -1188,8 +918,6 @@ export class GatewayServer {
   }
 
   broadcast(topic: string, payload: JsonValue): void {
-    // The same no-audience rule as `broadcastSession`: a global event with no
-    // ready client is not serialized.
     let recipients = 0;
     for (const client of this.clients.values()) {
       if (client.ready) recipients += 1;
@@ -1214,9 +942,6 @@ export class GatewayServer {
   }
 
   disconnectDevice(deviceId: string, origin?: { connectionId: string; requestId: string; deviceId: string }): void {
-    // The durable device replacement has already happened. Fence transport
-    // admission and observer ownership synchronously, while accepted RPCs are
-    // allowed to finish independently of the socket's physical close.
     this.options.auth.cancelOwner(deviceId);
     this.options.liveViews?.closeViewerIdentity(deviceId);
     for (const client of this.clients.values()) {
@@ -1234,13 +959,9 @@ export class GatewayServer {
         && origin.deviceId === deviceId
         && client.inFlight.has(origin.requestId);
       if (isInitiatingRequest) {
-        // The initiating request must enqueue its successful response before
-        // the close. An earlier queued frame is drained first by this queue.
         client.revokeResponseRequestId = origin.requestId;
         client.revokeResponseQueued = false;
       } else {
-        // The Gateway ends this socket because the device is gone, so a socket
-        // that never said hello states that cause rather than the peer leaving.
         if (!client.ready) {
           this.finishUpgrade(client.upgrade, "abandoned", "handshake", "device revoked", { reason: "device_revoked" });
         }
@@ -1253,9 +974,6 @@ export class GatewayServer {
   private async handleHttp(request: IncomingMessage, response: ServerResponse, transport: ConnectionTransport): Promise<void> {
     const trace = this.adoptAcceptedSocketTrace(request.socket);
     if (trace) trace.handled = true;
-    // Node's server timeout covers idle request/socket time, while this
-    // response timeout also retires a stream stalled after its headers were
-    // written. Route leases still own exact reader/viewer release.
     const readLifetime = new AbortController();
     response.setTimeout(HTTP_REQUEST_IDLE_TIMEOUT_MS, () => { readLifetime.abort(); response.destroy(); });
     const address = request.socket.remoteAddress ?? "unknown";
@@ -1272,17 +990,11 @@ export class GatewayServer {
       sendJson(response, 503, { error: { code: "busy", message: "HTTP request capacity is full", retryable: true } });
       return;
     }
-    // Auth/read owners bound physical work and remove cancelled queued waits.
-    // Their late values release at that owner, so disposable transport tickets
-    // can retire without freeing unaccounted filesystem work or accepted writes.
     let workSettled = false;
     const releaseTransportLease = (): void => {
       if (workSettled && (response.writableFinished || response.destroyed)) transportLease.release();
     };
     const retireAbortedRequest = (): void => {
-      // An aborted request is a disposable stream cancellation. Destroy the
-      // response as well so route pipelines release their reader/staging lease
-      // before this transport capacity is returned.
       if (!response.destroyed && !response.writableFinished) response.destroy();
       releaseTransportLease();
     };
@@ -1296,9 +1008,6 @@ export class GatewayServer {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       if (request.method === "GET" && url.pathname === "/health") {
         const status = this.shuttingDown ? "stopping" : this.ready ? "ok" : this.startupPhase;
-        // The LAN listener answers the health check with its status alone: any
-        // device on the same network can reach it unauthenticated, and build
-        // and revision metadata is not what a health check owes it (E-3a).
         if (transport === "lan") return sendJson(response, this.ready && !this.shuttingDown ? 200 : 503, { status });
         const info = this.options.service.info() as Record<string, JsonValue>;
         return sendJson(response, this.ready && !this.shuttingDown ? 200 : 503, {
@@ -1315,8 +1024,6 @@ export class GatewayServer {
         return sendJson(response, 503, { error: { code: "busy", message: "Gateway is starting", retryable: true } });
       }
       if (request.method === "POST" && url.pathname === "/v1/pair") {
-        // Pairing is first contact, and it stays on the main listener: the LAN
-        // leg serves the socket and authenticated routes only (E-3a).
         if (transport === "lan") return sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
         const key = request.socket.remoteAddress ?? "unknown";
         if (!this.pairingLimiter.admit(key)) throw new GatewayError("unauthenticated", "Too many pairing attempts; wait before retrying");
@@ -1337,17 +1044,12 @@ export class GatewayServer {
           throw new GatewayError("busy", "Gateway shutdown began before HTTP admission", true);
         }
         const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.deviceId;
-        // Authentication yielded while the transport lease remained held. The
-        // identity cut is synchronous before route admission. Await route work
-        // outside the credential owner's lock, retaining this transport lease.
         transportLease.identify(identity);
         handler = this.handleAuthenticatedHttp(request, response, url, authenticated, readLifetime.signal)
           .catch((error) => this.handleHttpError(request, response, error));
         return true;
       }, readLifetime.signal);
       if (admitted === null) return sendJson(response, 401, { error: { code: "unauthenticated", message: "Pairing token is invalid" } });
-      // GETs, bounded staging bodies and viewer leases are disposable. Accepted
-      // pairing/discard mutations retain their original settlement authority.
       const disposable = request.method === "GET"
         || request.method === "POST" && url.pathname === "/v1/uploads"
         || /^\/v1\/sessions\/[^/]+\/live-views\//.test(url.pathname);
@@ -1386,12 +1088,6 @@ export class GatewayServer {
     sendJson(response, status, { error: failure });
   }
 
-  /** The LAN lane's advertisement (E-3b): where a paired phone may race a
-   * second leg and which certificate key it must find there. It is added to
-   * the pairing response and hello alone — the two places a paired device
-   * learns about this Mac — and never to `/health` or any other route that
-   * anything on the network can reach. A Gateway composed without a lane
-   * advertises nothing, which a phone reads as "no LAN leg". */
   private lanAdvertising(): Record<string, JsonValue> {
     const advertisement: LanAdvertisement | undefined = this.lanEndpoint?.advertisement();
     if (advertisement === undefined) return {};
@@ -1441,8 +1137,6 @@ export class GatewayServer {
           try { sendJson(response, 200, lease); } catch (error) { close(); throw error; }
           return true;
         };
-        // Body consumption yielded after initial authentication. Re-enter the
-        // existing credential mutex, then authorize/create/publish synchronously.
         const admitted = authenticated.kind === "local" ? openAndRespond()
           : await this.options.devices.admitDevice(authenticated.deviceId, openAndRespond, signal);
         if (admitted === undefined) sendJson(response, 401, { error: { code: "unauthenticated", message: "Device was revoked" } });
@@ -1459,8 +1153,6 @@ export class GatewayServer {
         return;
       }
       if (request.method === "GET" && liveRoute[3] === "frame") {
-        // No await on this path: initial authentication, branch check, lease
-        // admission and publication share the same synchronous authority cut.
         if (request.readableAborted || request.socket.destroyed || response.destroyed) return;
         if (this.options.authorizeBrowserLiveView?.(sessionId, viewId, generation) !== true) {
           this.options.liveViews.retireView(sessionId, viewId, generation);
@@ -1575,7 +1267,6 @@ export class GatewayServer {
     const transportTrace = this.adoptAcceptedSocketTrace(socket);
     if (transportTrace) transportTrace.handled = true;
     const remoteAddress = request.socket.remoteAddress ?? "unknown";
-    // One record per upgrade, written wherever this attempt ends.
     const trace: UpgradeTrace = {
       transport,
       acceptAt: transportTrace?.acceptedAt ?? performance.now(),
@@ -1585,16 +1276,8 @@ export class GatewayServer {
       handshakeAt: null,
       reported: false,
     };
-    // Node relinquishes its HTTP parser on upgrade, before async credentials
-    // return. Own EOF/error and the auth deadline until ws takes the socket;
-    // otherwise a half-closed pre-handshake peer can live indefinitely.
     const readLifetime = new AbortController();
-    // Both ends of the credential wait destroy this socket, but only the phase
-    // record can say which one did: a peer that leaves is abandoned, an expired
-    // authentication deadline is a refusal.
     let retireCause: "peer" | "timeout" | null = null;
-    // Shutdown destroys this socket too. Registered so the record names the
-    // Gateway as the cause instead of reporting the peer as leaving.
     const endPendingUpgradeAtShutdown = (): void => {
       trace.authMs ??= performance.now() - trace.startedAt;
       this.finishUpgrade(trace, "abandoned", "auth", "Gateway shutdown during authentication", { reason: "shutting_down" });
@@ -1618,8 +1301,6 @@ export class GatewayServer {
       socket.off("error", retireForPeer);
       socket.off("close", retireForPeer);
     };
-    // An upgrade awaiting credentials is still an admitted HTTP operation.
-    // Physical close alone cannot release its pending authentication budget.
     const transportLease = this.httpAdmission.admit(remoteAddress, socket);
     if (!transportLease) {
       this.finishUpgrade(trace, "rejected", "request", "http admission capacity", { reason: "request_capacity" });
@@ -1636,7 +1317,6 @@ export class GatewayServer {
         return;
       }
       if (!this.ready || this.shuttingDown) {
-        // Expected during startup warmup and shutdown; clients retry.
         const reason = this.shuttingDown ? "shutting_down" : "warming_up";
         this.finishUpgrade(trace, "rejected", "request", `Gateway is ${reason.replace("_", " ")}`, { reason, level: "info" });
         socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
@@ -1644,13 +1324,7 @@ export class GatewayServer {
         return;
       }
       const admission = await this.options.devices.authenticateAndAdmit(bearer(request), (authenticated) => {
-        // The credential callback runs at the auth boundary, and the WebSocket
-        // handshake follows it on the same stack, so each phase is timed from
-        // the point it actually ended.
         trace.authMs ??= performance.now() - trace.startedAt;
-        // Authentication can yield while shutdown starts. Recheck the
-        // admission cut after that await so an upgrade cannot become a live
-        // connection after the listener has begun retiring work.
         if (socket.destroyed) {
           this.finishUpgrade(trace, "abandoned", "auth", "peer socket closed during authentication", { reason: "peer_closed" });
           return false;
@@ -1665,18 +1339,10 @@ export class GatewayServer {
         const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.deviceId;
         const maximumConnections = this.options.maximumConnections ?? 32;
         const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? GATEWAY_CONNECTION_POLICY.perIdentitySocketCap;
-        // A closing connection has already retired its work and is terminated
-        // within one second; it is not live capacity.
         const live = [...this.clients.values()].filter((client) => !client.closeInitiated);
         const identityConnections = live
           .filter((client) => client.identity === identity)
           .sort((left, right) => (left.lastInboundAt ?? left.admittedAt) - (right.lastInboundAt ?? right.admittedAt));
-        // A roaming or suspended phone leaves half-open sockets that heartbeat
-        // reaping only retires after minutes. The same authenticated identity
-        // opening a new socket is stronger evidence than those stale epochs, so
-        // the newest connection supersedes that identity's least recently active
-        // ones instead of locking the device out. Other identities are never
-        // displaced: global capacity still rejects them.
         let superseded = 0;
         while (superseded < identityConnections.length
           && (identityConnections.length - superseded >= maximumPerIdentity
@@ -1701,9 +1367,6 @@ export class GatewayServer {
           trace.handshakeAt = performance.now();
           this.admit(webSocket, identity, isLocal, remoteAddress, trace);
         });
-        // `abortHandshake` answers 400 without a callback: a bad
-        // `Sec-WebSocket-Key` or version, or a refused extension negotiation.
-        // The credential callback returns true, so only this check records it.
         if (trace.handshakeAt === null) {
           this.finishUpgrade(trace, "rejected", "handshake", "WebSocket handshake refused", { reason: "handshake_refused" });
         }
@@ -1716,9 +1379,6 @@ export class GatewayServer {
         socket.destroy();
       }
     } catch {
-      // A credential wait cut short never reaches the callback above: the peer
-      // left (`readLifetime` aborted by its own close) or the authentication
-      // deadline expired. Both reached this Mac and stopped in the auth phase.
       if (retireCause === null) {
         this.finishUpgrade(trace, "rejected", "request", "upgrade request could not be read", { reason: "unreadable_request" });
       } else {
@@ -1735,11 +1395,6 @@ export class GatewayServer {
     }
   }
 
-  /** Writes the one `http.upgrade` record for an upgrade, at whichever phase it
-   * ended. `phaseReached` names the last phase the attempt actually reached, so
-   * a missing `hello` phase means no hello frame arrived. This is the only
-   * record a refused upgrade writes: `reason` names the bound or phase cause
-   * that the separate bound-specific records used to restate. */
   private finishUpgrade(
     trace: UpgradeTrace,
     outcome: "opened" | "abandoned" | "rejected",
@@ -1832,8 +1487,6 @@ export class GatewayServer {
       lastWriteProgressAt: null,
       pingOutstandingSince: null,
       helloTimer: setTimeout(() => {
-        // The Gateway's own deadline ended this attempt, so the record must not
-        // name the peer as the cause.
         this.finishUpgrade(connection.upgrade, "abandoned", "handshake", "hello deadline", { reason: "hello_timeout" });
         this.closeFailedConnection(connection, 1008, "hello required");
       }, GATEWAY_CONNECTION_POLICY.helloDeadlineMs),
@@ -1854,10 +1507,6 @@ export class GatewayServer {
       this.disconnect(connection, `WebSocket close ${code}${suffix}`);
     });
     socket.on("error", (error) => {
-      // A frame the ws library refused at the protocol level (an oversized
-      // payload, a malformed frame) is the hello phase's refusal, not the peer
-      // leaving the socket it opened. Later frames are already reported by the
-      // upgrade's own ending.
       if (!connection.ready && isFrameRefusal(error)) {
         this.finishUpgrade(connection.upgrade, "rejected", "hello", `WebSocket error: ${error.message}`, { reason: "invalid_frame" });
       }
@@ -1866,8 +1515,6 @@ export class GatewayServer {
   }
 
   private async onMessage(connection: Connection, raw: unknown): Promise<void> {
-    // A close handshake is not an admission lease. In particular, a peer that
-    // overflowed the writer cannot submit more work while close is pending.
     if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN
       || !this.clients.has(connection.id)) return;
     let frame: Record<string, unknown>;
@@ -1876,8 +1523,6 @@ export class GatewayServer {
       frame = JSON.parse(text) as Record<string, unknown>;
       if (typeof frame !== "object" || frame === null || Array.isArray(frame)) throw new Error();
     } catch {
-      // A frame that is not JSON before hello is the Gateway refusing the
-      // hello phase, not the peer leaving after the handshake.
       if (!connection.ready) {
         this.finishUpgrade(connection.upgrade, "rejected", "hello", "invalid JSON", { reason: "invalid_frame" });
       }
@@ -1901,9 +1546,6 @@ export class GatewayServer {
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
       connection.peer = peerDiagnostics(frame.diagnostics);
       this.finishUpgrade(connection.upgrade, "opened", "hello", "hello accepted", { reason: "hello", peer: connection.peer });
-      // Admission and handshake are one `connection.opened` record. The Mac
-      // app's local probes reconnect constantly, so they are debug detail, and
-      // only a paired device's reconnect carries host memory evidence.
       const openHostEvidence = connection.isLocal ? "" : ` ${formatHostEvidence(this.stallSampler.hostSample())}`;
       this.options.logger.log(
         connection.isLocal ? "debug" : "info",
@@ -1911,10 +1553,6 @@ export class GatewayServer {
         { event: "connection.opened", source: "transport", connectionId: connection.id, ...connection.peer },
       );
       clearTimeout(connection.helloTimer);
-      // `connectionId` lets the peer log the key of this connection's records.
-      // The LAN advertisement rides on hello (E-3b): a paired device re-learns
-      // the lane's endpoint and pin on every connection, so a Mac that moved or
-      // rotated its certificate is corrected before the next race.
       this.send(connection, {
         type: "hello", ...this.options.service.info() as Record<string, JsonValue>,
         ...this.lanAdvertising(), connectionId: connection.id,
@@ -1935,8 +1573,6 @@ export class GatewayServer {
     }
 
     if (frame.type !== "request" || typeof frame.id !== "string" || typeof frame.method !== "string") {
-      // A `cancel` frame is a control frame with no answer: the peer already
-      // stopped waiting for the request it names, so there is nobody to tell.
       if (frame.type === "cancel") {
         if (typeof frame.id === "string") this.cancelInflightRequest(connection, frame.id);
         return;
@@ -1994,8 +1630,6 @@ export class GatewayServer {
         requestID: diagnosticID, connectionId: connection.id, outcome: "admitted",
       });
     }
-    // One span per admitted request. Its breakdown rides on the rpc.completed
-    // record below, so a slow request names the work that held it.
     const requestSpan = new RequestSpan();
     const inFlightRpc: InFlightRpc = {
       controller: requestController,
@@ -2004,25 +1638,16 @@ export class GatewayServer {
       span: requestSpan,
     };
     connection.requestControllers.set(frame.id, inFlightRpc);
-    // The deadline is armed at admission, so it bounds the whole request path
-    // and not only the work the handler happens to be in (`G-12`).
     const deadlineTimer = this.armDisposableReadDeadline(frame.method, inFlightRpc);
-    // The deadline owns this request only until a response is attempted: a timer
-    // that fires while an answer's own catch-up is still being written must not
-    // relabel an answered request as shed.
     const clearDeadline = (): void => { if (deadlineTimer !== undefined) clearTimeout(deadlineTimer); };
     const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
       ? frame.params as Record<string, unknown>
       : {};
-    // Correlation only: identifiers the client already chose, never payload.
     const rpcCorrelation = {
       ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
       ...(typeof params.commandId === "string" ? { commandId: params.commandId } : {}),
     };
     let rpcOutcome: "success" | "failure" = "failure";
-    // Whether the session-open attempt itself produced a result, before any
-    // response of this request was written. A synchronization installed by an
-    // attempt that produced nothing is this request's to release.
     let attemptSucceeded = false;
     const synchronizationOwners: SynchronizationOwner[] = [];
     const synchronizationCompletions: SynchronizationCompletion[] = [];
@@ -2067,16 +1692,10 @@ export class GatewayServer {
         id: connection.id,
         identity: connection.identity,
         isLocal: connection.isLocal,
-        // A `session.open` waits on the connection's shared attempt for its
-        // session, so its signal is the attempt's: one waiter leaving must not
-        // abandon the answer another waiter still waits for (`C-6`).
         signal: sessionOpenFlight?.controller.signal ?? requestController.signal,
         beginSynchronization: (sessionId) => {
           if (connection.revoked) throw new GatewayError("unauthenticated", "This device is no longer authorized");
           if (connection.workRetired) throw new GatewayError("busy", "Connection is closed", true);
-          // Runtime acquire may yield to a fork before this call. Resolve the
-          // request's ID before installing the subscription and barrier so
-          // ownership is attached to the canonical slot.
           sessionId = resolveSessionId(sessionId);
           if (connection.presentationOnly
               && connection.pendingSessionOpens.get(sessionId)?.requestId !== requestId) {
@@ -2088,18 +1707,10 @@ export class GatewayServer {
             throw new GatewayError("busy", "Connection subscription capacity is full", true);
           }
           if (connection.synchronizations.has(sessionId)) {
-            // A genuinely overlapping in-flight open is a race the protocol
-            // must reject; only the current owner may proceed.
             throw new GatewayError("conflict", "A session synchronization is already in progress for this connection", true);
           }
           const installedToken = connection.subscriptionTokens.get(sessionId);
           if (installedToken !== undefined) {
-            // The client asked for a fresh authoritative baseline. Replace the
-            // installed subscription deterministically instead of conflicting:
-            // after recycled client state, a missed close, or a half-open
-            // reconnect, an unconditional replacement is the only path that
-            // keeps client and server subscription ownership convergent. A
-            // stale close for the revoked token is ignored harmlessly.
             revokeSubscription(sessionId, installedToken);
           }
           this.options.sessions.subscribe(connection.id, sessionId);
@@ -2158,9 +1769,6 @@ export class GatewayServer {
           synchronizationCompletions.push({
             sessionId,
             syncToken,
-            // The open request remains the synchronization owner until this
-            // acknowledgement commits. The sync request may have a different
-            // request ID, but can never commit without this exact owner token.
             requestId: active.requestId,
             subscriptionToken: active.subscriptionToken,
           });
@@ -2218,9 +1826,6 @@ export class GatewayServer {
       );
       let result: JsonValue;
       if (sessionOpenFlight === undefined) {
-        // A read with a deadline is abandoned at that deadline instead of
-        // waiting for work whose answer nobody will accept; its owner keeps
-        // running and the abort answers the request (`G-12`).
         result = deadlineTimer === undefined
           ? await invoke()
           : await abortableRead(requestController.signal, invoke);
@@ -2228,12 +1833,7 @@ export class GatewayServer {
       } else {
         const attempt = invoke();
         sessionOpenFlight.attempt = attempt;
-        // One answer, shared with every request that joined it. A rejection the
-        // last waiter left behind is not an unhandled rejection: nobody will
-        // read it, and the abort that ends the shared work states why.
         void attempt.catch(() => {});
-        // Named for the cancellation record; the attempt's own stages are what
-        // measure it, and a second entry for the same interval would double it.
         const leaveAttemptStage = requestSpan.enterStage("session.open.attempt");
         try {
           result = await abortableRead(requestController.signal, () => attempt);
@@ -2243,10 +1843,6 @@ export class GatewayServer {
         attemptSucceeded = true;
       }
       if (requestController.signal.aborted) return;
-      // Validate every synchronization created by this request before writing
-      // the response. A timed-out open may have no completion at all; it must
-      // not publish an orphan successful response/token after its barrier was
-      // revoked.
       for (const owner of synchronizationOwners) {
         const active = connection.synchronizations.get(resolveSessionId(owner.sessionId));
         if (!active
@@ -2255,9 +1851,6 @@ export class GatewayServer {
           throw new GatewayError("conflict", "Session synchronization ownership changed before acknowledgement", true);
         }
       }
-      // Validate every completion before writing the response. The checks are
-      // request+token exact; this prevents a stale request from ever sending a
-      // successful response which it can no longer commit.
       for (const completion of synchronizationCompletions) {
         const active = connection.synchronizations.get(resolveSessionId(completion.sessionId));
         if (!active
@@ -2290,9 +1883,6 @@ export class GatewayServer {
           });
         }
       }
-      // The acknowledgement is enqueued before the barrier is removed. Because
-      // this block is synchronous, no newer broadcast can overtake the buffered
-      // catch-up on the WebSocket. Re-check exact ownership before committing.
       if (responseSentIntact) for (const completion of synchronizationCompletions) {
         completion.sessionId = resolveSessionId(completion.sessionId);
         const active = connection.synchronizations.get(completion.sessionId);
@@ -2301,9 +1891,6 @@ export class GatewayServer {
             || active.subscriptionToken !== completion.subscriptionToken
             || completion.syncToken !== active.subscriptionToken) continue;
         if (active.barrier.isOverflowed(completion.syncToken)) {
-          // Replace the overflowed quarantine before awaiting recovery. Events
-          // arriving during the snapshot read must be retained for the fresh
-          // recovery baseline, not discarded by the old overflow flag.
           if (!active.barrier.beginRecovery(completion.syncToken)) continue;
           const recoveryToken = connection.subscriptionTokens.get(completion.sessionId);
           const recovery = recoveryToken === completion.subscriptionToken
@@ -2314,11 +1901,6 @@ export class GatewayServer {
           if (!stillOwned) continue;
 
           const revokeBeforeResync = (): void => {
-            // resyncRequired is a terminal barrier: revoke every local and
-            // runtime ownership before publishing it, otherwise a later event
-            // can bypass the absent barrier while the client still believes it
-            // has a subscription. The token check remains valid even after the
-            // pending barrier was removed for a compact fallback.
             revokeInstalledSubscription(completion.sessionId, completion.subscriptionToken);
           };
           const sendResyncRequired = () => this.send(connection, {
@@ -2337,18 +1919,12 @@ export class GatewayServer {
           const recovered = active.barrier.commit(completion.syncToken);
           clearTimeout(active.timeout);
           if (recovered.overflowed) {
-            // The recovery quarantine overflowed too; no snapshot or suffix is
-            // trustworthy enough to publish. Revoke the installed token and
-            // terminal attachments before the resync notice can be observed.
             revokeBeforeResync();
             sendResyncRequired();
             continue;
           }
           connection.synchronizations.delete(completion.sessionId);
 
-          // `fallback` means prepareOutboundFrame already produced the compact
-          // resync replacement. Do not emit a duplicate or flush a suffix that
-          // has no corresponding published baseline.
           const recoveryOutcome = this.sendOutcome(connection, {
             type: "event",
             topic: "session.rebaseline",
@@ -2365,9 +1941,6 @@ export class GatewayServer {
               this.sendOutcome(connection, event, preparedEvent);
             }
           } else {
-            // Both an encoded fallback and a failed write are resync paths.
-            // The fallback already carries the notice; a failed write gets a
-            // best-effort direct notice after ownership is revoked.
             revokeBeforeResync();
             if (recoveryOutcome === "failed") sendResyncRequired();
           }
@@ -2388,7 +1961,6 @@ export class GatewayServer {
           event: "rpc.error", source: "transport", method: frame.method, requestID: diagnosticID,
           connectionId: connection.id, ...rpcCorrelation,
           code: diagnosticErrorCode(error), outcome: "failure",
-          // Structured detail only for faults; a caller mistake keeps its code.
           ...(level === "error" ? { error } : {}),
           ...(error instanceof GatewayError && error.diagnosticReason ? { reason: error.diagnosticReason } : {}),
           ...diagnosticErrorDetails(error),
@@ -2406,12 +1978,6 @@ export class GatewayServer {
     } finally {
       clearDeadline();
       const otherOpenWaiters = (sessionOpenFlight?.waiters ?? 1) > 1;
-      // An open keeps the synchronization it installed only when an answer for
-      // it is out: this request's own delivered response, or a shared attempt a
-      // waiting retry may still deliver. Everything else - a failure, a
-      // cancellation, an undelivered response - releases the barrier and its
-      // subscription here, so an abandoned open cannot block the retry that
-      // follows it (`C-6`).
       const releaseOwnSynchronizations = (): void => {
         const ownerRequestIDs = new Set([
           requestId,
@@ -2424,24 +1990,15 @@ export class GatewayServer {
         }
       };
       if (otherOpenWaiters && sessionOpenFlight !== undefined) {
-        // A waiting retry still needs whatever this attempt installed - including
-        // a barrier this request created before it was cancelled. The retry owns
-        // the delivery now, so the barrier is released only if it leaves without
-        // answering (`C-6`).
         sessionOpenFlight.releaseAbandoned = releaseOwnSynchronizations;
       } else if (!(attemptSucceeded && rpcOutcome === "success")) {
         releaseOwnSynchronizations();
       }
       if (sessionOpenFlight !== undefined) {
-        // Rekey retains an old duplicate-open alias, but both spellings point at
-        // the same flight; releasing the flight releases every alias with it.
         this.releaseSessionOpenFlight(connection, sessionOpenFlight);
       }
       connection.inFlight.delete(frame.id);
       connection.requestControllers.delete(frame.id);
-      // Closing a connection aborts its requests, yet accepted domain work
-      // (a prompt held behind compaction) keeps running. Name the undelivered
-      // response rather than reporting that work as failed.
       const loggedOutcome = inFlightRpc.cancelledStage !== undefined
         ? "cancelled"
         : rpcOutcome === "failure" && requestController.signal.aborted ? "connectionClosed" : rpcOutcome;
@@ -2458,13 +2015,6 @@ export class GatewayServer {
     }
   }
 
-  /**
-   * Answer a `session.open` that arrived while this connection and session
-   * already had one in flight: the retry joins that attempt, receives its exact
-   * result, and leaves the shared work alone while it waits (`C-6`). Answering a
-   * retry from a shared attempt is what turns the phone's 30-second timeout into
-   * a slow open instead of a duplicate-open failure.
-   */
   private async joinSessionOpen(
     connection: Connection,
     frame: Record<string, unknown>,
@@ -2491,7 +2041,6 @@ export class GatewayServer {
       ...(typeof params.commandId === "string" ? { commandId: params.commandId } : {}),
     };
     let rpcOutcome: "success" | "failure" = "failure";
-    // Join before any await: the flight's waiter count pairs with its `finally`.
     flight.waiters += 1;
     try {
       const attempt = flight.attempt;
@@ -2502,17 +2051,12 @@ export class GatewayServer {
       ));
       if (inFlightRpc.controller.signal.aborted) return;
       if (runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: true, result }))) {
-        // A retry delivered the shared attempt's answer, so the barrier it
-        // installed is now the client's to acknowledge.
         flight.answered = true;
         this.markSessionOpenDelivered(connection, flight.requestId, requestId);
         rpcOutcome = "success";
         clearDeadline();
       }
     } catch (error) {
-      // A shed join still owes its own answer: unlike a cancel, nobody stopped
-      // waiting for it, so the busy response with the retry hint goes out
-      // (`G-12`).
       if (inFlightRpc.shedReason !== undefined) {
         runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: false, error: publicError(error) }));
       } else if (!inFlightRpc.controller.signal.aborted) {
@@ -2548,14 +2092,6 @@ export class GatewayServer {
     }
   }
 
-  /**
-   * Arm one disposable read's deadline (`G-12`). On expiry the request is marked
-   * shed and aborted; the ordinary failure path answers `busy` with the retry
-   * hint and the one record for it is `gateway.shed`. A method outside
-   * `DISPOSABLE_READ_DEADLINES_MS` — every mutation, every prompt, `session.sync`
-   * — has no deadline at all: those owners settle their work whatever the client
-   * does with its wait.
-   */
   private armDisposableReadDeadline(
     method: string,
     inFlight: InFlightRpc,
@@ -2564,9 +2100,6 @@ export class GatewayServer {
     if (deadlineMs === undefined) return undefined;
     const timer = setTimeout(() => {
       if (inFlight.shedReason !== undefined || inFlight.controller.signal.aborted) return;
-      // A subscriber of a joined open still waits for its own answer, so only
-      // this request is aborted; the shared attempt ends when its last waiter
-      // leaves (`C-6`).
       inFlight.shedReason = "deadline";
       inFlight.controller.abort(new GatewayError(
         "busy",
@@ -2579,13 +2112,6 @@ export class GatewayServer {
     return timer;
   }
 
-  /**
-   * Record the `cancel` frame of a request this connection still owns: work only
-   * a disposable read does stops, and the record names the stage it was in. A
-   * cancel for an accepted mutation, an admitted prompt or a `session.sync` is
-   * ignored: their owners settle them durably whatever the client does with its
-   * wait (`C-6`).
-   */
   private cancelInflightRequest(connection: Connection, requestId: string): void {
     const inFlight = connection.requestControllers.get(requestId);
     if (inFlight === undefined) {
@@ -2598,19 +2124,8 @@ export class GatewayServer {
     inFlight.controller.abort(new GatewayError("cancelled", "The client cancelled this request", true));
   }
 
-  /**
-   * A cancel can cross a `session.open` answer still in transit on a slow link:
-   * the phone stopped waiting, but the Gateway already delivered the response and
-   * its barrier is still pending, so a retry in that window would fail as a
-   * duplicate. Revoke the barrier the abandoned open delivered - unless another
-   * delivered response carries the same token (a joined retry the phone may
-   * still accept), which is what `deliveredRequests` records (`C-6`).
-   */
   private revokeAbandonedOpen(connection: Connection, requestId: string): void {
     for (const [sessionId, synchronization] of connection.synchronizations) {
-      // Removing the delivered request both detects it and consumes it: the
-      // barrier belongs to the client only while one of its delivered responses
-      // is unaccounted for.
       if (!synchronization.deliveredRequests.delete(requestId)) continue;
       if (synchronization.deliveredRequests.size > 0) return;
       this.revokeSynchronization(connection, sessionId, synchronization);
@@ -2618,18 +2133,12 @@ export class GatewayServer {
     }
   }
 
-  /** Record that a delivered response carried this session's synchronization
-   * token, so a later cancel can revoke the barrier only when no other delivered
-   * response still carries it. The owner request installed the barrier; the
-   * delivering request may be the retry that joined it. */
   private markSessionOpenDelivered(connection: Connection, ownerRequestId: string, deliveredRequestId: string): void {
     for (const synchronization of connection.synchronizations.values()) {
       if (synchronization.requestId === ownerRequestId) synchronization.deliveredRequests.add(deliveredRequestId);
     }
   }
 
-  /** Release one waiter of a shared session-open attempt. The last one leaving
-   * abandons the work: nobody computes an answer nobody waits for. */
   private releaseSessionOpenFlight(connection: Connection, flight: SessionOpenFlight): void {
     flight.waiters -= 1;
     if (flight.waiters > 0) return;
@@ -2637,17 +2146,9 @@ export class GatewayServer {
     for (const [sessionId, pending] of connection.pendingSessionOpens) {
       if (pending === flight) connection.pendingSessionOpens.delete(sessionId);
     }
-    // Nobody waits for this attempt's answer and no response carried it: what
-    // it installed is unreachable ownership, released by the request that owns
-    // the barrier.
     if (!flight.answered) flight.releaseAbandoned?.();
   }
 
-  /** One record per finished request: `rpc.completed` with its breakdown, or the
-   * `rpc.cancelled` juncture record naming the stage a cancel interrupted. A read
-   * the Gateway shed at its own deadline (`G-12`) writes one `gateway.shed`
-   * record instead: the client is still waiting for that answer, and what it
-   * needs to know is the reason and the retry hint. */
   private logRequestOutcome(
     connection: Connection,
     request: {
@@ -2664,8 +2165,6 @@ export class GatewayServer {
     const durationMs = Math.max(0, Math.round(performance.now() - request.startedAt));
     const breakdown = request.span.breakdown(durationMs);
     if (request.shedReason !== undefined) {
-      // A shed read is abnormal by definition: the Gateway refused work it had
-      // admitted, so the record is a warning whether or not it was slow.
       this.options.logger.log(
         "warning",
         `Shed ${request.method} for client ${connection.id} at its deadline after ${durationMs}ms`,
@@ -2679,10 +2178,6 @@ export class GatewayServer {
       return;
     }
     if (request.cancelledStage !== undefined) {
-      // A cancellation is its own juncture, so it writes one record instead of a
-      // completion: the stage it interrupted plus the stages it reached. Only a
-      // read the peer abandoned after `SLOW_RPC_WARNING_MS` is worth a warning;
-      // an ordinary retry cadence stays debug.
       this.options.logger.log(
         durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
         `RPC ${request.method} for client ${connection.id} was cancelled in ${request.cancelledStage} after ${durationMs}ms`,
@@ -2716,9 +2211,6 @@ export class GatewayServer {
       if (frame) bytes("frame.serialize", frame.outputBytes);
       return frame;
     } catch {
-      // Broadcast preparation is outside the per-connection failure boundary;
-      // retain the old isolated failure behavior without allowing one malformed
-      // producer value to abort the fanout loop.
       this.options.logger.log("error", "Outbound projection encoding failed", {
         event: "connection.projection-rejected", source: "transport",
       });
@@ -2737,8 +2229,6 @@ export class GatewayServer {
       clearTimeout(deadline);
       if (force) {
         connection.outbound.retire();
-        // A stalled writer or close handshake must not retain capacity until
-        // ws's longer close timeout. The close handler owns normal cleanup.
         if (connection.socket.readyState !== WebSocket.CLOSED) connection.socket.terminate();
       } else if (connection.socket.readyState === WebSocket.OPEN) {
         this.closeFailedConnection(connection, 1008, "device revoked");
@@ -2757,9 +2247,6 @@ export class GatewayServer {
     if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN) return "failed";
     if (connection.revoked) {
       const frame = value as { type?: unknown; id?: unknown };
-      // Revocation retires events and observer delivery. Already queued frames
-      // drain in order, but only the exact initiating self-revoke response may
-      // be added after the durable cut; accepted work settles canonically.
       if (frame.type !== "response"
           || typeof frame.id !== "string"
           || frame.id !== connection.revokeResponseRequestId
@@ -2770,9 +2257,6 @@ export class GatewayServer {
         ? stage("frame.serialize", () => prepareOutboundFrame(value, this.options.maxFrameBytes))
         : prepared;
       if (!frame) return "failed";
-      // A frame prepared once for a broadcast is measured where it is built; a
-      // fresh one is measured here. Bytes follow the serialization, not the
-      // number of subscribers that receive it.
       if (prepared === undefined) bytes("frame.serialize", frame.outputBytes);
       if (frame.fallback) {
         const valueFrame = value as { type?: unknown; topic?: unknown };
@@ -2785,21 +2269,12 @@ export class GatewayServer {
         });
       }
 
-      // Enqueue acceptance is the ordering boundary. The connection-local
-      // writer hands exactly one encoded frame to ws at a time, preserving a
-      // response before its synchronization suffix without manufacturing
-      // transport pressure from concurrent bounded RPC completions.
       if (!connection.outbound.enqueue({
         encoded: frame.output, bytes: frame.outputBytes,
         ...outboundFrameIdentity(connection, value, frame, this.options.maxFrameBytes),
       })) return "failed";
-      // The queue reported the bytes it accepted: a frame it replaced with a
-      // coalescing `session.rebaseline` is counted as that replacement.
       return frame.fallback ? "fallback" : "sent";
     } catch {
-      // Never log the exception or payload: serialization errors can contain
-      // producer content. Failure must still be observable without killing the
-      // broadcaster or unrelated clients.
       this.options.logger.log("error", "Outbound projection encoding failed", {
         event: "connection.projection-rejected", source: "transport",
       });
@@ -2810,19 +2285,11 @@ export class GatewayServer {
   private disconnect(connection: Connection, detail = "WebSocket closed"): void {
     if (!this.clients.delete(connection.id)) return;
     const closedAt = performance.now();
-    // A socket that never got past hello leaves through here when the peer
-    // ended it: the upgrade reached this Mac and then went away before the
-    // handshake finished. Every ending the Gateway itself starts records its
-    // own `reason` before it closes the socket (`closeFailedConnection`, the
-    // hello deadline, revocation, shutdown), so only a peer-driven ending can
-    // still be unreported here.
     if (!connection.closeInitiated) {
       this.finishUpgrade(connection.upgrade, "abandoned", "handshake", detail, { reason: "peer_closed" });
     }
     const outbound = connection.outbound.snapshot();
     connection.outbound.retire();
-    // A phone's drop is the incident boundary, so the close record states what
-    // the host was doing; the local probes' debug records stay free of it.
     const closeHostEvidence = connection.isLocal ? "" : ` ${formatHostEvidence(this.stallSampler.hostSample())}`;
     this.options.logger.log(
       connection.isLocal ? "debug" : "info",
@@ -2846,21 +2313,15 @@ export class GatewayServer {
     }
     connection.synchronizations.clear();
     connection.subscriptionTokens.clear();
-    // A retiring socket has no request left to receive a shared session-open
-    // answer, so its attempts stop here instead of running for nobody.
     for (const flight of connection.pendingSessionOpens.values()) {
       flight.controller.abort(new GatewayError("cancelled", "The connection retired during this session open", true));
     }
     connection.pendingSessionOpens.clear();
     connection.rekeyedSessionIds.clear();
-    // Revoked accepted requests retain their controller until their own
-    // completion; ordinary disconnects still abort disposable work.
     if (!connection.revoked) for (const request of connection.requestControllers.values()) request.controller.abort();
     connection.requestControllers.clear();
     this.options.sessions.unsubscribeClient(connection.id);
     this.options.service.releaseClient(connection.id);
-    // The authenticated device identity owns provider login. A socket close
-    // only detaches event delivery; auth.resume can bind a replacement socket.
     this.options.auth.detachClient(connection.id);
   }
 
@@ -2869,20 +2330,14 @@ export class GatewayServer {
     code: number,
     reason: string,
     ending?: UpgradeEnding,
-    /** The wire close reason, when the peer decodes it rather than the log. */
     closeReason?: string,
   ): void {
     if (connection.closeInitiated) return;
     connection.closeInitiated = true;
-    // The Gateway is ending this socket, so an attempt that never reached hello
-    // states the Gateway's own cause here, before the close: `disconnect` would
-    // otherwise report the peer as leaving.
     if (ending !== undefined && !connection.ready) {
       this.finishUpgrade(connection.upgrade, "abandoned", "handshake", reason, ending);
     }
     connection.outbound.retire();
-    // Disposable observers/read waits retire now, not after a dead peer's close
-    // handshake. Accepted domain commands still settle with their receipt owner.
     this.retireConnectionWork(connection);
     connection.closeDeadline = setTimeout(() => {
       if (connection.socket.readyState !== WebSocket.CLOSED) connection.socket.terminate();
@@ -2891,7 +2346,6 @@ export class GatewayServer {
     connection.socket.close(code, closeReason ?? reason);
   }
 
-  /** Any inbound frame proves liveness, and it closes a logged silence episode. */
   private noteInbound(connection: Connection, clientInitiated: boolean): void {
     const inboundAt = performance.now();
     connection.unansweredHeartbeats = 0;
@@ -2902,23 +2356,13 @@ export class GatewayServer {
     if (episode === undefined) return;
     connection.silence = undefined;
     episode.resumedAt = inboundAt;
-    // The silent record is written when the shared peer-path read settles; a
-    // silence that ends first still reports silence before its resume.
     if (episode.reported) this.logInboundResumed(connection, episode);
   }
 
-  /** One warning per silence episode, not one per heartbeat tick. The peer's
-   * Tailscale path is captured once per episode and never delays the tick. */
   private observeInboundSilence(connection: Connection, heartbeatAt: number): void {
     if (connection.silence !== undefined) return;
     const startedAt = connection.lastInboundAt ?? connection.admittedAt;
     if (heartbeatAt - startedAt < INBOUND_SILENCE_WARNING_MS) return;
-    // A client that only answers the Gateway's pings is idle between them, not
-    // cut off: its silence says nothing until a ping the Gateway actually sent
-    // goes unanswered. A client that pings on its own (the phone, every ten
-    // seconds) proves liveness without being asked, so silence past the
-    // threshold is the path going quiet. Without this, a pong-only client
-    // reports silence on every tick.
     const pingUnanswered = connection.pingOutstandingSince !== null;
     const clientPingsOnItsOwn = connection.lastClientPingAt !== null;
     if (!pingUnanswered && !clientPingsOnItsOwn) return;
@@ -2929,8 +2373,6 @@ export class GatewayServer {
       detectedPingMs: connection.pingOutstandingSince === null
         ? null
         : Math.max(0, Math.round(heartbeatAt - connection.pingOutstandingSince)),
-      // A reader that rejects must still leave a record: the silence is the
-      // point, the path is the detail.
       peer: this.peerPaths.lookup(connection.remoteAddress)
         .catch((): PeerPathLookup => ({ peerPath: "unknown", peerPathSource: "cli-failed", peerRelay: "" })),
     };
@@ -2938,8 +2380,6 @@ export class GatewayServer {
     void episode.peer.then((peer) => {
       if (episode.reported) return;
       episode.reported = true;
-      // The message reports the silence observed at detection; the resume
-      // record carries the episode's full duration.
       this.options.logger.log("warning", `Client ${connection.id} has sent nothing for ${episode.detectedMs}ms (unansweredPingMs=${episode.detectedPingMs ?? "none"} peerPath=${peer.peerPath} peerPathSource=${peer.peerPathSource} peerRelay=${peer.peerRelay || "none"})`, {
         event: "connection.inbound-silent", source: "transport", connectionId: connection.id, ...connection.peer,
         peerPath: peer.peerPath, peerPathSource: peer.peerPathSource, peerRelay: peer.peerRelay,
@@ -2973,8 +2413,6 @@ export class GatewayServer {
     if (this.closeTask) return this.closeTask;
     this.shuttingDown = true;
     this.ready = false;
-    // Install the shared receipt before callbacks run: concurrent close and
-    // failed-startup cleanup join the same bounded retirement operation.
     this.closeTask = Promise.resolve().then(() => this.finishClose());
     return this.closeTask;
   }
@@ -2984,15 +2422,11 @@ export class GatewayServer {
     await this.options.liveViews?.joinRetirements();
     this.options.logger.log("info", "Closing Gateway transport", { event: "gateway.transport-closing", source: "transport" });
     clearInterval(this.heartbeat);
-    // The LAN leg retires first: no new connection reaches a Gateway that is
-    // stopping. Sockets it accepted keep their own bounded grace.
     const lanRetirement = this.lanEndpoint?.stop();
     clearInterval(this.resourceTimer);
     this.stallSampler.dispose();
     this.resourceSampler.dispose();
     for (const client of this.clients.values()) {
-      // The Gateway ends this socket, not its peer: a socket that never said
-      // hello must not be recorded as a peer departure when the process stops.
       if (!client.ready) {
         this.finishUpgrade(client.upgrade, "abandoned", "handshake", "Gateway shutdown before hello", { reason: "shutting_down" });
       }
@@ -3002,9 +2436,6 @@ export class GatewayServer {
         client.socket.close(1012, "gateway restarting");
         continue;
       }
-      // The ordered queue's acceptance boundary may be ahead of an active
-      // frame. Give the stopping event a short bounded flush opportunity, but
-      // never let one stalled peer prevent supervised shutdown indefinitely.
       let closeRequested = false;
       const requestClose = (): void => {
         if (closeRequested) return;
@@ -3018,10 +2449,6 @@ export class GatewayServer {
         requestClose();
       });
     }
-    // `server.close` waits for active HTTP responses. A stalled body or
-    // response stream is disposable transport work, so destroy tracked HTTP
-    // sockets after the same one-second retirement bound used by WebSocket
-    // close handshakes rather than waiting on Node indefinitely.
     let httpClosed = false;
     let forceHttpClose!: NodeJS.Timeout;
     const httpClosedPromise = new Promise<void>((resolve) => {
@@ -3032,8 +2459,6 @@ export class GatewayServer {
       });
     });
     forceHttpClose = setTimeout(() => {
-      // The Gateway stops these pending upgrades too, at whatever phase they
-      // reached; each record is written before its socket is destroyed.
       for (const endPendingUpgrade of this.pendingUpgrades) endPendingUpgrade();
       for (const socket of this.httpSockets) socket.destroy();
       if (httpClosed) clearTimeout(forceHttpClose);

@@ -9,11 +9,6 @@ import {
   type ExtensionArtifactRootWatchRequest,
 } from "./extension-artifact-discovery.js";
 
-/** Real artifact trees under a private temp root; the discovery owner is the
- * shipped class with its production watcher unless a case must make the
- * watcher drop events or fail. The slot is the structural consumer discovery
- * offers to: it records offers and attributes the runs a case names. */
-
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -40,8 +35,6 @@ function statusBytes(runId: string, state: string, lastUpdate: number): string {
   });
 }
 
-/** Writes status.json the way the provider does: a sibling temp file renamed
- * over the artifact. */
 async function writeStatus(runsRoot: string, runId: string, state: string, lastUpdate: number): Promise<void> {
   const directory = join(runsRoot, runId);
   await mkdir(directory, { recursive: true });
@@ -50,7 +43,6 @@ async function writeStatus(runsRoot: string, runId: string, state: string, lastU
   await rename(temporary, join(directory, "status.json"));
 }
 
-/** `count` terminal run directories, written in bounded batches. */
 async function terminalRuns(runsRoot: string, count: number, lastUpdate: number): Promise<string[]> {
   const names = Array.from({ length: count }, (_unused, index) => runName(index));
   for (let start = 0; start < names.length; start += 256) {
@@ -85,8 +77,6 @@ function discovery(
   return owner;
 }
 
-/** libuv filesystem requests this process issued while `work` ran: every
- * fs.promises call, Dir read and FileHandle close is one threadpool request. */
 async function countFilesystemRequests(work: () => Promise<unknown>): Promise<number> {
   let requests = 0;
   const hook = createHook({
@@ -107,15 +97,11 @@ async function passesUntil(owner: ExtensionArtifactDiscovery, settled: () => boo
   for (let passes = 1; passes <= limit; passes += 1) {
     await owner.runPass();
     if (settled()) return passes;
-    // Watcher events arrive on the event loop between passes, as between the
-    // registry's 750 ms ticks.
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`${label}: not settled within ${limit} passes`);
 }
 
-/** A watcher backend that stays attached but delivers nothing, as when the
- * platform drops events; `reset` fails it as an error would. */
 function silentWatcher() {
   const requests: ExtensionArtifactRootWatchRequest[] = [];
   let closed = 0;
@@ -136,15 +122,11 @@ describe("ambient extension artifact discovery change detection", () => {
     await terminalRuns(runsRoot, count, Date.now() - 60_000);
     const { slots } = recordingSlot(new Set());
     const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot });
-    // The startup sweep stats every directory once and reads every artifact;
-    // the per-pass read budget (1,024) spreads the reads over two passes.
     const startup = await countFilesystemRequests(async () => {
       expect(await owner.runPass()).toMatchObject({ entries: 1_025, statusReads: 1_024 });
       expect(await owner.runPass()).toBeUndefined();
     });
     expect(startup).toBeGreaterThanOrEqual(count);
-    // Later passes over the same tree: only the root itself is checked. The
-    // previous design re-statted every status.json on each pass (≥ 1,500 here).
     const steady: number[] = [];
     for (let pass = 0; pass < 5; pass += 1) steady.push(await countFilesystemRequests(() => owner.runPass()));
     expect(Math.max(...steady), `requests per unchanged pass: ${steady.join(", ")}`).toBeLessThanOrEqual(4);
@@ -160,12 +142,8 @@ describe("ambient extension artifact discovery change detection", () => {
     await passesUntil(owner, () => offers.includes(join(runsRoot, changed)), "first offer of the terminal run");
     offers.length = 0;
 
-    // A terminal artifact rewritten in place of its old bytes is only visible
-    // through the watcher (its directory is not re-statted on every pass).
     await writeStatus(runsRoot, changed, "failed", Date.now());
     await passesUntil(owner, () => offers.includes(join(runsRoot, changed)), "rewritten terminal run");
-    // A new run directory changes the root's own listing, so it is seen on the
-    // very next pass without any event.
     await writeStatus(runsRoot, "run-new", "running", Date.now());
     const passes = await passesUntil(owner, () => offers.includes(join(runsRoot, "run-new")), "new run");
     expect(passes).toBe(1);
@@ -174,8 +152,6 @@ describe("ambient extension artifact discovery change detection", () => {
   it("finds a same-size in-place rewrite that kept mtime, with or without its watcher event", async () => {
     const pinned = new Date(1_700_000_000_000);
     const completedAt = 1_700_000_000_000 - 5_000;
-    /** Rewrites the target in its own inode with the same length and a pinned
-     * whole-second mtime, so dev, ino, size and mtimeMs are all unchanged. */
     const rewriteInPlace = async (file: string, runId: string) => {
       const before = await stat(file);
       const rewritten = statusBytes(runId, "complete", completedAt + 1_000);
@@ -192,7 +168,6 @@ describe("ambient extension artifact discovery change detection", () => {
       return file;
     };
 
-    // Production watcher: the event names the file.
     const watched = await artifactTree("in-place");
     const target = (await terminalRuns(watched.runsRoot, 10, Date.now() - 60_000))[4]!;
     const file = await seed(watched.runsRoot, target);
@@ -203,7 +178,6 @@ describe("ambient extension artifact discovery change detection", () => {
     await rewriteInPlace(file, target);
     await passesUntil(owner, () => live.offers.includes(join(watched.runsRoot, target)), "watched in-place rewrite");
 
-    // The event is dropped: the backstop sweep's stat still sees the write.
     const dropped = await artifactTree("in-place-dropped");
     await terminalRuns(dropped.runsRoot, 10, Date.now() - 60_000);
     const droppedFile = await seed(dropped.runsRoot, target);
@@ -237,9 +211,6 @@ describe("ambient extension artifact discovery change detection", () => {
   });
 
   it("re-reads an attributed artifact its slot rejected on every pass without a watcher event", async () => {
-    // A recovered slot rejects a foreign producer's terminal header; the owning
-    // producer then rewrites the file. The slot must see the rewrite on the next
-    // pass, as when every directory was stat'd every pass.
     const { delegatedRoot, runsRoot } = await artifactTree("rejected");
     await terminalRuns(runsRoot, 20, Date.now() - 60_000);
     await writeStatus(runsRoot, "run-foreign", "complete", Date.now() - 5_000);
@@ -248,18 +219,14 @@ describe("ambient extension artifact discovery change detection", () => {
     const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot, watchArtifactRoot: backend.watchArtifactRoot });
     await owner.runPass();
     expect(offers).toEqual([join(runsRoot, "run-foreign")]);
-    // The same bytes are not offered again...
     await owner.runPass();
     expect(offers).toHaveLength(1);
-    // ...but a rewrite is, on the very next pass.
     await writeStatus(runsRoot, "run-foreign", "running", Date.now());
     await owner.runPass();
     expect(offers).toEqual([join(runsRoot, "run-foreign"), join(runsRoot, "run-foreign")]);
   });
 
   it("bounds the every-pass retry of rejected attributed runs to each slot's newest 64", async () => {
-    // A long session attributes every run in its history; permanently rejected
-    // ones must not bring back a per-pass stat of the whole history.
     const { delegatedRoot, runsRoot } = await artifactTree("rejected-history");
     const base = Date.now() - 600_000;
     const names = Array.from({ length: 300 }, (_unused, index) => runName(index));
@@ -270,11 +237,9 @@ describe("ambient extension artifact discovery change detection", () => {
     const { slots, offers } = recordingSlot(new Set(names), "rejected");
     const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot, watchArtifactRoot: backend.watchArtifactRoot });
     await passesUntil(owner, () => new Set(offers).size === names.length, "every run offered once", 4);
-    // Root stat plus one status.json stat per retried run, and nothing more.
     const steady = await countFilesystemRequests(() => owner.runPass());
     expect(steady).toBeGreaterThanOrEqual(64);
     expect(steady).toBeLessThanOrEqual(64 + 4);
-    // The newest rejected run is still retried on the next pass.
     offers.length = 0;
     await writeStatus(runsRoot, names.at(-1)!, "running", Date.now());
     await owner.runPass();
@@ -291,18 +256,15 @@ describe("ambient extension artifact discovery change detection", () => {
     await owner.runPass();
     expect(offers).toEqual([join(runsRoot, target)]);
 
-    // The watcher drops this change, so the cold artifact is not re-read...
     await writeStatus(runsRoot, target, "failed", Date.now());
     await owner.runPass();
     await owner.runPass();
     expect(offers).toHaveLength(1);
-    // ...until the watcher reports an error: the next pass sweeps the root.
     backend.requests[0]!.onReset();
     expect(backend.closed()).toBe(1);
     await owner.runPass();
     expect(offers).toEqual([join(runsRoot, target), join(runsRoot, target)]);
 
-    // A root whose watcher cannot start at all is polled by sweeps.
     const failing = await artifactTree("fallback-unwatchable");
     await terminalRuns(failing.runsRoot, 40, Date.now() - 60_000);
     const unwatched = recordingSlot(new Set([target]));
@@ -341,8 +303,6 @@ describe("ambient extension artifact discovery change detection", () => {
     const { delegatedRoot, runsRoot } = await artifactTree("over-cap");
     const count = 4_400;
     const names = await terminalRuns(runsRoot, count, Date.now() - 60_000);
-    // Every run is attributed, so each must be offered once: the routing budget
-    // spreads them over passes, and none may sit past an enumeration cap.
     const { slots, offers } = recordingSlot(new Set(names));
     const owner = discovery(slots, { delegatedArtifactRoot: delegatedRoot });
     await passesUntil(owner, () => new Set(offers).size === count, "every run offered", 12);

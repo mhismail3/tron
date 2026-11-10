@@ -18,8 +18,6 @@ afterEach(async () => {
 
 describe("codemode classifier usage projection", () => {
   it("counts TypeSafe classify usage once in the codemode card and session snapshot", async () => {
-    // Failure modes covered: Pi can omit classifier usage from the enclosing
-    // result, count it twice in session totals, or lose it in Tron projection.
     const root = await mkdtemp(join(tmpdir(), "tron-codemode-classify-cost-"));
     roots.push(root);
     const agentDir = join(root, "agent");

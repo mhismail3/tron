@@ -32,15 +32,12 @@ const registry = await createTestRegistry({ agentDir, tronHome, trust, idleRunti
 await registry.initialize();
 const settings = settingsDependencies({ agentDir, tronHome, trust, modelRuntime, registry, sessions: registry });
 const park = async (): Promise<never> => {
-  // A parent-owned fixture process, never a Gateway worker suspension.
   process.stdin.resume();
   writeFileSync(join(root, "cut"), cut!);
   return new Promise<never>(() => {});
 };
 const receipts = new CommandReceiptStore(tronHome, async (path, receipt, permissions) => {
   const status = (receipt as { status: string }).status;
-  // This is the real callback's completion write: effects and audit are already
-  // durable, but the canonical response still says pending at the effects cut.
   if (mode === "kill" && cut === "effects" && status === "completed") await park();
   await durableAtomicWriteJson(path, receipt, permissions);
   if (mode === "kill" && (cut === "pending" && status === "pending" || cut === "completion" && status === "completed")) await park();

@@ -4,12 +4,6 @@ import { keyForHome } from "./settings-schema.js";
 import { composedBelow, resolveSettings, targetLayers } from "./settings-resolver.js";
 import type { SettingsStores } from "./settings-types.js";
 
-/**
- * What resolveSettings and composedBelow return around proof block settings/precedence, on the real schema. The
- * block decides which layer wins, which layers are shown and which is not applied, over tokens; these cases pin
- * that the resolver gives it the right facts (a layer's per-model and plain values, admission, trust) and turns
- * its answer back into the right values, rows and badges.
- */
 const MODEL = "anthropic/claude-test";
 const session = { kind: "session" as const, sessionId: "s" };
 const global = { defaultProvider: "anthropic", defaultModel: "claude-test", defaultThinkingLevel: "low", defaultTools: ["read", "bash", "edit"] };
@@ -66,7 +60,6 @@ describe("settings resolution around the precedence block", () => {
   });
 
   it("a composing setting folds its applied layers lowest first, and a layer the setting does not admit takes no part", () => {
-    // tools.active is not project-settable: the project's +grep never enters, trusted or not.
     for (const applied of [true, false]) {
       expect(row(stores({ project: project(applied), session: chat }), "tools.active")).toMatchObject({
         value: ["read", "edit", "web"], display: "3 tools", layer: "session", applied: true, badges: [],
@@ -81,7 +74,6 @@ describe("settings resolution around the precedence block", () => {
     expect(composedBelow(given, tools, {}, "global")).toEqual(["read", "bash", "edit", "write"]);
     expect(composedBelow(given, tools, {}, "session")).toEqual(["read", "bash", "edit"]);
     expect(composedBelow(given, tools, {}, "project")).toEqual(["read", "edit", "web"]);
-    // An ordinary setting does not compose: the plain value of the highest layer below, never a per-model one.
     const thinking = keyForHome(TEST_SETTINGS_SCHEMA.schemaKey(THINKING), false);
     const perModel = stores({ global: { ...global, modelThinkingLevels: { [MODEL]: "high" } }, project: project(true), session: chat });
     expect(composedBelow(perModel, thinking, { role: "chat", model: MODEL }, "global")).toBe("medium");
@@ -99,7 +91,6 @@ describe("settings resolution around the precedence block", () => {
     });
     expect(composedBelow(given, thinking, { role: "chat", model: MODEL }, "home")).toBe("low");
     expect(composedBelow(given, thinking, { role: "chat", model: MODEL }, "global")).toBe("medium");
-    // Without a Home value the row falls to Global, and Home's empty layer is still listed.
     expect(resolveSettings(TEST_SETTINGS_SCHEMA, home, { ...given, home: {} }, options).keys.find(candidate => candidate.key === THINKING)).toMatchObject({
       value: "low", layer: "global", overridden: false, layers: [{ layer: "session", applied: true }, { layer: "global", value: "low", applied: true }],
     });

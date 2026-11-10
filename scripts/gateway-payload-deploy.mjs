@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-/**
- * Agent-manageable Gateway payload staging and promotion.  This command owns
- * only the bounded payload projection; the LaunchAgent remains the process
- * supervisor and canonical Gateway state is never modified.
- */
+// Agent-manageable Gateway payload staging and promotion.
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { createRequire } from "node:module";
@@ -32,9 +28,6 @@ import {
   writeFile,
 } from "node:fs/promises";
 
-// The helper is copied into app/scripts in the shipped payload. Resolve its
-// production dependencies from that adjacent app package first, then fall back
-// to the repository package when this source copy is run in-place.
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const adjacentPackage = join(scriptDirectory, "..", "package.json");
 const sourcePackage = join(scriptDirectory, "../packages/gateway/package.json");
@@ -53,7 +46,6 @@ const SCHEMA = 1;
 const KIND = "tron-gateway-payload";
 const SELECTION_KIND = "tron-gateway-selection";
 const PAYLOAD_FINGERPRINT_COVERAGE = "app/** and runtime/** regular files";
-// The launcher requires exactly these keys once, in this order-agnostic set.
 const MANIFEST_KEYS = [
   "schema", "kind", "gatewayVersion", "protocolVersion", "minProtocolVersion", "nodeVersion",
   "sourceRevision", "runtimeEpoch", "channel", "version", "payloadFingerprint", "dependencyTreeCoverage",
@@ -69,7 +61,6 @@ const LOCAL_CREDENTIAL_MAX_BYTES = 64 * 1024;
 const MAX_RETAINED_VERSIONS = 8;
 const PAYLOAD_COPY_TIMEOUT_MS = 120_000;
 const MACOS_CP = "/bin/cp";
-// Bounded reads keep storage latency overlapped without flooding the filesystem.
 const PAYLOAD_FINGERPRINT_READ_CONCURRENCY = 16;
 const REQUIREMENTS = [
   ["app/dist/index.js", 1_024, false],
@@ -118,7 +109,6 @@ export function isTailscaleAddress(address) {
     && bytes[3] === 0x5c && bytes[4] === 0xa1 && bytes[5] === 0xe0;
 }
 
-/** Resolve the documented bind name identically for health and WebSocket traffic. */
 export function resolveDeploymentHost(raw, interfaces = networkInterfaces()) {
   const requested = raw?.trim() || "tailscale";
   if (requested !== "tailscale") return requested;
@@ -224,7 +214,6 @@ async function npmRuntimeTreeDigest(root) {
     }
   }
   await visit(root, "");
-  // The records are sorted below, so bounded parallel reads do not change the digest.
   for (let start = 0; start < reads.length; start += PAYLOAD_FINGERPRINT_READ_CONCURRENCY) {
     await Promise.all(reads.slice(start, start + PAYLOAD_FINGERPRINT_READ_CONCURRENCY).map(async ({ record, path }) => {
       record.data = await readFile(path);
@@ -328,8 +317,6 @@ async function completePayload(root) {
     ["app/package.json", MAX_PACKAGE_JSON_BYTES],
     ["app/package-lock.json", MAX_PACKAGE_LOCK_BYTES],
   ]) {
-    // The Swift validator and the C launcher bound these two documents; an
-    // oversized one is a tampering signal even when the fingerprint matches it.
     if ((await stat(join(resolved, path))).size > maximum) throw new Error(`payload document exceeds ${maximum} byte limit: ${path}`);
   }
   await validateRuntimeNodeAlias(resolved, "arm64");
@@ -361,14 +348,11 @@ async function regularFiles(root, prefix) {
   return output;
 }
 
-/** Must remain byte-for-byte compatible with hash-gateway-payload.sh. */
 export async function payloadFingerprint(root) {
   await completePayload(root);
   return payloadTreeFingerprint(root);
 }
 
-// Callers must run completePayload on this root first. validatePayload already
-// does, so it must not pay for the npm runtime digest a second time.
 async function payloadTreeFingerprint(root) {
   return digestEntries(root, [...(await regularFiles(root, "app")), ...(await regularFiles(root, "runtime"))]);
 }
@@ -406,12 +390,6 @@ async function json(path, maximum = MAX_MANIFEST_BYTES) {
   return (await jsonDocument(path, maximum)).value;
 }
 
-/**
- * The C launcher parses both payload documents with a bounded flat parser and
- * admits no escapes, so it requires their exact key sets once each. JSON.parse
- * would instead ignore an unknown key and keep the last of a repeated one,
- * which is exactly the tampering signal this rejects.
- */
 function keysAreExact(text, keys) {
   let index = 0;
   const skipSpace = () => { while (index < text.length && " \t\r\n".includes(text[index])) index += 1; };
@@ -480,8 +458,6 @@ export function validateLocalCredentialDocument(document) {
 }
 
 export async function readLocalCredential(path) {
-  // lstat followed by readFile leaves a replacement race. Keep the descriptor
-  // open while checking ownership/mode and reading the bounded bytes.
   const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW).catch(() => { throw new Error("local Gateway credential is missing or unsafe"); });
   try {
     const info = await handle.stat();
@@ -506,9 +482,6 @@ export async function readLocalCredential(path) {
 }
 
 function payloadManifest(value, expected = {}) {
-  // One identity policy across the Swift validator, this helper and the C
-  // launcher: component charset and byte limits, a 40-hex revision, a UUID
-  // epoch, and the two production channels.
   if (!value || typeof value !== "object" || Array.isArray(value)
     || value.schema !== SCHEMA || value.kind !== KIND
     || (value.channel !== "stable" && value.channel !== "dev") || !validComponent(value.version, 128)
@@ -571,15 +544,8 @@ async function validatePayloadPushConfiguration(root, channel) {
   } finally { await handle.close(); }
 }
 
-// tsc emits double-quoted specifiers for static imports, re-exports, side-effect
-// imports, and literal dynamic imports.
 const RELATIVE_MODULE_SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(?\s*)"(\.{1,2}\/[^"]+)"/gu;
 
-/**
- * Only app/ ships. A compiled import that resolves anywhere else (for example a
- * repo fixture outside packages/gateway) passes source builds and tests but
- * fails module loading before the Gateway can log, so reject it at admission.
- */
 async function assertCompiledImportsShipped(root) {
   const appRoot = join(root, "app");
   for (const { path, target } of await regularFiles(root, "app/dist")) {
@@ -621,8 +587,6 @@ function store(home, channel) {
     pending: join(channelRoot, "pending-attempt.json"),
     config: join(home, "gateway", "update-config.json"),
     lock: join(channelRoot, ".update.lock"),
-    // Complete apply, direct promotion, rollback, and handoff operations share
-    // one lock. Fine-grained publication still uses the store lock.
     operationLock: join(channelRoot, ".operation.lock"),
   };
 }
@@ -746,10 +710,6 @@ export async function clearPendingAttempt(paths, identity, allowConsumedCommitte
   return withPendingAttemptLock(paths, async () => {
     const pending = paths.pending ?? join(paths.channelRoot, "pending-attempt.json");
     const value = await readOptional(pending);
-    // The launcher is the recovery consumer and may atomically remove a
-    // committed marker after it has admitted the candidate. The helper may
-    // accept that exact interleaving only after its caller has independently
-    // revalidated current.json and authenticated the live candidate identity.
     if (value === undefined && allowConsumedCommittedMarker) return;
     if (!matchingPendingAttempt(value, paths, identity) || value.attempt !== "committed") {
       throw new Error("candidate startup commit marker is missing or inconsistent");
@@ -775,8 +735,6 @@ async function captureSelectionState(paths) {
 }
 
 async function restoreSelectionState(paths, state) {
-  // Restore current first: never intentionally leave a newly active selection
-  // while state recovery is still in progress. Each replacement remains atomic.
   if (state.current === undefined) await rm(paths.current, { force: true });
   else await atomicBytes(paths.current, state.current);
   if (state.previous === undefined) await rm(paths.previous, { force: true });
@@ -786,17 +744,10 @@ async function restoreSelectionState(paths, state) {
 export async function restoreSelectionStateAndClearAttempt(paths, state) {
   return withPendingAttemptLock(paths, async () => {
     await restoreSelectionState(paths, state);
-    // Once current/previous are restored, a candidate attempt marker no longer
-    // matches current.json. Leaving it behind makes the launcher fail closed on
-    // every retry instead of starting the restored payload. The launcher's
-    // shared lock prevents it from recreating a launched marker after removal.
     await rm(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), { force: true });
   });
 }
 
-// Walks the payload without following links. Directories are listed parents
-// first (root included); openDirectory runs before each one is read. Unsupported
-// entries are refused before the caller changes any mode.
 async function payloadTreeEntries(root, openDirectory, onSymlink) {
   const rootInfo = await lstat(root);
   if (rootInfo.isSymbolicLink()) throw new Error("payload root must not be a symlink");
@@ -818,9 +769,6 @@ async function payloadTreeEntries(root, openDirectory, onSymlink) {
   return { files, directories };
 }
 
-// Regular files keep their executable bit: 0755/0644 unsealed, 0555/0444 sealed.
-// Batches bound the concurrent lstat/chmod pairs so a ~9k-entry payload does not
-// pay one serial await per entry.
 async function forEachPayloadFile(paths, operation) {
   for (let start = 0; start < paths.length; start += PAYLOAD_FINGERPRINT_READ_CONCURRENCY) {
     await Promise.all(paths.slice(start, start + PAYLOAD_FINGERPRINT_READ_CONCURRENCY).map(operation));
@@ -828,9 +776,6 @@ async function forEachPayloadFile(paths, operation) {
 }
 
 export async function makeMutable(root) {
-  // Cleanup never follows links. Admission validates live payload links;
-  // malformed failed staging trees must still be removable without
-  // traversing a target outside the store.
   const { files } = await payloadTreeEntries(root, (directory) => chmod(directory, 0o755), () => {});
   await forEachPayloadFile(files, async (path) => {
     const info = await lstat(path);
@@ -840,8 +785,6 @@ export async function makeMutable(root) {
 
 export async function makeImmutable(root) {
   const payloadRoot = await realpath(root);
-  // Every link is validated before any mode changes, so a refused payload is not
-  // left partially sealed.
   const { files, directories } = await payloadTreeEntries(
     root,
     async () => {},
@@ -851,15 +794,9 @@ export async function makeImmutable(root) {
     const info = await lstat(path);
     await chmod(path, (info.mode & 0o111) !== 0 ? 0o555 : 0o444);
   });
-  // Directories are sealed last, deepest first, so every entry is still reachable
-  // while the walk changes modes.
   for (const directory of directories.reverse()) await chmod(directory, 0o555);
 }
 
-// Moves a validated staging tree into versions/ as a sealed version. macOS 15
-// refuses to rename a directory its owner cannot write (EACCES; macOS 26
-// permits it), so the root stays writable across the rename and is sealed in
-// place before any caller records the version as a candidate or selection.
 async function publishImmutablePayload(temporary, target) {
   await makeImmutable(temporary);
   await chmod(temporary, 0o755);
@@ -868,9 +805,6 @@ async function publishImmutablePayload(temporary, target) {
 }
 
 async function assertStoreRoots(paths) {
-  // Never let mkdir/read/lock follow an attacker-created projection link. The
-  // updater is not a sandbox, but its owned roots must not silently redirect
-  // selection or payload writes outside the selected home.
   const home = paths.home ?? resolve(paths.channelRoot, "../../..");
   const roots = [join(home, "gateway"), join(home, "gateway", "payloads"), paths.channelRoot, paths.versionsRoot];
   for (const root of roots) {
@@ -966,12 +900,6 @@ export async function rollbackSelection(paths, { pendingAttempt = false } = {}) 
   if (state.previous === undefined) throw new Error("no previous Gateway selection is available for rollback");
   const prior = selection(JSON.parse(state.previous), paths.channel);
   const current = state.current === undefined ? undefined : selection(JSON.parse(state.current), paths.channel);
-  // A crash between the two writes must leave a state the launcher can start from.
-  // Without a pending-attempt marker nothing else records the target, so it is
-  // selected first. With one, current.json is rewritten last: a `launched` marker
-  // then restores its previous selection while current.json still names its
-  // candidate, `pending` and `committed` markers run the candidate as before, and
-  // any mismatch is refused (tron-gateway-launcher.c).
   const writes = [[paths.current, prior], ...(current ? [[paths.previous, current]] : [])];
   if (pendingAttempt) writes.reverse();
   try {
@@ -1037,18 +965,8 @@ async function writeProgress(paths, state, commandId, error) {
   paths.timeline?.enter(state, error);
 }
 
-// ---------------------------------------------------------------------------
-// Deploy timeline (~/.tron/logs/deploy.jsonl). The helper rotates it once at
-// operation start, and the C launcher appends its own `launcher.*` records to
-// the same file. Diagnostics never fail or delay a deployment.
-
-/** A source rebuild writes about a dozen records (~3 KB); 1 MB holds hundreds
- * of deployments while staying far under the Gateway's 40 MB budget. */
 export const DEPLOY_LOG_MAX_BYTES = 1_048_576;
-/** Only the newest part of each log can hold a crash from this attempt. */
 const STARTUP_CAUSE_TAIL_BYTES = 256 * 1_024;
-/** In an update, "rollback" and "rolled-back" mean the candidate failed; in a
- * user-requested rollback they are the requested work. */
 const DEPLOY_OPERATION_STATES = {
   update: { success: "ready", failed: new Set(["failure", "rollback", "rolled-back"]), terminal: new Set(["ready", "failure", "rolled-back"]) },
   rollback: { success: "rolled-back", failed: new Set(["failure"]), terminal: new Set(["rolled-back", "failure"]) },
@@ -1067,7 +985,6 @@ function appendDeployRecord(home, level, event, message, fields = {}) {
     mkdirSync(join(home, "logs"), { recursive: true, mode: 0o700 });
     appendFileSync(deployLogPath(home), `${JSON.stringify(record)}\n`, { mode: 0o600 });
   } catch {
-    // The deployment result is authoritative in update-progress.json.
   }
 }
 
@@ -1076,7 +993,6 @@ export function rotateDeployLog(home, maximumBytes = DEPLOY_LOG_MAX_BYTES) {
     const path = deployLogPath(home);
     if (existsSync(path) && statSync(path).size > maximumBytes) renameSync(path, `${path}.1`);
   } catch {
-    // Rotation is best effort; appends continue on the existing file.
   }
 }
 
@@ -1087,11 +1003,6 @@ function describeDeployError(error) {
   };
 }
 
-/**
- * Records each progress state as `deploy.<state>` carrying the duration of the
- * phase it ends, point events such as the old process exiting, and one
- * `deploy.finished` with the total. Durations use a monotonic clock.
- */
 export function createDeployTimeline(home, commandId, { operation = "update", now = () => performance.now() } = {}) {
   const states = DEPLOY_OPERATION_STATES[operation];
   if (!states) throw new Error("invalid deploy timeline operation");
@@ -1144,7 +1055,6 @@ export function createDeployTimeline(home, commandId, { operation = "update", no
   return timeline;
 }
 
-/** Attaches the timeline that every progress write of this operation reports to. */
 function attachDeployTimeline(paths, commandId, operation = "update") {
   rotateDeployLog(paths.home);
   paths.timeline = createDeployTimeline(paths.home, commandId, { operation });
@@ -1160,7 +1070,6 @@ async function readTail(path, maximumBytes) {
     const buffer = Buffer.alloc(length);
     await handle.read(buffer, 0, length, size - length);
     const text = buffer.toString("utf8");
-    // A tail that starts mid-record drops its first partial line.
     return length < size ? text.slice(text.indexOf("\n") + 1) : text;
   } catch {
     return "";
@@ -1172,8 +1081,6 @@ async function readTail(path, maximumBytes) {
 function startupCauseText(record) {
   if (record.event === "gateway.fatal-startup") {
     const error = record.error && typeof record.error === "object" ? record.error : {};
-    // A loading error carries its own code; a wrapped startup error keeps its
-    // root reason one level down.
     const root = typeof error.code === "string" || !error.cause || typeof error.cause !== "object" ? error : error.cause;
     const code = typeof root.code === "string" ? `${root.code}: ` : "";
     const detail = typeof root.message === "string" ? root.message : String(record.message ?? "");
@@ -1182,14 +1089,6 @@ function startupCauseText(record) {
   return `New build was rolled back by the launcher: ${String(record.message ?? "")}`;
 }
 
-/**
- * The cause a candidate recorded for its own failed start: the newest
- * `gateway.fatal-startup` (Gateway entrypoint) or `launcher.candidate-rolled-back`
- * (launcher) record at or after `since` whose `runtimeEpoch` or
- * `payloadVersion` names the candidate. A Gateway crash is preferred because it
- * names the failing file. Undefined when nothing matches, so the caller keeps
- * its generic message.
- */
 export async function candidateStartupFailure(home, candidate, since) {
   const sinceMs = Date.parse(since);
   if (!Number.isFinite(sinceMs)) return undefined;
@@ -1286,8 +1185,6 @@ async function gitRevision(cwd) {
     const { promisify } = await import("node:util");
     revision = (await promisify(execFile)("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" })).stdout.trim();
   } catch { revision = ""; }
-  // A manifest must carry the commit identity the launcher requires; a
-  // placeholder would produce a payload that can never be selected.
   if (!/^[0-9a-f]{40}$/u.test(revision)) {
     throw new Error("source revision is unavailable: a payload manifest requires the 40-hex commit identity");
   }
@@ -1307,11 +1204,6 @@ async function copyTrustedSourceScripts(sourceRoot, candidateRoot) {
   }
 }
 
-/** Stage the source revision's delegated-provider pin, its scripts and exactly the
- * artifacts both pin selections name, replacing whatever the base payload carried.
- * Packaging (`stage-gateway-app.sh`) stages the same set; a source update must not
- * claim a revision while running an older provider (#718). Artifact bytes are
- * bound by the pin's own digests, checked here before anything is published. */
 async function stageSourceProvider(sourceRoot, candidateRoot) {
   const gatewayRoot = join(sourceRoot, "packages", "gateway");
   const appRoot = join(candidateRoot, "app");
@@ -1392,7 +1284,6 @@ function processIsAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (error) { return error?.code === "EPERM"; }
 }
 
-/** Share the source dependency-tree lock with bundle-gateway.sh. */
 export async function withGatewaySourceBuildLock(sourceRoot, operation) {
   const parent = await noSymlinkDirectory(join(sourceRoot, "packages", "mac-app", "Sources", "Resources"));
   const lockPath = join(parent, ".tron-gateway-bundle.lock");
@@ -1430,12 +1321,6 @@ export async function withGatewaySourceBuildLock(sourceRoot, operation) {
   try { return await operation(); } finally { await rm(lockPath, { recursive: true, force: true }); }
 }
 
-/**
- * Source-only updates cannot change dependencies because the active payload is
- * the sole authority for signed native artifacts. Reuse its already validated
- * dependency tree rather than invoking a package manager or network service in
- * the supervised update path.
- */
 async function readBoundedRegular(path, maximumBytes) {
   const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error(`refusing non-regular metadata file: ${path}`);
@@ -1490,7 +1375,7 @@ export function runBounded(tool, args, options = {}) {
     });
     const terminateGroup = (signal) => {
       if (child.pid === undefined) return;
-      try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already exited */ } }
+      try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { } }
     };
     const finish = (error, result) => {
       if (settled) return;
@@ -1504,9 +1389,6 @@ export function runBounded(tool, args, options = {}) {
       terminateGroup("SIGTERM");
       const killTimer = setTimeout(() => {
         terminateGroup("SIGKILL");
-        // Descendants can retain inherited pipes after the process group is
-        // killed. Destroy them and settle at the bounded deadline instead of
-        // waiting forever for Node's close event.
         child.stdout?.destroy();
         child.stderr?.destroy();
         finish(new Error(message));
@@ -1538,9 +1420,6 @@ export function runBounded(tool, args, options = {}) {
   });
 }
 
-// Node 22 cannot clone on macOS (fs.cp ignores COPYFILE_FICLONE and libuv has no
-// clonefile), so a ~650 MB payload copy would write every byte. `cp -c` clones on
-// APFS and falls back to a byte copy elsewhere; `-R` keeps symlinks verbatim.
 async function copyPayloadTree(source, destination) {
   await mkdir(dirname(destination), { recursive: true });
   try {
@@ -1589,9 +1468,6 @@ async function cleanupPayloadVersionsUnlocked(paths, maximum = MAX_RETAINED_VERS
   return removed;
 }
 
-// Signed Node enforces library validation. Its native npm artifacts share the
-// installed snapshot's lifetime and authority, including spawned executables.
-// Detect contents, not addon names, so new native packages cannot bypass staging.
 async function isMachO(path) {
   const handle = await open(path, "r");
   try {
@@ -1599,10 +1475,10 @@ async function isMachO(path) {
     const { bytesRead } = await handle.read(header, 0, header.length, 0);
     if (bytesRead !== header.length) return false;
     switch (header.readUInt32BE()) {
-      case 0xfeedface: case 0xcefaedfe: // 32-bit, both byte orders
-      case 0xfeedfacf: case 0xcffaedfe: // 64-bit, both byte orders
-      case 0xcafebabe: case 0xbebafeca: // universal
-      case 0xcafebabf: case 0xbfbafeca: // universal 64-bit
+      case 0xfeedface: case 0xcefaedfe:
+      case 0xfeedfacf: case 0xcffaedfe:
+      case 0xcafebabe: case 0xbebafeca:
+      case 0xcafebabf: case 0xbfbafeca:
         return true;
       default: return false;
     }
@@ -1616,8 +1492,6 @@ async function adoptInstalledNativeFiles(candidateRoot, installedRoot) {
   for (const entry of await regularFiles(candidateRoot, "app/node_modules")) {
     if (!await isMachO(join(candidateRoot, entry.path))) continue;
     if (entry.target !== undefined) {
-      // Aliases retain their target text, but cannot reach worktree native bytes
-      // outside the npm inventory. Internal regular targets are replaced below.
       const target = await realpath(join(candidateRoot, entry.path));
       if (!under(modulesRoot, target)) throw refuse(`native alias leaves npm tree: ${entry.path}`);
     } else nativeFiles.push(entry.path);
@@ -1633,8 +1507,6 @@ async function adoptInstalledNativeFiles(candidateRoot, installedRoot) {
   const candidatePackages = await readPackages(candidateRoot);
   const installedPackages = await readPackages(installedRoot);
   for (const path of nativeFiles) {
-    // The nearest node_modules owns nested dependencies; scopes are part of the
-    // exact package-lock key, not a separate package or a name-only lookup.
     const parts = path.slice("app/".length).split("/");
     const start = parts.lastIndexOf("node_modules") + 1;
     const packageKey = parts.slice(0, start + (parts[start]?.startsWith("@") ? 2 : 1)).join("/");
@@ -1685,8 +1557,6 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
           payloadFingerprint: result.manifest.payloadFingerprint,
         },
       });
-      // State now protects the candidate; cleanup is safe at this terminal
-      // staging point and remains under the channel lock.
       await cleanupPayloadVersionsUnlocked(paths);
       return result;
     };
@@ -1751,8 +1621,6 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
       };
       payloadManifest(manifest, { channel, version: targetVersion });
       await atomicJson(join(temporary, "manifest.json"), manifest);
-      // manifest.json is outside the fingerprinted app/ and runtime/ trees, so the
-      // fingerprint computed above still describes the tree being published.
       await validatePayload(temporary, { channel, version: targetVersion, payloadFingerprint: stagedFingerprint }, false);
       await publishImmutablePayload(temporary, target);
       return markCandidateResult({ root: target, manifest, reused: false });
@@ -1825,9 +1693,6 @@ export async function preflightPayload(root, runCommand = runBounded, timeoutMs 
       TRON_CANDIDATE_NATIVE_MODULES: JSON.stringify(nativeModules),
     },
   });
-  // Protocol values are deliberately read from the candidate's compiled
-  // module with the candidate runtime. Manifests do not carry these fields;
-  // defaulting them here would turn a preflight into a self-assertion.
   const versionModule = join(root, "app", "dist", "version.js");
   const probe = "import(process.env.TRON_CANDIDATE_VERSION_URL).then(({PROTOCOL_VERSION, MIN_PROTOCOL_VERSION}) => { if (!Number.isSafeInteger(PROTOCOL_VERSION) || !Number.isSafeInteger(MIN_PROTOCOL_VERSION)) process.exit(2); process.stdout.write(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, minProtocolVersion: MIN_PROTOCOL_VERSION })); }).catch(() => process.exit(3));";
   const probeResult = await runCommand(runtime, ["-e", probe], {
@@ -1843,8 +1708,6 @@ export async function preflightPayload(root, runCommand = runBounded, timeoutMs 
   } catch {
     throw new Error("candidate Gateway did not emit a valid protocol version range");
   }
-  // The installed client speaks PROTOCOL_VERSION. The candidate must both
-  // understand that version and not require a newer one.
   if (protocol < PROTOCOL_VERSION || minimum > PROTOCOL_VERSION || minimum < 1 || protocol < minimum) {
     throw new Error("candidate Gateway protocol range is incompatible");
   }
@@ -1890,8 +1753,8 @@ function sameProcess(left, right) {
     && left.pid === right.pid && left.startIdentity === right.startIdentity;
 }
 
-export const RELAUNCH_LIMIT_MS = 60_000; // Existing allowance for launchd to produce its first listener.
-export const STARTUP_LIMIT_MS = 180_000; // Candidate warmup may include bounded session recovery.
+export const RELAUNCH_LIMIT_MS = 60_000;
+export const STARTUP_LIMIT_MS = 180_000;
 
 export async function waitForReplacement({
   oldProcess,
@@ -1900,10 +1763,6 @@ export async function waitForReplacement({
   requireEpochChange = true,
   relaunchLimitMs = RELAUNCH_LIMIT_MS,
   startupLimitMs = STARTUP_LIMIT_MS,
-  // launchd owns the normal candidate relaunch. A process can be alive but not
-  // listening during startup, so listener absence must never trigger a normal
-  // promotion kickstart. Recovery explicitly opts into its own replacement
-  // boundary after restoring the prior selection.
   naturalGraceMs = Number.POSITIVE_INFINITY,
   readListener,
   readHealth,
@@ -1917,7 +1776,6 @@ export async function waitForReplacement({
   let launched = false;
   let observedProcess;
   while (now() < (startupDeadline ?? relaunchDeadline)) {
-    // Listener probe failures are safety failures, never evidence of absence.
     const listener = await readListener();
     if (listener) {
       startupDeadline ??= now() + startupLimitMs;
@@ -1925,22 +1783,15 @@ export async function waitForReplacement({
         const value = await readHealth();
         const after = await readListener();
         if (sameProcess(listener, after) && !sameProcess(after, oldProcess)) {
-          // Only an exact payload identity is intentional replacement authority.
-          // A foreign listener must never become killable merely because it was
-          // observed during the candidate window.
           if (healthMatchesCandidate(value, expected, oldEpoch, false)) observedProcess = after;
           if (value.status === "ok" && healthMatchesCandidate(value, expected, oldEpoch, requireEpochChange)) {
             return { process: after, health: value };
           }
         }
       } catch {
-        // A live replacement may need the full bounded startup window. Health
-        // failures are retryable but never authorize killing that listener.
       }
     }
     if (!launched && now() - startedAt >= naturalGraceMs) {
-      // Recheck immediately at the destructive boundary. Only proven listener
-      // absence authorizes the one supervisor launch.
       const beforeLaunch = await readListener();
       if (!beforeLaunch) {
         await launchSupervisor();
@@ -1996,9 +1847,7 @@ export async function restoreAndVerifyReplacement({
   const listener = await replacement.readListener();
   if (listener) {
     let value;
-    try { value = await replacement.readHealth(); } catch { /* exact captured candidate may be replaced below */ }
-    // A second listener read binds the unauthenticated warmup identity to this
-    // exact PID/start pair; only that proof makes its startup ours to wait on.
+    try { value = await replacement.readHealth(); } catch { }
     const after = await replacement.readListener();
     if (sameProcess(listener, after) && value !== undefined
       && healthMatchesCandidate(value, expected, oldEpoch, false)) {
@@ -2016,8 +1865,6 @@ export async function restoreAndVerifyReplacement({
     }
   }
 
-  // No listener, or the exact process captured from the failed candidate
-  // attempt, is the only intentional replacement boundary.
   await replacement.launchSupervisor();
   return proveRecovery(await waitForReplacement({
     oldProcess: listener,
@@ -2029,7 +1876,6 @@ export async function restoreAndVerifyReplacement({
     readListener: replacement.readListener,
     readHealth: replacement.readHealth,
     launchSupervisor: replacement.launchSupervisor,
-    // The supervisor was invoked explicitly above; this disables another call.
     naturalGraceMs: Number.POSITIVE_INFINITY,
     ...(replacement.now ? { now: replacement.now } : {}),
     ...(replacement.sleep ? { sleep: replacement.sleep } : {}),
@@ -2042,9 +1888,6 @@ function commandProvedAbsence(error) {
 
 export async function captureLocalProcess(pid, runCommand = runBounded) {
   if (!Number.isSafeInteger(pid) || pid < 1) throw new Error("invalid Gateway PID");
-  // Enumerating the bounded local process table makes absence an exit-zero,
-  // parsed fact. A targeted `ps -p` uses exit 1 for both absence and some probe
-  // failures, which is not a safe replacement boundary.
   const output = (await runCommand("/bin/ps", ["-axo", "pid=,lstart="], {
     timeoutMs: 2_000, maxOutputBytes: 512 * 1024,
   })).output;
@@ -2068,9 +1911,6 @@ export async function captureLocalListenerProcess(port, runCommand = runBounded)
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid Gateway port");
   let output;
   try {
-    // macOS lsof field mode always emits an `f` record even when only `p`
-    // is requested. Terse mode is the native PID-only contract; suppress
-    // warnings so every successful output line remains machine-parseable.
     output = (await runCommand("/usr/sbin/lsof", ["-nP", "-w", "-t", `-iTCP:${port}`, "-sTCP:LISTEN"], {
       timeoutMs: 2_000, maxOutputBytes: 8 * 1024,
     })).output;
@@ -2088,16 +1928,6 @@ export async function captureLocalListenerProcess(port, runCommand = runBounded)
   return captureLocalProcess(pids[0], runCommand);
 }
 
-/** A planned restart may drain accepted work without a deadline. Health,
- * listener, and port state are never transition evidence after capture: the
- * candidate startup deadline begins only after the exact old PID/start pair is
- * gone or replaced. */
-// The old Gateway keeps its port while it drains accepted work, for as long as
-// that takes, and closes it only when its shutdown begins. The rest of its
-// shutdown is disposal and its own exit, so a process still alive this long
-// after releasing the port is stuck inside its exit (#729), and launchd cannot
-// relaunch until it is gone. The Gateway's exit watcher normally ends it within
-// seconds; this bound also covers an old Gateway that predates that watcher.
 export const DRAIN_EXIT_STALL_LIMIT_MS = 30_000;
 
 export async function waitForDrainCompletion(
@@ -2130,12 +1960,10 @@ export async function waitForDrainCompletion(
         releasedAt ??= now();
         const releasedForMs = now() - releasedAt;
         if (releasedForMs >= stallLimitMs) {
-          // Re-read the exact identity immediately before signalling: a PID
-          // that exited and was reused is never ours to kill.
           const exact = await readExactProcess(oldProcess.pid);
           if (!sameProcess(exact, oldProcess)) return exact;
           onExitStalled?.({ pid: oldProcess.pid, releasedForMs: Math.round(releasedForMs) });
-          try { killProcess(oldProcess.pid); } catch { /* exited between the read and the signal */ }
+          try { killProcess(oldProcess.pid); } catch { }
           killed = true;
         }
       }
@@ -2190,10 +2018,6 @@ function productionReplacementDependencies({ channel, host, port, token, timeout
     readAuthenticatedHealth: async () => requireAuthenticatedRuntimeInfo(await authenticatedRequest({
       host, port, token, timeoutMs, method: "system.info",
     }), channel),
-    // launchd owns the Stable relaunch. The Debug supervisor (scripts/tron dev)
-    // relaunches whatever is selected after an exit 75, the restored selection
-    // included, so Debug recovery only waits for it and never reaches launchd;
-    // otherwise the failure names scripts/tron dev start.
     launchSupervisor: channel === "dev" ? async () => {} : () => kickstartStableSupervisor(channel),
   };
 }
@@ -2216,7 +2040,7 @@ export async function requireBundledPayload(paths, expected, bundledCandidatesOv
       }, true);
       externalSelectionIsAdmissible = true;
     }
-  } catch { /* The launcher rejects the same malformed or incompatible projection. */ }
+  } catch { }
   if (externalSelectionIsAdmissible) {
     throw new Error("restored Gateway still has an admissible external payload selection");
   }
@@ -2235,7 +2059,7 @@ export async function resolveRecoveryPayload(paths, recoverySelectionValue, bund
         payloadFingerprint: recoverySelectionValue.payloadFingerprint,
       }, true);
       return { manifest, usesBundledFallback: false };
-    } catch { /* A rejected external selection means the launcher is already using its bundle. */ }
+    } catch { }
   }
   const bundled = await bundledPayload(bundledCandidatesOverride);
   return { manifest: bundled.manifest, usesBundledFallback: true };
@@ -2269,9 +2093,6 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
       requestInfo: () => authenticatedRequest({ host, port, token, timeoutMs, method: "system.info" }),
     });
     if (idempotent) return idempotent;
-    // If current already names the candidate, publication happened before a
-    // crash and `previous` is the real rollback pointer. Otherwise recovery
-    // must target the selection that was current before this promotion.
     const candidateAlreadyPublished = prior?.version === version && prior.payloadFingerprint === manifest.payloadFingerprint;
     const recoverySelectionValue = candidateAlreadyPublished
       ? (priorState.previous === undefined ? undefined : selection(JSON.parse(priorState.previous), channel))
@@ -2306,9 +2127,6 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
     await writeState(paths, { ...stateBase, state: "prepared" });
     const unchanged = prior?.version === version && prior.payloadFingerprint === manifest.payloadFingerprint;
 
-    // A crash can occur after current.json is published but before the new
-    // process is healthy. In that case current already names the candidate;
-    // publishing again would overwrite the real rollback pointer with itself.
     let published = candidateAlreadyPublished;
     let oldProcessGone = false;
     let restartRequestedAt;
@@ -2316,8 +2134,6 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
       if (!unchanged) {
         await writePendingAttempt(paths, target, prior);
         await publishSelection(paths, target);
-        // Set ownership immediately after atomic publication. A later failure
-        // must not skip recovery because this flag remained false.
         published = true;
       }
       await writeState(paths, { ...stateBase, state: deploymentTransition("prepared", "published") });
@@ -2343,7 +2159,6 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
           { pid, releasedForMs },
         ),
       });
-      // /health admits warmup only; authenticated system.info is the promotion proof.
       const confirmed = requireAuthenticatedRuntimeInfo(
         await authenticatedRequest({ host, port, token, timeoutMs, method: "system.info" }), channel,
       );
@@ -2361,8 +2176,6 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
       return { state: "ready", manifest, health: confirmed };
     } catch (caught) {
       const error = caught instanceof Error ? caught : new Error(String(caught));
-      // A candidate that crashed or was rolled back by the launcher recorded
-      // why; lead with that instead of the generic readiness timeout.
       if (restartRequestedAt !== undefined) {
         const cause = await candidateStartupFailure(paths.home, manifest, restartRequestedAt).catch(() => undefined);
         if (cause) error.message = `${cause}. ${error.message}`;
@@ -2396,8 +2209,6 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
             replaceableProcess: error.observedProcess,
           });
           await writeState(paths, { ...stateBase, state: deploymentTransition("rollback-requested", "rolledBack") });
-          // Preserve terminal automatic rollback through the outer apply
-          // boundary; callers still receive the original bounded failure.
           if (error && typeof error === "object") error.automaticRollbackCompleted = true;
         } catch (caughtRecovery) {
           const recoveryError = caughtRecovery instanceof Error
@@ -2476,9 +2287,6 @@ export async function stagedCandidate(paths, requestedVersion, expectedFingerpri
 
   let candidate = requestedVersion;
   if (candidate === undefined) {
-    // Automatic/source updates must never infer a Debug-origin artifact from
-    // mutable deployment state. Debug promotion is admitted only by an exact
-    // version+fingerprint request from the verified control-plane projection.
     if (declaresDebugOrigin) return undefined;
     candidate = raw?.candidateIdentity && typeof raw.candidateIdentity === "object"
       ? raw.candidateIdentity.version : raw?.candidateVersion;
@@ -2511,7 +2319,7 @@ async function bundledPayload(bundledCandidatesOverride) {
     try {
       const manifest = await validatePayload(bundledRoot, {}, true);
       return { root: bundledRoot, manifest };
-    } catch { /* Try the next known bundled-payload location. */ }
+    } catch { }
   }
   throw new Error("source update requires an active or bundled validated Gateway payload");
 }
@@ -2526,7 +2334,7 @@ async function currentPayload(paths, bundledCandidatesOverride) {
       }, true);
       return { root, manifest };
     }
-  } catch { /* fall through to another fully validated runtime base */ }
+  } catch { }
   return bundledPayload(bundledCandidatesOverride);
 }
 
@@ -2537,10 +2345,6 @@ function sourceRuntimeBaseCandidates(config, environment) {
     const candidate = resolve(value);
     if (!candidates.includes(candidate)) candidates.push(candidate);
   };
-  // artifactRoot is the operator's explicit immutable payload projection. The
-  // launcher-owned bundled root survives external selection, and a prepared
-  // source bundle lets a local Release build bootstrap a newly required runtime
-  // without weakening payload validation.
   append(config.artifactRoot);
   append(environment.TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT);
   append(join(config.sourceRoot, "packages", "mac-app", "Sources", "Resources", "Gateway"));
@@ -2564,8 +2368,6 @@ export async function copyValidatedPayloadBase(base, destination, copyPayload = 
   }
   try {
     await copyPayload(base.root, destination);
-    // Mutable source roots must match the exact manifest observed at admission
-    // before any copied bytes can become a runtime or candidate payload.
     await validatePayload(destination, {
       channel: base.manifest.channel,
       version: base.manifest.version,
@@ -2602,27 +2404,17 @@ async function removeStaleSourcePayloadStaging(paths) {
 export async function buildSourcePayload({ paths, config, candidateVersion, timeoutMs = 120_000, runCommand = runBounded, environment = process.env }) {
   const active = await resolveSourcePayloadBase(paths, config, environment);
   const gatewayRoot = join(config.sourceRoot, "packages", "gateway");
-  // Compile into a private temporary directory. In particular, never invoke
-  // the package build script here: its configured outDir is the trusted source
-  // tree's packages/gateway/dist, which must remain byte-for-byte unchanged.
   const compilerOutput = await mkdtemp(join(tmpdir(), "tron-gateway-source-build-"));
   try {
     let source;
     let sourceRevision;
     let sourceInputFingerprint;
     await withGatewaySourceBuildLock(config.sourceRoot, async () => {
-      // Bind the actual compiler/copy inputs, not just HEAD: development
-      // checkouts may be dirty, but their staged output must not claim to match
-      // the clean revision after those edits are reverted.
       sourceRevision = await gitRevision(config.sourceRoot);
       const installVerifierPath = join(config.sourceRoot, "scripts", "gateway-install-inputs.mjs");
       const { gatewayBuildInputFingerprint, ensureGatewayInstallInputs } = await import(pathToFileURL(installVerifierPath).href);
       sourceInputFingerprint = await gatewayBuildInputFingerprint(config.sourceRoot);
-      // A changed lock needs a newly signed build; refuse that before repairing
-      // anything, so npm ci only ever restores the lock the payload already runs.
       source = await captureReusableSourcePackage(active.root, gatewayRoot);
-      // The checkout's compile-only install drifts whenever main moves its lock
-      // without a reinstall; repair it with the active payload's pinned npm (#1010).
       const startedAt = Date.now();
       const install = await ensureGatewayInstallInputs(gatewayRoot, {
         runtimeBin: join(active.root, "runtime", `bin-${process.arch}`),
@@ -2643,17 +2435,11 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         throw new Error("Gateway source inputs changed during rebuild; retry from the current checkout");
       }
     });
-    // Source updates inherit the exact validated product configuration from
-    // the selected immutable payload. The source checkout and environment are
-    // never alternate configuration owners.
     const activePushConfiguration = await validatePayloadPushConfiguration(active.root, paths.channel);
     const version = candidateVersion ?? `${source.sourcePackage.version}-source-${Date.now()}`;
     if (!validComponent(version, 128)) throw new Error("source build produced an invalid candidate version");
     const target = join(paths.versionsRoot, version);
     return await withSourcePayloadBuildLock(paths, async () => {
-      // The build lock is separate from the store lock: it serializes source
-      // staging so a later build can safely reap crash leftovers without ever
-      // mistaking a live builder's directory for stale data.
       await removeStaleSourcePayloadStaging(paths);
       const stagingParent = await mkdtemp(join(paths.channelRoot, ".source-staging-"));
       const temporary = join(stagingParent, "payload");
@@ -2665,8 +2451,6 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
         await writeFile(join(temporary, "app", "package.json"), source.packageBytes);
         await writeFile(join(temporary, "app", "package-lock.json"), source.lockBytes);
-        // The patched pi-coding-agent declaration explains this exact lock, which a
-        // source update cannot change; refresh it so its metadata is the revision's.
         const patchDeclaration = await readFile(join(gatewayRoot, "pi-coding-agent-patch.json")).catch((error) => {
           if (error?.code === "ENOENT") return undefined;
           throw error;
@@ -2675,8 +2459,6 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         if (await validatePayloadPushConfiguration(temporary, paths.channel) !== activePushConfiguration) {
           throw new Error("source update changed the active product PushService.xcconfig");
         }
-        // The updater and helper are part of the trusted source revision, not
-        // stale files inherited from whichever payload happened to be active.
         await copyTrustedSourceScripts(config.sourceRoot, temporary);
         await stageSourceProvider(config.sourceRoot, temporary);
         if (await gitRevision(config.sourceRoot) !== sourceRevision) {
@@ -2693,14 +2475,7 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         };
         payloadManifest(manifest, { channel: paths.channel, version });
         await atomicJson(join(temporary, "manifest.json"), manifest);
-        // Structure, import containment and manifest must pass before anything
-        // is published; the fingerprint was computed from these files just above.
         await validatePayload(temporary, { channel: paths.channel, version, payloadFingerprint: fingerprint }, false);
-        // Compilation and payload copying above are private and do not hold the
-        // channel lock. Publication is one serialized transaction:
-        // immutable finalization, rename, candidate state, and retention all
-        // observe the same channel snapshot. applyPayload holds only the
-        // distinct operation lock, so this cannot recursively deadlock it.
         return await withStoreLock(paths, async () => {
           try {
             await access(target);
@@ -2766,12 +2541,6 @@ export function proveDebugHandoffIdentity(before, after, manifest) {
   return first;
 }
 
-/** Copy the exact selected and authenticated Debug payload into Stable as an
- * inactive candidate. Stable current.json and the 9847 process are untouched.
- * `version`/`expectedFingerprint` are the candidate `tron-dev-state.mjs
- * handoff-admission` admitted from its clean source record (#124); admission
- * runs before this lock, so the selection is re-checked against it here, where
- * a concurrent Debug apply or rollback can no longer change it. */
 export async function handoffDebugCandidate({
   devHome, stableHome, stableBundledRoot, version, expectedFingerprint, host, port = 9848, token,
   timeoutMs = 10_000, requestInfo, preflight = preflightPayload,
@@ -2799,8 +2568,6 @@ export async function handoffDebugCandidate({
       throw new Error("Debug Node runtime differs from the installed Stable runtime; replace Tron.app manually before promotion");
     }
     try {
-      // Copy and validate first, but do not advertise a candidate until the
-      // same authenticated Debug runtime proves it did not change mid-copy.
       const staged = await stagePayload({
         home: stablePaths.home, channel: "stable", source: devRoot,
         version: devManifest.version, sourceRevision: devManifest.sourceRevision,
@@ -2846,18 +2613,11 @@ export async function handoffDebugCandidate({
         },
       };
     } catch (error) {
-      // A failed post-copy proof must not publish a candidate marker. Existing
-      // stable selection and process are deliberately untouched.
       throw error;
     }
   }));
 }
 
-/**
- * Supervised-runtime update entrypoint. It deliberately has no source/path,
- * executable, host, or port arguments. Source and artifact roots are read only
- * from the validated home projection; request parameters select policy only.
- */
 export function deploymentTimeoutMs(environment = process.env) {
   const timeoutMs = Number(environment.TRON_GATEWAY_UPDATE_TIMEOUT_MS ?? String(RELAUNCH_LIMIT_MS));
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 2_000 || timeoutMs > 300_000) {
@@ -2891,9 +2651,6 @@ async function applyPayloadInternal(value, paths) {
     await writeProgress(paths, "building", value.commandId);
     let built;
     try {
-      // The configured checkout is already executable trusted build input.
-      // Use its current builder now, not the copy inside yesterday's payload;
-      // this installed helper still owns promotion, readiness and rollback.
       const scriptsRoot = await noSymlinkDirectory(join(config.sourceRoot, "scripts"));
       const sourceUpdaterPath = join(scriptsRoot, "gateway-payload-deploy.mjs");
       const sourceUpdater = await import(pathToFileURL(sourceUpdaterPath).href);
@@ -2953,15 +2710,9 @@ export async function applyPayload(request) {
     try {
       return await applyPayloadInternal(value, paths);
     } catch (error) {
-      // Every acknowledged detached request gets one terminal bounded result,
-      // including malformed config, unavailable npm, and pre-build failures.
-      // Automatic rollback is already terminal and must retain its original
-      // bounded error rather than being overwritten by generic failure.
       if (error?.automaticRollbackCompleted !== true) {
         await writeProgress(paths, "failure", value.commandId, error?.message ?? error).catch(() => {});
       }
-      // Every terminal path closes the timeline exactly once, including a
-      // "rollback" state whose recovery did not complete.
       timeline.finish("failure", error);
       throw error;
     }
@@ -2971,8 +2722,6 @@ export async function applyPayload(request) {
 export async function loadRollbackTarget(paths) {
   const priorState = await captureSelectionState(paths);
   if (priorState.previous === undefined) throw new Error("no previous Gateway selection is available for rollback");
-  // Validate the prior manifest before changing either pointer. A missing or
-  // corrupt target must never make current.json point at an unusable version.
   const priorSelection = selection(JSON.parse(priorState.previous), paths.channel);
   const manifest = await validatePayload(join(paths.versionsRoot, priorSelection.version), {
     channel: paths.channel, version: priorSelection.version, payloadFingerprint: priorSelection.payloadFingerprint,

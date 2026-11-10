@@ -36,8 +36,6 @@ async function fixture() {
   const broker = new AuthBroker(runtime, (_client, topic, payload) => {
     events.push({ topic, payload });
   });
-  /** Waits for the recorded events to satisfy the predicate; the shared hang
-   * bound names it when they never do. */
   const waitForAuthEvent = (predicate: () => boolean): Promise<void> =>
     waitFor(predicate, "the global provider auth event");
   const log = vi.fn();
@@ -76,10 +74,6 @@ async function configure(agentDir: string, extensions: string[]): Promise<void> 
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ extensions }, null, 2));
 }
 
-/** Event-loop turns are what settle a queued catalog read: every pending
- * continuation and I/O callback runs before each `setImmediate` callback, and no
- * wall-clock wait is involved. A read that is not fenced on the refresh mutex
- * resolves inside these turns, which is what the assertions below detect. */
 async function settleScheduledWork(): Promise<void> {
   for (let turn = 0; turn < 32; turn += 1) {
     await Promise.resolve();
@@ -89,8 +83,6 @@ async function settleScheduledWork(): Promise<void> {
 
 describe("global provider resources", () => {
   it("replays global virtual-model registrations into the administrative catalog", async () => {
-    // Guard the global/session-free boundary: virtual registrations were queued by
-    // extension loading but never replayed, so model.list omitted a selectable router.
     const f = await fixture();
     await writeFile(f.extensionPath, `export default (pi) => {
       pi.registerProvider("virtual-physical", {

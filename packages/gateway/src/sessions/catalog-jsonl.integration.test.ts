@@ -18,8 +18,6 @@ it("refuses oversized catalog rows on cold scans and cached appends, then recove
     const row = await index.entryFromSummary({ id: "catalog-line-bound", cwd: root, path,
       firstMessage: "(no messages)", createdAt: time, updatedAt: time, messageCount: 0 });
     expect(row).toBeDefined();
-    // A valid JSON row above the catalog's 64 MiB line budget. Write bounded
-    // pieces so this regression never needs a V8-sized string or host pressure.
     await appendFile(path, '{"type":"message","message":{"role":"user","content":"');
     const chunk = Buffer.alloc(1_048_576, "x");
     for (let part = 0; part < 65; part += 1) await appendFile(path, chunk);

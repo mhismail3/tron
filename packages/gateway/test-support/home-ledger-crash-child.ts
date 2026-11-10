@@ -9,15 +9,12 @@ const owner = new HomeOwner({
   tronHome,
   trust: {} as never,
   workspace: new TronWorkspace(tronHome),
-  // The crash path only seals a chapter, which never dispatches a task.
   taskPolicy: homeTaskPolicy({ settings: () => undefined, modelQueueOf: async () => [], modelRuntime: () => undefined }, { inspect: async () => { throw new Error("unused task target"); } }),
-  // Sealing never materializes a successor runtime or watches global resources.
   runtimes: {
     serializeSessionMutation: async <T>(_id: string, commit: () => Promise<T>) => commit(),
     noteSessionListChanged: () => {},
     liveRuntime: () => undefined,
   } as never, agentDir: "/nonexistent-agent-dir",
-  // The crash path never reaches a learned-profile read, so no Knowledge owner exists.
   knowledge: () => undefined,
   sessions: {
     chapterMetrics: async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true }),
@@ -31,9 +28,6 @@ const exposed = owner as unknown as { writeLocked(record: unknown): Promise<void
 const write = exposed.writeLocked.bind(owner);
 exposed.writeLocked = async record => {
   await write(record);
-  // An unresolved top-level promise alone lets Node exit. The parent owns this
-  // pipe and holds it open until SIGKILL, so observing the marker cannot race a
-  // normal child exit and does not depend on a sleep or background timer.
   process.stdin.resume();
   writeFileSync(marker, "after\n");
   await new Promise<void>(() => {});

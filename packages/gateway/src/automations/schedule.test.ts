@@ -1,15 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { classifyDueOccurrence, firstAutomationOccurrence, nextAutomationOccurrence } from "./schedule.js";
 
-/**
- * What callers of schedule.ts see for once and interval triggers. Proof block schedule/occurrence decides the
- * instants; these cases pin the text around it: an occurrence the functions compute is written as a canonical UTC
- * timestamp, a stored occurrence that is kept (not yet due, or a once trigger's own time) keeps its stored text,
- * and each result has exactly the keys its case has. Run identifiers hash these strings, so their form is behaviour.
- */
 const ANCHOR = Date.parse("2026-03-01T10:00:00.000Z");
 const HOUR = 3_600_000;
-// The same instant as ANCHOR, as a store may hold it: any Gateway timestamp form is admitted.
 const OFFSET_TEXT = "2026-03-01T12:00:00+02:00";
 const once = { kind: "once" as const, at: OFFSET_TEXT };
 const hourly = { kind: "interval" as const, anchorAt: OFFSET_TEXT, everySeconds: 3_600 };
@@ -51,24 +44,19 @@ describe("once and interval occurrences", () => {
   });
 
   it("acts on the latest due interval occurrence only and stores the one after now, both written anew", () => {
-    // Due this very millisecond: the stored occurrence itself, rewritten as canonical UTC.
     expect(classifyDueOccurrence(hourly, OFFSET_TEXT, ANCHOR, "latest"))
       .toStrictEqual({ dispatchAt: "2026-03-01T10:00:00.000Z", nextOccurrenceAt: "2026-03-01T11:00:00.000Z", skipped: [] });
-    // Two occurrences missed: the earlier ones leave no trace.
     const late = ANCHOR + 2 * HOUR + 17;
     expect(classifyDueOccurrence(hourly, OFFSET_TEXT, late, "latest"))
       .toStrictEqual({ dispatchAt: "2026-03-01T12:00:00.000Z", nextOccurrenceAt: "2026-03-01T13:00:00.000Z", skipped: [] });
     expect(classifyDueOccurrence(hourly, OFFSET_TEXT, late, "skip"))
       .toStrictEqual({ nextOccurrenceAt: "2026-03-01T13:00:00.000Z", skipped: ["2026-03-01T12:00:00.000Z"] });
-    // 400 days of downtime on a one-minute interval: 576,000 missed occurrences, one result.
     const minutely = { kind: "interval" as const, anchorAt: "2026-03-01T10:00:00Z", everySeconds: 60 };
     expect(classifyDueOccurrence(minutely, "2026-03-01T10:00:00.000Z", ANCHOR + 400 * 24 * HOUR + 30_000, "skip"))
       .toStrictEqual({ nextOccurrenceAt: "2027-04-05T10:01:00.000Z", skipped: ["2027-04-05T10:00:00.000Z"] });
   });
 
   it("refuses a time that is not a finite instant instead of computing with it", () => {
-    // No caller can pass one (the clock is finite and stored timestamps are validated); the block's façade
-    // checks every number before the proven arithmetic runs.
     for (const now of [Number.NaN, Number.POSITIVE_INFINITY, 0.5]) {
       expect(() => classifyDueOccurrence(hourly, OFFSET_TEXT, now, "latest")).toThrow(RangeError);
       expect(() => firstAutomationOccurrence(hourly, now)).toThrow(RangeError);

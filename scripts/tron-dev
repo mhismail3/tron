@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 # Developer-owned immutable Gateway lifecycle for port 9848.
 set -euo pipefail
-# Agents run this from shells that inherit the Stable Gateway's environment
-# (PI_SUBAGENTS_TEMP_ROOT, TRON_GATEWAY_CHANNEL=stable, payload identity, session
-# ids). None of it may reach the Debug build, deploy helper, supervisor or child,
-# so every mode re-runs once under the minimal environment launchd gives Stable,
-# plus the toolchain selections this script honours (#144).
-# Handoff replaces the maintainer's inactive Stable candidate (AGENTS.md safety boundary 1), so
-# only the maintainer runs it, in a terminal. Agent shells have no terminal and carry the
-# Gateway's PI_SESSION_ID; both are checked before anything else, in either environment.
 if [[ "${1:-}" == handoff ]]; then
   if [[ -n "${PI_SESSION_ID:-}" ]]; then
     echo "scripts/tron dev handoff is maintainer-only and refused a Pi session shell (PI_SESSION_ID is set): agents never run it; the maintainer runs it in Terminal" >&2
@@ -44,8 +36,6 @@ case "$command" in
   *) echo "usage: scripts/tron dev [start|restart|status|preflight|stop|handoff] [--tailscale|--loopback]" >&2; exit 64 ;;
 esac
 
-# The one repository resolver chooses the pinned development Node (#242); a
-# missing toolchain fails here, before any Debug state is touched.
 NODE_BIN="$("$ROOT/scripts/tron-node")"
 export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"
 STATE_DIR="$HOME/.tron-dev/gateway"
@@ -55,9 +45,6 @@ LOG_FILE="$STATE_DIR/dev.log"
 COMMAND_LOCK="$STATE_DIR/command.lock"
 COMMAND_LOCK_HELD=no
 STATE_HELPER="$ROOT/scripts/tron-dev-state.mjs"
-# The Gateway refuses to start unless its gateway/ state directory is owner-only
-# (notification grants live there), and on a fresh Debug home this script
-# creates that directory first, so it must create it owner-only (#144).
 ensure_state_dir() {
   (umask 077 && mkdir -p "$STATE_DIR")
   chmod 700 "$STATE_DIR"
@@ -82,8 +69,6 @@ pid_current() {
 
 kill_child() {
   local pid="${1:-}" identity="${2:-}"
-  # Revalidate immediately before every signal; PID reuse must never turn a
-  # stale lifecycle record into a signal for an unrelated process.
   pid_current "$pid" "$identity" || return 0
   kill -TERM "$pid" 2>/dev/null || true
 }
@@ -114,8 +99,6 @@ stop_dev() {
     child_pid="$("$NODE_BIN" "$STATE_HELPER" get "$STATE_FILE" childPid)"
     child_identity="$("$NODE_BIN" "$STATE_HELPER" get "$STATE_FILE" childStartIdentity)"
   fi
-  # A refused transition is reported, but the processes are still signalled:
-  # stopping the Gateway must not depend on the state file being writable.
   "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" stopping intentionalExit=true || stopping_recorded=no
   kill_child "$child_pid" "$child_identity"
   pid_current "$supervisor_pid" "$supervisor_identity" && kill -TERM "$supervisor_pid" 2>/dev/null || true
@@ -161,11 +144,6 @@ supervise() {
       exit 1
     fi
     "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" starting childPid= childStartIdentity=
-    # The child waits at a gate until its pid and start identity are recorded, so
-    # stop and termination never meet a running launcher they cannot attribute.
-    # Only this supervisor holds the gate's write end (fd 7): if it dies first,
-    # the child reads EOF and exits without starting. exec keeps the pid and its
-    # start identity.
     gate="$STATE_DIR/child-start.gate"
     rm -f "$gate"
     mkfifo -m 600 "$gate"
@@ -249,10 +227,6 @@ build_candidate() {
 
 if supervisor_live; then SUPERVISOR_LIVE=yes; else SUPERVISOR_LIVE=no; fi
 HOST="$("$NODE_BIN" "$STATE_HELPER" resolve-command-host "$STATE_FILE" "$HOST" "$HOST_EXPLICIT" "$SUPERVISOR_LIVE")" || exit 64
-# Only commands that launch the Gateway need the signed launcher (__supervise
-# checks it again itself). Handoff never executes it: it requires a live
-# supervisor, which passed this check before launching, and handoff-debug
-# refuses without a validated Stable payload sharing the Debug Node runtime.
 case "$command" in
   start|restart) require_installed_launcher ;;
 esac
@@ -269,16 +243,11 @@ case "$command" in
   handoff)
     supervisor_live || { echo "Debug Gateway is not supervised and ready" >&2; exit 1; }
     [[ "$(status)" == *'"readiness":"ready"'* ]] || { echo "Debug Gateway is not ready" >&2; exit 1; }
-    # Stable only receives a candidate recorded as built from a clean tree;
-    # handoff-debug re-checks that exact admitted identity under its lock.
     admitted="$("$NODE_BIN" "$STATE_HELPER" handoff-admission "$STATE_FILE" "$HOME/.tron-dev")" || exit 1
     read -r admitted_version admitted_fingerprint <<<"$admitted"
     "$NODE_BIN" "$DEPLOY" handoff-debug --host "$HOST" --dev-home "$HOME/.tron-dev" --stable-home "$HOME/.tron" --stable-bundled-root /Applications/Tron.app/Contents/Resources/Gateway --version "$admitted_version" --fingerprint "$admitted_fingerprint"
     ;;
   start|restart)
-    # Measure the source before building; a dirty tree still stages its full
-    # HEAD. record-source re-measures after the build and records the epoch
-    # dirty if either measurement is, or if HEAD moved (#140).
     candidate_source="$("$NODE_BIN" "$STATE_HELPER" candidate-source "$ROOT")" || { echo "Debug candidate source revision is unavailable" >&2; exit 78; }
     read -r source_revision source_dirty candidate_version <<<"$candidate_source"
     identity_line="$(build_candidate "$source_revision" "$candidate_version")"
@@ -320,8 +289,6 @@ case "$command" in
       esac
       TRON_DEV_STOPPED=1 "$NODE_BIN" "$DEPLOY" select-dev --channel dev --home "$HOME/.tron-dev" --version "$version" --fingerprint "$payload_fingerprint" >&2
       if [[ "$HOST" == tailscale ]]; then supervisor_host_arg=--tailscale; else supervisor_host_arg=--loopback; fi
-      # Its own session without the task scope anchor (fd 19): the shared Debug Gateway outlives
-      # the task that started it (packages/gateway/docs/host-load.md).
       nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$0" __supervise "$supervisor_host_arg" >"$LOG_FILE" 2>&1 19<&- &
       supervisor_pid=$!
       printf '%s\n' "$supervisor_pid" >"$PID_FILE"

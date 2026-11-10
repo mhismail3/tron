@@ -301,8 +301,6 @@ export async function inspectGitPath(path: string): Promise<{
 }> {
   const repository = await statusInspection(path);
   if (!repository) return { isRepository: false };
-  // These are bounded selection hints, not checkout authority. Creation still
-  // validates the selected ref and worktree occupancy against current Git state.
   const refs = await runGit(repository.root, [
     "for-each-ref", "--count=200", "--sort=refname", "--format=%(refname:lstrip=2)%00%(if)%(worktreepath)%(then)true%(else)false%(end)", "refs/heads",
   ]);

@@ -12,9 +12,6 @@ import { ManagedSubagents } from "../../kernel/delegation/managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "../../kernel/delegation/delegated-provider.js";
 import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
-/** Real retained research role, parent resource reload, and detached Pi resume.
- * The socket model is available to both processes; an in-memory faux provider
- * cannot establish detached-child model admission. No external endpoint runs. */
 it("a retained research child keeps its scoped evidence and web access across parent reload and resume", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-web-resume-"));
   const agentDir = join(root, "agent"); const cwd = join(root, "project"); const tronHome = join(root, "tron");

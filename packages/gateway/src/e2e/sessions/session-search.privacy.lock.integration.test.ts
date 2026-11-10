@@ -10,8 +10,6 @@ import { TrustService } from "../../kernel/resources/trust-service.js";
 import { SessionSearchIndex } from "../../sessions/session-search-index.js";
 import { SessionSearchService } from "../../sessions/session-search-service.js";
 
-// This adds cancellation/reopen coverage; the manifest also selects the existing
-// real Home-tool edit, credential, chapter-exclusion and exact-citation journeys.
 it("cancels only the query wait and reopens the index from the current canonical source", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-search-retirement-"));
   vi.stubEnv("HOME", root);
@@ -53,8 +51,6 @@ it("cancels only the query wait and reopens the index from the current canonical
     const metadata = { dimension: 2, language: "en", modelRevision: "lock-provider" };
     search.setSemanticClient({
       qualify: async () => metadata,
-      // Faux provider I/O deliberately ignores cancellation: the disposable
-      // caller must return without cancelling the shared SQLite/index owner.
       embed: async text => {
         if (text === "RETIREMENT-NEEDLE") { started = true; await barrier; }
         return { ...metadata, vector: [1, 0] };
@@ -68,13 +64,10 @@ it("cancels only the query wait and reopens the index from the current canonical
     controller.abort();
     const independent = await search.search({ query: "LEXICAL-SURVIVES" });
     expect(independent.results.map(hit => hit.entryId)).toContain(anchor.id);
-    // An independently completed query is the barrier, not a timer or a
-    // provider call-count assertion. The cancelled caller must already be done.
     const cancelled = await Promise.race([pending, Promise.resolve({ state: "still-waiting" })]);
     expect(cancelled).toEqual({ state: "refused", code: "cancelled" });
     release();
     await pending;
-    // Edit through the single live SDK owner, not a second session/client.
     const manager = (slot as unknown as { sessionManager: SessionManager }).sessionManager;
     manager.appendContextEdit(anchor.id, { content: [{ type: "text", text: "CURRENT-REOPEN-DECISION" }] });
     await search.close();
@@ -101,9 +94,6 @@ it("cancels only the query wait and reopens the index from the current canonical
   }
 }, 60_000);
 
-// Transcript text reaches only a helper the Gateway composition admitted
-// (gateway-main.ts: development override or the signed bundled helper). The
-// variable alone, outside that admission, never arms semantic indexing.
 it("never arms an embedding helper the Gateway composition did not admit", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-search-helper-owner-"));
   const helper = join(root, "unadmitted-helper");
@@ -121,7 +111,6 @@ it("never arms an embedding helper the Gateway composition did not admit", async
     registry = await createTestRegistry({ agentDir, trust: new TrustService(agentDir), tronHome: join(root, "tron"),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
     await registry.initialize();
-    // Startup warms search after the first catalog cut; an unknown id joins that cut.
     expect(await registry.sessionFile("no-such-session")).toBeUndefined();
     search = new SessionSearchService(registry, await SessionSearchIndex.open(join(root, "search.sqlite")));
     await search.warm();

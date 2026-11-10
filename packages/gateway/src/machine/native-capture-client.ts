@@ -50,8 +50,6 @@ function dimension(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 1280) throw new Error("Invalid native capture dimension");
   return value;
 }
-// Inspect the bounded encoded header before any future viewer allocates a
-// decoder. This is image-size admission, not proof of successful image decode.
 function jpegDimensions(jpeg: Buffer, width: number, height: number): void {
   if (jpeg.length < 4 || jpeg.readUInt16BE(0) !== 0xffd8 || jpeg.readUInt16BE(jpeg.length - 2) !== 0xffd9) {
     throw new Error("Invalid native capture JPEG");
@@ -81,10 +79,6 @@ function jpegDimensions(jpeg: Buffer, width: number, height: number): void {
   throw new Error("Native capture JPEG header is incomplete");
 }
 
-/** One canonical owner/load and one retained target. Streams may resume only
- * after clean suspension; terminal close retires the target and connection.
- * There is no reconnect, replay, timer, viewer cache, input grant or registry.
- */
 class NativeCaptureClient {
   readonly binding: NativeCaptureBinding;
   #transport: NativeCaptureTransport;
@@ -180,13 +174,9 @@ class NativeCaptureClient {
       }
       return reply;
     } catch (cause) {
-      // Suspend owns the interrupted ordinary request and its cleanup. Its
-      // joined receipt, not a stale read/start reply, decides resumability.
       if (this.#suspending && !stopping) throw cause;
       this.#closing = true;
       this.#handles.clear();
-      // An ordinary failure must not invalidate a concurrent accepted Stop.
-      // The Stop owner, not the failed presentation read, retires transport.
       if (operation !== "stop" && !this.#close) return this.#retireAfterFailure(cause);
       throw cause;
     }
@@ -220,7 +210,6 @@ class NativeCaptureClient {
       });
       return Object.freeze(sources);
     } catch (cause) {
-      // Invalid catalog data is terminal too; no partially accepted handles.
       this.#handles.clear();
       if (!this.#closing) { this.#closing = true; return this.#retireAfterFailure(cause); }
       throw cause;
@@ -252,8 +241,8 @@ class NativeCaptureClient {
         || region.width > source.width - region.x || region.height > source.height - region.y)) throw new Error("Region must stay inside its selected display");
       if (this.#selection && (this.#selection.handle !== handle || JSON.stringify(this.#selection.region) !== JSON.stringify(region))) throw new Error("Native capture resume cannot change its selection or crop");
       this.#selection = { handle, region };
-      this.#started = true; // Never replay an uncertain start.
-      this.#handles = new Map([[handle, source]]); // Resume only this exact source and crop.
+      this.#started = true;
+      this.#handles = new Map([[handle, source]]);
       const reply = await this.#exchange("start", "started", { handle, ...(region ? { region } : {}) });
       const generation = uuid(reply.generation);
       if (this.#closing || this.#suspending) throw new Error("Native capture start retired before publication");
@@ -275,13 +264,13 @@ class NativeCaptureClient {
     if (this.#close) return this.#close;
     if (this.#suspension) return this.#suspension;
     if (this.#closing) return Promise.reject(new Error("Native capture connection closed"));
-    if (!this.#started) return Promise.resolve({ status: "joined" }); // No stream was admitted.
+    if (!this.#started) return Promise.resolve({ status: "joined" });
     this.#suspending = true;
     const ordinary = this.#ordinary?.done;
     this.#suspension = (async () => {
       try {
         const reply = await this.#exchange("suspend", "joined");
-        await ordinary; // XPC can deliver the joined receipt before a read callback.
+        await ordinary;
         if ("diagnostic" in reply) throw new Error("Native capture suspension had a retirement diagnostic");
         this.#started = false; this.#generation = undefined; this.#nativeSequence = -1n;
         return { status: "joined" as const };
@@ -293,9 +282,6 @@ class NativeCaptureClient {
     })();
     return this.#suspension;
   }
-  /** Stop bypasses ordinary admission and joins the host's exact pending work.
-   * A local error/disconnect is rejection, never a remote joined result.
-   */
   close(): Promise<NativeCaptureJoin> {
     if (this.#close) return this.#close;
     const wasClosing = this.#closing;
@@ -304,16 +290,12 @@ class NativeCaptureClient {
     this.#close = (async () => {
       let joined: NativeCaptureJoin;
       try {
-        // Suspend already owns the reserved native control lane and requests
-        // immediate stream Stop. Terminal close joins it before retiring scope.
         if (this.#suspension) await this.#suspension;
         if (wasClosing || !this.#identity) throw new Error("Native capture remote retirement unconfirmed");
         const reply = await this.#exchange("stop", "joined");
         const diagnostic = "diagnostic" in reply ? text(reply.diagnostic) : undefined;
         joined = Object.freeze({ status: "joined" as const, ...(diagnostic !== undefined ? { diagnostic } : {}) });
       } catch (cause) { return this.#retireAfterFailure(cause); }
-      // Even malformed Stop metadata must retire local callbacks. Ordinary
-      // reads never invalidate this transport while the Stop owner is joining.
       await this.#retireLocal();
       return joined;
     })();

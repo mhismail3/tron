@@ -1,13 +1,8 @@
-// The pi-coding-agent half of the Pi seam (K-0 §4): the only production module that
-// imports `@earendil-works/pi-coding-agent`. Every name the Gateway uses is listed here;
-// a `// patch N` note marks a name used through an API of Tron's patched tarball
-// (pi-coding-agent-patch.json `removeWhen`, items 1-5), so this list is the patch-removal
-// checklist: when a release ships those APIs, each noted call site is rechecked.
 export {
   AgentSessionRuntime,
   createAgentSessionFromServices,
   createAgentSessionRuntime,
-  createAgentSessionServices, // patch 1: `{ projectDir }`
+  createAgentSessionServices,
   createBashToolDefinition,
   createCodemodeExtension,
   createEditToolDefinition,
@@ -20,23 +15,23 @@ export {
   createToolSearchExtension,
   createWriteToolDefinition,
   CredentialSynchronizationError,
-  DefaultPackageManager, // patch 1: `{ projectDir }`
-  DefaultResourceLoader, // patch 1: `projectDir` (session-free extension loads)
+  DefaultPackageManager,
+  DefaultResourceLoader,
   estimateTokens,
   getShellConfig,
-  hasTrustRequiringProjectResources, // patch 1: `(cwd, projectDir)`
+  hasTrustRequiringProjectResources,
   initTheme,
   ModelRuntime,
   parseFrontmatter,
   parseSessionEntries,
   ProjectTrustStore,
   SessionManager,
-  SettingsManager, // patch 1: `SettingsManager.create(projectDir, …)` reads `<projectDir>/.pi`
+  SettingsManager,
   stripFrontmatter,
   Theme,
 } from "@earendil-works/pi-coding-agent";
 export type {
-  AgentSession, // patch 1 `projectDir`; 2 idle `systemPrompt`; 3 `prompt({ preflightResult })` revocation
+  AgentSession,
   AgentSessionEvent,
   BashOperations,
   ContextEditEntry,

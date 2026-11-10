@@ -49,8 +49,6 @@ function systemMessage(value: unknown): boolean {
     && optional(value.toolsRemoved, tools => Array.isArray(tools) && tools.every(tool => object(tool) && string(tool.name)));
 }
 
-/** Version-3 SDK messages, including coding-agent roles; arbitrary extension
- * data is JSON, but context-bearing content must have a supported shape. */
 function message(value: unknown): boolean {
   if (!object(value) || !number(value.timestamp)) return false;
   switch (value.role) {
@@ -103,18 +101,12 @@ function isCanonicalEntry(record: Record<string, unknown>, previousIds: Set<stri
   }
 }
 
-/** Home owns the cold-open evidence decision. Reading a sealed chapter is safe;
- * only an in-progress materialization, wrong path or uncertain file is refused. */
 export async function homeOpenRefusal(sessionId: string, path: string, chapter: HomeChapterState): Promise<Error | undefined> {
   if (!chapter.homeId) return;
-  // The caller refuses an unstable header before the SDK can repair it, and the
-  // slot's chapter state refuses every write to a sealed chapter.
   if (chapter.materializing || chapter.expectedPath && resolve(chapter.expectedPath) !== resolve(path)) {
     return new GatewayError("conflict", "Home chapter cannot be opened as a runtime");
   }
   const canonicalPath = resolve(path);
-  // The exact file owns its evidence directory. Re-encoding cwd can select
-  // another folder after alias canonicalization, or encode a directory twice.
   const scan = await scanReservedHomeSession({
     directory: dirname(canonicalPath), expectedPath: canonicalPath, sessionId,
   });
@@ -123,10 +115,6 @@ export async function homeOpenRefusal(sessionId: string, path: string, chapter: 
   }
 }
 
-/** Cold admission measures the finite canonical file cut, not a zero-valued
- * live projection. Streaming newline counts retain no transcript bodies; SDK
- * construction separately validates the canonical graph before opening it.
- * The native path read is already started so this keeps its original await cut. */
 export async function coldHomeChapterMetrics(pathRead: Promise<string | undefined>): Promise<{ bytes: number; entries: number; quiescent: boolean }> {
   const path = await pathRead;
   if (!path) throw new GatewayError("conflict", "Home chapter metrics are unavailable", true);
@@ -157,12 +145,6 @@ export type ReservedHomeSessionScan =
   | { action: "adopt"; path: string }
   | { action: "blocked" };
 
-/**
- * Establish whether a reserved session can be adopted or safely created. Unlike
- * SessionManager.findById this scans every candidate and treats any uncertain
- * candidate as evidence that absence has not been proven. It never repairs or
- * mutates a canonical file.
- */
 export async function scanReservedHomeSession(input: {
   directory: string;
   expectedPath: string;
@@ -196,19 +178,13 @@ export async function scanReservedHomeSession(input: {
             if (parsed.type !== "session" || parsed.version !== 3 || !id(parsed.id) || !instant(parsed.timestamp)
               || !string(parsed.cwd) || !optional(parsed.parentSession, string)) return false;
             header = parsed;
-            // A stopped predecessor can legitimately retain >200 MiB including
-            // abort settlement. The byte limit guards adoption, not evidence.
             return !(path === expectedPath || header.id === input.sessionId) || info.size <= MAXIMUM_ADOPTION_BYTES;
           }
-          // One append-ordered chain proves parent membership and acyclicity in
-          // O(entries), before Pi can follow any parent pointer. No graph walk.
           if (!isCanonicalEntry(parsed, seen) || seen.has(parsed.id as string) || parsed.id === header.id || parsed.parentId !== tip) return false;
           tip = parsed.id as string;
           seen.add(tip);
           return true;
         };
-        // Retain only one line plus IDs, never the complete chapter. Read exactly
-        // the finite stat cut; appends/replacements during the scan block below.
         let parts: Buffer[] = [];
         let lineBytes = 0;
         let readBytes = 0;
@@ -240,8 +216,6 @@ export async function scanReservedHomeSession(input: {
       if (header?.id === input.sessionId) matches.push(path);
     }
     if (matches.length === 0) {
-      // A path reserved before the scan is part of the evidence even when an
-      // unexpected non-JSONL object occupies it.
       const expectedInfo = await lstat(expectedPath).catch(error => {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
         throw error;

@@ -216,7 +216,6 @@ const empty = (): NotificationDocument => ({
   version: 2, policy: { notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true }, grants: [], pending: [], receipts: [], revocations: [], inbox: [],
 });
 
-/** One-process owner for the bounded credential document. Runtime locking guarantees one live Gateway. */
 export class NotificationGrantStore {
   private readonly path: string;
   private readonly mutex = new AsyncMutex();
@@ -239,7 +238,6 @@ export class NotificationGrantStore {
     return this.mutex.run(async () => (await this.requireDocument()));
   }
 
-  /** Returning undefined admits a read-only transaction without rewriting credentials. */
   async update(update: (current: NotificationDocument) => NotificationDocument | undefined): Promise<NotificationDocument> {
     return this.mutex.run(async () => {
       const current = await this.requireDocument();

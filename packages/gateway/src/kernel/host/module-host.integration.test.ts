@@ -2,16 +2,6 @@ import { describe, expect, it } from "vitest";
 import { ORDINARY_SESSION_PROFILE } from "./session-profile.js";
 import { ModuleHost, type KernelHooks, type ModuleDescriptor, type ModuleInstance } from "./module-host.js";
 
-/**
- * Kernel contract for K3's module host (kernel.md §2.1, §3): the real
- * `ModuleHost` with faux descriptors. Invariants: modules start in composition
- * order and stop in reverse; a module reads only the contracts it declares;
- * composition errors (a second policy implementer, an unknown hook, a doubly
- * served RPC) fail at start and stop what already started; hooks are resolved
- * at each dispatch. The production composition is a system journey
- * (src/e2e/kernel/host/module-composition.integration.test.ts).
- */
-
 const log = { log: () => {} };
 
 function descriptor<C = void>(name: string, start: ModuleDescriptor<C>["start"], dependsOn?: ModuleDescriptor<unknown>[]): ModuleDescriptor<C> {
@@ -64,7 +54,6 @@ describe("kernel/host module host", () => {
     const recipe = { ...ORDINARY_SESSION_PROFILE, name: "named" };
     const host = await ModuleHost.start([descriptor("owner", () => ({ profiles: [recipe] }))], { tronHome: "/unused", log }, []);
     try {
-      // An admitted recipe cannot be renamed out from under its selected runtimes.
       Reflect.set(recipe, "name", "renamed");
       expect(host.profile("named")).toBe(recipe);
       expect(host.profile("ordinary")).toBe(ORDINARY_SESSION_PROFILE);
@@ -99,7 +88,6 @@ describe("kernel/host module host", () => {
     expect(await host.rpc("second.read")?.handle({}, { identity: "module-host-fixture" })).toBe("second");
     expect(host.rpc("toString")).toBeUndefined();
     expect(host.policy("modelUsed")).toBeUndefined();
-    // Never captured: a module that replaces its hook is dispatched to the new one.
     instances[0]!.hooks = { sessionRetired: () => "first, replaced", modelUsed: () => "late" } as Partial<KernelHooks>;
     expect(retired()).toEqual(["first, replaced", "second"]);
     expect((host.policy("modelUsed") as () => string)()).toBe("late");

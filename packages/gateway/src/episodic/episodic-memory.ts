@@ -19,20 +19,6 @@ import {
 } from "./episodic-tree.js";
 import { tronWorkspacePath } from "../foundation/tron-home-layout.js";
 
-/*
- * The owner of one source session's memory: the projected catalog, the binary
- * summary tree, the view, and the pump that builds nodes. It never subscribes to a
- * session; `entriesCommitted` asks its `sessionSource` for the deltas after its
- * cursor and drains the pump, and `whenReady` is what a request layer waits on.
- *
- * Ingestion, invalidation and `resumeIngested` are serialized behind one mutex. The pump
- * is not: it may still be building when the next commit invalidates nodes, so
- * every build carries the generation and the input revisions it started from and
- * discards its result when either changed.
- */
-
-/** The pump stops on this signal: the memory is blocked, and an operator resume
- * restarts it. It never escapes to a caller. */
 class EpisodicBlockedSignal extends Error {
   constructor(readonly blocked: EpisodicBlocked) {
     super(blocked.detail ? `${blocked.reason}: ${blocked.detail}` : blocked.reason);
@@ -40,8 +26,6 @@ class EpisodicBlockedSignal extends Error {
   }
 }
 
-/** One compactor call that overran its bound. Its own class, so the retry loop
- * classifies it as transient without reading its message. */
 class EpisodicCallTimeout extends Error {
   constructor(readonly boundMs: number) {
     super(`the compactor call exceeded its ${boundMs}ms bound`);
@@ -49,7 +33,6 @@ class EpisodicCallTimeout extends Error {
   }
 }
 
-/** The owner is closing; in-flight work ends without blocking. */
 class EpisodicClosedSignal extends Error {
   constructor() { super("Episodic memory is closing"); this.name = "EpisodicClosedSignal"; }
 }
@@ -62,25 +45,15 @@ interface Waiter {
   onAbort?: () => void;
 }
 
-/** One search's outcome (`EPISODIC_SEARCH_HITS` lines, the whole range's match
- * count, and how much of the range could contribute no searchable text at all, so
- * an absence is never read as proof). */
 interface EpisodicSearchResult {
-  /** At most `EPISODIC_SEARCH_HITS` lines, `id+0|kind: <snippet>`, in index order. */
   lines: string[];
-  /** Messages in the range whose projected text contains the query. */
   matches: number;
-  /** Messages in the range that are `[omitted]`. */
   omitted: number;
-  /** Messages in the range whose projected text was capped. */
   capped: number;
-  /** The range searched, after clamping to the messages this memory holds. */
   from: number;
   to: number;
 }
 
-/** What one build started from. A result is published only while the generation
- * and every input revision still match. */
 interface BuildStamp {
   generation: number;
   inputs: Array<{ address: string; revision: number }>;
@@ -88,12 +61,6 @@ interface BuildStamp {
   messageRevision?: number;
 }
 
-/**
- * The persisted state of one session's memory without opening it: the blocked
- * state and the spend a later open would restore. `home.status` reports both
- * while no activation has opened the store yet, and a session with no store at
- * all reads as undefined.
- */
 export async function readEpisodicState(options: {
   workspace: import("../workspace/tron-workspace.js").TronWorkspace;
   sessionId: string;
@@ -102,7 +69,6 @@ export async function readEpisodicState(options: {
   return store.readState();
 }
 
-/** The retry wait. It ends early, rejecting, when the memory starts closing. */
 function sleepFor(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.reject(new EpisodicMemoryError("closed", "Episodic memory is closing"));
   return new Promise((resolve, reject) => {
@@ -118,22 +84,14 @@ function sleepFor(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** A record before the queued append that publishes it assigns its revision. */
 type Draft<T extends { revision: number }> = Omit<T, "revision">;
 
 export class EpisodicMemory {
-  /** One in-process opener per store: two memories over one session would write
-   * the same files without a lock between them. */
   private static readonly openStores = new Set<string>();
 
   private readonly limits: EpisodicLimits;
   private readonly store: EpisodicStore;
   private readonly summarizer: EpisodicSummarizer;
-  /** Tokens this memory's compactor calls have spent over the store's life:
-   * reported, never a ceiling (#493). Spend is bounded by construction: a node
-   * builds only when it is missing, with at most `EPISODIC_TRIES` size-loop calls of at
-   * most `maxRetries + 1` attempts each, and a built node is rebuilt only after
-   * its source changed. So spend grows only with the conversation and its edits. */
   private spend = 0;
   private readonly usageSinceOpen: EpisodicUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   private readonly diagnostic: (record: EpisodicDiagnostic) => void;
@@ -143,7 +101,6 @@ export class EpisodicMemory {
   private readonly messages = new Map<number, EpisodicMessageRecord>();
   private readonly nodes = new Map<string, EpisodicNodeRecord>();
   private readonly entryIndex = new Map<string, number>();
-  /** Serialized bytes in current maps; updated with each committed replacement. */
   private liveBytes = 0;
   private readonly building = new Set<string>();
   private view: EpisodicViewPart[] = [];
@@ -166,11 +123,6 @@ export class EpisodicMemory {
     this.diagnostic = dependencies.diagnostic ?? (() => {});
   }
 
-  /** Open (or start) the memory for one source session: load the persisted
-   * catalog and nodes, replay them, fold the view from message 0 (sliced, so a
-   * long history never blocks the loop for the whole fold), and repair a
-   * catalog revision whose invalidation a crash lost. An open publishes no
-   * checkpoint: the owner checkpoints when the log grows past its threshold. */
   static async open(dependencies: EpisodicMemoryDependencies): Promise<EpisodicMemory> {
     const limits = resolveLimits(dependencies.limits);
     const descriptor = await dependencies.workspace.describe();
@@ -186,7 +138,6 @@ export class EpisodicMemory {
       let snapshot: EpisodicStoreSnapshot;
       try {
         snapshot = await memory.store.read();
-        // Refuse unsupported durable formats before any orphan cleanup writes.
         await memory.store.cleanupOrphans();
       } catch (error) {
         if (error instanceof EpisodicMemoryError && (error.kind === "invalid-store" || error.kind === "unsafe-store")) {
@@ -203,7 +154,6 @@ export class EpisodicMemory {
       if (snapshot.state) {
         memory.sourceCursor = snapshot.state.cursor;
         memory.blocked = snapshot.state.blocked;
-        // Restored before any compactor call: a restart never resets recorded spend.
         memory.spend = snapshot.state.spend;
       }
       if (snapshot.recoveredTornBytes > 0) {
@@ -224,32 +174,17 @@ export class EpisodicMemory {
     }
   }
 
-  /** Re-read the canonical session, ingest what the cursor has not seen, and
-   * drain the pump. A source read failure blocks with `source-unavailable`. */
   async entriesCommitted(sessionId: string): Promise<void> {
     await this.entriesIngested(sessionId);
     await this.drain();
     await this.checkpointIfNeeded();
   }
 
-  /**
-   * Re-read the canonical session and ingest what the cursor has not seen,
-   * WITHOUT waiting for the pump: the pump is started, not awaited. A turn loop
-   * waits only for the lines it will send (`whenReady`), never for summaries of
-   * messages that come after them, so a request's latency cannot depend on
-   * summarizing its own input and a slow compactor cannot stall a turn that does
-   * not need its output.
-   */
   async entriesIngested(sessionId: string, signal?: AbortSignal): Promise<void> {
     await this.ingestForRead(sessionId, signal);
-    // No checkpoint here: tool reads and activations come through this path, and a
-    // checkpoint holds the mutex for a whole-catalog rewrite. `entriesCommitted`
-    // (after canonical commits) owns it.
     void this.drain().catch(() => {});
   }
 
-  /** Projection refresh without admitting compactor work. Native reads must
-   * not create provider spend merely by opening a browser (including disabled Home). */
   async ingestForRead(sessionId: string, signal?: AbortSignal): Promise<void> {
     this.assertOpen();
     if (sessionId !== this.dependencies.sessionId) throw new EpisodicMemoryError("invalid-request", "entriesCommitted names a different session");
@@ -259,10 +194,6 @@ export class EpisodicMemory {
     }, signal);
   }
 
-  /** Resolves when every part of the view covering messages before `cut` is a
-   * built summary (gist §6). The view is soft-budgeted, so this is not a hard
-   * window check. It rejects a cut beyond the message count, a blocked memory,
-   * and an already-aborted wait. */
   async whenReady(cut: number, options: { signal?: AbortSignal } = {}): Promise<void> {
     this.assertOpen();
     if (!Number.isSafeInteger(cut) || cut < 0) throw new EpisodicMemoryError("invalid-request", "whenReady cut must be a non-negative integer");
@@ -282,16 +213,6 @@ export class EpisodicMemory {
     });
   }
 
-  /**
-   * How many of the messages this memory holds are at or before one canonical
-   * entry of the branch it last read: gist §6's cut, the number of view lines a
-   * request that starts at that entry covers. `null` is an empty history, so the
-   * cut is 0.
-   *
-   * Undefined when the entry is not on the branch this memory last read, or when
-   * it has not read the source at all: a cut cannot be guessed, because a wrong
-   * cut would render a view that does not stop where the activation starts.
-   */
   async cutAtEntry(entryId: string | null): Promise<number | undefined> {
     this.assertOpen();
     if (entryId === null) return 0;
@@ -312,18 +233,6 @@ export class EpisodicMemory {
     } catch { return undefined; }
   }
 
-  /**
-   * The agent-facing view up to `cut` (gist §5.1): one `id+n|text` line per
-   * part, oldest first, newlines flattened to single spaces. It covers the
-   * whole history before the cut, so a request that starts there never sends a
-   * message it does not own.
-   *
-   * A part that straddles the cut is expanded into the children under it: those
-   * are built whenever their parent is (a parent is composed from its children
-   * and revoked with them), so the expansion cannot render a placeholder. The
-   * placeholder is still the value for a part `whenReady` did not cover, which
-   * is display state, never a served request (the request layer waits first).
-   */
   renderView(cut: number): { text: string; lines: number; bytes: number } {
     this.assertOpen();
     const parts: EpisodicViewPart[] = [];
@@ -340,15 +249,10 @@ export class EpisodicMemory {
     return { text, lines: lines.length, bytes: utf8Bytes(text) };
   }
 
-  /** A browser cannot observe a partly appended catalog/invalidation batch.
-   * The pump may settle concurrently; HomeMemory fences that node revision. */
   async withBrowserRead<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.mutex.run(read, signal);
   }
 
-  /** Page identity includes the layout because continuation offsets index these parts;
-   * reopening the same ledger may rebuild a different decomposition.
-   * No await separates copying a row, its summary and the cursor revision. */
   browserRevision(): string {
     this.assertOpen();
     return episodicDigest(JSON.stringify([
@@ -362,7 +266,6 @@ export class EpisodicMemory {
     return this.sourceCursor ? structuredClone(this.sourceCursor) : null;
   }
 
-  /** Refuses evidence that no longer names this catalog's exact message. */
   assertBrowserEvidence(evidence: HomeMemoryEvidence): void {
     this.assertOpen();
     const message = this.messages.get(evidence.index);
@@ -370,13 +273,9 @@ export class EpisodicMemory {
       || message.sourceDigest !== evidence.sourceDigest) throw homeMemoryRevisionChanged();
   }
 
-  /** The same hierarchical lines the model-facing memory view renders, newest first.
-   * Chapter filtering recursively splits only parts crossing chapter boundaries. */
   browserView(request: HomeMemoryViewRequest): HomeMemoryView {
     this.assertOpen();
     const chapter = request.sessionId;
-    // Derive resolution from the same live layout as the page revision. A chapter
-    // split or zoom child is not itself a view line, even if its parent is.
     const addresses = new Set(this.view.map(part => `${part.start}+${part.span}`));
     let individualFrom = this.messages.size;
     for (let index = this.view.length - 1; index >= 0; index -= 1) {
@@ -418,7 +317,7 @@ export class EpisodicMemory {
       return { homeId: this.dependencies.sessionId, revision, totalMessages: this.messages.size, lines };
     }
     for (const part of this.view) add(part);
-    ranges.reverse(); // Home's view is chronological; the browser presents newest first.
+    ranges.reverse();
     const offset = request.cursor?.offset ?? 0;
     if (offset > ranges.length || request.cursor && offset === ranges.length) throw homeMemoryRevisionChanged();
     const totalMessages = chapter === undefined ? this.messages.size : [...this.messages.values()].filter(m => m.sessionId === chapter).length;
@@ -437,11 +336,6 @@ export class EpisodicMemory {
     return result;
   }
 
-  /**
-   * Largest built summary ranges for each chapter, newest first. Decomposes each
-   * contiguous chapter interval into maximal aligned dyadic nodes. Built leaves
-   * fill gaps left by lazy parents: an old free parent cannot hide newer topics.
-   */
   recentSummaries(sessionIds: readonly string[], limit: number): Map<string, string[]> {
     this.assertOpen();
     const result = new Map(sessionIds.map(sessionId => [sessionId, [] as string[]]));
@@ -473,19 +367,6 @@ export class EpisodicMemory {
     return result;
   }
 
-  /**
-   * The recipe's zoom (gist §7.1): line `id+n` opened into the two lines of
-   * `id+n/2` under it, or — at n = 1 — the message itself, from the catalog's
-   * current projection, so a redaction, an exclusion or an `[omitted]` slot is
-   * exactly what the caller reads. `undefined` when `id+n` is not a line of this
-   * memory: n is not a power of two, id is not a multiple of n, or the line runs
-   * past the last message.
-   *
-   * A child that is not built right now — never built, or invalidated and not yet
-   * rebuilt — renders the placeholder, never the text it held before (gist §6): a
-   * revoked node is deleted, so stale text cannot survive here. The caller
-   * ingests the canonical commits first, and never awaits the pump for them.
-   */
   zoomLines(id: number, n: number): string[] | undefined {
     this.assertOpen();
     if (!Number.isSafeInteger(id) || !Number.isSafeInteger(n) || n < 1) return undefined;
@@ -495,7 +376,6 @@ export class EpisodicMemory {
     if (n === 1) {
       const message = this.messages.get(id);
       if (!message) return undefined;
-      // The recipe's `id+0|`: the logged message, not the summarized node.
       return [`${id}+0|${message.kind}: ${message.text}`];
     }
     const half = n / 2;
@@ -505,22 +385,11 @@ export class EpisodicMemory {
     });
   }
 
-  /** The canonical instant of one message, as its catalog record holds it.
-   * `undefined` means this memory holds no such message. */
   entryTimestamp(id: number): string | undefined {
     this.assertOpen();
     return this.messages.get(id)?.timestamp;
   }
 
-  /**
-   * One case-insensitive substring pass over the projected catalog (Tron's
-   * addition to the recipe's tools). Bounded: a hit line per match up to
-   * `EPISODIC_SEARCH_HITS`, each snippet bounded to
-   * `EPISODIC_SEARCH_SNIPPET_CHARS`, and the range's `[omitted]` and capped counts,
-   * so a message that cannot be searched is named rather than silently absent.
-   * `undefined` for an empty query or one over `EPISODIC_SEARCH_QUERY_CHARS`.
-   * Omitted bounds default to the whole memory and are clamped to it.
-   */
   searchMessages(query: string, from?: number, to?: number): EpisodicSearchResult | undefined {
     this.assertOpen();
     if (query.length === 0 || query.length > EPISODIC_SEARCH_QUERY_CHARS) return undefined;
@@ -535,8 +404,6 @@ export class EpisodicMemory {
     for (let index = start; index < end; index += 1) {
       const message = this.messages.get(index);
       if (!message) continue;
-      // An omitted message holds no searchable text: its `[omitted]` text is a
-      // placeholder, counted in the header and never reported as a hit.
       if (message.omitted) { omitted += 1; continue; }
       if (message.omissions.includes("capped")) capped += 1;
       const at = message.text.toLowerCase().indexOf(needle);
@@ -549,21 +416,9 @@ export class EpisodicMemory {
     return { lines, matches, omitted, capped, from: start, to: end };
   }
 
-  /**
-   * Clear the blocked state, re-read the source and restart the pump. The cause
-   * must have been fixed by the caller, or be one a new attempt addresses: a
-   * different model, a reachable source, a recovered provider. The block is
-   * cleared and the source re-read under the lock, and the pump is started, not
-   * awaited. An operator command (a reconfiguration, `home.resumeMemory`) must
-   * return once the memory is unblocked, not after the whole summary backlog; a
-   * caller that needs the lines it will send waits on `whenReady` as a turn does.
-   */
   async resumeIngested(): Promise<void> {
     this.assertOpen();
     await this.mutex.run(async () => {
-      // A failed ingest may have committed catalog edits but not their whole
-      // invalidation. Reconcile before replay can skip text-identical edits,
-      // and keep the durable block until that reconciliation succeeds.
       await this.repairOrphanedDependencies();
       await this.repairCatalogMismatch();
       if (this.blocked) {
@@ -575,8 +430,6 @@ export class EpisodicMemory {
     void this.drain().catch(() => {});
   }
 
-  /** Pause authority already committed by Home; release disposable waits while
-   * accepted node work retains its result and bounded spend. */
   notePause(): void { this.settleWaiters(); }
 
   status(): EpisodicMemoryStatus {
@@ -627,16 +480,10 @@ export class EpisodicMemory {
     };
   }
 
-  /** Stop the pump, abort in-flight compactor calls and release every waiter. */
   async dispose(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     this.abort.abort();
-    // An ingest in flight holds the mutex and is still appending to this store, and
-    // the opener is what keeps a second writer out: releasing it before that ingest
-    // finishes would both let a second opener take a store that is still being
-    // written and leave records landing after the store was closed. Everything this
-    // memory owed is durable before the opener goes.
     await this.mutex.run(async () => {});
     await this.draining?.catch(() => {});
     if (this.storeKey) EpisodicMemory.openStores.delete(this.storeKey);
@@ -646,8 +493,6 @@ export class EpisodicMemory {
     }
   }
 
-  // ---- ingestion -----------------------------------------------------------------
-
   private async ingest(): Promise<void> {
     try {
       for await (const delta of this.dependencies.sessionSource.read(this.sourceCursor, this.limits)) {
@@ -655,8 +500,6 @@ export class EpisodicMemory {
         if (this.blocked || this.closed) return;
       }
     } catch (error) {
-      // A concurrent in-place rewrite can make a syntactically invalid read a
-      // transient cut. Leave the cursor untouched so the next ingestion retries.
       if (error instanceof EpisodicSourceChangedError) {
         this.diagnostic({
           event: "episodic.source-read-retried", level: "warning",
@@ -679,7 +522,6 @@ export class EpisodicMemory {
     }
     if (this.sourceCursor && cut.incremental
       && cut.cursor.completeBytes === this.sourceCursor.completeBytes && cut.cursor.leafEntryId === this.sourceCursor.leafEntryId) {
-      // No new line was read: only the cursor moves (a fence or a ledger transition).
       this.sourceCursor = cut.cursor;
       await this.saveState();
       return;
@@ -696,7 +538,6 @@ export class EpisodicMemory {
           const index = this.messages.size;
           await this.appendCatalog({ index, ...message, sessionId: message.sourceSessionId });
           this.entryIndex.set(message.entryId, index);
-          // A new message appends one part to the view; nothing is invalidated.
           this.view.push({ level: 0, index, start: index, span: 1 });
           this.fit();
           continue;
@@ -707,9 +548,6 @@ export class EpisodicMemory {
           return;
         }
         const sameContent = current?.text === message.text && current.omitted === message.omitted && current.kind === message.kind;
-        // Canonical identity/date and omission attribution can change without
-        // changing projected text. Keep the catalog's evidence current while
-        // retaining text-identical summary nodes (no new provider spend).
         if (sameContent && current.sourceDigest === message.sourceDigest && current.timestamp === message.timestamp
           && JSON.stringify(current.omissions) === JSON.stringify(message.omissions)) continue;
         await this.appendCatalog({ index: existing, ...message, sessionId: message.sourceSessionId });
@@ -717,8 +555,6 @@ export class EpisodicMemory {
       }
 
       if (!cut.incremental) {
-        // Navigation: an entry the branch no longer holds keeps its index and
-        // becomes `[omitted]`, so no later message is ever renumbered.
         for (const [entryId, index] of this.entryIndex) {
           if (seen.has(entryId)) continue;
           const current = this.messages.get(index);
@@ -737,8 +573,6 @@ export class EpisodicMemory {
 
       if (changed.length > 0) await this.invalidate(changed);
     } catch (error) {
-      // A record the store refuses is a visible blocked state, never a silent
-      // throw that leaves the cursor stalled.
       if (error instanceof EpisodicMemoryError && (error.kind === "invalid-store" || error.kind === "unsafe-store")) {
         await this.block("permanent-failure", error.message);
         return;
@@ -780,9 +614,6 @@ export class EpisodicMemory {
 
   private attributedViewLine(start: number, span: number, text: string | undefined): string {
     if (text === undefined) return EPISODIC_PLACEHOLDER;
-    // A merged line has no single speaker. Do not scan its entire historical
-    // span on every render, or claim a model-written sentence is user-authored.
-    // A label the model wrote stays inside the line, after Tron's own kind.
     const kind = span === 1 ? this.messages.get(start)?.kind : "summary";
     return `${kind ?? "summary"}: ${span === 1 ? viewLine(text) : text.replace(/\n+/gu, " ")}`;
   }
@@ -802,7 +633,6 @@ export class EpisodicMemory {
     this.liveBytes -= Buffer.byteLength(`${JSON.stringify(previous)}\n`);
   }
 
-  /** Repair survivors of an interrupted chunked invalidation before serving. */
   private async repairOrphanedDependencies(): Promise<void> {
     const orphaned = new Set<string>();
     for (const [address, node] of this.nodes) {
@@ -817,7 +647,6 @@ export class EpisodicMemory {
     if (orphaned.size > 0) await this.invalidateNodes(orphaned);
   }
 
-  /** A live leaf with a stale source digest is invalidated again at load. */
   private async repairCatalogMismatch(): Promise<void> {
     const changed: number[] = [];
     for (const node of this.nodes.values()) {
@@ -829,7 +658,6 @@ export class EpisodicMemory {
     if (changed.length > 0) await this.invalidate(changed);
   }
 
-  /** Revoke changed leaves and their transitive dependent closure. */
   private async invalidate(changedIndices: readonly number[]): Promise<void> {
     await this.invalidateNodes(changedIndices.map(index => nodeAddress(0, index)));
   }
@@ -843,8 +671,6 @@ export class EpisodicMemory {
         const ancestors: string[] = [];
         for (let level = parsed.level, i = parsed.index; level <= 63; level += 1, i = Math.floor(i / 2)) {
           const ancestor = nodeAddress(level, i);
-          // Children are written before their parents, so an absent ancestor means
-          // every ancestor above it is absent too.
           if (!this.nodes.has(ancestor)) break;
           ancestors.push(ancestor);
         }
@@ -883,8 +709,6 @@ export class EpisodicMemory {
       const parts = Math.ceil(ordered.length / EPISODIC_INVALIDATION_CHUNK);
       for (let part = 0; part < parts; part += 1) {
         const chunk = ordered.slice(part * EPISODIC_INVALIDATION_CHUNK, (part + 1) * EPISODIC_INVALIDATION_CHUNK);
-        // Durable before use: a crash between revoking and rebuilding must not
-        // leave a revoked child under a live parent.
         const record: EpisodicInvalidationRecord = {
           revision: this.revision++, generation, part, parts,
           nodes: chunk.map(address => {
@@ -906,8 +730,6 @@ export class EpisodicMemory {
     });
   }
 
-  /** A revoked merged part cannot stay in the view: only level-0 parts may be
-   * unbuilt (gist §6), so the tiling expands it into the two lines under it. */
   private expandInvalidatedParts(invalid: ReadonlySet<string>): void {
     for (;;) {
       let expanded = false;
@@ -925,16 +747,11 @@ export class EpisodicMemory {
     }
   }
 
-  // ---- the pump (gist §4.1) ------------------------------------------------------
-
   private async drain(): Promise<void> {
     if (this.closed || this.blocked || this.dependencies.isPaused?.()) return;
     const draining = this.draining;
     if (draining) {
       await draining;
-      // A joining resume/ingest may arrive while this pump retires its paused
-      // exit. That admission starts remaining work after the exact pump retires;
-      // a pump's own completion never schedules itself again without admission.
       if (!this.closed && !this.blocked && !this.dependencies.isPaused?.() && this.nextStartable()) await this.drain();
       return;
     }
@@ -942,15 +759,6 @@ export class EpisodicMemory {
       try {
         await this.pump();
       } catch (error) {
-        // The pump handles every failure it can classify; anything that
-        // escapes it (a store append that fails on I/O, say) would otherwise
-        // leave the pump dead, the memory unblocked and every waiter waiting
-        // for a node that can never come. For a caller that never awaits the
-        // drain — the turn loop, which only waits on `whenReady` — an
-        // unexpected failure of the owner's own loop is a permanent failure,
-        // so it blocks with the reason and releases the waiters. The
-        // settlement runs in a `finally`: a block that cannot be persisted
-        // still must not strand a waiter.
         try {
           await this.block("permanent-failure", error instanceof Error ? error.message : String(error));
         } finally {
@@ -961,9 +769,6 @@ export class EpisodicMemory {
     await this.draining;
   }
 
-  /** The recipe's pump: fill the JOBS slots, and re-pump after **each**
-   * completion, so a finished merge never waits behind a slow sibling. Every
-   * published node fits the view first. */
   private async pump(): Promise<void> {
     const running = new Map<string, Promise<void>>();
     try {
@@ -985,14 +790,9 @@ export class EpisodicMemory {
     }
   }
 
-  /** Rule 3 of gist §4.1: a node builds only once every view part before its
-   * end is built (`end <= first(view)`), so the view's built prefix grows
-   * contiguously for `whenReady` and its cached head stays stable (#491). */
   private nextStartable(): { level: number; index: number } | undefined {
     const count = this.messages.size;
     const first = this.firstUnbuilt();
-    // Fit and paid-merge admission share byte accounting. Free parents still
-    // support zoom without spend; unused higher summaries do not need a model.
     const needsMerge = this.view.reduce((bytes, part) => bytes + this.partBytes(part).bytes, 0) > this.limits.viewBytes;
     for (let level = 0; 2 ** level <= count; level += 1) {
       const span = 2 ** level;
@@ -1025,15 +825,11 @@ export class EpisodicMemory {
     try {
       const stamp = this.buildStamp(level, index);
       if (!stamp) {
-        // The node's source is gone, so it can never be composed. That is a
-        // stopped pump with a reason, never a busy loop.
         await this.block("permanent-failure", `node ${address} has no source to summarize`);
         return;
       }
       const draft = await this.composeNode(level, index, stamp);
       if (!draft || this.stale(stamp)) return;
-      // Serialize the final stamp check with invalidation and publish memory in
-      // the same queue operation as the durable append.
       await this.enqueueAppend(async () => {
         if (this.stale(stamp)) return;
         const record: EpisodicNodeRecord = { revision: this.revision++, ...draft };
@@ -1071,9 +867,6 @@ export class EpisodicMemory {
     };
   }
 
-  /** True when this build's result must not be published: the memory closed or
-   * blocked, an invalidation bumped the generation, or one of its inputs was
-   * revoked or rebuilt while the compactor call ran. */
   private stale(stamp: BuildStamp): boolean {
     if (this.closed || this.blocked) return true;
     if (this.generation !== stamp.generation) return true;
@@ -1088,8 +881,6 @@ export class EpisodicMemory {
       if (!message) return undefined;
       const source = `${message.kind}: ${message.text}`;
       if (message.omitted) {
-        // `[omitted]` is never sent to the model; it is a free node whatever the
-        // limit, so an edit or a navigation costs nothing.
         return this.freeNode(level, index, `${message.kind}: ${EPISODIC_OMITTED_TEXT}`, episodicDigest(source));
       }
       const free = freeNodeText(message.kind, message.text, this.limits.nodeBytes);
@@ -1116,15 +907,10 @@ export class EpisodicMemory {
     return { level, index, kind: "summary", text, contextRuns: [], textDigest: episodicDigest(text), sourceDigest };
   }
 
-  // ---- one compactor call, the size loop and retries -----------------------------
-
   private async compact(step: string, stamp: BuildStamp): Promise<string> {
     let request = compactorRequest(EPISODIC_COMPACT_PROMPT, step, this.abort.signal, `tron-episodic:${this.dependencies.sessionId}`);
     const tries: string[] = [];
     for (let attempt = 0; attempt < EPISODIC_TRIES; attempt += 1) {
-      // The reply's wording is never a reason to stop memory (#1279): attribution
-      // is structural (attributedViewLine), so a model that keeps Tron's own kind
-      // labels or paraphrases its instructions still yields a usable line.
       const reply = await this.compactCall(request, stamp);
       tries.push(reply);
       if (utf8Bytes(reply) <= this.limits.nodeBytes || attempt + 1 >= EPISODIC_TRIES) break;
@@ -1142,8 +928,6 @@ export class EpisodicMemory {
         message = await this.summarizerWithinBound(request);
       } catch (error) {
         if (this.closed || error instanceof EpisodicClosedSignal) throw new EpisodicClosedSignal();
-        // A call that overran its bound answered too late to be used, so it is a
-        // transient failure; a thrown call reports no usage.
         const verdict = error instanceof EpisodicCallTimeout ? "transient" : classifyThrown(error);
         const detail = error instanceof Error ? error.message : "the compactor call failed";
         if (verdict === "permanent") throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail });
@@ -1157,7 +941,6 @@ export class EpisodicMemory {
       this.usageSinceOpen.output += message.usage?.output ?? 0;
       this.usageSinceOpen.cacheRead += message.usage?.cacheRead ?? 0;
       this.usageSinceOpen.cacheWrite += message.usage?.cacheWrite ?? 0;
-      // Durable before the next call: a crash must not lose recorded spend.
       await this.saveState();
       const text = summarizerText(message);
       const verdict = classifyReply(message);
@@ -1165,8 +948,6 @@ export class EpisodicMemory {
       if (verdict === "permanent") {
         throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail: message.errorMessage ?? emptyReplyDetail(message) });
       }
-      // A plan limit is not retried here: the queue has already skipped the model
-      // for it, and the memory re-arms on the next activation once it lapses.
       if (verdict === "usage-limit") throw new EpisodicBlockedSignal({ reason: "usage-limit", detail: message.errorMessage ?? "the compactor's provider reported a usage limit" });
       if (attempt >= this.limits.maxRetries) {
         throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail: message.errorMessage ?? "the compactor call kept failing" });
@@ -1175,12 +956,6 @@ export class EpisodicMemory {
     }
   }
 
-  /**
-   * One compactor call under its own bound. The call's signal is aborted at the
-   * bound so a real provider stops reading, the late promise is neutralized (its
-   * rejection must not surface unhandled and its answer is never used), and the
-   * caller sees a transient failure.
-   */
   private async summarizerWithinBound(request: EpisodicCompactorRequest): Promise<AssistantMessage> {
     const bound = this.limits.compactorTimeoutMs;
     const controller = new AbortController();
@@ -1212,8 +987,6 @@ export class EpisodicMemory {
     }
     if (this.closed) throw new EpisodicClosedSignal();
   }
-
-  // ---- view, waiters, blocked state --------------------------------------------
 
   private fit(): void {
     rebalanceView(this.view, this.messages.size, this.limits.viewBytes, part => this.partBytes(part), address => this.nodes.has(address));
@@ -1283,13 +1056,6 @@ export class EpisodicMemory {
     this.settleWaiters();
   }
 
-  /**
-   * Persist the memory's state, chained behind every earlier append and state
-   * write and with its snapshot taken *inside* that step. Two concurrent savers
-   * would otherwise both be in flight with snapshots taken at call time, and the
-   * older one could land last: spend would go backwards, and a block written by
-   * one path could be overwritten by another path's earlier, unblocked state.
-   */
   private saveState(): Promise<void> {
     return this.enqueueAppend(() => this.store.saveState({
       version: EPISODIC_STORE_VERSION,
@@ -1299,8 +1065,6 @@ export class EpisodicMemory {
       spend: this.spend,
     })).catch(error => {
       if (error instanceof EpisodicMemoryError && error.kind === "invalid-store") {
-        // An unpublishable cursor must not replace the last readable state.
-        // Keep the in-process owner fail-closed without retrying that same write.
         this.blocked = { reason: "permanent-failure", detail: error.message };
         this.diagnostic({ event: "episodic.node-blocked", level: "warning", message: "Episodic state publication was refused", reason: "permanent-failure" });
         this.settleWaiters();
@@ -1309,9 +1073,6 @@ export class EpisodicMemory {
     });
   }
 
-  /** Every append is chained, so the durable order equals the request order and
-   * a concurrent build can never interleave a line. The queued append assigns the
-   * record's revision, so a revision is only ever one that was appended. */
   private appendCatalog(draft: Draft<EpisodicMessageRecord>): Promise<EpisodicMessageRecord> {
     return this.enqueueAppend(async () => {
       const record: EpisodicMessageRecord = { revision: this.revision++, ...draft };
@@ -1331,8 +1092,6 @@ export class EpisodicMemory {
     return next;
   }
 
-  /** A loaded store must be internally consistent; a live parent whose child is
-   * missing or rebuilt is corruption, not something to guess at. */
   private assertConsistent(): void {
     for (const node of this.nodes.values()) {
       if (node.level === 0) {
@@ -1355,8 +1114,6 @@ export class EpisodicMemory {
   }
 }
 
-/** One view line's text: newlines flattened to single spaces (gist §5.1), and
- * the placeholder for a part whose node is not built. */
 function viewLine(text: string | undefined): string {
   return text === undefined ? EPISODIC_PLACEHOLDER : text.replace(/^(?:user|talk|echo|event|assistant|tool):\s/iu, "").replace(/\n+/gu, " ");
 }

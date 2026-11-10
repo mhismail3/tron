@@ -9,35 +9,6 @@ import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue,
 import { awaitsWithin, waitFor } from "../../../../test-support/wait-for.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
-/**
- * `gateway/home` contention, publication and restart lock (K-0 §7 E0a follow-up,
- * guarding E5-E8's moves of Home's admission, ledger and task recovery), beside
- * `home-activation-wake`. Through the real Gateway with Home wired as
- * `gateway-main` wires it:
- * - contention: while Home's first activation is held, a second prompt, a
- *   follow-up and `home.disable` arrive; the follow-up runs after the
- *   activation, which delegates a task;
- * - a failed publication: with the Home directory read-only, `home.pauseMemory`
- *   fails and the ledger is unchanged; once writable, pause and resume commit;
- * - a restart: the Gateway shuts down while the task's worker is mid-turn (its
- *   registry disposes every runtime and aborts that turn, as a `restartNow` or a
- *   stalled drain's shutdown does, not a crash). The task record is still
- *   non-terminal at that boundary; a new Gateway over the same Tron home settles
- *   it from its canonical file (`HomeOwner.recoverTasks`, `cold-no-report`) and the
- *   result wakes Home in the new process.
- *
- * The refused write answers with fixed client-safe internal text and keeps its
- * filesystem diagnostic in the Gateway-local log. The scenario trace normalizes
- * the message; the unblinded wire and local-log assertions protect that boundary.
- *
- * The Home entries no other lock covers stay in the narrowed
- * `locks/home-contention-restart.golden.json`: Home's system entry (its
- * workspace prompt variant), the recovered task result (`tron.home-task-result.v1`,
- * "No accepted report…") and its settings, chat-invocation and context-delivery
- * entries. The golden's `inlineTrace` keeps the rest of the trace in order,
- * with references to those entries.
- */
-
 const MODULE = "gateway/e2e";
 const NARROWED_ENTRY_TYPES = new Set(["tron.settings.v1", "tron.chat-invocation.v1", "tron.context-delivery.v4", "tron.home-task-result.v1"]);
 
@@ -52,11 +23,8 @@ const TASK_ID = "lock-restart-task";
 const owned: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });
 
-/** Pi's 8-hex entry ids, which every reference to a canonical entry repeats. */
 const ENTRY_ID = /^[0-9a-f]{8}$/;
-/** Byte and token counts that move with the host's temp paths and measured durations. */
 const SIZE_KEYS = new Set(["bytes", "currentBytes", "viewBytes", "effectiveTokens", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "tokens"]);
-/** Home's per-run values the shared normalization does not cover, as `home-activation-wake` stabilizes them. */
 function stabilize(value: TraceValue, key = ""): TraceValue {
   if (typeof value === "string") {
     if (ENTRY_ID.test(value)) return "<entry>";
@@ -67,7 +35,6 @@ function stabilize(value: TraceValue, key = ""): TraceValue {
   if (Array.isArray(value)) return value.map((item) => stabilize(item, key));
   if (value !== null && typeof value === "object") {
     if (key === "error" && (value as { code?: unknown }).code === "internal") return { ...value, message: "<internal error message>" };
-    // Home memory's summarizer pump runs beside the scenario; its progress counts are host timing.
     if (key === "episodic") return Object.fromEntries(Object.keys(value).map((name) => [name, "<memory>"]));
     if (key === "hostPressure") return Object.fromEntries(Object.keys(value).map((name) => [name, "<host>"]));
     return Object.fromEntries(Object.entries(value).map(([name, child]) => [name, stabilize(child, name)]));
@@ -82,7 +49,6 @@ function textOf(content: unknown): string {
 
 type Caller = "worker" | "home-input" | "home-delegated" | "home-second" | "home-followup" | "home-wake";
 
-/** Faux serves one queue to every runtime, so each step decides its caller from its context. */
 function callerOf(context: TranscriptContext): Caller {
   const messages = context.messages as Array<{ role: string; content?: unknown; toolName?: string }>;
   if (messages.some((message) => (message.role === "user" || message.role === "system") && textOf(message.content).includes(WORKER_MARKER))) return "worker";
@@ -95,7 +61,6 @@ function callerOf(context: TranscriptContext): Caller {
   return "home-wake";
 }
 
-/** Resolve on the request's abort: the worker is mid-turn when its Gateway stops. */
 function untilAborted(options: SimpleStreamOptions | undefined): Promise<void> {
   return new Promise<void>((resolve) => {
     const signal = options?.signal;
@@ -152,7 +117,6 @@ describe("gateway/home contention, publication and restart lock", () => {
     const session = await phone.request("session.open", { sessionId: homeSessionId });
     expect((await phone.request("session.sync", { sessionId: homeSessionId, syncToken: session.result.syncToken })).ok).toBe(true);
 
-    // 1. Contention while the first activation is held.
     const admitted = await command("home.prompt", { text: "Delegate the restart work." });
     expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
     await waitFor(() => callers.some((entry) => entry.caller === "home-input"), "the held Home activation");
@@ -164,7 +128,6 @@ describe("gateway/home contention, publication and restart lock", () => {
     await waitFor(() => callers.some((entry) => entry.caller === "home-followup"), "the follow-up activation");
     await first.settled(homeSessionId);
 
-    // 2. A failed ledger publication leaves the ledger as it was; a writable one commits.
     const ledgerBefore = await ledger();
     await chmod(homeRoot, 0o500);
     let pauseRefused: Awaited<ReturnType<typeof command>>;
@@ -182,7 +145,6 @@ describe("gateway/home contention, publication and restart lock", () => {
     const resumed = await command("home.resumeMemory");
     const taskBeforeRestart = await phone.request("home.taskStatus", { taskId: TASK_ID });
 
-    // 3. The Gateway stops with the worker mid-turn; a new one over the same home recovers the task.
     const firstRecord = first.record();
     firstDisposed = true;
     await first.dispose({ keepRoot: true });
@@ -193,7 +155,6 @@ describe("gateway/home contention, publication and restart lock", () => {
     owned.push(() => restarted.dispose());
     restarted.script(Array.from({ length: 8 }, () => route));
     const mac = await restarted.connect("mac");
-    // Read the owner, not the RPC, while waiting: a poll's count is host timing.
     const owner = homeOwnerOf(restarted.registry);
     await waitFor(async () => (await owner.taskResult(TASK_ID)).wake?.state === "acknowledged", "the recovered result's wake to be acknowledged");
     await waitFor(() => callers.some((entry) => entry.phase === "restarted" && entry.caller === "home-wake"), "the recovered result's wake activation");

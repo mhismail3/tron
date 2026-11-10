@@ -21,13 +21,11 @@ class BootstrapError(RuntimeError):
     pass
 
 
-# ---------------------------------------------------------------- pure planning
-
 
 @dataclass
 class OptionPlan:
     changed: bool
-    options: List[dict]  # declared order; "id" present when an option is kept
+    options: List[dict]
     removed: List[str]
 
 
@@ -79,8 +77,6 @@ def plan_labels(live: List[dict], declared: List[dict]) -> Tuple[List[dict], Lis
     return creates, updates, sorted(label["name"] for label in by_name.values())
 
 
-# ------------------------------------------------------------------ live state
-
 _PROJECTS = """
 query($login: String!, $cursor: String) {
   repositoryOwner(login: $login) {
@@ -122,7 +118,6 @@ query($project: ID!, $field: String!, $cursor: String) {
 """
 
 _TYPES = {"single_select": "SINGLE_SELECT", "number": "NUMBER", "text": "TEXT", "date": "DATE"}
-# Field types a Project owner creates; the rest (Title, Labels, Parent issue...) are GitHub's own.
 _CUSTOM_TYPES = {"SINGLE_SELECT", "NUMBER", "TEXT", "DATE", "ITERATION"}
 
 _FIELD_VALUES = """
@@ -179,7 +174,6 @@ class Bootstrap:
         self.repo = repo["nameWithOwner"]
         self.owner = repo["owner"]["login"]
 
-    # Projects belonging to the owner whose title matches the declaration.
     def _projects(self) -> Tuple[str, List[dict]]:
         found: List[dict] = []
         owner_id = ""
@@ -245,7 +239,7 @@ class Bootstrap:
             )
         if not projects:
             actions.append(Action("create-project", declared["title"], {"ownerId": owner_id}))
-            return Plan(actions, notes, drift)  # fields are planned after the Project exists
+            return Plan(actions, notes, drift)
         project = projects[0]
         if project["closed"]:
             raise BootstrapError(f"Project {declared['title']!r} is closed; reopen it first")
@@ -260,8 +254,6 @@ class Bootstrap:
         for key, existing in sorted(live_fields.items()):
             if key in declared_fields or existing.get("dataType") not in _CUSTOM_TYPES:
                 continue
-            # A field nothing declares has no reader, so prune deletes it with its values; the count is
-            # reported first so the plan shows what would be lost.
             used = self._field_in_use(project["id"], existing["name"])
             if self.prune:
                 actions.append(Action("delete-field", existing["name"], {"fieldId": existing["id"], "values": used}))
@@ -374,8 +366,6 @@ def run(gh: Gh, root: Path, config: dict, apply: bool, report: Optional[Path], p
     bootstrap = Bootstrap(gh, root, config, prune)
     applied: List[dict] = []
     plan = bootstrap.plan()
-    # A new Project needs a second pass for its fields; any further pending
-    # action after that means the declaration cannot converge.
     for _ in range(3 if apply else 0):
         if not plan.actions:
             break

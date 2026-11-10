@@ -88,18 +88,9 @@ function isCustomMessageEntry(entry: SessionEntry | undefined): boolean {
     || (entry?.type === "message" && entry.message.role === "custom");
 }
 
-/**
- * Joins Gateway delivery receipts to an earlier canonical custom message. The
- * historical v1 shape is normalized at this canonical-data boundary; v4 is the
- * only wire model. Duplicate contradictory receipts fail closed.
- */
 export function contextDeliveryMetadataByEntry(
   entries: readonly SessionEntry[],
 ): ReadonlyMap<string, ContextDeliveryMetadata> {
-  // Most branches hold no delivery receipt, and a snapshot projection runs this
-  // over the whole branch on every build: with nothing to join, do not index
-  // every entry twice for a map that stays empty (G-2). The `some` pass is one
-  // cheap scan that stops at the first receipt.
   if (!entries.some((entry) => entry.type === "custom"
     && (entry.customType === CONTEXT_DELIVERY_RECEIPT_TYPE
       || entry.customType === HISTORICAL_CONTEXT_DELIVERY_RECEIPT_TYPE))) {
@@ -124,8 +115,6 @@ export function contextDeliveryMetadataByEntry(
           >= (position.get(entry.id) ?? -1)) continue;
     const wake = receipt.wakeOperationId ? wakeBindings.get(receipt.wakeOperationId) : undefined;
     const wakeEntry = wake?.canonicalEntryId ? byId.get(wake.canonicalEntryId) : undefined;
-    // Admission alone is not a turn: handled/abandoned inputs have no binding.
-    // Exact canonical binding survives queue consumption and cold reconstruction.
     const wakeEntryId = wakeEntry?.type === "message" && wakeEntry.message.role === "user"
       && wake?.origin.kind === "subagent" && wake.origin.ownerId === receipt.origin?.owner?.id
       ? wakeEntry.id : undefined;

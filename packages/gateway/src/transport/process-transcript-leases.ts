@@ -21,9 +21,7 @@ type Lease = {
   expectedOperationId?: string;
   path: string;
   fileIdentity: string;
-  /** Last revision acknowledged by a page response to this client. */
   revision: string;
-  /** Newest invalidation announced but not yet acknowledged by a page read. */
   pendingRevision?: string;
   watcher: FSWatcher;
   invalidationTimer: NodeJS.Timeout | undefined;
@@ -33,9 +31,6 @@ type Lease = {
   controller: AbortController;
 };
 
-/** Connection-owned, disposable observer of a validated canonical child file.
- * It stores no transcript mirror. Its sole mutation revalidates the exact lease
- * binding before asking the already-owned parent runtime to stop that process. */
 export class ProcessTranscriptLeaseStore {
   private readonly leases = new Map<string, Lease>();
   private readonly pendingOpens = new Map<string, { clientId: string; parentSessionId: string; parentSubscriptionToken: string; controller: AbortController }>();
@@ -142,16 +137,10 @@ export class ProcessTranscriptLeaseStore {
     let changedDuringOpen = false;
     let watcher: FSWatcher;
     try {
-      // Install observation before the baseline read. Until the lease enters
-      // the map, callbacks latch a dirty bit so an append in the open window
-      // cannot disappear between baseline capture and ownership publication.
       watcher = watch(admission.path, { persistent: false }, () => {
         if (this.leases.get(id)?.watcher === watcher) this.scheduleInvalidation(id);
         else if (this.pendingOpens.get(id) === pending) changedDuringOpen = true;
       });
-      // Install the error fence before the baseline read. A failed watcher
-      // retires the pending owner instead of leaving an opening without an
-      // observer or allowing a late response to publish it.
       watcher.on("error", () => {
         pending.controller.abort(new GatewayError("conflict", "Subagent viewer opening was retired", true, undefined, "viewer_retired"));
         if (this.pendingOpens.get(id) === pending || this.leases.get(id)?.watcher === watcher) {
@@ -238,17 +227,11 @@ export class ProcessTranscriptLeaseStore {
   ): Promise<ProcessTranscriptLease["page"] & { revision: string }> {
     const admittedLease = this.owned(clientId, leaseId);
     return admittedLease.pageMutex.run(async () => {
-      // Revalidate ownership and the expected generation inside the per-lease
-      // lane. A canceled mobile request may still finish at the Gateway, so
-      // concurrent prepend/refresh reads must not both advance one revision.
       const lease = this.owned(clientId, leaseId);
       if (lease !== admittedLease) throw new GatewayError("conflict", "Subagent transcript lease changed", true);
       if (expectedRevision !== undefined && expectedRevision !== lease.revision) {
         throw new GatewayError("conflict", "Subagent transcript changed; refresh the viewer", true);
       }
-      // A watcher announces pendingRevision without advancing the client's
-      // acknowledged revision. This lets the mounted read-only viewer refresh
-      // the newest page on the same lease using the revision it actually owns.
       const pendingAtStart = lease.pendingRevision;
       let page: Awaited<ReturnType<RuntimeRegistry["readOnlySubagentTranscriptPage"]>>;
       try {
@@ -329,8 +312,6 @@ export class ProcessTranscriptLeaseStore {
     if (lease.invalidationTimer) clearTimeout(lease.invalidationTimer);
     clearTimeout(lease.timeout);
     lease.watcher.close();
-    // Logical retirement is immediate. Retain this exact capacity/identity until
-    // the read lane drains; otherwise dismiss/reopen can multiply physical I/O.
     void lease.pageMutex.run(() => {
       if (this.leases.get(leaseId) === lease) this.leases.delete(leaseId);
     });

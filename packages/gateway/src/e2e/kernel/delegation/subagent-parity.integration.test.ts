@@ -35,9 +35,6 @@ const gate = () => {
 
 it("drives managed subagents through single, workflow, question and steering checkpoints", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-subagent-parity-"));
-  // The temp root and its canonical form differ under macOS aliases (/tmp and
-  // /var resolve below /private). Normalize both, canonical first, so reports
-  // never depend on which temporary directory the run used.
   const canonicalRoot = await realpath(root);
   const withoutRoot = (text: string, base: string, label: string) =>
     text.split(canonicalRoot + base.slice(root.length)).join(label).split(base).join(label);
@@ -158,8 +155,6 @@ it("drives managed subagents through single, workflow, question and steering che
         }
       }
       const snapshot = slot.snapshot();
-      // Normalize execution identities before visiting values; never sort process
-      // or child arrays, whose producer launch order is user-visible.
       const identities = new Map<string, string>();
       for (const entry of launches()) if (entry.type === "message" && entry.message.role === "toolResult") {
         const status = (report.statuses as Record<string, { runId: string; steps?: Array<{ runId?: string; sessionOwnerId?: string; label?: string }> }>)[`${name}:${entry.message.toolCallId}`];
@@ -179,8 +174,6 @@ it("drives managed subagents through single, workflow, question and steering che
         if (key === "sessionOwnerId" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return "<session-owner>";
         if (key === "id" && /^(?:extension:|[0-9a-f]{8}:\d+)/.test(value)) return value.startsWith("extension:") ? "extension:<owner>" : `<entry>:${value.split(":")[1]}`;
         let text = value;
-        // Canonical session layout and temporary/verified installation roots
-        // vary per execution, but file names and provider-authored text do not.
         text = text.split(dirname(sessionFile!)).join("<sessions>");
         text = withoutRoot(text, root, "<fixture>");
         text = volatileProviderText(text);
@@ -190,9 +183,6 @@ it("drives managed subagents through single, workflow, question and steering che
           .replace(/\b\d+(?:\.\d+)?(?:ms|s)\b/g, "<elapsed>");
       };
       (report.snapshots ??= {})[name] = snapshot;
-      // The transport bounds rows by recency (ties include random process IDs).
-      // Compare the actual mounted rows in canonical launch/producer-child order,
-      // not that time-dependent eviction order. Missing/extra rows still fail.
       const mounted = (snapshot.processActivities ?? []).filter(row => row.kind === "subagent");
       const rows = launches().flatMap(entry => {
         if (entry.type !== "message" || entry.message.role !== "toolResult") return [];
@@ -211,9 +201,6 @@ it("drives managed subagents through single, workflow, question and steering che
         ...row, model: row.model?.split("/").at(-1),
         lifecycle: { ...row.lifecycle, sequence: "<revision>" },
       }));
-      // Native process rows above own activity facts/timing. These additional
-      // child fields own task and exact child/control admission; aggregate
-      // extension counters are not consumed by the native process renderer.
       const childIdentity = (child: import("../../../protocol/types.js").ExtensionRunChild): unknown => normalize({
         id: child.id, producerId: child.producerId, label: child.label,
         task: child.task, childSessionRef: child.childSessionRef,
@@ -242,10 +229,6 @@ it("drives managed subagents through single, workflow, question and steering che
           return { type: value.type, key: value.key, source: value.owner?.source ?? null, title: value.owner?.title ?? null, kind: value.owner?.kind ?? null,
             privateSubagent, nativeVisibility: privateSubagent ? "hidden" : "visible", contents: privateSubagent ? null : normalize(value.contents) };
         });
-      // ExtensionRetainedContentPolicy.content excludes subagent widgets,
-      // statuses and surfaces before every native consumer (Swift lines 100,
-      // 112 and 124). Private frames are not app text; compare ownership and
-      // hidden visibility, retaining their raw bytes in report.snapshots only.
       const surfaces = snapshot.extensionPresentation.surfaces.map(surface => {
         const privateSubagent = surface.provenance?.kind === "subagent";
         const presentable = surface.kind === "widget" && surface.lifecycle !== "blocking" && surface.frame.lines.length > 0;
@@ -297,8 +280,6 @@ it("drives managed subagents through single, workflow, question and steering che
       && entries().filter(entry => entry.type === "custom_message" && entry.customType === "subagent_supervisor_request").length === 2,
       "artifact watchers publish failed child and pending question details without explicit discovery");
     await capture("workflow-question");
-    // Hostile derivatives of the real child file exercise reciprocal-edge
-    // admission, not provider execution. This fixture restores exact bytes.
     const status = (report.statuses as Record<string, { steps: Array<{ label?: string; runId: string }> }>)["workflow-question:workflow-launch"]!;
     const question = status.steps.find(step => step.label === "question")!;
     const launch = launches().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === "workflow-launch")!;
@@ -330,8 +311,6 @@ it("drives managed subagents through single, workflow, question and steering che
     gates.finish.release();
     await waitFor(() => acknowledged === 2 && parentIdle(), "workflow completion wakes idle parent");
     await capture("workflow-completed");
-    // A factory-bound API probe covers the racing steer lifetime: the managed
-    // producer's wake stays a typed, hidden normal input.
     const api = globals.parityPi!;
     const sender = await (async () => {
       const { managedProducerAPI } = await import("../../../kernel/delegation/managed-producer.js");
@@ -416,8 +395,6 @@ it("drives managed subagents through single, workflow, question and steering che
   }
 });
 
-// pi-subagents' installation root embeds its version and its bundled worker-eval
-// frames embed line/column positions; the report normalizes both.
 function volatileProviderText(text: string) {
   return text
     .replace(/(?:<fixture>\/agent\/npm\/node_modules\/pi-subagents|<fixture>\/tron\/internal\/pi-subagents\/[^\/\s"']+|<fixture>\/tron\/internal\/[^\s"']*?\/root)(?=\/|$)/g, "<provider>")

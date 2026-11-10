@@ -14,8 +14,6 @@ import { HomeProfileItems } from "../src/modules/home/home-profile.js";
 import type { ProfileStore } from "../src/modules/home/profile-store.js";
 import { homeOwnerOf, projectsOwnerOf } from "./gateway-registry.js";
 
-/** The real settings model and change path a fixture Gateway needs, wired the
- * way gateway-main wires them (docs/settings-model.md). */
 export function settingsDependencies(input: {
   agentDir: string;
   tronHome: string;
@@ -23,13 +21,9 @@ export function settingsDependencies(input: {
   modelRuntime: ModelRuntime;
   sessions?: { reloadProject(cwd: string, trusted: boolean, force: boolean): Promise<unknown>; commitProjectReload(cwd: string): Promise<unknown> | unknown; abortProjectReload(cwd: string): Promise<unknown> | unknown };
   home?: () => HomeOwner | undefined;
-  /** The learned profile's Knowledge owner, for Home's `profile` tool (doc 6.4). */
   knowledge?: () => ProfileStore | undefined;
-  /** Installs them for the `settings` tool, as gateway-main does. */
   registry?: { setSettings(model: SettingsModel, changes: SettingsChangePath): void };
-  /** The change path's clock; a fixture advances it to test expiry. */
   now?: () => Date;
-  /** Option catalog for `catalog.tools` keys, wired as gateway-main wires it. */
   toolCatalog?: ConstructorParameters<typeof SettingsStoreAdapter>[0]["toolCatalog"];
 }): { settingsModel: SettingsModel<SettingsStoreAdapter>; settingsChanges: SettingsChangePath } {
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA,
@@ -50,10 +44,6 @@ export function settingsDependencies(input: {
   return { settingsModel, settingsChanges };
 }
 
-/** Sets a model queue through the one settings change path, as the iPhone's
- * Manage Home does (docs/settings-model.md 6.3), installing the settings owners
- * on the registry first when the fixture has none. Home's memory and Knowledge
- * run on the background queue. */
 export async function setModelQueue(input: {
   registry: RuntimeRegistry;
   agentDir: string; tronHome: string; trust: TrustService; modelRuntime: ModelRuntime;
@@ -65,8 +55,6 @@ export async function setModelQueue(input: {
     { actor: { kind: "ui", id: "fixture" }, commandId: randomUUID() });
 }
 
-/** Home memory's models, set the way the iPhone sets them: the background model
- * queue through the settings change path, on a registry built with a Gateway model runtime. */
 export async function setHomeMemoryModels(registry: RuntimeRegistry,
   models: readonly (string | { provider: string; id: string })[]): Promise<void> {
   const internals = registry as unknown as {
@@ -74,13 +62,10 @@ export async function setHomeMemoryModels(registry: RuntimeRegistry,
     dependencies(): { createModelRuntime(): Promise<ModelRuntime> };
   };
   const options = internals.options;
-  // A registry without a Gateway runtime admits through its own runtime factory.
   const modelRuntime = options.gatewayModelRuntime ?? await internals.dependencies().createModelRuntime();
   await setModelQueue({ registry, agentDir: options.agentDir, tronHome: options.tronHome, trust: options.trust, modelRuntime }, "background", models);
 }
 
-/** The production background-queue summarizer over one fixed model, for episodic
- * cases that exercise the compactor's own request against a real provider. */
 export function singleModelSummarizer(runtime: ModelRuntime, model: { provider: string; id: string }) {
   return createQueueSummarizer(new ModelQueueOwner({ runtime, usage: { read: async () => ({ providers: [] }) }, queue: async () => [`${model.provider}/${model.id}`] }));
 }

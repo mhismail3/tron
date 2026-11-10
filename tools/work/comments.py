@@ -43,8 +43,6 @@ def guard_public_text(repo: Path, config: dict, body: str) -> None:
         capture_output=True, text=True,
     )
     if checked.returncode:
-        # Guard output may quote personal data. Do not copy it to terminal,
-        # the audit log, or GitHub; the caller can inspect the private source.
         raise GhError("public text refused by the privacy guard")
 
 

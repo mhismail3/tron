@@ -55,11 +55,9 @@ interface InteractionRequestOptions {
   apply?: (acceptance: NativeChangeAcceptance) => Promise<unknown>;
   signal?: AbortSignal;
   timeout?: number;
-  /** The interaction's own expiry, distinct from a decline or an abort. */
   expired?: () => void;
 }
 
-/** An exact change card expires unanswered after a day; nothing is applied. */
 export const CHANGE_REVIEW_TTL_MS = 24 * 60 * 60_000;
 
 const THEME_COLORS: Record<ThemeColor, string | number> = {
@@ -73,8 +71,6 @@ const THEME_COLORS: Record<ThemeColor, string | number> = {
   syntaxFunction: 6, syntaxVariable: 7, syntaxString: 2, syntaxNumber: 3,
   syntaxType: 4, syntaxOperator: 7, syntaxPunctuation: 8, thinkingOff: 8,
   thinkingMinimal: 8, thinkingLow: 4, thinkingMedium: 6, thinkingHigh: 3,
-  // Pi's optional search foreground falls back to the ordinary text color.
-  // Pinning the same value preserves the pre-upgrade RPC baseline exactly.
   thinkingXhigh: 5, thinkingMax: 1, bashMode: 3, searchMatchText: 7,
   scrollbarTrack: 8, scrollbarThumb: 7,
 };
@@ -106,12 +102,6 @@ function requireBoundedString(value: string, maximumBytes: number, field: string
   }
 }
 function stripTerminalPresentation(value: string): string { return stripTerminalControls(value, true); }
-/**
- * One-line, unique labels for select options; the answer maps back by position
- * to the extension's own option. Pi's terminal select renders multi-line options
- * (a sectioned menu carries status lines under each option), but a semantic
- * select option is a single line on the wire and in the app.
- */
 function selectLabels(options: readonly string[]): string[] {
   const used = new Set<string>();
   return options.map((option) => {
@@ -128,17 +118,12 @@ function boundedWidgetLines(content: unknown): string[] | undefined {
   const lines: string[] = [];
   for (const source of content) {
     const line = stripTerminalPresentation(source);
-    // setWidget is a presentation-only, void producer callback. Reject an
-    // oversized update atomically instead of throwing into an extension-owned
-    // timer/event callback, where Pi has no caller awaiting the failure and the
-    // exception would otherwise terminate the Gateway process.
     if (encodedBytes(line) > MAX_WIDGET_LINE_BYTES) return undefined;
     lines.push(line);
   }
   return lines;
 }
 
-/** Implements semantic Pi UI methods while the injected store exclusively owns presentation state. */
 export class SemanticUIBroker {
   private active = true;
   private readonly pending = new Map<string, PendingInteraction>();
@@ -183,8 +168,6 @@ export class SemanticUIBroker {
         || typeof answer.approved !== "boolean" || answer.digest !== pending.wire.review.digest) {
         throw new GatewayError("invalid_request", "Native change response does not match its exact review");
       }
-      // Atomic acceptance cut: consume before awaiting. Stop/retirement can no
-      // longer cancel it, and the enclosing native RPC receipt awaits settlement.
       this.finish(pending);
       if (!answer.approved) { pending.resolve(undefined); return; }
       return Promise.resolve().then(() => pending.apply!(acceptance)).then(result => { pending.resolve(result); }, error => {
@@ -312,9 +295,6 @@ export class SemanticUIBroker {
     try {
       this.assertActive();
       const title = stripTerminalPresentation(input.title);
-      // Sanitize each discriminated interaction independently. Keeping these
-      // branches explicit prevents forbidden fields from being cast into the
-      // flat wire shape.
       switch (input.method) {
         case "select":
           input = {
@@ -385,9 +365,6 @@ export class SemanticUIBroker {
       const interactions = [...this.interactions(), wire];
       if (encodedBytes(interactions) > MAX_INTERACTION_BYTES) return reject(new GatewayError("busy", "Extension UI interactions reached their bounded capacity", true));
       const pending: PendingInteraction = { wire, resolve, reject, ...(options?.apply ? { apply: options.apply } : {}) };
-      // Install settlement authority before publishing. Broadcast callbacks are
-      // allowed to respond re-entrantly, and abort must not be lost between the
-      // preflight check and committed presentation.
       this.pending.set(wire.id, pending);
       if (timeout) pending.timer = setTimeout(() => { if (this.pending.has(wire.id)) { this.finish(pending); options?.expired?.(); resolve(undefined); } }, timeout);
       if (options?.signal) {
@@ -399,14 +376,9 @@ export class SemanticUIBroker {
       try {
         this.presentation.transact((draft) => { draft.pendingInteractions.push(wire); });
       } catch (error) { this.cleanup(pending); reject(error); return; }
-      // The interaction itself is the authoritative user-input boundary. A
-      // synchronous presentation observer may already have answered it, so
-      // notify only while its exact settlement owner is still pending. Invoke
-      // the detached sink now so it can latch foreground presence at the same
-      // admission cut; notification failure never owns interaction settlement.
       if (this.pending.has(wire.id) && this.interactionSink) {
         try { void Promise.resolve(this.interactionSink(wire)).catch(() => undefined); }
-        catch { /* Notification admission must never fail the interaction. */ }
+        catch { }
       }
     });
   }

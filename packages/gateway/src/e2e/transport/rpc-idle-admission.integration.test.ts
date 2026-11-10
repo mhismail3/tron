@@ -17,9 +17,6 @@ import { settingsDependencies } from "../../../test-support/settings-dependencie
 import { sessionSettingChange, changedRevision, type SessionSetting } from "../../../test-support/session-settings-change.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-/** Retained, regenerable evidence for one run of this file. The path is stable
- * and gitignored, so an operator can inspect exactly which RPCs the session idle
- * admission admitted or rejected without committing one-off output. */
 const REPORT_PATH = join(process.cwd(), "test-results", "rpc-idle-admission.integration.json");
 const report: {
   generatedAt: string;
@@ -141,7 +138,6 @@ async function fixture(options: {
     broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
     receipts: new CommandReceiptStore(root),
     uploads,
-    // The real owner with no PTYs: restart admission reads its true state.
     logger: diagnosticLogger,
     ...(options.authRuntime ? { modelRuntime: options.authRuntime } : {}),
     ...(auth ? { auth } : {}),
@@ -197,10 +193,6 @@ async function fixture(options: {
       },
     };
   };
-  /** A canonical, persisted session with no live runtime, created the way the
-   * pinned SDK creates one. The fixture writes the file itself, so it forces the
-   * catalog owner's cut: a read that lands before the owner has indexed it
-   * refuses retryably, and no reader walks the folder (G-1c). */
   const coldSession = async (label: string) => {
     const manager = SessionManager.create(cwd, sessionDirectory);
     manager.appendMessage(fauxAssistantMessage(`${label} canonical response`));
@@ -214,8 +206,6 @@ async function fixture(options: {
     await owner.settled();
     return { id: manager.getSessionId(), file, entryId: entry.id };
   };
-  /** Authoritative live snapshot: `revision` and `runtimeGeneration` are the
-   * optimistic-concurrency inputs `session.setContextWindow` requires. */
   const snapshot = async (client: Client, sessionId: string) => {
     const opened = await client.request(`snapshot-${Math.random().toString(36).slice(2, 8)}`, "session.open", { sessionId });
     expect(opened.ok, JSON.stringify(opened)).toBe(true);
@@ -406,8 +396,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
       expectedRuntimeGeneration: before.runtimeGeneration, expectedModel: before.model ?? null,
     }));
     expect(configured.ok, JSON.stringify(configured)).toBe(true);
-    // A photo materializes as an inline image with no text envelope, so the
-    // steer's runtime text is empty.
     f.uploads.materialize.mockImplementation(async (uploadIds: string[]) => ({
       envelope: "",
       images: uploadIds.map(() => ({ type: "image", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", mimeType: "image/png" })),
@@ -430,7 +418,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
       sessionId: session.id, commandId: "image-steer-start", text: "hold the current run",
     });
     expect(initial.ok, JSON.stringify(initial)).toBe(true);
-    // The steer queues while the three-second tool call holds the run.
     await waitFor(async () => (await f.snapshot(client, session.id)).toolExecutions.length === 1, "the running tool call");
     const steer = await client.request("image-steer", "session.prompt", {
       sessionId: session.id, commandId: "image-steer", text: "", behavior: "steer", uploadIds: ["fixture-photo"],
@@ -448,7 +435,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
       throw new Error(`${String(error)}\n${JSON.stringify((await f.snapshot(client, session.id)).queuedItems)}`);
     }
     expect(providerImageCounts).toEqual([1]);
-    // Delivered: no queued item remains, neither live nor on a fresh open.
     expect((await f.snapshot(client, session.id)).queuedItems).toEqual([]);
     expect(sdkSession.getSteeringMessages()).toEqual([]);
     const reopened = await f.connect();
@@ -618,8 +604,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
     expect(stoppedSnapshot.phase).toBe("idle");
     expect(f.faux.state.callCount).toBe(1);
     const slot = await f.registry.acquire(session.id);
-    // Installed extension lifecycle is independent authority. Inject only its
-    // admitted artifact, not the configuration admission or RPC under test.
     const activities = slot.ownedTurns.extensionActivities as Map<string, unknown>;
     const now = new Date().toISOString();
     activities.set("independent-child", {
@@ -680,7 +664,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
       expect(f.logRecords.some(record => record.metadata.event === "rpc.error" && record.metadata.reason === "session_configuration_settling")).toBe(true);
       settlementFrameCut = client.frames.length;
     } finally { work.settle(); }
-    // No session.open/snapshot RPC may rescue a missing retirement event.
     await waitFor(() => client.frames.slice(settlementFrameCut).some(frame => frame.topic === "session.configuration" && frame.payload?.data?.configurationBlocker === null), "ready publication after terminal retirement");
     const ready = await f.snapshot(client, session.id);
     expect(ready.revision).toBe(before.revision);
@@ -747,7 +730,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
       expectedRevision: current.revision,
       expectedRuntimeGeneration: current.runtimeGeneration,
     });
-    // Fork last: it rebinds the live runtime to a new session identity.
     const fork = await client.request("rpc-session-fork", "session.fork", {
       commandId: "session-fork-command", sessionId: session.id, entryId: session.entryId, position: "at",
     });
@@ -777,8 +759,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
     const session = await f.coldSession("busy-session");
     const opened = await f.openSession(client, session.id);
 
-    // A running prompt is not the caller's own entry, so idle admission must
-    // still reject every idle-checked mutation.
     f.faux.setResponses([fauxAssistantMessage("slow response ".repeat(60))]);
     const prompt = client.request("busy-prompt", "session.prompt", {
       commandId: "busy-prompt-command", sessionId: session.id, text: "start a slow run",
@@ -803,14 +783,10 @@ describe("receipt-backed mutations against their own session work entry", () => 
     expect((await prompt).ok, "prompt admitted").toBe(true);
     await waitFor(async () => (await list(client)).sessions.some((row) => row.id === session.id && row.phase === "idle"), "settled after abort");
 
-    // A concurrently admitted Bash RPC keeps the session unavailable: excluding
-    // one request's own entry must not disable the check for another request.
     const bash = client.request("held-bash", "session.bash", {
       commandId: "held-bash-command", sessionId: session.id, command: "sleep 5", excludeFromContext: true,
     });
     await waitFor(async () => (await list(client)).sessions.some((row) => row.id === session.id && row.phase === "running"), "bash running");
-    // The drain waits on the Bash RPC and on the foreground agent operation it admitted (#2283); both may
-    // share an admission millisecond, so they are compared by category.
     expect(f.registry.administrativeDrainSnapshot().blockers.filter((blocker) => blocker.sessionId === session.id)
       .map(({ category, method, state }) => ({ category, method, state })).sort((left, right) => left.category.localeCompare(right.category)),
     "the running Bash's drain blockers").toEqual([

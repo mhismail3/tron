@@ -29,10 +29,6 @@ function diagnosticCode(error: unknown): string {
   return error instanceof Error ? "exception" : "unknown";
 }
 
-/**
- * Dispatch only upload routes. A miss is synchronous so later authenticated
- * routes retain their existing credential cut and are never delayed here.
- */
 export function handleUploadHttp(
   request: IncomingMessage,
   response: ServerResponse,
@@ -92,9 +88,6 @@ async function receiveUpload(
         dependencies.sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
         await finished(response, { readable: false, cleanup: true });
       } catch (error) {
-        // Body completion is not receipt publication. Drop only abandoned
-        // staging; discard's serialized claim check protects an attachment
-        // already owned by an accepted prompt, even in a close/claim race.
         try { await dependencies.options.uploads.discard(upload.id); }
         catch (cleanupError) {
           if (!(cleanupError instanceof GatewayError && ["conflict", "not_found"].includes(cleanupError.code))) {

@@ -23,8 +23,6 @@ export async function admitSearchEmbeddingHelper(path: string, expectedTeam = "M
 
 interface SearchEmbedding { vector: number[]; dimension: number; language: string; modelRevision: string; }
 
-/** One-shot helper calls keep the signed process boundary simple and ensure a
- * crashed helper cannot strand a Gateway worker or retain transcript text. */
 export class NaturalLanguageEmbeddingClient {
   constructor(private readonly helperPath: string, private readonly timeoutMs = 2_000) {}
 

@@ -5,9 +5,6 @@ import { fixture, homeActivation, profileCall, profileReportFile, profileSection
 
 profileReportFile("test-results/home-profile/exposure-cases.json");
 
-// Committed synthetic current-file fixture: enough Engineering notes to cross a
-// page boundary, other areas, Unsorted, both confirmation states and retirement.
-// The final Correction binds the exact claim created through the real store.
 const syntheticNotes: ProfileNoteRecordDraft[] = Array.from({ length: 21 }, (_, index) => ({
   id: `synthetic-exposure-${String(index).padStart(2, "0")}`,
   kind: "note", scope: "personal",
@@ -66,7 +63,6 @@ it("keeps a synthetic 21-note current Profile metadata-only and preserves every 
   }
   expect((await readProfilePage(f, "life")).items.map(item => item.id)).toEqual([records[17]!.id]);
   const correction = pages.find(item => item.id === records[20]!.id)!;
-  // The model-facing exact read must retain the claim link, not just the title.
   const exactTurn = await homeActivation(f, "Read the exact Correction.", [
     profileCall({ action: "read", id: correction.id, revisionId: correction.revisionId }, "synthetic-correction-read"), say("read"),
   ]);

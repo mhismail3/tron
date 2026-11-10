@@ -1,7 +1,5 @@
 import type { ProfileNoteRecord } from "./profile-note-contract.js";
 
-/** Placement is organization only. These are the seven personal roots; inferred
- * is deliberately separate, and prior organization is never a writable root. */
 export const PROFILE_AREAS = {
   life: "Life & people",
   routines: "Routines & wellbeing",
@@ -12,7 +10,6 @@ export const PROFILE_AREAS = {
   corrections: "Corrections",
 } as const;
 export interface ProfileMetadata { version: 2; path: string[] }
-/** Metadata row derived from a canonical note. */
 interface ProfileNoteRow {
   title: string; confirmed: boolean; tags: string[]; retired: boolean;
   profile?: ProfileMetadata; supersedes: string[];
@@ -43,7 +40,6 @@ export function validateProfileMetadata(raw: unknown): asserts raw is ProfileMet
 }
 
 type Note = Pick<Extract<ProfileNoteRecord, { kind: "note" }>, "id" | "relations"> & { content: Pick<Extract<ProfileNoteRecord, { kind: "note" }>["content"], "profile" | "retired"> };
-/** Supersession includes retired successors, matching the canonical profile reader. */
 function occupancy(notes: readonly Note[]): Map<string, number> {
   const superseded = new Set(notes.flatMap(note => note.relations.filter(relation => relation.type === "supersedes").map(relation => relation.recordId)));
   const counts = new Map<string, number>();
@@ -63,8 +59,6 @@ function occupancy(notes: readonly Note[]): Map<string, number> {
   counts.set("sub-areas", prefixes.size);
   return counts;
 }
-/** Called inside the admitted ProfileNote transaction, including direct note
- * writers. Restored over-cap data remains readable; only net growth is refused. */
 export function assertProfileCapacity(before: readonly Note[], after: readonly Note[]): void {
   const prior = occupancy(before), next = occupancy(after);
   for (const [key, count] of next) {

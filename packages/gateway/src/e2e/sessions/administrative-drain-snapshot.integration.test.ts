@@ -13,9 +13,6 @@ afterEach(async () => {
   root = undefined;
 });
 
-// Regression: a restart drain once waited on eight "completion receipts" that
-// were in fact whole receipt-backed RPCs (for example a compaction). The drain
-// must name an executing request and its method.
 it("names an executing receipt-backed request and its method as a drain blocker", async () => {
   root = await mkdtemp(join(tmpdir(), "tron-drain-snapshot-"));
   const agentDir = join(root, "agent");

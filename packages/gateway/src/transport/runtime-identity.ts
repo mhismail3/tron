@@ -12,7 +12,6 @@ function optionalIdentity(value: string | undefined): string | undefined {
   return value;
 }
 
-/** Optional provenance is supplied by the owning isolated supervisor. */
 export function runtimeIdentity(environment: NodeJS.ProcessEnv = process.env): GatewayRuntimeIdentity {
   const result: GatewayRuntimeIdentity = {};
   const sourceRevision = optionalIdentity(environment.TRON_GATEWAY_SOURCE_REVISION);

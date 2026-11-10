@@ -9,8 +9,6 @@ import { WakeInboxOwner } from "./home-wake-inbox.js";
 import { HomeTaskStore, taskIntentDigest, type HomeTaskRecord, type HomeTaskWrite, type HomeTaskStoreDiagnostic } from "./home-task-store.js";
 import { issueGrant } from "../../../test-support/home-task-grant.js";
 
-// Counts the task-directory files the store reads. The wrapper is transparent;
-// only the cost cases below switch the counter on.
 const fileReads = vi.hoisted(() => ({ active: false, tasks: 0, authority: 0 }));
 vi.mock("../../foundation/secure-json.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../foundation/secure-json.js")>();
@@ -26,8 +24,6 @@ vi.mock("../../foundation/secure-json.js", async (importOriginal) => {
   };
 });
 
-/** Seams over the directory scan and birth-time identity; the real filesystem
- * answers everything else. */
 const fsSeam = vi.hoisted(() => ({ entriesVisited: 0, zeroBirthtimePaths: new Set<string>() }));
 vi.mock("node:fs/promises", async importOriginal => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -191,7 +187,6 @@ describe("HomeTaskStore durable namespace", () => {
     await f.store.initialize();
     const owner = authorization(f.store);
     const scope = await owner.enableInitialScope("epoch-1");
-    // Only reconfirmation renews a standing scope: a second initial scope is refused by the store, never swapped in.
     await expect(owner.enableInitialScope("epoch-2")).rejects.toMatchObject({ code: "invalid-record" });
     const restarted = new HomeTaskStore(f.root, f.workspace);
     await expect(authorization(restarted).authorize(request)).resolves.toEqual({ kind: "standing-scope", scopeId: scope.id });
@@ -250,16 +245,12 @@ describe("HomeTaskStore durable namespace", () => {
       { ...task(), reportRef: [{ resultId: "result-1", sessionId: "session-1", entryId: "entry-1", digest: "a".repeat(64) }] },
       { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: -1, outputTokens: 0 } },
       { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, unpriced: true } },
-      // Cache counters come as a pair, so fresh input is never ambiguous (#1250).
       { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, cacheReadTokens: 2 } },
     ];
     for (const record of invalid) await expect(f.store.put(record as HomeTaskRecord, null)).rejects.toMatchObject({ code: "invalid-record" });
     expect(await bytes(f.directory)).toEqual(before);
   });
 
-  // #1250: spend splits fresh input from cache read/write. A record published before the
-  // split holds the combined total in inputTokens; the never-shrinks check compares prompt
-  // totals across both shapes, and a split record never reverts to the combined one.
   it("accepts split spend over a combined record and refuses a shrinking or unsplit successor", async () => {
     const f = await fixture(); await f.store.initialize();
     await f.store.put(task(), null);
@@ -272,8 +263,6 @@ describe("HomeTaskStore durable namespace", () => {
     expect((await f.store.read("task-1"))!.spend).toEqual(split);
   });
 
-  // FM7: a final result is only a result with its one report reference; the rest of
-  // the record is valid, so the reference is the only thing refused.
   it("refuses a final terminal result without its single report reference", async () => {
     const f = await fixture(); await f.store.initialize();
     const final = { ...terminalTask("task-final"), terminalEvidence: { outcome: "final" as const, sessionId: "session-1", entryIds: ["entry-1"], reason: "explicit-report" } };
@@ -290,7 +279,6 @@ describe("HomeTaskStore durable namespace", () => {
     expect(await f.store.read("task-terminal")).toBeUndefined();
   });
 
-  // FM1/FM2/FM6: a deleted field is refused on both paths, never read as current.
   it("refuses a task record that carries a deleted field, on write and on read", async () => {
     const f = await fixture(); await f.store.initialize();
     await f.store.put(task(), null);
@@ -308,7 +296,6 @@ describe("HomeTaskStore durable namespace", () => {
       await writeFile(path, JSON.stringify({ ...current, ...extra }), { mode: 0o600 });
       await expect(collectRecords(f.store), `read ${name}`).rejects.toMatchObject({ code: "invalid-record" });
     }
-    // The positive control: the unmodified current-shape record still reads.
     await writeFile(path, valid, { mode: 0o600 });
     expect(await collectRecords(f.store)).toHaveLength(1);
   });
@@ -339,7 +326,6 @@ describe("HomeTaskStore durable namespace", () => {
     await f.store.put(task(), null);
     const other = { ...task(), taskId: "task-2", intent: { text: "A different intent" }, intentDigest: taskIntentDigest("A different intent") };
     await f.store.put(other, null);
-    // Same intent digest as the requested task, different target: the target dimension alone must exclude it.
     await f.store.put({ ...task(), taskId: "task-3", target: "/trusted/other" }, null);
     const binding = { intentDigest: task().intentDigest, target: "/trusted/project", authorizationScope: "full-work", restoreEpoch: epoch };
     const refused = await owner.authorize(binding).then(() => { throw new Error("authorized without a grant"); },
@@ -527,7 +513,6 @@ describe("Home task recency pages", () => {
       await operation();
       return fsSeam.entriesVisited;
     };
-    // A single pass visits every entry; two passes (validation plus enumeration) is the ceiling.
     for (const [name, operation] of [
       ["records", () => collectRecords(f.store)],
       ["page", () => f.store.page({ limit: 50 })],
@@ -581,7 +566,6 @@ describe("Home task recency pages", () => {
 });
 
 describe("HomeTaskStore staged publications", () => {
-  // A crash between the temporary write and its rename leaves this name behind.
   const leftover = (name: string) => `${name}.4242.0123456789ab.tmp`;
 
   it("skips a crash-leftover temporary in every enumeration and removes it only at recovery", async () => {
@@ -660,7 +644,7 @@ describe("HomeTaskStore operation cost", () => {
   it("reads authorization once per full scan, not once per record", async () => {
     const f = await fixture(); await f.store.initialize();
     for (let index = 1; index <= 300; index++) await f.store.put({ ...task(), taskId: `task-${index}` }, null);
-    const cost = await fileReadsDuring(async () => { for await (const _record of f.store.records()) { /* drain */ } });
+    const cost = await fileReadsDuring(async () => { for await (const _record of f.store.records()) { } });
     expect(cost.authority).toBe(1);
   }, 60_000);
 

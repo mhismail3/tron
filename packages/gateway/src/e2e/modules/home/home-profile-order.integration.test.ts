@@ -6,8 +6,6 @@ import { readHomeProfile } from "../../../modules/home/home-profile.js";
 it("SQL profile record pages retain native kind/creation/ID ordering across a cursor, not random UUID order", async () => {
   const f = await fixture("profile-order");
   for (let index = 0; index < 17; index++) {
-    // The oldest record sorts LAST by UUID: a projection must not turn the
-    // original chronological contract into a chance-dependent array order.
     const id = index === 0 ? "ffffffff-ffff-4fff-8fff-ffffffffffff" : `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
     await f.store.createNote({ commandId: `profile-order-${index}`, record: {
       kind: "note", id, scope: "personal", createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),

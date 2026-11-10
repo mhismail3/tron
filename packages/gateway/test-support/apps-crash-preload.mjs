@@ -16,7 +16,6 @@ if (process.env.TRON_APPS_CRASH_CUT === "retirement") {
   fs.rm = async (path, ...args) => {
     if (String(path).startsWith(process.env.TRON_APPS_CRASH_ROOT + "/tron/workspace/state/apps/.removed-")
       && /\/\.removed-[a-z0-9-]+-[a-f0-9]{12}$/.test(String(path))) {
-      // remove() has already fsynced the renamed parent; hold before erasing data.
       await globalThis[Symbol.for("tron.apps.crashCut")]();
     }
     return rm(path, ...args);
@@ -24,8 +23,6 @@ if (process.env.TRON_APPS_CRASH_CUT === "retirement") {
   syncBuiltinESMExports();
 }
 
-// Install before durable-json captures its production FS functions. Only this
-// child and its exact temporary Apps sources can encounter this test-only cut.
 if (process.env.TRON_APPS_CRASH_CUT === "source") {
   const open = fs.open;
   fs.open = async (...args) => {

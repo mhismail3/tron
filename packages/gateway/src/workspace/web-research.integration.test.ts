@@ -5,9 +5,6 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { WebResearch } from "./web-research.js";
 
-/** HTTP/socket integration for the shared owner's nonduplicated boundaries:
- * global dispatch limits, streamed body bounds, pre-disclosure redirect safety,
- * and stored-byte TTL. Runtime/role/status semantics are covered by Gateway E2E. */
 it("bounds concurrent callers, rejects oversized streams and unsafe redirects, and expires scoped bytes", async () => {
   let active = 0; let peak = 0; let providerCalls = 0; let originCalls = 0;
   let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; });
@@ -39,7 +36,6 @@ it("bounds concurrent callers, rejects oversized streams and unsafe redirects, a
   try {
     const first = service.execute("home", { op: "search", query: "held-home" });
     const second = service.execute("worker", { op: "search", query: "held-worker" });
-    // Synchronize on the real socket requests rather than a timing sleep.
     const ready = Date.now() + 2000;
     while (providerCalls < 2 && Date.now() < ready) await new Promise<void>(resolve => setImmediate(resolve));
     expect(providerCalls).toBe(2);

@@ -20,7 +20,6 @@ it("durably publishes new display bytes once and reuses them for distinct retain
     await store.initialize();
     const source = "// original snapshot\n";
     await writeFile(join(root, "Snapshot.swift"), source);
-    // A valid but unreferenced inode models a prior interrupted publication.
     const digest = createHash("sha256").update(source).digest("hex");
     const object = join(root, "gateway/display-artifacts/objects", digest.slice(0, 2), digest.slice(2));
     await mkdir(dirname(object), { recursive: true });
@@ -28,11 +27,11 @@ it("durably publishes new display bytes once and reuses them for distinct retain
     const orphan = await stat(object);
     drainDurableWriteStats();
     const first = await store.ingest(root, "Snapshot.swift", "first-session");
-    expect(drainDurableWriteStats().count).toBe(3); // object bytes, metadata, metadata directory
+    expect(drainDurableWriteStats().count).toBe(3);
     const retained = await stat(join(root, "gateway/display-artifacts/artifacts", first.id, "content"));
-    expect([retained.dev, retained.ino]).toEqual([orphan.dev, orphan.ino]); // actual existing-object path
+    expect([retained.dev, retained.ino]).toEqual([orphan.dev, orphan.ino]);
     const second = await store.ingest(root, "Snapshot.swift", "second-session");
-    expect(drainDurableWriteStats().count).toBe(2); // metadata and directory; staged duplicate is discarded
+    expect(drainDurableWriteStats().count).toBe(2);
     expect(second.id).not.toBe(first.id);
     await rm(join(root, "Snapshot.swift"));
     const reopened = new DisplayArtifactStore(root);
@@ -75,8 +74,6 @@ it("durably removes unowned artifact directories in one maintenance cut without 
     try {
       drainDurableWriteStats();
       await store.maintain(async () => new Set(["live-session"]));
-      // Two retained metadata publications (reader + surviving owner), then
-      // one directory sync for the whole removed set, not two per deleted file.
       expect(drainDurableWriteStats().count).toBe(5);
       for (const artifact of retired) {
         await expect(stat(join(root, "gateway/display-artifacts/artifacts", artifact.id))).rejects.toMatchObject({ code: "ENOENT" });
@@ -129,8 +126,6 @@ it("synchronizes maintenance deletion when the last reader releases during metad
     const syncing = new Promise<void>(resolve => { reachedSync = resolve; });
     const resume = new Promise<void>(resolve => { resumeSync = resolve; });
     let held = false;
-    // Gate the real syscall, not store logic: maintenance already observed the
-    // reader and is publishing empty-owner metadata before the release wins.
     const sync = vi.spyOn(prototype, "sync").mockImplementation(async function (this: typeof handle) {
       if (!held) { held = true; reachedSync(); await resume; }
       await realSync.call(this);
@@ -140,8 +135,6 @@ it("synchronizes maintenance deletion when the last reader releases during metad
     maintenance = store.maintain(async () => new Set(["live-session"]));
     await syncing;
     releasing = reader.release();
-    // Public reader-cap admission proves release decremented its reservation;
-    // release itself cannot finish until it joins maintenance's mutation lane.
     leases.push(await waitFor(async () => {
       try { return await store.acquire(live.id, "live-session"); }
       catch (error) { if ((error as { code?: string }).code === "busy") return undefined; throw error; }
@@ -149,7 +142,7 @@ it("synchronizes maintenance deletion when the last reader releases during metad
     resumeSync();
     await maintenance;
     await releasing;
-    expect(drainDurableWriteStats().count).toBe(3); // metadata + its directory + deletion parent
+    expect(drainDurableWriteStats().count).toBe(3);
     await expect(stat(join(root, "gateway/display-artifacts/artifacts", deleted.id))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(store.acquire(deleted.id, "deleted-session")).rejects.toMatchObject({ code: "not_found" });
     const reopened = new DisplayArtifactStore(root);
@@ -190,7 +183,6 @@ it("retains only authorized sibling Markdown images through source removal, cold
     await waitFor(() => !fixture.slot.isBusy, "Markdown display idle");
     const row = fixture.slot.snapshot().transcript.findLast(item => item.kind === "message" && item.display?.title === "Review images");
     if (row?.kind !== "message" || !row.display?.artifact) throw new Error("Markdown display missing");
-    // Read the actual projected contract, without an implementation helper.
     const display = row.display as typeof row.display & { markdownImages?: Array<{ destination: string; artifact: { id: string } }> };
     expect(display.markdownImages?.map(image => image.destination)).toEqual(["preview.png"]);
     const imageID = display.markdownImages![0]!.artifact.id;

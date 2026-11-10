@@ -1,35 +1,5 @@
 #!/usr/bin/env bash
 # The one repository owner of the pinned development Node (#242, #244).
-#
-#   scripts/tron-node                 print the absolute path of the pinned `node`
-#   scripts/tron-node exec CMD...     run CMD with that Node's directory first on PATH
-#   scripts/tron-node install         install the pinned Node into the verified cache
-#   scripts/tron-node status [--online]
-#                                     report the pin and its toolchain; --online also
-#                                     reports newer patches and the major's support window
-#   scripts/tron-node pin VERSION     move the pin: verify both macOS archives against
-#                                     SHASUMS256.txt and rewrite .node-version, the
-#                                     digests in config/ci-toolchain.env and their
-#                                     compiled-in copies (scripts/node-pin-mirrors.py)
-#
-# `.node-version` is the only version authority. Candidates, in order:
-#   1. TRON_NODE_BIN (absolute; an explicit choice that fails loudly),
-#   2. the exact nvm directory ($NVM_DIR or ~/.nvm)/versions/node/v<pin>,
-#   3. the checksum-verified cache `install` fills (scripts/install-ci-tools.sh
-#      node): TRON_CI_TOOLS_DIR, else this checkout's and then the primary
-#      checkout's `.ci-tools`, so one install serves every linked worktree,
-#   4. each `node` on PATH in order, then Homebrew,
-# each accepted only when it reports exactly v<pin>, has a sibling `npm`, and is
-# a development toolchain rather than a signed Gateway runtime. A shell spawned
-# by a Gateway has that Gateway's payload runtime first on PATH; it answers the
-# pinned version and has an npm alias, but its hardened runtime refuses the
-# unsigned native add-ons development loads (Vitest's Rolldown) and it
-# ships no npx, so it is never chosen here.
-#
-# `status` and `pin` never run as part of a build: `status` only reports, and
-# `pin` is the one deliberate update (and, with the earlier version, rollback)
-# of the development, CI and bundled-runtime pin. The update rule is in
-# docs/development.md#toolchain.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -48,8 +18,6 @@ NODE_VERSION="$(<"$VERSION_FILE")"
 
 INSTALL_HINT="install it with \`scripts/tron-node install\` (checksum-verified) or \`nvm install $NODE_VERSION\`, or set TRON_NODE_BIN to an absolute Node v$NODE_VERSION that has a sibling npm"
 
-# Only the release commands read the archive pins; resolving needs nothing but
-# .node-version, so fixtures that copy just this script keep resolving.
 load_release_pins() {
   # shellcheck disable=SC1091
   source "$ROOT/config/ci-toolchain.env" || die "missing release pins: $ROOT/config/ci-toolchain.env"
@@ -63,8 +31,6 @@ node_architecture() {
   esac
 }
 
-# The verified caches, most specific first. A linked worktree shares the primary
-# checkout's cache; an explicit TRON_CI_TOOLS_DIR is the only cache.
 cache_dirs() {
   if [[ -n "${TRON_CI_TOOLS_DIR:-}" ]]; then
     printf '%s\n' "$TRON_CI_TOOLS_DIR"
@@ -78,21 +44,16 @@ cache_dirs() {
   fi
 }
 
-# Why `$1` is a Gateway runtime rather than a development toolchain, or nothing.
 gateway_runtime_reason() {
   local real
   real="$(realpath "$1" 2>/dev/null)" || real="$1"
   case "$real" in
     *.app/Contents/*) echo "it is inside an app bundle"; return ;;
   esac
-  # A staged or installed Gateway payload: <payload>/runtime/node-<arch> beside
-  # <payload>/manifest.json (packages/mac-app/scripts/bundle-gateway.sh).
   if [[ "$(basename "$(dirname "$real")")" == runtime && -f "$(dirname "$(dirname "$real")")/manifest.json" ]]; then
     echo "it is a Gateway payload runtime"
     return
   fi
-  # The cause itself, wherever the binary was copied: a hardened runtime without
-  # disable-library-validation cannot load unsigned native add-ons.
   if [[ -x /usr/bin/codesign ]]; then
     local signature
     if signature="$(/usr/bin/codesign -d --verbose=1 --entitlements - --xml "$real" 2>&1)" \
@@ -103,7 +64,6 @@ gateway_runtime_reason() {
 }
 
 REJECTED=()
-# Prints nothing and returns 1 with the reason in REASON when `$1` is not usable.
 admit() {
   local candidate="$1" actual runtime
   REASON=""
@@ -150,7 +110,6 @@ resolve() {
   exit 127
 }
 
-# Fetch a release-metadata URL into $2; failures name the URL and never guess.
 fetch() {
   curl -fsSL --retry 2 --max-time 60 "$1" -o "$2" || die "could not fetch $1"
 }
@@ -239,14 +198,12 @@ pin() {
       "node-v$version-darwin-$arch/bin/node" "node-v$version-darwin-$arch/lib/node_modules/npm" \
       "node-v$version-darwin-$arch/include/node" \
       || die "$archive has no bin/node, npm tree or C headers"
-    # macOS ships bash 3.2: no associative arrays.
     upper="$(printf '%s' "$arch" | tr '[:lower:]' '[:upper:]')"
     assignments+=("TRON_NODE_${upper}_ARCHIVE_SHA256=$digest"
       "TRON_NODE_${upper}_RUNTIME_SHA256=$(shasum -a 256 "$work/$arch/bin/node" | awk '{print $1}')")
     npm_digest="$(python3 "$ROOT/scripts/hash-npm-runtime.py" "$work/$arch/lib/node_modules/npm")"
     npm_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' \
       "$work/$arch/lib/node_modules/npm/package.json")"
-    # Bundle assembly stages one npm tree for both architectures.
     [[ -z "$previous_npm" || "$previous_npm" == "$npm_digest $npm_version" ]] \
       || die "the arm64 and x64 archives of v$version carry different npm trees"
     previous_npm="$npm_digest $npm_version"
@@ -271,7 +228,6 @@ os.replace(path + ".tmp", path)
 PY
   local from="$NODE_VERSION"
   printf '%s\n' "$version" >"$VERSION_FILE.tmp" && mv "$VERSION_FILE.tmp" "$VERSION_FILE"
-  # The signed app, the payload deployer and the native client compile copies in.
   python3 "$ROOT/scripts/node-pin-mirrors.py" write --headers "$work/arm64/include/node" \
     || die "could not rewrite the compiled-in Node pins; .node-version and config/ci-toolchain.env are already updated"
   echo "pinned Node v$version (was v$from) with npm $npm_version; archives verified against SHASUMS256.txt"
@@ -289,16 +245,12 @@ case "${1:-}" in
     shift
     (($#)) || die "usage: scripts/tron-node exec COMMAND [ARGUMENTS...]"
     node="$(resolve)"
-    # npm's launchers use `/usr/bin/env node`; the resolved directory goes first
-    # so every child runs this toolchain. npm's node-gyp runs Python inside the
-    # pinned npm tree, which must not gain __pycache__ (#638).
     export PATH="$(dirname "$node"):$PATH" PYTHONDONTWRITEBYTECODE=1
     exec "$@"
     ;;
   install)
     shift
     (($# == 0)) || die "usage: scripts/tron-node install"
-    # The primary checkout's cache serves every linked worktree.
     TRON_CI_TOOLS_DIR="$(cache_dirs | tail -n 1)" "$ROOT/scripts/install-ci-tools.sh" node
     resolve
     ;;
@@ -311,7 +263,21 @@ case "${1:-}" in
     pin "$@"
     ;;
   -h|--help)
-    sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    cat <<'EOF'
+The one repository owner of the pinned development Node (#242, #244).
+
+  scripts/tron-node                 print the absolute path of the pinned `node`
+  scripts/tron-node exec CMD...     run CMD with that Node's directory first on PATH
+  scripts/tron-node install         install the pinned Node into the verified cache
+  scripts/tron-node status [--online]
+                                    report the pin and its toolchain; --online also
+                                    reports newer patches and the major's support window
+  scripts/tron-node pin VERSION     move the pin: verify both macOS archives against
+                                    SHASUMS256.txt and rewrite .node-version, the
+                                    digests in config/ci-toolchain.env and their
+                                    compiled-in copies (scripts/node-pin-mirrors.py)
+
+EOF
     ;;
   *)
     die "usage: scripts/tron-node [exec COMMAND [ARGUMENTS...] | install | status [--online] | pin X.Y.Z]"

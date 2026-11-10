@@ -5,10 +5,7 @@ import { boundCommandContent } from "../projection/projection.js";
 import { redactCredentials } from "../../util/credential-redaction.js";
 import { GatewayError } from "../../errors.js";
 
-/** The third-party package that owns subagent discovery. */
 const SUBAGENT_PACKAGE = "pi-subagents";
-/** Presentation projection only: the available-subagent list is capped so an
- * unbounded agent directory cannot enlarge `session.resources`. */
 const MAX_SUBAGENTS = 128;
 const MAX_DIAGNOSTIC_CHARACTERS = 512;
 const DISCOVERY_SOURCES = ["builtin", "package", "user", "project"] as const;
@@ -22,11 +19,7 @@ export interface AvailableSubagent {
   thinking?: string;
   source: SubagentDiscoverySource;
   distribution: ResourceDistribution;
-  /** Absolute definition file, when discovery reports one. Internal attribution
-   * evidence for `packages.list` (`availableSubagentRow` keeps it off the wire). */
   filePath?: string;
-  /** The definition's body (its system prompt). Internal: only the bounded
-   * `session.subagentDetail` read publishes it, never `session.resources`. */
   systemPrompt?: string;
 }
 
@@ -41,7 +34,6 @@ interface SubagentCatalogRequest {
   cwd: string;
   settingsManager: SettingsManager;
   managedSubagents?: ManagedSubagents;
-  /** Overrides loading pi-subagents' own discovery module (used by tests). */
   loadDiscovery?: (packageRoot: string) => Promise<unknown>;
 }
 
@@ -49,17 +41,10 @@ function isDiscoverySource(value: unknown): value is SubagentDiscoverySource {
   return typeof value === "string" && (DISCOVERY_SOURCES as readonly string[]).includes(value);
 }
 
-/** builtin and package agents ship inside the pi-subagents package, so they are
- * External; user and project agents are Local. */
 function subagentDistribution(source: SubagentDiscoverySource): ResourceDistribution {
   return source === "builtin" || source === "package" ? "external" : "local";
 }
 
-/** Normalizes pi-subagents' discovery output into bounded presentation rows.
- * Grouped objects (`{ builtin: [...], user: [...] }`), a flat array, and a
- * `{ agents: [...] }` object are all admitted; unknown sources are dropped. A
- * duplicate name keeps the more specific scope (project > user > package >
- * builtin), matching the package's own merge precedence. */
 function collectSubagents(raw: unknown): AvailableSubagent[] {
   const groups: Array<{ source?: SubagentDiscoverySource; records: unknown[] }> = [];
   if (Array.isArray(raw)) {
@@ -87,8 +72,6 @@ function collectSubagents(raw: unknown): AvailableSubagent[] {
 function projectSubagent(value: unknown, groupSource?: SubagentDiscoverySource): AvailableSubagent | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
-  // discoverAgentsAll returns every defined agent; only discoverAgents applies
-  // the package's disabled filtering, so drop disabled definitions here too.
   if (record.disabled === true) return undefined;
   const name = typeof record.name === "string" ? record.name : undefined;
   const source = isDiscoverySource(record.source) ? record.source : groupSource;
@@ -110,9 +93,6 @@ function projectSubagent(value: unknown, groupSource?: SubagentDiscoverySource):
   };
 }
 
-/** The wire row `session.resources` publishes for one subagent. The definition
- * file path is Gateway-internal attribution evidence for `packages.list`, so it
- * never leaves the process; the body is `subagentDetail`'s alone. */
 export function availableSubagentRow(subagent: AvailableSubagent): AvailableSubagent {
   return {
     name: subagent.name,
@@ -134,9 +114,6 @@ async function discoverAgents(discovery: unknown, cwd: string): Promise<unknown>
   throw new Error(`${SUBAGENT_PACKAGE} exposes no agent discovery`);
 }
 
-/** Fail-soft discovery for `session.resources`. A missing package, a failed
- * import, or an unexpected export shape returns an empty list plus one bounded
- * diagnostic; it never rejects, so subagents cannot take down the response. */
 export async function loadSubagentCatalog(request: SubagentCatalogRequest): Promise<SubagentCatalog> {
   try {
     const managed = request.managedSubagents;
@@ -170,9 +147,6 @@ export interface SubagentDetail extends AvailableSubagent {
   contentTruncated?: boolean;
 }
 
-/** One discovered subagent's wire row plus its definition body, credential-
- * redacted and bounded like a command's source document; the file path stays
- * internal. A name discovery no longer reports is not found. */
 export function subagentDetail(subagents: readonly AvailableSubagent[], name: string): SubagentDetail {
   const subagent = subagents.find((candidate) => candidate.name === name);
   if (!subagent) throw new GatewayError("not_found", "That subagent is no longer available");

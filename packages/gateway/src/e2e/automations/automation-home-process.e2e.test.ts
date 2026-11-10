@@ -2,12 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BACKGROUND_MODEL, SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-/**
- * A Home automation wake across real Gateway-process restarts (#2234): a source
- * Gateway process, the production loopback WebSocket and local credential, and
- * a scripted HTTP provider as the only scripted party.
- */
-
 const gateways: GatewayProcess[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -25,7 +19,6 @@ async function homeTranscript(client: ProcessClient, sessionId: string): Promise
   return opened.session;
 }
 
-/** Each startup records its post-listen Home task recovery once; `count` names this process's start. */
 async function startupRecovered(gateway: GatewayProcess, count: number): Promise<void> {
   await waitFor(async () => (await gateway.log()).filter((record) => record.event === "gateway.startup-step"
     && record.step === "home-task-recovery").length === count || undefined, `Gateway start ${count} finished its startup recovery`);
@@ -46,9 +39,7 @@ describe("a Home automation wake across real Gateway-process restarts", () => {
     await ok(phone, "settings.change", { commandId: "home-wake-background-queue", target: { kind: "home" }, changes: [
       { key: "model.queue[role=background]", layer: "session", op: "set", value: [`${SCRIPTED_PROVIDER}/${BACKGROUND_MODEL}`] },
     ] });
-    // Home memory's summaries go to the background model, answered apart from the scripted turns.
     gateway.provider.answerModel(BACKGROUND_MODEL, () => ({ chunks: ["Memory line."] }));
-    // A started Home conversation, so paused delivery recovers into this chapter.
     gateway.provider.script([() => ({ chunks: ["Home is ready."] })]);
     await ok(phone, "home.prompt", { commandId: "home-wake-bootstrap", text: "Initialize this Home conversation." });
     await waitFor(async () => {
@@ -66,7 +57,6 @@ describe("a Home automation wake across real Gateway-process restarts", () => {
     const automationId = created.id as string;
     const fired = await ok(phone, "automation.runNow", { commandId: "home-wake-run-now", automationId, expectedRevision: created.revision });
     const runId = fired.runId as string;
-    // Paused: the run is retained, Home has not woken.
     expect((await ok(phone, "automation.run.get", { automationId, runId })).state).toBe("queued");
     expect(automationMessages((await homeTranscript(phone, sessionId)).transcript)).toHaveLength(0);
     expect(automationRequests(gateway)).toHaveLength(0);
@@ -91,7 +81,6 @@ describe("a Home automation wake across real Gateway-process restarts", () => {
     expect(automationRequests(gateway)).toHaveLength(1);
     await phone.close();
 
-    // A second restart finds the run delivered: no further message and no model turn.
     await gateway.restart();
     await startupRecovered(gateway, 3);
     phone = await gateway.connect();
@@ -99,11 +88,8 @@ describe("a Home automation wake across real Gateway-process restarts", () => {
     const after = await homeTranscript(phone, sessionId);
     expect(after.phase).toBe("idle");
     expect(after.transcript.map((item) => item.id)).toEqual(delivered.home.transcript.map((item) => item.id));
-    // Delivered once in the ledger: the current, pending-Home and history runs hold
-    // exactly this one, succeeded, so no unfinished run is left to claim.
     const runs = await ok(phone, "automation.run.list", { automationId });
     expect((runs.runs as Array<{ runId: string; state: string }>).map((run) => [run.runId, run.state])).toEqual([[runId, "succeeded"]]);
-    // Home memory may summarize on the same provider, so the wake turn is the one carrying the automation text.
     expect(automationRequests(gateway)).toHaveLength(1);
     expect(gateway.provider.errors).toEqual([]);
     await phone.close();

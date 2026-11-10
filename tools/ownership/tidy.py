@@ -29,9 +29,7 @@ DAY = 86400
 SCRATCH, SCRATCH_DAYS = ".scratch", 7
 EVIDENCE, EVIDENCE_DAYS = "test-results", 14
 IDLE_DAYS, BRANCH_IDLE_DAYS = 3, 14
-# Ignored paths with a named writer, as exact repo-relative paths. Anything else ignored is
-# residue: delete it, or add its writer here in the change that adds its .gitignore rule.
-REGENERABLE = {  # deleting loses nothing; the writer recreates it
+REGENERABLE = {
     SCRATCH, EVIDENCE, ".ci-tools", "packages/gateway/node_modules", "packages/gateway/dist",
     "packages/push-relay/node_modules", "packages/push-relay/dist", "packages/push-relay/dist-sandbox",
     "packages/push-relay/.wrangler", "packages/ios-app/TronMobile.xcodeproj", "packages/mac-app/TronMac.xcodeproj",
@@ -40,15 +38,11 @@ REGENERABLE = {  # deleting loses nothing; the writer recreates it
     "packages/mac-app/Sources/Resources/Gateway",
     "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS",
     "packages/mac-app/Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Resources",
-    # scripts/tron-ios-device: device-build DerivedData and the IPA it stages for the share host.
     "packages/ios-app/build/DerivedData", "packages/ios-app/build/DerivedData-fast-debug", "packages/ios-app/build/share",
-    # SwiftPM, when MacTerminalSSH is built on its own; the package's .gitignore keeps it out.
     "packages/ios-app/MacTerminalSSH/Package.resolved",
 }
-# Pi's subagent tool tells agents to write workflow scripts under the request cwd "such as
-# .pi/<name>.js": loose files directly in .pi/ are scratch, aged and pruned like .scratch/.
 PI_SCRATCH = ".pi"
-LOCAL = {".claude", "progress.md", "packages/mac-app/.env.local"}  # per-user state: reported never, pruned never
+LOCAL = {".claude", "progress.md", "packages/mac-app/.env.local"}
 PROTECTED_BRANCHES = {"main"}
 TEST_NAME = re.compile(r"(^test[-_])|(\.test\.)")
 SKIP_SCAN = (".md", ".tsv", ".module.json", ".png", ".jpg", ".pdf", ".tgz", ".caf", ".ttf", ".otf", ".icns")
@@ -155,7 +149,7 @@ def dead_tooling() -> list[str]:
 
     def keys(path: str) -> set[str]:
         name = path.rsplit("/", 1)[-1]
-        return {name, name[:-3]} if name.endswith(".py") else {name}  # Python modules are imported by stem
+        return {name, name[:-3]} if name.endswith(".py") else {name}
     names = set().union(*(keys(p) for p in tooling)) if tooling else set()
     if not names:
         return []
@@ -208,25 +202,22 @@ def report(prune: bool) -> dict:
                         out["bytecode"].append(str(tree / entry))
                     elif known(entry, tree) is None:
                         out["residue"].append(str(tree / entry))
-                    # The same predicate as worktree removal: anything but regenerable output is local data.
                     if not entry.endswith("__pycache__") and known(entry, tree) != "regenerable":
                         dirty = True
             if code != "!!":
                 dirty = True
         if tree == primary:
             out["tracked_ignored"] = tracked_ignored(tree)
-        for entry in sorted(tree.iterdir()):  # git status does not list empty ignored directories
+        for entry in sorted(tree.iterdir()):
             if entry.is_dir() and entry.name not in tops | {".git"} and known(entry.name, tree) is None \
                     and not any(entry.iterdir()):
                 out["residue"].append(str(entry))
-        # A linked worktree with a live process or local changes is another worker's: its
-        # scratch and evidence are theirs to keep. The shared primary checkout ages by policy.
         real = os.path.realpath(tree)
         if tree != primary and (dirty or cwds is None or any(c == real or c.startswith(real + os.sep) for c in cwds)):
             continue
         for folder, days in ((SCRATCH, SCRATCH_DAYS), (EVIDENCE, EVIDENCE_DAYS)):
             for base in [tree / folder, *tree.glob(f"packages/*/{folder}")]:
-                if base.is_dir() and not base.is_symlink():  # never age, or prune, files outside the checkout
+                if base.is_dir() and not base.is_symlink():
                     out["expired"] += [str(p) for p in sorted(base.iterdir()) if age_days(p) > days]
         pi = tree / PI_SCRATCH
         if pi.is_dir() and not pi.is_symlink():
@@ -239,8 +230,6 @@ def report(prune: bool) -> dict:
         path = Path(w["worktree"])
         branch = str(w.get("branch", "")).removeprefix("refs/heads/")
         status = git("status", "--porcelain", "--ignored", "--untracked-files=normal", cwd=path, check=False)
-        # Anything but regenerable output is local data: `git worktree remove` would delete ignored
-        # files (such as .env.local) without asking, so such a worktree is never pruned.
         dirty = any(not line.startswith("!! ") or known(unquote(line[3:]).rstrip("/"), path) != "regenerable"
                     for line in status.splitlines())
         real = os.path.realpath(path)
@@ -274,10 +263,7 @@ def report(prune: bool) -> dict:
             if not path.exists() and not path.is_symlink():
                 out["pruned"].append(str(path))
         for w in out["worktrees"]:
-            # A detached worktree belongs to the tool that made it (verify batch lanes, base checks).
             if w["branch"] and w["merged"] and not w["dirty"] and not w["live"] and w["idleDays"] >= IDLE_DAYS:
-                # --force only because what remains is regenerable ignored output (node_modules, build).
-                # bundle-gateway.sh seals its payload read-only, and Xcode copies it into DerivedData.
                 try:
                     for directory, _, _ in os.walk(w["path"]):
                         os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
@@ -359,7 +345,7 @@ def main(argv: list[str]) -> int:
             return 2
         tree = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd()).strip())
         found = here(tree)
-        if "--landing" in argv:  # scratch and live subagent trees are allowed while the task runs
+        if "--landing" in argv:
             found = {key: items for key, items in found.items() if key in ("untracked", "residue")}
         count = sum(len(items) for items in found.values())
         if "--json" in argv:

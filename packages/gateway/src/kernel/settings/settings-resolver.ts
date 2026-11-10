@@ -27,7 +27,6 @@ function piDocument(stores: SettingsStores, layer: StoreLayer): Record<string, u
   return layer === "global" ? stores.global : layer === "project" ? stores.project?.document : undefined;
 }
 
-/** Read one layer's raw value for a key instance from that layer's store. */
 export function readBinding(stores: SettingsStores, layer: StoreLayer, binding: Binding, qualifiers: Qualifiers, qualifiedOnly: boolean, keyId?: string): unknown {
   switch (binding.store) {
     case "pi": {
@@ -69,8 +68,6 @@ export function readBinding(stores: SettingsStores, layer: StoreLayer, binding: 
   }
 }
 
-/** pi's trust rule (ProjectTrustStore): the nearest saved decision on the path
- * or one of its parents covers it, so the row shows what actually applies. */
 function nearestTrustDecision(decisions: Record<string, boolean>, project: string): boolean | undefined {
   for (let current = project; ; current = dirname(current)) {
     if (Object.prototype.hasOwnProperty.call(decisions, current)) return decisions[current];
@@ -78,8 +75,6 @@ function nearestTrustDecision(decisions: Record<string, boolean>, project: strin
   }
 }
 
-/** A composing key's value from the layers below `layer`: what that layer's
- * entries are relative to. */
 export function composedBelow(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers, layer: StoredLayer): unknown {
   const facts = precedenceFacts(stores, key, qualifiers);
   return facts.value(precedence.Below(facts.key, facts.layers, CORE_LAYER[layer]));
@@ -96,11 +91,6 @@ const CORE_LAYER = { global: "Global", home: "Home", session: "Session", project
 const STORED_LAYER = { Global: "global", Home: "home", Session: "session", Project: "project" } as const satisfies Record<Layer, StoredLayer>;
 const NO_VALUE: Opt = { $: "None" };
 
-/** One key instance as proof block settings/precedence (packages/core) decides it: each stored layer's presence,
- * binding, values and whether it applies. The block never sees a value, only its token: 0 is the instance's
- * default, and the layer at index n from the bottom (Global is 0) has 2n+1 for its per-model value and 2n+2 for
- * its plain value. `value` turns the block's term over tokens back into a value, composing with the key's own
- * type. */
 function precedenceFacts(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers) {
   const values: unknown[] = [keyDefault(key, qualifiers)];
   const entry = (layer: StoredLayer, index: number): Entry => {
@@ -124,26 +114,20 @@ function precedenceFacts(stores: SettingsStores, key: KeyDeclaration, qualifiers
   };
 }
 
-/** Resolve every key (or the requested ones) for a target. */
 export function resolveSettings(schema: SettingsSchema, target: SettingsTarget, stores: SettingsStores, options: ResolveOptions): Resolution {
   const diagnostics = stores.project
     ? projectSettingsDiagnostics(schema, stores.project.document, join(stores.project.root, ".pi", "settings.json")) : { diagnostics: [] };
   const applicable = schema.KEYS.map(key => keyForHome(key, stores.layers.includes("home")));
   const keys = options.keys ? applicable.filter(key => options.keys!.includes(key.id)) : applicable;
   const resolved: ResolvedKey[] = [];
-  // Model-qualified keys resolve for the target's effective chat model, which
-  // is itself an ordinary key; resolve it first.
   const chatModelKey = applicable.find(key => key.id === "model.ref[role=chat]")!;
   const noDependencies = () => undefined;
   const chatModel = resolveInstance(schema, chatModelKey, chatModelKey.fixed ?? {}, stores, options, noDependencies).value as { provider: string; id: string } | undefined;
-  // Dependencies are ordinary keys resolved for the same target (doc 7.5).
   const dependencyValue = (id: string) => id === chatModelKey.id ? chatModel
     : resolveInstance(schema, keyForHome(schema.schemaKey(id), stores.layers.includes("home")), schema.schemaKey(id).fixed ?? {}, stores, options, noDependencies).value;
   const modelQualifier = chatModel ? `${chatModel.provider}/${chatModel.id}` : undefined;
 
   for (const key of keys) {
-    // A key belongs to a target that has at least one of its allowed layers
-    // (doc 3.3): Home-only profile keys never appear on an ordinary chat.
     if (target.kind === "session" && !stores.layers.includes("home") && key.layers.home && !key.layers.session) continue;
     if (!Object.keys(key.layers).some(layer => stores.layers.includes(layer as StoreLayer) && scopeAdmitted(key, layer as StoreLayer))) continue;
     for (const qualifiers of instances(schema, key, target, stores, modelQualifier)) {
@@ -162,7 +146,6 @@ function instances(schema: SettingsSchema, key: KeyDeclaration, target: Settings
   if (key.qualifier === "model") {
     const onlyQualified = Object.values(key.layers).some(binding => binding.store === "pi" && binding.path.includes("{model}"));
     if (target.kind === "project" || target.kind === "global") {
-      // Repository inspection includes non-default models, not an inherited snapshot.
       const models = new Set<string>();
       if (target.kind === "global" && model) models.add(model);
       const layer = target.kind === "project" ? "project" : "global";
@@ -180,7 +163,6 @@ function instances(schema: SettingsSchema, key: KeyDeclaration, target: Settings
     return model ? [{ ...fixed, model }] : onlyQualified ? [] : [fixed];
   }
   if (key.qualifier === "device") {
-    // Global policy: the enrolled iPhones appear on the Mac target only.
     return target.kind === "global" ? Object.keys(stores.macTerminal).sort().map(device => ({ ...fixed, device })) : [];
   }
   if (key.qualifier === "project") {
@@ -216,7 +198,6 @@ function resolveInstance(
     if (!stores.layers.includes(layerId) && layerId !== "default") continue;
     if (layerId === "default") continue;
     if (!key.layers[layerId] || !scopeAdmitted(key, layerId)) continue;
-    // Only the Home chat has the Home recipe (doc 3.3); it has no Chat compaction layer.
     const entry = shown.find(candidate => candidate.layer === layerId);
     layerValues.push(entry
       ? { layer: scopeForStore(layerId), value: entry.value, display: format(entry.value), applied: entry.applied, ...(entry.reason ? { reason: entry.reason } : {}) }
@@ -224,7 +205,6 @@ function resolveInstance(
   }
 
   const badges: Badge[] = [];
-  // A per-model value is the one for this chat's model, named as the picker names it.
   if (qualifiers.model && key.qualifier === "model") badges.push({ kind: "scope", label: `For ${modelDisplayName(qualifiers.model, options.format)}`, detail: qualifiers.model });
   if (qualifiers.project && key.qualifier === "project") badges.push({ kind: "scope", label: qualifiers.project });
   if (notApplied) {
@@ -232,8 +212,6 @@ function resolveInstance(
       action: { kind: "reviewTrust", label: "Review trust" } });
   }
   badges.push(...storeStateBadges(key, qualifiers, stores, format));
-  // Capability clamping (doc 3.6): a value its dependency does not support
-  // resolves to the closest supported one, named by a Clamped badge.
   if (key.optionsSource && value !== undefined && layer !== "session") {
     const dependency = key.optionsSource.dependsOn.length ? dependencyValue(key.optionsSource.dependsOn[0]!) : undefined;
     if (dependency !== undefined) {
@@ -285,14 +263,11 @@ function resolveInstance(
   };
 }
 
-/** A `provider/id` model qualifier's display name, or the qualifier itself. */
 function modelDisplayName(qualifier: string, format: FormatContext): string {
   const slash = qualifier.indexOf("/");
   return (slash > 0 ? format.modelName({ provider: qualifier.slice(0, slash), id: qualifier.slice(slash + 1) }) : undefined) ?? qualifier;
 }
 
-/** Store-state badges (doc 5.6, 5.7): a Project value's git state, and a value
- * changed outside Tron with Apply again where it replaced a value Tron wrote. */
 function storeStateBadges(key: KeyDeclaration, qualifiers: Qualifiers, stores: SettingsStores, format: (value: unknown) => string): Badge[] {
   const badges: Badge[] = [];
   const projectBinding = key.layers.project;
@@ -324,7 +299,6 @@ function storeStateBadges(key: KeyDeclaration, qualifiers: Qualifiers, stores: S
   return badges;
 }
 
-/** The layers a target has (doc 3.3): a target has a layer when it has its store. */
 export function targetLayers(target: SettingsTarget, options: { home?: boolean; project?: boolean }): readonly StoreLayer[] {
   switch (target.kind) {
     case "global": return ["global", "default"];

@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 // Lists paired iPhones or binds one to a CoreDevice target for Gateway-driven installs.
-
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -49,7 +48,6 @@ export function parseArguments(args) {
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.help) { console.log(USAGE); return; }
-  // Never send the local-wrapper credential to an arbitrary remote hostname.
   const host = resolveDeploymentHost(options.host);
   const token = await readLocalCredential(join(options.tronHome, "gateway", "local-auth.json"));
   const result = await authenticatedRequest({

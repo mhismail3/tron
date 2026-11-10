@@ -4,17 +4,8 @@ import type { Actor, ChangeEntry } from "../kernel/settings/settings-record.js";
 import { formatStoredSetting, LAYER_LABELS, RENDERER_CONTRACT_VERSION, type Control, type ValueType } from "../kernel/settings/settings-types.js";
 import { scopeAdmitted } from "../kernel/settings/scope-resolution.js";
 
-/**
- * What a client is shown for each resolved key and section (docs/settings-model.md
- * 7.2, 7.5). The resolver holds values; this module holds how they are presented,
- * and it reads every key's declaration generically: no per-key code.
- */
-
 export const UPDATE_TRON_NOTE = "Update Tron to edit";
 
-/** The control a key renders with for a client (doc 7.5): the declared control
- * when the client has it, else the declared fallback, else read-only. A client
- * that names no controls gets every editable key read-only, with its display. */
 function negotiateControl(key: KeyDeclaration, clientControls: readonly string[] | undefined): { control?: Control; note?: string } {
   if (key.control === undefined) return {};
   if (key.control === "readOnly") return { control: "readOnly" };
@@ -32,17 +23,14 @@ export interface KeyPresentation {
   control?: Control;
   note?: string;
   valueKind: string;
-  /** The static choices, for a `choice` control. Dynamic options come from `settings.options`. */
   options?: readonly { value: unknown; label: string; detail?: string }[];
   range?: NonNullable<ValueType["range"]>;
   optionsSource?: { name: string; dependsOn: readonly string[] };
   confirm?: string;
   redacted?: true;
-  /** What to type into the key's text field or a list's new value, and a realistic example. */
   entry?: EntryGuidance;
   sessionOverridable: boolean;
   projectSettable: boolean;
-  /** Target-specific store/capability availability; Project masks remain visible. */
   editable: boolean;
   timing: KeyDeclaration["timing"];
   effect: KeyDeclaration["effect"];
@@ -59,7 +47,6 @@ function presentKey(key: KeyDeclaration, clientControls: readonly string[] | und
     ...(control ? { control } : {}),
     ...(note ? { note } : {}),
     valueKind: key.type.kind,
-    // Project files remain repository-owned; the app is an inspector there.
     sessionOverridable: key.sessionOverridable,
     projectSettable: key.projectSettable,
     editable: layer !== "project" && scopeAdmitted(key, layer) && key.writers.includes("ui") && binding !== undefined && binding.store !== "session-launch",
@@ -92,11 +79,9 @@ export interface PresentedResolution extends Omit<Resolution, "keys"> {
 }
 
 interface PresentationInput {
-  /** The controls the client names (`renderer.controls`); absent without a renderer. */
   controls?: readonly string[];
 }
 
-/** Who asked, as the iPhone's approval row names it. */
 function requesterLabel(actor: Actor): string {
   return actor.kind === "worker" && actor.taskId ? `Home task ${actor.taskId}` : actorLabel(actor);
 }
@@ -109,7 +94,6 @@ const KIND_LABELS = {
   preference: "preference", "standing-decision": "standing decision", "delegation-default": "delegation default", fact: "fact",
 } as const;
 
-/** How Changes shows a recorded profile value. Read-only presentation of audit. */
 export function formatProfileValue(value: unknown): string {
   if (value === null || value === undefined) return "Not in the profile";
   const item = value as Record<string, unknown> & { kind?: keyof typeof KIND_LABELS };
@@ -119,12 +103,8 @@ export function formatProfileValue(value: unknown): string {
   return `${item.confirmed ? "Confirmed" : "Inferred"} ${kind}: ${item.text ?? ""}`;
 }
 
-/** History is a disposable projection of permanent audit, not another schema or
- * value store. Retired keys keep their recorded values; known keys reuse their
- * declared formatter. Neither labels nor formatted values are written to audit. */
 export function presentHistoryEntry(schema: SettingsSchema, entry: ChangeEntry) {
   if (entry.key === HOME_PROFILE_SUBJECT.id) {
-    // A profile item's recorded value is its note's text and state (doc 6.4).
     return { ...entry, presentation: {
       label: HOME_PROFILE_SUBJECT.label, section: HOME_PROFILE_SUBJECT.group,
       actor: requesterLabel(entry.actor), layer: LAYER_LABELS[entry.layer],
@@ -132,7 +112,6 @@ export function presentHistoryEntry(schema: SettingsSchema, entry: ChangeEntry) 
     } };
   }
   if (entry.action) {
-    // An approval action (#1985) records its preview, not a stored value: show what was asked and how it ended.
     const title = (entry.after as { title?: unknown } | undefined)?.title;
     return { ...entry, presentation: {
       label: typeof title === "string" ? title : entry.key, actor: requesterLabel(entry.actor), layer: LAYER_LABELS[entry.layer],
@@ -144,7 +123,6 @@ export function presentHistoryEntry(schema: SettingsSchema, entry: ChangeEntry) 
   const redacted = entry.redacted || key?.redacted;
   const { before, after, fixedAt: _fixedAt, ...redactedEntry } = entry;
   const format = (value: unknown): string => formatStoredSetting(key?.type, value);
-  // A record subject's definition is never recorded: show what happened to it, by name.
   const name = subject ? entry.qualifiers?.[subject.qualifier] : undefined;
   const display = subject ? entry.op === "unset" ? { before: "Configured", after: "Removed" }
     : entry.added ? { before: "Not configured", after: "Added" } : { before: "Configured", after: "Changed" }

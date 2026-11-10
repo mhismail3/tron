@@ -1,6 +1,5 @@
 import type { AdministrativeDrainBlockerSummary, AdministrativeDrainSnapshot } from "../protocol/types.js";
 
-/** Reports blockers from the canonical drain loop without filling the persistent log. */
 export const DRAIN_WAIT_LOG_INTERVAL_MS = 15_000;
 
 type DrainMode = "restart" | "stop";
@@ -12,7 +11,6 @@ interface DrainOwner {
   administrativeDrainSnapshot(): AdministrativeDrainSnapshot;
 }
 
-/** One `gateway.<mode>-drain.waiting` record naming every summarized blocker. */
 export function logDrainBlockers(logger: DrainLogger, mode: DrainMode, snapshot: AdministrativeDrainSnapshot): void {
   const blockers = snapshot.blockers.map(({ sessionId, category, method, state, ageMs, progressAt }) => ({
     ...(sessionId ? { sessionId } : {}), category, ...(method ? { method } : {}), state, ageMs: ageMs ?? null,
@@ -23,12 +21,6 @@ export function logDrainBlockers(logger: DrainLogger, mode: DrainMode, snapshot:
   });
 }
 
-/**
- * The intentional stop's wait: it never cuts accepted work, so unlike the restart
- * drain it has no stall bound (a stop exits 0 and nothing relaunches to recover cut
- * work). What it shares is diagnosis: while blockers remain it names them on the
- * restart drain's cadence. Resolves with the final snapshot for the caller's proof.
- */
 export async function waitForStopDrain(
   sessions: DrainOwner,
   logger: DrainLogger,
@@ -52,9 +44,6 @@ type RestartDrainDecision =
   | { outcome: "unresolved-owners"; owners: AdministrativeDrainBlockerSummary[] }
   | { outcome: "stalled"; blocker: AdministrativeDrainBlockerSummary; ageMs: number };
 
-/** Tracks progress only for the oldest outstanding blocker; churn on other sessions is irrelevant.
- * The oldest blocker's progress is the latest on its own session: a Home task held between
- * turns makes no progress of its own while the async runs it waits on do (#2363). */
 export class RestartDrainProgress {
   private tracked: { id: string; state: string; progressAt?: string; admittedAt?: string; sinceMs: number } | undefined;
 
@@ -85,7 +74,6 @@ export class RestartDrainProgress {
       || this.tracked.progressAt !== progressAt
       || this.tracked.admittedAt !== oldest.admittedAt;
     if (signatureChanged) {
-      // A blocker without a progress signal is judged from admission.
       const signalAt = progressAt ?? oldest.admittedAt;
       const signalMs = signalAt ? Date.parse(signalAt) : Number.NaN;
       this.tracked = {

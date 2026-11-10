@@ -1,14 +1,3 @@
-/**
- * A Home task worker's prompt cache, proved on the wire (#1250). The worker runs in a real
- * RuntimeRegistry on a local OpenAI Responses endpoint, so every request crosses pi-ai's real
- * request builder and usage parser. The endpoint records each body and reports usage the way
- * OpenAI does: `input_tokens` includes `input_tokens_details.cached_tokens`.
- *
- * It proves the two things a cache regression needs: across the worker's turns the request
- * prefix (instructions, tools, earlier input items) is byte-stable and carries one
- * `prompt_cache_key`; and the task's published spend keeps fresh input apart from cache reads,
- * so a cache-read token is never counted as fresh input.
- */
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
@@ -34,8 +23,6 @@ afterAll(async () => {
 type Body = { model: string; input: unknown[]; tools?: unknown[]; prompt_cache_key?: string; [key: string]: unknown };
 interface Usage { input: number; cached: number; output: number }
 
-/** The worker's script: two tool turns, then the sealed report. Each response reports the
- * previous request's whole prompt as cached, the way a warm prefix cache answers. */
 async function responsesEndpoint() {
   const requests: Body[] = [];
   const usages: Usage[] = [];
@@ -46,9 +33,6 @@ async function responsesEndpoint() {
   ];
   const server = createServer((request, response) => {
     let raw = "";
-    // Decode the whole stream, not each chunk: a chunk may end inside a
-    // multi-byte character (the prompt's ’), which per-chunk decoding turns into
-    // U+FFFD and so changes the recorded prefix bytes (#2228).
     request.setEncoding("utf8");
     request.on("data", chunk => { raw += chunk; });
     request.on("end", () => {
@@ -90,12 +74,8 @@ describe("Home task worker prompt cache on the wire", { concurrent: false }, () 
     expect(final.terminalEvidence?.outcome).toBe("final");
     expect(wire.requests).toHaveLength(3);
 
-    // One cache key, the worker's own session, on every request.
     const keys = wire.requests.map(body => body.prompt_cache_key);
     expect(keys.every(key => key === run.sessionId)).toBe(true);
-    // Each request extends the previous one: the same tools in the same order and every
-    // earlier input item byte-identical (system/developer text included), so no per-turn
-    // nonce, timestamp or rebuilt prompt invalidates the cached prefix.
     for (let i = 1; i < wire.requests.length; i++) {
       const previous = wire.requests[i - 1]!, next = wire.requests[i]!;
       expect(JSON.stringify(next.tools)).toBe(JSON.stringify(previous.tools));
@@ -103,15 +83,12 @@ describe("Home task worker prompt cache on the wire", { concurrent: false }, () 
       expect(JSON.stringify(next.input.slice(0, previous.input.length))).toBe(JSON.stringify(previous.input));
     }
 
-    // Spend keeps fresh input, cache read and cache write apart; OpenAI's input_tokens
-    // includes the cached tokens, which must not reappear as fresh input.
     const fresh = wire.usages.reduce((sum, usage) => sum + usage.input - usage.cached, 0);
     const cacheRead = wire.usages.reduce((sum, usage) => sum + usage.cached, 0);
     const output = wire.usages.reduce((sum, usage) => sum + usage.output, 0);
     expect(cacheRead).toBeGreaterThan(fresh);
     const expected = { inputTokens: fresh, cacheReadTokens: cacheRead, cacheWriteTokens: 0, outputTokens: output };
     expect(final.spend).toMatchObject(expected);
-    // The durable record carries the same split, and the diagnostic reports it.
     const tasks = join(f.tronHome, "gateway/home/tasks");
     const file = (await readdir(tasks)).find(name => name.endsWith("cache-worker.json"))!;
     expect(JSON.parse(await readFile(join(tasks, file), "utf8")).spend).toMatchObject(expected);

@@ -5,12 +5,6 @@ import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode
 
 type TranscriptSessionReader = Pick<SessionManager, "getBranch"> & Partial<Pick<SessionManager, "getSessionId">>;
 
-/**
- * Returns exact tool-call IDs whose results are already owned by the current
- * canonical branch. Runtime tool state is a disposable overlay; once Pi has
- * persisted this exact result, callers must not publish a second runtime copy,
- * even when the result is outside the bounded transcript tail.
- */
 export function canonicalToolResultCallIDsFromBranch(branch: readonly SessionEntry[]): ReadonlySet<string> {
   const result = new Set<string>();
   for (const entry of branch) {
@@ -47,20 +41,10 @@ const COMPACT_LIVE_TOOL_JSON_BYTES = 12_000;
 const MAX_LIVE_TOOL_OUTPUT_BYTES = 48_000;
 const TRANSCRIPT_PAGE_BYTES = 600_000;
 const TRANSCRIPT_PAGE_ITEMS = 512;
-// Nested dynamic JSON is admitted by iOS before typed snapshot/page decoding.
-// Reserve structural headroom for live metadata and the response/event wrapper.
 const TRANSCRIPT_PAGE_NODES = 24_000;
 const SESSION_SNAPSHOT_NODES = 30_000;
 const MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES = 24;
-/** Leaves headroom for the response/event envelope under the 1 MiB socket cap. */
 const SESSION_SNAPSHOT_BYTES = 800_000;
-/**
- * Upper bound for one live streaming progress frame. Progress events republish
- * the cumulative streaming message, so an unbounded message amplifies every
- * token into a full-payload frame and can overrun the synchronization
- * quarantine during catch-up. The settled canonical message always pages
- * through transcript projection; only the transient live tail is trimmed here.
- */
 const STREAMING_PROGRESS_BYTES = 24_000;
 
 function boundedText(value: string): string {
@@ -166,11 +150,6 @@ function projectedSkillText(value: string): string {
     : value;
 }
 
-/**
- * The text a skill/prompt message's row shows: what the user typed, never the
- * expansions the canonical message carries before it. A receipt from before
- * multi-resource messages (#311) recorded that text as its one resource's arguments.
- */
 function invokedResourceText(invocation: InvocationProjection | undefined): string | undefined {
   if (!invocation?.resourceInvocations?.some(resource => resource.source !== "extension")) return undefined;
   return invocation.submittedText ?? invocation.arguments ?? "";
@@ -199,8 +178,6 @@ export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()
       const result: JsonValue[] = [];
       const length = Math.min(value.length, 1_000);
       for (let index = 0; index < length; index += 1) {
-        // Reading a hole yields undefined, which JSON.stringify represents as
-        // null. Push every slot explicitly so sparse arrays retain JSON shape.
         result.push(safeJson(value[index], depth + 1, seen));
       }
       seen.delete(value);
@@ -209,11 +186,6 @@ export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()
     const result: Record<string, JsonValue> = {};
     const usedKeys = new Set<string>();
     let entries = 0;
-    // Iterate lazily so a hostile object with millions of keys cannot first
-    // materialize the complete Object.entries array. Keys are data too: bound
-    // them before they become part of the projected object. A bounded key may
-    // collide with a sibling, so add a deterministic suffix instead of
-    // silently overwriting the earlier JSON property.
     for (const key in value) {
       if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
       if (entries >= 1_000) break;
@@ -234,10 +206,6 @@ export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()
         enumerable: true, configurable: true, writable: true });
       entries += 1;
     }
-    // `seen` is a recursion stack, not a global visited set. Pi reuses
-    // immutable metadata objects across resource entries; repeated siblings
-    // are valid JSON and must be projected again, while true back-edges still
-    // resolve to the bounded circular marker above.
     seen.delete(value);
     return result;
   }
@@ -249,24 +217,15 @@ function boundedUtf8Tail(value: string, maximumBytes: number): { value: string; 
   return { value: bounded, truncated: bounded.length !== value.length };
 }
 
-/** Extracts only explicit display text from Pi's current AgentToolResult. Arbitrary
- * detail objects remain structured JSON and are never guessed into user-facing
- * output. The newest tail is retained because command tools stream cumulative
- * output and the current lines are the most useful audit evidence. */
 export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_OUTPUT_BYTES, toolName?: string): {
   output?: string;
   outputTruncated?: true;
 } {
-  // Walk newest-first and retain only the suffix that can reach the wire. This
-  // is intentionally not a flatMap/join: command output is cumulative and can
-  // contain millions of old blocks that must never become one intermediate
-  // string. The reverse traversal preserves the old collector's precedence and
-  // depth rules while allowing it to stop after the first overflowing text.
   const retainedNewestFirst: string[] = [];
   let retainedBytes = 0;
   let truncated = false;
   const addNewest = (text: string): boolean => {
-    if (!text) return false; // filter(Boolean) in the original collector
+    if (!text) return false;
     const textBytes = Buffer.byteLength(text);
     if (retainedNewestFirst.length === 0) {
       const kept = textBytes <= maximumBytes ? text : boundedUtf8Suffix(text, maximumBytes);
@@ -275,7 +234,7 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
       if (textBytes > maximumBytes) truncated = true;
       return truncated;
     }
-    const capacity = maximumBytes - retainedBytes - 1; // separator
+    const capacity = maximumBytes - retainedBytes - 1;
     if (capacity <= 0) {
       truncated = true;
       return true;
@@ -326,15 +285,10 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
     visitReverse(value);
   }
   if (retainedNewestFirst.length === 0) return {};
-  // Reverse traversal prepends each older block, so the collector is already
-  // in display order. Reversing it here would make newest output appear first.
   const output = retainedNewestFirst.join("\n");
   if (!truncated) return { output };
   const marker = "… earlier live output truncated by gateway …\n";
   const markerBytes = Buffer.byteLength(marker);
-  // A marker larger than the requested envelope cannot be emitted honestly.
-  // Keep the newest tail instead; every returned frame remains within its
-  // caller-owned byte budget (for all feasible JSON/text budgets).
   if (maximumBytes <= markerBytes) {
     return { output: boundedUtf8Suffix(output, maximumBytes), outputTruncated: true };
   }
@@ -344,9 +298,6 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
   };
 }
 
-/** Progress payloads are current display frames, not an append-only log.
- * Install the latest nonempty frame in place; an empty advisory frame preserves
- * the last readable frame so an open detail sheet never flashes blank. */
 export function mergeLiveToolOutput(
   previous: { output?: string; outputTruncated?: boolean } | undefined,
   incoming: { output?: string; outputTruncated?: true },
@@ -365,9 +316,6 @@ export function mergeLiveToolOutput(
   };
 }
 
-/** The JSON frame stays bounded independently from the readable live-output
- * channel. If Pi streams a huge text result, retain only a recent tail here too
- * rather than serializing the whole value before projectJson can compact it. */
 export function projectToolResult(value: unknown, maximumBytes = 24_000, toolName?: string): JsonValue {
   if (!value || typeof value !== "object" || Array.isArray(value)) return projectJson(value, maximumBytes);
   const record = value as Record<string, unknown>;
@@ -383,17 +331,9 @@ export function projectToolResult(value: unknown, maximumBytes = 24_000, toolNam
     return projectJson(minimal, maximumBytes);
   }
   let truncated = false;
-  // Retain at most the newest content rows before cloning any row. Each row is
-  // projected independently so a giant detail object cannot be spread into an
-  // unbounded intermediate result.
   const content = visibleToolResultContent(toolName ?? "", record.content.slice(-128)).map((part) => {
     if (!part || typeof part !== "object" || Array.isArray(part)) return part;
     const source = part as Record<string, unknown>;
-    // Tail the source scalar before generic JSON projection. Otherwise
-    // projectJson first turns a large text field into a preview envelope and
-    // permanently loses the AgentToolResult type/text shape and newest text.
-    // Copy fields lazily as well: a detail object must not be spread before its
-    // enclosing byte budget has admitted it.
     const result: Record<string, unknown> = {};
     let fields = 0;
     for (const key in source) {
@@ -424,11 +364,7 @@ export function projectToolResult(value: unknown, maximumBytes = 24_000, toolNam
   return { ...bounded, truncated: true };
 }
 
-/** Pi records up to 256 nested calls per parent (`NESTED_CALL_LIMITS`); the
- * Gateway projects every one it kept, so a long script's call list is whole. */
 export const NESTED_CALL_LIMIT = 256;
-/** Argument bytes one call may project, and all of a parent's calls together
- * (Pi's own total), so every live frame stays bounded however many calls run. */
 export const NESTED_ARGUMENT_CALL_BYTES = 1_024;
 export const NESTED_ARGUMENT_TOTAL_BYTES = 32 * 1_024;
 
@@ -501,9 +437,6 @@ function boundedJsonNode(
     if (clippedBytes <= maximumBytes) {
       return { value: clipped, bytes: clippedBytes, truncated: clipped !== value };
     }
-    // Do not allocate or encode the source string merely to discover that it
-    // cannot fit. A bounded scalar prefix is enough for the outer truncation
-    // preview, and the returned JSON remains valid.
     const prefix = boundedUtf8Prefix(clipped, Math.max(0, maximumBytes - 2));
     const projected = prefix;
     return { value: projected, bytes: jsonBytes(projected), truncated: true };
@@ -593,7 +526,6 @@ function boundedProjectionEnvelope(preview: string, maximumBytes: number): JsonV
     while (lower <= upper) {
       const middle = Math.floor((lower + upper) / 2);
       let candidate = preview.slice(0, middle);
-      // Avoid introducing a lone UTF-16 surrogate at the binary-search cut.
       if (candidate.length > 0 && /[\uD800-\uDBFF]$/u.test(candidate)) candidate = candidate.slice(0, -1);
       if (envelopeBytes(candidate + marker) <= maximumBytes) {
         best = candidate;
@@ -605,8 +537,6 @@ function boundedProjectionEnvelope(preview: string, maximumBytes: number): JsonV
     const candidate = `${best}${marker}`;
     if (envelopeBytes(candidate) <= maximumBytes) return { truncated: true, preview: candidate };
   }
-  // Below the diagnostic envelope budget, return the smallest fitting JSON
-  // scalar. No JSON representation exists for a zero-byte budget.
   if (maximumBytes >= 4) return null;
   if (maximumBytes >= 2) return "";
   return 0;
@@ -616,20 +546,10 @@ export function projectJson(value: unknown, maximumBytes = MAX_PROJECTED_JSON_BY
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new RangeError("JSON projection requires a positive byte budget");
   const bounded = boundedJsonNode(value, maximumBytes);
   if (!bounded.truncated && bounded.bytes <= maximumBytes) return bounded.value;
-  // Keep previews useful without allowing the diagnostic envelope to become a
-  // second copy of a large projected graph.
   const preview = boundedUtf8Prefix(JSON.stringify(bounded.value), 24_000);
   return boundedProjectionEnvelope(preview, maximumBytes);
 }
 
-/**
- * Bounds one live streaming progress item for the wire without touching Pi's
- * canonical state. Tool arguments yield to message content and invocation
- * identity first; only then are trailing parts selected and the oldest kept
- * text/thinking part tail-trimmed. Clients
- * replace their transient streaming bubble with each event, so a bounded tail
- * is always superseded by the canonical settled message.
- */
 export function boundStreamingProgressItem(
   item: TranscriptItem,
   maximumBytes = STREAMING_PROGRESS_BYTES,
@@ -639,9 +559,6 @@ export function boundStreamingProgressItem(
   if (item.kind !== "message") return item;
   const toolCount = item.content.filter(part => part.type === "toolCall").length;
   if (toolCount > 0) {
-    // Reserve all visible content and invocation structure before spending
-    // bytes on arguments. An oversized trailing write must not erase the
-    // response preceding it (or split a finalized declaration group).
     const omitted = { truncated: true };
     const structure = {
       ...item,
@@ -655,9 +572,6 @@ export function boundStreamingProgressItem(
         if (part.type !== "toolCall") return part;
         const encoded = JSON.stringify(part.arguments);
         if (Buffer.byteLength(encoded) <= argumentBudget) return part;
-        // Reuse the existing truncated/preview JSON contract. A source byte can
-        // expand to at most six escaped bytes; reserve the preview envelope so
-        // quotes/control characters cannot overrun the argument allocation.
         const prefixBytes = Math.floor((argumentBudget - frameBytes({ truncated: true, preview: TRUNCATION_MARKER })) / 6);
         const argumentsPreview = prefixBytes > 0
           ? { truncated: true, preview: `${boundedUtf8Prefix(encoded, prefixBytes)}${TRUNCATION_MARKER}` }
@@ -698,10 +612,6 @@ export function boundStreamingProgressItem(
     }
     break;
   }
-  // A bounded live frame may omit a leading portion of a finalized group.
-  // Never publish a partial declaration with a complete group count: either
-  // the whole group survives or the subsequent group-aware tool progress owns
-  // its aggregate placeholder until canonical projection arrives.
   const retainedCounts = new Map<string, number>();
   for (const part of kept) {
     if (part.type === "toolCall" && part.groupFinalized && part.groupId) {
@@ -726,9 +636,6 @@ export function boundStreamingProgressItem(
   const bounded = { ...item, content: kept };
   if (frameBytes(bounded) <= maximumBytes) return bounded;
 
-  // Optional assistant metadata can itself exceed the live-frame budget. Keep
-  // only the stable handoff envelope and an explicit marker; canonical history
-  // remains complete and is published immediately after persistence.
   const minimal: TranscriptItem = {
     id: item.id,
     parentId: item.parentId,
@@ -755,8 +662,6 @@ function fitsSnapshot(value: unknown, maximumBytes: number): boolean {
     && frameBytes(value) <= maximumBytes;
 }
 
-/** Compact only under aggregate structure pressure; canonical ordinals, row
- * identities and normal text survive, just as they do under byte pressure. */
 function fitTranscriptStructure(items: TranscriptItem[]): TranscriptItem[] {
   if (jsonNodeCount(items, TRANSCRIPT_PAGE_NODES, true) <= TRANSCRIPT_PAGE_NODES) return items;
   const perItemNodes = Math.floor((TRANSCRIPT_PAGE_NODES - 1) / items.length);
@@ -770,10 +675,6 @@ function transcriptContinuityMessages(items: TranscriptItem[]): number {
 
 function definitelyFitsStreamingFrame(item: TranscriptItem, maximumBytes: number): boolean {
   if (item.kind !== "message") return false;
-  // JSON control characters can expand to six bytes. This deliberately loose
-  // upper bound avoids allocating/stringifying the cumulative content only
-  // when the result is provably below the wire limit; exact sizing remains the
-  // authority for every near-limit or structured part.
   let maximum = frameBytes({ ...item, content: [] }) + 2;
   const escapedUpperBound = (value: string): number => 2 + (6 * Buffer.byteLength(value));
   for (const part of item.content) {
@@ -797,16 +698,7 @@ function definitelyFitsStreamingFrame(item: TranscriptItem, maximumBytes: number
   return maximum <= maximumBytes;
 }
 
-/**
- * Fits every live session snapshot to a strict wire budget without touching Pi's
- * canonical state. Large tool payloads become readable previews first. While an
- * operation is active, the newest transcript continuity floor survives pressure;
- * iOS retains any larger compatible prefix already on screen. Status, operation,
- * ordering, and canonical transcript cursors always survive.
- */
 export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
-  // Reconnect must not restore arguments that the next progress frame drops.
-  // Canonical history is deliberately not subject to this live-message budget.
   const streaming = snapshot.streaming && boundStreamingProgressItem(snapshot.streaming);
   if (streaming && streaming !== snapshot.streaming) snapshot = { ...snapshot, streaming };
   const transcriptOverflow = Math.max(0, snapshot.transcript.length - TRANSCRIPT_PAGE_ITEMS);
@@ -836,9 +728,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   };
   if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
 
-  // Completed output is canonical in the transcript. Do not duplicate terminal
-  // payloads in the live overlay when the frame is under pressure. Running
-  // output remains available for the exact current call.
   projected = {
     ...projected,
     toolExecutions: projected.toolExecutions.map((tool) => {
@@ -855,9 +744,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   };
   if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
 
-  // Process output is a bounded convenience projection. Canonical command
-  // results and child transcripts remain available independently, so shed the
-  // duplicated tails before sacrificing transcript continuity or authority.
   if (projected.processActivities?.length) {
     projected = {
       ...projected,
@@ -869,9 +755,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   }
   if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
 
-  // Retain a stable recent continuity floor even under active snapshot pressure.
-  // iOS may keep a larger exact loaded prefix, but it must never receive a new
-  // authoritative tail containing only the Load earlier control and one row.
   let removed = 0;
   const fittedTranscript = [...projected.transcript];
   let fittedContinuityMessages = transcriptContinuityMessages(fittedTranscript);
@@ -892,8 +775,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   };
   if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
 
-  // Every surface is a decorative retained widget. Omitted identities/revisions
-  // remain a bounded delta baseline, so an exact-next full-frame upsert can converge.
   const completeSurfaces = [...projected.extensionPresentation.surfaces];
   const omittedSurfaceRevisions: Array<{ id: string; revision: number }> = [];
   for (const removed of completeSurfaces) {
@@ -914,9 +795,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
     if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
   }
 
-  // Statuses and widgets are disposable chrome. The revisioned editor baseline
-  // is not: retaining editorRevision while clearing editorText would make a
-  // later paste delta impossible for the client to validate or converge.
   projected = {
     ...projected,
     extensionPresentation: {
@@ -924,10 +802,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
       semanticState: {
         ...projected.extensionPresentation.semanticState,
         statuses: {},
-        // Status attribution is structurally owned by the corresponding
-        // status key. Clear both halves atomically under wire pressure;
-        // retaining an orphan owner makes the authoritative snapshot invalid
-        // to native admission and can strand an otherwise healthy session.
         statusOwners: {},
         widgets: [],
       },
@@ -946,8 +820,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   };
   if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
 
-  // A single streaming message can itself be large. It remains canonical and
-  // will return through paged transcript projection once settled.
   const { streaming: _streaming, ...withoutStreaming } = projected;
   projected = withoutStreaming;
   if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
@@ -969,8 +841,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   };
   if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
 
-  // Output tails are the last disposable component. Preserve every bounded call
-  // identity and the transcript continuity floor before dropping live text.
   projected = {
     ...projected,
     toolExecutions: tools.map((tool) => {
@@ -980,10 +850,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   };
   if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
 
-  // All high-cardinality fields above are bounded. Reaching this point means a
-  // legal transcript item itself exhausted the remaining envelope. Shrink only
-  // rows above the continuity floor; projectTranscriptPage already compacts an
-  // individually oversized item before it can enter this frame.
   const strictTranscript = [...projected.transcript];
   let strictContinuityMessages = transcriptContinuityMessages(strictTranscript);
   let strictRemoved = 0;
@@ -1013,8 +879,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   };
   if (fitsSnapshot(projected, SESSION_SNAPSHOT_BYTES)) return projected;
 
-  // Preserve strict transport safety and the newest canonical rows when even
-  // compacted continuity cannot fit.
   const unavoidableTrim = [...projected.transcript];
   let unavoidableRemoved = 0;
   while (unavoidableTrim.length > 0
@@ -1029,9 +893,6 @@ export function fitSessionSnapshot(snapshot: SessionSnapshot): SessionSnapshot {
   };
 }
 
-/** Every content block a Pi message can carry. Derived from the SDK's message
- * union, so a block type added upstream fails `projectContent` at compile time
- * instead of being dropped from every row (#470). */
 type MessageContentBlock<M> = M extends { content: infer C } ? C extends readonly unknown[] ? C[number] : never : never;
 export type PiMessageContentBlock = MessageContentBlock<AgentMessage>;
 
@@ -1226,9 +1087,6 @@ function projectContent(
         break;
       }
       default: {
-        // Unreachable for the pinned SDK: every block type is a projected row
-        // above. A new SDK block type fails this assignment, so it cannot be
-        // silently dropped from the transcript.
         part satisfies never;
         break;
       }
@@ -1259,11 +1117,6 @@ function isPiCodemodeImageSavedText(text: string, followingImageMimeType: string
   return file !== null && PI_CODEMODE_IMAGE_MIME_BY_EXTENSION[file[1] as keyof typeof PI_CODEMODE_IMAGE_MIME_BY_EXTENSION] === saved[2];
 }
 
-/**
- * Pi's `image()` adds this label before the image block (pi-coding-agent's
- * `extensions/codemode/execute.js:243`). Hide only that exact pair in client
- * projections; the source result remains authoritative and unchanged.
- */
 function visibleToolResultContent<T>(toolName: string, content: readonly T[]): readonly T[] {
   if (toolName !== "codemode") return content;
   let visible: T[] | undefined;
@@ -1392,9 +1245,6 @@ export function projectMessage(displayProjection: ToolDisplayProjection,
           ...(toolMetadata.groupCount === undefined ? {} : { groupCount: toolMetadata.groupCount }),
           ...(toolMetadata.groupFinalized === undefined ? {} : { groupFinalized: toolMetadata.groupFinalized }),
         } : {
-          // Pi JSONL does not currently persist tool execution start/end metadata.
-          // The result timestamp is an observed completion anchor; clients pair it
-          // with the canonical call timestamp as a conservative history fallback.
           completedAt: timestamp,
         }),
       };
@@ -1429,9 +1279,6 @@ export function projectMessage(displayProjection: ToolDisplayProjection,
         },
       };
     case "custom":
-      // Producer-hidden custom messages remain context-only. They are
-      // intentionally excluded from the ordinary chat projection; canonical
-      // JSONL and typed receipts retain them for audit/reconciliation.
       if (!message.display) return undefined;
       return {
         id,
@@ -1456,11 +1303,8 @@ export function projectMessage(displayProjection: ToolDisplayProjection,
         semantic: semanticForStatus(),
       };
     case "system":
-      // System messages are model context and prompt state, never a chat row.
       return undefined;
     default: {
-      // Unreachable for the pinned SDK: every message role is classified above.
-      // A new SDK role fails this assignment instead of silently dropping a row.
       message satisfies never;
       return undefined;
     }
@@ -1513,9 +1357,6 @@ function projectEntry(displayProjection: ToolDisplayProjection,
         semantic: semanticForCustom(entry.display === true, contextDelivery),
       };
     case "custom": {
-      // Arbitrary extension state stays canonical in Pi JSONL but never
-      // consumes a chat row. Only Gateway-authored, strictly validated command
-      // and notification receipts receive typed transcript presentation.
       if (entry.customType === EXTENSION_NOTIFICATION_RECEIPT_TYPE) {
         const notification = parseExtensionNotificationReceipt(entry.data);
         if (!notification) return undefined;
@@ -1591,20 +1432,12 @@ function projectEntry(displayProjection: ToolDisplayProjection,
         semantic: semanticForStatus(),
       };
     case "session_info":
-      // Session metadata is read from its own owner, not a transcript row.
       return undefined;
     case "usage":
-      // Pi attributes model usage (for example cache warming) to a canonical
-      // entry that never participates in the conversation.
       return undefined;
     case "context_edit":
-      // A context-only edit rewrites model input; canonical JSONL and the tree
-      // projection's `contextEdit` kind own it, not the transcript.
       return undefined;
     default: {
-      // Unreachable for the pinned SDK: every entry type is classified above.
-      // A new SDK entry type fails this assignment instead of silently
-      // disappearing from the transcript.
       entry satisfies never;
       return undefined;
     }
@@ -1642,9 +1475,6 @@ interface BoundedCommandContent {
   contentTruncated: boolean;
 }
 
-/** Keeps selected resource content bounded without making the complete command
- * catalog carry every source document. UTF-8 decoding drops only a split final
- * code point when truncation lands inside a multibyte scalar. */
 export function boundCommandContent(content: string): BoundedCommandContent {
   const encoded = Buffer.from(content, "utf8");
   if (encoded.byteLength <= COMMAND_DETAIL_CONTENT_BYTES) {
@@ -1659,8 +1489,6 @@ export function boundCommandContent(content: string): BoundedCommandContent {
   };
 }
 
-/** Validates the complete runtime-owned command catalog before generic JSON
- * projection can silently trim it. Ordering and object identity are preserved. */
 export function admitCommandCatalog(commands: CommandInfo[]): CommandInfo[] {
   if (commands.length > COMMAND_CATALOG_ITEMS) {
     throw new GatewayError("conflict", "Command catalog exceeds its item limit");
@@ -1695,9 +1523,6 @@ export function admitCommandCatalog(commands: CommandInfo[]): CommandInfo[] {
   return commands;
 }
 
-// safeJson intentionally bounds arrays to 1,000 values. Keep the tree page
-// within that generic transport bound so selected nodes are never discarded
-// after projectTree has chosen the newest useful history.
 const MAX_TREE_NODES = 1_000;
 const TREE_PROJECTION_BYTES = 700_000;
 const TREE_PROJECTION_STRING_BYTES = 8_192;
@@ -1707,20 +1532,13 @@ function validTreeString(value: unknown, optional = false): boolean {
     || typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= TREE_PROJECTION_STRING_BYTES;
 }
 
-/** Canonical summaries are producer-owned context and may legitimately exceed
- * one tree field. They are admitted by shape here and reduced to a 240-character
- * preview before the bounded tree response is encoded. */
 function validCanonicalSummary(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-/** Shape-check one content block from canonical JSONL. */
 function validContentPart(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const part = value as Record<string, unknown>;
-  // The tag is asserted, not trusted: a value outside the SDK's block union still
-  // reaches `default` and fails closed, while a new SDK block type fails the
-  // build here instead of being silently rejected as a malformed block.
   const type = part.type as PiMessageContentBlock["type"];
   switch (type) {
     case "text": return typeof part.text === "string";
@@ -1743,9 +1561,6 @@ function validMessage(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const message = value as Record<string, unknown>;
   if (typeof message.role !== "string" || !Number.isFinite(message.timestamp as number)) return false;
-  // The role is asserted, not trusted: a value outside the SDK's message union
-  // still reaches `default` and fails closed, while a new SDK role fails the
-  // build here instead of being silently rejected as a malformed message.
   const role = message.role as AgentMessage["role"];
   switch (role) {
     case "system": {
@@ -1780,17 +1595,12 @@ function validMessage(value: unknown): boolean {
     case "compactionSummary":
       return typeof message.summary === "string" && Number.isSafeInteger(message.tokensBefore);
     default: {
-      // Unreachable for the pinned SDK: every role is validated above. A new SDK
-      // role fails this assignment; a foreign runtime role still fails closed.
       role satisfies never;
       return false;
     }
   }
 }
 
-/** Validate canonical shape without calling projectEntry/projectContent. This
- * keeps omitted history fail-closed while reserving blob registration for an
- * already admitted tree candidate. */
 function validateCanonicalEntry(value: unknown): void {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new GatewayError("conflict", "Session tree contains a malformed canonical entry");
@@ -1807,9 +1617,6 @@ function validateCanonicalEntry(value: unknown): void {
   if (typeof entry.customType === "string" && Buffer.byteLength(entry.customType) > TREE_PROJECTION_STRING_BYTES) {
     throw new GatewayError("conflict", "Session tree contains an invalid or oversized string");
   }
-  // The type is asserted, not trusted: a foreign value still reaches `default`
-  // and fails closed, while a new SDK entry type fails the build here instead of
-  // being rejected as malformed.
   const type = entry.type as SessionEntry["type"];
   switch (type) {
     case "message": valid = validMessage(entry.message); break;
@@ -1829,9 +1636,6 @@ function validateCanonicalEntry(value: unknown): void {
     case "label": valid = validTreeString(entry.targetId) && (entry.label === undefined || validTreeString(entry.label)); break;
     case "session_info": valid = entry.name === undefined || validTreeString(entry.name); break;
     case "usage":
-      // Pi's cache warmer records model-attributed usage as a canonical entry
-      // with no authored content. Tron validates its shape and hides it from the
-      // transcript, the outline and the history feed (#470).
       valid = validTreeString(entry.kind) && validTreeString(entry.provider) && validTreeString(entry.model)
         && !!entry.usage && typeof entry.usage === "object" && !Array.isArray(entry.usage)
         && (entry.note === undefined || validTreeString(entry.note)); break;
@@ -1843,9 +1647,6 @@ function validateCanonicalEntry(value: unknown): void {
       break;
     }
     default: {
-      // Unreachable for the pinned SDK: every entry type is validated above. A
-      // new SDK entry type fails this assignment; a foreign runtime type still
-      // fails closed.
       void (type satisfies never);
       valid = false;
     }
@@ -1867,18 +1668,10 @@ function validateProjectedTreeNode(node: SessionTreeNode): void {
   }
 }
 
-/** Outline node kind for one canonical entry. The outline publishes
- * `contextEdit`, `sessionInfo` and `usage` evidence without a chat row, a system
- * message as `systemMessage`, and every other entry under its projected row's
- * kind; an entry whose producer asked to stay hidden (a non-displayed custom
- * message) keeps the session-metadata kind it already had. Every SDK entry type
- * is classified, so a new type fails this switch instead of silently becoming
- * `sessionInfo` (#470). */
 function outlineNodeKind(entry: SessionEntry, item: TranscriptItem | undefined): SessionTreeNode["kind"] {
   switch (entry.type) {
     case "context_edit": return "contextEdit";
     case "session_info": return "sessionInfo";
-    // Omitted from the outline; classified so the union stays exhaustive.
     case "usage": return "usage";
     case "message":
       if (entry.message.role === "system") return "systemMessage";
@@ -1895,8 +1688,6 @@ function outlineNodeKind(entry: SessionEntry, item: TranscriptItem | undefined):
   }
 }
 
-/** A visible outline entry of these types projects a row; the fallback is the
- * pre-existing session-metadata label for the producer-hidden ones. */
 function rowKind(item: TranscriptItem | undefined): SessionTreeNode["kind"] {
   return item?.kind ?? "sessionInfo";
 }
@@ -1928,8 +1719,6 @@ interface TreeProjectionRef {
   depth: number;
 }
 
-// A dry projector preserves the exact projected shape without registering image
-// bytes. Real BlobStore registration occurs only after a candidate is admitted.
 const treeProjectionProbe = { register: () => "x".repeat(43) } as unknown as BlobStore;
 
 function validateSourceTreeNode(source: PiSessionTreeNode, expectedParentId: string | null, depth: number): void {
@@ -1948,11 +1737,6 @@ function validateSourceTreeNode(source: PiSessionTreeNode, expectedParentId: str
   }
 }
 
-/** Whether a canonical entry is omitted from the tree outline: a `custom` entry
- * that is not a Gateway-authored start receipt, and Pi's model-attributed usage
- * record (cache warming), which carries no authored content. Every SDK entry
- * type is classified, so a new type cannot silently gain or lose an outline node
- * (#470). */
 function omittedFromTreeOutline(
   entry: SessionEntry,
   invocation: ReturnType<typeof parseInvocationReceipt>,
@@ -1997,7 +1781,6 @@ export function projectTree(displayProjection: ToolDisplayProjection, manager: S
     const isHiddenCanonical = omittedFromTreeOutline(source.entry, treeInvocation);
     if (!isHiddenCanonical) byId.set(id, { source, depth });
     const childDepth = isHiddenCanonical ? depth : depth + 1;
-    // Preserve descendants while omitting reserved audit nodes themselves.
     for (let index = source.children.length - 1; index >= 0; index -= 1) {
       work.push({ source: source.children[index]!, depth: childDepth, parentId: id });
     }
@@ -2018,9 +1801,6 @@ export function projectTree(displayProjection: ToolDisplayProjection, manager: S
     }
   }
 
-  // Admit the newest canonical entries first, then restore chronological order.
-  // Dry projection is intentionally side-effect free so omitted images never
-  // consume BlobStore capacity.
   const selected: SessionTreeNode[] = [];
   let bytes = 2;
   for (let index = entries.length - 1; index >= 0 && selected.length < MAX_TREE_NODES; index -= 1) {
@@ -2042,9 +1822,6 @@ export function projectTree(displayProjection: ToolDisplayProjection, manager: S
   return selected.reverse();
 }
 
-/** Roles whose message never becomes a chat row: Pi's system context and a
- * producer-hidden custom message. A new SDK role fails this switch instead of
- * reaching a default. */
 function projectableMessageRole(message: AgentMessage): boolean {
   switch (message.role) {
     case "custom": return message.display;
@@ -2060,13 +1837,6 @@ function projectableMessageRole(message: AgentMessage): boolean {
   }
 }
 
-/** Whether one canonical entry produces a chat row. Every SDK entry type is
- * classified: Pi records model-context edits, session metadata and
- * model-attributed usage (cache warming) as canonical entries that never become
- * rows, and a `custom`/`custom_message` entry is a row only when its producer
- * asked for display. A new SDK entry type fails this switch instead of being
- * treated as projectable and then throwing `projectable transcript entry
- * produced no item` in `projectTranscriptPage` (#470). */
 function transcriptRowFor(
   entry: SessionEntry,
   invocation: ReturnType<typeof parseInvocationReceipt>,
@@ -2080,9 +1850,6 @@ function transcriptRowFor(
     case "thinking_level_change": case "model_change": case "compaction":
     case "branch_summary": case "label":
       return true;
-    // Context edits alter only Pi's model-context projection, session metadata
-    // has its own owner, and usage is model-attributed metadata: all three stay
-    // canonical without a fabricated user-facing chat row.
     case "session_info": case "context_edit": case "usage":
       return false;
     default: {
@@ -2092,11 +1859,6 @@ function transcriptRowFor(
   }
 }
 
-/** Filter the canonical branch and derive tool segments in the same pass. The
- * identity begins at exact conversation input, survives tool-only assistant and
- * result entries, and retires at visible or non-conversation barriers. This
- * keeps cold reopen and live delivery equivalent without adding another O(N)
- * transcript walk or persisting presentation metadata to Pi JSONL. */
 function projectableTranscriptEntries(
   manager: TranscriptSessionReader,
   presentationIDs?: ReadonlyMap<string, string>,
@@ -2113,9 +1875,6 @@ function projectableTranscriptEntries(
   const toolSegmentIDs = new Map<string, string>();
   let ownerId: string | undefined;
   for (const entry of branch) {
-    // Validate this exact receipt once and reuse it below: a page projection
-    // runs this over every entry of the branch, so a second validation of the
-    // same record is pure O(branch) work (G-2).
     const invocation = entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
       ? parseInvocationReceipt(entry.data)
       : undefined;
@@ -2158,9 +1917,6 @@ function projectableTranscriptEntries(
       ownerId ??= presentationId;
       toolSegmentIDs.set(entry.id, toolSegmentId(ownerId));
     }
-    // A barrier after the final declaration retires the segment. Content before
-    // a declaration starts that displayed run and must not split later tool-only
-    // continuations from the same producer turn on cold reconstruction.
     const lastBarrierIndex = content.findLastIndex((part) => part.type !== "toolCall");
     if (lastToolIndex < 0 || lastBarrierIndex > lastToolIndex) ownerId = undefined;
   }
@@ -2173,13 +1929,6 @@ function durableInvocationLifecycle(lifecycle: InvocationProjection["lifecycle"]
     : "outcomeUnknown";
 }
 
-/**
- * A fork copies its origin's command `start` rows, and those receipts name the
- * origin, so the fork's own receipt fold never sees them. Each such row settles
- * in the origin: with the origin's copied terminal when the fork's branch cut
- * carries it, otherwise as `completed`, the only outcome the origin records for
- * the forking command, whose terminal is written after the copy (#661).
- */
 function inheritedCommandSettlements(
   branch: readonly SessionEntry[],
   sessionId: string | undefined,
@@ -2201,27 +1950,18 @@ function inheritedCommandSettlements(
   return settlements;
 }
 
-/**
- * Enrich a canonical row only from the exact Gateway-authored invocation
- * binding. The receipt owns producer provenance; the role-based fallback in
- * projectMessage applies only when no durable binding exists.
- */
 function withInvocationSemantics(
   item: TranscriptItem,
   boundInvocation: InvocationProjection | undefined,
   invocationStates: ReadonlyMap<string, InvocationProjection["lifecycle"]>,
   inheritedCommands: ReadonlyMap<string, InvocationLifecycle>,
 ): TranscriptItem {
-  // A Home wake's bound target is its delivered result, which already projects as
-  // an attributed context row. Recasting it as a prompt would invent a user row.
   if (boundInvocation && item.semantic && boundInvocation.source !== "homeWake") {
     return { ...item, semantic: {
       ...item.semantic,
       origin: boundInvocation.origin,
       invocationId: boundInvocation.invocationId,
       operationId: boundInvocation.operationId,
-      // A subagent wake is a hidden internal prompt: its subagent origin plus
-      // hiddenInternal direction classify it on the existing protocol-7 axes.
       kind: boundInvocation.source === "subagentWake" ? "prompt" : "resourcePrompt",
       ...(boundInvocation.source === "subagentWake" ? { direction: "hiddenInternal" as const, visibility: "hidden" as const } : {}),
       ...(boundInvocation.resourceInvocations ? { resourceInvocations: boundInvocation.resourceInvocations } : {}),
@@ -2252,10 +1992,7 @@ export interface TranscriptPage {
   start: number;
   end: number;
   total: number;
-  /** Exact next projected entry at `end`, echoed so clients can validate the
-   * page boundary without treating raw parent links as display adjacency. */
   nextEntryId?: string;
-  /** Exact previous projected entry at `start`, echoed for forward paging. */
   previousEntryId?: string;
   runtimeGeneration?: string;
   leafEntryId?: string;
@@ -2280,8 +2017,6 @@ export function projectTranscriptPage(displayProjection: ToolDisplayProjection,
     presentationIDs,
     branchCut,
   );
-  // Reuse this operation's canonical branch cut for receipts as well as rows.
-  // Reacquiring it repeats the pinned SDK's full ancestry walk on every page.
   const invocationValues = invocationProjection(invocationReceipts(
     branch,
     manager.getSessionId?.(),
@@ -2320,9 +2055,6 @@ export function projectTranscriptPage(displayProjection: ToolDisplayProjection,
     const itemBytes = Buffer.byteLength(JSON.stringify(enriched)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;
     if (itemBytes > byteBudget) {
-      // session.transcript responses are not passed through the snapshot fitter.
-      // Compact an unexpectedly oversized legal item before returning it so the
-      // page both advances and stays inside its production wire budget.
       selected.unshift(compactTranscriptPageItem(enriched, Math.max(256, byteBudget - 3)));
       start -= 1;
       break;
@@ -2434,8 +2166,6 @@ function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number, nod
   }
   if (jsonNodeCount(compacted, nodeBudget, true) <= nodeBudget
     && Buffer.byteLength(JSON.stringify(compacted)) <= byteBudget) return compacted;
-  // Metadata alone is small; this final message-shaped marker retains canonical
-  // identity/order while guaranteeing a bounded response for future item shapes.
   return {
     id: item.id,
     parentId: item.parentId,

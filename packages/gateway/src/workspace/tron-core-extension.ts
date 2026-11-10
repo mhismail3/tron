@@ -30,8 +30,6 @@ export function tronContext(workspace: TronWorkspaceDescriptor, cwd: string, too
 const HANDOFF_START = "[Tron workspace handoff]\n";
 const HANDOFF_END = "\n[/Tron workspace handoff]\n\n";
 
-/** Plain task context is the supported common denominator for native and
- * external one-shot runners. Never rewrite workflow programs or agent configs. */
 function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescriptor): string {
   if (task.startsWith(HANDOFF_START)) {
     const end = task.indexOf(HANDOFF_END);
@@ -42,15 +40,12 @@ function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescriptor):
   return handoff + task;
 }
 
-/** The SDK rebuilds the base prompt for each run. Never append a canonical
- * message, load workspace documents, change cwd, or replace project context. */
 export function createTronCoreExtension(workspace: Pick<ResourceRoot, "describe">, jev?: JevDecisionClient, connections?: Pick<ConnectionAccess, "snapshot">): ExtensionFactory {
   return (pi) => {
     if (jev) createJevExtension(jev)(pi);
     if (connections) {
       pi.registerTool({
         name: "connections",
-        // docs/settings-model.md 5.4: declares it reads no open-world content.
         annotations: { openWorldHint: false },
         label: "Connections",
         description: "Inspect Tron-managed provider connection definitions, account instances, capability availability, and setup status. MCP servers are configured separately through Pi's agent-directory mcp.json. This read-only projection contains no credential values or references; setup and policy changes remain exact owner-typed Gateway commands.",

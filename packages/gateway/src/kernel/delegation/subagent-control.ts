@@ -2,8 +2,6 @@ import { randomUUID } from "node:crypto";
 import type { AgentSession, ToolDefinition } from "../pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
 
-/** The provider's own control for one run, through the exact installed controller.
- * A rejection is an error: the caller must not assume the run was stopped. */
 export async function controlSubagentRun(session: AgentSession, tool: ToolDefinition, input: Record<string, unknown>): Promise<void> {
   const toolCallId = `tron-control-${randomUUID()}`;
   const signal = new AbortController().signal;

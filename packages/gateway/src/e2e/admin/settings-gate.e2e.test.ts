@@ -21,7 +21,6 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 import { disposeFixtures, fixture as homeTaskFixture, reportCall, TASK_REASONING_MODEL_ID } from "../../../test-support/home-task-fixture.js";
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai";
 
-/** Real agent, SDK and store witnesses for typed writes, live inheritance, request pins and worker signals. */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-gate.json");
 const transcript: Array<{ case: string; steps: Array<Record<string, unknown>> }> = [];
 const roots: string[] = [];
@@ -42,8 +41,6 @@ const MODEL = { provider: PROVIDER, id: "agent" };
 const MEMORY_MODEL = { provider: PROVIDER, id: "memory" };
 const PUBLIC_ADDRESS = "93.184.216.34";
 
-/** A third-party extension: one tool that declares nothing (so it is untrusted
- * and marks the run) and one that declares it reads no open-world content. */
 const THIRD_PARTY_EXTENSION = `export default function(pi) {
   pi.registerTool({
     name: "fetch_page", label: "Fetch page", description: "Fetches a page.",
@@ -68,7 +65,6 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-settings-gate-")));
   roots.push(root);
   const tronHome = join(root, "tron");
-  // tronHome stays uncreated: the internal workspace (Home's memory) creates it owner-only.
   const agentDir = join(root, "agent");
   const sessionDir = join(root, "sessions");
   const project = join(root, "project");
@@ -99,7 +95,6 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     homeWebTransport: {
       fetcher: async () => new Response("<html><head><title>Page</title></head><body><article><p>A page body long enough to extract as readable text, repeated. A page body long enough to extract as readable text, repeated.</p></article></body></html>", { status: 200, headers: { "content-type": "text/html" } }),
       resolveHost: async () => [PUBLIC_ADDRESS],
-      // Public-page preflight and renderer API are distinct remote boundaries.
       providerFetcher: async () => Response.json({ success: true, data: {
         markdown: "A page body long enough to extract as readable text, repeated.",
         metadata: { statusCode: 200, sourceURL: "https://example.org/page", title: "Page" },
@@ -110,7 +105,6 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   await registry.initialize();
   await waitFor(() => (registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "catalog cut");
   await registry.catalog("all");
-  // The fixture's clock: expiry is tested by advancing it, never by waiting.
   let clock = Date.parse("2026-10-11T12:00:00.000Z");
   settings = settingsDependencies({
     agentDir, tronHome, trust, modelRuntime, sessions: registry, home: () => homeOwnerOf(registry), registry, now: () => new Date(clock),
@@ -123,7 +117,6 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, home: homeOwnerOf(registry), receipts: new CommandReceiptStore(tronHome),
     uploads: new UploadStore(tronHome, DEFAULT_MAX_UPLOAD_BYTES),
-    // The push owner's admission boundary, recorded: delivery is not under test.
     notifications: { enqueue: async (input: { kind: string; title?: string; message: string; sessionId: string; category?: string }) => { pushes.push(input); return "queued"; } },
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
@@ -131,8 +124,6 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
 
   await settingsChanges.start();
 
-  /** One run: one model step per tool call, then a closing reply. Returns the
-   * tool results the closing request carried and what that run's context held. */
   async function run(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, input: string, steps: Array<{ name: string; args: ToolCall["arguments"] }>) {
     await waitFor(() => !slot.isBusy && slot.snapshot().phase === "idle" && slot.snapshot().configurationBlocker === null || undefined, "previous run settled before scripting input");
     const requests: Array<Array<Record<string, unknown>>> = [];
@@ -155,8 +146,6 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
       details: message.details as Record<string, unknown> | undefined,
       text: (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join(""),
     }));
-    // What the run's first request carried: the outcome lines (Q22), which the
-    // canonical session holds as a SETTINGS_OUTCOME_MESSAGE custom message.
     const text = (message: Record<string, unknown>) => typeof message.content === "string" ? message.content
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
     const first = requests[0]!;
@@ -211,7 +200,6 @@ describe("typed settings at real runtime boundaries", () => {
       .rejects.toThrow("Project settings are read-only");
     expect(await readFile(projectFile, "utf8").catch(() => null)).toBe(before);
     expect((await f.history()).filter(entry => entry.key === "model.ref[role=chat]")).toEqual([]);
-    // The repository owns its file: its model is inherited by the next chat.
     await mkdir(join(f.project, ".pi"), { recursive: true });
     await writeFile(projectFile, JSON.stringify({ defaultProvider: MEMORY_MODEL.provider, defaultModel: MEMORY_MODEL.id }));
     const project = await f.service.invoke(phone(), "settings.resolve", { target, keys: ["model.ref[role=chat]"] }) as unknown as { keys: Array<{ value: unknown; layer: string }> };
@@ -276,7 +264,6 @@ describe("typed settings at real runtime boundaries", () => {
     await turn();
     expect(served).toEqual([MEMORY_MODEL.id, MODEL.id, MEMORY_MODEL.id]);
     expect(home.snapshot().model).toMatchObject(MEMORY_MODEL);
-    // Designation's explicit model is Home's first saved choice; each later choice is one entry.
     const changes = (await f.history()).filter(entry => entry.key === "model.ref[role=chat]");
     expect(changes).toHaveLength(4);
     expect(changes.filter(entry => entry.actor.kind === "ui" && entry.actor.id === "home-designation")).toHaveLength(1);
@@ -288,7 +275,6 @@ describe("typed settings at real runtime boundaries", () => {
     const f = await fixture();
     const options = () => f.service.invoke(phone(), "settings.options", { target: { kind: "home" }, key: "tools.active" }) as
       Promise<{ options: Array<{ value: string; detail?: string }> }>;
-    // Without a loaded chapter, every selectable name is still offered.
     const unloaded = (await options()).options;
     expect(unloaded.map(option => option.value)).toEqual([...HOME_TOOL_NAMES]);
     expect(unloaded.map(option => option.value)).not.toContain("knowledge");
@@ -297,7 +283,6 @@ describe("typed settings at real runtime boundaries", () => {
     const described = (await options()).options;
     expect(described.map(option => option.value)).toEqual([...HOME_TOOL_NAMES]);
     for (const option of described) {
-      // The served detail is the first sentence of the definition Home's model is given.
       const definition = registered.get(option.value);
       expect(option.detail === undefined ? !definition : definition?.trim().startsWith(option.detail), option.value).toBe(true);
     }
@@ -350,7 +335,6 @@ describe("typed settings at real runtime boundaries", () => {
     }) as unknown as { keys: Array<{ value: unknown }> };
     const sdkThinking = home.runtime.session.thinkingLevel;
     const failed = (await f.history()).filter(entry => entry.status === "failed").map(entry => [entry.target.kind, entry.layer]);
-    // Preserve the real consumer state even on a failed parity assertion.
     transcript.push({ case: "single Home override provider and busy rollback", steps: [{ observed, busyReasoning, resolved, saved: saved.keys, sdkThinking, failed }] });
     expect(saved.keys[0]?.value).toBe("high");
     expect(sdkThinking).toBe("high");
@@ -367,7 +351,6 @@ describe("typed settings at real runtime boundaries", () => {
         fence: { runtimeGeneration: snapshot.runtimeGeneration, revision: snapshot.revision, model: snapshot.model },
         changes: [{ key, layer: "session", op: "set", value }] });
     }
-    // Home's saved settings have no context window; the chapter's own window still carries.
     const window = first.snapshot();
     await first.setContextWindow(window.model!.provider, window.model!.id, 64_000, window.revision, window.runtimeGeneration);
     const choices = first.settingsSessionLayer();
@@ -398,8 +381,6 @@ describe("typed settings at real runtime boundaries", () => {
       tools: choices.tools, contextWindow: choices.contextWindow, fixed: {}, settings: {}, requestPins: choices.requestPins });
     expect(next.runtime.session.settingsManager.getRetrySettings().maxRetries).toBe(7);
     expect(next.runtime.session.settingsManager.getBlockImages()).toBe(true);
-    // Home intentionally summarizes earlier chapters in its request view. It
-    // must not copy their canonical messages or entry identities into this file.
     const nextEntries = next.canonicalSessionEntries();
     expect(JSON.stringify(nextEntries.filter(entry => entry.type === "message"))).not.toContain("Only the first chapter contains this message.");
     expect(nextEntries.some(entry => oldIds.has(entry.id))).toBe(false);
@@ -466,8 +447,6 @@ describe("typed settings at real runtime boundaries", () => {
     expect(f.runtimeEvents.filter(event => event.sessionId === slot.id && event.topic === "session.diagnostic").at(-1))
       .toMatchObject({ payload: { data: { code: "settings-run-applied", imagesBlocked: true } } });
     const createdWhileBlocked = await f.chat();
-    // An outside/default relaxation is not permission to expose this chat's
-    // retained images. A fresh chat, however, uses the new default.
     const document = await f.macDocument();
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...document, images: { blockImages: false } }));
     expect((await observe()).images).toBe(0);
@@ -479,8 +458,6 @@ describe("typed settings at real runtime boundaries", () => {
     await f.answerNative(slot, true);
     expect(f.settle((await imagesTurn).results)).toMatchObject({ status: "applied" });
     expect((await observe()).images).toBeGreaterThan(0);
-    // Narrowing during a model/tool loop must affect the next request in the
-    // same turn, not only the next user prompt.
     const withinTurn: number[] = [];
     f.faux.setResponses([
       async context => {
@@ -611,14 +588,12 @@ describe("typed settings at real runtime boundaries", () => {
       { key: "context.compaction.instructions", layer: "session", op: "set", value: "Keep the plan." },
     ]);
     expect(first.settingsSessionLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
-    // The projection follows the Session value at once; the SDK budgets at the next idle admission.
     expect(first.snapshot().compactionPolicy?.next).toMatchObject({ enabled: false, reserveTokens: 4_096, instructions: "Keep the plan.",
       source: { enabled: "session", reserveTokens: "session", instructions: "session", keepRecentTokens: "global" } });
     await idle(first, "apply the chat compaction policy");
     await idle(second, "apply the default compaction policy");
     expect(sdk(first)).toMatchObject({ enabled: false, reserveTokens: 4_096 });
     expect(sdk(second)).toMatchObject({ enabled: true, reserveTokens: 16_384 });
-    // A Global default reaches the other open chat; the overridden fields stay local.
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "global" }, changes: [
       { key: "context.compaction.reserveTokens", layer: "global", op: "set", value: 32_768 },
       { key: "context.compaction.keepRecentTokens", layer: "global", op: "set", value: 12_000 },
@@ -630,14 +605,11 @@ describe("typed settings at real runtime boundaries", () => {
     const resolved = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "session", sessionId: first.id },
       keys: ["context.compaction.enabled"] }) as { keys: Array<{ key: string; value: unknown; layer: string }> };
     expect(resolved.keys[0]).toMatchObject({ value: false, layer: "session" });
-    // Fork rebinds this slot to the new branch with the same Session values; each
-    // branch then owns its own.
     const parentId = first.id;
     const point = first.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
     const fork = await first.fork(point.id, "at");
     expect(first.id).toBe(fork.sessionId);
     expect(first.settingsSessionLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
-    // Follow the default: unsetting the Session values restores the Mac and Built-in values.
     await changeChat(first, [
       { key: "context.compaction.enabled", layer: "session", op: "unset" },
       { key: "context.compaction.reserveTokens", layer: "session", op: "unset" },
@@ -649,7 +621,6 @@ describe("typed settings at real runtime boundaries", () => {
     expect(first.snapshot().compactionPolicy?.next.source).toMatchObject({ enabled: "global", reserveTokens: "global", instructions: "global" });
     const changes = (await f.history()).filter(entry => entry.layer === "session" && entry.key.startsWith("context.compaction."));
     expect(changes.map(entry => entry.op)).toEqual(expect.arrayContaining(["set", "unset"]));
-    // Cold resume of the parent keeps its own Session values (the fork's unset is branch-local).
     await f.registry.dispose();
     let settings: ReturnType<typeof settingsDependencies> | undefined;
     const reopened = await createTestRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
@@ -748,8 +719,6 @@ describe("typed settings at real runtime boundaries", () => {
     expect(await request()).toEqual({ timeoutMs: 8_001, maxRetries: 3, websocketConnectTimeoutMs: 9_001 });
     await change("unset");
     expect(await request()).toEqual({ timeoutMs: 300_000, maxRetries: undefined, websocketConnectTimeoutMs: undefined });
-    // An independent caller on the very same runtime is not an agent request;
-    // its explicit options must not inherit the last admitted chat snapshot.
     let independent: unknown;
     f.faux.setResponses([async (_context, options) => {
       independent = { timeoutMs: options?.timeoutMs, maxRetries: options?.maxRetries, websocketConnectTimeoutMs: options?.websocketConnectTimeoutMs };
@@ -824,7 +793,6 @@ describe("typed settings at real runtime boundaries", () => {
 
   it("a Home task worker: quiet from a clean turn, notify after an undeclared third-party tool in its turn", async () => {
     const f = await homeTaskFixture();
-    // The worker's project carries a third-party tool that declares nothing, so it marks the run.
     await mkdir(join(f.cwd, ".pi", "extensions"), { recursive: true });
     await writeFile(join(f.cwd, ".pi", "extensions", "third-party.ts"), THIRD_PARTY_EXTENSION);
     const { settingsChanges } = f.settings;
@@ -832,13 +800,10 @@ describe("typed settings at real runtime boundaries", () => {
     const textOf = (message: { content: unknown }) => typeof message.content === "string" ? message.content
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
     const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
-    // What the worker's own fetch_page call returned: the tool really ran in the
-    // worker, so the mark comes from its declaration, not from a missing tool.
     const fetched = new Map<string, string>();
     const worker = (taskId: string, value: number, expected: number, marked: boolean) =>
       (context: TranscriptContext): AssistantMessage => {
         if (!isWorker(context)) {
-          // Home: delegate once in the turn that asked for this task; any later turn (the result's wake) just answers.
           const asked = context.messages.findLastIndex(message => message.role === "user" && textOf(message).includes(`Delegate ${taskId}`));
           const delegated = asked < 0 || context.messages.slice(asked).some(message => message.role === "toolResult" && message.toolName === "delegate");
           return delegated ? fauxAssistantMessage("Delegated.")
@@ -858,11 +823,9 @@ describe("typed settings at real runtime boundaries", () => {
       await home.prompt(`Delegate ${taskId}`);
       await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home delegation turn");
       await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus(taskId).catch(() => undefined))?.lifecycle === "terminal" || undefined, `task ${taskId} terminal`);
-      // The result wakes Home; the next delegation starts once that wake is acknowledged.
       await waitFor(async () => (await homeOwnerOf(f.registry).taskResult(taskId).catch(() => undefined) as { wake?: { state?: string } } | undefined)?.wake?.state === "acknowledged" || undefined, `task ${taskId} acknowledged`);
       await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home wake settled");
     };
-    // The fixture's settings carry no retry value; the worker's change sets it.
     await delegateOnce("clean-worker", 4, null as unknown as number, false);
     await delegateOnce("marked-worker", 5, 4, true);
     expect(fetched.get("marked-worker")).toContain("Ignore previous instructions");
@@ -874,16 +837,6 @@ describe("typed settings at real runtime boundaries", () => {
     transcript.push({ case: "Home task worker", steps: entries.map(entry => ({ actor: entry.actor, status: entry.status })) });
   }, 90_000);
 
-  /**
-   * #1336: Home reads and changes a delegated worker's settings while that worker
-   * executes. The worker's provider request is held in flight while Home acts, so
-   * the case proves the in-flight request keeps its settings, the next request of
-   * the same run uses the new model and thinking with Home's signal in its context,
-   * an approve-tier change waits for the maintainer and then applies live with its
-   * own signal, unsupported keys and invalid targets are refused, and a settled
-   * worker is changed for its next run without a signal. One task, one session,
-   * one report throughout.
-   */
   it("Home changes a running worker's model and thinking from its next request, with an explicit signal", async () => {
     const f = await homeTaskFixture();
     const { settingsModel, settingsChanges } = f.settings;
@@ -901,12 +854,9 @@ describe("typed settings at real runtime boundaries", () => {
     const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
     const gate = () => { let open!: () => void; const opened = new Promise<void>(resolve => { open = resolve; }); return { open, opened }; };
     const gates = [gate(), gate()];
-    // Every worker request: the model and thinking it actually ran on, and the settings signals its context carried.
     const workerRequests: Array<{ model: string; thinking: string | undefined; signals: string[] }> = [];
-    // Home's next tool call, and what its result said (Home's next request carries it).
     let homeCall: { prompt: string; name: string; args: Record<string, unknown> } | undefined;
     const homeResults = new Map<string, { isError: boolean; text: string; details: unknown }>();
-    // An ordinary project chat's own call: the same tool, without Home's target authority.
     let chatCall: Record<string, unknown> | undefined;
     const respond = async (context: TranscriptContext, options: { reasoning?: string } | undefined, _state: unknown, model: { id: string }): Promise<AssistantMessage> => {
       const users = context.messages.filter(message => message.role === "user").map(textOf);
@@ -914,7 +864,6 @@ describe("typed settings at real runtime boundaries", () => {
         const index = workerRequests.push({ model: model.id, thinking: options?.reasoning,
           signals: users.filter(text => text.startsWith("[Tron settings]")) }) - 1;
         if (index < gates.length) {
-          // Held in flight while Home and the maintainer act; it answers on the model it started with.
           await gates[index]!.opened;
           return fauxAssistantMessage([fauxToolCall("bash", { command: `echo step-${index}` })], { stopReason: "toolUse" });
         }
@@ -929,7 +878,6 @@ describe("typed settings at real runtime boundaries", () => {
         if (homeCall && last.toolName === homeCall.name) homeResults.set(homeCall.prompt, { isError: last.isError === true, text: textOf(last), details: last.details });
         return fauxAssistantMessage("Done.");
       }
-      // A settings wake is not another copy of the preceding user instruction.
       const turn = context.messages.slice(context.messages.findLastIndex(message => message.role === "assistant") + 1);
       if (homeCall && turn.some(message => message.role === "user" && textOf(message) === homeCall.prompt)) return fauxAssistantMessage([fauxToolCall(homeCall.name, homeCall.args)], { stopReason: "toolUse" });
       return fauxAssistantMessage("Noted.");
@@ -953,15 +901,12 @@ describe("typed settings at real runtime boundaries", () => {
     const started = workerRequests[0]!;
     expect(started.model).not.toBe(REASONING.id);
 
-    // Inspect: the worker is running, its selection is its start, and it has not answered yet.
     const inspected = await homeSays("Inspect live-worker", "settings", { action: "resolve", taskId: "live-worker", keys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.queue[role=subagent]"] });
     expect(inspected.isError).toBe(false);
-    // The worker's own task-launch subagent queue is readable through its target, from its launch input.
     expect(JSON.parse(inspected.text).keys.map((row: { key: string }) => row.key)).toContain("model.queue[role=subagent]");
     expect(JSON.parse(inspected.text).worker).toMatchObject({ taskId: "live-worker", sessionId: workerSessionId, state: "running", running: true,
       selected: { model: `${f.model.provider}/${started.model}` }, lastResponse: null });
 
-    // Change while the worker's request is in flight: stored now, signalled once, nothing cancelled.
     const changed = await homeSays("Change live-worker", "settings", { action: "change", taskId: "live-worker", reason: "Harder step next",
       changes: [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: REASONING }, { key: "model.thinking[role=chat]", layer: "session", op: "set", value: "high" }] });
     expect(changed.isError).toBe(false);
@@ -972,14 +917,11 @@ describe("typed settings at real runtime boundaries", () => {
     expect(worker.snapshot().model).toMatchObject(REASONING);
     steps.push({ inspected: JSON.parse(inspected.text).worker, changed: changeResult });
 
-    // A key with no supported mid-run boundary is refused with the boundary named; nothing is queued.
     const refused = await homeSays("Change live-worker tools", "settings", { action: "change", taskId: "live-worker", reason: "Fewer tools",
       changes: [{ key: "tools.active", layer: "session", op: "set", value: ["read"] }] });
     expect(refused.isError).toBe(true);
     expect(refused.text).toMatch(/active tools change only between runs/);
 
-    // Release the in-flight request: it ran on its start settings. The next request of the same run
-    // uses Home's model and thinking and carries the signal, once.
     gates[0]!.open();
     await waitFor(() => workerRequests.length >= 2 || undefined, "worker's next request");
     expect(workerRequests[1]).toMatchObject({ model: REASONING.id, thinking: "high" });
@@ -989,7 +931,6 @@ describe("typed settings at real runtime boundaries", () => {
     const acknowledged = worker.taskWorkerSettingsState();
     expect(acknowledged.lastResponse).toMatchObject({ model: `${f.model.provider}/${started.model}` });
 
-    // The second routine write is accepted while the next request remains in flight.
     const approved = await homeSays("Lower live-worker thinking", "settings", { action: "change", taskId: "live-worker", reason: "Cheaper final step",
       changes: [{ key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" }] });
     expect(approved.details).toMatchObject({ status: "applied", signal: { status: "queued", taskId: "live-worker", appliesFrom: "next-request" } });
@@ -1003,14 +944,12 @@ describe("typed settings at real runtime boundaries", () => {
     await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home settled after the result");
     steps.push({ requests: workerRequests, approved });
 
-    // Settled: the change is stored for the next run (resume) and no signal is sent.
     const settledChange = await homeSays("Reset live-worker model", "settings", { action: "change", taskId: "live-worker", reason: "Back to the default for any resume",
       changes: [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: { provider: f.model.provider, id: f.model.id } }] });
     expect(settledChange.details).toMatchObject({ status: "applied", signal: { status: "not-running", appliesFrom: "next-run" },
       worker: { running: false, lastResponse: { model: `${REASONING.provider}/${REASONING.id}`, thinking: "low" } } });
     expect(settledChange.text).toContain("takes effect when the task is resumed");
 
-    // Invalid targets: an unknown task, and the same parameter outside Home.
     const unknown = await homeSays("Inspect missing", "settings", { action: "resolve", taskId: "missing-worker" });
     expect(unknown).toMatchObject({ isError: true });
     expect(unknown.text).toMatch(/no task "missing-worker"/);
@@ -1021,7 +960,6 @@ describe("typed settings at real runtime boundaries", () => {
     expect(forbidden).toMatchObject({ isError: true });
     expect(forbidden.text).toMatch(/available only in Tron Home/);
 
-    // The record: Home is the actor with the task; the worker's own session is the target; one report.
     const entries = (await settingsChanges.history({ actor: "home" })).entries.reverse()
       .filter(entry => entry.key === "model.ref[role=chat]" || entry.key === "model.thinking[role=chat]");
     expect(entries.map(entry => [entry.key, entry.status, entry.after, entry.actor.taskId, entry.target])).toEqual([

@@ -51,7 +51,7 @@ def inventory(rev: str | None) -> tuple[list[str], callable]:
     blobs: dict[str, bytes] = {}
 
     def read(path: str) -> bytes:
-        if not blobs:  # one `git cat-file --batch` for the whole tree, on first use
+        if not blobs:
             oids = sorted(set(entries.values())) or [""]
             raw = subprocess.run(["git", "-C", str(ROOT), "cat-file", "--batch"], input="\n".join(oids).encode() + b"\n",
                                  stdout=subprocess.PIPE, check=True).stdout
@@ -59,7 +59,7 @@ def inventory(rev: str | None) -> tuple[list[str], callable]:
             while at < len(raw):
                 header_end = raw.index(b"\n", at)
                 header = raw[at:header_end].split(b" ")
-                if len(header) != 3:  # "<oid> missing": a gitlink names a commit, not a blob
+                if len(header) != 3:
                     at = header_end + 1
                     continue
                 oid, _, size = header
@@ -93,7 +93,7 @@ def base_layout(rev: str | None) -> dict | None:
     try:
         blob = git("cat-file", "blob", f"{base}:{ROOT_MANIFEST}")
     except GitError:
-        return None  # no root manifest at the base: nothing declared yet to shrink from
+        return None
     try:
         data = json.loads(blob)
     except ValueError:
@@ -280,7 +280,6 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
         if len(files) > 1:
             errors.append(f"duplicate module id {module_key}: {', '.join(files)}")
 
-    # Exactly-one ownership: one owns entry across all manifests per tracked path.
     hits: dict[str, list[tuple[str, str]]] = {}
     for manifest, module in modules.items():
         prefix = "" if module["folder"] == "." else module["folder"] + "/"
@@ -336,7 +335,7 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
 
     root = modules.get(ROOT_MANIFEST, {}).get("data", {})
     if "layout" in root:
-        import layout  # sibling module; only repositories that declare a layout need it
+        import layout
         errors.extend(layout.problems(root["layout"], paths, modes_of(rev), read, base_layout(rev) if shrink else None))
 
     def listed(module: dict, key: str) -> list:

@@ -15,12 +15,10 @@ afterEach(async () => {
   await disposeFixtures();
 });
 
-/** The system messages one provider request carries, as their text. */
 function systemTexts(messages: readonly { role: string; content?: unknown }[]): string[] {
   return messages.filter(message => message.role === "system").map(message => String(message.content));
 }
 
-/** The text of the last user message one provider request carries. */
 function lastUserText(messages: readonly { role: string; content?: unknown }[]): string {
   const content = messages.filter(message => message.role === "user").at(-1)?.content;
   return typeof content === "string" ? content
@@ -34,7 +32,6 @@ describe("Home system prompt at the request seam", () => {
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const home = await f.registry.acquire(f.home.sessionId);
     const systems: string[][] = [];
-    // One activation with a tool loop: two provider requests that must carry identical system bytes.
     f.faux.setResponses([
       (context) => { systems.push(systemTexts(context.messages)); return fauxAssistantMessage([fauxToolCall("memory_search", { query: "earlier" })], { stopReason: "toolUse" }); },
       (context) => { systems.push(systemTexts(context.messages)); return fauxAssistantMessage("first reply"); },
@@ -55,8 +52,6 @@ describe("Home system prompt at the request seam", () => {
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const home = await f.registry.acquire(f.home.sessionId);
-    // User-level resources in the agent directory, and project resources in Home's own
-    // directory, trusted so only Home's guard keeps them out.
     await mkdir(join(f.agentDir, "skills", "global-skill"), { recursive: true });
     await writeFile(join(f.agentDir, "skills", "global-skill", "SKILL.md"),
       "---\nname: global-skill\ndescription: Global skill description marker.\n---\nGLOBAL SKILL BODY\n");
@@ -67,7 +62,6 @@ describe("Home system prompt at the request seam", () => {
     await mkdir(join(home.cwd, ".pi", "prompts"), { recursive: true });
     await writeFile(join(home.cwd, ".pi", "prompts", "project-prompt.md"), "PROJECT PROMPT\n");
     await f.trust.set(home.cwd, true);
-    // A trust transition reload is the strongest admission path for project resources.
     await home.reload(true);
 
     const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
@@ -75,7 +69,6 @@ describe("Home system prompt at the request seam", () => {
       receipts: new CommandReceiptStore(join(f.root, "composer-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "composer-client", identity: "device:composer-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
 
-    // The composer pickers' catalog.
     const { commands } = await service.invoke(client, "session.commands", { sessionId: home.id }) as { commands: Array<{ name: string; source: string; resourceScope?: string }> };
     expect(commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "skill:global-skill", source: "skill", resourceScope: "user" }),
@@ -103,15 +96,11 @@ describe("Home system prompt at the request seam", () => {
     await waitFor(() => requests.length === 3, "prompt request");
     await settle("prompt settled");
 
-    // The inserted resource is expanded into that user message, as in an ordinary chat.
     expect(requests[0]!.user).toBe("plain message");
     expect(requests[1]!.user).toContain('<skill name="global-skill"');
     expect(requests[1]!.user).toContain("GLOBAL SKILL BODY");
     expect(requests[1]!.user.endsWith("apply it")).toBe(true);
-    // A prompt chip expands without arguments; the typed text follows it once (#311).
     expect(requests[2]!.user).toBe("GLOBAL PROMPT BODY\n\nargument");
-    // Shared resource discovery lists global skill metadata, not executable
-    // project resources or preloaded skill/prompt bodies.
     for (const request of requests) {
       expect(request.system).toHaveLength(1);
       expect(request.system[0]).toContain("global-skill");

@@ -1,18 +1,4 @@
 import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
-/**
- * Tron Home end to end: the real `EpisodicMemory` behind Home's request seam,
- * driven through the Gateway RPC surface, with a deterministic faux compactor and
- * a faux provider.
- *
- * The compactor is injected on the Gateway's ModelRuntime seam (the same seam the
- * Gateway uses to resolve the Knowledge model), so every provider request in this
- * file is Home's own: the memory's summaries never reach the faux provider's
- * stream. That keeps the counts meaningful — "zero provider requests" is about
- * the activation, not about a compactor the test happens to script.
- *
- * Retained artifacts are `test-results/home-activation/report.json` and
- * `test-results/terminal-chat-home/transcript.json`.
- */
 import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
 import { homeMemoryChange } from "../../../test-support/session-settings-change.js";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -96,21 +82,16 @@ const OTHER_MODEL_ID = "chat-2";
 const MEMORY_PROVIDER = "tron-home-e2e-memory";
 const MEMORY_MODEL_ID = "compactor";
 const MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: MEMORY_MODEL_ID };
-/** A second physical memory model: a reconfiguration that reopens the store. */
 const OTHER_MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: "compactor-2" };
 const VIRTUAL_MODEL_ID = "router";
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
 const OTHER_MODEL = { provider: PROVIDER, id: OTHER_MODEL_ID };
 const SUMMARY_MARKER = "HOME-SUMMARY";
-/** A ChatGPT plan's usage limit, in the wording the captured fixture uses (home-task-worker-model.e2e.test.ts),
- * including the provider's reset sentence, which the refusal must keep. */
 const USAGE_LIMIT_ERROR = "429 You have hit your ChatGPT usage limit (usage_limit_reached). Try again in 3 days.";
-/** How long the background queue skips a model after its usage-limit error (model-queue.ts RECORD_MS). */
 const QUEUE_USAGE_LIMIT_RECORD_MS = 15 * 60_000;
 const FILLER = "these are earlier home words ".repeat(40);
 const REPORT_PATH = "test-results/home-activation/report.json";
 
-/** Rows this file records, in order. */
 const report: { generatedAt: string; cases: Array<Record<string, unknown>> } = {
   generatedAt: new Date().toISOString(),
   cases: [],
@@ -129,36 +110,25 @@ interface CompactorState {
   entered: number;
   gate: Promise<void> | undefined;
   release: (() => void) | undefined;
-  /** Flipped by a case that needs the cause of a block to be gone (or present)
-   * before the next attempt. */
   failing: boolean;
-  /** #493 S2: replies report this many tokens, far beyond what one summary earns. */
   runawayUsage?: number;
 }
 
-/** Provider usage a faux compactor reply reports, so Home's spend is measured
- * (a reply with no usage spends nothing, and the budget would be untested). */
 const COMPACTOR_USAGE = {
   input: 64, output: 16, cacheRead: 0, cacheWrite: 0, totalTokens: 80,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-/** A short, bounded line that never echoes its input, so a summarized message's
- * own text cannot reappear in the view. */
 function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
   return async (request) => {
     state.calls += 1;
     state.entered += 1;
     if (request.turns.length === 1 && state.gate) {
-      // A real compactor call honors the signal it was given, so a test that
-      // holds one must not be able to wedge a dispose (or a reconfiguration).
       await Promise.race([
         state.gate,
         new Promise((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new Error("the compactor call was aborted")), { once: true })),
       ]);
     }
-    // A permanent provider refusal: the memory blocks rather than retrying, and
-    // the cause is the model, which a resume or a different model addresses.
     if (state.failing) return fauxAssistantMessage("", { stopReason: "error", errorMessage: "invalid_request_error: unsupported message" });
     const line = `${SUMMARY_MARKER} ${state.calls} ${"s".repeat(64)}`;
     return { ...await fauxAssistantMessage(line), usage: state.runawayUsage
@@ -167,8 +137,6 @@ function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
   };
 }
 
-// Threshold fixtures must not alter chapter limits while the previous turn's
-// quiescence callback still owns sealing. Hold that callback to prove the cut.
 async function prepareThresholdFixture(f: Awaited<ReturnType<typeof fixture>>, slot: RuntimeSlot, text: string): Promise<void> {
   const owner = homeOwnerOf(f.registry);
   const quiescent = owner.chapterQuiescent.bind(owner);
@@ -202,9 +170,7 @@ async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs 
 interface CapturedRequest {
   roles: string[];
   blob: string;
-  /** The memory message's text blocks before the nonce, joined: the view as the model reads it. */
   view: string;
-  /** Every message but the memory message. */
   outside: string;
 }
 
@@ -216,13 +182,11 @@ function record(context: { messages: Array<{ role: string; content?: unknown }> 
   return {
     roles: context.messages.map((message) => message.role),
     blob: json(context.messages),
-    // The view spans several text blocks (#491); they rejoin to the view text.
     view: memory ? texts(memory).slice(0, -1).join("") : "",
     outside: json(context.messages.filter((message) => message !== memory)),
   };
 }
 
-/** The frozen view one request carried, without its per-activation nonce. */
 function viewOf(request: CapturedRequest): string {
   return request.view;
 }
@@ -254,18 +218,14 @@ interface Fixture {
   runtime: ModelRuntime;
   registry: RuntimeRegistry;
   service: GatewayService;
-  /** The production upload store, when a test sends real attachments. */
   uploads?: UploadStore;
   receipts: CommandReceiptStore;
   server?: GatewayServer;
   compactor: CompactorState;
   summarizer: EpisodicSummarizer;
-  /** The memory provider: its replies are the compactor's when the summarizer is the queue's. */
   memoryFaux: FauxProviderHandle;
-  /** Every record the seam reported (activation sizes and refusals). */
   requestRecords: HomeRequestRecord[];
   capabilityRecords: Array<{ name: string; count: 1; status: string; latencyBucket: string }>;
-  /** Every record Home's memory reported. */
   memoryDiagnostics: Array<{ event: string; reason?: string }>;
   homeDiagnostics: Array<Record<string, unknown>>;
   homeLogger: GatewayLogger;
@@ -343,9 +303,6 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
     });
   }
   const compactor: CompactorState = { calls: 0, entered: 0, gate: undefined, release: undefined, failing: false };
-  // A case that injects `memoryQueueClock` runs the production summarizer: the
-  // background queue over the memory provider, on that clock, so a usage-limit
-  // record can lapse in the test without waiting for real time.
   const memoryQueue = options.memoryQueueClock && new ModelQueueOwner({
     runtime,
     usage: new ProviderUsageOwner(),
@@ -368,17 +325,12 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
   return f;
 }
 
-/** The refusals the seam reported for this fixture's Home, oldest first. */
 function refusalRecords(f: Fixture): Array<Extract<HomeRequestRecord, { event: "refused" }>> {
   return f.requestRecords.filter((record): record is Extract<HomeRequestRecord, { event: "refused" }> => record.event === "refused");
 }
 const refusedReasons = (f: Fixture): string[] => refusalRecords(f).map(record => record.reason);
-/** Whether Home's activation is open, as `home.context` reports it. */
 const activationOpen = (f: Fixture): boolean => { const context = homeOwnerOf(f.registry).contextStatus(); return context.available && context.activationOpen; };
 
-/** Dispose the Gateway and open a new one over the same installation, as a restart does, then
- * wait for its own startup reconcile: its durable catalog document can predate the newest row,
- * and a case that rewrites that session's file must not race the pass that publishes it. */
 async function restart(f: Fixture): Promise<void> {
   f.service.dispose();
   await f.receipts.dispose();
@@ -393,7 +345,6 @@ async function restart(f: Fixture): Promise<void> {
   await f.registry.catalog("all");
 }
 
-/** Designate Home through the service, configure its memory, and return its slot. */
 async function designateHome(
   f: Fixture,
   commandId: string,
@@ -416,11 +367,6 @@ const responsesOf = (f: Fixture, requests: CapturedRequest[]) => (blob: string) 
   return fauxAssistantMessage(blob);
 };
 
-/**
- * A valid 1x1 PNG padded with an ancillary tEXt chunk to exactly `bytes`. Pi passes
- * an image through unchanged when it fits the dimension limit and its base64 stays
- * under 4.5 MiB, so this is a photo-sized upload that reaches the canonical line.
- */
 function paddedPng(bytes: number): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const length = Buffer.alloc(4);
@@ -450,7 +396,6 @@ async function sessionJsonl(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>
   return slot.sessionFile ? await readFile(slot.sessionFile, "utf8").catch(() => "") : "";
 }
 
-/** The memory store's state document keyed by Home's stable logical identity. */
 function memoryStatePath(f: Fixture, homeId: string): string {
   return join(f.tronHome, "workspace", "state", "episodic", homeId, "state.json");
 }
@@ -503,8 +448,6 @@ describe("Tron Home activations end to end", () => {
     expect(timing.queueMs).not.toBeNull();
     expect(timing.modelMs).toBeGreaterThanOrEqual(0);
     expect(timing.toolMs).toBeGreaterThanOrEqual(0);
-    // Missing-file reads and a failing subprocess exercise the shared SDK error
-    // path independently, without inspecting private result content.
     const ordinary = await f.registry.create(f.agentDir);
     f.faux.setResponses([fauxAssistantMessage(fauxToolCall("bash", { command: "exit 7" })), fauxAssistantMessage("done")]);
     await ordinary.prompt("execute the bounded failing command");
@@ -595,8 +538,6 @@ describe("Tron Home activations end to end", () => {
       const materializations = vi.spyOn(homeOwnerOf(f.registry).materializer, "materialize").mockImplementation(async id => {
         const joinedTerminal = ++contenders === 2;
         const slot = await originalMaterialize(id);
-        // One ordering lets both joined inputs be admitted: construction is still
-        // shared, while terminal input waits for the first operation to settle.
         if (cut === "path" && joinedTerminal) await terminalGate;
         return slot;
       });
@@ -689,7 +630,6 @@ describe("Tron Home activations end to end", () => {
     const params = { commandId: "home-receipt-exact-command", text: "receipt-only-secret-marker" };
     const accepted = await f.service.invoke(client, "home.prompt", params);
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
-    // Drain the early-response completion write before reconstructing the receipt owner.
     await f.receipts.dispose();
     const before = await sessionJsonl(slot);
     const calls = f.faux.state.callCount;
@@ -699,7 +639,6 @@ describe("Tron Home activations end to end", () => {
     owner.options.sessions.chapterMetrics = async () => ({ bytes: 0, entries: 50_001, quiescent: true });
     await homeOwnerOf(f.registry).chapterQuiescent(slot.id);
     await homeOwnerOf(f.registry).disable();
-    // A new durable receipt owner is enough to prove replay does not depend on volatile lanes.
     const receipts = new CommandReceiptStore(join(f.tronHome, "receipts"));
     const replayCategories: string[] = [];
     try {
@@ -739,8 +678,6 @@ describe("Tron Home activations end to end", () => {
     const successor = await f.service.invoke(client, "home.prompt", { commandId: "privacy-successor-command", text: secret }) as unknown as { sessionId: string };
     const next = await f.registry.acquire(successor.sessionId);
     await waitUntil(() => next.snapshot().configurationBlocker === null);
-    // Simulate the owner-facing explanation from a failed storage/reload seam;
-    // it is useful to clients, but never safe as a diagnostic reason enum.
     owner.unavailable = `${secret} ${f.root} ${slot.id}`;
     try { await expect(f.service.invoke(client, "home.open", {})).rejects.toMatchObject({ code: "conflict" }); }
     finally { owner.unavailable = undefined; }
@@ -809,7 +746,6 @@ describe("Tron Home activations end to end", () => {
     expect(stored.chapters[0]).toMatchObject({ state: "sealed", sizeAtSeal: bytes, entriesAtSeal: entries });
     expect(stored.chapters[1]).toMatchObject({ state: "reserved", ordinal: 2 });
     expect(stored.bindingRevision).toBe(1);
-    // Lazy rollover: threshold crossing seals and reserves metadata only.
     expect((await f.registry.catalog("all")).sessions.map(session => session.id)).not.toContain(stored.chapters[1]!.sessionId);
     report.cases.push({ case: "soft-rollover", trigger: _label, oldState: stored.chapters[0]!.state, successorState: stored.chapters[1]!.state, successorMaterialized: false });
   });
@@ -939,17 +875,11 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([fauxAssistantMessage("initial canonical flush")]);
     await prepareThresholdFixture(f, slot, "initialize successful threshold evidence");
     admissionLimits.bytes = 64 * 1_024;
-    // Canonical custom entries bring the chapter near the byte boundary without
-    // crossing it; only the provider's finalized successful message crosses. The
-    // reply is sized to the remaining headroom, not to the boundary: a reply
-    // streamed at the fixture's pace costs about 40 chars per timer tick.
     for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < 58 * 1_024; index += 1) {
       slot.sessionManager.appendCustomEntry("response-fixture", { padding: "x".repeat(4_096) });
     }
     const before = statSync(slot.sessionFile!).size;
     expect(before).toBeLessThan(admissionLimits.bytes);
-    // Both abort and agent settlement persist through this owner; the wrapper
-    // now only adds terminal notification and is not the completion boundary.
     const internal = (slot as unknown as { runInvocations: { persistInvocationTerminal(...args: unknown[]): Promise<unknown> } }).runInvocations;
     const terminalize = internal.persistInvocationTerminal.bind(internal);
     let release!: () => void;
@@ -1018,8 +948,6 @@ describe("Tron Home activations end to end", () => {
     try {
       await waitUntil(() => entered);
       const padding = "x".repeat(1_024 * 1_024);
-      // Real canonical SDK appends cross the byte boundary while the provider is
-      // running; no metric getter is substituted and no append is suppressed.
       for (let index = 0; index < 201 && statSync(slot.sessionFile!).size < 200 * 1_024 * 1_024; index += 1) {
         slot.sessionManager.appendCustomEntry("byte-stop-fixture", { padding: index === 190 ? padding.repeat(11) : padding });
       }
@@ -1067,7 +995,6 @@ describe("Tron Home activations end to end", () => {
     const malformed = original + JSON.stringify({ type: "thinking_level_change", id: "cycle", parentId: "cycle",
       timestamp: "2026-10-07T00:00:00.000Z", thinkingLevel: "off" }) + "\n";
     await writeFile(path, malformed);
-    // Do not let the negative control enter Pi's unbounded parent traversal.
     const open = vi.spyOn(SessionManager, "open").mockImplementation(() => { throw new Error("unsafe SDK construction reached"); });
     await expect(f.registry.acquire(slot.id)).rejects.toThrow(/uncertain canonical evidence/);
     expect(open).not.toHaveBeenCalled();
@@ -1177,8 +1104,6 @@ describe("Tron Home activations end to end", () => {
         mutation = mutate();
         await awaitsWithin(reached, "admitted mutation barrier");
         seal = homeOwnerOf(f.registry).chapterQuiescent(slot.id);
-        // The serializer must still be waiting behind admitted mutation work.
-        // This microtask cut joins enqueue, not a filesystem scheduling sleep.
         await Promise.resolve();
         expect(events).toEqual([]);
         release();
@@ -1334,8 +1259,6 @@ describe("Tron Home activations end to end", () => {
       vi.spyOn(owner.options.runtimes, "replaceRuntimeForProfile").mockImplementation((...args) => {
         const result = originalPort(...args); transitionReached(); return result;
       });
-      // The unfixed disable bypasses Registry entirely for an unpublished
-      // reservation. Observe that old commit cut too, without rescuing it.
       const originalWrite = owner.writeLocked.bind(owner);
       vi.spyOn(owner, "writeLocked").mockImplementation(record => {
         const result = originalWrite(record); transitionReached(); return result;
@@ -1420,7 +1343,6 @@ describe("Tron Home activations end to end", () => {
     expect(pending.snapshot().revision).toBeGreaterThan(afterDisable);
     expect(pending.snapshot().model).toMatchObject(OTHER_MODEL);
     const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
-    // Home's saved settings, not its record, own the chosen model.
     expect(Object.hasOwn(stored, "model")).toBe(false);
     const saved = await (f.registry as unknown as { settingsOwners: { model: { resolve(target: unknown, session: undefined, keys: string[]): Promise<{ keys: Array<{ value: unknown; layer: string }> }> } } })
       .settingsOwners.model.resolve({ kind: "home" }, undefined, ["model.ref[role=chat]"]);
@@ -1488,7 +1410,6 @@ describe("Tron Home activations end to end", () => {
       const metrics = owner.options.sessions.chapterMetrics!;
       owner.options.sessions.chapterMetrics = async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true });
       try { await owner.chapterQuiescent(old.id); } finally { owner.options.sessions.chapterMetrics = metrics; }
-      // Logical Home materializes the next chapter, but paused memory refuses dispatch.
       await f.service.invoke(client, "home.prompt", { commandId: `browser-${label}-next`, text: "second chapter fact" });
       const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
       const current = await f.registry.acquire(status.sessionId!);
@@ -1602,7 +1523,6 @@ describe("Tron Home activations end to end", () => {
       const omitted = memoryItems(await page(f, { limit: 50 })).find(candidate => candidate.evidence.entryId === entryId)!;
       expect(omitted).toMatchObject({ index: item.index, projection: { omitted: true, text: "[omitted]" } });
       expect(omitted.projection.omissions).toContain("context-edit");
-      // Evidence stays canonical even after a projected context edit/exclusion.
       const evidence = await f.service.invoke(client, "home.memory.evidence", { evidence: item.evidence }) as unknown as HomeMemoryEvidencePage;
       expect(evidence.text).toContain("fixture-token");
       await rm(current.sessionFile!);
@@ -1701,7 +1621,6 @@ describe("Tron Home activations end to end", () => {
         expect(built.revision).not.toBe(initial.revision);
         expect(built.lines.some(line => line.item?.summary?.text.includes(SUMMARY_MARKER))).toBe(true);
         expect(built.lines.map(line => line.start)).toEqual([...built.lines.map(line => line.start)].sort((a, b) => b - a));
-        // A part read answers the two halves the summary above them covers, with items at span 1.
         const children = await page(f, { part: { start: 0, span: 2 } });
         expect(children.lines.map(line => [line.start, line.span])).toEqual([[0, 1], [1, 1]]);
         expect(children.lines.every(line => line.item !== undefined)).toBe(true);
@@ -1732,8 +1651,6 @@ describe("Tron Home activations end to end", () => {
         const queuedController = new AbortController();
         const queued = f.service.invoke({ ...client, signal: queuedController.signal }, "home.memory.view", {})
           .then(() => undefined, error => error);
-        // The first read keeps its proof gate. Cancellation must remove this
-        // queued read without waiting for that unrelated request to settle.
         queuedController.abort();
         expect(await awaitsWithin(queued, "cancelled queued browser read")).toBeDefined();
         f.compactor.release?.();
@@ -1785,7 +1702,7 @@ describe("Tron Home activations end to end", () => {
         devices, sessions: f.registry, service: f.service, uploads: {} as never,
         auth: { detachClient: () => {}, cancelOwner: () => {} } as never,
         logger: { log: (_level: string, _message: string, fields: Record<string, unknown>) => { records.push(fields); } } as never,
-        disposableReadDeadlinesMs: new Map(), // Only explicit cancellation owns this held read.
+        disposableReadDeadlinesMs: new Map(),
       });
       const releases: Array<() => void> = [];
       let socket: WebSocket | undefined;
@@ -1801,7 +1718,7 @@ describe("Tron Home activations end to end", () => {
       const original = homeSource.readCanonicalHomeIndex;
       let started = 0;
       const spy = vi.spyOn(homeSource, "readCanonicalHomeIndex").mockImplementation(async function* (...args) {
-        yield* original(...args); // Proof uses real sources; only its completion is gated.
+        yield* original(...args);
         const signal = args[3]!;
         await new Promise<void>((resolve, reject) => {
           releases.push(resolve);
@@ -1851,9 +1768,6 @@ describe("Tron Home activations end to end", () => {
     });
   });
 
-  // The property Home exists for (#466): the full history grows
-  // to several model windows while every request stays bounded, carries no
-  // earlier activation's native messages, and its view still covers message 0.
   it("keeps every request bounded while the full history grows to several model windows", async () => {
     const WINDOW = 64_000;
     const f = await fixture("windows", { contextWindow: WINDOW });
@@ -1868,8 +1782,6 @@ describe("Tron Home activations end to end", () => {
       await waitUntil(() => slot.snapshot().configurationBlocker === null, 60_000);
       expect(requests).toHaveLength(1);
       const view = viewOf(requests[0]!);
-      // Short inputs are verbatim view lines (gist §3); only text outside the
-      // view would be a resent native message, and replies are never verbatim.
       const outside = requests[0]!.outside;
       let carriesEarlier = false;
       for (let earlier = 0; earlier < turn; earlier += 1) {
@@ -1885,12 +1797,10 @@ describe("Tron Home activations end to end", () => {
       refusals: f.requestRecords.filter((record) => record.event === "refused").length,
     };
     report.cases.push({ case: "several-windows", ...row });
-    // The control: the full history really is several windows long.
     expect(row.historyTokens).toBeGreaterThan(WINDOW * 2);
     expect(row.anyCarriedEarlier).toBe(false);
     expect(row.viewsCoverZero).toBe(true);
     expect(row.refusals).toBe(0);
-    // Every request, estimated at four characters a token, is a small fraction of the window.
     expect(row.maxRequestChars / 4).toBeLessThan(WINDOW / 4);
   }, 300_000);
 
@@ -2002,7 +1912,6 @@ describe("Tron Home activations end to end", () => {
         await resume(f);
       }
       await waitUntil(async () => ((await homeOwnerOf(f.registry).memoryStatus()).episodic?.view.unbuilt ?? 1) === 0);
-      // Only the long first input and reply require compactor calls; the committed input leaf is not rebuilt.
       expect(f.compactor.calls).toBe(2);
       expect(f.faux.state.callCount).toBe(1);
       report.cases.push({ case: "pause-wait-pump-restart", ordering, waitRefused: true, committedLeafRetained: true, totalCompactorCalls: f.compactor.calls });
@@ -2053,13 +1962,9 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
     const slot = await designateHome(f, "e2e-designate-view");
-    // Both of activation one's messages are long enough to need a summary: a
-    // short message is its own view line, word for word (gist §3), so only a
-    // summarized message proves the native body is gone.
     f.faux.setResponses([responsesOf(f, requests)(longInput("activation one response"))]);
     await slot.prompt(longInput("activation one input"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
-    // Activation one's leaves are built before activation two starts.
     await waitUntil(async () => ((await homeOwnerOf(f.registry).memoryStatus()).episodic?.coverage.summarized ?? 0) >= 2);
     f.faux.setResponses([
       async (context) => { requests.push(record(context)); return fauxAssistantMessage(fauxToolCall("read", { path: "note.txt" })); },
@@ -2111,7 +2016,6 @@ describe("Tron Home activations end to end", () => {
       expect(context.contextWindow).toBeGreaterThan(0);
       expect(context.activationOpen).toBe(false);
     }
-    // The frozen view's text is never part of this projection.
     expect(JSON.stringify(context)).not.toContain(SUMMARY_MARKER);
   }, 60_000);
 
@@ -2120,8 +2024,6 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
     const slot = await designateHome(f, "e2e-designate-wait");
-    // The compactor parks on its first attempt, so activation one's leaves stay
-    // unbuilt and activation two cannot send anything.
     f.compactor.gate = new Promise<void>((resolve) => { f.compactor.release = resolve; });
     f.faux.setResponses([responsesOf(f, requests)(longInput("wait activation one reply"))]);
     await slot.prompt(longInput("wait activation one"));
@@ -2156,8 +2058,6 @@ describe("Tron Home activations end to end", () => {
     expect(row.providerRequests).toBe(2);
     expect(row.viewSummarized).toBe(true);
     expect(row.viewExcludesPriorText).toBe(true);
-    // The wait is the activation's own record, in milliseconds: the first
-    // activation found nothing to wait for, the second waited for its lines.
     expect(row.activationWaitedMs[0]).toBe(0);
     expect(row.activationWaitedMs[1]).toBeGreaterThan(0);
   }, 60_000);
@@ -2175,9 +2075,6 @@ describe("Tron Home activations end to end", () => {
     const requestsBefore = requests.length;
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
     const second = slot.prompt(longInput("stop activation two")).then(() => "resolved", (error: unknown) => error instanceof Error ? `${error.name}: ${error.message}` : String(error));
-    // The memory wait starts only after Pi has appended the input. Admission
-    // (`currentOperationId`) comes earlier, and a Stop before the append revokes
-    // the prompt; that interleaving is covered by its own test below.
     await waitUntil(async () => (await canonicalMessages(slot)).some((message) => JSON.stringify(message).includes("stop activation two")));
     await slot.abort("agent");
     const outcome = await second;
@@ -2186,10 +2083,7 @@ describe("Tron Home activations end to end", () => {
     const row = {
       outcome,
       providerRequestsOfStoppedActivation: requests.length - requestsBefore,
-      // Message content is a string or parts, so the whole entry is searched.
       inputStayedInLog: messages.some((message) => JSON.stringify(message).includes("stop activation two")),
-      // A stopped activation is never answered: no completed assistant turn
-      // follows the input it never took (gist §7).
       answeredAfterInput: messages.some((message, index) => message.role === "assistant"
         && message.stopReason === "stop"
         && messages.slice(0, index).some((earlier) => JSON.stringify(earlier).includes("stop activation two"))),
@@ -2198,8 +2092,6 @@ describe("Tron Home activations end to end", () => {
       slotPhase: slot.snapshot().phase,
     };
     report.cases.push({ case: "stop", ...row });
-    // The parked compactor is a test promise, not an abortable model call, so it
-    // is released before the fixture disposes the memory its pump is inside.
     f.compactor.release?.();
     expect(row.providerRequestsOfStoppedActivation).toBe(0);
     expect(row.inputStayedInLog).toBe(true);
@@ -2213,8 +2105,6 @@ describe("Tron Home activations end to end", () => {
     const requests: CapturedRequest[] = [];
     const slot = await designateHome(f, "e2e-designate-stop-before-append");
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
-    // The admitted prompt parks at the owner's inbox seam, which runs after
-    // `admit` and before Pi appends the input. Stop lands in that window.
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     let entered = false;
@@ -2254,7 +2144,6 @@ describe("Tron Home activations end to end", () => {
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
     const slot = await designateHome(f, "e2e-designate-large-line");
-    // Five pass-through photos of 3 MB each: their base64 is 20 MB in one user line.
     const uploadIds: string[] = [];
     for (let index = 0; index < 5; index += 1) {
       uploadIds.push((await f.uploads!.save(`photo-${index}.png`, "image/png", paddedPng(3_000_000))).id);
@@ -2283,16 +2172,12 @@ describe("Tron Home activations end to end", () => {
     expect(row.providerRequests).toBe(2);
   }, 120_000);
 
-  // Pi, not Tron, shrinks an oversized photo (auto-resize, on by default). Tron's
-  // source bound assumes that limit, so this test uses Pi's real behaviour as the
-  // oracle: a drifted Pi limit leaves the photo's base64 above the mirror.
   it("shrinks a photo over the inline limit, so its canonical line stays inside the source bound", async () => {
     const f = await fixture("inline-limit", { realUploads: true });
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
     const slot = await designateHome(f, "e2e-designate-inline-limit");
     const photo = paddedPng(6_000_000);
-    // The input must be over the mirrored limit, or the test would pass for any Pi limit.
     expect(Math.ceil(photo.length / 3) * 4).toBeGreaterThan(INLINE_IMAGE_BASE64_LIMIT_BYTES);
     const upload = await f.uploads!.save("oversized-photo.png", "image/png", photo);
     f.faux.setResponses([responsesOf(f, requests)("oversized photo received")]);
@@ -2361,8 +2246,6 @@ describe("Tron Home activations end to end", () => {
     expect(row.unconfiguredMemory).toEqual({ configured: false, open: false, paused: false });
     expect(row.providerRequestsWhileUnconfigured).toBe(0);
     expect(row.refusalReasons).toContain("memory-not-configured");
-    // The refusal is the activation's own evidence, even though it never
-    // prepared a request.
     expect(context.available).toBe(true);
     expect(context.available ? context.lastRefusalReason : undefined).toBe("memory-not-configured");
     expect(row.configuredProviderRequests).toBe(1);
@@ -2441,8 +2324,6 @@ describe("Tron Home activations end to end", () => {
       }
       if (method === "session.open" && prompts.at(-1) === "rollover-0"
         && (params as { sessionId: string }).sessionId === initial.id) {
-        // Reconnect must recover acceptance while the successor is still held,
-        // not accidentally observe a pending command receipt and skip the race.
         await waitFor(async () => (await f.receipts.status(context.identity, "home.prompt", rolloverCommandId!)).status === "completed",
           "rollover acceptance receipt before reconnect baseline");
       }
@@ -2452,8 +2333,6 @@ describe("Tron Home activations end to end", () => {
         await waitUntil(settleDuringSync.entered);
         const operation = accepted.at(-1)!;
         const slot = await f.registry.acquire(operation.sessionId);
-        // Public SDK canonical appends model context arriving during the run.
-        // These real rows page out its user binding; snapshots stay unmodified.
         for (let row = 0; row < 10; row += 1) {
           slot.sessionManager.appendCustomMessageEntry("fixture-context", "x".repeat(64_000), true);
         }
@@ -2489,8 +2368,6 @@ describe("Tron Home activations end to end", () => {
           return result;
         }
         if (["running-operation", "rollover-0", "rollover-1"].includes((params as { text: string }).text)) return result;
-        // The accepted command's response arrives after its actual settlement.
-        // This exercises both event-before-response and terminal-baseline transfer.
         const connection = (server as unknown as { clients: Map<string, { socket: import("ws").WebSocket }> }).clients.get(context.id);
         if (!connection) throw new Error("terminal connection missing at accepted-response cut");
         await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id).some(receipt =>
@@ -2501,11 +2378,7 @@ describe("Tron Home activations end to end", () => {
           expect(slot.snapshot().phase).toBe("running");
         }
         settlementCuts.push({ operationId: operation.operationId, phase: slot.snapshot().phase, busy: slot.isBusy });
-        // Publication owns the sequence: rebroadcasting snapshot() directly can
-        // reuse a consumed sequence and hide newly terminal receipt evidence.
         slot.publishSnapshot();
-        // A ping/pong cut proves the terminal has consumed preceding snapshot
-        // frames before this response, without a scheduling sleep.
         const consumed = once(connection.socket, "pong");
         connection.socket.ping();
         await awaitsWithin(consumed, "terminal consumed the settled snapshot");
@@ -2642,8 +2515,6 @@ describe("Tron Home activations end to end", () => {
           expect(next).not.toBe(current);
           const previous = opened.findLast(item => item.sessionId === current)!;
           expect(closed.at(-1)).toEqual({ sessionId: current, subscriptionToken: previous.subscriptionToken, closed: true });
-          // Real idle eviction after outgoing attachment retirement. The current
-          // subscribed chapter stays live; no production protection is bypassed.
           (f.registry as unknown as { options: { idleRuntimeMs: number } }).options.idleRuntimeMs = 0;
           const liveSlots = (f.registry as unknown as { slots: Map<string, RuntimeSlot> }).slots;
           await waitUntil(async () => {
@@ -2710,22 +2581,16 @@ describe("Tron Home activations end to end", () => {
       methods.push(method);
       const second = method === "session.prompt" && (params as { text?: string }).text === "refusal two";
       if (second) holdSecondSnapshots = true;
-      // The forced resync's baseline owns everything published before it. Like a
-      // real Gateway, publish every later event to the reattached client.
       const resyncOpen = method === "session.open" && holdSecondSnapshots;
       if (resyncOpen) holdSecondSnapshots = false;
       const result = await invoke(context, method, params);
       if (resyncOpen && !publishedAfterResync) {
-        // One real sequenced event after that baseline, while refusal 2's response
-        // is still held: the client must receive it in order, with no event gap.
         publishedAfterResync = true;
         slot.publishConfiguration();
       }
       if (second) {
         await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id).some(receipt =>
           receipt.receiptKind === "terminal" && receipt.operationId === (result as { operationId: string }).operationId));
-        // Suppress presentation events and force authoritative resync while
-        // the accepted response is still pending. That snapshot owns refusal 2.
         broadcast(slot.id, "transport.resyncRequired", {});
         await secondResponseGate;
         holdSecondSnapshots = false;
@@ -2776,8 +2641,6 @@ describe("Tron Home activations end to end", () => {
       await waitUntil(() => (stderr.match(/Tron synchronized/gu)?.length ?? 0) > syncsBefore, 10_000);
       await waitUntil(() => (stdout.match(/Home memory is not configured/gu)?.length ?? 0) >= 2, 2_000).catch(() => { throw new Error(`missing second refusal; stdout=${scrub(stdout)} stderr=${scrub(stderr)}`); });
       releaseSecondResponse();
-      // The next ordinary sequenced event proves the post-baseline one arrived:
-      // the client checks each event against the sequence it last received.
       slot.publishConfiguration();
       const repeatedRefusalCount = stdout.match(/Home memory is not configured/gu)?.length ?? 0;
       await waitUntil(() => (stdout.match(/you>/gu)?.length ?? 0) >= 3, 10_000);
@@ -2854,9 +2717,6 @@ describe("Tron Home activations end to end", () => {
   }, 90_000);
 
   it("resumes a retries-exhausted block once on the next activation", async () => {
-    // A transient outage leaves a `retries-exhausted` block behind. The cause is
-    // time, so the next activation re-arms the bounded retries by itself and is
-    // served; a block that recurs during its wait would be refused by the wait.
     const f = await fixture("resume-transient");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
@@ -2865,8 +2725,6 @@ describe("Tron Home activations end to end", () => {
     await slot.prompt(longInput("transient activation one"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
 
-    // The Gateway that a transient outage blocked: the memory's own durable state
-    // is exactly what a restart hands over.
     await restart(f);
     const memoryId = await homeMemoryStateId(f);
     const state = await readMemoryState(f, memoryId);
@@ -2894,9 +2752,6 @@ describe("Tron Home activations end to end", () => {
   }, 90_000);
 
   it("heals a permanent failure on the first activation after its cause clears, with no resume", async () => {
-    // #1279: a block of any reason is re-armed by every activation. While the
-    // model still refuses, the activation is refused with the block; once it
-    // stops refusing, the next activation is served without anyone resuming.
     const f = await fixture("heal-permanent");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
@@ -2919,7 +2774,6 @@ describe("Tron Home activations end to end", () => {
     const refusals = refusedReasons(f);
     const rearmedWhileFailing = f.compactor.calls > compactorCallsBefore;
 
-    // The cause is gone. Nobody resumes memory.
     f.compactor.failing = false;
     const requestsBefore = requests.length;
     f.faux.setResponses([responsesOf(f, requests)(longInput("heal response three"))]);
@@ -2946,10 +2800,6 @@ describe("Tron Home activations end to end", () => {
     { queue: [`${MEMORY_PROVIDER}/${MEMORY_MODEL_ID}`], label: "single model" },
     { queue: ["unregistered/memory-fallback", `${MEMORY_PROVIDER}/${MEMORY_MODEL_ID}`], label: "mixed permanent skip" },
   ])("stops memory on a usage limit as its own block, refuses with the cause while it lasts, and recovers without resume ($label)", async ({ queue }) => {
-    // The memory model's plan limit is time-bound: the block names it, the
-    // activation that finds it still in force is refused with its cause, and the
-    // first activation after it clears re-arms the memory by itself. The queue
-    // summarizer is the production one; only its clock is injected.
     const clock = { now: 0 };
     const f = await fixture("usage-limit", { memoryQueueClock: clock, memoryQueue: queue });
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
@@ -2966,8 +2816,6 @@ describe("Tron Home activations end to end", () => {
     expect(blocked).toBe("usage-limit");
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
 
-    // The limit still holds: the next activation re-arms the memory once, the
-    // re-arm blocks again during its wait, and the activation is refused with the cause.
     f.faux.setResponses([responsesOf(f, requests)("must never be produced while limited")]);
     await slot.prompt(longInput("usage activation two"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
@@ -2975,7 +2823,6 @@ describe("Tron Home activations end to end", () => {
     const limitedRefusalText = (await canonicalMessages(slot)).filter(message => message.stopReason === "error").map(message => String(message.errorMessage ?? "")).at(-1) ?? "";
     const blockedWhileLimited = (await homeOwnerOf(f.registry).memoryStatus()).blocked;
 
-    // The provider's window reopens and the queue's own record of the limit lapses.
     limit.reached = false;
     clock.now += QUEUE_USAGE_LIMIT_RECORD_MS + 1;
     f.faux.setResponses([responsesOf(f, requests)("usage activation three response")]);
@@ -3003,9 +2850,6 @@ describe("Tron Home activations end to end", () => {
   }, 90_000);
 
   it("keeps the memory configuration across disable, re-enable and a fresh-session designation", async () => {
-    // The configuration is the user's decision about *how* Home remembers, so it
-    // survives a disable, a re-enable and a replacement session. The spend does
-    // not: the store is keyed by session id, so a new session starts its own.
     const f = await fixture("lifecycle");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
@@ -3027,8 +2871,6 @@ describe("Tron Home activations end to end", () => {
     const afterEnable = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     expect(afterEnable).toMatchObject({ phase: "ready", readiness: { ready: true, gaps: [] }, recovery: { action: "none" } });
 
-    // A replacement session: the recorded one is deleted, so the next
-    // designation creates a fresh one.
     await f.service.invoke(client, "session.delete", { commandId: "e2e-lifecycle-delete", sessionId: sameSession.id });
     await waitUntil(async () => (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).sessionPresent === false);
     expect(await f.service.invoke(client, "home.status", {})).toMatchObject({
@@ -3059,8 +2901,6 @@ describe("Tron Home activations end to end", () => {
     expect(row.spendOnNewSession).toBeGreaterThanOrEqual(row.spentOnFirstSession);
     expect(row.spentOnFirstSession).toBeGreaterThan(0);
 
-    // The new physical chapter opens the same Home memory namespace (#483), so
-    // the stable Home identity retains configuration and spend across recovery.
     const freshSlot = await f.registry.acquire(reDesignated.sessionId);
     f.faux.setResponses([responsesOf(f, requests)(longInput("lifecycle reply three"))]);
     await freshSlot.prompt(longInput("lifecycle activation three"));
@@ -3074,15 +2914,12 @@ describe("Tron Home activations end to end", () => {
     report.cases.push({ case: "missing-sealed-source-blocked", priorProjectionRetained: true, blocked: blockedMemory.blocked });
   }, 120_000);
 
-  // #493: there is no budget to manage, and the memory is never stopped by what
-  // its summaries cost: spend is bounded by construction, and only reported.
   it("keeps serving with no budget, however much its summaries cost", async () => {
     const f = await fixture("no-budget");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
     const slot = await designateHome(f, "e2e-designate-no-budget");
     f.faux.setResponses([responsesOf(f, requests)("first activation response"), responsesOf(f, requests)("second activation response")]);
-    // Activation one's summaries report a cost far beyond any former budget.
     f.compactor.runawayUsage = 1_000_000_000;
     await slot.prompt(longInput("costly activation one"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
@@ -3105,8 +2942,6 @@ describe("Tron Home activations end to end", () => {
   }, 90_000);
 
   it("refuses a disable while an activation waits, and that activation completes", async () => {
-    // Home's memory must survive a refused disable: the session keeps running and
-    // the activation waiting for its view is the thing being protected.
     const f = await fixture("disable-wait");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
@@ -3154,15 +2989,12 @@ describe("Tron Home activations end to end", () => {
     f.faux.setResponses([responsesOf(f, requests)("race reply two")]);
     const second = slot.prompt(longInput("race activation two"));
     await waitUntil(() => activationOpen(f));
-    // The operator's change lands while the activation is inside its first step.
     const configured = await f.service.invoke(client, "settings.change", homeMemoryChange({
       commandId: "e2e-configure-race", model: OTHER_MEMORY_MODEL,
     })).then(() => "accepted", (error: unknown) => (error as { message?: string }).message ?? "failed");
     f.compactor.release?.();
     await second.catch(() => undefined);
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
-    // Whatever that race did to the waiting activation, the memory is usable and
-    // open exactly once: the next activation is served with the new model.
     f.faux.setResponses([responsesOf(f, requests)(longInput("race reply three"))]);
     await slot.prompt(longInput("race activation three"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
@@ -3198,8 +3030,6 @@ describe("Tron Home activations end to end", () => {
     report.cases.push({ case: "context-refusal", ...row });
     expect(context.available).toBe(true);
     if (context.available) {
-      // The activation's own start entry and refusal, and no sizes at all: it
-      // never prepared a request, so no other activation's sizes may appear.
       expect(typeof context.activationStartEntryId).toBe("string");
       expect(context.activationOpen).toBe(false);
       expect(context.lastRefusalReason).toBe("memory-not-configured");
@@ -3221,8 +3051,6 @@ describe("Tron Home activations end to end", () => {
     await waitUntil(async () => ((await homeOwnerOf(f.registry).memoryStatus()).episodic?.tokens.used ?? 0) > 0);
 
     await restart(f);
-    // The store the restart closed: its own document is what the status must
-    // report, because the reopened memory has not opened it yet.
     const memoryId = await homeMemoryStateId(f);
     const persisted = await readMemoryState(f, memoryId);
     expect(persisted).toBeDefined();
@@ -3234,7 +3062,6 @@ describe("Tron Home activations end to end", () => {
       spentTokensWhenClosed: closed.memory.spentTokens,
       persistedSpend: persisted!.spend,
       blockedWhenClosed: blocked.memory.blocked,
-      // Model queue entries are `provider/id`; only the block's own text could carry a path.
       blockedReasonLeakedPath: JSON.stringify({ ...blocked.memory, models: undefined }).includes("/"),
     };
     report.cases.push({ case: "status-persisted", ...row });
@@ -3245,7 +3072,6 @@ describe("Tron Home activations end to end", () => {
     expect(row.blockedReasonLeakedPath).toBe(false);
   }, 90_000);
 
-  // #493 S6: a memory configuration is a queue of physical models and nothing else.
   it("admits a memory configuration only of physical models, with no budget", async () => {
     const f = await fixture("configure-validation", { virtualModel: true });
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
@@ -3406,8 +3232,6 @@ describe("Tron Home activations end to end", () => {
     const callsBefore = f.compactor.calls;
 
     await restart(f);
-    // The restarted Gateway has no memory open until an activation asks for one,
-    // which is also when the record's model is applied again.
     const reopened = await f.registry.acquire(slot.id);
     f.faux.setResponses([responsesOf(f, requests)("after restart response")]);
     await reopened.prompt(longInput("restart activation two"));
@@ -3420,18 +3244,12 @@ describe("Tron Home activations end to end", () => {
       persistedSpend: persisted?.spend ?? -1,
       compactorCallsBeforeRestart: callsBefore,
       summarySentAfterRestart: requests.at(-1)?.blob.includes(SUMMARY_MARKER) ?? false,
-      // The restarted memory must not re-spend its budget rebuilding what it
-      // already built: the tree is durable and only the new message is summarized.
       compactorCallsAfterRestart: f.compactor.calls - callsBefore,
     };
     report.cases.push({ case: "restart", ...row });
-    // Strictly greater: a reset-and-re-earn would also satisfy >=, and the
-    // persisted document is the value a future restart restores.
     expect(row.usedAfterRestart).toBeGreaterThan(row.usedBeforeRestart);
     expect(row.usedAfterRestart).toBe(row.persistedSpend);
     expect(row.summarySentAfterRestart).toBe(true);
-    // Only the new message needed summarizing: the tree was durable, so the
-    // restarted memory re-spent nothing on what it had already built.
     expect(row.compactorCallsAfterRestart).toBeLessThanOrEqual(2);
   }, 90_000);
 });

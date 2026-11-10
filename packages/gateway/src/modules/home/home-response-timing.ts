@@ -23,8 +23,6 @@ interface Sample {
   toolsStarted?: number;
 }
 
-/** Volatile input correlation only. Completion exports scalars, never identities
- * or content; the canonical invocation receipt owns terminal truth. */
 export class HomeResponseTiming implements ResponseTiming {
   private readonly samples = new Map<string, Sample>();
   constructor(private readonly emit: (sample: HomeResponseSample) => void) {}
@@ -37,8 +35,6 @@ export class HomeResponseTiming implements ResponseTiming {
 
   transfer(from: string, to: string): void {
     const sample = this.samples.get(from);
-    // A separately accepted target keeps its own admission clock. Native
-    // receipts still terminalize the predecessor; never blend two inputs.
     if (!sample || this.samples.has(to)) return;
     this.samples.delete(from);
     this.samples.set(to, sample);

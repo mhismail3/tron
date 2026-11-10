@@ -6,7 +6,6 @@ import { GatewayError } from "../../errors.js";
 import { hasRuntimeRequestApplier, timingFor, type SettingsSchema, type Binding, type KeyDeclaration } from "./settings-schema.js";
 import type { SessionStore, SettingsStores, ResolveOptions } from "./settings-types.js";
 
-/** What a session target contributes: its Session scope and whether it is Home's chat. */
 export interface SessionSettingsSource {
   cwd: string;
   home: boolean;
@@ -26,20 +25,16 @@ export interface SettingsOption { value: unknown; label: string; detail?: string
 
 export interface SettingsOptionsResult {
   key: string;
-  /** The key's option source, or `static` for its declared choices. */
   source: string;
   dependsOn: string[];
   options: SettingsOption[];
-  /** An opaque cursor for the next page of a catalog. */
   nextCursor?: string;
 }
 
 
-/** Store/catalog I/O stays with its adapter; precedence and request pins belong here. */
 export interface SettingsReadOwner {
   readonly schema: SettingsSchema;
   readonly modelRuntime: ModelRuntime;
-  /** Admission uses the active SDK runtime, not the adapter’s catalog runtime. */
   readonly admitModelChoice: (runtime: ModelRuntime, provider: string, id: string) => Promise<void>;
   stores(target: SettingsTarget, session?: SessionSettingsSource, options?: { storeState?: boolean }): Promise<SettingsStores>;
   resolveOptions(runtime: ModelRuntime): Pick<ResolveOptions, "format" | "options">;
@@ -57,16 +52,10 @@ export class SettingsModel<Owner extends SettingsReadOwner = SettingsReadOwner> 
     return resolveSettings(this.schema, target, stores, { ...this.owner.resolveOptions(runtime), ...(keys ? { keys } : {}) });
   }
 
-  /** Resolve operational defaults at a request boundary, never by reloading the
-   * whole SDK manager (which would also change fixed resource/shell settings).
-   * Absence is meaningful for optional provider fields: the request boundary
-   * replaces them after the SDK has composed its initial defaults. */
   async requestSettings(sessionId: string, session: SessionSettingsSource, previousPins: Record<string, FixedSetting>): Promise<{
     settings: ReturnType<SettingsManager["getSettings"]>; requestPins: Record<string, FixedSetting>; admission: Resolution["keys"];
   }> {
     const keys = this.schema.KEYS.filter(hasRuntimeRequestApplier);
-    // The provider-request boundary reads values only: outside comparison and git
-    // state belong to settings reads and file events, not to every model request.
     const resolved = await this.resolve({ kind: "session", sessionId }, session, [...keys.map(key => key.id), "model.ref[role=chat]", "model.thinking[role=chat]", ...(session.home ? ["tools.active"] : [])], { storeState: false });
     const settings: Record<string, unknown> = {};
     const requestPins = structuredClone(previousPins);
@@ -92,11 +81,6 @@ export class SettingsModel<Owner extends SettingsReadOwner = SettingsReadOwner> 
   }
 }
 
-/**
- * One id rule for resolve, dry run and change: the declared id, exactly as resolve
- * returns it. A plain id whose instances carry a fixed qualifier is refused with
- * those ids named, never guessed (#1642).
- */
 export function declaredKey(schema: SettingsSchema, id: string): KeyDeclaration {
   const key = schema.KEYS.find(candidate => candidate.id === id);
   if (key) return key;
@@ -106,7 +90,6 @@ export function declaredKey(schema: SettingsSchema, id: string): KeyDeclaration 
 
 export const deepEqual = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 
-/** A change qualified by model writes the binding's per-model path when it has one. */
 export function qualifiedWrite(binding: Binding, qualifiers: Qualifiers): boolean {
   return binding.store === "pi" && binding.qualified !== undefined && qualifiers.model !== undefined;
 }
@@ -125,7 +108,6 @@ export function setPath(document: Record<string, unknown>, path: readonly string
   current[path[path.length - 1]!] = value;
 }
 
-/** Unset a value and drop parents it leaves empty. */
 export function unsetPath(document: Record<string, unknown>, path: readonly string[]): void {
   const parents: Array<Record<string, unknown>> = [];
   let current: unknown = document;

@@ -6,8 +6,6 @@ import json
 import os
 import time
 
-# A Gateway Vitest run waits its turn for this lock instead of overlapping another; a caller that
-# holds it (mutate) says so in its environment, so the run inside it does not wait again.
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
 HELD_BY_CALLER = 'TRON_FULL_GATEWAY_LOCK_HELD'
 

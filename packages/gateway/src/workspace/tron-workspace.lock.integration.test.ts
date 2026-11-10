@@ -4,11 +4,6 @@ import { join } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
 import { TronWorkspace, type TronWorkspaceFeature, type TronWorkspaceUnavailableCause } from "./tron-workspace.js";
 
-/**
- * `gateway/workspace` workspace-state markers: the shared initialization record and
- * each feature's marker, what initialization and marking commit, which hand-written
- * markers are admitted, and when the workspace refuses to be available.
- */
 it("workspace-state-paths: initialize, mark features, admission and availability", async () => {
   const home = join(await realpath(await mkdtemp(join(tmpdir(), "tron-workspace-state-"))), "home");
   onTestFinished(() => rm(join(home, ".."), { recursive: true, force: true }));
@@ -26,7 +21,6 @@ it("workspace-state-paths: initialize, mark features, admission and availability
   const initialized = async (workspace: TronWorkspace) => Object.fromEntries(await Promise.all(features.map(async (feature) =>
     [feature, await workspace.featureInitialized(feature).catch((error: Error) => `refused: ${error.message}`)])));
   const availability = async ({ workspace, causes }: ReturnType<typeof open>) => ({ describe: await workspace.describe(), causes });
-  /** Every file in the workspace-state directory, parsed. */
   const markers = async (): Promise<Record<string, unknown>> => {
     const names = await readdir(state).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
     return Object.fromEntries(await Promise.all(names.sort().map(async (name) => [name, JSON.parse(await readFile(join(state, name), "utf8"))])));
@@ -91,8 +85,6 @@ it("workspace-state-paths: initialize, mark features, admission and availability
   expect(await first.workspace.describe(), "dispose closes the workspace").toEqual(unavailable("closed"));
   await expect(first.workspace.dispose(), "dispose again").resolves.toBeUndefined();
 
-  // A fresh owner admits only the exact shared record; anything else is unavailable
-  // and its features refuse instead of reading as uninitialized.
   for (const value of [{ version: 1, knowledgeInitialized: false }, { version: 1, knowledgeInitialized: true }, { version: 1, extra: true },
     { version: 2 }, { version: 1, knowledgeInitialized: "yes" }, [{ version: 1 }], { version: 1 }]) {
     await marker("initialized.json", value);

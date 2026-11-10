@@ -15,15 +15,11 @@ import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
 const TASK_BYTES = 256 * 1_024;
 const AUTHORIZATION_BYTES = 4 * 1_024 * 1_024;
-/** Publications `taskWritesSince` can name: far more than one Home activation's writes. */
 const WRITE_JOURNAL = 1_024;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u;
 const OUTCOMES = ["progress", "needs-input", "final", "limited", "interrupted", "unknown"] as const;
 const FAILURE_CAUSES = ["provider-usage-limit", "provider-error"] as const;
 export type HomeTaskFailureCause = typeof FAILURE_CAUSES[number];
-/** The staged name `durableAtomicWriteJson` gives a publication in flight:
- * `<name>.json.<pid>.<12 hex>.tmp`. A crash can leave one behind; it is never a
- * record, so enumeration skips it and only startup recovery removes it. */
 const ownedTemporaryName = /^(?:authorization|\d{13}-.+)\.json\.\d+\.[0-9a-f]{12}\.tmp$/u;
 
 export interface HomeTaskRecord {
@@ -36,13 +32,10 @@ export interface HomeTaskRecord {
   generation: number;
   routeGeneration: number;
   wake: HomeWakeEvent | null;
-  /** Bounded recent history; copied on resume without changing original attribution. */
   checkins?: HomeTaskCheckin[];
   lastAttentionAt?: string;
-  /** One independent blocker outbox, so settlement cannot overwrite a delivered wake. */
   attention?: { checkin: HomeTaskCheckin; wake: HomeWakeEvent };
   intent: { text: string };
-  /** `taskIntentDigest(intent.text)`: the grant binding's identity of the intent. */
   intentDigest: string;
   target: string;
   grantRef: string | null;
@@ -51,35 +44,23 @@ export interface HomeTaskRecord {
   sessionId: string | null;
   operationId: string | null;
   stopIntent: { operationId: string; requestedAt: string } | null;
-  /** `inputTokens` is fresh input; cache read/write are counted apart (#1250).
-   * Records written before that carry no cache fields, and their `inputTokens`
-   * is the total including cache. */
   spend: { sourceDigest: string; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number } | null;
-  /** The Home profile's task budget fixed at dispatch (settings-model.md 6.1); absent is no limit. */
   budget?: { inputTokens?: number; outputTokens?: number };
-  /** The stopped task this one continues in place, in that task's own worker session (#929),
-   * and the maintainer's or Home's instruction it carries: a later resume re-delivers it when
-   * this one is refused before it starts (#959). */
   resumes?: { taskId: string; operationId: string; instruction?: string };
-  /** When an authorized task began waiting for a running-worker slot (#915); kept once set. */
   queuedAt?: string;
-  /** The one canonical report this task sealed, pinned by entry ID and payload digest. */
   reportRef: { resultId: string; sessionId: string; entryId: string; digest: string } | null;
   terminalEvidence: {
     outcome: typeof OUTCOMES[number];
     sessionId: string | null;
     entryIds: string[];
     reason: string;
-    /** Canonical provider failure, independent of work outcome/report/settlement. Never raw error text. */
     failureCause?: HomeTaskFailureCause;
-    /** Why admission refused the task, in the refusing owner's words (#959). */
     detail?: string;
   } | null;
 }
 
 export type HomeTaskWrite = Omit<HomeTaskRecord, "createdAt" | "updatedAt">;
 
-/** The intent's identity: SHA-256 of its UTF-8 text. */
 export function taskIntentDigest(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
@@ -101,39 +82,22 @@ interface Options {
   fileSystem?: DurableJsonFileSystem;
 }
 
-/** One listed record, with whether a maintainer decision is still owed for it. */
 interface HomeTaskPageItem {
   task: HomeTaskRecord;
   pendingGrant: boolean;
 }
 
-/** Durable namespace authority only; dispatch and domain lifecycle belong to
- * their later owners. One store per installation shares the workspace lease.
- * Enumeration streams files, never builds a second task catalog, so its owners
- * keep scans few: a list page is one pass, and Home admission never scans once
- * per delivered operation (#906). */
 export class HomeTaskStore {
   private readonly mutex = new AsyncMutex();
   private readonly home: string;
   private readonly directory: string;
   private readonly authorizationPath: string;
-  /** Publications made visible but not proven durable: a task ID, "authorization", or
-   * "namespace" for the setup marker. While any is uncertain the store refuses everything
-   * except an in-place update of an uncertain task (#2319): that complete durable rewrite
-   * supersedes the uncertain rename, and its synced directory covers the namespace. */
   private readonly uncertain = new Set<string>();
   readonly authorization: HomeTaskAuthorizationStore;
-  /** Durable publications this process attempted. This process is the namespace's
-   * only writer, so an unchanged count proves no record changed (#922). */
   private writes = 0;
   get writeCount(): number { return this.writes; }
-  /** The task each of the latest publications named (null for authorization),
-   * oldest first; the newest is publication `writes`. Bounded: an older count has
-   * no answer, so its reader takes a full pass. */
   private readonly journal: Array<string | null> = [];
 
-  /** Task IDs this process published, or attempted to, after write count `since`,
-   * or undefined when the journal no longer reaches back that far. */
   taskWritesSince(since: number): string[] | undefined {
     const first = this.writes - this.journal.length;
     if (!Number.isSafeInteger(since) || since < first || since > this.writes) return undefined;
@@ -157,8 +121,6 @@ export class HomeTaskStore {
           const current = await this.inspectAuthority();
           if (!current) throw new HomeTaskStoreError("not-initialized");
           if (next.revision !== current.revision || !positive(current.revision + 1)) throw new HomeTaskStoreError("revision-conflict");
-          // Tasks cite scopes and grants by ID and are not re-read on save, so
-          // authority may only append or mark records; removal would dangle them.
           if (current.scopes.some(scope => !next.scopes.some(candidate => candidate.id === scope.id))
             || current.grants.some(grant => !next.grants.some(candidate => candidate.id === grant.id))) invalid();
           await this.publish(this.authorizationPath, { version: 1, ...next, revision: current.revision + 1 }, AUTHORIZATION_BYTES);
@@ -167,8 +129,6 @@ export class HomeTaskStore {
     };
   }
 
-  /** Explicit setup only. A partial prior setup is evidence, not permission to
-   * finish or repair it. Marker publication follows durable namespace creation. */
   async initialize(): Promise<boolean> {
     return this.run(async () => {
       if (await this.inspect()) return false;
@@ -178,8 +138,6 @@ export class HomeTaskStore {
       await assertDirectory(this.home);
       await mkdir(this.directory, { mode: 0o700 });
       await this.publish(this.authorizationPath, { version: 1, revision: 1, scopes: [], requests: [], decisions: [], grants: [] }, AUTHORIZATION_BYTES);
-      // The init marker must not outlive a directory entry still in a volatile
-      // parent cache, including the newly created Home directory.
       for (const path of [this.home, tronHomePath(this.tronHome, "gateway")]) {
         const handle = await open(path, "r");
         try { await syncDurably(handle); } finally { await handle.close(); }
@@ -189,8 +147,6 @@ export class HomeTaskStore {
     });
   }
 
-  /** Physical namespace identity is outside the restored document authority.
-   * Restart and atomic file replacement retain it; directory recreation does not. */
   async restoreEpoch(): Promise<string> {
     return this.run(async () => {
       if (!(await this.inspectAuthority())) throw new HomeTaskStoreError("not-initialized");
@@ -198,21 +154,14 @@ export class HomeTaskStore {
     });
   }
 
-  /** Sequential consumers may await mutations between records. Namespace
-   * validation finishes under the mutex; no lock is held across a yield. */
   async *records(): AsyncGenerator<HomeTaskRecord> {
-    // Full validation runs first, so recovery refuses before it acts on any record.
     let authority = await this.run(() => this.inspect());
     if (!authority) return;
     for await (const name of this.taskNames()) {
       const task = await this.run(async () => {
-        // Each record re-checks the namespace path, so a directory swapped
-        // between yields is refused; the authority file itself is not re-read.
         if (!await this.assertNamespace()) throw new HomeTaskStoreError("missing-state");
         const current = await this.readNamedTask(name);
         if (!authorityReferencesResolve(current, authority!)) {
-          // A task created after this scan's authority read may cite authority
-          // published since then. Refresh once; a reference still unresolved is refused.
           const refreshed = await this.inspectAuthority();
           if (!refreshed) throw new HomeTaskStoreError("missing-state");
           authority = refreshed;
@@ -224,8 +173,6 @@ export class HomeTaskStore {
     }
   }
 
-  /** Exact-reference owners must block on undefined, never recreate a missing
-   * referenced task. Unreferenced absence carries no initialization evidence. */
   async read(taskId: string): Promise<HomeTaskRecord | undefined> {
     return this.run(async () => {
       if (!identifier(taskId) || taskId === "authorization") throw new HomeTaskStoreError("invalid-record");
@@ -236,16 +183,12 @@ export class HomeTaskStore {
   }
 
   async put(record: HomeTaskWrite, expectedRevision: number | null): Promise<HomeTaskRecord> {
-    // Snapshot at the command boundary: a queued caller cannot mutate its
-    // accepted command while an earlier durable write owns the mutex.
     const input = structuredClone(record);
     return this.run(async () => {
       const authorization = await this.inspectAuthority();
       if (!authorization) throw new HomeTaskStoreError("not-initialized");
       if (!identifier(input.taskId) || input.taskId === "authorization") invalid();
       const current = await this.readTask(input.taskId, authorization);
-      // Creation is strictly monotonic even within one wall-clock millisecond.
-      // The filename owns ordering across reopen; no clock/index state survives.
       let creationTime = Date.now();
       if (!current) for await (const name of this.taskNames()) creationTime = Math.max(creationTime, name.createdAt + 1);
       const createdAt = current?.createdAt ?? creationTime;
@@ -265,8 +208,6 @@ export class HomeTaskStore {
     });
   }
 
-  /** Domain mutations use the latest durable record under the same mutex as
-   * publication. Terminal settlement cannot overwrite accepted Stop/spend. */
   async update(taskId: string, change: (current: HomeTaskRecord) => HomeTaskRecord): Promise<HomeTaskRecord> {
     return this.run(async () => {
       if (!identifier(taskId) || taskId === "authorization") throw new HomeTaskStoreError("invalid-record");
@@ -290,8 +231,6 @@ export class HomeTaskStore {
     }, undefined, taskId);
   }
 
-  /** Inbox is the sole mutable portion of a terminal task. Its result and
-   * authority cannot be rewritten by delivery, recovery or notification. */
   async updateWake(taskId: string, change: (wake: HomeWakeEvent) => HomeWakeEvent, eventId?: string): Promise<HomeTaskRecord> {
     return this.run(async () => {
       if (!identifier(taskId) || taskId === "authorization") throw new HomeTaskStoreError("invalid-record");
@@ -313,9 +252,6 @@ export class HomeTaskStore {
     });
   }
 
-  /** Startup recovery only, before any task surface exists. A temporary is
-   * removed only when it is this user's regular file: anything else in the
-   * namespace is not ours to delete and refuses recovery. */
   async removeAbandonedTemporaries(): Promise<void> {
     await this.run(async () => {
       if (!(await this.inspectAuthority())) return;
@@ -329,16 +265,12 @@ export class HomeTaskStore {
     });
   }
 
-  /** `signal` withdraws a read still queued for the mutex (a caller that went away); `repairs`
-   * names the one uncertain task this operation may rewrite while the store is fenced. */
   private async run<T>(operation: () => Promise<T>, signal?: AbortSignal, repairs?: string): Promise<T> {
     return this.mutex.run(async () => {
       try {
         if (this.uncertain.size && !(repairs !== undefined && this.uncertain.has(repairs))) throw new HomeTaskStoreError("publication-uncertain");
         return await operation();
       } catch (error) {
-        // Setup-marker and data-file publications share this one uncertainty
-        // owner; no other write path continues after a visible uncertain commit.
         if (isDurablePublicationUncertain(error)) this.uncertain.add("namespace");
         const refusal = this.uncertain.size ? new HomeTaskStoreError("publication-uncertain")
           : error instanceof HomeTaskStoreError ? error
@@ -350,7 +282,6 @@ export class HomeTaskStore {
   }
 
   private async publish(path: string, document: unknown, maximumBytes: number): Promise<void> {
-    // Counted and named before the attempt: a failed or uncertain write still ends a quiet proof.
     this.writes += 1;
     this.journal.push(path === this.authorizationPath ? null : (document as HomeTaskRecord).taskId);
     if (this.journal.length > WRITE_JOURNAL) this.journal.shift();
@@ -365,8 +296,6 @@ export class HomeTaskStore {
     this.uncertain.delete(key);
   }
 
-  /** Directory checks for the namespace path, without reading any file. False
-   * means the namespace was never created; a half-present namespace is refused. */
   private async assertNamespace(): Promise<boolean> {
     if (!(await this.workspace.describe()).available) throw new HomeTaskStoreError("unsafe-state");
     await assertDirectory(this.tronHome);
@@ -393,7 +322,6 @@ export class HomeTaskStore {
   private async inspect(): Promise<HomeTaskAuthorizationState | undefined> {
     const state = await this.inspectAuthority();
     if (!state) return undefined;
-    // Each file is validated and released before the next one.
     for await (const name of this.taskNames()) {
       const task = await this.readNamedTask(name);
       validateAuthorityReferences(task, state);
@@ -407,12 +335,8 @@ export class HomeTaskStore {
     return join(this.directory, `${String(task.createdAt).padStart(13, "0")}-${task.taskId}.json`);
   }
 
-  /** The one enumeration that owns the one-file-per-task invariant: a second
-   * name for the same taskId is refused wherever it appears in the directory.
-   * The only state retained across entries is one ID per record. */
   private async *taskNames(): AsyncGenerator<TaskName> {
     const taskIds = new Set<string>();
-    // opendir has a bounded entry buffer; the caller owns the pace of iteration.
     for await (const entry of await opendir(this.directory, { bufferSize: 32 })) {
       if (!isTaskEntry(entry.name)) continue;
       const name = parseTaskName(entry.name);
@@ -422,9 +346,6 @@ export class HomeTaskStore {
     }
   }
 
-  /** One record by ID. The directory is listed for names only: the target is
-   * the only record read, and its authority references are checked against the
-   * caller's single authority read. */
   private async readTask(taskId: string, authority: HomeTaskAuthorizationState): Promise<HomeTaskRecord | undefined> {
     let name: TaskName | undefined;
     for await (const candidate of this.taskNames()) {
@@ -436,8 +357,6 @@ export class HomeTaskStore {
     return task;
   }
 
-  /** Reads the record a directory entry names, and refuses it unless its body
-   * agrees with that name. Authority references are the caller's to check. */
   private async readNamedTask(name: TaskName): Promise<HomeTaskRecord> {
     const read = await readSecureJson<unknown>(this.taskPath(name), TASK_BYTES);
     if (!read.present) throw new HomeTaskStoreError("missing-state");
@@ -446,18 +365,12 @@ export class HomeTaskStore {
     return task;
   }
 
-  /** Physical namespace identity for restore fencing. A directory without birth
-   * time has no identity to fence with, so it is refused rather than hashed. */
   private async directoryEpoch(): Promise<string> {
     const info = await lstat(this.directory, { bigint: true });
     if (!info.isDirectory() || info.isSymbolicLink() || info.birthtimeNs <= 0n) throw new HomeTaskStoreError("unsafe-state");
     return createHash("sha256").update(`${info.dev}:${info.ino}:${info.birthtimeNs}`).digest("hex");
   }
 
-  /** The `target` of every task that has not settled, from one locked pass. Callers
-   * that only need to know where work is live (project lifecycle) must not page the
-   * whole history once per page of display rows. `signal` stops the pass between
-   * records and withdraws a read still queued for the mutex. */
   async activeTargets(signal?: AbortSignal): Promise<string[]> {
     return this.run(async () => {
       const authority = await this.inspectAuthority();
@@ -473,9 +386,6 @@ export class HomeTaskStore {
     }, signal);
   }
 
-  /** The newest tasks after `cursor`, with exact lifecycle counts for the whole
-   * namespace, from one locked pass: the counts read every record anyway, so the
-   * page's records come from that same read. Never a report body. */
   async page(input: { limit?: number; cursor?: string; lineages?: boolean; filter?: "all" | "open" | "finished" }, signal?: AbortSignal): Promise<{ items: HomeTaskPageItem[]; nextCursor?: string; counts: HomeTaskCounts }> {
     return this.run(async () => {
       const limit = input.limit ?? 20;
@@ -496,9 +406,6 @@ export class HomeTaskStore {
           after = { createdAt: value.createdAt as number, taskId: value.taskId as string };
         } catch { invalid(); }
       }
-      // Every record is validated once. The lineage read temporarily retains records
-      // to resolve explicit resume links across page boundaries, then discards them;
-      // the operation catalog keeps only its newest `limit + 1` candidates.
       const counts: HomeTaskCounts = { active: 0, finished: 0 };
       const selected: HomeTaskRecord[] = [];
       const lineageRecords: HomeTaskRecord[] = [];
@@ -554,9 +461,6 @@ function keys(value: unknown, required: string[], optional: string[] = []): valu
 }
 function positive(value: unknown): value is number { return Number.isSafeInteger(value) && (value as number) > 0; }
 function count(value: unknown): value is number { return Number.isSafeInteger(value) && (value as number) >= 0; }
-/** Spend is a cumulative projection: once published it never shrinks, and a split
- * record never reverts to the pre-#1250 combined shape. Prompt totals compare
- * across both shapes. */
 function spendRegressed(current: HomeTaskRecord["spend"], next: HomeTaskRecord["spend"]): boolean {
   if (current === null) return false;
   return next === null || homeTaskPromptTokens(next) < homeTaskPromptTokens(current) || next.outputTokens < current.outputTokens
@@ -571,7 +475,6 @@ function timestamp(value: unknown): boolean { return typeof value === "number" &
 function unique(records: Record<string, unknown>[]): boolean { return new Set(records.map(record => record.id)).size === records.length; }
 function invalid(): never { throw new HomeTaskStoreError("invalid-record"); }
 function immutableTask(task: HomeTaskRecord): string {
-  // The budget is fixed at the task's start: no later publication may raise or drop it.
   return JSON.stringify([task.createdAt, task.taskId, task.homeId, task.generation, task.routeGeneration, task.intent.text, task.intentDigest, task.target, task.budget ?? null, task.resumes ?? null]);
 }
 

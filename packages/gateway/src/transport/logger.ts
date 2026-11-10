@@ -6,12 +6,6 @@ import { GatewayError } from "../errors.js";
 import type { HomeHardBoundary } from "../modules/home/home-diagnostic.js";
 import type { CommandReceiptRouteCategory } from "../protocol/types.js";
 
-/*
- * Level policy (owned by packages/gateway/docs/observability.md): error means
- * someone should look; warning is degraded
- * but handled; info reconstructs a timeline; debug is per-request detail kept
- * only in the in-memory buffer that diagnostic exports include.
- */
 export type LogLevel = "debug" | "info" | "warning" | "error";
 
 export interface LogError {
@@ -19,7 +13,6 @@ export interface LogError {
   code?: string;
   message: string;
   stack?: string;
-  /** Bounded diagnostic text, never the public error's structured details. */
   details?: string;
   cause?: LogError;
 }
@@ -30,31 +23,23 @@ export interface LogRecord {
   message: string;
   event?: string;
   source?: string;
-  /** Stamped by the writer, never by call sites. */
   process?: "gateway";
   runtimeEpoch?: string;
   payloadVersion?: string;
   sessionId?: string;
   connectionId?: string;
-  /** The phone's hello correlation key (O-1): joins its records to this connection. */
   peerClientId?: string;
   peerAttemptId?: string;
   peerEpoch?: string;
-  /** The protocol version a refused hello asked for (`http.upgrade`,
-   * `reason=protocol_mismatch`): names the stale side of a version mismatch. */
   peerProtocolVersion?: number;
   commandId?: string;
-  /** Process identity for lifecycle records observed across supervisor boundaries. */
   pid?: number;
-  /** A named lifecycle step, such as a startup checkpoint. */
   step?: string;
-  /** Sanitized transport request correlation; never a session or payload ID. */
   requestID?: string;
   method?: string;
   outcome?: string;
   code?: string;
   reason?: string;
-  /** Home chapter diagnostics: approved enums and non-negative safe counters. */
   operation?: "pauseMemory" | "resumeMemory";
   category?: "open" | CommandReceiptRouteCategory;
   boundary?: HomeHardBoundary;
@@ -67,36 +52,23 @@ export interface LogRecord {
   acceptToCloseMs?: number;
   bytesRead?: number;
   transportEnd?: "reset" | "timeout" | "fin" | "none";
-  /** The request span's compact stage breakdown, one bounded string. */
   stages?: string;
-  /** The measured stage a request was in at one instant, e.g. the stage a
-   * cancellation interrupted (`rpc.cancelled`). */
   stage?: string;
-  /** The part of `durationMs` no named stage accounted for. */
   unaccountedMs?: number;
-  /** How far an upgrade got: `request`, `auth`, `handshake` or `hello`. */
   phaseReached?: string;
-  /** Upgrade phase durations, in the order they run (`http.upgrade`). */
   acceptToUpgradeMs?: number;
   authMs?: number;
   handshakeMs?: number;
   helloMs?: number;
-  /** The peer's Tailscale path at an inbound-silence episode (`connection.inbound-silent`). */
   peerPath?: string;
   peerPathSource?: string;
   peerRelay?: string;
   peerLastHandshake?: string;
   peerRxBytes?: number;
   peerTxBytes?: number;
-  /** The listener a connection reached: `lan`, `tailscale` or `primary`
-   * (`http.upgrade`). The phone names the two real legs it races the same way. */
   transport?: string;
-  /** How long the socket had been silent when it spoke again. */
   silentMs?: number;
-  /** Named counters for one record (a reconcile's files and rows): the writer
-   * bounds how many, their names and their values. */
   counts?: Record<string, number>;
-  /** Home task diagnostics: bounded hashes and approved tokens, never IDs or text. */
   taskHash?: string;
   operationHash?: string;
   eventHash?: string;
@@ -138,17 +110,10 @@ interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "bounda
   acceptToCloseMs?: number;
   bytesRead?: number;
   transportEnd?: "reset" | "timeout" | "fin" | "none";
-  /** `name=12ms×2/610KB;name=5ms`; the writer bounds it. */
   stages?: string;
-  /** The measured stage a request was in at one instant, e.g. the stage a
-   * cancellation interrupted (`rpc.cancelled`). */
   stage?: string;
-  /** The part of `durationMs` the stage breakdown did not cover. */
   unaccountedMs?: number;
   phaseReached?: string;
-  /** The admission a capacity shed refused (`gateway.shed` with `reason=heap`):
-   * a cold runtime load (`open`) or a JSONL import. A deadline shed names its
-   * `method` instead. */
   admission?: string;
   acceptToUpgradeMs?: number;
   authMs?: number;
@@ -160,13 +125,10 @@ interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "bounda
   peerLastHandshake?: string;
   peerRxBytes?: number;
   peerTxBytes?: number;
-  /** The listener a connection reached; the `transport` field of `http.upgrade`. */
   transport?: string;
   silentMs?: number;
-  /** Named integer counters, e.g. `{ files: 12, added: 1 }`. */
   counts?: Readonly<Record<string, number>>;
   taskHash?: string;
-  /** Null when no operation is bound; the writer omits it. */
   operationHash?: string | null;
   eventHash?: string;
   referenceHash?: string;
@@ -182,7 +144,6 @@ interface LogMetadata extends Pick<LogRecord, "operation" | "category" | "bounda
   action?: string;
   disposition?: string;
   cancelAndJoin?: string;
-  /** Any thrown value; the writer bounds and redacts it. */
   error?: unknown;
 }
 
@@ -190,7 +151,6 @@ function counterField(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
-/** One duration field: finite, non-negative, rounded, never NaN in a record. */
 function durationField(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value)))
@@ -202,29 +162,18 @@ interface LoggerIdentity {
   payloadVersion?: string | undefined;
 }
 
-/** Records served to iOS and `recent()`: persisted levels only. */
 const PERSISTED_TAIL_RECORDS = 1_000;
-/** Debug detail for exports: enough for several minutes of busy RPC traffic. */
 const DEBUG_BUFFER_MAX_RECORDS = 4_000;
 const DEBUG_BUFFER_MAX_BYTES = 2 * 1_024 * 1_024;
-/** User-chosen Gateway retention (2026-09-23): 8 segments × 5 MB = 40 MB. */
 const SEGMENT_MAX_BYTES = 5 * 1_024 * 1_024;
 const SEGMENT_COUNT = 8;
 const MAX_MESSAGE_BYTES = 2_000;
-/** A stage breakdown is read as one line beside the record it explains; past
- * this it stops naming stages rather than crowding the other fields. Wide
- * enough for a cold open's ~260-byte breakdown with room for a nested catalog
- * walk. */
 const MAX_STAGES_BYTES = 1_024;
 const MAX_ERROR_MESSAGE_BYTES = 1_000;
-/** Internal details name a small set of failure reasons, never an arbitrary payload. */
 const MAX_ERROR_DETAIL_NODES = 64;
 const MAX_STACK_BYTES = 4_000;
 const MAX_FIELD_CHARS = 160;
-/** A record names a handful of counters; more would make the field a payload. */
 const MAX_COUNT_FIELDS = 16;
-/** A counter name is a short identifier: the shape check below already rejects
- * anything but letters and digits, so only its length needs bounding. */
 const MAX_COUNT_NAME_CHARS = 32;
 const PERSISTED_LEVELS: ReadonlySet<LogLevel> = new Set(["info", "warning", "error"]);
 
@@ -238,8 +187,6 @@ function boundedMessage(value: string): string {
   return boundedBytes(redact(value), MAX_MESSAGE_BYTES);
 }
 
-/** Named counters are fields a reader can aggregate, so their names are short
- * plain identifiers and their values are bounded integers. */
 function boundedCounts(value: Readonly<Record<string, number>>): Record<string, number> {
   const bounded: Record<string, number> = {};
   for (const [name, count] of Object.entries(value)) {
@@ -254,20 +201,14 @@ function boundedDiagnosticID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, MAX_FIELD_CHARS);
 }
 
-/** A hash or enum token a diagnostic names: escaped like an ID and short enough
- * that it cannot carry a payload. */
 function boundedToken(value: unknown): string | undefined {
   return typeof value === "string" ? boundedDiagnosticID(value).slice(0, 64) : undefined;
 }
 
-/** The stage breakdown keeps its `=`, `;`, `×` and `/` separators, so it is
- * bounded by bytes and redacted like a message, not diagnostic-ID-escaped. */
 function boundedStages(value: string): string {
   return boundedBytes(redact(value), MAX_STAGES_BYTES);
 }
 
-// Payload and home prefixes are shortened before the standard redaction, which
-// would otherwise replace whole paths and hide which file an error names.
 function shortenedPaths(value: string): string {
   const payloadRoot = process.env.TRON_GATEWAY_PAYLOAD_ROOT;
   const withPayload = payloadRoot ? value.replaceAll(payloadRoot, "<payload>") : value;
@@ -288,8 +229,6 @@ function internalErrorDetails(value: unknown): string {
   }
 }
 
-/** Bounded, redacted error shape. One level of `cause` keeps the root reason
- * of a wrapped error; typed internal details stay diagnostic-only text. */
 export function describeError(error: unknown, includeCause = true): LogError {
   if (!(error instanceof Error)) {
     return { name: "NonError", message: boundedBytes(shortenedPaths(String(error)), MAX_ERROR_MESSAGE_BYTES) };
@@ -301,7 +240,6 @@ export function describeError(error: unknown, includeCause = true): LogError {
   };
 }
 
-/** The one place error fields are bounded, for live errors and restored lines. */
 function boundedErrorFields(
   name: string, code: unknown, message: string, stack: unknown, clean: (text: string) => string,
 ): LogError {
@@ -326,7 +264,6 @@ function boundedError(value: unknown): LogError | undefined {
   };
 }
 
-/** Normalizes call-site metadata or a persisted line into one bounded shape. */
 function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescribed: boolean): Omit<LogRecord, "timestamp" | "level" | "message"> {
   const error = value.error === undefined
     ? undefined
@@ -419,18 +356,12 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
   };
 }
 
-/**
- * The Gateway's single log writer. Info and above append to numbered JSONL
- * segments and a bounded tail served to clients; debug stays in a separate
- * bounded memory buffer that only diagnostic exports read.
- */
 export class GatewayLogger {
   private readonly records: LogRecord[] = [];
   private readonly debugRecords: Array<{ record: LogRecord; bytes: number }> = [];
   private debugBytes = 0;
   private readonly path: string | undefined;
   private readonly identity: Pick<LogRecord, "runtimeEpoch" | "payloadVersion">;
-  /** Tracked in memory so each append avoids a stat call. */
   private activeBytes: number | undefined;
 
   constructor(path?: string, identity: LoggerIdentity = {}) {
@@ -464,12 +395,10 @@ export class GatewayLogger {
     else process.stdout.write(output);
   }
 
-  /** Persisted levels only; debug detail is reachable through exports. */
   recent(limit = 200): LogRecord[] {
     return this.records.slice(-Math.max(1, Math.min(limit, PERSISTED_TAIL_RECORDS)));
   }
 
-  /** The in-memory debug buffer, oldest first, for diagnostic exports. */
   debugTail(): LogRecord[] {
     return this.debugRecords.map((entry) => entry.record);
   }
@@ -488,8 +417,6 @@ export class GatewayLogger {
   private loadPersisted(): void {
     if (!this.path) return;
     try {
-      // Newest segments hold the tail; read until the tail is full, then
-      // restore chronological order.
       const newestFirst: LogRecord[] = [];
       for (let index = 0; index < SEGMENT_COUNT && newestFirst.length < PERSISTED_TAIL_RECORDS; index += 1) {
         const candidate = this.segmentPath(index);
@@ -502,7 +429,6 @@ export class GatewayLogger {
       }
       this.records.push(...newestFirst.reverse());
     } catch {
-      // Diagnostics must never prevent Gateway startup.
     }
   }
 
@@ -522,7 +448,6 @@ export class GatewayLogger {
         ...normalizedFields(value as LogMetadata, true),
       };
     } catch {
-      // Ignore a partial final line or malformed historical record.
       return undefined;
     }
   }
@@ -540,16 +465,14 @@ export class GatewayLogger {
       appendFileSync(this.path, line, { mode: 0o600 });
       this.activeBytes += lineBytes;
     } catch {
-      // Re-measure after any failure; stdout/stderr remains the fallback sink.
       this.activeBytes = undefined;
     }
   }
 
-  /** Shifts gateway.jsonl → .1 → … → .7, discarding the oldest segment. */
   private rotate(): void {
-    try { unlinkSync(this.segmentPath(SEGMENT_COUNT - 1)); } catch { /* fewer segments exist */ }
+    try { unlinkSync(this.segmentPath(SEGMENT_COUNT - 1)); } catch { }
     for (let index = SEGMENT_COUNT - 2; index >= 0; index -= 1) {
-      try { renameSync(this.segmentPath(index), this.segmentPath(index + 1)); } catch { /* gap in the sequence */ }
+      try { renameSync(this.segmentPath(index), this.segmentPath(index + 1)); } catch { }
     }
     this.activeBytes = 0;
   }

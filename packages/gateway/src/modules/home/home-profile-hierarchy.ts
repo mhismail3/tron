@@ -3,8 +3,6 @@ import { PROFILE_AREAS } from "./profile-placement.js";
 import type { HomeProfileIndexRead } from "./home-profile.js";
 
 export const PROFILE_SECTION_HEADING = "## Learned profile";
-/** Bodies/titles are never included. The final UTF-8 bound includes instructions,
- * diagnostics and continuation; oversized metadata remains explicitly pageable. */
 export function profileIndex(read: Pick<HomeProfileIndexRead, "diagnostics" | "sorting"> & { items: Array<Pick<HomeProfileIndexRead["items"][number], "id" | "revisionId" | "path" | "status">> }, offset = 0, activation?: "user" | "wake"): string {
   const names = [...Object.keys(PROFILE_AREAS), "inferred", "prior"];
   const rows = names.map(path => {

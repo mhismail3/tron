@@ -13,7 +13,6 @@ export function storedNoteContent(content: NoteContent): NoteContent {
   if (content.retired !== false) return content;
   const { retired: _cleared, ...rest } = content; return rest;
 }
-/** One placement: a v2 `path`, exact `profile` metadata, or (Changes Undo only) `prior`. */
 export interface ProfileAssignment { id: string; expectedRevision: string; path?: string; profile?: ProfileMetadata; prior?: true }
 export interface ProfilePartitionRequest { commandId: string; mode: "reorganize"; assignments: ProfileAssignment[] }
 export interface ProfilePartitionResult { audit?: SubjectAuditReference; changes: Array<{ id: string; beforeRevision: string; revisionId: string }> }
@@ -30,8 +29,6 @@ function assignmentContent(note: ProfileNoteRecord, assignment: ProfileAssignmen
   if (assignment.prior) return content;
   return { ...content, profile: assignment.path !== undefined ? profilePath(assignment.path) : assignment.profile! };
 }
-/** Prepares only current placement data. No history, backup directory or archive
- * is an input to an admitted transition. The file owner publishes the whole plan. */
 export function prepareProfilePartition(request: ProfilePartitionRequest, notes: ProfileNoteRecord[], excluded: (note: ProfileNoteRecord) => boolean,
   restoring = false, revisions: Readonly<Record<string, string>> = {}): { originals: ProfileNoteRecord[]; prepared: ProfileNoteRecord[]; result: ProfilePartitionResult } {
   if (request.mode !== "reorganize" || request.assignments.length < 1 || request.assignments.length > 500) refuse("Partition requires 1 to 500 explicit assignments");

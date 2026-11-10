@@ -9,32 +9,12 @@ import {
 import { TOOL_INTERRUPT_SIGNAL_GRACE_MS, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
 import { boundTaskCommandScope, closeTaskScopeAnchor, openTaskScopeAnchor, recordTaskCommandGroup, TASK_SCOPE_ANCHOR_FD } from "./task-command-scope.js";
 
-/**
- * Agent-started commands (the bash tool of every Gateway-hosted session: chats, Home
- * and task workers; not a user's own `!` command) run at this niceness, set by `nice` before the shell execs
- * so the shell and every descendant inherit it; the Gateway itself keeps its own
- * priority, so its interactive requests win the CPU when commands saturate the host.
- * Niceness rather than background QoS: QoS confines a command to efficiency cores
- * and throttles its I/O, which made an idle-host TypeScript check four times slower.
- */
 export const AGENT_COMMAND_NICENESS = 10;
 const NICE = "/usr/bin/nice";
 const POST_EXIT_OUTPUT_GRACE_MS = 100;
-/** How long output may still hold a call after a timeout or Stop has asked for
- * termination and the shell has exited. Only a descendant that escaped the
- * process group can still be writing then, and without this bound it would hold
- * the call open for as long as it writes (#499 review). Without termination the
- * call keeps reading, as Pi does (pi#5303), so legitimate output is never cut. */
 const TERMINATED_OUTPUT_MAX_MS = 2_000;
 const ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
-/** Pi's own bound on a bash timeout (the largest `setTimeout` delay). */
 const MAX_TIMEOUT_MS = 2_147_483_647;
-/**
- * The tool's `timeout` (seconds) as milliseconds, validated exactly as Pi's own
- * bash operations do. `BashOperations.exec` owns the timeout: Pi's tool only
- * passes it through, so operations that ignore it leave every command unbounded
- * (#499: a call with timeout 900 ran 57 minutes until it was aborted).
- */
 function resolveTimeoutMs(timeout: number | undefined): number | undefined {
   if (timeout === undefined) return undefined;
   if (!Number.isFinite(timeout) || timeout <= 0) throw new Error("Invalid timeout: must be a finite number of seconds");
@@ -46,15 +26,10 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
 interface ActiveProcess {
   readonly child: ChildProcess;
   readonly settled: Promise<void>;
-  /** Terminates the owned tree and bounds how long output can still hold the call. */
   readonly terminate: () => void;
   aborted: boolean;
 }
 
-/**
- * Owns only the built-in foreground bash tool for one canonical session.
- * Detached/background extension-managed subagents never enter this owner.
- */
 export class DirectBashProcessOwner {
   private readonly active = new Map<number, ActiveProcess>();
 
@@ -65,8 +40,6 @@ export class DirectBashProcessOwner {
     return {
       ...presentation,
       execute: (toolCallId, params, signal, onUpdate, context) => {
-        // Shell settings are read at execution time so a resource reload keeps
-        // the same behavior as Pi's built-in bash definition.
         const commandPrefix = this.settings.getShellCommandPrefix();
         const current = createBashToolDefinition(cwd, {
           operations: this.shellOperations("agent"),
@@ -101,8 +74,6 @@ export class DirectBashProcessOwner {
     }
   }
 
-  /** Keep the work CLI's opaque session identity, but never expose Gateway-owned
-   * paths or supervision controls to arbitrary shell commands. */
   private commandEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     const commandEnvironment = Object.fromEntries(
       Object.entries(environment ?? process.env).filter(([name]) =>
@@ -112,17 +83,13 @@ export class DirectBashProcessOwner {
     return commandEnvironment;
   }
 
-  /** Shared by assistant bash tools (`agent`, lowered) and Pi's direct user `!`
-   * bash execution (`user`, the user's own command at default priority). */
   shellOperations(origin: "agent" | "user"): BashOperations {
     return {
       exec: async (command, cwd, options) => {
-        // Validated before the abort check, in Pi's order.
         const timeoutMs = resolveTimeoutMs(options.timeout);
         if (options.signal?.aborted) throw new Error("aborted");
         const shell = getShellConfig(this.settings.getShellPath());
         const fromStdin = shell.commandTransport === "stdin";
-        // A task worker's commands run in its task's scope, reaped when the task settles.
         const scope = process.platform === "win32" ? undefined : boundTaskCommandScope(this.sessionId);
         const environment = this.commandEnvironment(options.env);
         if (scope) environment.TMPDIR = scope.tmp;
@@ -130,7 +97,6 @@ export class DirectBashProcessOwner {
         let child: ChildProcess;
         try {
           const shellArgs = fromStdin ? shell.args : [...shell.args, command];
-          // `nice` execs the shell in place: the same PID and process group.
           const lowered = origin === "agent" && process.platform !== "win32";
           child = spawn(
             lowered ? NICE : shell.shell,
@@ -148,7 +114,6 @@ export class DirectBashProcessOwner {
           if (anchor !== undefined) closeTaskScopeAnchor(anchor);
         }
         if (scope && child.pid !== undefined) {
-          // An unrecorded shell would be exactly the orphan the scope exists to prevent.
           try { recordTaskCommandGroup(scope, child.pid); }
           catch (error) { this.terminateOwnedTree(child); throw error; }
         }
@@ -176,8 +141,6 @@ export class DirectBashProcessOwner {
         this.active.set(pid, active);
         const onAbort = () => {
           active.aborted = true;
-          // An interrupt of only this call lets the command clean up first (#1189); Stop and
-          // timeouts end the tree at once.
           if (options.signal?.reason instanceof ToolCallInterrupt) void this.interruptOwnedTree(child, terminating, terminate);
           else terminate();
         };
@@ -185,8 +148,6 @@ export class DirectBashProcessOwner {
           if (options.signal.aborted) onAbort();
           else options.signal.addEventListener("abort", onAbort, { once: true });
         }
-        // The same termination as an abort: the freeze-then-kill of the owned tree,
-        // and a bounded settlement even if an escaped descendant holds the output.
         let timedOut = false;
         const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
           timedOut = true;
@@ -196,8 +157,6 @@ export class DirectBashProcessOwner {
         try {
           const exitCode = await completion;
           if (active.aborted || options.signal?.aborted) throw new Error("aborted");
-          // Pi's tool reports this as "Command timed out after N seconds",
-          // keeping the output the command wrote.
           if (timedOut) throw new Error(`timeout:${options.timeout}`);
           return { exitCode };
         } finally {
@@ -209,20 +168,12 @@ export class DirectBashProcessOwner {
     };
   }
 
-  /** Interrupts the owned tree as a terminal's Ctrl-C would, then escalates (#1189): SIGINT to
-   * the shell's process group; after the grace (or once the shell exits) SIGTERM to the group and
-   * every surviving descendant seen; after the grace again (or once all are gone) the
-   * freeze-and-SIGKILL cut and SIGKILL to every surviving seen descendant. A descendant in its own
-   * session (gate shards, XCTest) misses the group signals and, once its parent exits, is an
-   * orphan that ancestry no longer finds, so each one seen is followed to the end. */
   private async interruptOwnedTree(child: ChildProcess, terminating: () => void, terminate: () => void): Promise<void> {
     const pid = child.pid;
     if (pid === undefined || process.platform === "win32") { terminate(); return; }
     terminating();
     let exited = child.exitCode !== null || child.signalCode !== null;
     if (!exited) child.once("exit", () => { exited = true; });
-    // Each descendant with its parent when first seen. It is still ours while it has that
-    // parent, another seen one, or none (an orphan); a reused PID has an unrelated parent.
     const seen = new Map<number, number>();
     const observe = () => {
       const parents = this.parentPids();
@@ -234,8 +185,8 @@ export class DirectBashProcessOwner {
     };
     const groupAlive = () => { try { process.kill(-pid, 0); return true; } catch { return false; } };
     const signal = (name: NodeJS.Signals, descendants: number[]) => {
-      try { process.kill(-pid, name); } catch { /* group already gone */ }
-      for (const descendant of descendants) { try { process.kill(descendant, name); } catch { /* already exited */ } }
+      try { process.kill(-pid, name); } catch { }
+      for (const descendant of descendants) { try { process.kill(descendant, name); } catch { } }
     };
     const wait = async (done: () => boolean) => {
       for (const deadline = Date.now() + TOOL_INTERRUPT_SIGNAL_GRACE_MS; Date.now() < deadline && !done();) {
@@ -247,68 +198,54 @@ export class DirectBashProcessOwner {
     await wait(() => exited);
     const terminated = observe();
     signal("SIGTERM", terminated);
-    // Polled with signal 0, not `ps`: a synchronous `ps` read blocks the Gateway's event loop.
     const alive = (descendant: number) => { try { process.kill(descendant, 0); return true; } catch { return false; } };
     await wait(() => exited && !groupAlive() && !terminated.some(alive));
     const survivors = observe();
     terminate();
-    for (const descendant of survivors) { try { process.kill(descendant, "SIGKILL"); } catch { /* already exited */ } }
+    for (const descendant of survivors) { try { process.kill(descendant, "SIGKILL"); } catch { } }
   }
 
-  /** Freeze the owned group before taking one exact descendant cut. This keeps
-   * a child from escaping between discovery and termination. */
   private terminateOwnedTree(child: ChildProcess): void {
     const pid = child.pid;
     if (pid === undefined) return;
     if (process.platform === "win32") {
       if (child.exitCode !== null || child.signalCode !== null) return;
       try {
-        // The trusted System32 executable, as Pi uses: cleanup must not depend on PATH.
         const killer = spawn(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/F", "/T", "/PID", String(pid)], {
           detached: true,
           stdio: "ignore",
           windowsHide: true,
         });
-        // A failed spawn emits "error" asynchronously; an unconsumed one would crash the Gateway.
         killer.once("error", () => {});
-      } catch { /* process already exited */ }
+      } catch { }
       return;
     }
     if (child.exitCode !== null || child.signalCode !== null) {
-      // The shell has exited, but descendants it left in its process group can
-      // still run and hold its output: kill the group, as Pi does. Descendants
-      // can no longer be found by ancestry once the root is gone.
-      try { process.kill(-pid, "SIGKILL"); } catch { /* group already gone */ }
+      try { process.kill(-pid, "SIGKILL"); } catch { }
       return;
     }
 
     try { process.kill(-pid, "SIGSTOP"); }
     catch {
-      try { process.kill(pid, "SIGSTOP"); } catch { /* process already exited */ }
+      try { process.kill(pid, "SIGSTOP"); } catch { }
     }
     const firstCut = this.descendantPids(pid);
     for (const descendant of firstCut) {
-      try { process.kill(descendant, "SIGSTOP"); } catch { /* process already exited */ }
+      try { process.kill(descendant, "SIGSTOP"); } catch { }
     }
-    // A descendant in another process group could fork while the first cut was
-    // being read. Once every observed owner is frozen, a second cut closes that
-    // interval without widening ownership beyond this root tree.
     const descendants = [...new Set([...firstCut, ...this.descendantPids(pid)])];
     for (const descendant of descendants) {
-      try { process.kill(descendant, "SIGSTOP"); } catch { /* process already exited */ }
+      try { process.kill(descendant, "SIGSTOP"); } catch { }
     }
     try { process.kill(-pid, "SIGKILL"); }
     catch {
-      try { process.kill(pid, "SIGKILL"); } catch { /* process already exited */ }
+      try { process.kill(pid, "SIGKILL"); } catch { }
     }
-    // Some programs (notably XCTest diagnostics) create their own process
-    // groups. They remain exact descendants at the frozen ownership cut.
     for (const descendant of descendants.reverse()) {
-      try { process.kill(descendant, "SIGKILL"); } catch { /* process already exited */ }
+      try { process.kill(descendant, "SIGKILL"); } catch { }
     }
   }
 
-  /** Every process's parent, from one `ps` read; empty when it cannot be read. */
   private parentPids(): Map<number, number> {
     const parents = new Map<number, number>();
     const result = spawnSync("ps", ["-axo", "pid=,ppid="], {
@@ -344,11 +281,6 @@ export class DirectBashProcessOwner {
     return descendants;
   }
 
-  /** Settles once the shell has exited and its output is done: both pipes ended,
-   * or no output for the grace period. `terminating` marks that termination was
-   * requested; from then on output can extend the call by at most
-   * TERMINATED_OUTPUT_MAX_MS after the shell exits. Settlement always follows the
-   * shell's exit (or a spawn error), which `abortAll` relies on. */
   private waitForChild(child: ChildProcess): { completion: Promise<number | null>; terminating: () => void } {
     let terminating = () => {};
     const completion = new Promise<number | null>((resolve, reject) => {

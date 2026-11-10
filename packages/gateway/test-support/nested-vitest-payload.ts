@@ -5,16 +5,12 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url));
 
-/** Copies the package as a payload for a nested vitest run of one test file.
- * Copying every other test file was over half of each nested leg's cost under
- * host load; the source modules the leg imports are all kept. */
 export async function copyPayload(payload: string, ownTestFile: string): Promise<void> {
   await mkdir(payload);
   await cp(join(packageRoot, "src"), join(payload, "src"), {
     recursive: true,
     filter: (source) => !source.endsWith(".test.ts") || source.endsWith(ownTestFile),
   });
-  // The main config imports the nested list, so a payload that runs either pass needs both.
   for (const file of ["test-support", "vitest.config.ts", "vitest.nested.config.ts", "package.json"]) {
     await cp(join(packageRoot, file), join(payload, file), { recursive: true });
   }
@@ -22,7 +18,6 @@ export async function copyPayload(payload: string, ownTestFile: string): Promise
   await symlink(join(packageRoot, "artifacts"), join(payload, "artifacts"));
 }
 
-/** Digest of every regular file under `root`, keyed by its relative path. */
 export async function retainedFiles(root: string): Promise<Record<string, string>> {
   const result: Record<string, string> = {};
   async function visit(path: string): Promise<void> {
@@ -36,7 +31,6 @@ export async function retainedFiles(root: string): Promise<Record<string, string
   return result;
 }
 
-/** Refuses fixture removal while a nested run's process owner reports an unjoined child. */
 export async function refuseUnjoinedFixture(root: string): Promise<void> {
   let failure: string;
   try { failure = await readFile(process.env.TRON_TEST_PROCESS_OWNER_FAILURE ?? join(root, "process-owner-failure.jsonl"), "utf8"); }

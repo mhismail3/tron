@@ -17,18 +17,12 @@ import { GatewayService } from "../../transport/gateway-service.js";
 import { GatewayServer } from "../../transport/server.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-/** Retained, regenerable evidence for one run of this file. The path is stable
- * and gitignored so an operator can inspect exactly what the archive contract
- * did without committing one-off output. */
 const REPORT_PATH = join(process.cwd(), "test-results", "session-archive.integration.json");
 const report: {
   generatedAt: string;
   cases: Array<{ name: string; passed: boolean; evidence: Record<string, unknown> }>;
 } = { generatedAt: new Date().toISOString(), cases: [] };
 
-/** One archive case. The body returns the values it measured, and this records
- * the case's real outcome, so a failing case stays visible in the report with
- * its error instead of disappearing from it. */
 function archiveCase(name: string, body: () => Promise<Record<string, unknown>>): void {
   it(name, async () => {
     try {
@@ -72,15 +66,9 @@ interface Client {
 }
 
 async function fixture(options: {
-  /** Writes one extension source into `${agentDir}/extensions/<name>`. */
   extensions?: Array<{ name: string; source: (root: string) => string }>;
-  /** Writes `${agentDir}/settings.json` before the first runtime starts. */
   settings?: Record<string, unknown>;
-  /** Builds a real search index and service over the registry, the owner
-   * Home's session_search research tool reads. */
   search?: boolean;
-  /** Runs after startup admission but before attention recovery, which is the
-   * window the real Gateway already serves from. */
   duringStartupRecovery?: (registry: RuntimeRegistry, cwd: string) => Promise<void>;
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-session-archive-"));
@@ -128,27 +116,19 @@ async function fixture(options: {
       idleRuntimeMs: 60_000,
       modelRuntimeFactory: runtimeFactory as never,
       trust: new TrustService(agentDir),
-      // Mirrors gateway-main: slot events reach subscribed sockets.
       broadcast: (sessionId: string, topic: string, payload: unknown) => {
         server?.broadcastSession(sessionId, topic, payload as never);
       },
       sessionSummaryChanged: () => {},
-      // Mirrors gateway-main: the registry announcement is what reaches clients.
       sessionListChanged: () => { listChanged(); server?.notifySessionListChanged(); },
-      // Mirrors gateway-main: a rebind carries the connection's subscription.
       sessionRekeyed: (previousId: string, nextId: string) => server?.rekeySession(previousId, nextId),
       archiveDiagnostic,
     });
     await registry.initialize();
-    // The listener serves before the owner publishes its first cut, and a read
-    // refuses retryably until then (G-1c). The fixture waits so each case
-    // exercises its own subject instead of the catalog's startup.
     await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } })
       .sessionCatalog.whenPublished();
     await options.duringStartupRecovery?.(registry, cwd);
     await registry.recoverCanonicalAttention();
-    // The search owner is optional in the Gateway, so only the traversal that
-    // exercises the search projection pays for a real index and coordinator.
     if (options.search) {
       searchService = new SessionSearchService(registry, await SessionSearchIndex.open(join(root, "gateway", "session-search.sqlite")));
     }
@@ -232,10 +212,6 @@ async function fixture(options: {
       },
     };
   };
-  /** The fixture writes canonical files itself, so it is an external writer to
-   * the catalog: the reader no longer walks the folder, and forcing the owner's
-   * cut is the deterministic equivalent of waiting the folder watcher out.
-   * Without it a read right after a write races the watcher's own debounce. */
   const settle = async (): Promise<void> => {
     const owner = (current!.registry as unknown as {
       sessionCatalog: { reconcile(): Promise<void>; settled(): Promise<void> };
@@ -243,8 +219,6 @@ async function fixture(options: {
     await owner.reconcile();
     await owner.settled();
   };
-  /** A canonical, persisted session with no live runtime, created the way the
-   * pinned SDK creates one. */
   const coldSession = async (label: string): Promise<{ id: string; file: string }> => {
     const manager = SessionManager.create(cwd, sessionDirectory);
     manager.appendMessage(fauxAssistantMessage(`${label} canonical response`));
@@ -252,8 +226,6 @@ async function fixture(options: {
     await settle();
     return { id: manager.getSessionId(), file };
   };
-  /** A canonical session written directly instead of through the pinned
-   * manager, so the fixture controls its exact bytes and revisions. */
   const rawSession = async (label: string, id: string): Promise<{ id: string; file: string; entryId: string }> => {
     const timestamp = new Date().toISOString();
     const entryId = `${label}-entry`;
@@ -263,8 +235,6 @@ async function fixture(options: {
       JSON.stringify({ type: "session", version: 3, id, timestamp, cwd }),
       JSON.stringify({
         type: "message", id: entryId, parentId: null, timestamp,
-        // A canonical assistant envelope: the runtime projects its usage and
-        // stop reason when a search anchor opens this cold session.
         message: {
           role: "assistant", content: [{ type: "text", text: `${label} canonical response` }],
           api: "faux", provider: "faux", model: "faux-1", stopReason: "stop",
@@ -278,7 +248,6 @@ async function fixture(options: {
   return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, logs, connect, coldSession, rawSession, settle, restart, current: () => current!, searchService: () => searchService! };
 }
 
-/** An extension-owned trigger that starts a turn of its own. */
 const wakeExtension = (root: string) => `
         import { existsSync, unlinkSync, writeFileSync } from "node:fs";
         import { setTimeout as delay } from "node:timers/promises";
@@ -298,8 +267,6 @@ const wakeExtension = (root: string) => `
         }
       `;
 
-/** A command that holds its own admission until the test releases it, the way
- * a long branch summary or resource reload holds the session lane. */
 const holdCommandExtension = (root: string) => `
         import { existsSync } from "node:fs";
         import { setTimeout as delay } from "node:timers/promises";
@@ -312,8 +279,6 @@ const holdCommandExtension = (root: string) => `
         }
       `;
 
-/** A command that replaces the live session with another canonical session
- * file, the way a session-switching extension does. */
 const switchCommandExtension = () => `
         export default function (pi) {
           pi.registerCommand("switch", { handler: async (args, ctx) => {
@@ -322,7 +287,6 @@ const switchCommandExtension = () => `
         }
       `;
 
-/** A command that blocks on a real semantic user interaction. */
 const selectCommandExtension = () => `
         export default function (pi) {
           pi.registerCommand("select-hold", { handler: async (_args, ctx) => {
@@ -345,8 +309,6 @@ const list = async (client: Client, archived: "exclude" | "only", extra: Record<
   };
 };
 
-/** A live, idle session: `openedSlot` requires the subscription an open+sync
- * establishes, and archiving is allowed while a slot is idle. */
 const openSession = async (client: Client, sessionId: string) => {
   const opened = await client.request(`open-${sessionId}`, "session.open", { sessionId });
   expect(opened.ok, JSON.stringify(opened)).toBe(true);
@@ -377,11 +339,6 @@ const attentionRecord = async (root: string, sessionId: string): Promise<unknown
   return document.sessions[sessionId];
 };
 
-/** Holds every outbound write the Gateway has to this process's sockets until
- * the returned release runs. The frame is still handed to the socket; only its
- * completion waits, which is how a loaded host delays a write. The outbound
- * queue then keeps later frames behind the held one, so a newer snapshot
- * supersedes an unsent one and the client receives it as a rebaseline. */
 function stallOutboundWrites(server: GatewayServer): () => void {
   const sockets = server as unknown as { localSockets: { clients: Set<WebSocket> }; pairedSockets: { clients: Set<WebSocket> } };
   let stalled = true;
@@ -399,8 +356,6 @@ function stallOutboundWrites(server: GatewayServer): () => void {
   };
 }
 
-/** Fails every durable archive-record removal from now on, modelling a full or
- * failing disk at the store's exact write boundary. */
 function failArchiveRemovals(registry: RuntimeRegistry): () => void {
   const store = (registry as unknown as { archive: { remove(sessionId: string): Promise<boolean> } }).archive;
   const durable = store.remove.bind(store);
@@ -411,17 +366,9 @@ function failArchiveRemovals(registry: RuntimeRegistry): () => void {
 const listChangedFrames = (client: Client) =>
   client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.listChanged").length;
 
-/** Snapshots a subscribed client actually received for one session, newest last. */
 const snapshotFrames = (client: Client, sessionId: string) =>
   client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.snapshot" && frame.sessionId === sessionId);
 
-/** The authoritative state a subscribed client received for one session, newest
- * last, however the outbound queue delivered it: as its own `session.snapshot`,
- * or — when a newer snapshot of the same runtime generation superseded an
- * unsent one, and the queue covered the dropped sequence with a
- * `session.rebaseline` (`G-4`) — as the snapshot nested inside that rebaseline.
- * Both make the client install that state, so a case asserting on the state a
- * client ends up with must read both. */
 const deliveredAuthorityFrames = (client: Client, sessionId: string) =>
   client.frames.flatMap((frame) => {
     if (frame.type !== "event" || frame.sessionId !== sessionId) return [];
@@ -432,15 +379,12 @@ const deliveredAuthorityFrames = (client: Client, sessionId: string) =>
     return [];
   });
 
-/** The Gateway's published row phase. A held subscriber write cannot show the
- * run yet, so the wait reads the registry to know the run's snapshot is queued. */
 const runningInRegistry = (registry: RuntimeRegistry, sessionId: string): boolean =>
   (registry as unknown as { latestSummaries: Map<string, { phase?: string }> }).latestSummaries.get(sessionId)?.phase === "running";
 
 const latestSnapshot = (client: Client, sessionId: string) =>
   snapshotFrames(client, sessionId).at(-1)?.payload as { archivedAt?: string } | undefined;
 
-/** Session search as Home's research tool reads it: the in-process owner. */
 const search = async (service: SessionSearchService, query: string) => service.search({ query, maxResults: 10 });
 
 describe("session archive over the real Gateway", () => {
@@ -448,7 +392,6 @@ describe("session archive over the real Gateway", () => {
     const f = await fixture({ search: true });
     const client = await f.connect();
     const session = await f.rawSession("searchable", "searchable-archive-session");
-    // One warm query settles any first-read write before the measured revisions below.
     const warm = await search(f.searchService(), "searchable");
     expect(warm.results.find((result) => result.sessionId === session.id), JSON.stringify(warm)).toBeDefined();
     const canonicalBytes = await readFile(session.file, "utf8");
@@ -466,9 +409,6 @@ describe("session archive over the real Gateway", () => {
     expect(archived.ok, JSON.stringify(archived)).toBe(true);
     expect((await list(client, "exclude")).sessions.map((row) => row.id)).not.toContain(session.id);
 
-    // Search reads archive state beside the index: the same canonical passage
-    // and content revision come back, only relabeled, while its dashboard row
-    // is hidden.
     const hidden = await search(f.searchService(), "searchable");
     const hiddenHit = hidden.results.find((result) => result.sessionId === session.id);
     expect(hiddenHit, JSON.stringify(hidden)).toBeDefined();
@@ -521,8 +461,6 @@ describe("session archive over the real Gateway", () => {
     expect(only.archivedCount).toBeUndefined();
     expect(f.listChanged).toHaveBeenCalled();
 
-    // The canonical file, its bytes and its revision fields are untouched, and
-    // archiving a cold session never starts a runtime for it.
     expect(await readFile(archived.file, "utf8")).toBe(before);
     const row = (await list(client, "exclude")).sessions.find((session) => session.id === visible.id);
     expect(row).toBeDefined();
@@ -552,7 +490,6 @@ describe("session archive over the real Gateway", () => {
     expect(only.sessions).toHaveLength(1);
     expect(only.sessions[0]?.archivedAt).toBe(first.result.archivedAt);
 
-    // A distinct command ID that repeats the same state is idempotent too.
     const third = await client.request("archive-third", "session.archive.set", {
       commandId: "archive-command-replay-again", sessionId: session.id, archived: true,
     });
@@ -576,17 +513,12 @@ describe("session archive over the real Gateway", () => {
     const token = first.projectionToken;
     expect(token).toContain(":");
 
-    // An equal token is a complete revalidation of the client's rows, so the
-    // answer carries neither rows nor a count.
     const unchanged = await list(client, "exclude", { projectionToken: token });
     expect(unchanged).toMatchObject({ notModified: true, projectionToken: token, sessions: [] });
     expect(unchanged.listRevision).toBe(first.listRevision);
     expect(unchanged.nextCursor).toBeUndefined();
     expect(unchanged.archivedCount).toBeUndefined();
 
-    // A cold row's attention moves `catalogProjectionGeneration` only: the
-    // structural revision is unchanged, so a token that covered membership
-    // alone would falsely revalidate rows this client no longer holds.
     const attention = await phone.request(`attention-${session.id}`, "session.attention.set", {
       commandId: "revision-attention-command", sessionId: session.id, unread: true,
     });
@@ -597,7 +529,6 @@ describe("session archive over the real Gateway", () => {
     expect(afterAttention.projectionToken).not.toBe(token);
     expect(afterAttention.sessions.find((row) => row.id === session.id)?.isUnread).toBe(true);
 
-    // A client holding a superseded token must still receive the rows.
     const attentionToken = afterAttention.projectionToken;
     await openSession(client, session.id);
     await archiveSession(client, session.id, "revision-archive-command");
@@ -608,8 +539,6 @@ describe("session archive over the real Gateway", () => {
     const revalidated = await list(client, "exclude", { projectionToken: archivedToken });
     expect(revalidated).toMatchObject({ notModified: true, projectionToken: archivedToken });
 
-    // The conditional answer belongs to the first page only: a cursored page is
-    // already bound to the projection its lease admitted.
     const paged = await list(client, "exclude", { limit: 1 });
     expect(paged.nextCursor).toBeDefined();
     const continued = await client.request("revision-cursor", "session.list", {
@@ -620,14 +549,11 @@ describe("session archive over the real Gateway", () => {
     expect(continuedResult.notModified).toBeUndefined();
     expect(continuedResult.sessions).toHaveLength(1);
 
-    // An empty token is a client error, never a silent full read.
     const malformed = await client.request("revision-malformed", "session.list", {
       scope: "user", archived: "exclude", projectionToken: "",
     });
     expect(malformed).toMatchObject({ ok: false, error: { code: "invalid_request" } });
 
-    // A restart starts a new runtime epoch while every revision begins again at
-    // zero, so a token retained across it can never revalidate those rows.
     await f.restart();
     const replacement = await f.connect();
     const restarted = await list(replacement, "exclude", { projectionToken: archivedToken });
@@ -648,8 +574,6 @@ describe("session archive over the real Gateway", () => {
   archiveCase("moves the projection token when an acknowledged recovery clears a cold row's marker", async () => {
     const f = await fixture();
     const session = await f.coldSession("recovered-automation");
-    // A recovered automation run's marker is restored at startup, and a row
-    // with no live summary and no slot reads its phase from that set alone.
     const { RunMarkerStore } = await import("../../kernel/run/run-markers.js");
     const operationId = "automation:10000000-0000-4000-8000-0000000000a9";
     await new RunMarkerStore(f.root).mark(session.id, operationId);
@@ -661,9 +585,6 @@ describe("session archive over the real Gateway", () => {
     const token = first.projectionToken;
     expect((await list(client, "exclude", { projectionToken: token })).notModified).toBe(true);
 
-    // The user acknowledges the recovery. Nothing structural moves: the row
-    // changes phase, which only a token covering the whole row overlay can
-    // carry, so an owner naming the old token must be answered with rows.
     const listChangesBefore = f.listChanged.mock.calls.length;
     await restarted.registry.clearOwnedOperationMarker(session.id, operationId);
     expect(f.listChanged.mock.calls.length).toBeGreaterThan(listChangesBefore);
@@ -671,7 +592,6 @@ describe("session archive over the real Gateway", () => {
     expect(after.notModified).toBeUndefined();
     expect(after.sessions.find((candidate) => candidate.id === session.id)?.phase).toBe("idle");
     expect(after.projectionToken).not.toBe(token);
-    // The row it now serves revalidates in turn.
     expect((await list(client, "exclude", { projectionToken: after.projectionToken })).notModified).toBe(true);
     return {
       phaseBefore: row?.phase,
@@ -692,8 +612,6 @@ describe("session archive over the real Gateway", () => {
     });
     const firstArchived = await archive(older.id, "archive-command-cursor-older");
     expect(firstArchived.ok).toBe(true);
-    // Archive timestamps are the ordering source, so the two commits must not
-    // share one millisecond.
     await new Promise((resolve) => setTimeout(resolve, 5));
     const newer = await f.coldSession("cursor-archived-newer");
     const secondArchived = await archive(newer.id, "archive-command-cursor-newer");
@@ -716,8 +634,6 @@ describe("session archive over the real Gateway", () => {
     expect(received).toHaveLength(2);
     expect([...received].sort()).toEqual([visible.id, visibleOther.id].sort());
     expect(new Set(received).size).toBe(received.length);
-    // The cursor belongs to the exclude traversal: an `only` request cannot
-    // continue it and receive the other projection.
     const excludeCursor = (await list(client, "exclude", { limit: 1 })).nextCursor;
     expect(excludeCursor).toBeDefined();
     const mismatched = await client.request("cursor-mismatch", "session.list", {
@@ -806,11 +722,6 @@ describe("session archive over the real Gateway", () => {
     release();
     await waitFor(async () => (await list(client, "exclude")).sessions.some((row) => row.id === session.id && row.phase === "idle"), "idle phase");
 
-    // Detached subagent work is the third projection a user sees as active, and
-    // no public fixture can produce it: only the pi-subagents async-artifact
-    // protocol registers a detached run activity that outlives its parent turn.
-    // The published projection is the exact input this guard reads, so it is
-    // injected here; the real waiting-for-user projection has its own case.
     const internals = f.current().registry as unknown as { latestSummaries: Map<string, Record<string, unknown>> };
     const published = internals.latestSummaries.get(session.id);
     expect(published).toBeDefined();
@@ -835,11 +746,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("rejects archive promptly while a long session-lane request is in flight", async () => {
-    // A branch summary or resource reload holds the session lane while the
-    // published projection still reads idle. Archive admission must reject that
-    // before it waits on the lane, or it would hold the Gateway-wide registry
-    // mutex — and every cold open, create, delete and automation lease — for the
-    // whole request.
     const f = await fixture({ extensions: [{ name: "hold.ts", source: holdCommandExtension }] });
     const client = await f.connect();
     const held = await f.coldSession("lane-holder");
@@ -851,7 +757,6 @@ describe("session archive over the real Gateway", () => {
     });
     const registry = f.current().registry as unknown as { slots: Map<string, { isBusy: boolean }> };
     await waitFor(() => registry.slots.get(held.id)?.isBusy === true, "held session lane");
-    // The projection still reads idle: that is exactly the window this guards.
     const projection = (await list(client, "exclude")).sessions.find((row) => row.id === held.id);
     expect(projection?.phase).toBe("idle");
 
@@ -859,8 +764,6 @@ describe("session archive over the real Gateway", () => {
       commandId: "lane-hold-archive-command", sessionId: held.id, archived: true,
     });
     expect(archive).toMatchObject({ ok: false, error: { code: "busy" } });
-    // The Gateway mutex was never held for the lane wait: an unrelated cold open
-    // and list read both complete while the holder is still running.
     const bystander = await client.request("lane-bystander-open", "session.open", { sessionId: unrelated.id });
     expect(bystander.ok, JSON.stringify(bystander)).toBe(true);
     expect(await listedIds(client, "exclude")).toContain(unrelated.id);
@@ -879,10 +782,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("rejects an archive retryably when only another request's entry blocks it", async () => {
-    // Nothing about this session is working: another request (a rename, an
-    // attention toggle, a second device's archive) holds one session-scoped work
-    // entry. That clears by itself, so the client may retry instead of being
-    // told to stop a session that is not running.
     const f = await fixture();
     const client = await f.connect();
     const session = await f.coldSession("transient-blocker");
@@ -910,9 +809,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("keeps a session unarchived when an automation holds its lease", async () => {
-    // The automation lease is retained for the whole scheduled run. Archive
-    // admission must see that ownership as real activity rather than as another
-    // request's transient entry.
     const f = await fixture();
     const client = await f.connect();
     const session = await f.coldSession("automation-lease");
@@ -942,8 +838,6 @@ describe("session archive over the real Gateway", () => {
     await waitFor(async () => (await list(client, "exclude")).sessions.some(
       (row) => row.id === session.id && row.waitingForUser === true), "waiting for user");
     const projection = (await list(client, "exclude")).sessions.find((row) => row.id === session.id);
-    // The pending interaction the user must answer is published on the opened
-    // snapshot, which is the same projection a phone renders.
     const reopened = await client.request("waiting-reopen", "session.open", { sessionId: session.id });
     const pending = reopened.result.session.extensionPresentation.pendingInteractions[0] as {
       id: string; hostEpoch: string; presentationRevision: number; method: string;
@@ -981,10 +875,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("keeps the record of a session that started before startup recovery finished", async () => {
-    // The Gateway serves before attention recovery completes, so a session can
-    // be created and archived inside that window. Recovery prunes records with
-    // no canonical owner, and a live session that has not reached disk yet is an
-    // owner: its record must survive.
     let liveSessionId = "";
     const f = await fixture({
       duringStartupRecovery: async (registry, cwd) => {
@@ -1004,9 +894,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("keeps the record of a session archived while startup recovery was scanning", async () => {
-    // Recovery already holds its retained set when a session is created and
-    // archived, so the archive prune must read live ownership again on the lane
-    // rather than reuse the set the attention prune above was given.
     let liveSessionId = "";
     let archiving: Promise<void> | undefined;
     const f = await fixture({
@@ -1045,9 +932,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("unarchives a session while its run is still active", async () => {
-    // Unarchiving is the recovery direction, so it never requires an idle
-    // session: a client must be able to reverse a hidden row even if a run has
-    // already started.
     const f = await fixture();
     const client = await f.connect();
     const session = await f.coldSession("unarchive-running");
@@ -1119,8 +1003,6 @@ describe("session archive over the real Gateway", () => {
     await client.request("fork-sync", "session.sync", { sessionId: parent.id, syncToken: opened.result.syncToken });
     const entryId = (SessionManager.open(parent.file).getBranch().at(-1) as { id?: string } | undefined)?.id;
     expect(typeof entryId).toBe("string");
-    // The fork runs through its real RPC, so the rebind hook and the archive
-    // ownership under test are reached exactly as a client reaches them.
     const forked = await client.request("fork-request", "session.fork", {
       commandId: "fork-command", sessionId: parent.id, entryId: entryId!, position: "at",
     });
@@ -1176,8 +1058,6 @@ describe("session archive over the real Gateway", () => {
     expect((await list(client, "only")).sessions).toHaveLength(0);
     expect((await list(client, "exclude")).archivedCount).toBe(0);
 
-    // A re-created canonical file with the same identity is a new session, not a
-    // resurrected archive record.
     await writeFile(session.file, `${JSON.stringify({
       type: "session", version: 3, id: session.id, timestamp: new Date().toISOString(), cwd: f.cwd,
     })}\n${JSON.stringify({
@@ -1200,8 +1080,6 @@ describe("session archive over the real Gateway", () => {
     const f = await fixture();
     const client = await f.connect();
     const slot = await f.current().registry.create(f.cwd);
-    // A brand-new session has no canonical file yet; it is still an admitted
-    // dashboard row and must be archivable while it is idle.
     const response = await client.request("live-archive", "session.archive.set", {
       commandId: "live-archive-command", sessionId: slot.id, archived: true,
     });
@@ -1226,16 +1104,11 @@ describe("session archive over the real Gateway", () => {
     const f = await fixture();
     const client = await f.connect();
     const session = await f.coldSession("snapshot-archive");
-    // Archive before the session is ever opened: the projection belongs to the
-    // session, not to a subscription, so the first authoritative snapshot for
-    // an archived session already carries it.
     const archivedWhileCold = await archiveSession(client, session.id, "snapshot-cold-archive-command");
     await openSession(client, session.id);
     const opened = client.frames.find((frame) => frame.id === `open-${session.id}`);
     expect(opened.result.session.archivedAt).toBe(archivedWhileCold.archivedAt);
 
-    // Unarchiving republishes the snapshot of the live subscription, so a chat
-    // that is already open sees the row leave its archived state.
     const beforeUnarchive = snapshotFrames(client, session.id).length;
     const unarchive = await client.request("snapshot-unarchive", "session.archive.set", {
       commandId: "snapshot-unarchive-command", sessionId: session.id, archived: false,
@@ -1244,13 +1117,10 @@ describe("session archive over the real Gateway", () => {
     await waitFor(() => snapshotFrames(client, session.id).length > beforeUnarchive
       && latestSnapshot(client, session.id)?.archivedAt === undefined, "unarchive republish");
 
-    // Archiving a live idle session republishes it the same way.
     const archivedWhileLive = await archiveSession(client, session.id, "snapshot-live-archive-command");
     await waitFor(() => latestSnapshot(client, session.id)?.archivedAt !== undefined, "archive republish");
     expect(latestSnapshot(client, session.id)?.archivedAt).toBe(archivedWhileLive.archivedAt);
 
-    // The prompt that admits a run clears the record, and the snapshot the
-    // admission publishes no longer reports the session as archived.
     f.faux.setResponses([fauxAssistantMessage("awake")]);
     const prompt = await client.request("snapshot-prompt", "session.prompt", {
       commandId: "snapshot-prompt-command", sessionId: session.id, text: "come back",
@@ -1281,8 +1151,6 @@ describe("session archive over the real Gateway", () => {
       commandId: "prompt-unarchive-command", sessionId: session.id, text: "come back",
     });
     expect(prompt.ok, JSON.stringify(prompt)).toBe(true);
-    // The admission response is the exact boundary: the durable record must
-    // already be gone, before the run's first event can reach any client.
     expect(await archivedRecord(f.root, session.id)).toBeUndefined();
 
     await waitFor(async () => (await listedIds(first, "exclude")).includes(session.id), "visible on the prompting client");
@@ -1320,15 +1188,12 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("clears archive state when a manual compaction is admitted", async () => {
-    // A tiny compaction budget gives the session history that manual compaction
-    // can actually summarize, so the admitted work is observable end to end.
     const f = await fixture({ settings: { compaction: { enabled: true, reserveTokens: 1_024, keepRecentTokens: 0 } } });
     const client = await f.connect();
     const session = await f.coldSession("compaction-unarchive");
     await openSession(client, session.id);
     f.faux.setResponses([
       fauxAssistantMessage(`History for compaction. ${"detail ".repeat(200)}`),
-      // Compaction may summarize the recent turn prefix before the main summary.
       fauxAssistantMessage("turn prefix summary"),
       fauxAssistantMessage("compacted summary"),
       fauxAssistantMessage("compacted summary"),
@@ -1346,8 +1211,6 @@ describe("session archive over the real Gateway", () => {
     });
     expect(compaction.ok, JSON.stringify(compaction)).toBe(true);
     expect(compaction.result).toMatchObject({ compacted: true });
-    // Either compaction path (immediate or queued behind a run) is admitted
-    // through the same boundary, so the record must be gone once it returns.
     expect(await archivedRecord(f.root, session.id)).toBeUndefined();
     expect(await listedIds(client, "exclude")).toContain(session.id);
     expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "auto-unarchived", trigger: "admission" });
@@ -1358,12 +1221,8 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("keeps a refused manual compaction archived", async () => {
-    // Manual compaction is refused while another owner is producing a file, and
-    // an export in flight never clears archive state. That refusal is the exact
-    // boundary the run-admission clear must come after.
     const f = await fixture();
     const client = await f.connect();
-    // The export owner is initialized by the Gateway's storage-warming stage.
     await f.current().registry.initializeBlobStorage();
     const session = await f.coldSession("refused-compaction");
     await openSession(client, session.id);
@@ -1388,7 +1247,6 @@ describe("session archive over the real Gateway", () => {
       commandId: "refused-compaction-command", sessionId: session.id,
     });
     expect(refused).toMatchObject({ ok: false, error: { code: "busy" } });
-    // The refusal happened before run ownership, so nothing cleared the record.
     expect(await archivedRecord(f.root, session.id)).toBeDefined();
     expect(await listedIds(client, "only")).toEqual([session.id]);
     expect(await listedIds(client, "exclude")).not.toContain(session.id);
@@ -1413,8 +1271,6 @@ describe("session archive over the real Gateway", () => {
     await archiveSession(client, session.id, "automation-archive-command");
     f.faux.setResponses([fauxAssistantMessage("scheduled response")]);
 
-    // Mirrors AutomationExecutor: take the shared owned-session lease for a
-    // persisted session, then admit the prompt with exact operation ownership.
     const lease = await f.current().registry.acquireOwnedSessionLease(session.id);
     const admission = await lease.slot.prompt(
       "scheduled run",
@@ -1474,9 +1330,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("clears archive state when an extension starts a turn without Gateway admission", async () => {
-    // An extension-owned trigger (a scheduled wake) starts the turn inside Pi,
-    // so no Gateway run admission can see it. The active projection is the only
-    // boundary that can restore visibility, and it must do so immediately.
     const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
     const client = await f.connect();
     const session = await f.coldSession("backstop-unarchive");
@@ -1490,9 +1343,6 @@ describe("session archive over the real Gateway", () => {
       await writeFile(join(f.root, "wake-trigger"), "", "utf8");
       await waitFor(async () => (await list(client, "exclude")).sessions.some(
         (row) => row.id === session.id && row.phase === "running"), "externally started run");
-      // The row is visible from the moment the active projection is published,
-      // and the durable record is cleared behind it rather than only hidden in
-      // memory.
       const visibleWhileRunning = (await list(client, "exclude")).sessions.find((row) => row.id === session.id);
       expect(visibleWhileRunning?.phase).toBe("running");
       expect(visibleWhileRunning?.archivedAt).toBeUndefined();
@@ -1513,10 +1363,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("restores visibility and retries the record when the backstop write fails", async () => {
-    // A run Pi starts on its own cannot be rejected, so visibility is restored
-    // in memory first. The device that archived the session must still be told:
-    // it is the one hiding the row, and it learns about the change from the
-    // membership change rather than from the durable write.
     const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
     const client = await f.connect();
     const session = await f.coldSession("backstop-write-failure");
@@ -1534,11 +1380,8 @@ describe("session archive over the real Gateway", () => {
       expect(visible?.phase).toBe("running");
       expect(visible?.archivedAt).toBeUndefined();
       expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "failure", stage: "auto-unarchive" });
-      // Fail closed on the durable half: the record survives a failed write.
       expect(await archivedRecord(f.root, session.id)).toBeDefined();
 
-      // The next published summary retries the exact record once the store
-      // recovers, so the retry is not lost.
       restoreRemovals();
       release();
       await waitFor(async () => (await archivedRecord(f.root, session.id)) === undefined, "record cleared on retry");
@@ -1556,10 +1399,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("settles a pending backstop write before disposal resolves", async () => {
-    // The backstop clears records fire-and-forget while sessions publish, so its
-    // write can still be in flight when the owning registry reports disposal.
-    // Whoever released the Gateway state directory — a shutdown, a reinstall, a
-    // test fixture — must be able to assume this owner is done writing.
     const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
     const client = await f.connect();
     const session = await f.coldSession("dispose-drain");
@@ -1584,7 +1423,6 @@ describe("session archive over the real Gateway", () => {
     f.faux.setResponses([async () => { await runBarrier; return fauxAssistantMessage("woke by itself"); }]);
     await writeFile(join(f.root, "wake-trigger"), "", "utf8");
     await waitFor(() => entered, "backstop write in flight");
-    // The run may finish; only the blocked clear must still be in flight.
     resume();
 
     const disposing = registry.dispose();
@@ -1592,7 +1430,6 @@ describe("session archive over the real Gateway", () => {
       disposing.then(() => "disposed" as const),
       new Promise<"waiting">((resolve) => { setTimeout(() => resolve("waiting"), 250); }),
     ]);
-    // Disposal must not report itself done while the write it owns is in flight.
     expect(outcome).toBe("waiting");
     release();
     await disposing;
@@ -1624,12 +1461,8 @@ describe("session archive over the real Gateway", () => {
       release();
       await waitFor(() => !(f.current().registry as unknown as { slots: Map<string, { isBusy: boolean }> })
         .slots.get(session.id)?.isBusy, "run settled");
-      // The durable clear still failed, so the stale record is what a re-archive
-      // would otherwise resurrect.
       expect(await archivedRecord(f.root, session.id)).toBeDefined();
       restoreRemovals();
-      // Archive timestamps are the container's ordering source, so the second
-      // archive must not reuse the first one's position.
       await new Promise((resolve) => setTimeout(resolve, 5));
       const second = await archiveSession(client, session.id, "pending-rearchive-command");
       expect(Date.parse(second.archivedAt)).toBeGreaterThan(Date.parse(first.archivedAt));
@@ -1654,8 +1487,6 @@ describe("session archive over the real Gateway", () => {
     const registry = f.current().registry as unknown as {
       markers: { evidence(): Promise<ReadonlyMap<string, readonly unknown[]>> };
     };
-    // A failing durable write leaves the in-memory projection untouched, which
-    // is exactly what a full or failing disk produces.
     const restoreRemovals = failArchiveRemovals(f.current().registry);
     f.faux.setResponses([fauxAssistantMessage("must never run")]);
 
@@ -1669,8 +1500,6 @@ describe("session archive over the real Gateway", () => {
     }
     expect(prompt).toMatchObject({ ok: false, error: { code: "busy", retryable: true } });
     expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "failure", stage: "auto-unarchive" });
-    // Fail closed: the session stays archived, no run marker exists, and no
-    // runtime work was admitted for the rejected prompt.
     expect(await archivedRecord(f.root, session.id)).toBeDefined();
     expect(await listedIds(client, "only")).toEqual([session.id]);
     expect([...(await registry.markers.evidence()).keys()]).not.toContain(session.id);
@@ -1686,10 +1515,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("holds the session lane from archive admission through the durable commit", async () => {
-    // The review finding this covers: if archive admission released the session
-    // lane before its durable commit, a prompt could be admitted in the gap, and
-    // the archive would then commit over running work. Holding the durable write
-    // open inside the commit makes that gap observable.
     const f = await fixture();
     const client = await f.connect();
     const session = await f.coldSession("lane-hold");
@@ -1719,13 +1544,10 @@ describe("session archive over the real Gateway", () => {
       }).then((response) => { promptSettled = true; return response; });
       await new Promise((resolve) => setTimeout(resolve, 100));
       const admittedDuringCommit = promptSettled;
-      // The archive still owns the session lane, so no prompt may be admitted.
       expect(admittedDuringCommit).toBe(false);
       releaseCommit();
       expect((await archivePromise).ok).toBe(true);
       const prompt = await promptPromise;
-      // The prompt is admitted only after the commit, and it clears the record
-      // before it runs: the session is never both working and hidden.
       expect(prompt.ok, JSON.stringify(prompt)).toBe(true);
       expect(await archivedRecord(f.root, session.id)).toBeUndefined();
       await waitFor(async () => (await list(client, "exclude")).sessions.some((row) => row.id === session.id), "visible after the commit");
@@ -1753,9 +1575,6 @@ describe("session archive over the real Gateway", () => {
     const rounds = 10;
     for (let round = 0; round < rounds; round += 1) {
       f.faux.setResponses([fauxAssistantMessage(`race response ${round}`)]);
-      // Warm the catalog acquisition on alternating rounds so the archive
-      // request can reach the session lane before the prompt does, instead of
-      // always losing the walk to it.
       if (round % 2 === 1) await list(client, "exclude", { limit: 1 });
       const [archive, prompt] = await Promise.all([
         client.request(`race-archive-${round}`, "session.archive.set", {
@@ -1767,8 +1586,6 @@ describe("session archive over the real Gateway", () => {
       ]);
       if (prompt.ok) {
         outcomes.promptAdmitted += 1;
-        // The invariant this race protects: once a run owns the session, no
-        // archive record may exist, so it can never work while hidden.
         expect(registry.archive.archivedAt(session.id)).toBeUndefined();
         expect(await archivedRecord(f.root, session.id)).toBeUndefined();
         expect(await listedIds(client, "exclude")).toContain(session.id);
@@ -1779,15 +1596,12 @@ describe("session archive over the real Gateway", () => {
         outcomes.archiveWonPromptRejected += 1;
       }
       await waitFor(() => !slot.isBusy, "race run settled");
-      // Reset for the next round: an unarchive is a no-op when the prompt won.
       const reset = await client.request(`race-reset-${round}`, "session.archive.set", {
         commandId: `race-reset-command-${round}`, sessionId: session.id, archived: false,
       });
       expect(reset.ok).toBe(true);
     }
 
-    // One gated round with a committed record: the prompt then clears it and
-    // the row must be visible for the whole run that follows.
     const gated = (() => {
       let release!: () => void;
       const barrier = new Promise<void>((resolve) => { release = resolve; });
@@ -1815,10 +1629,6 @@ describe("session archive over the real Gateway", () => {
   });
 
   archiveCase("reports the restored row when a run starts during the archive write", async () => {
-    // A turn Pi starts on its own can begin while the durable record is still
-    // being written. The record then lands over a running session, so the
-    // authoritative answer is the restored row rather than the record this
-    // request wrote.
     const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
     const client = await f.connect();
     const session = await f.coldSession("started-during-write");
@@ -1856,24 +1666,14 @@ describe("session archive over the real Gateway", () => {
       });
       void archiving.catch(() => {});
       await inWrite;
-      // The extension's turn never passes Gateway run admission, so only the
-      // active projection the commit rechecks can notice it. Its frames arrive
-      // while the commit still holds the registry mutex, which is why this
-      // waits on the subscription rather than on a catalog read.
-      // Held socket writes model a loaded host: the run's first running snapshot
-      // queues behind them, and the commit's own republish supersedes it.
       const releaseSocketWrites = stallOutboundWrites(f.current().server);
       await writeFile(join(f.root, "wake-trigger"), "", "utf8");
       await waitWithStallState(() => existsSync(join(f.root, "wake-sent")), "external turn submitted");
       await waitWithStallState(() => runningInRegistry(f.current().registry, session.id), "externally started run in the registry");
       releaseWrite();
-      // The restored row's republish is queued behind the held write before
-      // the backstop clears the record, so the release below delivers it.
       await waitFor(() => f.archiveDiagnostic.mock.calls.some(
         (call) => JSON.stringify(call[0]) === JSON.stringify({ outcome: "auto-unarchived", trigger: "backstop" })), "backstop diagnostic");
       releaseSocketWrites();
-      // The running state reaches the client as a rebaseline when its snapshot
-      // was superseded while queued, so the oracle reads delivered authority.
       await waitWithStallState(() => deliveredAuthorityFrames(client, session.id).some(
         (frame) => frame.payload?.phase === "running"), "externally started run");
       const response = await archiving;
@@ -1895,11 +1695,6 @@ describe("session archive over the real Gateway", () => {
     }
   });
   archiveCase("keeps a session switch to a session that already has records admissible", async () => {
-    // An extension switching to an existing session (`ctx.switchSession`) must
-    // rebind onto that identity. The rebind is a `preserve`: it does not claim a
-    // new identity, so the target's existing attention and archive records are
-    // not a conflicting new-identity claim, and neither session's records may
-    // change.
     const f = await fixture({ extensions: [{ name: "switch.ts", source: switchCommandExtension }] });
     let client = await f.connect();
     const target = await f.coldSession("switch-target");
@@ -1914,8 +1709,6 @@ describe("session archive over the real Gateway", () => {
     await archiveSession(client, target.id, "switch-target-archive-command");
     const archiveBefore = await archivedRecord(f.root, target.id);
     expect(archiveBefore, "target archive record before the switch").toBeDefined();
-    // A restart leaves the records durable and takes the target's own runtime
-    // away, which is the normal state of a session switched back to later.
     await f.restart();
     client = await f.connect();
     expect(await attentionRecord(f.root, target.id)).toEqual(attentionBefore);
@@ -1930,14 +1723,9 @@ describe("session archive over the real Gateway", () => {
     });
     expect(switched.ok, JSON.stringify(switched)).toBe(true);
     await waitFor(() => registry.slots.has(target.id), "session switch landed");
-    // A refused rebind also reports itself as an extension error; the switch
-    // must produce none.
     expect(client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.extensionError"
       && JSON.stringify(frame.payload).includes("identity already has"))).toEqual([]);
 
-    // The rebind R-5 owns: exactly one live identity, the switched one, and the
-    // target stayed archived with both of its records byte-identical. The
-    // switched session opens; the command's receipts stay with its origin.
     expect([...registry.slots.keys()]).toEqual([target.id]);
     await openSession(client, target.id);
     expect(await attentionRecord(f.root, target.id)).toEqual(attentionBefore);
@@ -1953,8 +1741,6 @@ describe("session archive over the real Gateway", () => {
   });
 });
 
-/** Invocation receipts one canonical session file actually holds. Pi writes a
- * new session's file only once it has content, so an unwritten file holds none. */
 async function invocationReceiptsIn(file: string): Promise<Array<{ receiptKind: string; lifecycle?: string; sessionId: string; name?: string }>> {
   const text = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return "";
@@ -1965,7 +1751,6 @@ async function invocationReceiptsIn(file: string): Promise<Array<{ receiptKind: 
     .map((entry) => entry.data);
 }
 
-/** A command that replaces the live session, optionally failing after it. */
 const replacingCommandExtension = (replace: string, afterReplace = "") => () => `
         export default function (pi) {
           pi.registerCommand("replace", { handler: async (args, ctx) => {
@@ -1975,13 +1760,10 @@ const replacingCommandExtension = (replace: string, afterReplace = "") => () => 
         }
       `;
 
-/** Holds a command handler after its replacement until the test creates the
- * gate file, so the replacement's live state is observable as it stands. */
 const gateCall = (gate: string) => `const { existsSync: gateExists } = await import("node:fs");
             const { setTimeout: gateDelay } = await import("node:timers/promises");
             while (!gateExists(${JSON.stringify(gate)})) await gateDelay(5);`;
 
-/** Refuses every switch, the way a guarding extension would. */
 const refuseSwitchExtension = () => `
         export default function (pi) {
           pi.on("session_before_switch", async () => ({ cancel: true }));
@@ -1989,13 +1771,6 @@ const refuseSwitchExtension = () => `
       `;
 
 describe("command-driven session replacement over the real Gateway", () => {
-  // Failure modes: the replacement target is unopenable; the origin never
-  // records the command's terminal and later reports outcomeUnknown; the
-  // replacement file carries orphan receipts for a command it never ran; the
-  // command's work, runtime marker or pending state leaks; a client subscribed
-  // to the origin never receives the replacement snapshot; a refused switch
-  // hands the command off anyway; a handler failing after the switch writes a
-  // failure into the replacement.
   const replace = async (
     kind: "switch" | "new" | "fork",
     options: { afterReplace?: string } = {},
@@ -2018,36 +1793,23 @@ describe("command-driven session replacement over the real Gateway", () => {
     await waitFor(() => !registry.slots.has(origin.id) && registry.slots.size === 1, "replacement landed");
     const replacementId = [...registry.slots.keys()][0]!;
     const replacementFile = registry.slots.get(replacementId)!.sessionFile!;
-    // Settlement: no drain blocker remains for either identity.
     await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, "command work settled");
     return { f, client, origin, replacementId, replacementFile, operationId: response.result.operationId as string };
   };
 
   const assertSettledInOrigin = async (
     r: Awaited<ReturnType<typeof replace>>,
-    // Pi writes a new, empty session to disk only once it has content.
     replacementPersisted = true,
   ) => {
     const originReceipts = await invocationReceiptsIn(r.origin.file);
     expect(originReceipts.map((receipt) => [receipt.receiptKind, receipt.lifecycle, receipt.sessionId]))
       .toEqual([["start", "staged", r.origin.id], ["terminal", "completed", r.origin.id]]);
-    // A fork copies the origin's history, including this command's start under
-    // the origin's identity; nothing may be written under the replacement's.
     expect((await invocationReceiptsIn(r.replacementFile)).filter((receipt) => receipt.sessionId === r.replacementId)).toEqual([]);
     const markers = join(r.f.root, "gateway", "runtime-markers");
     const markerFiles = await import("node:fs/promises").then((fs) => fs.readdir(markers).catch(() => [] as string[]));
     expect(markerFiles.filter((name) => name.startsWith(r.origin.id))).toEqual([]);
-    // The origin's subscriber follows the identity change and receives the
-    // replacement's authoritative state, whether the queue delivered it as the
-    // snapshot itself or as the `session.rebaseline` covering a sequence a
-    // newer snapshot superseded.
-    // Wait for the replacement's settled snapshot. An earlier frame, such as the
-    // rebind's, still carries the command's live state until the handler returns.
     await waitFor(() => (deliveredAuthorityFrames(r.client, r.replacementId).at(-1)?.payload as { phase?: string } | undefined)?.phase === "idle",
       "replacement settled snapshot delivered");
-    // The command is settled: the replacement is idle and no row for it (a
-    // fork inherits one) is projected as still running by the newest authority
-    // the client received.
     const replacementSnapshot = deliveredAuthorityFrames(r.client, r.replacementId).at(-1)!.payload as {
       transcript: Array<{ semantic?: { operationId?: string; lifecycle?: string } }>;
     };
@@ -2055,8 +1817,6 @@ describe("command-driven session replacement over the real Gateway", () => {
       && ["running", "waitingForInput"].includes(item.semantic.lifecycle ?? ""))).toEqual([]);
     expect((await list(r.client, "exclude")).sessions.find((row) => row.id === r.replacementId)?.phase).toBe("idle");
     await openSession(r.client, r.replacementId);
-    // Durable after restart: both sessions open, and the origin reports the
-    // command completed rather than recovering it as an unknown outcome.
     await r.f.restart();
     const client = await r.f.connect();
     const originOpen = await client.request("origin-after-restart", "session.open", { sessionId: r.origin.id });
@@ -2079,11 +1839,6 @@ describe("command-driven session replacement over the real Gateway", () => {
   }, 30_000);
 
   it("keeps a fork-inherited command row out of the running state while the replacement's handler is live", async () => {
-    // Failure modes: the replacement's snapshot marks the origin's command row
-    // running while the forked handler is still live, because the live-command
-    // overlay matches the inherited row by operation identity; the command never
-    // settles in the replacement; the settled snapshot still projects the row as
-    // running.
     const forkCall = "await ctx.fork(ctx.sessionManager.getLeafId(), { position: \"at\" });";
     const f = await fixture({ extensions: [{
       name: "replace.ts",
@@ -2099,7 +1854,6 @@ describe("command-driven session replacement over the real Gateway", () => {
     expect(response.ok, JSON.stringify(response)).toBe(true);
     await waitFor(() => !registry.slots.has(origin.id) && registry.slots.size === 1, "fork landed");
     const replacementId = [...registry.slots.keys()][0]!;
-    // Positive control: the origin's command is still live in the replacement.
     await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount > 0, "forked command live");
     await waitFor(() => deliveredAuthorityFrames(client, replacementId).length > 0, "replacement snapshot delivered while live");
     const operationId = response.result.operationId as string;
@@ -2118,11 +1872,6 @@ describe("command-driven session replacement over the real Gateway", () => {
 
   type InvocationSemantic = { kind?: string; operationId?: string; lifecycle?: string; settledInOriginSession?: boolean };
   it("projects a fork's inherited command rows from their origin settlement, never staged", async () => {
-    // Failure modes: a command that completed before the fork keeps the copied
-    // `staged` lifecycle, which blocks composer commands in the fork; a command
-    // that failed in the origin projects as completed in the fork; the forking
-    // command projects staged or running; the settlement note is missing; the
-    // projection loses either fact after restart.
     const f = await fixture({ extensions: [{
       name: "replace.ts",
       source: () => `
@@ -2159,7 +1908,6 @@ describe("command-driven session replacement over the real Gateway", () => {
     await waitFor(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, "forking command settled");
     await waitFor(() => (deliveredAuthorityFrames(client, replacementId).at(-1)?.payload as { phase?: string } | undefined)?.phase === "idle",
       "replacement settled snapshot delivered");
-    // The command rows of one projected snapshot, in transcript order.
     const commandRows = (payload: unknown) => (payload as { transcript: Array<{ semantic?: InvocationSemantic }> }).transcript
       .filter((item) => item.semantic?.kind === "command")
       .map((item) => [item.semantic!.operationId, item.semantic!.lifecycle, item.semantic!.settledInOriginSession]);
@@ -2169,7 +1917,6 @@ describe("command-driven session replacement over the real Gateway", () => {
       [replaceOperation, "completed", true],
     ];
     expect(commandRows(deliveredAuthorityFrames(client, replacementId).at(-1)!.payload)).toEqual(expected);
-    // The origin keeps every terminal fact; the fork projects them, never rewrites them.
     expect((await invocationReceiptsIn(origin.file)).filter((receipt) => receipt.receiptKind === "terminal")
       .map((receipt) => receipt.lifecycle)).toEqual(["completed", "failed", "completed"]);
 
@@ -2186,9 +1933,6 @@ describe("command-driven session replacement over the real Gateway", () => {
   }, 30_000);
 
   it("keeps a handoff write that must retry in its origin", async () => {
-    // Both origin writes start while the origin is bound; forcing them to fail
-    // until the rebind has committed makes each succeed only on a retry after
-    // the identity changed, which must still target the origin.
     const { RunMarkerStore } = await import("../../kernel/run/run-markers.js");
     let rebound = false;
     const append = SessionManager.prototype.appendCustomEntry;

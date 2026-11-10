@@ -65,39 +65,43 @@ def main(argv: list[str]) -> int:
         parser.error(f"no Gateway vitest lock is selected for {args.file}")
     report_path = verify.ROOT / "test-results" / "mutate" / "vitest.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    # The Gateway test runner owns each run's temporary HOME and scratch; this command holds the host's
-    # full-Gateway lock for the whole sampling, so no mutant's time is spent waiting for it.
     command = ["python3", str(verify.ROOT / "tools/verify/gateway.py"), "--reporter=json",
                f"--outputFile={report_path}", *[test[len(verify.GATEWAY) + 1:] for test in tests]]
-    # Held until this process exits: the open handle keeps its flock.
     held = wait_for_full_gateway_lock({"pid": os.getpid(), "worktree": str(verify.ROOT), "purpose": f"mutate {args.file}"},
                                       lambda line: print(f"mutate: {line}", file=sys.stderr, flush=True))
 
     def run_locks(timeout: float | None) -> dict | str | None:
         """The run's vitest summary, "timeout", or None when no readable report proves the tests ran."""
         report_path.unlink(missing_ok=True)
-        # Its own process group, so a hung run is stopped with every vitest worker it started.
-        process = subprocess.Popen(command, cwd=verify.ROOT / verify.GATEWAY, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, start_new_session=True,
-                                   env={**os.environ, HELD_BY_CALLER: "1"})
+        stops = {signal.SIGINT, signal.SIGTERM}
+        process = None
+        signal.pthread_sigmask(signal.SIG_BLOCK, stops)
         try:
+            process = subprocess.Popen(command, cwd=verify.ROOT / verify.GATEWAY, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, start_new_session=True,
+                                       env={**os.environ, HELD_BY_CALLER: "1"},
+                                       preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_UNBLOCK, stops))
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, stops)
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             return "timeout"
         finally:
-            # SIGTERM first, so the runner removes its temporary HOME; then SIGKILL whatever is left,
-            # also after a clean exit: a worker vitest left behind still belongs to the group.
-            if process.poll() is None:
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, stops)
+            if process is not None:
                 try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                    process.wait(timeout=10)
-                except (OSError, subprocess.TimeoutExpired):
-                    pass
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except OSError:  # already gone; macOS reports a reaped group as EPERM
-                pass
-            process.wait()
+                    if process.poll() is None:
+                        try:
+                            os.killpg(process.pid, signal.SIGTERM)
+                            process.wait(timeout=10)
+                        except (OSError, subprocess.TimeoutExpired):
+                            pass
+                finally:
+                    signal.pthread_sigmask(signal.SIG_BLOCK, stops)
+                    try:
+                        verify.signal_group(process.pid, signal.SIGKILL)
+                        process.wait()
+                    finally:
+                        signal.pthread_sigmask(signal.SIG_UNBLOCK, stops)
         try:
             return json.loads(report_path.read_text())
         except (OSError, ValueError):
@@ -111,11 +115,7 @@ def main(argv: list[str]) -> int:
           f"{len(tests)} selected lock file(s)", flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
-    # SIGTERM (an outer `timeout`) unwinds like an interrupt, so every lock run's group is stopped
-    # and the source is restored; installed before the unmutated run, which has no deadline.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
-    # A broken harness would otherwise count every mutant as killed. The unmutated run is not bounded
-    # (like the lock wait): it is the verify-green locks, and its time sets every mutant's deadline.
     started = time.monotonic()
     baseline = run_locks(None)
     elapsed = time.monotonic() - started
@@ -151,7 +151,6 @@ def main(argv: list[str]) -> int:
             begun = time.time()
             summary = run_locks(deadline)
             path.write_text(source)
-            # Killed by a failing test, a suite the mutant broke, or a run it hung; no report is a harness error.
             outcome = summary if summary == "timeout" else "error" if summary is None \
                 else "killed" if summary.get("numFailedTests") or summary.get("numFailedTestSuites") else "survived"
             mutants.append({"line": index + 1, "from": lines[index][start:end].strip(), "to": replacement.strip(),

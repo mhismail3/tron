@@ -8,18 +8,6 @@ import { PackageService } from "./package-service.js";
 import { TrustService } from "../kernel/resources/trust-service.js";
 import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../kernel/delegation/managed-subagents.js";
 
-/**
- * #243: a Pi package whose `engines.node` excludes the Gateway's Node installs
- * with only an npm `EBADENGINE` warning, and nothing afterwards says so. This
- * configures packages in canonical `settings.json` (the `sources.packages`
- * value the agent's exact install card writes), then drives `packages.list`
- * and the receipt-backed update/remove mutations through `GatewayService`, a real
- * `PackageService`, Pi's real `DefaultPackageManager` and canonical
- * `settings.json` in a temporary agent directory. The fixture packages declare a
- * satisfied, an unsatisfied, an invalid and no range; the warning never blocks
- * a configured package or listing (maintainer decision D-2, recorded on #241).
- */
-
 const client: ClientContext = {
   id: "dashboard", identity: "device:dashboard", isLocal: false, signal: undefined,
   beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
@@ -122,7 +110,6 @@ describe("packages.list projects each package's engines.node against the Gateway
     expect(bySource.get(sources.unsatisfied)?.nodeRequirement).toEqual({ range: ">=999.0.0", runtime, status: "unsatisfied" });
     expect(bySource.get(sources.invalid)?.nodeRequirement).toEqual({ range: "the newest one", runtime, status: "invalid" });
     expect(bySource.get(sources.missing)).not.toHaveProperty("nodeRequirement");
-    // Warn, never refuse: the mismatched package is admitted and still contributes its resources.
     expect(bySource.get(sources.unsatisfied)?.provides.skills).toEqual(["future-node"]);
     expect(bySource.get(sources.invalid)?.provides.skills).toEqual(["invalid-node"]);
   });

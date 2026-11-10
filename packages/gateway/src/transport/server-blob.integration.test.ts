@@ -353,8 +353,6 @@ describe("Gateway blob HTTP leases", () => {
     let streamClosed: Promise<{ closed: true } | { error: unknown }> | undefined;
     (gateway as any).options.display.acquireArtifact = async (sessionID: string, id: string) => {
       const lease = await store.acquire(id, sessionID);
-      // A fake release counter cannot catch descriptor double-close on 304,
-      // where no pipeline consumes the stream or installs an error listener.
       streamClosed = once(lease.stream, "close").then(
         () => ({ closed: true as const }),
         (error: unknown) => ({ error }),

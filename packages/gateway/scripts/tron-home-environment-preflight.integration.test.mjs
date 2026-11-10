@@ -6,10 +6,6 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-// Real Node process: the child imports the actual test-support preflight before any
-// code runs. Paths are inert strings; the child only reads environment names, and
-// nothing is opened at the account home. The HOME override reproduces an isolated
-// test shell that inherited a live-home path from the original user's account.
 const preflight = new URL("../test-support/tron-home-environment-preflight.mjs", import.meta.url).href;
 const accountHome = userInfo().homedir;
 const root = await mkdtemp(join(tmpdir(), "tron-home-preflight-"));
@@ -31,15 +27,12 @@ test("removes inherited live-home variables recognized from the account home whe
     PI_CODING_AGENT_DIR: join(accountHome, ".tron", "__inert_marker"),
     PI_SESSION_FILE: join(accountHome, ".tron-dev", "sessions", "inert.jsonl"),
     JITI_ALIAS: JSON.stringify({ "@tron-inert": `${accountHome}/.tron/extensions/inert` }),
-    // Whole-path boundary: a sibling of the live home is a fixture, not a live home.
     TRON_GATEWAY_PAYLOAD_ROOT: join(accountHome, ".tron-fixture-sibling", "payload"),
     PI_SUBAGENTS_TEMP_ROOT: join(isolatedHome, "fixtures", "subagents"),
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), ["PATH", "PI_SUBAGENTS_TEMP_ROOT", "TRON_GATEWAY_PAYLOAD_ROOT"]);
 
-  // Literal shorthand still belongs to the supplied HOME; recognizing the
-  // account's absolute paths must not change the existing shorthand rule.
   const shorthand = runChild({ PI_SESSION_FILE: "~/.tron-dev/sessions/inert.jsonl" });
   assert.equal(shorthand.status, 0, shorthand.stderr);
   assert.deepEqual(JSON.parse(shorthand.stdout), ["PATH"]);

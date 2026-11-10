@@ -9,10 +9,6 @@ import { closeSubagentFixtures, bound, childModel, holdingAsyncLaunch, waitBetwe
 import { GatewayLogger } from "../../../transport/logger.js";
 import { RestartDrainProgress, waitForStopDrain } from "../../../sessions/restart-drain.js";
 
-// #2256: liveness comes from the installed delegated provider, not result shape. A
-// real managed async run must still hold the intentional stop until it settles, and
-// the stop must name it in gateway.jsonl while it waits.
-
 const roots: string[] = [];
 afterEach(async () => {
   await closeSubagentFixtures();
@@ -29,7 +25,6 @@ describe("Managed subagents: intentional stop drain", () => {
   it("a live managed async run blocks the stop, is named in gateway.jsonl within one interval, and the stop completes after it settles", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
-    // An ordinary session's own managed async run, so the run is the only accepted work.
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch"),
       fauxAssistantMessage("Launched the background check."),
@@ -53,7 +48,6 @@ describe("Managed subagents: intentional stop drain", () => {
     expect(Date.parse(first!.timestamp) - startedAt).toBeLessThan(intervalMs + 1_000);
     const named = JSON.parse(first!.message!.slice(first!.message!.indexOf("["))) as Array<Record<string, unknown>>;
     expect(named).toContainEqual(expect.objectContaining({ sessionId: slot.id, category: "detached-extension-run", state: "active", ageMs: expect.any(Number) }));
-    // Accepted work that is still progressing is never cut: the stop keeps waiting.
     await waitFor(async () => (await records(logPath)).filter(record => record.event === "gateway.stop-drain.waiting").length >= 2, "a second waiting record on the cadence", bound);
     expect(settled).toBe(false);
 
@@ -91,13 +85,10 @@ describe("Managed subagents: intentional stop drain", () => {
     }, "the stop names its blockers", bound);
     const [first] = (await records(logPath)).filter(record => record.event === "gateway.stop-drain.waiting");
     const named = JSON.parse(first!.message!.slice(first!.message!.indexOf("["))) as Array<Record<string, unknown>>;
-    // The task's own work is owned by the worker session it bound, never a stranded owner.
     expect(named).toContainEqual(expect.objectContaining({ sessionId: run.sessionId, category: "foreground-agent-operation", state: "active" }));
     expect(named.filter(blocker => blocker.state === "suspect")).toEqual([]);
     expect(settled).toBe(false);
 
-    // The run settles; the drain refuses the wake the task waits for, and a refused wake is never
-    // replayed, so the task settles here without a report (resumable) instead of holding the stop.
     child.releaseHeld();
     expect(await run.completion).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "unknown", reason: "no-report", sessionId: run.sessionId } });
     const final = await drain;
@@ -121,9 +112,7 @@ describe("Managed subagents: intentional stop drain", () => {
     const blocker = (category: string) => f.registry.administrativeDrainSnapshot().blockers
       .find(entry => entry.sessionId === run.sessionId && entry.category === category);
     const heldAt = blocker("foreground-agent-operation")!.progressAt!;
-    // The run's ISO progress time must be strictly later than the task's (same-millisecond times compare equal).
     await new Promise(resolve => setTimeout(resolve, 20));
-    // The run takes a tool step after the task's last transition, then holds again: live and progressing.
     child.releaseHeld();
     await waitFor(() => child.heldRequests() === 2, "the run progressed and is live again", bound);
     await waitFor(() => (blocker("detached-extension-run")?.progressAt ?? "") > heldAt, "the run's progress reaches the drain", bound);
@@ -132,12 +121,9 @@ describe("Managed subagents: intentional stop drain", () => {
     const runProgress = snapshot.blockers.find(entry => entry.sessionId === run.sessionId && entry.category === "detached-extension-run")!.progressAt!;
     expect(task.progressAt).toBe(heldAt);
     const limit = 180_000;
-    // Past the limit from the task's own last transition, but not from its run's progress: waiting.
     expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(heldAt) + limit, limit)).toEqual({ outcome: "waiting" });
-    // The bound still holds: no progress from either for the limit is a stall, named at the held task.
     expect(new RestartDrainProgress().evaluate(snapshot, Date.parse(runProgress) + limit, limit))
       .toMatchObject({ outcome: "stalled", blocker: { sessionId: run.sessionId }, ageMs: limit });
-    // Cleanup only: the task's settlement is the stop-drain cases' concern, not this one's.
     child.releaseHeld();
     await run.completion.catch(() => {});
   }, 60_000);

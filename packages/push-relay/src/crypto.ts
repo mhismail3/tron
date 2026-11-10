@@ -19,10 +19,6 @@ export function ownedBuffer(value: Uint8Array): ArrayBuffer {
   return Uint8Array.from(value).buffer;
 }
 
-/**
- * Bounded stream read for the request body gate and the APNs response parse.
- * An absent stream reads as empty bytes; callers own what an empty body means.
- */
 export async function readBoundedStream(
   stream: ReadableStream<Uint8Array> | null | undefined,
   maximumBytes: number,
@@ -121,7 +117,6 @@ export function canonicalRegistration(fields: {
   route: string;
   bindingHash: string;
 }): Uint8Array {
-  // Lexicographic keys match Swift JSONEncoder.sortedKeys byte-for-byte.
   return utf8(JSON.stringify({
     apnsToken: fields.apnsToken,
     bindingHash: fields.bindingHash,

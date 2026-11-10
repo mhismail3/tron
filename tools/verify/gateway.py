@@ -27,14 +27,9 @@ def hold_full_gateway_lock():
     return wait_for_full_gateway_lock(record, lambda line: print(f'gateway tests: {line}', file=sys.stderr, flush=True))
 
 
-# The browser receipt test runs the pinned agent-browser fork, which it reads from this
-# variable, and whose native case runs the engine first on PATH. The runner provisions that exact
-# commit once per clone and the engine version it declares once per version, so every run
-# that selects the test (a batch's Gateway lane included) covers it instead of skipping it.
 BROWSER_FORK_COPY = 'TRON_P99_17_BROWSER_FORK_COPY'
 BROWSER_FORK_TEST = 'src/e2e/sessions/browser-fork-receipts.integration.test.ts'
 BROWSER_FORK_REPOSITORY = 'https://github.com/fitchmultz/pi-agent-browser-native.git'
-# Vitest options whose value is the next word, so that word is not a file filter.
 VALUE_OPTIONS = {'--config', '-c', '--project', '--reporter', '--outputFile', '-t', '--testNamePattern', '--root', '-r', '--dir', '--shard',
                  '--testTimeout', '--hookTimeout', '--teardownTimeout', '--bail', '--retry', '--maxWorkers', '--minWorkers', '--pool',
                  '--environment', '--maxConcurrency', '--sequence.seed', '--exclude'}
@@ -113,7 +108,6 @@ def pinned_browser_fork() -> str:
 def provision_browser_fork() -> Path:
     """The built checkout of the pinned fork in this clone's shared verify state, built from its lockfile once."""
     commit = pinned_browser_fork()
-    # This clone and the fixture's own repository, never a caller's (a hook's GIT_DIR, for example).
     clean = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
     common = Path(subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
                                           text=True, env=clean).strip())
@@ -126,8 +120,6 @@ def provision_browser_fork() -> Path:
         if stamp.is_file() and stamp.read_text() == commit:
             return target
         print(f'gateway tests: provisioning the pinned agent-browser fork {commit[:12]} into {target}', file=sys.stderr, flush=True)
-        # Only this lock's holder stages, so any staging left here belongs to a provisioner
-        # that was stopped or killed mid-build; remove it before starting over.
         for stale in fixtures.glob('.pi-agent-browser-native-*'):
             shutil.rmtree(stale, ignore_errors=True)
         staging = Path(tempfile.mkdtemp(prefix='.pi-agent-browser-native-', dir=fixtures))
@@ -139,7 +131,6 @@ def provision_browser_fork() -> Path:
             run('git', 'checkout', '-q', '--detach', 'FETCH_HEAD')
             if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=staging, text=True, env=clean).strip() != commit:
                 raise SystemExit(f'gateway tests: the fetched agent-browser fork is not {commit}')
-            # The lockfile pins every dependency; lifecycle scripts stay off and the build is explicit.
             run(str(ROOT / 'scripts/tron-node'), 'exec', 'npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund')
             run(str(ROOT / 'scripts/tron-node'), 'exec', 'node', 'scripts/build.mjs')
             if not (staging / 'dist/extensions/agent-browser/index.js').is_file():
@@ -180,7 +171,6 @@ def provision_browser_engine(fork: Path) -> Path:
         if stamp.is_file() and stamp.read_text() == version:
             return target / 'bin'
         print(f'gateway tests: provisioning agent-browser {version}, the engine the fork declares, into {target}', file=sys.stderr, flush=True)
-        # As for the fork, only this lock's holder stages; leftovers are a killed provisioner's.
         for stale in fixtures.glob('.agent-browser-*'):
             shutil.rmtree(stale, ignore_errors=True)
         staging = Path(tempfile.mkdtemp(prefix='.agent-browser-', dir=fixtures))
@@ -216,8 +206,6 @@ def provision_browser_engine(fork: Path) -> Path:
 
 
 def main() -> int:
-    # Resolve the development toolchain before replacing HOME; resolution must
-    # neither depend on the fixture home nor fall back to the signed Gateway.
     node = subprocess.check_output([str(ROOT / "scripts/tron-node")], text=True).strip()
     vitest = ROOT / "packages/gateway/node_modules/.bin/vitest"
     if not vitest.is_file():
@@ -230,28 +218,17 @@ def main() -> int:
     fork = {}
     if selects_browser_fork(arguments):
         copy = provision_browser_fork()
-        # Its native case runs `which agent-browser`: the fork's declared engine comes first.
         path = [str(provision_browser_engine(copy)), *filter(None, os.environ.get('PATH', '').split(os.pathsep))]
         fork = {BROWSER_FORK_COPY: str(copy), 'PATH': os.pathsep.join(path)}
     lock = hold_full_gateway_lock()
-    # The scratch root never derives from the caller's TMPDIR: fixture paths, socket paths and
-    # path-length-bounded fixtures must not change with who runs the suite (#2260: a Home task
-    # worker's 108-character TMPDIR left a realistic catalog fixture short of rows).
-    # SIGTERM unwinds from here on, so the root below is removed even before Vitest starts.
     signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
     with tempfile.TemporaryDirectory(prefix="tron-gateway-tests-", dir="/tmp") as temporary:
         root = Path(temporary)
         home, scratch = root / "home", root / "tmp"
         home.mkdir(); scratch.mkdir()
         environment = {**os.environ, **fork, "HOME": str(home), "TMPDIR": str(scratch), "TRON_NODE_BIN": node}
-        # The existing Tron-home preflight remains authoritative for inherited
-        # selectors/resource paths. Do not clear selectors or add an override
-        # that would bypass its refusal; clean defaults now derive from HOME.
         with subprocess.Popen([str(ROOT / "scripts/tron-node"), "exec", str(vitest), "run", *arguments],
                               cwd=ROOT / "packages/gateway", env=environment) as child:
-            # Keep the environment alive until Vitest has joined its own work.
-            # No second timeout or descendant controller: the caller owns the
-            # step group, while this launcher forwards direct signals and waits.
             def forward(signum, _frame):
                 if child.poll() is None:
                     child.send_signal(signum)

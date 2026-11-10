@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { MacTerminalService } from "./mac-terminal-service.js";
 
-/** Explicit maintainer command; no startup hook and no daemon supervisor. */
 async function main(): Promise<void> {
   const [command, flag, home, ...extra] = process.argv.slice(2);
   if (!command || !["status", "start", "stop", "recover"].includes(command) || flag !== "--home" || !home || extra.length) {

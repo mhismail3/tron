@@ -7,7 +7,6 @@ import { EpisodicStore } from "./episodic-store.js";
 import { HOME_MAX_CHAPTERS } from "./episodic-contract.js";
 import { EPISODIC_STORE_VERSION, EPISODIC_STATE_MAX_BYTES, type EpisodicStoreState } from "./episodic-contract.js";
 
-// A state with the ledger's full chapter count must write and read back.
 const maxChapters = HOME_MAX_CHAPTERS;
 const maxStateBytes = EPISODIC_STATE_MAX_BYTES;
 const chapterCursor = { dev: 1, ino: 1, size: 1, completeBytes: 1, leafEntryId: "entry", leafLineDigest: "a".repeat(64), completePrefixDigest: "b".repeat(64) };
@@ -51,8 +50,6 @@ it("keeps small ordinary episodic states readable", async () => {
   });
 });
 
-// FM3: the aggregate cursor is strict. A deleted field is refused, and each required
-// field is refused when absent. The file is rewritten directly: saveState validates too.
 it("refuses an aggregate cursor that carries a deleted field or omits a required one", async () => {
   await fixture(async (store, path) => {
     await store.saveState(state(1));

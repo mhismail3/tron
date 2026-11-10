@@ -10,12 +10,8 @@ import { EpisodicMemory } from "../../episodic/episodic-memory.js";
 import { EPISODIC_DEFAULTS } from "../../episodic/episodic-contract.js";
 import { TronWorkspace } from "../../workspace/tron-workspace.js";
 
-// Reproduces the old draft's unexplained 10→9 delta without changing an oracle.
-// The old/new tool text is from the retained synthetic lock trace, not live notes.
 it("a longer delegate diagnostic crosses the free-parent byte limit, without losing a message", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-lock-home-activation-wake-"));
-  // Keep this synthetic input independent of session storage/TMPDIR while
-  // preserving byte pressure on both sides of the 512-byte free-parent limit.
   const target = "/fixture/home-profile-episode/projects/retained-synthetic-lock-trace/workspaces/delegated-task/project/notes/workspace";
   const samples = [];
   try {

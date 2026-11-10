@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Test-owned synthetic history only. This never connects to a Gateway or opens
-// a user's session. Compile first; optional baseline is another compiled dist.
+// Test-owned synthetic history only.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -48,8 +47,6 @@ for (const entries of extended ? [100, 1_000, 10_000, 25_000, 100_000] : [100, 1
   try {
   const records = modules.map(module => ({ module, durations: [], branchWalks: [], last: undefined }));
   for (let iteration = -warmup; iteration < repetitions; iteration++) {
-    // Balance order in the same process; report samples rather than asserting
-    // a machine-specific latency threshold in the ordinary unit suite.
     const order = iteration % 2 === 0 ? records : [...records].reverse();
     for (const record of order) {
       assert.ok(performance.now() < deadline, "synthetic workload exceeded its two-minute ceiling");
@@ -63,8 +60,6 @@ for (const entries of extended ? [100, 1_000, 10_000, 25_000, 100_000] : [100, 1
       assert.equal(page.end, entries);
       assert.deepEqual(page.items.map(item => item.id), canonical.slice(page.start, page.end).map(entry => entry.id));
       assert.equal(page.end - page.start, page.items.length);
-      // Independent canonical oracle: no assertion just compares a fitter to
-      // itself. Role/text/identity and full baseline equality are both checked.
       assert.deepEqual(page.items.map(item => [item.role, item.content?.[0]?.text]),
         canonical.slice(page.start, page.end).map(entry => [entry.message.role, entry.message.content[0].text]));
       record.last = page;

@@ -11,12 +11,6 @@ import { TrustService } from "../../kernel/resources/trust-service.js";
 import type { AgentInstructions } from "../../sessions/agent-instructions.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-// The Agent Instructions sheet claims to show what the model receives. These
-// cases pin the failure modes of the structured projection against the real
-// pinned runtime: lost/altered bytes, hostile file content splitting sections,
-// the per-turn Tron context missing when idle or doubled mid-turn, an unknown
-// forced prompt being mis-structured, and wrong source attribution.
-
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
 const mcpServers: Server[] = [];
@@ -118,7 +112,6 @@ async function openRegistry(agentDir: string, tronHome: string, faux: ReturnType
   return registry;
 }
 
-/** Disposes the fixture's runtime and opens its canonical session in a fresh registry. */
 async function reopen(f: Awaited<ReturnType<typeof fixture>>) {
   await f.registry.dispose();
   registries.splice(registries.indexOf(f.registry), 1);
@@ -132,7 +125,6 @@ async function instructions(slot: { context(): Promise<unknown> }): Promise<Agen
   return ((await slot.context()) as { instructions: AgentInstructions }).instructions;
 }
 
-/** Runs one turn and returns what the model received plus the mid-turn projection. */
 async function turn(f: Awaited<ReturnType<typeof fixture>>) {
   let received = "";
   let during: AgentInstructions | undefined;
@@ -149,10 +141,8 @@ async function turn(f: Awaited<ReturnType<typeof fixture>>) {
 describe("Agent Instructions projection through the pinned runtime", () => {
   it("shows the connected MCP section as session context idle and mid-turn, matching model bytes", async () => {
     const f = await fixture(true);
-    // Context inspection must not anticipate the lazy first prompt admission.
     expect((await instructions(f.slot)).sections.some(section => section.id === "mcp_servers")).toBe(false);
     const { received, during } = await turn(f);
-    // Pi installs the MCP section at first prompt admission, not runtime load.
     const idle = await instructions(f.slot);
     for (const [phase, projection] of [["mid-turn", during], ["idle", idle]] as const) {
       expect(projection.sections.filter(section => section.id === "mcp_servers").map(section => section.id), `${phase}: model MCP section IDs vs projected IDs`).toEqual(["mcp_servers"]);
@@ -163,7 +153,6 @@ describe("Agent Instructions projection through the pinned runtime", () => {
       expect(received).toContain(`<mcp_servers>\n${mcp!.text}\n</mcp_servers>`);
       expect(received.match(/\n<mcp_servers>\n/g)).toHaveLength(1);
     }
-    // A transcript-only idle fallback would regress accepted unsent tool changes.
     await f.slot.setTools(["fixture_tool"]);
     const preview = await instructions(f.slot);
     const next = await turn(f);
@@ -171,7 +160,6 @@ describe("Agent Instructions projection through the pinned runtime", () => {
       expect(projection.text).toBe(next.received);
       expect(projection.sections.filter(section => section.id === "mcp_servers")).toHaveLength(1);
     }
-    // The section is canonical session context: a reopened runtime shows it before its first turn.
     const reopened = await reopen(f);
     const cold = await instructions(reopened.slot);
     expect(cold.sections.filter(section => section.id === "mcp_servers").map(section => section.id), "reopened: model MCP section IDs vs projected IDs").toEqual(["mcp_servers"]);
@@ -195,7 +183,7 @@ describe("Agent Instructions projection through the pinned runtime", () => {
       const tron = projection.sections.find(section => section.id === "tron")!;
       expect(tron.timing).toBe("turn");
       expect(tron.text.startsWith("## Tron operating context")).toBe(true);
-      expect(projection.text.match(/\n## Tron operating context\n/g)).toHaveLength(2); // real one + hostile file copy
+      expect(projection.text.match(/\n## Tron operating context\n/g)).toHaveLength(2);
     }
 
     const byId = new Map(during.sections.map(section => [section.id, section]));
@@ -229,7 +217,6 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     const f = await fixture();
     const first = await turn(f);
     expect(first.received).toContain("<fixture_once>\nOne-shot fixture\n</fixture_once>");
-    // Idle shows what the model last received; Pi drops the section at the next request.
     expect((await instructions(f.slot)).text).toBe(first.received);
     const next = await turn(f);
     expect(next.received).not.toContain("<fixture_once>");

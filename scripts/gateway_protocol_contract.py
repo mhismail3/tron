@@ -112,7 +112,6 @@ def verify_source_contract(root: Path = ROOT) -> GatewayProtocolContract:
     )
     _expect_equal(deploy_contract, expected, "deployment helper")
 
-    # The profiling driver speaks to a Gateway as the phone does, at the contract's protocol.
     profile = _read(root / "scripts/tron-profile-gateway-driver.mjs")
     profile_protocol = _exact_integer(profile, r"^const PROTOCOL_VERSION\s*=\s*(\d+);$", "profiling driver protocol")
     if profile_protocol != expected.protocol_version:
@@ -130,8 +129,6 @@ def verify_source_contract(root: Path = ROOT) -> GatewayProtocolContract:
         (root / "packages/ios-app/Core/Gateway/GatewayProtocolContract.swift", "iOS"),
         (root / "packages/mac-app/Sources/Server/Health/GatewayProtocolContract.swift", "Mac"),
     ):
-        # The iOS constants carry package access (never public) because the app and its unit
-        # tests read them across the TronMobileCore framework boundary.
         source = _read(path)
         actual = GatewayProtocolContract(
             _exact_integer(source, r"^\s*(?:package )?static let protocolVersion\s*=\s*(\d+)\s*$", f"{label} protocol"),

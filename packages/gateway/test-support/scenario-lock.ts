@@ -5,42 +5,13 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-/**
- * The scenario-lock framework (packages/gateway/docs/scenario-locks.md#framework).
- *
- * A lock is a *normalized* recording of what one deterministic scenario makes
- * the real Gateway and the pinned Pi SDK emit, persist and send, compared
- * byte-for-byte with a committed golden. Two runs of the same scenario must
- * produce byte-identical traces, so every per-run identity (ids, timestamps,
- * durations, counters, the disposable temp root) is replaced by a stable
- * placeholder here — the one owner of lock normalization.
- *
- * What must never be normalized away is the *shape and wording* the Gateway and
- * the SDK produce: a tool name, a prompt section heading, a tool-result text, a
- * response value. Those are the deltas a change has to justify hunk by hunk.
- *
- * The comparison's diff is produced by `git diff --no-index`, not by a
- * hand-written algorithm: the same tool a reviewer would run, with real hunk
- * boundaries on a golden whose blocks repeat.
- */
-
-/**
- * Names the modules whose goldens a run may rewrite: a comma-separated list of
- * module ids (`gateway/run,gateway/admin`) or `all`. Unset, every lock compares.
- */
 const LOCK_UPDATE_ENV = "TRON_UPDATE_LOCKS";
 
-/** Whether this run may rewrite the goldens of `moduleId`. */
 export function lockUpdateRequested(moduleId: string): boolean {
   const requested = (process.env[LOCK_UPDATE_ENV] ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
   return requested.includes("all") || requested.includes(moduleId);
 }
 
-/**
- * Where a lock's golden and its retained evidence live: the golden beside the
- * lock test in `locks/<name>.golden.json` (owned by the test's module), the
- * actual trace and diff under `test-results/locks/`.
- */
 export function lockPaths(testFileUrl: string, name: string): { goldenPath: string; actualPath: string; diffPath: string } {
   const testFile = fileURLToPath(testFileUrl);
   const results = resolve(process.cwd(), "test-results", "locks");
@@ -51,41 +22,26 @@ export function lockPaths(testFileUrl: string, name: string): { goldenPath: stri
   };
 }
 
-/** The test file's name, for messages. */
 function lockName(goldenPath: string): string {
   return basename(goldenPath).replace(/\.golden\.json$/u, "");
 }
 
-/** A mismatch prints at most this many diff lines; the whole diff is in the artifact. */
 const MAXIMUM_REPORTED_DIFF_LINES = 400;
 
 export type TraceValue = null | boolean | number | string | TraceValue[] | { [key: string]: TraceValue };
 
-/** Per-run facts the trace must not carry: the disposable roots it ran in. */
 export interface TraceNormalization {
-  /** Absolute directories (and their realpaths) that become `<tmp>`. */
   readonly roots: readonly string[];
-  /**
-   * Identity values that are the scenario's own, not the SDK's: a fixed
-   * tool-call ID the script names. Anything else under an identity key is
-   * generated per run and becomes `<id>`.
-   */
   readonly stableIds?: readonly string[];
 }
 
-/** One distinct provider request, with how many consecutive requests it covers. */
 export interface ProviderRequestTrace {
-  /** Consecutive identical requests this record stands for; `1` for a one-off. */
   readonly repeats: number;
-  /** Declared tool names, in declaration order. */
   readonly tools: readonly string[];
-  /** System-prompt section headings, in the order they appear in the prompt. */
   readonly promptSections: readonly string[];
-  /** `sha256:<hex>` over the normalized prompt text. */
   readonly promptHash: string;
 }
 
-/** One client-facing topic, with the union of the payload structures it carried. */
 export interface ClientEventTrace {
   readonly topic: string;
   readonly paths: readonly string[];
@@ -94,16 +50,12 @@ export interface ClientEventTrace {
 export interface BehaviorTrace {
   readonly scenario: string;
   readonly providerRequests: readonly ProviderRequestTrace[];
-  /** The non-chat provider boundary the scenario exercises: TypeSafe classify. */
   readonly classifierRequests: readonly TraceValue[];
   readonly clientEvents: readonly ClientEventTrace[];
-  /** Canonical session JSONL entries, in file order, normalized. */
   readonly canonicalJsonl: readonly TraceValue[];
-  /** The slot's transcript projection, normalized. */
   readonly transcript: readonly TraceValue[];
 }
 
-/** Values that differ per run but whose structure is worth keeping. */
 const IDENTITY_KEYS = new Set([
   "id", "parentId", "parentSessionId", "sessionId", "presentationId", "toolCallId", "targetId",
   "fromId", "firstKeptEntryId", "leafEntryId", "toolSegmentId", "groupId", "runtimeGeneration",
@@ -116,16 +68,6 @@ const TIMESTAMP_KEYS = new Set([
 ]);
 const DURATION_KEYS = new Set(["durationMs", "elapsedMs", "latencyMs", "ageMs"]);
 const COUNTER_KEYS = new Set(["sequence", "eventSequence", "revision", "progressSequence", "callCount"]);
-/**
- * Values whose exact numbers are host- and checkout-derived; only their
- * structure is compared. `tokensBefore` is one of them: Pi estimates the
- * pre-compaction context from the last assistant usage plus a chars/4 estimate
- * of the serialized context, and that context contains absolute package and
- * temp paths, so the same scenario on a checkout of a different path length
- * produces a different number. `contextUsage` is the same estimate projected to
- * clients. The prompt-size signal stays visible through the prompt sections, the
- * per-request prompt hash and the section text.
- */
 const STRUCTURE_ONLY_KEYS = new Set(["usage", "cost", "stats", "tokensBefore", "contextUsage"]);
 
 const IDENTITY_MARKER = "<id>";
@@ -134,45 +76,20 @@ const DURATION_MARKER = "<duration>";
 const COUNTER_MARKER = "<n>";
 const STRUCTURE_MARKER = "<value>";
 
-/**
- * Absolute package paths differ per checkout and machine; only the package
- * identity matters. Deliberately a single bounded quantifier: a star over a
- * group that itself repeats is exponential on a long slash-heavy token.
- */
 const PACKAGE_PATH = /(?:[^\s"'`()[\]]*[/\\])?node_modules[/\\]((?:@[^/\\]+[/\\])?[^/\\]+)/g;
 const TEMP_PATH = /(?:[/\\]private)?[/\\](?:var[/\\]folders|tmp|private[/\\]tmp)[^\s"',;)]*/g;
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?/g;
-/** Pi names a session file by its creation time with `-` for `:` and `.`. */
 const FILE_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z/g;
-/** A path segment that is a full digest of a per-run path (a project key). */
 const DIGEST_SEGMENT = /([/\\])[0-9a-f]{64}(?=[/\\])/g;
-/** A truncated digest of a per-run path, as extension identities carry. */
 const SHORT_DIGEST = /^sha256:[0-9a-f]{16}$/;
-/** An extension owner identity: a base64url digest of the extension's per-run path. */
 const EXTENSION_OWNER = /^extension:[A-Za-z0-9_-]{43}$/;
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const DATA_URL = /data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,[A-Za-z0-9+/=]+/gi;
 const EPOCH_NUMBER = /(?<![.\d])\b\d{13,}\b/g;
-/** The codemode tool result reports its own wall time, which host load moves. */
 const WALL_TIME_TEXT = /\bWall time \d+(?:\.\d+)? seconds?\b/g;
 const FAUX_API = /^faux:\d+:[a-z0-9]+$/;
 const BASE64_PAYLOAD = /^[A-Za-z0-9+/]{64,}={0,2}$/;
 
-/**
- * Live-progress subtrees a payload carries only while work is in flight, so
- * whether a run observed them depends on host timing rather than on the SDK's
- * behavior: the growing streamed message, the live tool-execution list, a tool
- * result before it settles, and nested-call progress inside a live execution.
- * Their settled forms are recorded by the transcript projection, so pruning them
- * from an *event shape* costs no signal and removes a false delta.
- */
-// Admission-window state is just as transient: a prompt waiting for its run
-// (`pendingPrompt`), steers and follow-ups queued behind a live run
-// (`queuedItems`), the live tool segment (`activeToolSegmentId`), and the
-// not-yet-persisted notice a new session's context policy carries until its first
-// message is written (`contextWindowPolicy.warning`). Which coalesced frame a
-// client receives in that window is host timing; their settled state is in the
-// recorded responses. A dotted entry names a subtree by its path suffix.
 const SNAPSHOT_TRANSIENTS = ["streaming", "toolExecutions", "partialResult", "nestedCalls", "pendingPrompt",
   "queuedItems", "activeToolSegmentId", "contextWindowPolicy.warning"];
 const TRANSIENT_EVENT_PATHS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
@@ -184,17 +101,12 @@ const TRANSIENT_EVENT_PATHS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
 ]);
 const NO_TRANSIENT_PATHS: ReadonlySet<string> = new Set<string>();
 
-/** Replace per-run values in one string, keeping every stable structural cue. */
 function normalizeTraceString(value: string, normalization: TraceNormalization): string {
-  // Whole-value identities first: the generic replacements below would hide the
-  // pattern that identifies them.
   if (FAUX_API.test(value)) return "<api>";
   if (BASE64_PAYLOAD.test(value)) return `<base64:${value.length}>`;
   if (SHORT_DIGEST.test(value)) return "sha256:<digest>";
   if (EXTENSION_OWNER.test(value)) return "extension:<digest>";
   let text = value;
-  // Longest first: a realpath (`/private/var/…`) contains the raw temp root
-  // (`/var/…`), and replacing the shorter one first would leave `/private<tmp>`.
   for (const root of [...normalization.roots].sort((left, right) => right.length - left.length)) {
     if (root.length > 1) text = text.split(root).join("<tmp>");
   }
@@ -210,7 +122,6 @@ function normalizeTraceString(value: string, normalization: TraceNormalization):
   return text;
 }
 
-/** The normalized trace value of one JSON-shaped SDK value. */
 export function normalizeTraceValue(value: unknown, normalization: TraceNormalization): TraceValue {
   if (value === null || typeof value === "boolean") return value;
   if (typeof value === "number") return Number.isFinite(value) ? value : "<nonfinite>";
@@ -241,12 +152,6 @@ export function normalizeTraceValue(value: unknown, normalization: TraceNormaliz
   return `<${typeof value}>`;
 }
 
-/**
- * A compaction entry repeats the whole system prompt it was cut at, which is
- * already recorded by the live system message and by every request's section
- * headings and prompt hash. Keep which sections and tools the boundary carried,
- * drop the duplicated text.
- */
 function summarizeSystemPromptState(value: unknown): TraceValue {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return normalizeShapeOnly(value);
   const state = value as { content?: unknown; sections?: unknown; toolsAdded?: unknown };
@@ -278,7 +183,6 @@ function normalizeShapeOnly(value: unknown): TraceValue {
   return `<${typeof value}>`;
 }
 
-/** Keep a value's structure while discarding its numbers. */
 function blindStructure(value: unknown): TraceValue {
   if (value === null) return "<null>";
   if (Array.isArray(value)) return value.map(blindStructure);
@@ -292,21 +196,11 @@ function blindStructure(value: unknown): TraceValue {
   return STRUCTURE_MARKER;
 }
 
-/** `sha256:<hex>` over a normalized prompt text. */
 export function hashPromptText(prompt: string, normalization: TraceNormalization): string {
   const normalized = normalizeTraceString(prompt, normalization);
   return `sha256:${createHash("sha256").update(normalized, "utf8").digest("hex")}`;
 }
 
-/**
- * The system prompt's section headings, in prompt order.
- *
- * The Gateway's own `before_agent_start` hook flattens the structured prompt
- * into one `content` string, so the request carries no `sections` object: the
- * headings are the rendered `<name>…</name>` blocks. A heading only counts when
- * its closing tag exists, so prose that mentions a `<placeholder>` does not
- * become a section.
- */
 export function promptSectionHeadings(prompt: string): string[] {
   const headings: string[] = [];
   for (const match of prompt.matchAll(/(?:^|\n)<([a-z][a-z0-9_]*)>\n/g)) {
@@ -318,11 +212,6 @@ export function promptSectionHeadings(prompt: string): string[] {
   return headings;
 }
 
-/**
- * Every dotted path (with a type tag at each leaf) reachable in one JSON-shaped
- * value. Paths are deduplicated and sorted, so a payload's structure is compared
- * without its per-run ordering or repetition. `skip` prunes whole subtrees.
- */
 function shapePaths(value: unknown, options: { readonly skip?: ReadonlySet<string> } = {}): string[] {
   const found = new Set<string>();
   collectShapePaths(value, "", found, options.skip ?? NO_TRANSIENT_PATHS);
@@ -347,12 +236,10 @@ function collectShapePaths(value: unknown, prefix: string, found: Set<string>, s
   found.add(`${prefix}:${value === null ? "null" : typeof value}`);
 }
 
-/** The shape of one client-event payload, with its in-flight sub-states pruned. */
 export function eventShapePaths(topic: string, payload: unknown): string[] {
   return shapePaths(payload, { skip: TRANSIENT_EVENT_PATHS.get(topic) ?? NO_TRANSIENT_PATHS });
 }
 
-/** Collapse a run's broadcasts into one row per topic, in first-appearance order. */
 export function clientEventTrace(events: Iterable<{ topic: string; paths: readonly string[] }>): ClientEventTrace[] {
   const order: string[] = [];
   const byTopic = new Map<string, Set<string>>();
@@ -364,13 +251,6 @@ export function clientEventTrace(events: Iterable<{ topic: string; paths: readon
   return order.map((topic) => ({ topic, paths: [...(byTopic.get(topic) ?? [])].sort() }));
 }
 
-/**
- * Collapse each run of identical consecutive provider requests into one record
- * carrying its `repeats`. A turn makes several requests with the same prompt and
- * tool set; recording them once keeps the trace's *sequence* and count while
- * sparing the reviewer eight identical blocks, and any request that differs
- * splits the run and stays visible.
- */
 export function collapseRepeatedRequests(requests: readonly Omit<ProviderRequestTrace, "repeats">[]): ProviderRequestTrace[] {
   const collapsed: ProviderRequestTrace[] = [];
   for (const request of requests) {
@@ -387,11 +267,6 @@ export function collapseRepeatedRequests(requests: readonly Omit<ProviderRequest
   return collapsed;
 }
 
-/** Shared Home + worker declarations are owned by the real Home activation lock.
- * Other scenarios retain tool names/order/sampling and their lifecycle data, not
- * another copy of those schemas. Tools absent from the canonical capture retain
- * their full declarations with their own scenario.
- */
 const SHARED_TOOL_SCHEMAS = new Set([
   "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
   "web_search", "session_search", "session_read", "settings", "projects",
@@ -410,8 +285,6 @@ export function withoutSharedToolSchemas(value: unknown): unknown {
         return identity;
       })];
     }
-    // Wire/event shape arrays repeat these same schema subtrees. The canonical
-    // capture keeps their complete values; preserve every other typed path.
     if ((key === "paths" || key === "response") && Array.isArray(child)) {
       return [key, child.filter(path => typeof path !== "string" || !TOOL_SCHEMA_PATH.test(path))
         .map(withoutSharedToolSchemas)];
@@ -420,46 +293,21 @@ export function withoutSharedToolSchemas(value: unknown): unknown {
   }));
 }
 
-/** The canonical rendering both the golden and the retained artifact use. */
 function renderTrace(trace: unknown): string {
   return `${JSON.stringify(trace, null, 2)}\n`;
 }
 
 export interface GoldenComparison<Trace = BehaviorTrace> {
-  /** The module id `TRON_UPDATE_LOCKS` names to rewrite the golden. The golden's manifest owner
-   * can differ: the Pi seam goldens in `test-fixtures/pi-sdk/` are rewritten as `gateway/e2e`. */
   readonly module: string;
   readonly goldenPath: string;
-  /** Where the exact trace that produced the diff is retained. */
   readonly actualPath: string;
-  /** Where the full unified diff is retained for review. */
   readonly diffPath: string;
   readonly trace: Trace;
-  /** An additional trace kept beside a narrowed projection in the golden, compared after the same shared-tool-schema projection. */
   readonly inlineTrace?: TraceValue;
-  /**
-   * Rewrite the golden from this trace. Only one case per golden passes `true`
-   * (and only under {@link LOCK_UPDATE_ENV}), so every other case still has to
-   * agree with the golden this run just wrote.
-   */
   readonly update: boolean;
-  /**
-   * Assert the scenario itself ran. Called once the trace is known to *match*
-   * the golden — and, in update mode, before the golden is written — so a golden
-   * can never be accepted from a run whose own steps stopped exercising a seam,
-   * while a real SDK delta is still reported as a diff.
-   */
   readonly validate: (trace: Trace) => void;
 }
 
-/**
- * Compare one scenario's trace with the committed golden, or rewrite it.
- *
- * A mismatch throws a unified diff produced by `git diff --no-index` — the same
- * command a reviewer runs — and retains the full diff and the exact trace at
- * stable paths so the whole comparison can be inspected without re-running
- * anything.
- */
 export async function compareWithGolden<Trace>(comparison: GoldenComparison<Trace>): Promise<{ updated: boolean; hunks: number }> {
   const lock = lockName(comparison.goldenPath);
   const goldenTrace = comparison.inlineTrace === undefined
@@ -511,7 +359,6 @@ async function writeGolden(goldenPath: string, rendered: string): Promise<void> 
   await writeFile(goldenPath, rendered);
 }
 
-/** The reviewable unified diff between two trace files, from git itself. */
 async function unifiedDiff(beforePath: string, afterPath: string): Promise<string> {
   const run = promisify(execFile);
   try {
@@ -520,9 +367,6 @@ async function unifiedDiff(beforePath: string, afterPath: string): Promise<strin
     });
     return stdout;
   } catch (error) {
-    // `git diff --no-index` exits 1 for "differences found", which is the
-    // expected case; anything else is reported with the two files so the
-    // comparison is still reproducible by hand.
     const stdout = (error as { stdout?: unknown }).stdout;
     if (typeof stdout === "string" && stdout.length > 0) return stdout;
     throw new Error(`Could not diff the lock trace (${String(error)}); compare ${beforePath} with ${afterPath} by hand.`);

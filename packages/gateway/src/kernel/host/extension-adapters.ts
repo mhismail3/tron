@@ -116,12 +116,6 @@ export function adaptedToolDefinition(
   return adapter ? adapter.adapt(extension, name, definition) : definition;
 }
 
-/**
- * Event contexts are adapted at the trusted load boundary as well as tool
- * execution. The package captures its session_start context in a channel
- * handler, so adapting only execute() would leave subagent-forwarded forms on
- * the opaque marker select path.
- */
 export function adaptedExtensionEventHandler<T extends (...args: any[]) => any>(extension: Extension, handler: T): T {
   if (!isZhushanwenExtension(extension)) return handler;
   return ((...args: Parameters<T>) => handler(...args.map((arg) => adaptContextValue(arg)))) as T;
@@ -212,9 +206,6 @@ function isZhushanwenExtension(extension: Extension): boolean {
   const source = extension.sourceInfo;
   const paths = [source.baseDir, source.path, extension.path, extension.resolvedPath];
   const sourcePath = paths.map((value) => value ?? "").join("\n").replaceAll("\\", "/");
-  // Pi invokes extensionsOverride immediately before applying canonical package
-  // SourceInfo. Admit that exact loader-owned provisional shape only when the
-  // installed manifest, lock integrities, and owning settings pin all agree.
   const canonicalSource = source.origin === "package"
     && (source.scope === "user" || source.scope === "project")
     && source.source === AUDITED_ASK_USER_PACKAGE.source;
@@ -254,7 +245,7 @@ function auditedPackageInstallation(paths: Array<string | undefined>): boolean {
         && locked?.version === AUDITED_ASK_USER_PACKAGE.version
         && locked.integrity === AUDITED_ASK_USER_PACKAGE.integrity
         && lockedProtocol !== undefined) return true;
-    } catch { /* An unverifiable install is deliberately not adapted. */ }
+    } catch { }
   }
   return false;
 }

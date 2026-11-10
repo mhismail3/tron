@@ -1,15 +1,3 @@
-// Integration test for `scripts/tron proof wire` (tools/proof/dafny2wire/README.md "Wire").
-// 1. Protocol: packages/gateway/src/protocol/types.ts is exactly what packages/core/wire/Protocol.dfy generates,
-//    and the protocol's own TypeScript and Swift codecs agree byte for byte on a seeded corpus of values of
-//    every datatype (TypeScript encodes, each side decodes and re-encodes), the TypeScript encoder writes what
-//    JSON.stringify writes for a value built in declaration order (how the Gateway builds frames); on malformed
-//    values TypeScript (strict, the Gateway's validators) refuses at a JSON path and Swift (tolerant, the iOS
-//    decoding policy) reads defaults or refuses as stated.
-// 2. Codecs: the generator's TypeScript and Swift codecs for the fixture wire source (one datatype per shape
-//    the protocol uses) round trip 2,000 seeded random frames and the edge values byte for byte, agree with
-//    each other byte for byte (Swift re-encodes what TypeScript encoded, and both normalise the same
-//    non-canonical inputs identically; a map built in Swift encodes in JavaScript order); TypeScript rejects
-//    malformed inputs at their JSON path and tolerant Swift reads or rejects each as stated.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -39,7 +27,6 @@ test("protocol: types.ts is generated, and its TypeScript and tolerant Swift cod
   const pick = (xs) => xs[Math.floor(rnd() * xs.length)];
   const STRINGS = ["", "a", 'q"uote', "back\\slash", "line\nbreak", "\u0001ctl", "é ✓ 😀", "2026-11-09T09:00:00.000Z"];
   const DOUBLES = [0, 1, 7, 100, 0.5, 1 / 3, 1e21, 5e-324, -2, 1700000000000];
-  // A random value of field type ft, in declaration order; depth bounds the recursive types.
   const value = (ft, depth) => {
     switch (ft.kind) {
       case "string": return pick(STRINGS);
@@ -65,7 +52,6 @@ test("protocol: types.ts is generated, and its TypeScript and tolerant Swift cod
     if (ty.kind === "enum") return pick(ty.ctors).wire;
     if (ty.kind === "record") return fields(ty.ctors[0], depth, {});
     if (ty.kind === "tagged") { const c = pick(ty.ctors); return fields(c, depth, { [ty.tag]: c.wire }); }
-    // bykind: deep values are scalars.
     const ctors = depth > 3 ? ty.ctors.filter((c) => !c.fields.length || ["string", "real", "bool"].includes(c.fields[0].type.kind)) : ty.ctors;
     const c = pick(ctors);
     return c.fields.length ? value(c.fields[0].type, depth) : null;
@@ -115,9 +101,6 @@ test("protocol: types.ts is generated, and its TypeScript and tolerant Swift cod
   const ts = corpus.map(tsOut);
   const differ = lines.map((line, i) => [line.split("\t")[0], ts[i], swift[i]]).filter(([, a, b]) => a !== b);
   assert.deepEqual(differ.slice(0, 3), [], `${differ.length} of ${lines.length} values differ between TypeScript and Swift`);
-  // TypeScript (the Gateway's validators) is strict; Swift is tolerant, as the iOS app decodes: an unknown field
-  // is ignored, an absent or null field takes its default, an unknown value of an enum with an `unknown` value
-  // is `unknown`; a wrong kind, an unknown enum map key or tag, and an overflowing number are still refused.
   assert.deepEqual(ts.slice(lines.length), [
     'ERR $.blockerCounts["nope"]', "ERR $.available", "ERR $", "ERR $", "ERR $.id", "ERR $[\"a\"][1][\"b\"]", "ERR $", "ERR $.provider",
   ]);
@@ -169,7 +152,6 @@ test("generated TypeScript and Swift codecs agree byte for byte", async (t) => {
   const lines = Array.from({ length: 2000 }, () => W.encodeFrame(frame()));
   for (const line of lines) assert.equal(W.encodeFrame(W.decodeFrame(JSON.parse(line))), line);
   assert.ok(lines.some((l) => l.includes("1e+21")) && lines.some((l) => l.includes("5e-324")) && lines.some((l) => l.includes("1e-7")));
-  // Non-canonical inputs both decoders must normalise the same way: JS property order and whitespace.
   const reorder = [
     ' { "parts" : [ ] , "events" : [ ] , "seq" : 7 } ',
     '{"seq":1,"events":[],"parts":[{"kind":"Tool","name":"n","arguments":{"b":1,"1":2,"a":{"z":0,"0":1},"0":[1.50,2e3]}}]}',
@@ -197,7 +179,6 @@ test("generated TypeScript and Swift codecs agree byte for byte", async (t) => {
     'for line in text.split(separator: "\\n", omittingEmptySubsequences: false).dropLast() {',
     '  do { print(try Frame.decode(try wParse(String(line))).encode()) } catch let e as WireError { print("ERR \\(e.path)") } catch { print("ERR ?") }',
     "}",
-    // A map built in Swift, in non-JavaScript order, still encodes in JavaScript's property order.
     'print(WireMap<Int>([("b", 1), ("1", 2), ("a", 3), ("0", 4), ("b", 5)]).encode { String($0) })',
   ].join("\n"));
   execFileSync("swiftc", ["-O", join(dir, "Wire.swift"), join(dir, "main.swift"), "-o", join(dir, "roundtrip")], { stdio: "pipe" });
@@ -216,7 +197,6 @@ test("generated TypeScript and Swift codecs agree byte for byte", async (t) => {
     "ERR $.events[0].sample.version", "ERR $.parts[1].text", 'ERR $.parts[0].arguments["k"][1]', "ERR $.events[0]", "ERR $.parts[0]",
     "ERR $.events[0].sample.version", "ERR $.events[0].sample.level", "ERR $.events[0].sample.bold",
   ]);
-  // Swift decodes tolerantly (see the protocol test): what it still refuses, and what it reads instead.
   assert.deepEqual(swift.slice(valid), [
     "ERR $.seq", "ERR $.seq", "ERR $.seq", "ERR $.events[0].type", "ERR $.events[0].text",
     '{"seq":1,"events":[],"parts":[]}', '{"seq":1,"events":[{"type":"Stopped"}],"parts":[]}', '{"seq":0,"events":[],"parts":[]}',

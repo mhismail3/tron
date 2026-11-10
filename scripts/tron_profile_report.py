@@ -29,9 +29,6 @@ SCHEMA = "tron.profile-report.v1"
 SAMPLES_SCHEMA = "tron.profile-samples.v1"
 TOOLS = ("ios", "gateway")
 DIRECTIONS = ("lower", "higher")
-# A delta must exceed a relative floor, three robust standard deviations and,
-# for integer-valued metrics, one unit before it is a verdict; smaller movement
-# is reported as noise.
 DEFAULT_FLOOR = 0.03
 SPREAD_MULTIPLIER = 3.0
 MAD_TO_SIGMA = 1.4826
@@ -258,7 +255,6 @@ def markdown_summary(report: dict[str, Any]) -> str:
 def write_report(report: dict[str, Any], run_dir: Path) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     destination = run_dir / "report.json"
-    # Write-then-rename so a reader never sees a truncated report.
     with tempfile.NamedTemporaryFile("w", dir=run_dir, delete=False, suffix=".tmp") as handle:
         json.dump(report, handle, indent=2, sort_keys=True)
         handle.write("\n")
@@ -288,8 +284,6 @@ def compare_metric(base: dict[str, Any], candidate: dict[str, Any], floor: float
     delta = candidate["median"] - base["median"]
     spread = MAD_TO_SIGMA * max(base["mad"], candidate["mad"])
     enough = min(base["count"], candidate["count"]) >= MINIMUM_SAMPLES
-    # Integer-valued metrics (frames, requests, wakeups) cannot move by less
-    # than one unit, so a single-unit difference is never a verdict.
     integral = all(float(value).is_integer() for value in base["samples"] + candidate["samples"])
     noise = max(
         SPREAD_MULTIPLIER * spread if enough else 0.0,
@@ -314,8 +308,6 @@ def compare_metric(base: dict[str, Any], candidate: dict[str, Any], floor: float
 
 
 def compare(base: dict[str, Any], candidate: dict[str, Any], floor: float, allow_mismatch: bool) -> dict[str, Any]:
-    # A traced run (`ios --trace`) carries Instruments overhead in every
-    # resource metric; it attributes cost but never decides a comparison.
     for role, report in (("base", base), ("candidate", candidate)):
         if (report.get("context") or {}).get("trace"):
             raise ReportError(
@@ -397,7 +389,6 @@ def newest_report(tool_root: Path, worktree: Path) -> tuple[Path, dict[str, Any]
         source = report.get("source")
         if not isinstance(source, dict) or source.get("worktree") != str(worktree):
             continue
-        # created_at has whole seconds; the write time orders two reports of one second.
         key = (str(report.get("created_at")), written)
         if newest is None or key > newest[:2]:
             newest = (*key, run_dir, report)

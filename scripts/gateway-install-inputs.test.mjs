@@ -103,7 +103,6 @@ except Failure as error:
       return error.stderr;
     }
   }
-  // A valid install passes the real verifier and reaches the unrelated fixture registration check.
   assert.match(await preflight(), /com\.tron\.fixture\.missing-deps is absent/);
   for (const missing of ["node_modules/required", "node_modules"]) {
     await rm(join(gateway, missing), { recursive: true, force: true });
@@ -124,10 +123,6 @@ test("Debug build input check command refuses stale installs before staging", as
   );
 });
 
-// #1010: a checkout whose lock moved without a reinstall (installed 0.9.0, locked
-// 1.0.0) is repaired by a real `npm ci` from local tarballs, the same command
-// Rebuild from Source runs with the payload's pinned runtime. Tracked inputs and
-// an untracked file such as build.pid must survive byte for byte.
 async function driftedInstall(t) {
   const root = await mkdtemp(join(tmpdir(), "gateway-install-repair-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -151,8 +146,6 @@ async function driftedInstall(t) {
     await rm(join(gateway, "package-lock.json"), { force: true });
     await npm(["install", "--offline"], gateway);
   };
-  // Install the old lock, keep its node_modules, then move the tracked files to
-  // the new lock exactly as a fast-forward of main does.
   await install("1.0.0");
   const tracked = { manifest: await readFile(join(gateway, "package.json")), lock: await readFile(join(gateway, "package-lock.json")) };
   await install("0.9.0");
@@ -178,14 +171,12 @@ test("Rebuild from Source repairs node_modules drift from package-lock with npm 
   assert.deepEqual(await readFile(join(gateway, "package-lock.json")), tracked.lock);
   assert.equal(await readFile(join(gateway, "build.pid"), "utf8"), "4242\n");
 
-  // A matching install is left alone.
   const second = await execFileAsync(process.execPath, [cli, "ensure", gateway, dirname(process.execPath)], { env });
   assert.equal(second.stdout.trim(), "Gateway full installed inputs match package-lock.json");
 });
 
 test("Rebuild from Source fails loudly with the exact command when npm ci cannot repair drift", async (t) => {
   const { gateway, env, tarballs } = await driftedInstall(t);
-  // Offline with the locked tarball gone and a cold cache: npm ci cannot succeed.
   await rm(join(tarballs, "tron-drift-dep-1.0.0.tgz"));
   await rm(env.npm_config_cache, { recursive: true, force: true });
   const runtimeBin = dirname(process.execPath);

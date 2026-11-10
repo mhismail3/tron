@@ -12,8 +12,6 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 import type { ChangeResult, Resolution } from "../../kernel/settings/tool-contract.js";
 import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
 
-// Real Registry/Pi/provider/RPC boundaries, not declaration-table assertions.
-// This RED checkpoint names the approved behavior before changing any owner.
 const evidence: Array<Record<string, unknown>> = [];
 afterEach(disposeFixtures);
 afterAll(async () => {
@@ -98,8 +96,6 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
       fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
       changes: [{ key: "run.retry.maxRetries", layer: "session", op: "set", value, expected: null }],
     })));
-    // Public request-stage evidence, not a delay or a mocked source: both real
-    // RPCs have finished admission and are queued on the same shipped stripe.
     try { await waitFor(() => spans.every(span => span.currentStage() === "settings.target-stripe") || undefined, "both RPCs queued at the actual target stripe"); }
     finally { release(); await stripe; }
     const results = await Promise.allSettled(calls);
@@ -143,7 +139,6 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     let failure: unknown;
     try {
       failure = await f.service.invoke(f.client, "settings.change", command).then(() => undefined, error => error);
-      // The owner message is client-safe; the actual filesystem refusal stays the diagnostic cause.
       expect(failure).toMatchObject({ message: "Settings applied but history publication failed", cause: { code: "EACCES" } });
       expect((failure as Error & { cause: Error }).cause.message).toContain(history);
       expect((failure as Error).message).not.toContain(history);

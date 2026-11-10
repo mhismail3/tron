@@ -32,16 +32,6 @@ export function parseContextModelKey(key: string): ModelRef {
   return { provider, id };
 }
 
-/** Catalog metadata is a configured default, not necessarily the service ceiling.
- * This exact, endpoint-qualified correction is required until the pinned catalog
- * represents both. No family-name inference, remote scraping, or provider aliases.
- * Verified 2026-09-04 against OpenAI's individual model documentation:
- * https://developers.openai.com/api/docs/models/gpt-6-astra
- * https://developers.openai.com/api/docs/models/gpt-5.6-sol
- * https://developers.openai.com/api/docs/models/gpt-5.6-terra
- * https://developers.openai.com/api/docs/models/gpt-5.6-luna
- * Codex uses the same models but account/endpoint acceptance remains provider-owned.
- */
 const OPENAI_LONG_CONTEXT_MODELS = new Set(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
 function documentedMaximum(model: RuntimeModel): number | undefined {
   if (!OPENAI_LONG_CONTEXT_MODELS.has(model.id)) return undefined;
@@ -62,8 +52,6 @@ function contextWindowMinimum(compaction: CompactionBudget = DEFAULT_COMPACTION)
 export function contextWindowLimits(model: RuntimeModel, compaction: CompactionBudget = DEFAULT_COMPACTION): ContextWindowLimits | undefined {
   if (!Number.isSafeInteger(model.contextWindow) || model.contextWindow <= 0 || model.contextWindow > MAX_CONTEXT_TOKENS) return undefined;
   const maximum = documentedMaximum(model) ?? model.contextWindow;
-  // Keep room for both the retained tail and a response. Existing tiny custom
-  // models remain usable at their declared window rather than inventing capacity.
   const minimum = Math.min(maximum, contextWindowMinimum(compaction));
   const threshold = model.cost.tiers?.map(tier => tier.inputTokensAbove)
     .filter(value => Number.isSafeInteger(value) && value > 0 && value < maximum).sort((a, b) => a - b)[0];
@@ -73,8 +61,6 @@ export function contextWindowLimits(model: RuntimeModel, compaction: CompactionB
   };
 }
 
-/** This first-party preference lives in canonical SDK settings, not a second store.
- * Return a fresh bounded projection; never mutate the SDK's settings snapshot. */
 function contextWindowPreferences(document: object, maximumEntries = MAX_CONTEXT_PREFERENCES): Record<string, number> {
   const raw = (document as Record<string, unknown>).modelContextWindows;
   if (raw === undefined) return {};
@@ -122,8 +108,6 @@ function canonicalContextWindowOverrides(entries: readonly SessionEntry[]): Map<
   return overrides;
 }
 
-/** A chapter is a new transcript, not a new Chat policy. Copy only the bounded
- * effective preferences; replaying the old history would also carry messages. */
 export function appendContextWindowSnapshot(entries: readonly SessionEntry[], manager: SessionManager): void {
   for (const [key, contextWindow] of canonicalContextWindowOverrides(entries)) {
     const model = parseContextModelKey(key);
@@ -131,9 +115,6 @@ export function appendContextWindowSnapshot(entries: readonly SessionEntry[], ma
   }
 }
 
-/** One policy per live SDK session. The catalog stays unchanged; only the selected
- * model copy carries the effective budget. Session overrides are branch-local
- * custom entries and never become messages or independent Gateway session state. */
 export class SessionContextWindowPolicy {
   private readonly lookup: ModelRuntime["getModel"];
   private readonly overrides = new Map<string, number>();
@@ -142,8 +123,6 @@ export class SessionContextWindowPolicy {
 
   constructor(private readonly session: AgentSession) {
     this.lookup = session.modelRuntime.getModel.bind(session.modelRuntime);
-    // Provider registration refreshes the selected model from this public lookup
-    // without emitting model_select. Keep that SDK path subject to the same policy.
     session.modelRuntime.getModel = ((provider: string, id: string) => {
       const model = this.lookup(provider, id);
       return model ? this.modelWithBudget(model) : model;
@@ -204,7 +183,6 @@ export class SessionContextWindowPolicy {
     const selected = this.session.model;
     const model = selected && this.lookup(selected.provider, selected.id);
     const state = model && this.resolve(model);
-    // Projection must never claim a changed catalog budget is already applied.
     if (!state || !selected) return undefined;
     const warnings = [state.warning];
     const file = this.session.sessionManager.getSessionFile();
@@ -234,12 +212,8 @@ export class SessionContextWindowPolicy {
       throw new GatewayError("conflict", "Compact the session before reducing its context window below current usage plus response headroom");
     }
     const key = contextModelKey(model);
-    // Every new command records its desired value, including an apparent no-op:
-    // an earlier failed SDK append may have staged that value only in memory.
     if (value !== null && !this.overrides.has(key) && this.overrides.size >= MAX_CONTEXT_PREFERENCES) throw new GatewayError("conflict", "Too many session context preferences");
     const entry: ContextEntry = { version: 1, provider: model.provider, modelId: model.id, contextWindow: value };
-    // The SDK stages an entry in memory before its synchronous disk append.
-    // Brand-new sessions persist this override with their first message.
     const previousLeaf = this.session.sessionManager.getLeafId();
     try {
       this.session.sessionManager.appendCustomEntry(CONTEXT_WINDOW_ENTRY, entry);
@@ -247,8 +221,6 @@ export class SessionContextWindowPolicy {
       const staged = this.session.sessionManager.getLeafEntry();
       if (staged?.id !== previousLeaf && staged?.type === "custom" && staged.customType === CONTEXT_WINDOW_ENTRY
         && JSON.stringify(staged.data) === JSON.stringify(entry)) {
-        // Do not invent a rollback of Pi's canonical in-memory branch. Report
-        // uncertain durability so the command receipt prevents blind replay.
         this.restore();
         throw new GatewayError("conflict", "Context preference entered the runtime but could not be persisted; refresh session state before retrying", false, { outcomeUnknown: true });
       }
@@ -290,8 +262,6 @@ export const createContextWindowModule = (eligibility: () => OpenAIModelEligibil
   },
 });
 
-/** Hook the owner, not SDK private lifecycle fields. Factories survive resource
- * reload; each replacement session receives a distinct policy closure. */
 export function contextWindowExtension(policy: () => ContextPolicy | undefined): ExtensionFactory {
   return pi => {
     pi.on("session_start", () => { policy()?.restore(); });

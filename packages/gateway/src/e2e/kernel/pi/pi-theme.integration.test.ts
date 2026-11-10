@@ -7,10 +7,6 @@ import { TrustService } from "../../../kernel/resources/trust-service.js";
 import { initializeRegistry, temporaryRoot } from "../../../../test-support/runtime-registry-fixture.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 
-// Port: the Pi seam's process-global theme (kernel/pi `initTheme`, K-0 §4).
-// Invariant: a Gateway composition pins Pi's global theme before any runtime exists, so a
-// runtime extension that reads it through Pi's public helpers renders instead of throwing
-// "Theme not initialized".
 describe("gateway/pi process-global theme", () => {
   it("is initialized for runtime extensions that read it through Pi's public helpers", async () => {
     const root = await temporaryRoot("tron-pi-theme-");

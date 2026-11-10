@@ -31,7 +31,6 @@ async function fixture() {
   await store.put(task, null);
   const { WakeInboxOwner } = await import("./home-wake-inbox.js");
   const pushes: unknown[] = []; const entries: any[] = [];
-  // Home is not wake-eligible in these fixtures: each settled result keeps its task-finished push.
   const options = { notify: async (input: unknown) => { pushes.push(input); return "queued"; }, pushSession: () => "chapter-one", wakeAvailable: async () => false, wake: () => {},
     result: async () => ({ task: await store.read("task"), text: "immutable evidence", subagents: { started: 0, stoppedAtEnd: 0 } }),
     evidence: async () => entries };
@@ -63,8 +62,6 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     const second = await fixture();
     await second.owner.publish("task");
     expect(second.pushes).toHaveLength(1);
-    // This notification port retains NO receipts at all: stronger than expiry
-    // after 24h. Only the task's durable terminal decision prevents replay.
     await second.reopen().recover(second.route);
     expect(second.pushes).toHaveLength(1);
   });
@@ -72,8 +69,6 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     const f = await fixture();
     if (cut !== "terminal") await f.owner.publish("task");
     if (!["terminal", "push"].includes(cut)) {
-      // A frozen owner cannot execute after the cut. The fresh owner sees only
-      // durable store state and the canonical cut, as after process loss.
       const update = (f.store as any).updateWake.bind(f.store);
       vi.spyOn(f.store as any, "updateWake").mockImplementation(freezeHomeLedgerWriter(update,
         (result: HomeTaskRecord) => result.wake!.state === (cut === "terminal-state" ? "terminal" : cut)));
@@ -126,7 +121,6 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     vi.spyOn(f.options, "evidence").mockRejectedValueOnce(new EpisodicMemoryError("source", `Canonical session line exceeds ${EPISODIC_DEFAULTS.maxSourceLineBytes} bytes`));
     await expect(f.owner.settle(f.route, "activation")).resolves.toBeUndefined();
     expect((await f.store.read("task"))?.wake?.state).toBe("outcome-unknown");
-    // A later activation recovers the rest of the namespace; the unreadable event is not replayed.
     await expect(f.reopen().recover(f.route)).resolves.toBeUndefined();
     expect((await f.store.read("task"))?.wake?.state).toBe("outcome-unknown");
     expect(f.entries.filter(entry => entry.type === "custom_message")).toHaveLength(1);
@@ -151,7 +145,6 @@ describe("Wake inbox frozen-owner crash cuts", () => {
     vi.spyOn(second.options, "evidence").mockRejectedValueOnce(new EpisodicMemoryError("source", "Canonical session has an incomplete tail"));
     await expect(second.reopen().recover(second.route)).resolves.toBeUndefined();
     expect((await second.store.read("task"))?.wake?.state).toBe("outcome-unknown");
-    // An uncertain admitted effect is never retargeted into a pending delivery.
     await expect(second.reopen().redeliver("task", { ...second.route, routeGeneration: 2 })).rejects.toMatchObject({ code: "conflict" });
     expect((await second.store.read("task"))?.wake?.state).toBe("outcome-unknown");
   });
@@ -189,9 +182,6 @@ describe("Wake inbox frozen-owner crash cuts", () => {
   });
 });
 
-// #1995: a pass after the first reads only the tasks its predecessor found
-// actionable and those written since. A fresh owner (no proof, one full pass) is
-// the oracle: whatever writes ran between passes, both see the same results.
 describe("Wake inbox quiet proof", () => {
   async function inbox() {
     const root = await mkdtemp(join(tmpdir(), "tron-wake-proof-")); roots.push(root);
@@ -212,7 +202,6 @@ describe("Wake inbox quiet proof", () => {
     const checkin = (taskId: string, id: string, attention: "none" | "requested") => ({ id, taskId, sessionId: `session-${taskId}`, operationId: `operation-${taskId}`,
       at: at(id.length), attention, step: "Step", done: "Done", next: "Next", ...(attention === "requested" ? { needsAttention: true, blocker: "Blocked" } : {}) });
     const pending = async (reader: InstanceType<typeof WakeInboxOwner>) => (await reader.pendingTasks("home")).map(task => task.wake!.eventId);
-    // Each command is one store publication that an owner would make.
     const commands = {
       create: async (taskId: string) => { if (!await store.read(taskId)) await store.put(record(taskId), null); },
       activate: async (taskId: string) => {
@@ -274,7 +263,6 @@ describe("Wake inbox quiet proof", () => {
     const reader = f.owner();
     expect(await f.pending(reader)).toHaveLength(1);
     await f.commands.wake("early", "acknowledged", false);
-    // A result settles after this pass began and after its own records were read.
     const read = f.store.read.bind(f.store);
     let settled = false;
     vi.spyOn(f.store, "read").mockImplementation(async taskId => {

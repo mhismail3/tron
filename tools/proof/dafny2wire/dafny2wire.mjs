@@ -1,39 +1,5 @@
 #!/usr/bin/env node
-// Purpose: `scripts/tron proof wire --generate <in.dfy> <out-dir>`: one wire source (Dafny datatypes marked
-// `// @wire`) -> TypeScript and Swift codecs that produce identical bytes and reject the same inputs.
-// `--protocol [--check]` writes (or checks) the Gateway's protocol types and decoders,
-// packages/gateway/src/protocol/types.ts, from packages/core/wire/Protocol.dfy.
-//
-// Source forms (one `// @wire` line directly above each datatype):
-//   // @wire                 datatype R = R(a: T, b_: U)          record: a JSON object
-//   // @wire enum            datatype E = a | {:wire "b-c"} b | {:wire 1} one | {:wire true} yes
-//                            a JSON literal per constructor (a string, number or boolean); a one-constructor
-//                            enum is a literal-typed field such as `version: 1`
-//   // @wire tag=<field>     datatype S = A(x: T) | {:wire "b"} B | {:wire true} C
-//                            tagged union: {"<field>": <name>, ...fields}; a constructor name may be a string,
-//                            number or boolean literal
-//   // @wire bykind          datatype K = Nil | S(v: string) | N(v: real) | L(v: seq<K>) | O(v: map<string, K>)
-//                            untagged union split by JSON kind: each constructor is JSON null (no field) or
-//                            one value whose JSON kind no other constructor has
-// A constructor's wire name is its {:wire ...} attribute, else its name; a field's is its name with one
-// trailing `_` removed (a Dafny keyword escape: `label_` is "label").
-// Field types: string, bool, int (JSON integer in the safe range), nat (same, >= 0), real (a JSON float64
-// number), seq<T> (array), map<string, T> (object), Option<T> (Some = key present, None = key absent),
-// Nullable<T> (NonNull = value, Null = JSON null), Absent (the key never appears: `x?: never`), and other
-// @wire datatypes; map<E, T> with E a string enum is an object whose keys are E's values. `///` lines above
-// a datatype or a field are its documentation (JSDoc in TypeScript). `// @wire ... import=<path>` keeps a
-// type's TypeScript owner: the type is imported from <path> and the compile fails unless it equals the shape
-// stated here (WireImportChecks).
-//
-// Canonical JSON: keys in declaration order (a tag first), no whitespace, strings escaped as
-// JSON.stringify does, numbers formatted as ECMAScript Number::toString (-0 as 0); maps keep JavaScript's
-// property order (array-index keys ascending, then insertion order), which is what a TypeScript decoder
-// sees, and a Swift map is built in that order whatever order it is given. TypeScript decoders are strict:
-// they reject unknown fields, wrong kinds, non-finite numbers, non-safe integers and unknown constructors,
-// naming the JSON path. Swift decoders are tolerant (the iOS policy): unknown fields are ignored, an absent
-// or null field takes its type's default, an enum with an `unknown` value maps unknown values to it (see
-// tools/proof/dafny2wire/README.md "Wire"). Swift parses JSON itself so that order and duplicates (last wins, at the
-// first key's position) follow JSON.parse.
+// Purpose: `scripts/tron proof wire --generate <in.dfy> <out-dir>`: one wire source (Dafny datatypes marked `// @wire`) -> TypeScript and Swift codecs that produce identical bytes and reject the same inputs.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,12 +15,10 @@ export function parseWire(src) {
     while (d >= 0 && /^\s*\/\/\/( |$)/.test(lines[d])) docLines.unshift(lines[d--]);
     const head = /^\s*datatype\s+(\w+)\s*=(.*)$/.exec(lines[i + 1] ?? "");
     if (!head) throw new Error(`line ${i + 2}: // @wire is not directly above a datatype`);
-    // The body continues on the lines indented deeper than the datatype.
     const bodyLines = [head[2]];
     let j = i + 2;
     while (j < lines.length && (lines[j].trim() === "" ? false : lines[j].length - lines[j].trimStart().length > indent.length)) bodyLines.push(lines[j++]);
     i = j - 1;
-    // Field docs (`///` lines) become placeholders so that their text cannot split fields.
     const fieldDocs = [];
     const rawBody = bodyLines.map((l) => (/^\s*\/\/\/( |$)/.test(l) ? `@@doc${fieldDocs.push(l) - 1}@@` : l)).join("\n");
     const takeDocs = (text) => {
@@ -95,7 +59,6 @@ export function parseWire(src) {
     if (!["string", "bool", "int", "nat", "real", "Absent"].includes(t.kind) && !byName.has(t.kind)) throw new Error(`${where}: unknown type ${t.kind}`);
   };
   for (const ty of types) for (const c of ty.ctors) for (const f of c.fields) check(f.type, `${ty.name}.${c.name}.${f.name}`);
-  // A bykind union is decodable only if its constructors' JSON kinds are distinct.
   for (const ty of types.filter((t) => t.kind === "bykind")) {
     const kinds = ty.ctors.map((c) => (c.fields.length ? jsonKinds(c.fields[0].type, byName) : ["null"]));
     const all = kinds.flat();
@@ -104,7 +67,6 @@ export function parseWire(src) {
   }
   return types;
 }
-// The JSON kinds a value of type t can have on the wire.
 function jsonKinds(t, byName) {
   switch (t.kind) {
     case "string": return ["string"];
@@ -121,7 +83,6 @@ function jsonKinds(t, byName) {
     }
   }
 }
-// `///` comment lines -> their text (one line per comment line), or null.
 function docText(docLines) { return docLines.length ? docLines.map((l) => l.replace(/^\s*\/\/\/ ?/, "")).join("\n") : null; }
 function splitTop(s, sep) { const out = []; let depth = 0, cur = "", str = false; for (const ch of s) { if (ch === '"') str = !str; if (!str && "(<{".includes(ch)) depth++; if (!str && ")>}".includes(ch)) depth--; if (!str && ch === sep && depth === 0) { out.push(cur); cur = ""; } else cur += ch; } out.push(cur); return out; }
 function parseType(t) {
@@ -133,8 +94,6 @@ function parseType(t) {
 const lc = (s) => s[0].toLowerCase() + s.slice(1);
 const swiftName = (s) => (/^(default|case|enum|struct|class|let|var|func|in|is|as|self|Type|protocol|init|return|true|false|nil|where|repeat|while|for|if|else|switch|import|public|private|static|extension|operator|throws|try|catch|throw|do|guard|defer|break|continue|fallthrough|inout|internal|open|subscript|typealias|associatedtype|super|any|some)$/.test(s) ? `\`${s}\`` : s);
 
-// ---------------------------------------------------------------- TypeScript
-// A `///` doc as a JSDoc block (unindented; the caller indents every line).
 const jsdoc = (doc) => (!doc ? "" : doc.includes("\n") ? `/**\n${doc.split("\n").map((l) => ` *${l ? ` ${l}` : ""}`).join("\n")}\n */\n` : `/** ${doc} */\n`);
 export function emitTs(types, source) {
   const byName = new Map(types.map((t) => [t.name, t]));
@@ -153,17 +112,12 @@ export function emitTs(types, source) {
   const decFields = (c) => present(c).map((f) => f.type.kind === "Option"
     ? `...(own(o, "${f.wire}") === undefined ? {} : { ${f.wire}: ${dec(f.type.arg, `own(o, "${f.wire}")`, `p + ".${f.wire}"`)} })`
     : `${f.wire}: ${dec(f.type, `own(o, "${f.wire}")`, `p + ".${f.wire}"`)}`);
-  // Each field contributes `,"name":value` (or nothing when an Option is absent); the leading comma is cut.
   const encFields = (c, pre) => present(c).map((f) => f.type.kind === "Option"
     ? `(${pre}.${f.wire} === undefined ? "" : ',"${f.wire}":' + ${enc(f.type.arg, `${pre}.${f.wire}`)})`
     : `',"${f.wire}":' + ${enc(f.type, `${pre}.${f.wire}`)}`);
-  // Absent fields are not in the allowed key list, so their presence is an unknown field.
   const keys = (c, extra = []) => JSON.stringify([...extra, ...present(c).map((f) => f.wire)]);
   const lit = (w) => JSON.stringify(w);
   const kindTest = { null: (v) => `${v} === null`, string: (v) => `typeof ${v} === "string"`, number: (v) => `typeof ${v} === "number"`, boolean: (v) => `typeof ${v} === "boolean"`, array: (v) => `Array.isArray(${v})`, object: (v) => `(typeof ${v} === "object" && ${v} !== null && !Array.isArray(${v}))` };
-  // An imported datatype keeps its TypeScript owner: the owner's type is imported, the shape this source
-  // states is declared as <Name>$Wire, and WireImportChecks fails the compile unless the two are equal
-  // (mutually assignable, with the same keys in every object member).
   const declared = (ty) => (ty.from ? `type ${ty.name}$Wire` : null);
   const exportAs = (ty, kw) => (ty.from ? `${kw} ${ty.name}$Wire` : `export ${kw} ${ty.name}`);
   for (const ty of types) {
@@ -187,7 +141,6 @@ export function emitTs(types, source) {
         ...ty.ctors.map((c) => `    case ${lit(c.wire)}: return ${JSON.stringify(`{"${ty.tag}":${JSON.stringify(c.wire)}`)}${present(c).length ? " + " + encFields(c, "v").join(" + ") : ""} + "}";`),
         `  }`, `}`);
     } else {
-      // bykind: the TypeScript value is untagged; its JSON kind selects the constructor both ways.
       out.push(`${jsdoc(ty.doc)}${exportAs(ty, "type")} = ${ty.ctors.map((c) => (c.fields.length ? tsType(c.fields[0].type) : "null")).join(" | ")};`,
         `export function decode${ty.name}(v: unknown, p = "$"): ${ty.name} {`,
         ...ty.ctors.map((c, i) => `  if (${ty.kinds[i].map((k) => kindTest[k]("v")).join(" || ")}) return ${c.fields.length ? dec(c.fields[0].type, "v", "p") : "null"};`),
@@ -211,7 +164,6 @@ export function emitTs(types, source) {
       `/** Fails the compile when an imported owner's type differs from the shape stated here. */`,
       `export type WireImportChecks = [${imported.map((t) => `Check<Equal<${t.name}, ${t.name}$Wire>>`).join(", ")}];`);
   }
-  // Only the prelude helpers the codecs call (an unused declaration fails the Gateway's noUnusedLocals).
   const at = out.indexOf(TS_PRELUDE);
   const body = out.filter((_, i) => i !== at).join("\n");
   out[at] = TS_PRELUDE.split("\n").filter((line, i, lines) => {
@@ -236,7 +188,6 @@ const only = (o: Record<string, unknown>, p: string, keys: string[]): void => { 
 const encNum = (v: number): string => { if (!Number.isFinite(v)) throw new RangeError(\`not a finite number: \${v}\`); return JSON.stringify(v); };
 const encDict = <T>(v: Partial<Record<string, T>>, f: (x: T) => string): string => "{" + Object.keys(v).map((k) => JSON.stringify(k) + ":" + f(v[k] as T)).join(",") + "}";`;
 
-// ---------------------------------------------------------------- Swift
 export function emitSwift(types, source) {
   const out = [`// GENERATED by tools/proof/dafny2wire from ${source}. Do not edit.`, SWIFT_PRELUDE];
   const swType = (t) => ({ string: "String", bool: "Bool", int: "Int", nat: "Int", real: "Double" })[t.kind]
@@ -250,8 +201,6 @@ export function emitSwift(types, source) {
   const present = (c) => c.fields.filter((f) => f.type.kind !== "Absent");
   const byName = new Map(types.map((t) => [t.name, t]));
   const unknownCase = (ty) => ty.ctors.find((c) => c.wire === "unknown");
-  // Tolerant decoding (the iOS policy): an absent or null field takes its type's default; a field of a type
-  // with no default (an enum without an `unknown` value, a union) is still required.
   const swDefault = (t, seen = new Set()) => {
     const scalar = { string: '""', bool: "false", int: "0", nat: "0", real: "0" }[t.kind];
     if (scalar) return scalar;
@@ -265,7 +214,6 @@ export function emitSwift(types, source) {
     if (ty?.kind === "record" && !seen.has(ty.name) && present(ty.ctors[0]).every((f) => f.type.kind === "Option" || swDefault(f.type, new Set([...seen, ty.name])))) return `try ${ty.name}.decode(.object(WireObject([])), p + ".${"$"}{wire}")`;
     return null;
   };
-  // One statement per field (a long initializer exceeds Swift's type-checking budget).
   const decLets = (c, indent) => present(c).map((f) => {
     const at = `o.value("${f.wire}")`, path = `p + ".${f.wire}"`, name = `f_${f.wire}`;
     if (f.type.kind === "Option") return `${indent}let ${name}: ${swType(f.type)} = ${absent(f.type.arg, at)} ? nil : ${dec(f.type.arg, `${at}!`, path)}`;
@@ -273,8 +221,6 @@ export function emitSwift(types, source) {
     const def = swDefault(f.type)?.replace("${wire}", f.wire);
     return `${indent}let ${name}: ${swType(f.type)} = ${absent(f.type, at)} ? ${def ?? `try wMissing(${path})`} : ${dec(f.type, `${at}!`, path)}`;
   });
-  // JSON null is a value, not an absence, for a type that holds it (Nullable<T>, so that a patch's
-  // `Option<Nullable<T>>` keeps "clear" distinct from "unchanged", or a bykind union with a null constructor).
   const holdsNull = (t) => t.kind === "Nullable" || (byName.get(t.kind)?.kind === "bykind" && byName.get(t.kind).ctors.some((c) => !c.fields.length));
   const absent = (t, at) => (holdsNull(t) ? `${at} == nil` : `wAbsent(${at})`);
   const decArgs = (c) => present(c).map((f) => `${swiftName(f.wire)}: f_${f.wire}`).join(", ");
@@ -296,7 +242,6 @@ export function emitSwift(types, source) {
       out.push(`public struct ${ty.name}: Equatable {`, ...present(c).map((f) => `  public let ${swiftName(f.wire)}: ${swType(f.type)}`),
         `  public static func decode(_ v: WireJSON, _ p: String = "$") throws -> ${ty.name} {`, `    let o = try wObj(v, p)`, ...decLets(c, "    "),
         `    return ${ty.name}(${decArgs(c)})`, `  }`,
-        // One statement per field: a long concatenation exceeds Swift's type-checking budget.
         present(c).length ? `  public func encode() -> String {\n    var s = ""\n${present(c).map((f) => `    s += ${encField(f, "self.")}`).join("\n")}\n    return "{" + String(s.dropFirst()) + "}"\n  }` : `  public func encode() -> String { "{}" }`, `}`);
     } else if (ty.kind === "tagged") {
       out.push(`public indirect enum ${ty.name}: Equatable {`,
@@ -525,7 +470,6 @@ export function generate(input, outDir) {
   return { types: types.map((t) => t.name), tsLines: ts.split("\n").length, swiftLines: swift.split("\n").length };
 }
 
-// The protocol: packages/core/wire/Protocol.dfy -> the Gateway's protocol types and decoders.
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 export const PROTOCOL_SOURCE = "packages/core/wire/Protocol.dfy";
 export const PROTOCOL_TS = "packages/gateway/src/protocol/types.ts";

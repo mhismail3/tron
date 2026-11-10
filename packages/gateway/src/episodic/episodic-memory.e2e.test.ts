@@ -17,15 +17,6 @@ import { resolveLimits, type EpisodicLimits, type EpisodicMemoryStatus, type Epi
 import { EpisodicMemory } from "./episodic-memory.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
-/*
- * End-to-end: a real canonical session in OS temp, driven incrementally through
- * the owner, with a deterministic faux compactor. The view is compared after
- * every step against an independent reference fold re-derived from the durable
- * record stream (never from this module's code).
- *
- * The retained artifact is packages/gateway/test-results/episodic-memory/report.json.
- */
-
 import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 const GATEWAY_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const REPORT_PATH = join(GATEWAY_ROOT, "test-results/episodic-memory/report.json");
@@ -93,15 +84,12 @@ afterAll(async () => {
   console.log(`episodic-memory report: ${report.steps} steps, ${report.messages} messages, ${report.nodes.total} nodes, ${report.compactor.calls} compactor calls, max ${report.compactor.maxConcurrent} concurrent, ${invalidated} nodes invalidated by context edits, blocked ${report.blocked.map(entry => entry.reason).join("/")}`);
 });
 
-// ---- the reference fold: written from the gist's pseudocode, not from this module ----
-
 interface Part { level: number; index: number; start: number; span: number }
 interface OracleNode { level: number; index: number; text: string; contextRuns: Array<[number, number]> }
 
 const PLACEHOLDER_BYTES = Buffer.byteLength("(not summarized yet: zoom it)", "utf8");
 const address = (level: number, index: number): string => `${index * 2 ** level}+${2 ** level}`;
 
-/** The invalidation record's compact address encoding, decoded independently. */
 function decodeCodes(value: string): string[] {
   return value.split(" ").filter(code => code !== "").map(code => {
     const packed = Number.parseInt(code, 36);
@@ -111,7 +99,6 @@ function decodeCodes(value: string): string[] {
   });
 }
 
-/** The node record's level-run context, decoded independently. */
 function decodeRuns(runs: ReadonlyArray<readonly [number, number]>): string[] {
   const addresses: string[] = [];
   let cursor = 0;
@@ -130,8 +117,6 @@ function partBytes(part: Part, nodes: Map<string, OracleNode>): number {
   return node ? Buffer.byteLength(node.text, "utf8") : PLACEHOLDER_BYTES;
 }
 
-/** The view's fit (gist §5.2) as #491 batches it: nothing until the view passes
- * its budget, then merges down to seven eighths of it. */
 function fit(view: Part[], count: number, budget: number, nodes: Map<string, OracleNode>): void {
   const size = () => view.reduce((sum, part) => sum + partBytes(part, nodes), 0);
   if (size() <= budget) return;
@@ -152,8 +137,6 @@ function fit(view: Part[], count: number, budget: number, nodes: Map<string, Ora
     const a = view[best.position]!;
     view.splice(best.position, 2, { level: a.level + 1, index: a.index / 2, start: a.start, span: a.span * 2 });
   }
-  // A partial replay fit cannot publish until it reaches the batch target or
-  // its binary forest is irreducible, even if more parents are still unbuilt.
   const reducible = view.some((a, index) => {
     const b = view[index + 1];
     return b && a.level === b.level && a.index % 2 === 0 && b.index === a.index + 1;
@@ -195,7 +178,6 @@ function readJsonlFileSafe(path: string): Array<Record<string, unknown>> {
   return text.split("\n").filter(line => line.trim() !== "").map(line => JSON.parse(line) as Record<string, unknown>);
 }
 
-/** Include the checkpoint baseline before its append-only tail. */
 function readJsonlSafe(path: string): Array<Record<string, unknown>> {
   const root = dirname(path);
   let checkpoint: Array<Record<string, unknown>> = [];
@@ -228,10 +210,6 @@ function ancestorsOf(nodes: Map<string, OracleNode>, from: string): string[] {
   return ancestors;
 }
 
-/** The predicted invalidation closure, as a fixed point over the durable
- * records: the changed leaf and its ancestors, plus every node whose recorded
- * context included any invalidated node (and that node's ancestors), until
- * nothing changes. */
 function predictedInvalidation(nodes: Map<string, OracleNode>, index: number): Set<string> {
   const invalid = new Set(ancestorsOf(nodes, address(0, index)));
   for (let changed = true; changed;) {
@@ -254,9 +232,6 @@ function predictedInvalidation(nodes: Map<string, OracleNode>, index: number): S
   return invalid;
 }
 
-/** Replay one step's durable records into the oracle, in the order the owner
- * made them: appends (with the node set the step started from), then each
- * invalidation chunk and each node record, each followed by a fit. */
 function oracleStep(state: OracleState, step: { newMessages: number; records: Array<Record<string, unknown>>; budget: number }): void {
   for (let index = state.messages; index < step.newMessages; index += 1) {
     state.view.push({ level: 0, index, start: index, span: 1 });
@@ -286,8 +261,6 @@ function statusParts(status: EpisodicMemoryStatus): Array<{ address: string; sta
 function oracleParts(state: OracleState): Array<{ address: string; start: number; messages: number }> {
   return state.view.map(part => ({ address: address(part.level, part.index), start: part.start, messages: part.span }));
 }
-
-// ---- fixture -------------------------------------------------------------------
 
 interface Gate {
   paused: boolean;
@@ -321,8 +294,6 @@ function pad(head: string, length: number): string {
   return `${head}${"m".repeat(Math.max(0, length - head.length))}`;
 }
 
-/** Deterministic replies computed from the prompt: most fit `nodeBytes`, one in
- * five deliberately overshoots so the size loop has to run. */
 function respond(context: TranscriptContext, nodeBytes: number, compactor: Fixture["compactor"]): AssistantMessage {
   const last = [...context.messages].reverse().find(message => message.role === "user");
   const text = last && last.role === "user"
@@ -339,8 +310,6 @@ function respond(context: TranscriptContext, nodeBytes: number, compactor: Fixtu
   const overshoot = body.length % 5 === 0;
   const content = body.replace(/^(?:user|talk|echo|event):\s*/u, "");
   const line = pad(content.slice(0, 100), overshoot ? nodeBytes + 100 : nodeBytes - 60);
-  // One in three summaries carries a second line, so the prompt's context lines
-  // have to be flattened (the view is one line per part).
   return fauxAssistantMessage(compactor.calls % 3 === 0 ? `${line}\nLINEBREAK-${compactor.calls}` : line);
 }
 
@@ -373,8 +342,6 @@ async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}, r
     compactor.prompts.push(request.turns.map(turn => turn.text).join("\n"));
     faux.appendResponses([(context: TranscriptContext) => responder(context, limits.nodeBytes, compactor)]);
     try {
-      // Only a first attempt parks: the size loop's feedback turn must finish, or
-      // the parked node could never advance the view.
       if (gate.paused && request.turns.length === 1) await new Promise<void>(resolve => gate.waiters.push(resolve));
       return await defaultSummarizer(request);
     } finally {
@@ -408,8 +375,6 @@ function toolResultMessage(toolCallId: string, text: string): Message {
   return { role: "toolResult", toolCallId, toolName: "read_file", content: [{ type: "text", text }], isError: false, timestamp: Date.now() };
 }
 
-/** Varied sizes: some fit NODE as free nodes, some need a compactor call, and
- * one tool result in thirteen is far over CAP. */
 function messageText(index: number): string {
   if (index % 11 === 0) return `short question ${index}`;
   if (index % 7 === 0) return `paste ${index} ${"p".repeat(2_400)}`;
@@ -426,7 +391,6 @@ function catalogIndexFor(fx: Fixture, entryId: string): number {
   return record!.index as number;
 }
 
-/** The latest record per index, which is the live projection. */
 function latestCatalog(path: string): Map<number, Record<string, unknown>> {
   const latest = new Map<number, Record<string, unknown>>();
   for (const record of readJsonlSafe(path)) latest.set(record.index as number, record);
@@ -436,8 +400,6 @@ function latestCatalog(path: string): Map<number, Record<string, unknown>> {
 function sha(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }
-
-// ---- tests ---------------------------------------------------------------------
 
 describe("episodic memory end to end", () => {
   it.each([
@@ -476,7 +438,6 @@ describe("episodic memory end to end", () => {
     const fx = await fixture("repair-copy", { nodeBytes: 64 }, (context) => {
       const last = context.messages.at(-1)!;
       const input = last.role === "user" && typeof last.content === "string" ? last.content : JSON.stringify(last.content);
-      // Reproduce a copy-prone model obeying the old feedback's cut example.
       const cut = /cut here:\n([^|]*)\|/u.exec(input);
       return fauxAssistantMessage(cut?.[1] ?? (input.startsWith("That line is") ? "Manage Home polish #1723 remains unproven." : first));
     });
@@ -611,8 +572,6 @@ describe("episodic memory end to end", () => {
   });
 
   it("admits higher summaries only while the retained view exceeds its budget", async () => {
-    // Constant provider replies keep the replay independent of model-call order.
-    // They are too large to merge freely, so higher summaries really cost calls.
     const fx = await fixture("scheduler-budget", { viewBytes: 8_192, jobs: 2, retryMs: 0 },
       () => fauxAssistantMessage(`summary ${"s".repeat(400)}`));
     for (let index = 0; index < 16; index += 1) {
@@ -650,7 +609,6 @@ describe("episodic memory end to end", () => {
       await reopenedMemory.entriesCommitted(fx.sessionId);
       reopened = sample(reopenedMemory, "reopened");
     } finally { await reopenedMemory.dispose(); }
-    // Read the actual durable record stream, not an intercepted store method.
     const fittingRecords = readJsonlSafe(fx.nodesPath);
     const fittingHigherSummaries = fittingRecords.filter(record => record.kind === "summary" && typeof record.level === "number" && record.level > 0).length;
 
@@ -686,8 +644,6 @@ describe("episodic memory end to end", () => {
   }, 300_000);
 
   it("summarizes each node from its own stretch, so an edit revokes only that leaf's dependents", async () => {
-    // The first message's status reaches only requests whose stretch holds it:
-    // earlier view lines never reach the model beside a later node.
     const fx = await fixture("stretch-only", { viewBytes: 2_048, jobs: 2, retryMs: 0 });
     for (let index = 0; index < 12; index += 1) {
       fx.manager.appendMessage(userMessage(`${index === 0 ? "D1-D10 await Mohsin" : `later work ${index}`} ${"s".repeat(700)}`));
@@ -700,7 +656,6 @@ describe("episodic memory end to end", () => {
     expect(requests.some(prompt => prompt.includes("Merge these two lines into one"))).toBe(true);
     for (const prompt of requests) {
       expect(prompt).not.toContain("<chat>");
-      // A size-repair call repeats the step after it; only the step is read.
       const [step] = prompt.split("\n</stretch>");
       expect(step).toMatch(/^(?:Compress this message|Merge these two lines) into one[^\n]*\n<stretch>\n/u);
       if (step!.includes("D1-D10 await Mohsin")) expect(step!.split("<stretch>\n")[1]).toContain("D1-D10 await Mohsin");
@@ -710,8 +665,6 @@ describe("episodic memory end to end", () => {
     expect(durable.filter(record => record.kind === "summary").length).toBeGreaterThan(12);
     expect(durable.every(record => Array.isArray(record.contextRuns) && record.contextRuns.length === 0)).toBe(true);
 
-    // A summary stored with the view's context (the newest leaf, which has no
-    // parent yet) stays readable, and its stored runs still make it a dependent.
     const newest = durable.filter(record => record.level === 0 && record.index === 12).at(-1)!;
     const stored = { ...newest, revision: Math.max(...readJsonlSafe(fx.nodesPath).map(record => record.revision as number)) + 1, contextRuns: [[0, 12]] };
     await writeFile(fx.nodesPath, `${await readFile(fx.nodesPath, "utf8")}${JSON.stringify(stored)}\n`);
@@ -719,8 +672,6 @@ describe("episodic memory end to end", () => {
     try {
       await reopened.entriesCommitted(fx.sessionId);
       expect(reopened.status().blocked).toBeNull();
-      // Editing message 1 revokes leaf 1, the merges above it and the stored
-      // dependent, not the later leaves built from their own stretch.
       const before = liveNodes(fx);
       expect(before.get(address(0, 12))!.contextRuns).toEqual([[0, 12]]);
       const target = fx.manager.getBranch().filter(entry => entry.type === "message")[1]!;
@@ -742,8 +693,6 @@ describe("episodic memory end to end", () => {
     try {
       await memory.entriesCommitted(fx.sessionId);
       const status = memory.status();
-      // A real older free parent must exist to exercise the sparse-cover trap;
-      // the newer paid leaves fit without requiring any paid parent.
       expect(status.nodes.byLevel.some(part => part.level > 0 && part.count > 0)).toBe(true);
       expect(status.view.parts.every(part => part.messages === 1 && part.built)).toBe(true);
       expect(status.view.bytes).toBeLessThan(status.view.budgetBytes);
@@ -769,9 +718,6 @@ describe("episodic memory end to end", () => {
       report.chapterTopics!.reopened = true;
     } finally { await reopened.dispose(); }
 
-    // Under pressure the maximal 0+16 range becomes built. Keep that useful
-    // merged range, but put the newer odd tail first: returning only leaves
-    // would also lose the chapter-topics contract.
     const merged = await openMemory({ ...fx, limits: resolveLimits({ ...fx.limits, viewBytes: 128 }) });
     try {
       await merged.entriesCommitted(fx.sessionId);
@@ -849,8 +795,6 @@ describe("episodic memory end to end", () => {
         if (number % 3 === 0) fx.manager.appendMessage(toolResultMessage(`call-${number}`, toolResultText(number)));
       }
       if (batch === 4) {
-        // An image attachment, a display custom message, a planted credential,
-        // and entries that must never become messages.
         fx.manager.appendMessage({ role: "user", content: [{ type: "text", text: `look at this screenshot token ${PLANTED_CREDENTIAL}` }, { type: "image", data: IMAGE_BASE64, mimeType: "image/png" }], timestamp: Date.now() });
         fx.manager.appendCustomMessageEntry("tron.receipt", "displayed event text", true);
         fx.manager.appendCustomMessageEntry("tron.receipt", "hidden receipt text", false);
@@ -860,8 +804,6 @@ describe("episodic memory end to end", () => {
         fx.manager.appendLabelChange(fx.manager.getLeafId()!, "bookmark");
         fx.manager.appendSessionInfo("renamed session");
         await step();
-        // A context edit targets an already-ingested entry: this is the
-        // invalidation case, and it must not renumber anything.
         preEditBodies = [...fx.compactor.levelZeroBodies];
         preEditTexts = catalogLevelZeroTexts(fx);
         messagesAtEdit = memory.status().messages;
@@ -885,10 +827,6 @@ describe("episodic memory end to end", () => {
       levelZeroCalls: fx.compactor.levelZeroBodies.length,
     };
 
-    // Rule 3: leaves are built strictly in order. The durable level-0 records
-    // prove it: the first pass appends leaves 0,1,2,… with no gap and no
-    // repeat, and the context edit's rebuild touches exactly the invalidated
-    // leaves, each once.
     const levelZeroIndices = nodeWrites
       .filter(record => typeof record.nodes !== "string" && record.level === 0)
       .sort((a, b) => (a.revision as number) - (b.revision as number))
@@ -905,19 +843,14 @@ describe("episodic memory end to end", () => {
     expect(rebuilt.length).toBe(new Set(rebuilt).size);
     expect(new Set(rebuilt)).toEqual(new Set(invalidatedLeaves));
 
-    // The compactor's level-0 steps are the messages that needed a call, in
-    // index order, before the edit rebuilds them.
     expect(preEditBodies.map(sha)).toEqual(preEditTexts.map(sha));
     expect(preEditBodies.length).toBeGreaterThan(10);
 
-    // The compactor never sees an unsummarized line, reasoning or attachment
-    // bytes; concurrency stays inside JOBS and the size loop ran.
     for (const prompt of fx.compactor.prompts) {
       expect(prompt).not.toContain("(not summarized yet");
       expect(prompt).not.toContain(THINKING_PREFIX);
       expect(prompt).not.toContain(IMAGE_BASE64);
       expect(prompt).not.toContain(PLANTED_CREDENTIAL);
-      // Every stretch line is one line: a summary's own newline became a space.
       const stretch = prompt.split("<stretch>\n")[1]?.split("\n</stretch>")[0] ?? "";
       expect(stretch.split("\n").every(line => !line.startsWith("LINEBREAK-"))).toBe(true);
     }
@@ -930,7 +863,6 @@ describe("episodic memory end to end", () => {
     expect(catalogRaw).not.toContain(IMAGE_BASE64);
     expect(catalogRaw).not.toContain(PLANTED_CREDENTIAL);
     expect(catalogRaw).toContain("[image: image/png]");
-    // Paths are not credentials: the memory keeps them readable.
     expect(catalogRaw).toContain("/Users/example/project/file-0.ts");
     expect(catalogRaw).not.toContain("[USER_PATH]");
     expect(catalogRaw).toContain("displayed event text");
@@ -938,7 +870,6 @@ describe("episodic memory end to end", () => {
     expect(catalogRaw).not.toContain("bookkeeping");
     expect(catalogRaw).not.toContain("renamed session");
 
-    // A tool result over CAP is capped head and tail, and says so.
     const capped = readJsonlSafe(fx.catalogPath).find(record => typeof record.text === "string" && (record.text as string).includes(CAP_MARKER))!;
     expect(capped).toBeDefined();
     const cappedText = capped.text as string;
@@ -947,16 +878,12 @@ describe("episodic memory end to end", () => {
     expect(cappedText.length).toBeLessThan(40_000);
     expect(capped.omissions as string[]).toContain("capped");
 
-    // The context edit replaced its target without renumbering anything.
     const edited = readJsonlSafe(fx.catalogPath).find(record => record.text === "replacement prompt from a context edit");
     expect(edited).toBeDefined();
     expect(edited!.index).toBe(editIndex);
 
     await memory.whenReady(memory.status().messages);
 
-    // The memory browser (#911) shows the lines this view renders, newest first:
-    // older ranges as summary lines, recent messages with their items, and a
-    // summary opens into its two halves down to single messages.
     const rendered = memory.status().view.parts;
     const browser = memory.browserView({ limit: 50 });
     expect(browser.lines.map(line => [line.start, line.span]))
@@ -983,7 +910,6 @@ describe("episodic memory end to end", () => {
       fx.manager.appendMessage(userMessage(`concurrent prompt ${index} ${"c".repeat(700)}`));
       fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"r".repeat(700)}`)]));
     }
-    // Two commits race: ingestion must not interleave index assignment.
     await Promise.all([
       memory.entriesCommitted(fx.sessionId),
       memory.entriesCommitted(fx.sessionId),
@@ -999,7 +925,6 @@ describe("episodic memory end to end", () => {
     };
     expect(indices).toEqual([...Array(status.messages).keys()]);
     expect(new Set([...latest.values()].map(record => record.entryId)).size).toBe(status.messages);
-    // The second commit saw the cursor and appended nothing.
     expect(catalog.length).toBe(status.messages);
     expect(report.concurrency.duplicateViewParts).toBe(0);
     let cursor = 0;
@@ -1025,9 +950,6 @@ describe("episodic memory end to end", () => {
     const nodesBefore = memory.status().nodes.total;
     const promptMark = fx.compactor.prompts.length;
 
-    // Park first attempts, commit more messages, let exactly the next leaf
-    // through so a merge becomes startable beside the following leaf, and edit
-    // an early message while both are in flight.
     fx.gate.paused = true;
     let preEditNodes!: ReturnType<typeof liveNodes>;
     try {
@@ -1045,9 +967,6 @@ describe("episodic memory end to end", () => {
 
       const generationBefore = memory.status().generation;
       fx.manager.appendContextEdit(target.id, { content: "in-flight replacement" });
-      // Ingestion acknowledges durable invalidation without waiting for the
-      // parked compactor. Its log prefix is the exact revoked graph: sparse
-      // scheduling can finish another node after the earlier flight observation.
       await memory.entriesIngested(fx.sessionId);
       const durable = readJsonlSafe(fx.nodesPath);
       invalidations = durable.filter(record => typeof record.nodes === "string" && Number(record.generation) > generationBefore);
@@ -1074,8 +993,6 @@ describe("episodic memory end to end", () => {
     expect(memory.status().view.unbuilt).toBe(0);
     await memory.dispose();
 
-    // The store must reopen consistently: a stale node published under revoked
-    // children would be refused here.
     const reopened = await openMemory(fx);
     expect(reopened.status().nodes.total).toBeGreaterThan(nodesBefore);
     expect(reopened.status().blocked).toBeNull();
@@ -1091,7 +1008,6 @@ describe("episodic memory end to end", () => {
       fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"a".repeat(600)}`)]));
     }
 
-    // 1. A permanent refusal blocks at once, and the pump stops.
     let calls = 0;
     const refusal: EpisodicSummarizer = async () => {
       calls += 1;
@@ -1108,8 +1024,6 @@ describe("episodic memory end to end", () => {
     expect(calls).toBe(callsAtBlock);
     await expect(refused.whenReady(refusedStatus.messages)).rejects.toBeInstanceOf(EpisodicMemoryError);
     await refused.dispose();
-    // The blocked state survives a restart, and an operator resume with a working
-    // compactor recovers it.
     const recovered = await openMemory(fx);
     expect(recovered.status().blocked?.reason).toBe("permanent-failure");
     await recovered.resumeIngested();
@@ -1119,7 +1033,6 @@ describe("episodic memory end to end", () => {
     report.blocked.push({ reason: "permanent-failure", resumed: true, nodesAtBlock: nodesWhenBlocked });
     await recovered.dispose();
 
-    // 2. An auth or configuration error is permanent, not retried.
     const authFixture = await fixture("auth", { viewBytes: 1_024, jobs: 2, retryMs: 0, maxRetries: 3 });
     for (let index = 0; index < 4; index += 1) authFixture.manager.appendMessage(userMessage(`auth case message ${index} ${"x".repeat(600)}`));
     let authAttempts = 0;
@@ -1134,8 +1047,6 @@ describe("episodic memory end to end", () => {
     report.blocked.push({ reason: "permanent-failure", resumed: false, nodesAtBlock: unauthorizedMemory.status().nodes.total });
     await unauthorizedMemory.dispose();
 
-    // 3. A transient failure that never succeeds exhausts its retries; once the
-    // provider recovers, an operator resume restarts the pump on the same memory.
     const retryFixture = await fixture("retries", { viewBytes: 1_024, jobs: 2, retryMs: 0, maxRetries: 2 });
     for (let index = 0; index < 4; index += 1) retryFixture.manager.appendMessage(userMessage(`retry case message ${index} ${"c".repeat(600)}`));
     let attempts = 0;
@@ -1155,9 +1066,6 @@ describe("episodic memory end to end", () => {
     expect(retried.status().nodes.total).toBeGreaterThan(0);
     await retried.dispose();
 
-    // 4. A plan limit is its own block, not a permanent refusal. It persists under
-    // its reason across a restart, and nothing re-arms it but an operator resume
-    // or the Home activation that finds the limit lapsed.
     const limited = await fixture("usage-limit", { viewBytes: 1_024, jobs: 2, retryMs: 0, maxRetries: 3 });
     for (let index = 0; index < 4; index += 1) limited.manager.appendMessage(userMessage(`usage limit case message ${index} ${"l".repeat(600)}`));
     let limitCalls = 0;
@@ -1187,8 +1095,6 @@ describe("episodic memory end to end", () => {
     const fixtureFor = async (label: string, usage: Usage): Promise<{ fx: Fixture; used: number }> => {
       const fx = await fixture(label, { viewBytes: 1_024, jobs: 1, retryMs: 0 });
       fx.manager.appendMessage(userMessage(`usage case message ${"u".repeat(600)}`));
-      // The reply's usage is what the memory records as spend, so the real
-      // faux reply is returned with the injected usage.
       const injected: EpisodicSummarizer = async (request) => ({ ...await fx.summarizer(request), usage });
       const memory = await openMemory(fx, injected);
       await memory.entriesCommitted(fx.sessionId);
@@ -1197,13 +1103,10 @@ describe("episodic memory end to end", () => {
       await memory.dispose();
       return { fx, used: snapshot.used };
     };
-    // The provider's own total wins when it reports one.
     const withTotal = await fixtureFor("usage-total", { input: 10, output: 5, cacheRead: 7, cacheWrite: 3, totalTokens: 40, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
-    // Every call is charged the reported total (40), never the bucket sum (24).
     expect(withTotal.used).toBeGreaterThanOrEqual(40);
     expect(withTotal.used % 40).toBe(0);
     expect(withTotal.used % 24).not.toBe(0);
-    // Without a reported total, every billed bucket counts, cache reads included.
     const summed = await fixtureFor("usage-sum", { input: 10, output: 5, cacheRead: 7, cacheWrite: 3, totalTokens: undefined as unknown as number, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
     expect(summed.used).toBeGreaterThanOrEqual(25);
     expect(summed.used % 25).toBe(0);
@@ -1227,20 +1130,15 @@ describe("episodic memory end to end", () => {
       tailKept: text.endsWith(" end-of-paste"),
       blockedOnLineBound: null,
     };
-    // The cap keeps `recordCapChars` characters of content plus its marker.
     expect(text.length).toBeLessThanOrEqual(fx.limits.recordCapChars + 64);
     expect(text).toContain(CAP_MARKER);
     expect(record.omissions as string[]).toContain("capped");
     expect(text.startsWith("start-of-paste ")).toBe(true);
     expect(text.endsWith(" end-of-paste")).toBe(true);
-    // The record the store holds is far below its line bound, and the memory
-    // summarized the capped text rather than the paste.
     expect(Buffer.byteLength(JSON.stringify(record))).toBeLessThan(fx.limits.maxStoreLineBytes);
     expect(fx.compactor.prompts.every(prompt => prompt.length < 500_000)).toBe(true);
     await memory.dispose();
 
-    // A store bound the projection cannot respect is a visible blocked state,
-    // never a silent throw with a stalled cursor.
     const tight = await fixture("oversized-blocked", { viewBytes: 1_024, jobs: 2, retryMs: 0, maxStoreLineBytes: 4_096, recordCapChars: 1_000_000 });
     tight.manager.appendMessage(userMessage(`start ${"q".repeat(200_000)}`));
     const tightMemory = await openMemory(tight);
@@ -1251,9 +1149,6 @@ describe("episodic memory end to end", () => {
   }, 300_000);
 
   it("cuts the view at a canonical entry and renders only what precedes it", async () => {
-    // The request layer's cut (gist §6): how many summarized messages a turn
-    // starting at one canonical entry covers. A turn sends the view up to that
-    // cut and nothing after it, so the render must stop there.
     const fx = await fixture("cut", { viewBytes: 4_096, jobs: 2, retryMs: 0 });
     const memory = await openMemory(fx);
     await memory.entriesCommitted(fx.sessionId);
@@ -1262,8 +1157,6 @@ describe("episodic memory end to end", () => {
     expect(await memory.cutAtEntry(first.id)).toBe(1);
     expect(await memory.cutAtEntry("entry-that-no-branch-holds")).toBeUndefined();
 
-    // A non-message entry between two messages: the cut counts the messages at or
-    // before the named entry, whatever the entry's own type is.
     fx.manager.appendMessage(fauxAssistantMessage(fauxText("first reply")));
     const unIngested = fx.manager.getLeafId()!;
     expect(await memory.cutAtEntry(unIngested)).toBeUndefined();
@@ -1283,7 +1176,6 @@ describe("episodic memory end to end", () => {
       const [address, text] = line.split("|");
       const [start, span] = address!.split("+").map(Number) as [number, number];
       expect(text).toBeTruthy();
-      // Nothing covering the third message may be rendered.
       expect(start + span).toBeLessThanOrEqual(2);
     }
     const full = memory.renderView(3);
@@ -1292,7 +1184,6 @@ describe("episodic memory end to end", () => {
   }, 300_000);
 });
 
-/** The live nodes as the oracle sees them, from the durable log. */
 function liveNodes(fx: Fixture, records = readJsonlSafe(fx.nodesPath)): Map<string, OracleNode> {
   const nodes = new Map<string, OracleNode>();
   for (const record of records) {
@@ -1308,7 +1199,6 @@ function liveNodes(fx: Fixture, records = readJsonlSafe(fx.nodesPath)): Map<stri
   return nodes;
 }
 
-/** The catalog's level-0 source lines that do not fit NODE, in index order. */
 function catalogLevelZeroTexts(fx: Fixture): string[] {
   return [...latestCatalog(fx.catalogPath).values()]
     .sort((a, b) => (a.index as number) - (b.index as number))

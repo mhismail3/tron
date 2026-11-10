@@ -45,9 +45,6 @@ it("refuses native legacy-placement creation before writing a body or head", asy
   evidence.push({ nativeLegacyWriterRefused: true, profileHeadsAfterRefusal: 0 });
 }, 60_000);
 
-// Current-file crash, cold publication and exact Prior Undo use the nine
-// real-process stages in home-profile-partition.integration.test.ts.
-
 it("repairs a v2-to-historical Undo audit after a real postcommit process death without replaying note effects", async () => {
   const { f, profile } = await setup();
   const originals = [await seed(0), await seed(1)];

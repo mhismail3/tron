@@ -20,13 +20,9 @@ export const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
   maximumAcquisitionBytes: 4 * 1_024 * 1_024,
   maximumHeaderBytes: 64 * 1_024 * 1_024,
   maximumHeaderBytesPerFile: 64 * 1_024,
-  // The width one folder-visit batch runs at, for the evidence scan and its
-  // header batches.
   normalizationConcurrency: 16,
 };
 
-/** At most one folder batch runs at a time, and a failing visit prevents new
- * assignments while already-admitted filesystem work settles. */
 async function visitConcurrently<T>(
   values: readonly T[],
   concurrency: number,
@@ -49,22 +45,16 @@ async function visitConcurrently<T>(
   }
 }
 
-/** Stable hash and materialization order despite concurrent filesystem visits. */
 function sortCatalogPaths(paths: Iterable<string>): string[] {
   return [...paths].sort();
 }
 
-/** pi-subagents reserves only the immediate workspace diagnostics directory;
- * deeper project directories with the same basename remain canonical. The
- * folder watcher applies the same rule to an event's path, so what discovery
- * walks and what the index tracks cannot disagree. */
 export function isIgnoredCatalogDirectory(directory: string, canonicalRoot: string): boolean {
   const fromRoot = relative(canonicalRoot, resolve(directory));
   if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return true;
   const parts = fromRoot.split(sep);
   return parts.length === 2 && parts[1] === "subagent-artifacts";
 }
-// The catalog scheduler must get a request turn before one buffered transcript batch monopolizes the loop.
 const CATALOG_METADATA_YIELD_EVERY_ENTRIES = 256;
 
 type SessionInfo = Awaited<ReturnType<typeof SessionManager.listAll>>[number];
@@ -73,9 +63,6 @@ export type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText"> & {
   creationOrigin?: SessionCreationOrigin;
 };
 
-/** SDK-compatible row metadata without constructing its unused transcript-wide
- * `allMessagesText` accumulator. The complete JSONL remains authoritative for
- * RuntimeSlot.open; this pass is only catalog discovery metadata. */
 export async function buildCatalogSessionInfo(
   filePath: string,
   yieldToLoop?: () => Promise<void>,
@@ -121,8 +108,6 @@ export async function buildCatalogSessionInfo(
           && (entry.message as Record<string, unknown>).role === "user") {
           firstUserEntryId = entry.id;
         } else {
-          // A generated Automation session begins with its invocation receipts
-          // and canonical user prompt. Any earlier message proves another owner.
           sawPrePromptMessage = true;
           automationStarts.clear();
         }
@@ -186,20 +171,11 @@ export interface DelegatedSessionTopology {
 }
 
 export interface CatalogStructureEvidence {
-  /** Canonical root used for this complete traversal and its row classification. */
   catalogRoot: string;
   digest: string;
   factsDigest: string;
   identitiesByPath: ReadonlyMap<string, CatalogHeaderIdentity>;
-  /** The traversal covered the whole folder. A file whose own header this pass
-   * could not prove is reported in `unprovenPaths`, not here: one unreadable
-   * transcript must not blind the membership of every other one. */
   complete: boolean;
-  /** Canonical paths the traversal found whose header this pass could not read:
-   * a zero-byte file, a partial header, an oversized file over the retention
-   * budget, or the rest of the cut after a header read failed. A path here
-   * proves neither presence nor absence, so its caller keeps whatever row it
-   * already had for it and adds none. */
   unprovenPaths: ReadonlySet<string>;
   unstableCanonicalFiles: boolean;
   unstableCanonicalPaths?: ReadonlySet<string>;
@@ -262,8 +238,6 @@ export class CatalogDiscovery {
               continue;
             }
             if (!entry.name.endsWith(".jsonl") || (!entry.isFile() && !entry.isSymbolicLink())) continue;
-            // Symlinked JSONL is never canonical authority. A regular file in a
-            // canonical folder is canonical; the header read fences its inode.
             if (entry.isSymbolicLink()) continue;
             const fromRoot = relative(catalogRoot, child);
             if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) continue;
@@ -345,17 +319,11 @@ export class CatalogDiscovery {
           .update(identity?.id ?? "").update("\0")
           .update(identity?.cwd ?? "").update("\0")
           .update(identity?.fileIdentity ?? "").update("\0")
-          // A Gateway-owned JSONL may grow while its header is being read. Its
-          // inode and identity remain structural authority; cold/unowned files
-          // retain size/mtime validation so external rewrites cannot slip by.
           .update(identity ? (liveOwner ? "live-append" : String(identity.size)) : "").update("\0")
           .update(identity ? (liveOwner ? "live-append" : String(identity.mtimeMs)) : "").update("\n");
         if (identity) identitiesByPath.set(path, identity);
       }
     }
-    // A header read that failed stops the batch loop, so every path it never
-    // reached is unproven too: the remaining rows are kept rather than dropped
-    // as if the files were gone.
     for (const path of paths) if (!identitiesByPath.has(path)) unprovenPaths.add(path);
     return {
       catalogRoot,
@@ -405,8 +373,6 @@ export class CatalogDiscovery {
     try {
       const finalByte = Buffer.alloc(1);
       const finalRead = await handle.read(finalByte, 0, 1, opened.size - 1);
-      // A stable header remains identity evidence while this file has a partial
-      // tail. Transcript/catalog readers separately enforce their selected scope.
       const incompleteTail = finalRead.bytesRead !== 1 || finalByte[0] !== 0x0a;
       const buffer = Buffer.allocUnsafe(maximumBytes);
       const parseHeader = (line: Buffer): CatalogHeaderIdentity | undefined => {

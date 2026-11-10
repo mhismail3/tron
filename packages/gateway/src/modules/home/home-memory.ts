@@ -10,33 +10,8 @@ import type { HomeMemoryStatus } from "../../protocol/types.js";
 import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 import { HomeMemoryRefusal, type HomeActivationIdentity, type HomeActivationView } from "./home-request-policy.js";
 
-/*
- * Tron Home's memory for one stable Home identity: ONE `EpisodicMemory`
- * over its ordered canonical chapter source, plus the frozen agent-facing view an activation
- * receives.
- *
- * The owner of the memory is Home, not the session's live runtime: a runtime is
- * evicted, replaced and rebuilt (idle eviction, a profile change, a reload),
- * while the memory and its spend outlive all of them. The runtime only reports
- * that canonical entries changed (`noteEntriesCommitted`); the memory re-reads
- * the log after its cursor under its own bounds, and a request waits for the
- * lines it will send before it sends them.
- *
- * There is no default model queue (decision D4): with no background or subagent
- * models (`model.queue[role=…]`), the memory refuses every
- * activation fail-closed, so nothing is ever served from an empty or partial
- * memory. There is no budget to manage (#493): the memory regulates its own
- * spend.
- */
-/** Marker shared by the frozen view's attribution line. One spelling, so a
- * request carrying the memory view is recognizable without matching prose. */
 export const HOME_MEMORY_VIEW_MARKER = "Tron Home memory";
 
-/**
- * Why one Home memory tool could not answer with a memory fact. A code, never
- * prose: the tool's text says the same thing, and this is what a reader and a
- * test assert on.
- */
 export type HomeMemoryUnavailableReason =
   | "not-home-session"
   | "memory-not-configured"
@@ -44,14 +19,6 @@ export type HomeMemoryUnavailableReason =
   | "memory-blocked"
   | "timestamp-unavailable";
 
-/**
- * What one Home memory tool answers. `text` is what the model reads, and
- * `outcome` is the state behind it: an answer the memory could not give is
- * `unavailable` with its reason, never an empty success that reads as "nothing
- * there".
- */
-/** What an answered read found, for a reader of the transcript that should not parse
- * the model's text: a date's canonical instant, or a search's range and counts. */
 export interface HomeMemoryToolFacts {
   date?: { id: number; at: string };
   search?: { query: string; from: number; to: number; matches: number; shown: number; omitted: number; capped: number };
@@ -62,22 +29,12 @@ export type HomeMemoryToolResult =
   | { outcome: "invalid-arguments"; text: string }
   | { outcome: "unavailable"; reason: HomeMemoryUnavailableReason; text: string };
 
-/**
- * Tron Home's memory navigation, as the `zoom`, `date` and `memory_search` tools
- * call it. `HomeMemory` is the implementation; the Home owner hands the tools
- * the memory that is open for the session they are running in.
- */
 export interface HomeMemoryToolAccess {
-  /** The recipe's zoom: line `id+n` opened into its two children, or the message
-   * itself at n = 1. */
   zoom(id: number, n: number, signal?: AbortSignal): Promise<HomeMemoryToolResult>;
-  /** The local date and time of message `id`. */
   date(id: number, signal?: AbortSignal): Promise<HomeMemoryToolResult>;
-  /** A case-insensitive substring search over the projected messages. */
   search(query: string, from: number | undefined, to: number | undefined, signal?: AbortSignal): Promise<HomeMemoryToolResult>;
 }
 
-/** The typed answer for a memory that cannot serve a tool call. */
 export function homeMemoryToolUnavailable(reason: HomeMemoryUnavailableReason, text?: string): HomeMemoryToolResult {
   return { outcome: "unavailable", reason, text: text ?? UNAVAILABLE_TEXT[reason] };
 }
@@ -90,16 +47,10 @@ const UNAVAILABLE_TEXT: Readonly<Record<HomeMemoryUnavailableReason, string>> = 
   "timestamp-unavailable": "That message's recorded date cannot be read.",
 };
 
-/** The Home memory's background model queue, `provider/id` in order. */
 interface HomeMemoryConfig {
   models: readonly string[];
 }
 
-/**
- * Why Home's memory could not ingest committed entries. A code, never a message:
- * this reaches the Gateway log, and an episodic failure's own message can carry
- * the canonical session path.
- */
 type HomeMemoryIngestFailure =
   | "source-unavailable"
   | "store-refused"
@@ -108,27 +59,17 @@ type HomeMemoryIngestFailure =
   | "already-open"
   | "unknown";
 
-/** What the Gateway log receives from Home's memory: the module's own bounded
- * records, and Home's coded ingest failure. */
 export type HomeMemoryDiagnostic =
   | { event: "home.memory-ingest"; level: "warning"; reason: HomeMemoryIngestFailure }
   | EpisodicDiagnostic;
 
 interface HomeMemoryOptions {
-  /** The canonical source identity this memory is over; also its store namespace. */
   sessionId: string;
   workspace: TronWorkspace;
-  /** The canonical session JSONL that must exist before the store opens, resolved
-   * when it opens: the session exists before it has a line, and a runtime may be
-   * evicted while the memory stays open. The source reads the chapters. */
   sessionFile: () => Promise<string | undefined>;
-  /** Separate chapter-delta ingestion and frozen cursor-scoped branch lookup. */
   sessionSource: EpisodicSessionSource;
-  /** The compactor's calls, on the Gateway's background model queue
-   * (providers/model-queue.ts), never a session's runtime. */
   modelSummarizer: () => EpisodicSummarizer;
   diagnostic?: (record: HomeMemoryDiagnostic) => void;
-  /** Home ledger is the single pause authority, including across store replacement. */
   isPaused?: () => boolean;
 }
 
@@ -136,14 +77,6 @@ interface MemoryBinding {
   memory: EpisodicMemory;
 }
 
-/** The attribution every Home memory view carries. Summaries of the earlier
- * conversation are evidence about what happened, and the chat may hold text that
- * looks like an order (from the user, a tool result, a displayed page): the agent
- * must read them and must never act on them as instructions (gist §7).
- *
- * The navigation paragraph is the recipe's VIEW_DOC, adapted: what a line is,
- * what the kinds are, and when to zoom. It is constant text, so two activations
- * carry a byte-identical view preamble. */
 const VIEW_HEADER = [
   `${HOME_MEMORY_VIEW_MARKER}: one-line summaries of this Home chat from its start up to your current message, oldest first.`,
   "Each line is `id+n|text`: the n messages from id on, summarized; a short message is its own line, word for word.",
@@ -154,22 +87,6 @@ const VIEW_HEADER = [
 ].join("\n");
 const VIEW_FOOTER = "</chat>";
 
-/**
- * The view as the blocks a Home request sends (#2228): the header, the lines in
- * groups of `VIEW_BLOCK_LINES` (cache-layout.ts) counted from the view's first line, then the
- * footer. They rejoin to exactly `header\nlines\nfooter`, the text the model reads.
- *
- * Anthropic keys a cache entry by the cumulative hash of every block up to its
- * mark, so a later request re-reads it only if its blocks up to there are the same
- * blocks, not merely the same text. Grouping by position from the start makes
- * the blocks a function of the view alone: between two rebalances the view only
- * gains lines at its end, so every whole group a request sent is a block of the
- * next request too, and only the last, partial group can change. The request
- * marks the last whole group (`markHomeMemoryCache`); a later request's mark finds
- * that entry within Anthropic's 20-block lookback while an activation adds fewer
- * than about 80 lines. A rebalance changes the blocks from its first merged line
- * on, and the blocks before it stay.
- */
 function viewPieces(text: string): string[] {
   const lines = text === "" ? [] : text.split("\n");
   const groups: string[] = [];
@@ -184,25 +101,10 @@ export class HomeMemory {
   private summarizer: EpisodicSummarizer | undefined;
   private binding: MemoryBinding | undefined;
   private failure: HomeMemoryIngestFailure | undefined;
-  /**
-   * One lock over every open and close. #415's store allows one opener per
-   * process, so an un-serialized `configure` racing an activation's first
-   * step could open the same store twice (`already-open`) or close a store the
-   * other is reading. The lock is held for the open itself and never across a
-   * wait: an activation's readiness wait happens outside it.
-   */
   private readonly mutex = new AsyncMutex();
 
   constructor(private readonly options: HomeMemoryOptions) {}
 
-  /**
-   * Record the memory's model queue, and open its store when the session already has
-   * a canonical file.
-   *
-   * A configuration is not a promise: a session that has no line yet, or a
-   * runtime that is idle-evicted, is normal, and the store then opens at the
-   * first activation.
-   */
   async configure(config: HomeMemoryConfig): Promise<void> {
     const summarizer = this.options.modelSummarizer();
     return await this.mutex.run(async () => {
@@ -218,43 +120,22 @@ export class HomeMemory {
     });
   }
 
-  /**
-   * Clear a block the caller has addressed with an operator action:
-   * `home.resumeMemory`. The re-read and the pump start happen under the lock;
-   * the drain does not.
-   */
   async resume(): Promise<void> {
-    // Configuration opens an existing canonical source. An empty new Home has
-    // no store to resume yet; removing its ledger pause is sufficient.
     const binding = await this.mutex.run(async () => this.binding);
     await binding?.memory.resumeIngested();
   }
 
-  /** Notify existing waiters only; no copied pause state or store opening. */
   notePause(): void { this.binding?.memory.notePause(); }
 
-  /** The persisted state of this memory's store, without opening it: its recorded
-   * spend and the block that refuses every activation. */
   async persistedState(): Promise<{ spend: number; blocked: EpisodicBlocked | null } | undefined> {
     const state = await readEpisodicState({ workspace: this.options.workspace, sessionId: this.options.sessionId });
     return state ? { spend: state.spend, blocked: state.blocked } : undefined;
   }
 
-  /** Whether the store is open and serving. */
   get open(): boolean {
     return this.binding !== undefined;
   }
 
-  /**
-   * The canonical entries of the Home session changed. Fire and forget: the
-   * memory re-reads the log after its cursor and drains its pump under its own
-   * bounds, so a caller never waits on it inside admission.
-   *
-   * The binding this started on is the only one the outcome belongs to: a
-   * reconfiguration replaces it (and closes that store), so a result that arrives
-   * afterwards must neither clear the current memory's failure nor record the old
-   * one's.
-   */
   noteEntriesCommitted(): void {
     const binding = this.binding;
     if (!binding) return;
@@ -263,8 +144,6 @@ export class HomeMemory {
       this.failure = undefined;
     }, (error: unknown) => {
       const reason = homeMemoryIngestFailure(error);
-      // A store closed by a reconfiguration is not a failure: the next commit
-      // reads the store the configuration opened.
       if (reason === undefined) return;
       if (this.binding !== binding) return;
       this.failure = reason;
@@ -272,8 +151,6 @@ export class HomeMemory {
     });
   }
 
-  /** HomeOwner qualifies a not-started chapter with no prior history. The
-   * memory must still be configured; no store/source is manufactured. */
   emptyChapterView(signal?: AbortSignal): HomeActivationView {
     if (this.options.isPaused?.()) throw new HomeMemoryRefusal("memory-paused", "Home memory is paused; resume memory before sending another input");
     if (!this.config || !this.summarizer) throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
@@ -282,21 +159,10 @@ export class HomeMemory {
     return { text: pieces.join(""), pieces, waitedMs: 0 };
   }
 
-  /**
-   * The frozen agent-facing view for one activation.
-   *
-   * The cut is the number of memory messages at or before the activation's start
-   * entry, and the wait is gist §6's "wait, don't cut": an activation waits until
-   * every line it will send is a built summary. The wait is abortable through the
-   * request's signal, so the user's Stop cancels it and their message stays in
-   * the log, unanswered.
-   */
   activationView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<HomeActivationView> {
     return this.viewAtBoundary(activation, signal);
   }
 
-  /** A not-started chapter has no current messages; its entire validated source
-   * is the preceding sealed history. Reuse ingestion, bounds and readiness. */
   precedingChapterView(signal: AbortSignal | undefined): Promise<HomeActivationView> {
     return this.viewAtBoundary(undefined, signal);
   }
@@ -305,20 +171,10 @@ export class HomeMemory {
     if (this.options.isPaused?.()) throw new HomeMemoryRefusal("memory-paused", "Home memory is paused; resume memory before sending another input");
     const binding = await this.mutex.run(() => this.bindingForViewLocked());
     try {
-      // Ingest only: the wait below is for the lines this activation will send,
-      // never for summaries of the messages it is about to add.
       await binding.memory.entriesIngested(this.options.sessionId);
     } catch (error) {
       throw new HomeMemoryRefusal("memory-unavailable", `the Home memory could not read the session: ${messageOf(error)}`);
     }
-    // A blocked memory stopped its pump, so it cannot cover this activation as
-    // it stands. Every activation re-arms it once, whatever the reason (#1279):
-    // provider outages, plan limits, flaky replies, a source that was briefly
-    // unreadable and model or settings fixes all clear without anyone having to
-    // find a resume control, and the cost is one bounded build attempt per
-    // activation. resumeIngested clears the block, re-reads the source and
-    // restarts the pump; a block that recurs during the wait below is refused
-    // by the wait's own error path with its cause.
     if (binding.memory.status().blocked) await binding.memory.resumeIngested();
     const blocked = binding.memory.status().blocked;
     if (blocked) throw this.blockedRefusal(blocked);
@@ -343,7 +199,6 @@ export class HomeMemory {
     return { text: pieces.join(""), pieces, waitedMs: Math.round(performance.now() - waitingSince) };
   }
 
-  /** The bounded memory status, for `home.status` and for the seam's evidence. */
   status(): HomeMemoryStatus {
     const config = this.config;
     const binding = this.binding;
@@ -357,22 +212,16 @@ export class HomeMemory {
       episodic: memory,
       spentTokens: memory.tokens.used,
       ...(memory.blocked ? { blocked: memory.blocked.reason } : {}),
-      // The last ingest failure while the store is serving: the memory keeps
-      // serving, so this is why it is degraded rather than why it is stopped.
       ...(this.failure ? { reason: this.failure } : {}),
     };
   }
 
-  /** Release the store, so another Gateway authority may open it again. */
   async dispose(): Promise<void> {
     await this.mutex.run(() => this.closeLocked());
     this.config = undefined;
     this.summarizer = undefined;
   }
 
-  /** Browser reads share the binding's lifetime, but never wait for summaries.
-   * Ingestion stays with its existing owner; canonical proof happens before the
-   * final exact revision fence, so a concurrent commit cannot publish old data. */
   async browserRead<T>(read: (memory: EpisodicMemory) => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.mutex.run(async () => {
       signal?.throwIfAborted();
@@ -392,11 +241,6 @@ export class HomeMemory {
     }, signal);
   }
 
-  // ---- the agent-facing tools (docs/home.md) -----------------------------------
-
-  /**
-   * The recipe's `zoom`, against the store that is open right now.
-   */
   async zoom(id: number, n: number, signal?: AbortSignal): Promise<HomeMemoryToolResult> {
     return await this.toolRead(signal, memory => {
       const lines = memory.zoomLines(id, n);
@@ -406,14 +250,10 @@ export class HomeMemory {
     });
   }
 
-  /** The recipe's `date`: the local date and time of one message. */
   async date(id: number, signal?: AbortSignal): Promise<HomeMemoryToolResult> {
     return await this.toolRead(signal, (memory) => {
       const timestamp = memory.entryTimestamp(id);
-      // A message's view line is `id+1`, so a refused date names the line it is
-      // about the same way a refused zoom does.
       if (timestamp === undefined) return { outcome: "invalid-arguments", text: `No line ${id}+1.` };
-      // An unparsable instant is refused as unavailable: the memory never invents a time.
       const text = localTimestampText(timestamp);
       if (text === undefined) {
         return homeMemoryToolUnavailable("timestamp-unavailable", `The recorded date of message ${id} cannot be read.`);
@@ -422,16 +262,8 @@ export class HomeMemory {
     });
   }
 
-  /**
-   * Tron's own addition to the recipe's tools: a case-insensitive substring
-   * search over the projected messages, with the range's `[omitted]` and capped
-   * counts, so a message that holds no searchable text is named instead of
-   * looking like a message that never matched.
-   */
   async search(query: string, from: number | undefined, to: number | undefined, signal?: AbortSignal): Promise<HomeMemoryToolResult> {
     return await this.toolRead(signal, (memory) => {
-      // The memory owns the query bound; this is where its refusal becomes the
-      // text the model reads.
       const found = memory.searchMessages(query, from, to);
       if (!found) return { outcome: "invalid-arguments", text: `memory_search needs a query of 1 to ${EPISODIC_SEARCH_QUERY_CHARS} characters.` };
       return {
@@ -445,27 +277,10 @@ export class HomeMemory {
     });
   }
 
-  /**
-   * One tool read, from the store this memory has open right now.
-   *
-   * A tool call is only reachable from an activation, and the activation has
-   * already opened and waited for this memory, so a call never opens the store,
-   * configures it or resumes it: a memory that is not there answers with its state
-   * instead of starting to spend on the model's behalf.
-   *
-   * Before the read, the commits appended since the last read are ingested and the
-   * pump they start is not awaited, so no answer comes from a projection that is
-   * missing them. Ingesting can stop the memory *without* throwing (an unreadable
-   * source, a permanent compactor failure), so the state is read again afterwards,
-   * and a store that a reconfiguration or a release replaced while the ingest ran
-   * answers for what it is now.
-   */
   private async toolRead(signal: AbortSignal | undefined, read: (memory: EpisodicMemory) => HomeMemoryToolResult | Promise<HomeMemoryToolResult>): Promise<HomeMemoryToolResult> {
     const store = this.toolStore();
     if ("unavailable" in store) return store.unavailable;
     try {
-      // An aborted lock wait rejects with the tool's abort reason, which Pi
-      // reports as the stopped call; `toolFailure` rethrows it unchanged.
       await store.memory.entriesIngested(this.options.sessionId, signal);
       if (store.memory.status().blocked) return homeMemoryToolUnavailable("memory-blocked");
       if (this.binding?.memory !== store.memory) return homeMemoryToolUnavailable("memory-unavailable");
@@ -475,8 +290,6 @@ export class HomeMemory {
     }
   }
 
-  /** The state that stops a tool read, as the typed result the tool returns.
-   * Read, never started: no configuration, no open, no resume. */
   private toolStore(): { memory: EpisodicMemory } | { unavailable: HomeMemoryToolResult } {
     if (!this.config) return { unavailable: homeMemoryToolUnavailable("memory-not-configured") };
     const binding = this.binding;
@@ -485,9 +298,6 @@ export class HomeMemory {
     return { memory: binding.memory };
   }
 
-  /** A store that closed, or a pump that blocked, between the state check above
-   * and this read: the tool answers for that state instead of throwing at the
-   * model. Anything else is a defect and is not swallowed. */
   private toolFailure(error: unknown): HomeMemoryToolResult {
     if (error instanceof EpisodicMemoryError) {
       return homeMemoryToolUnavailable(error.kind === "blocked" ? "memory-blocked" : "memory-unavailable");
@@ -505,8 +315,6 @@ export class HomeMemory {
     );
   }
 
-  /** The open binding, opening the store first when this is the first use.
-   * Callers hold the lock. */
   private async bindingForViewLocked(): Promise<MemoryBinding> {
     const binding = this.binding;
     if (binding) return binding;
@@ -519,9 +327,6 @@ export class HomeMemory {
     return await this.openStore(false);
   }
 
-  /** The canonical file, when the session already has one. A session exists
-   * before its first canonical line, so configuration recorded against one is
-   * held, not refused, and the store opens at the first activation. */
   private async hasCanonicalFile(): Promise<boolean> {
     const path = await this.options.sessionFile();
     if (!path) return false;
@@ -550,16 +355,10 @@ export class HomeMemory {
       throw error;
     }
     this.binding = { memory };
-    // A stored block outlives the process that wrote it, so a different model,
-    // the change that addresses an unreachable or refusing model, clears it here
-    // rather than waiting for the next commit to be refused. Nodes are durable,
-    // so re-opening re-spends nothing, and the resume does not wait for the pump:
-    // the caller is an operator command.
     if (modelChanged && memory.status().blocked !== null) await memory.resumeIngested();
     return this.binding;
   }
 
-  /** Close the store. Callers hold the lock. */
   private async closeLocked(): Promise<void> {
     const binding = this.binding;
     this.binding = undefined;
@@ -571,11 +370,6 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Why an ingest failed, as a code. Undefined for a store that a reconfiguration
- * closed: that race is not a failure. Only this reason is recorded: an episodic
- * failure's own message can name the canonical session path.
- */
 function homeMemoryIngestFailure(error: unknown): HomeMemoryIngestFailure | undefined {
   if (!(error instanceof EpisodicMemoryError)) return "unknown";
   if (error.kind === "closed") return undefined;

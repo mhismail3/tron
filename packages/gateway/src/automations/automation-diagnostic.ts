@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ModuleLog } from "../kernel/host/module-host.js";
 
-/** Keep scheduler attribution bounded and content-free, using the shared log schema. */
 export function logAutomationDiagnostic(
   logger: ModuleLog,
   message: string,

@@ -62,7 +62,6 @@ class CoreBlocksTest(unittest.TestCase):
                 packet = tron("packet", block)
                 self.assertEqual(packet.returncode, 0, packet.stderr)
                 rows = {line.split(" | ")[0][2:]: line for line in packet.stdout.splitlines() if line.startswith("| ")}
-                # The review row is verified against the reviewer's transcript in this machine's Pi session store.
                 self.assertRegex(rows["Independent review"], r"^\| Independent review \| ACCEPT by ", "review not verified here (transcript missing or stale)")
                 self.assertEqual((directory / "LAWS.md").read_text(), packet.stdout,
                                  f"LAWS.md is not the current packet: run scripts/tron proof packet {block} --write")
@@ -75,7 +74,6 @@ class CoreBlocksTest(unittest.TestCase):
                 self.assertEqual({law: review["laws"].get(law, {}).get("verdict") for law in laws}, {law: "ACCEPT" for law in laws})
                 facade = tron("facade", block, "--check")
                 self.assertEqual(facade.returncode, 0, facade.stdout + facade.stderr)
-                # Every block is cut over: its shell runs the compiled core.
                 self.assertRegex(rows["Cut over"], r"^\| Cut over \| the only implementation: ")
 
     def test_compiled_methods_reject_their_hand_mutants(self) -> None:
@@ -93,7 +91,6 @@ class CoreBlocksTest(unittest.TestCase):
                     (Path(tmp) / impl).write_text(text)
                     return tron("check", block, "--root", tmp, "--cache", str(Path(tmp) / "cache.json"))
 
-            # The control: an unchanged copy verifies, so a rejection below is the change's doing.
             control = checked(source)
             self.assertEqual(control.returncode, 0, control.stdout + control.stderr)
 
@@ -101,7 +98,6 @@ class CoreBlocksTest(unittest.TestCase):
                 if source.count(mutant["from"]) != 1:
                     return f"'{mutant['from']}' does not occur exactly once in {impl}"
                 check = checked(source.replace(mutant["from"], mutant["to"]))
-                # A verification error, not a change the compiler refuses.
                 if check.returncode == 1 and re.search(r"finished with \d+ verified, [1-9]\d* errors?", check.stdout + check.stderr):
                     return None
                 return f"'{mutant['from']}' -> '{mutant['to']}' was not rejected by the verifier:\n{(check.stdout + check.stderr)[-600:]}"

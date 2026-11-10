@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Behavioral check for the post-build manifest fingerprint rewrite.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"

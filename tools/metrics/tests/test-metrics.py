@@ -40,7 +40,7 @@ ARTIFACTS = ROOT / "test-results" / "metrics-cli"
 TOOL_FILES = ("scripts/tron", "tools/metrics/metrics.py", "tools/ownership/ownership.py",
               "tools/ownership/layout.py")
 DAY = 86400
-T0 = 1_700_000_000  # 2023-11-14: far from the wall clock, so clock anchoring fails loudly.
+T0 = 1_700_000_000
 
 
 def lines(count: int, prefix: str = "line") -> str:
@@ -171,7 +171,6 @@ class ClassificationTests(RepoCase):
             "packages/gateway/src/exactly-500.ts": lines(500),
             "packages/gateway/src/over-500.ts": lines(501),
             "packages/gateway/src/big.test.ts": lines(700),
-            # Git's binary probe reads only the first 8,000 bytes.
             "packages/gateway/src/late-nul.ts": "a" * 8000 + "\n\0\n",
         }
         for relative in self.EXPECTED:
@@ -181,7 +180,7 @@ class ClassificationTests(RepoCase):
         os.symlink("guide.md", self.repo.path / "docs/link.md")
         self.repo.git("add", "-A")
         self.repo.git("update-index", "--add", "--cacheinfo", f"160000,{'1' * 40},vendor/sub")
-        self.repo.git("commit", "-q", "-m", "fixture", date=T0)  # `add -A` would drop the gitlink.
+        self.repo.git("commit", "-q", "-m", "fixture", date=T0)
         self.sha = self.repo.git("rev-parse", "HEAD")
         self.result = self.measure()
         self.data = json.loads(self.repo.output(self.sha).read_text())
@@ -278,10 +277,8 @@ class HotspotTests(RepoCase):
         self.repo.git("checkout", "-q", "-b", "side")
         self.touch("s1", T0 - 10 * DAY, "f10")
         self.repo.git("checkout", "-q", "main")
-        # The merge's own first-parent diff touches f10 again; merges must not count.
         self.repo.git("merge", "-q", "--no-ff", "-m", "merge side", "side", date=T0 - 2 * DAY)
         head = self.touch("c5", T0, "f11")
-        # Clock skew: a child dated before its parent leaves the parent out of its window.
         skewed = self.touch("skewed", T0 - 40 * DAY, "f12")
         self.repo.git("checkout", "-q", "-b", "stale", c3)
         self.touch("stale-side", T0 - 100 * DAY, "f13")
@@ -377,7 +374,7 @@ class HealthTests(RepoCase):
             r.write(f"mods/{name}/{name}.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
         r.write("mods/b/quiet.ts", lines(20))
         r.commit("start", T0)
-        for day in range(1, 7):  # the hub is large and co-changes with module b, mostly in fixes
+        for day in range(1, 7):
             r.write("mods/a/hub.ts", lines(3000, f"v{day}"))
             r.write("mods/b/edge.ts", f"edge {day}\n")
             r.commit("fix: hub and edge" if day % 2 else "feat: hub and edge", T0 + day * DAY)
@@ -423,7 +420,6 @@ class HealthTests(RepoCase):
                                 env={**r.env, "PATH": f"{bin_dir}:{r.env['PATH']}"}, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
-        # "install" is not a stall: three reds, one fixed in production, one only in tests, one never named.
         self.assertIn("O4 red or flake issues opened: 3; a commit naming it changed production code 0.333, "
                       "only non-production paths 0.333, no naming commit 0.333", result.stdout)
         self.assertIn("O1 kind:bug issues opened: 2", result.stdout)

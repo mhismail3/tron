@@ -1,26 +1,5 @@
 import { workspaceModule } from "../../workspace/workspace-module.js";
 import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
-/**
- * Tron Home's curated read-only research tools (#724), end to end: `web_search`,
- * `session_search`, `session_read`, `profile` and shared `read` registered by the
- * real Home and Pi modules, called by a faux model inside real
- * activations on a designated Home, with the request seam live and counted.
- *
- * Failure modes these cases exist for, written before the code they test:
- *  F1 a research tool call refuses its activation at the request seam
- *     (`context-mutated`, `projection-mismatch`, a nonce or digest failure);
- *  F2 an unbounded tool result enters the transcript (the memory projection's
- *     30,000-character cap must hold at the tool, not only at projection);
- *  F3 shared file paging or error semantics diverge from the worker's reader;
- *  F4 a Knowledge write action is reachable from Home;
- *  F5 `web_fetch` reaches a private destination (SSRF) or follows a redirect to
- *     one;
- *  F6 ordinary sessions gain research tools or the Home-only module;
- *  F7 a varying tool list or system prompt between activations (the cached
- *     prefix head must stay byte-identical).
- *
- * The retained artifact is `test-results/home-research-tools/report.json`.
- */
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -52,7 +31,6 @@ const MEMORY_PROVIDER = "tron-home-research-memory";
 const MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: "compactor" };
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
 const REPORT_PATH = "test-results/home-research-tools/report.json";
-/** A resolvable public address for the injected DNS seam. */
 const PUBLIC_ADDRESS = "93.184.216.34";
 
 const report: { generatedAt: string; cases: Array<Record<string, unknown>> } = {
@@ -85,8 +63,6 @@ function recordCase(name: string, data: Record<string, unknown>): void {
   report.cases.push({ name, ...data });
 }
 
-// ---- the injected web transport -------------------------------------------------
-
 const ARTICLE_BODY = "This is the research article body, written as a real paragraph with enough substance that readable-text extraction keeps it whole. ".repeat(4);
 const PAGE_HTML = `<html><head><title>Research Fixture Page</title></head><body><article><h1>Research Fixture Page</h1><p>${ARTICLE_BODY}</p></article></body></html>`;
 const HUGE_HTML = `<html><head><title>Huge</title></head><body><article><p>${"huge page text that keeps repeating so the result must be capped. ".repeat(3_000)}</p></article></body></html>`;
@@ -95,8 +71,6 @@ function htmlResponse(html: string): Response {
   return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
-/** One deterministic transport: no sockets, no real DNS. It records each fetched
- * URL so SSRF cases can prove the transport was never reached. */
 function webTransport() {
   const fetchedUrls: string[] = [];
   return {
@@ -123,8 +97,6 @@ function webTransport() {
     },
   };
 }
-
-// ---- the fixture ----------------------------------------------------------------
 
 type HomeSlot = Awaited<ReturnType<RuntimeRegistry["acquire"]>>;
 
@@ -190,7 +162,6 @@ async function fixture(
   await waitFor(() => hasCut() || undefined, "catalog cut", { boundMs: 30_000 });
   await registry.catalog("all");
 
-  // Real owners, installed the way gateway-main installs them.
   const store = new ProfileStore(registry.moduleHost.contract(workspaceModule));
   knowledge = store;
   const indexPath = join(tronHome, "gateway", "session-search.sqlite");
@@ -208,8 +179,6 @@ async function fixture(
     sessionId: designation.sessionId, slot,
   };
 }
-
-// ---- driving activations --------------------------------------------------------
 
 interface CapturedRequest { blob: string }
 
@@ -233,8 +202,6 @@ function toolResultsOf(request: CapturedRequest): ToolObservation[] {
 
 interface Step { name: string; args: ToolCall["arguments"] }
 
-/** Run one activation: one model step per tool call, then a closing reply, and
- * return the tool results the closing request carried. */
 async function toolAnswers(f: Fixture, input: string, steps: Step[]): Promise<ToolObservation[]> {
   f.faux.setResponses([
     ...steps.map((step) => async (context: { messages: Array<{ role: string }> }) => {
@@ -259,8 +226,6 @@ async function toolAnswers(f: Fixture, input: string, steps: Step[]): Promise<To
 function refusals(f: Fixture): HomeRequestRecord[] {
   return f.requestRecords.filter((record) => record.event === "refused");
 }
-
-// ---- the cases ------------------------------------------------------------------
 
 describe("Tron Home research tools", () => {
   async function sharedFixture(label: string, seedCanonical?: (agentDir: string, project: string) => Promise<void>) {
@@ -384,8 +349,6 @@ describe("Tron Home research tools", () => {
     const start = Date.now();
     const [partial] = await toolAnswers(f, "bounded read expansion", [{ name: "web_search", args: { op: "search", query: "deadline", depth: "fast", fetch: "top3" } }]);
     const elapsed = Date.now() - start;
-    // Whole Home turn around a 2000 ms tool deadline; the hung source waits 30 s. Disk-write load
-    // adds ~2-3 s outside the tool (#2274), so 10 s still proves the deadline without flaking.
     expect(elapsed).toBeLessThan(10_000);
     const bounded = JSON.parse(partial!.text);
     expect(bounded.status).toBe("partial"); expect(bounded.reason).toBe("timeout"); expect(partial!.isError).toBe(false);
@@ -411,8 +374,6 @@ describe("Tron Home research tools", () => {
     await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
     const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
     const f = await fixture("soft-error", undefined, undefined, {
-      // Keep the public-destination guard live; route only the transport to the
-      // owned local socket, never to a provider or private destination.
       resolveHost: async () => [PUBLIC_ADDRESS],
       fetcher: (_input, init) => fetch(endpoint, init),
       providerFetcher: (_input, init) => fetch(endpoint, init),
@@ -433,24 +394,20 @@ describe("Tron Home research tools", () => {
   it("runs web, search, Profile and trusted-file tools inside Home activations with zero seam refusals", async () => {
     const f = await fixture("all-tools");
 
-    // Profile remains active note storage. Source capture is no longer a tool.
     const { record: profileNote } = await f.store.createNote({ commandId: "seed-note-0001", record: {
       id: "profile-fixture", kind: "note", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [],
       content: { title: "Profile fixture note", body: "the profile fixture body", role: "fact", confirmed: true, tags: ["home-profile", "kind-fact"], profile: { version: 2, path: ["inferred", "review"] } },
     } });
 
-    // Seed another chat for session search, then release its runtime.
     const ordinary = await f.registry.create(f.project);
     await ordinary.setModel(PROVIDER, MODEL_ID);
     f.faux.setResponses([fauxAssistantMessage("ordinary reply about RESEARCH-NEEDLE-ALPHA")]);
     await ordinary.prompt("please remember RESEARCH-NEEDLE-ALPHA");
     await waitFor(() => (ordinary.snapshot().configurationBlocker === null) || undefined, "ordinary settled", { boundMs: 30_000 });
 
-    // A trusted-project file for the shared reader.
     const filePath = join(f.project, "notes.txt");
     await writeFile(filePath, Array.from({ length: 12 }, (_, i) => `line ${i + 1} of the trusted file`).join("\n"));
 
-    // F1: every tool, one activation each; the seam must never refuse.
     const [search] = await toolAnswers(f, "search the web", [{ name: "web_search", args: { op: "search", query: "alpha beta" } }]);
     expect(search!.isError).toBe(false);
     expect(search!.details).toMatchObject({ status: "ok", requestId: expect.any(String) });
@@ -474,8 +431,6 @@ describe("Tron Home research tools", () => {
         snippet: expect.stringContaining("RESEARCH-NEEDLE-ALPHA"),
       })]),
     });
-    // This is the real Home tool-result in the canonical session, not a UI
-    // fixture or a separately invented display model.
     const persistedSearch = (await readFile(f.slot.persistedSessionFile!, "utf8")).trim().split("\n")
       .map(line => JSON.parse(line))
       .findLast(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "session_search");
@@ -496,7 +451,6 @@ describe("Tron Home research tools", () => {
     const activations = f.requestRecords.filter((record) => record.event === "activation");
     expect(activations.length).toBeGreaterThanOrEqual(5);
 
-    // F7: the cached prefix head is byte-identical across activations.
     const systemOf = (request: CapturedRequest): string =>
       JSON.stringify((JSON.parse(request.blob) as Array<{ role: string }>).filter((message) => message.role === "system"));
     const heads = new Set(f.requests.map(systemOf));
@@ -512,14 +466,11 @@ describe("Tron Home research tools", () => {
   it("bounds shared web results, refuses SSRF, uses shared file semantics and cannot reach Knowledge writes", async () => {
     const f = await fixture("bounds");
 
-    // F2: the complete shared-tool JSON, including citations and diagnostics,
-    // stays inside the stronger UTF-8 byte cap and declares incomplete content.
     const [huge] = await toolAnswers(f, "fetch the huge page", [{ name: "web_search", args: { op: "read", url: "https://example.org/huge" } }]);
     expect(huge!.details).toMatchObject({ status: "partial" });
     expect(Buffer.byteLength(huge!.text, "utf8")).toBeLessThanOrEqual(8192);
     expect(JSON.parse(huge!.text).sources[0].truncated).toBe(true);
 
-    // F5: private destinations are refused before any transport use.
     const fetchedBefore = f.fetchedUrls.length;
     const [local, privateHost, redirected] = await toolAnswers(f, "try unsafe fetches", [
       { name: "web_search", args: { op: "read", url: "http://127.0.0.1/secret" } },
@@ -529,11 +480,8 @@ describe("Tron Home research tools", () => {
     expect(local!.details).toMatchObject({ status: "error", reason: "blocked" });
     expect(privateHost!.details).toMatchObject({ status: "error", reason: "blocked" });
     expect(redirected!.details).toMatchObject({ status: "error", reason: "blocked" });
-    // Only the redirecting hop itself was fetched; neither private target was.
     expect(f.fetchedUrls.slice(fetchedBefore)).toEqual(["https://example.org/redirect-private"]);
 
-    // Shared file tools are not a project sandbox. Resource trust still gates
-    // executable project resources; it does not create a second file reader.
     const localFile = join(f.root, "local.txt");
     await writeFile(localFile, "shared file content");
     const link = join(f.project, "linked.txt");
@@ -554,14 +502,12 @@ describe("Tron Home research tools", () => {
     expect(relative!.text).toContain("home workspace content");
     expect(missing!.isError).toBe(true);
 
-    // F4: the retired tool is absent, so no Knowledge operation can reach an owner.
     const context = await f.slot.context() as unknown as { availableTools: Array<{ name: string }> };
     expect(context.availableTools.map(tool => tool.name)).not.toContain("knowledge");
     const [write] = await toolAnswers(f, "try a knowledge write", [{ name: "knowledge", args: { action: "createNote", commandId: "evil-note-0001", title: "evil", scope: "personal" } }]);
     expect(write!.isError).toBe(true);
     expect((await f.store.list({ kind: "note" })).records.some(record => record.content.title === "evil")).toBe(false);
 
-    // None of these refusals is a seam refusal: the activation always completed.
     expect(refusals(f)).toEqual([]);
 
     recordCase("bounds-and-refusals", {
@@ -662,8 +608,6 @@ describe("Tron Home research tools", () => {
     ]);
     expect(search!.details).toMatchObject({ status: "ok", hits: [] });
     expect(homeOwnerOf(f.registry).isHomeChapter(f.sessionId)).toBe(true);
-    // A settled Home turn dirties the catalog too; it must not become a
-    // spurious omission when coverage is recomputed on the next search.
     const refreshed = await f.search.search({ query: "HOME-NATIVE-HISTORY-ONLY" });
     expect(refreshed.results).toEqual([]);
     expect(refreshed.coverage).toMatchObject({ sessionsTotal: 0, sessionsIndexed: 0, omittedSessions: 0, state: "complete" });
@@ -697,8 +641,6 @@ describe("Tron Home research tools", () => {
       if (!identity) throw new Error("fixture has no verified catalog identity");
       const old = await SessionSearchIndex.open(path);
       try {
-        // A real old-generation durable row, stamped with *unchanged* catalog
-        // facts. Only the derivation fence can make warm-up parse it again.
         await old.replace({ sessionId: "old-index-root", title: `OLD-INDEX-ORIGINAL ${secret}`, cwd: cut.summary.cwd,
           updatedAt: new Date().toISOString(), fileIdentity: identity.fileIdentity,
           branchDigest: createHash("sha256").update(JSON.stringify(cut.entries.slice(1))).digest("base64url"),
@@ -757,7 +699,6 @@ describe("Tron Home research tools", () => {
     const pending = f.search.search({ query: "PUBLICATION-RACE-NEEDLE" });
     try {
       await waitFor(() => started || undefined, "query ranking awaiting");
-      // Append through the one live SDK owner, not an independently opened file.
       const manager = (ordinary as unknown as { sessionManager: SessionManager }).sessionManager;
       manager.appendContextEdit(anchor.id, { content: [{ type: "text", text: "PUBLICATION-CURRENT-DECISION" }] });
     } finally { release(); await pending; }
@@ -776,8 +717,6 @@ describe("Tron Home research tools", () => {
   it("reads every exported source revision and citation through the existing Home file tool", async () => {
     const f = await fixture("plain-source-citation");
     const exported = join(f.project, "research");
-    // Exported sources are ordinary files, not a live converter or store. Seed
-    // two immutable editions and exercise the shipped Home reader through Pi.
     for (const revision of ["edition-one", "edition-two"]) {
       const directory = join(exported, "sources", "source", revision);
       await mkdir(directory, { recursive: true });
@@ -871,8 +810,6 @@ describe("Tron Home research tools", () => {
     const ordinary = await f.registry.create(f.project);
     await ordinary.setModel(PROVIDER, MODEL_ID);
     const secret = `sk-${"boundarycredential".repeat(3)}`;
-    // JSON's closing quote/brace put the shared 4K tail twenty characters
-    // into this credential. Redacting only the already-capped text leaks its suffix.
     const text = `${"p".repeat(50_000)} ${secret} ${"z".repeat(4_017 - secret.length)}`;
     f.faux.setResponses([
       fauxAssistantMessage(fauxToolCall("fixture_missing_tool", { text })),
@@ -925,8 +862,6 @@ describe("Tron Home research tools", () => {
       ].map(entry => JSON.stringify(entry)).join("\n") + "\n";
       await writeFile(join(directory, "reader-parent.jsonl"), source("reader-parent", "parent-entry", "PARENT-READABLE"));
       await writeFile(join(childDirectory, "session.jsonl"), source("reader-child", "child-entry", "CHILD-NOT-READABLE"));
-      // A valid anchor after an oversized neighbour proves full graph admission
-      // runs before projection/budgeting, not merely an anchor lookup failure.
       const oversizedId = "x".repeat(30_000);
       const invalid = source("reader-invalid-ids", oversizedId, "BAD-GRAPH-CONTENT") + JSON.stringify({
         type: "message", id: "graph-anchor", parentId: oversizedId, timestamp,
@@ -960,8 +895,6 @@ describe("Tron Home research tools", () => {
       extensions: Array<{ name: string }>;
     };
     const tools = context.availableTools.map((tool) => tool.name);
-    // F6: web is shared, while Home-only research registrations stay in Home.
-    // Retired Knowledge is absent in both Home and ordinary sessions.
     expect(tools).toContain("web_search");
     for (const name of ["web_fetch", "session_search", "session_read", "read_file"]) {
       expect(tools, `ordinary sessions must not register ${name}`).not.toContain(name);

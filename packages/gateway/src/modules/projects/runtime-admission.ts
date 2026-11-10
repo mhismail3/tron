@@ -2,10 +2,6 @@ import { GatewayError } from "../../errors.js";
 import type { ProjectRuntimePort } from "./project-lifecycle.js";
 
 interface RuntimeEntry { isDisposed: boolean; isBusy: boolean; projectDir: string; cwd: string }
-/** Read canonical runtime/task owners, not a copied worker index. The native
- * trust-reload fence remains the actual exclusion mechanism at effects. One
- * occupancy reads the Home task store once, so a listing of many folders asks
- * once instead of once per folder (and per page of task history). */
 export function projectRuntimePort(owners: () => {
   runtimeEntries(): ReadonlyArray<readonly [string, RuntimeEntry]>;
   reloadProject(path: string, trusted: boolean, publish: boolean): Promise<void>;

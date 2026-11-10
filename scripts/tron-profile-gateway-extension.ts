@@ -1,8 +1,4 @@
-// Faux model for scripts/tron-profile-gateway. The profiler copies this file
-// into the isolated fixture's agent extensions directory; it never loads into a
-// user Gateway. Each response is derived from the latest user directive and the
-// canonical context alone, so a reloaded or shared extension module cannot
-// desynchronize the workload, and every iteration streams identical content.
+// Faux model for scripts/tron-profile-gateway.
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
 
 const tokensPerSecond = Number(process.env.TRON_PROFILE_TOKENS_PER_SECOND ?? "80");
@@ -17,12 +13,10 @@ const faux = fauxProvider({
     name: "Tron Profile Model",
     reasoning: true,
     input: ["text", "image"],
-    // Large enough that the seeded transcript never triggers compaction.
     contextWindow: 4_000_000,
     maxTokens: 64_000,
   }],
   tokensPerSecond,
-  // Fixed chunk size keeps the delta cadence identical across iterations.
   tokenSize: { min: 4, max: 4 },
 });
 
@@ -51,7 +45,6 @@ function sentence(random: () => number): string {
   return `${text[0].toUpperCase()}${text.slice(1)}.`;
 }
 
-/** Deterministic Markdown of exactly `length` characters. */
 function markdown(length: number, seed: number): string {
   const random = generator(seed);
   const blocks: string[] = [];
@@ -128,7 +121,6 @@ function respond(context: { messages: readonly { role: string; content?: unknown
   throw new Error(`Unknown tron-profile scenario: ${directive.scenario}`);
 }
 
-// Re-arm on every call: the queue never drains however many turns a run takes.
 function step(context: { messages: readonly { role: string; content?: unknown }[] }) {
   faux.appendResponses([step]);
   return respond(context);

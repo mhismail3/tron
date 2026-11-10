@@ -1,8 +1,5 @@
 import type { RuntimeSlot } from "../../kernel/run/runtime-slot.js";
 
-/** The executable ceiling and unconfigured tool selection for Home's isolated
- * runtime. Shared by runtime admission and settings declarations: ordinary Mac
- * tool defaults cannot grant or remove Home's curated capabilities. */
 export const HOME_TOOL_NAMES: readonly string[] = [
   "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "schedule", "profile", "obligation",
   "web_search", "session_search", "session_read", "settings", "projects",
@@ -11,14 +8,10 @@ export const HOME_TOOL_NAMES: readonly string[] = [
 
 const MUTATING_GENERAL_TOOLS = new Set(["write", "edit", "bash"]);
 
-/** Only a canonical maintainer activation admits general file/shell mutations.
- * Existing Home capabilities retain their own grants and approval boundaries. */
 export function homeToolAvailable(name: string, kind: "user" | "wake" | undefined): boolean {
   return HOME_TOOL_NAMES.includes(name) && (kind === "user" || !MUTATING_GENERAL_TOOLS.has(name));
 }
 
-/** Select descriptions from the first native lineage member, never loading a
- * runtime for this read. Native map keys/order, not chapter order, govern it. */
 export function homeToolCatalog(
   runtimes: ReadonlyArray<readonly [string, Pick<RuntimeSlot, "isDisposed" | "settingsToolCatalog">]>,
   isLineageMember: (sessionId: string) => boolean,

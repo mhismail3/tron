@@ -104,7 +104,6 @@ async function awaitWhileClientConnected<T>(operation: Promise<T>, signal?: Abor
   });
 }
 
-/** Advertised when `settings.resolve` serves the settings model (docs/settings-model.md). */
 const SETTINGS_MODEL_CAPABILITY = "settings-model.v1";
 
 function settingsTarget(raw: unknown): SettingsTarget {
@@ -116,8 +115,6 @@ function settingsTarget(raw: unknown): SettingsTarget {
   return { kind };
 }
 
-/** The session a receipt-backed mutation works on: its `sessionId`, or a
- * `settings.change` session target, so the work entry is the session's. */
 function mutationSessionId(params: Record<string, unknown>): string | undefined {
   if (typeof params.sessionId === "string") return params.sessionId;
   const target = params.target;
@@ -135,8 +132,6 @@ function settingsQualifiers(raw: unknown, label: string): Qualifiers {
   return qualifiers as Qualifiers;
 }
 
-/** One `home.profileChange` op, typed: only the maintainer's actions, each with the
- * revision he read, and nothing an action does not take. */
 function profileChangeOp(raw: unknown, label: string): HomeProfileRequest {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new GatewayError("invalid_request", `${label} must be an object`);
   const value = raw as Record<string, unknown>;
@@ -193,8 +188,6 @@ function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
   };
 }
 
-/** The controls a client names with `settings.resolve` (doc 7.5). Its version is
- * checked, and the response names the version this Gateway speaks. */
 function settingsRendererControls(raw: unknown): string[] {
   const renderer = object(raw, "renderer");
   rejectUnknownFields(renderer, ["version", "controls"], "renderer");
@@ -241,21 +234,13 @@ const restartDrainMethods = new Set([
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
 ]);
 
-/** One session export at a time (`G-12`): an export streams a whole transcript
- * through the loop and the disk, so a second concurrent one halves the speed of
- * both while doubling what the host holds. */
 const MAXIMUM_CONCURRENT_SESSION_EXPORTS = 1;
-/** Two workspace inspections at once (`G-12`): each spawns git or walks a
- * directory tree, and a client can ask for several while scrolling; the rest
- * wait their turn instead of competing for the same disk. */
 const MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS = 2;
 
 export interface ClientContext {
   id: string;
   identity: string;
   isLocal: boolean;
-  /** Aborts disposable reads when this exact socket disconnects. Accepted
-   * mutations retain their existing durable ownership and do not consume it. */
   signal?: AbortSignal;
   beginSynchronization(sessionId: string): string;
   establishSynchronization(sessionId: string, snapshot: import("../protocol/types.js").SessionSnapshot): void;
@@ -267,13 +252,10 @@ export interface ClientContext {
     visible: boolean,
   ): { visible: boolean; revision: number };
   unsubscribe(sessionId: string, subscriptionToken?: string): boolean;
-  /** Request-scoped observer/authority fences supplied by GatewayServer. */
   isSubscribed(sessionId: string): boolean;
   isRevoked(): boolean;
   revokeDevice(deviceId: string): void;
-  /** Current exact subscription token for a connection-owned presentation. */
   subscriptionToken?(sessionId: string): string | undefined;
-  /** Direct connection-local event delivery for opaque read-only leases. */
   sendEvent?(topic: string, sessionId: string, payload: JsonValue): void;
 }
 
@@ -288,37 +270,26 @@ export interface GatewayServiceDependencies {
   gitWorktrees?: GitWorktreeService;
   uploads: UploadStore;
   trust: TrustService;
-  /** The settings model's resolver (docs/settings-model.md). */
   settingsModel: SettingsModel<SettingsStoreAdapter>;
-  /** The settings model's one change path, with its record. */
   settingsChanges: SettingsChangePath;
-  /** Mac Terminal's enrollment facts (security/mac-terminal.ts); absent in a
-   * Gateway that owns no ~/.ssh. */
   macTerminal?: Pick<MacTerminalService, "status">;
   modelConfig: ModelConfigService;
   packages: PackageService;
-  /** Session-free hook listings for a scope; never opens or registers a session. */
   hookResources: HookResources;
   auth: AuthBroker;
   globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot">;
-  /** Configured only by the LaunchAgent-owned update helper; never from RPC params. */
   updateService?: GatewayUpdateService;
-  /** Fixed LocalDevice installer; source and CoreDevice identity never come from install RPC params. */
   iosDeviceInstallService?: IosDeviceInstallService;
   logger: GatewayLogger;
   receipts: CommandReceiptStore;
   requestRestart: (restartNow?: boolean) => void;
-  /** Drain-owned intentional shutdown; the process owner chooses the non-relaunch exit policy. */
   requestStop: () => void;
   broadcast: (topic: string, payload: JsonValue) => void;
   notifications?: NotificationService;
   workRegistry?: GatewayWorkRegistry;
   automations?: AutomationService;
   knowledge?: ProfileStore;
-  /** Generic account-envelope owner. Provider progress/evidence remains with its adapter. */
-  /** Tron Home's designation owner; absent only in a Gateway without one. */
   home?: HomeOwner;
-  /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
   mcpAdmin?: McpAdminService;
 }
@@ -337,8 +308,6 @@ export class GatewayService {
   private readonly workspaceInspector: WorkspaceInspectionService;
   private readonly providerUsage: ProviderUsageOwner;
   private readonly modelReleaseDates: ModelReleaseDateCatalog;
-  /** The named caps that queue rather than refuse (`G-12`); an admitted
-   * mutation or prompt is never behind them. */
   private readonly exportGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_SESSION_EXPORTS);
   private readonly workspaceGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS);
 
@@ -359,8 +328,6 @@ export class GatewayService {
         resumeTask: async (input: { taskId: string; operationId: string; text: string }) => {
           const status = await home.status();
           if (!status.sessionId) throw new GatewayError("conflict", "Home has no session for grant review");
-          // The card belongs to Home, not the stopped worker: its response receipt
-          // must not occupy the worker session that this continuation acquires.
           const slot = await dependencies.sessions.acquire(status.sessionId);
           return safeJson(await home.resumeTask(input, undefined, undefined, [], { confirm: (review, apply) => slot.requestChange({ review, apply }) }));
         },
@@ -389,12 +356,9 @@ export class GatewayService {
       },
       ...(this.workRegistry ? { workRegistry: this.workRegistry } : {}),
     });
-    // One observer for every actor's changes: the iPhone's RPCs and the agents'
-    // `settings` tool reach the same after-apply effects, broadcasts and pushes.
     dependencies.settingsChanges?.observe({
       applied: (target, changes, context) => this.settingsChanged(target, changes, context),
     });
-    // Outside changes reach the same after-apply effects and broadcast, one store at a time.
     dependencies.settingsModel?.owner.outsideChanges?.observe({
       outside: async (entries) => {
         const outside = entries.filter(entry => entry.status === "outside" && !recordSubject(entry.key));
@@ -414,10 +378,6 @@ export class GatewayService {
     });
   }
 
-  /** MCP servers and custom model providers changed outside Tron (doc 5.6): their
-   * own owners serve them, so the record, the push by floor and the owners'
-   * refresh events stand in for a settings row. MCP definitions load at the next
-   * reload or chat, and custom models at the next Gateway start, as for Tron's own edits. */
   private recordSubjectsChangedOutside(entries: readonly ChangeEntry[]): void {
     for (const file of new Set(entries.map(entry => entry.actor.id))) {
       const group = entries.filter(entry => entry.actor.id === file);
@@ -432,7 +392,6 @@ export class GatewayService {
     }
   }
 
-  /** Tron's own MCP and custom-model writes are Tron's, not outside changes. */
   private async asTronWrite<T>(stores: readonly ObservedStore[], write: () => Promise<T>): Promise<T> {
     const outside = this.dependencies.settingsModel?.owner.outsideChanges;
     return outside ? outside.adopt(stores, write) : write();
@@ -468,12 +427,6 @@ export class GatewayService {
     }
   }
 
-  /**
-   * Authoritative re-baseline for a subscriber whose synchronization
-   * quarantine overflowed while its open handshake completed. A fresh fitted
-   * snapshot converges the client without another full open handshake; clients
-   * that cannot admit a re-baseline fall back to their ordinary resync path.
-   */
   async recoverySnapshot(sessionId: string): Promise<import("../protocol/types.js").SessionSnapshot | undefined> {
     try {
       const slot = await this.dependencies.sessions.acquire(sessionId);
@@ -495,10 +448,6 @@ export class GatewayService {
       machineName: config.machineName,
       gatewayChannel: this.updateService.channel,
       ...runtimeIdentity(),
-      // A reconnecting phone compares this against the registration it
-      // acknowledged: the value changes whenever this Gateway's stored grants
-      // do, including when the relay disables a grant at runtime, which no
-      // event announces (G-7).
       ...(this.dependencies.notifications
         ? { pushRegistrationRevision: this.dependencies.notifications.registrationRevision }
         : {}),
@@ -616,8 +565,6 @@ export class GatewayService {
           return safeJson(method === "home.revokeTaskScope" ? await this.requireHome().revokeTaskScope(id) : await this.requireHome().revokeTaskGrant(id));
         });
       case "home.profileChange":
-        // The maintainer's learned-profile changes (docs/settings-model.md 6.4): typed ops
-        // through the one change path, as Home's profile tool, confirmed by his tap.
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "changes", "reason"], method);
           if (!this.dependencies.home) throw new GatewayError("unsupported", "Tron Home is not available on this Gateway");
@@ -661,9 +608,6 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "model"], method);
           const model = this.admitNamedHomeModel(params.model);
-          // The owner falls back to the recorded model when re-enabling an
-          // existing Home, and only a fresh session uses the default.
-          // The default is read before the owner's lock; only a fresh session uses it.
           const fallback = model ? undefined : await this.defaultHomeModel().then(value => ({ value }), (error: unknown) => ({ error }));
           return safeJson(await this.requireHome().designate(
             model ? { model } : {},
@@ -820,8 +764,6 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId"], method);
           await this.requireNoActiveIosDeviceInstall();
-          // A connected client speaks this Gateway's protocol; the orchestrator
-          // refuses a replacement that would strand it.
           return safeJson(await this.macReplace.start(PROTOCOL_VERSION));
         });
       case "mac.replace.complete":
@@ -922,8 +864,6 @@ export class GatewayService {
             await this.requirePairedDevice(deviceId);
             await this.requireNoActiveGatewayUpdate();
             return safeJson(await this.iosDeviceInstallService.install(deviceId, commandId, buildMode, async (name) => {
-              // Same identity lane as binding/revocation: a discovery result cannot
-              // rename a replacement binding or resurrect a revoked pairing.
               if (await this.dependencies.devices.updateObservedName(deviceId, name)) {
                 this.dependencies.broadcast("devices.changed", { deviceId });
               }
@@ -933,11 +873,6 @@ export class GatewayService {
       case "device.revoke": {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(deviceId, async () => {
-          // A revoked iPhone loses its Mac Terminal key too, through the same
-          // logged change path as a revocation from the Mac Terminal screen.
-          // The key goes first: if removing it fails, the device stays paired
-          // and the revoke can be retried, rather than a revoked iPhone keeping
-          // a working SSH key.
           if ((await this.dependencies.settingsModel?.owner.macTerminalKeys?.read())?.[deviceId] !== undefined) {
             await this.dependencies.settingsChanges.change({ kind: "global" }, [{
               key: "permissions.macTerminalKey", qualifiers: { device: deviceId }, layer: "global", op: "unset",
@@ -992,13 +927,9 @@ export class GatewayService {
         });
       case "push.registration.upsert":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
-        // Identical registrations are naturally idempotent and write nothing at
-        // all, so they are answered before the receipt owner opens one.
         const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented", "notifyWhenFinished", "notifyWhenWaiting"]);
         if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
         const notifications = this.requireNotifications();
-        // `commandId` stays required here so an unchanged registration is still
-        // addressed by the same command identity a retried request repeats.
         void string(params.commandId, "commandId", { min: 8, max: 160 });
         const input = {
           deviceId: client.identity,
@@ -1011,21 +942,9 @@ export class GatewayService {
           ...(params.notifyWhenFinished === undefined ? {} : { notifyWhenFinished: boolean(params.notifyWhenFinished, "notifyWhenFinished") }),
           ...(params.notifyWhenWaiting === undefined ? {} : { notifyWhenWaiting: boolean(params.notifyWhenWaiting, "notifyWhenWaiting") }),
         };
-        // An identical registration is naturally idempotent and writes nothing,
-        // not even a command receipt, so it is answered before the receipt owner
-        // opens one. This check is read-only and runs outside the identity lane,
-        // so it is not ordered with this device's lane operations: an identical
-        // upsert racing a remove or a revoke is answered from the snapshot the
-        // check read rather than from behind that lane mutation. It cannot bring
-        // a grant back — it only decides to skip the write — and a grant the
-        // relay disabled is still visible because the status is read after the
-        // decision.
         if (await notifications.registrationIsCurrent(input)) {
           return safeJson(await notifications.status(client.identity));
         }
-        // An admitted registration keeps the existing order: the per-device lane
-        // wraps the operation inside its receipt, so an accepted mutation is
-        // owned by the work registry before it waits for the lane.
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(client.identity, async () => {
           if (!await this.dependencies.devices.hasDevice(client.identity)) {
             throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
@@ -1073,7 +992,6 @@ export class GatewayService {
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain(workToken);
-            // Restart retains its established cancellation policy; intentional stop does not.
             this.dependencies.auth.cancelWaitingForRestart();
             this.dependencies.logger?.log(
               "info",
@@ -1091,7 +1009,6 @@ export class GatewayService {
             });
           }, restartNow || priorDrain.phase === "failed" || priorDrain.phase === "complete");
         } finally {
-          // The receipt must settle before the process owner can close its transport.
           if (ownsSchedule) {
             if (restartNow) this.dependencies.requestRestart(true);
             else setTimeout(this.dependencies.requestRestart, 100).unref();
@@ -1134,7 +1051,6 @@ export class GatewayService {
             });
           }, true);
         } finally {
-          // The receipt is durable before lifecycle retirement can close the socket.
           if (ownsSchedule) setImmediate(this.dependencies.requestStop);
         }
       }
@@ -1241,17 +1157,11 @@ export class GatewayService {
 
       case "session.list": {
         const scope = params.scope === undefined ? "user" : oneOf(params.scope, "scope", ["user", "all"] as const);
-        // `exclude` is the dashboard projection; archived rows are then absent
-        // from every page of this traversal. `only` lists the archived rows.
         const archived = params.archived === undefined
           ? "exclude"
           : oneOf(params.archived, "archived", ["exclude", "only"] as const);
         const cursor = optionalString(params.cursor, "cursor", 96);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);
-        // Conditional first page (G-7): a client that already holds this exact
-        // projection revalidates it without a row projection. A cursor
-        // traversal is already bound to the projection its first page admitted,
-        // so only an uncursored request may name one.
         const clientProjectionToken = optionalString(params.projectionToken, "projectionToken", 512);
         this.requireObserverAdmission(client);
         if (cursor !== undefined) {
@@ -1271,9 +1181,6 @@ export class GatewayService {
             this.sessionListPages.releaseClient(client.id);
             throw new GatewayError("unauthenticated", "This device is no longer authorized");
           }
-          // The token covers structural identity, archive membership, the
-          // visible archived count and every mutable row overlay, so an equal
-          // token means the client's rows are still exactly this projection.
           return safeJson({
             sessions: [],
             listRevision: source.listRevision,
@@ -1351,30 +1258,16 @@ export class GatewayService {
       }
       case "session.open": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
-        // A cold open's runtime load is the most expensive disposable read the
-        // Gateway serves, so its wait is abandonable and checked before the
-        // snapshot is built. The registry's shared start is not abandoned with
-        // it: a retry (or another connection) joins the runtime load already in
-        // progress instead of starting a second one (`C-6`).
         const slot = await abortableRead(client.signal, () => this.dependencies.sessions.acquire(sessionId, client.signal));
-        // Join the exact canonical completion barrier before snapshotting. The
-        // response and completionRevision therefore describe one admitted cut.
         await abortableRead(client.signal, () => slot.reconcileAttention());
         client.signal?.throwIfAborted();
-        // Acquire can overlap a canonical fork rekey. From this synchronous
-        // boundary onward, use the slot's admitted identity for subscription,
-        // snapshot, and attention so one response cannot mix parent and child.
         const canonicalSessionId = slot.id;
         const syncToken = client.beginSynchronization(canonicalSessionId);
-        // The request span measures acquire, the snapshot build and the response
-        // serialization; a slow open needs no record of its own.
         const snapshot = slot.snapshot();
         if (snapshot.sessionId !== canonicalSessionId) {
           throw new GatewayError("conflict", "Session identity changed while opening", true);
         }
         client.establishSynchronization(canonicalSessionId, snapshot);
-        // Sanitizing the response is real request work over the whole snapshot;
-        // the span names it instead of leaving it in `unaccountedMs`.
         return stage("response.encode", () => safeJson({
           session: snapshot,
           syncToken,
@@ -1417,7 +1310,6 @@ export class GatewayService {
         return { synchronized: true };
       }
       case "session.transcript": {
-        // Validate the shape here; openedSlot resolves the session itself.
         string(params.sessionId, "sessionId", { max: 200 });
         const before = params.before === undefined
           ? undefined
@@ -1431,8 +1323,6 @@ export class GatewayService {
         const expectedRuntimeGeneration = optionalString(params.expectedRuntimeGeneration, "expectedRuntimeGeneration", 200);
         const expectedLeafEntryId = optionalString(params.expectedLeafEntryId, "expectedLeafEntryId", 200);
         const slot = await this.openedSlot(client, params);
-        // Paging is a bounded read for an already-open presentation. It must
-        // never create or revive event-subscription ownership after a close.
         return safeJson(after !== undefined
           ? slot.transcriptPageAfter(after, expectedPreviousEntryId, expectedRuntimeGeneration, expectedLeafEntryId)
           : slot.transcriptPage(before, expectedNextEntryId, expectedRuntimeGeneration, expectedLeafEntryId));
@@ -1475,9 +1365,6 @@ export class GatewayService {
         if (client.subscriptionToken?.(sessionId) !== parentSubscriptionToken) {
           throw new GatewayError("conflict", "Parent session presentation is not current", true);
         }
-        // Install connection/viewer ownership before openedSlot, reconciliation,
-        // or any other await. Disconnect and cancellation therefore retire the
-        // exact pending viewer instead of allowing a late open to orphan it.
         const reservation = this.processTranscriptLeases.reserveOpen(
           client.id, sessionId, viewerId, parentSubscriptionToken, client.signal,
         );
@@ -1532,8 +1419,6 @@ export class GatewayService {
         return { closed };
       }
       case "session.archive.set":
-        // Archive state is display state, so the receipt and the command ID are
-        // the whole admission: a replay returns the first authoritative result.
         return this.mutation(client, method, params, async (workToken) => {
           const sessionId = string(params.sessionId, "sessionId", { max: 200 });
           const archived = boolean(params.archived, "archived");
@@ -1559,8 +1444,6 @@ export class GatewayService {
           return { deleted: true };
         });
       case "home.prompt": {
-        // The logical route accepts the composer's whole prompt contract; the
-        // shared admission below validates it against the slot it resolves to.
         rejectUnknownFields(params, ["commandId", "text", "uploadIds", "behavior", "resourceInvocations"], method);
         let binding: CommandReceiptBinding | undefined;
         return this.mutation(client, method, params, async () => {
@@ -1594,8 +1477,6 @@ export class GatewayService {
         });
       }
       case "session.prompt": {
-        // Pin before receipt I/O, but defer rejection to its operation callback:
-        // an existing receipt remains readable without a live subscription.
         const releaseSession = typeof params.sessionId === "string" && client.isSubscribed(params.sessionId)
           ? this.dependencies.sessions.retainLiveSession(params.sessionId) : undefined;
         return this.mutation(client, method, params, async (workToken) => {
@@ -1650,8 +1531,6 @@ export class GatewayService {
           ));
         }, true);
       case "session.bash":
-        // The idle checks below exclude this request's own work entry, which
-        // every receipt-backed mutation holds for its whole operation.
         return this.mutation(client, method, params, async (workToken) => (await this.openedSlot(client, params)).executeBash(
           string(params.command, "command", { max: 100_000 }),
           params.excludeFromContext === undefined ? false : boolean(params.excludeFromContext, "excludeFromContext"),
@@ -1728,8 +1607,6 @@ export class GatewayService {
         return safeJson(await (await this.openedSlot(client, params)).subagentDetail(string(params.name, "name", { max: 8_192 })));
       case "session.export": {
         const slot = await this.openedSlot(client, params);
-        // A queued export whose client left is dropped before it starts: the
-        // export is a read nobody would receive (`G-12`).
         return safeJson(await this.exportGate.run(
           client.signal,
           () => slot.export(oneOf(params.format, "format", ["html", "jsonl"] as const)),
@@ -1933,8 +1810,6 @@ export class GatewayService {
           const target = await this.canonicalSettingsTarget(params.target);
           if (!Array.isArray(params.changes)) throw new GatewayError("invalid_request", "changes must be an array");
           const changes = params.changes.map((raw, index) => settingsChangeRequest(raw, `changes[${index}]`));
-          // An iPhone enrolls only its own Mac Terminal key, so revoking a
-          // device always finds and removes the key that device can use.
           if (changes.some(change => change.key === "permissions.macTerminalKey" && change.op === "set"
             && change.qualifiers?.device !== client.identity)) {
             throw new GatewayError("invalid_request", "An iPhone can enroll only its own Mac Terminal key");
@@ -1971,8 +1846,6 @@ export class GatewayService {
           return safeJson(result);
         });
       case "settings.applyAgain":
-        // Apply again is offered on an outside change that replaced or removed a
-        // value Tron wrote (docs/settings-model.md 5.6); it is never automatic.
         return this.mutation(client, method, params, async workToken => {
           rejectUnknownFields(params, ["commandId", "changeId"], method);
           const changeId = string(params.changeId, "changeId", { max: 100 });
@@ -2009,8 +1882,6 @@ export class GatewayService {
       }
       case "hooks.list":
         rejectUnknownFields(params, ["cwd"], "Hook listing");
-        // Absent cwd lists the global scope only. Loading project extensions is
-        // the hook owner's decision under the canonical project trust state.
         return safeJson(await this.dependencies.hookResources.list(optionalString(params.cwd, "cwd", 4_096)));
       case "packages.checkUpdates":
         rejectUnknownFields(params, ["cwd"], "Package update check");
@@ -2174,8 +2045,6 @@ export class GatewayService {
     if (!release) throw new GatewayError("busy", "Session runtime is no longer available", true);
   }
 
-  /** A session target's settings source from the chat the client subscribed to: its
-   * cwd, Home flag, Session scope and model runtime. Other targets read no session. */
   private async readSettingsSession(client: ClientContext, target: SettingsTarget): Promise<SessionSettingsSource | undefined> {
     if (target.kind !== "session") return undefined;
     const slot = await this.openedSlot(client, { sessionId: target.sessionId });
@@ -2188,9 +2057,6 @@ export class GatewayService {
     return target;
   }
 
-  /** A session target's Session scope and its slot-lane appliers. The fence is the
-   * runtime the client read (and its model or revision); the lane guards stay.
-   * An applier's missing fence refuses before planning, dry run too (#1642). */
   private async settingsSession(slot: RuntimeSlot, rawFence: unknown, changes: ReadonlyArray<Pick<ChangeRequest, "key" | "layer">>, workToken?: string): Promise<SessionSettingsSource & { appliers: SessionAppliers }> {
     const fence = rawFence === undefined ? undefined : object(rawFence, "fence");
     if (fence) rejectUnknownFields(fence, ["runtimeGeneration", "model", "revision"], "fence");
@@ -2210,14 +2076,11 @@ export class GatewayService {
         },
         setTools: (tools, fixedAt) => slot.setTools(tools, workToken, fixedAt),
         setSetting: (key, value, allowFixedDirection, fixedAt) => slot.setChatRunSetting(key, value, workToken, expectation(), allowFixedDirection, fixedAt),
-        // A running Home task worker hears the maintainer's change, an approval or an undo (#1336).
         announce: (notice) => slot.announceSettingsChange(notice),
       },
     };
   }
 
-  /** The enabled Home's runtime boundary holds its lane before any recipe
-   * publication, including through the operational SDK adoption. */
   private async settingsHomeChapter(workToken?: string): Promise<ChangeContext["homeChapter"]> {
     const home = this.dependencies.home;
     let open: ReturnType<HomeOwner["open"]>;
@@ -2227,19 +2090,12 @@ export class GatewayService {
     return slot.homeSettingsChapter(workToken);
   }
 
-  /** After-apply effects by each key's effect point, then the broadcast (doc 5.2
-   * step 6), and for a notify-tier change an agent made, the push with Undo (5.4). */
   private async settingsChanged(target: SettingsTarget, changes: readonly ChangeOutcome[], context: { actor: Actor; reason?: string }): Promise<void> {
     if (changes.length === 0) return;
-    // Project-layer effects address every live chat of the changed store's
-    // Project root (TrustInspection.projectDir), not only chats at one cwd; a chat
-    // target's project layer is its own root.
     const projectDir = target.kind === "project" ? (await this.dependencies.trust.inspect(target.cwd)).projectDir
       : target.kind === "session" && changes.some(change => change.layer === "project")
         ? (await this.slot({ sessionId: target.sessionId })).projectDir : undefined;
     if (changes.some(change => change.key === "context.images.block")) {
-      // A chat/Home requester can edit a default layer. Scope follows the
-      // changed store, not the target through which the request arrived.
       const imageLayers = new Set(changes.filter(change => change.key === "context.images.block").map(change => change.layer));
       for (const layer of imageLayers) {
         if (layer !== "global" && layer !== "project") continue;
@@ -2256,7 +2112,6 @@ export class GatewayService {
       }
     }
     for (const change of changes) {
-      // A record subject (a profile item) has no after-apply effect of its own.
       const key = this.dependencies.settingsModel.schema.KEYS.find(candidate => candidate.id === change.key);
       if (!key) continue;
       if (key.effect === "reload" && change.layer === "global" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
@@ -2268,7 +2123,6 @@ export class GatewayService {
       changeIds: changes.map(change => change.changeId), keys: [...new Set(changes.map(change => change.key))],
       layer: changes[0]!.layer, target,
     }));
-    // `trust.changed` carries the resulting trust inspection, as trust's own event.
     for (const change of changes) {
       if (change.key === "permissions.projectTrust" && change.result !== undefined) this.dependencies.broadcast("trust.changed", safeJson(change.result));
     }
@@ -2284,11 +2138,6 @@ export class GatewayService {
     return { runtimeGeneration, model };
   }
 
-  /** The composer's prompt admission, shared by `session.prompt` and
-   * `home.prompt`. A logical Home route accepts exactly the physical prompt
-   * contract: text, attachments, resource invocations and steering behavior are
-   * all validated against the slot the prompt will run in, before any attachment
-   * is materialized. */
   private async admitPrompt(slot: RuntimeSlot, params: Record<string, unknown>, workToken?: string): Promise<{ operationId: string }> {
     if (params.text !== undefined && typeof params.text !== "string") {
       throw new GatewayError("invalid_request", "text must be a string");
@@ -2304,27 +2153,18 @@ export class GatewayService {
     if (extensionCommand !== undefined && uploadIds.length > 0) {
       throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
     }
-    // Rejected before any attachment is materialized; the runtime rechecks in its lane.
     if (resourceInvocations !== undefined) slot.assertInvocableResources(resourceInvocations);
     if (slot.homeTaskWorkerState === "settled") {
-      // A message to a Home worker whose task stopped or settled continues that task in place
-      // (#929): same session and worktree, with this message as its instruction.
       if (resourceInvocations !== undefined) {
         throw new GatewayError("invalid_request", "A stopped Home worker continues from a message, not a command");
       }
-      // Attachments (for example the screenshots a stopped worker asked for) go with the
-      // resume instruction; the brief carries their text envelope, the first turn their images.
       const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
-      // This request's own work entry must not count as the session being busy.
       const resumed = await this.requireHome().resumeWorkerSession(slot.id,
         [text, attachments.envelope].filter(Boolean).join("\n\n"), workToken, attachments.images, string(params.commandId, "commandId", { min: 8, max: 160 }));
-      // A resume names its worker operation even while it waits for a running-worker slot (#959).
       return { operationId: resumed.operationId };
     }
     const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
     const visiblePrompt = [text, attachments.envelope].filter(Boolean).join("\n\n");
-    // An extension command is Pi's literal command text. Skills and prompts are
-    // composed with the visible prompt by the runtime, inside its lane.
     const prompt = extensionCommand === undefined
       ? visiblePrompt
       : `/${extensionCommand.name}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
@@ -2392,9 +2232,6 @@ export class GatewayService {
     return this.dependencies.home;
   }
 
-  /** Admit the model a request named, or undefined when it named none. A
-   * virtual model is refused here because Home must not route on the canonical
-   * transcript. */
   private admitNamedHomeModel(input: unknown): ModelRef | undefined {
     if (input === undefined || input === null) return undefined;
     const model = object(input, "model");
@@ -2407,9 +2244,7 @@ export class GatewayService {
     );
   }
 
-  /** This Gateway's default model for a new session, admitted the same way. */
   private async defaultHomeModel(): Promise<ModelRef> {
-    // The Global scope's default model through the one resolver.
     const resolution = await this.dependencies.settingsModel.resolve({ kind: "global" }, undefined, ["model.ref[role=chat]"], { storeState: false });
     const fallback = resolution.keys.find(key => key.key === "model.ref[role=chat]")?.value as ModelRef | undefined;
     if (!fallback) throw new GatewayError("invalid_request", "Tron Home needs a model: set a default model or name one");
@@ -2460,9 +2295,6 @@ export class GatewayService {
     resolveBinding?: () => CommandReceiptBinding | Promise<CommandReceiptBinding>,
   ): Promise<JsonValue> {
     const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
-    // The entry spans the whole receipt-backed operation (a compaction or a
-    // branch summary can take minutes), so the drain names it as a request
-    // with its method rather than as receipt persistence.
     const admission = {
       kind: "rpc-mutation" as const,
       method,
@@ -2476,10 +2308,6 @@ export class GatewayService {
       : undefined;
     let completionOwnsWork = false;
     try {
-      // The operation is the part that waits away from the loop (a shell command,
-      // a compaction, a model, a package install), so it runs off the request's
-      // share of the loop: a background slice must not be paused for a request
-      // whose loop is idle for minutes.
       const result = await this.dependencies.receipts.execute(
         client.identity,
         method,
@@ -2571,11 +2399,7 @@ export class GatewayService {
         catch (error) { if (signal?.aborted) throw error; return []; }
       }))).flat().map((model) => `${model.provider}\0${model.id}`));
       const projected = await Promise.all(modelRuntime.getModels().map(async (model) => {
-        // Undated models simply omit the field; the picker's provider sections
-        // list them without a release date.
         const releaseDate = await this.modelReleaseDates.modelReleaseDate(model.provider, model.id);
-        // USD per million tokens. An all-zero SDK price means "unset", not free,
-        // so it is omitted and the picker shows no price.
         const priced = model.cost.input > 0 || model.cost.output > 0;
         return {
           provider: model.provider,
@@ -2587,8 +2411,6 @@ export class GatewayService {
           contextWindow: model.contextWindow,
           contextWindowLimits: contextWindowLimits(model),
           maxTokens: model.maxTokens,
-          // The owner is checked directly as well: an extension contribution that
-          // re-registers openai/openai-codex replaces the SDK filter decoration.
           available: available.has(`${model.provider}\0${model.id}`)
             && (openAIModelEligibility(modelRuntime)?.isEligibleInRuntime(modelRuntime, model.provider, model.id) ?? true),
           ...(releaseDate === undefined ? {} : { releaseDate }),

@@ -5,20 +5,6 @@ import { expect, it } from "vitest";
 import { recordFixed } from "../../test-support/fixed-recording.js";
 import { CORPUS_STORES, TRON_CORPUS_HOME, directories, fileDigests, prepareHome, stageCorpus } from "../../test-support/tron-store-corpus.js";
 
-/**
- * Records the persisted-store corpus (`npm run record:tron-corpus`, #1465): every
- * store in `CORPUS_STORES` is written by its real owner into a fresh Tron home, which then
- * replaces `test-fixtures/tron-corpus/home`. The data is synthetic and the home
- * contains no credentials beyond the generated device-token hashes.
- *
- * `TRON_CORPUS_STORES=<lock>,<lock>` re-records only the named stores over the
- * committed home and proves every other store's bytes unchanged, so adding or
- * extending one store does not churn every golden.
- *
- * Re-recording is a behavior event for review: store locks compare against the
- * committed corpus, so a new corpus is only committed with the change that needs it
- * (a migration slice records the old corpus first).
- */
 it("records every listed store with its current owner", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-store-corpus-record-"));
   const home = join(root, "home");
@@ -38,7 +24,6 @@ it("records every listed store with its current owner", async () => {
     } else {
       await prepareHome(home);
     }
-    // A fixed clock and counted ids: recording a store again writes the same bytes.
     for (const store of recorded) await recordFixed(() => store.record(home));
     if (named.length) {
       const after = await fileDigests(home);
@@ -46,7 +31,6 @@ it("records every listed store with its current owner", async () => {
         && !recorded.some((store) => ownedBy(path, store)));
       expect(changed, "re-recording named stores changes no other store's bytes").toEqual([]);
     }
-    // Nothing the recorder leaves behind may be machine- or user-specific.
     const digests = await fileDigests(home);
     for (const path of Object.keys(digests)) {
       const text = await readFile(join(home, path), "utf8").catch(() => "");

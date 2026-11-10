@@ -8,8 +8,6 @@ export const registration = {
 };
 type Command = { id: number; method: string; params?: Record<string, unknown>; sessionId?: string };
 
-/** Protocol peer, not a substitute observer: replies use correlated CDP IDs and
- * real JPEG bytes. Tests control missing/error replies and visibility changes. */
 export class BrowserSocket extends EventEmitter {
   readyState = 0;
   commands: Command[] = [];

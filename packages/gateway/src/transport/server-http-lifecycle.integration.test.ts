@@ -14,25 +14,6 @@ import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUE
 import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
-// Failure modes this file exists to catch (real sockets, real HTTP boundary):
-// 1. An upgrade that opens the write buffer and is deleted before hello
-//    leaves no record of how far into the Gateway it got.
-// 2. A refused upgrade is only visible in its own bound-specific record, so
-//    the phase it was refused at is lost.
-// 3. The upgrade record cannot be joined to the peer's records.
-// 4. A peer that leaves while authentication is pending is recorded as a
-//    request-phase refusal, which sends triage to Gateway readiness or
-//    admission instead of the abandoned credential wait.
-// 5. A handshake refused after authentication (a bad key or version, or
-//    extension negotiation) writes no upgrade record at all.
-// 6. A first frame that is not JSON, or a frame the WebSocket library itself
-//    refuses (an oversized payload), is recorded as an abandoned handshake
-//    instead of a refusal at hello.
-// 7. A close the Gateway itself starts — the hello deadline, shutdown before
-//    hello, a revocation or a supersession of a pre-hello socket — is recorded
-//    as the peer leaving (`reason=peer_closed`), so grouping by `reason` counts
-//    Gateway-side retirements as peer departures.
-
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   const failures: unknown[] = [];
@@ -63,12 +44,9 @@ async function fixture(maximumHttpRequests = 128) {
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
     service: { info: () => ({ protocolVersion: 8 }), releaseClient: vi.fn() } as any,
     logger: logger as any,
-    // Never the host's Tailscale CLI: only silence records read the path.
     peerPathReader: { lookup: async () => ({ peerPath: "unknown" as const, peerPathSource: "not-tailscale" as const, peerRelay: "" }) },
   });
   const serverSockets: Socket[] = [];
-  // Observe the actual transport terminal boundary, not a scheduling delay or
-  // a private admission counter that could agree with its own broken helper.
   (gateway as unknown as { server: Server }).server.on("connection", socket => serverSockets.push(socket));
   const clientSockets: Socket[] = [];
   cleanups.push(async () => {
@@ -110,7 +88,6 @@ interface LoggedRecord {
   fields: Record<string, unknown>;
 }
 
-/** Waits for one event record, which is written once its owning phase ends. */
 async function loggedRecord(f: Awaited<ReturnType<typeof fixture>>, event: string): Promise<LoggedRecord> {
   const call = await waitFor(
     () => f.logger.log.mock.calls.find((candidate) => candidate[2]?.event === event),
@@ -165,7 +142,6 @@ describe("HTTP pending-work ownership", () => {
     peer.on("error", () => {});
     cleanups.push(async () => { peer.terminate(); });
     await awaitsWithin(once(peer, "open"), "reset peer upgrade");
-    // Real TCP RST, not an emitted error or mocked ws callback.
     const raw = (peer as unknown as { _socket: Socket })._socket;
     raw.resetAndDestroy();
     const record = await loggedRecord(f, "connection.closed");
@@ -188,9 +164,6 @@ describe("HTTP pending-work ownership", () => {
     const [incoming] = await awaitsWithin(received, "incomplete body request admitted");
     expect(incoming.complete).toBe(false);
     const server = await waitFor(() => f.serverSockets[0], "accepted idle body socket");
-    // Cross Node's socket timeout event boundary without waiting thirty real
-    // seconds. The configured duration and the real request/response teardown
-    // remain covered; host scheduling speed is not the oracle.
     expect(HTTP_REQUEST_IDLE_TIMEOUT_MS).toBe(30_000);
     expect(listener.timeout).toBe(HTTP_REQUEST_IDLE_TIMEOUT_MS);
     expect(server.timeout).toBe(HTTP_REQUEST_IDLE_TIMEOUT_MS);
@@ -213,9 +186,6 @@ describe("HTTP pending-work ownership", () => {
     const server = await waitFor(() => f.serverSockets[0], "accepted deadline peer");
     const closed = new Promise<void>(resolve => server.once("close", () => resolve()));
     const response = capture(peer);
-    // Node's public clientError event carries ERR_HTTP_REQUEST_TIMEOUT for
-    // header and whole-request expiry. Keep native expiry/trickle coverage
-    // separately; this proves the Gateway's configured bounds and event path.
     listener.emit("clientError", Object.assign(new Error("Request timeout"), { code: "ERR_HTTP_REQUEST_TIMEOUT" }), server);
     expect(await response).toContain("HTTP/1.1 408 Request Timeout");
     await awaitsWithin(closed, "deadline peer closed after 408");
@@ -259,9 +229,6 @@ describe("HTTP pending-work ownership", () => {
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
     expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "peer_closed" });
-    // No hello arrived, so there is no peer key; helloMs is the time the
-    // attempt spent waiting in that phase before the socket went away. The
-    // connection ID joins this upgrade to its own `connection.closed` record.
     expect(record.fields).not.toHaveProperty("peerClientId");
     expect(typeof record.fields.helloMs).toBe("number");
     expect(typeof record.fields.authMs).toBe("number");
@@ -300,8 +267,6 @@ describe("HTTP pending-work ownership", () => {
     socket.destroy();
     await awaitsWithin(physicallyClosed, "abandoned upgrade socket close");
     const record = await loggedRecord(f, "http.upgrade");
-    // The peer reached the Mac and stopped in the credential wait, not at the
-    // request: `abandoned` sends triage to the peer, `request` would not.
     expect(record.level).toBe("warning");
     expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "auth", reason: "peer_closed" });
     expect(typeof record.fields.authMs).toBe("number");
@@ -315,8 +280,6 @@ describe("HTTP pending-work ownership", () => {
     socket.on("error", () => {});
     await awaitsWithin(once(socket, "connect"), "refused handshake connect");
     const response = capture(socket);
-    // Version 13 is the only one ws completes; anything else is `abortHandshake`
-    // with no callback, so only the trace can record the refusal.
     socket.write("GET /v1/socket HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 12\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer fixture\r\n\r\n");
     expect(await response).toContain("400");
     const record = await loggedRecord(f, "http.upgrade");
@@ -344,8 +307,6 @@ describe("HTTP pending-work ownership", () => {
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
     await awaitsWithin(once(peer, "open"), "upgrade open");
-    // Over the 16 KiB frame bound: the ws library refuses the frame itself and
-    // closes with 1009, which is a hello-phase refusal, not a peer departure.
     peer.send("x".repeat(20_000));
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
@@ -361,8 +322,6 @@ describe("HTTP pending-work ownership", () => {
     peer.on("error", () => {});
     await awaitsWithin(once(peer, "open"), "upgrade open");
     const closed = once(peer, "close");
-    // The device is revoked while its socket has not introduced itself: the
-    // Gateway ends the socket, so the record must name that, not the peer.
     f.gateway.disconnectDevice(phone.deviceId);
     await awaitsWithin(closed, "revoked socket close");
     const record = await loggedRecord(f, "http.upgrade");
@@ -381,17 +340,11 @@ describe("HTTP pending-work ownership", () => {
     peer.send(JSON.stringify({ type: "hello", protocolVersion }));
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
-    // The peer's version is what tells a stale phone build from a stale Gateway.
     expect(record.fields).toMatchObject({
       outcome: "rejected", phaseReached: "hello", reason: "protocol_mismatch", peerProtocolVersion: protocolVersion,
     });
-    // The frame was refused before it could name the peer.
     expect(record.fields).not.toHaveProperty("peerClientId");
     expect(typeof record.fields.helloMs).toBe("number");
-    // The refused peer only has the close itself to classify the ending: a
-    // generic transport failure retries a version mismatch forever, so the
-    // typed code and the version range are what let the phone name the build
-    // that must update (F-3).
     const [closeCode, closeReason] = await awaitsWithin(closed, "protocol mismatch close");
     expect(closeCode).toBe(PROTOCOL_MISMATCH_CLOSE_CODE);
     expect(JSON.parse(String(closeReason))).toEqual({
@@ -408,11 +361,7 @@ describe("HTTP pending-work ownership", () => {
     await awaitsWithin(once(peer, "connect"), "silent header peer connect");
     const server = await waitFor(() => f.serverSockets[0], "accepted header peer");
     const startedAt = process.hrtime.bigint();
-    // A plain listener: `once` would reject on the 408's own socket error.
     const closed = new Promise<void>((resolve) => server.once("close", () => resolve()));
-    // Read the response directly: `capture` carries a 12 s bound, shorter than
-    // the 15 s header deadline. The Gateway answers that deadline with a 408
-    // before closing; nothing is ever received from this peer.
     const response = new Promise<string>((resolve) => {
       let text = "";
       peer.on("data", (chunk: Buffer) => {
@@ -500,8 +449,6 @@ describe("HTTP pending-work ownership", () => {
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
     await awaitsWithin(once(peer, "open"), "upgrade open");
-    // The Gateway's own 5 s deadline closes a socket that never introduced
-    // itself; the peer did not leave, so `reason` must not say it did.
     await awaitsWithin(once(peer, "close"), "hello deadline close", 10_000);
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
@@ -539,8 +486,6 @@ describe("HTTP pending-work ownership", () => {
     await awaitsWithin(once(socket, "connect"), "pending upgrade connect");
     socket.write("GET /v1/socket HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer fixture\r\n\r\n");
     await awaitsWithin(authEntered.promise, "queued upgrade authentication");
-    // Shutdown destroys the socket while the credential is still unread; the
-    // peer is still there, so the record must not call it a peer close.
     await awaitsWithin(f.gateway.close(), "gateway close");
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "auth", reason: "shutting_down" });

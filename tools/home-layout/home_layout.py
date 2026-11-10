@@ -74,22 +74,17 @@ def validate(registry: dict, root: Path) -> list[str]:
     return problems
 
 
-# A Tron-home-relative literal: `.tron/<a>/<b>`, `".tron", "<a>"`, `".tron" / "<a>"`,
-# Swift `tronHome...appendingPathComponent("<a>"`, or `join(tronHome, "<a>", "<b>"`.
 LITERALS = [
     re.compile(r"\.tron/([\w.-]+)(?:/([\w.*-]+))?"),
     re.compile(r"""["']\.tron["']\s*[,/]\s*["']([\w.-]+)["'](?:\s*[,/]\s*["']([\w.*-]+)["'])?"""),
     re.compile(r'\b\w*[hH]ome\b[^\n]*?appendingPathComponent\(\s*"([\w.-]+)(?:/([\w.*-]+))?"'),
     re.compile(r"""\b(?:join|resolve)\(\s*[\w.]*(?:tronHome|tron_home|TRON_HOME|\bhome)\b[^,()]*,\s*["']([\w.-]+)["'](?:\s*,\s*["']([\w.*-]+)["'])?"""),
 ]
-# The last two patterns also match other homes (the user's, a bundle's): unless the
-# receiver names the Tron home, only a first segment that is a registered root counts.
 TRON_RECEIVER = re.compile(r"tronHome|tron_home|TRON_HOME|TronHome")
 GATEWAY_JOIN = LITERALS[3]
 SOURCE_ROOTS = ("packages/gateway/src", "packages/gateway/scripts", "packages/mac-app/Sources", "packages/mac-app/scripts", "scripts", "tools")
 SOURCE_SUFFIXES = {".ts", ".mjs", ".js", ".py", ".swift", ".c", ".sh"}
 TEST_NAME = re.compile(r"((^|/)test[-_][^/]*$|[.-]test\.|\.(integration|e2e|lock)\.|Tests?/|/tests/)")
-# The registry module itself, and the tool that reads the registry, name paths by design.
 EXEMPT = {"packages/gateway/src/foundation/tron-home-layout.ts", "tools/home-layout/home_layout.py"}
 
 

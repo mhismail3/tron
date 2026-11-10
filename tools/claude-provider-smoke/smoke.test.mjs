@@ -1,4 +1,3 @@
-// Runs the offline probe of scripts/tron provider-smoke against the Gateway's pinned Pi.
 import { spawnSync } from "node:child_process";
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
@@ -13,7 +12,6 @@ test("reports the Claude Code version Pi sends and Fable 5.2's status, and gates
   const plain = run();
   const { probe } = JSON.parse(plain.stdout);
   assert.match(probe.piAi, /^\d+\.\d+\.\d+/u);
-  // Read off the wire: the version Tron sends is the Gateway's own, and Pi still claims one.
   const { version } = JSON.parse(readFileSync(new URL("../../packages/gateway/src/providers/claude-code-identity.json", import.meta.url), "utf8"));
   assert.equal(probe.userAgent, `claude-cli/${version}`);
   assert.equal(probe.claudeCode, version);
@@ -22,7 +20,6 @@ test("reports the Claude Code version Pi sends and Fable 5.2's status, and gates
   const expected = !probe.fable52.listed ? "absent" : newerOrEqual(probe.claudeCode, probe.fable52.minimumClaudeCode) ? "servable" : "listed-but-refused";
   assert.equal(probe.fable52.status, expected);
   assert.ok(probe.opusLevels.includes("xhigh") && probe.opusLevels.includes("max"), probe.opusLevels.join(","));
-  // A listed model Anthropic refuses fails the plain run; requiring Fable 5.2 passes exactly when Pi serves it.
   assert.equal(plain.status, expected === "listed-but-refused" ? 1 : 0, plain.stdout + plain.stderr);
   const required = run("--require-fable-5-2");
   assert.equal(required.status, expected === "servable" ? 0 : 1, required.stdout);

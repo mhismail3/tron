@@ -66,8 +66,6 @@ describe("GitWorktreeService", () => {
       expect(await git(selected.root, "branch", "--list", "feature/selected")).toContain("feature/selected");
       expect(await git(foreign.root, "show-ref")).toBe(foreignRefs);
       expect(await readFile(join(foreign.root, ".git", "index"))).toEqual(foreignIndex);
-      // Retirement must use the same selected repository, not the process's
-      // ambient repository restored by a surrounding Git hook.
       try {
         process.env.GIT_DIR = join(foreign.root, ".git");
         process.env.GIT_WORK_TREE = foreign.root;
@@ -128,7 +126,6 @@ describe("GitWorktreeService", () => {
         process.env = { ...saved };
       }
       expect(await git(selected.root, "branch", "--list", "feature/foreign-base")).toBe("");
-      // Repository-owned object sharing is still Git's canonical configuration.
       await writeFile(join(selected.root, ".git", "objects", "info", "alternates"), `${join(foreign.root, ".git", "objects")}\n`);
       prepared = await new GitWorktreeService(selected.tronHome).prepare(selected.root, {
         mode: "newBranchWorktree", branch: "feature/foreign-base", base: foreignHead,
@@ -205,8 +202,6 @@ describe("GitWorktreeService", () => {
       const losers = results.filter((result) => result.status === "rejected");
       expect(winners).toHaveLength(1);
       expect(losers).toHaveLength(7);
-      // The losing add has no proof that it created the branch and must not
-      // delete the successful request's branch during its failure cleanup.
       expect(await git(root, "show-ref", "--verify", "--quiet", "refs/heads/feature/concurrent")).toBe("");
       await winners[0].value.cleanup();
       await expect(git(root, "show-ref", "--verify", "--quiet", "refs/heads/feature/concurrent")).rejects.toThrow();
@@ -232,11 +227,10 @@ describe("GitWorktreeService", () => {
         try { process.kill(pid!, 0); return false; }
         catch { return true; }
       }, "the hook's background process to exit");
-      // The command's uncertain outcome does not grant cleanup authority.
       expect(await git(root, "branch", "--list", "feature/hook-failure")).toContain("feature/hook-failure");
     } finally {
       if (pid === undefined) pid = Number(await readFile(pidFile, "utf8").catch(() => "NaN"));
-      if (Number.isSafeInteger(pid) && pid! > 1) { try { process.kill(pid!, "SIGKILL"); } catch { /* exact test descendant already exited */ } }
+      if (Number.isSafeInteger(pid) && pid! > 1) { try { process.kill(pid!, "SIGKILL"); } catch { } }
       await rm(root, { recursive: true, force: true });
       await rm(tronHome, { recursive: true, force: true });
     }

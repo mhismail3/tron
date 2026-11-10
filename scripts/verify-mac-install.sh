@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Read-only verification for a manually installed Release Tron.app.
-# This never changes the app, LaunchAgents, Gateway, or either Tron home.
 set -u
 
 ARTIFACT_ONLY=false
@@ -27,10 +26,6 @@ regular_file() { [[ -f "$1" && ! -L "$1" ]]; }
 regular_dir() { [[ -d "$1" && ! -L "$1" ]]; }
 plist_value() { plutil -extract "$1" raw -o - "$2" 2>/dev/null || true; }
 plist_json() { plutil -extract "$1" json -o - "$2" 2>/dev/null || true; }
-# The exact command packages/mac-app/scripts/tron-gateway-launcher.c execs for
-# a payload, then the launchd or scripts/tron-dev arguments ($2, space-led).
-# The Mac app's admission (StableGatewayProvenance.launchArguments) requires the
-# same list, so this check fails exactly when the app would refuse the Gateway.
 launcher_command() {
   local runtime=node-arm64
   [[ "$HOST_ARCH" == x86_64 ]] && runtime=node-x64
@@ -45,16 +40,12 @@ if [[ "$APP_PROTOCOL_VERSION" =~ ^[1-9][0-9]{0,4}$ && "$APP_MIN_PROTOCOL_VERSION
 else
   fail "installed app Gateway protocol metadata missing or malformed"
 fi
-# The verifier names the exact mismatch; keep it with the FAIL line.
 if protocol_output="$(python3 "$(dirname "$0")/verify-gateway-protocol-contract.py" --mac-app "$APP" 2>&1)"; then
   pass "installed app and bundled Gateway match the canonical protocol"
 else
   fail "installed app or bundled Gateway protocol does not match source: $(tail -n 3 <<<"$protocol_output")"
 fi
 
-# Verify the installed signed helper before using its in-process canonical
-# hasher. This keeps verification fast even with a full production dependency
-# tree while remaining independent of the mutable updater script.
 verify_codesign() {
   local path="$1" description="$2"
   if codesign --verify --deep --strict "$path" >/dev/null 2>&1; then pass "$description deep strict signature"; else fail "$description deep strict signature invalid"; fi
@@ -73,7 +64,6 @@ verify_codesign "$NATIVE_CLIENT" "native capture client"
 CLIENT_ARCHS="$(lipo -archs "$NATIVE_CLIENT" 2>/dev/null || true)"
 [[ "$CLIENT_ARCHS" == "x86_64 arm64" || "$CLIENT_ARCHS" == "arm64 x86_64" ]] \
   && pass "native capture client is universal" || fail "native capture client architectures invalid"
-# The validator's last stderr line names what is wrong, or that the validator itself could not run.
 if native_error="$(python3 "$(dirname "$0")/validate-native-host.py" --app "$APP" 2>&1 >/dev/null)"; then
   pass "native helper and Aqua Mach service composition"
 else
@@ -116,24 +106,12 @@ NATIVE_IDENTIFIER="$(codesign -dv --verbose=4 "$NATIVE_HOST" 2>&1 | sed -n 's/^I
 [[ ! -e "$APP/Contents/Library/LaunchAgents/com.tron.server.dev.plist" ]] \
   && pass "Release app contains no Debug LaunchAgent plist" \
   || fail "Release app unexpectedly contains a Debug LaunchAgent plist"
-# Never execute an embedded validator or runtime after its signature failed.
 (( failures == 0 )) || exit 1
 HASHER="$APP/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
 hash_payload() {
   "$HASHER" --fingerprint "$1"
 }
 
-# The selected pointer can remain self-consistent under an older payload
-# contract after a Mac app replacement. Mirror every newly required runtime
-# boundary here before treating that pointer as launchable; otherwise the
-# signed launcher correctly falls back to bundled while verification projects
-# the rejected external path and reports false identity failures.
-#
-# The XcodeGen boundary stops at structure, architecture and version: the
-# launcher requires no signature on that executable, and a store payload
-# carries the pinned upstream binary, which is unsigned. Requiring a signature
-# here rejects every valid external selection. verify_payload checks that
-# executable's provenance separately, as a signature or the pinned digest.
 payload_meets_current_runtime_contract() {
   local payload="$1"
   local xcodegen="$payload/runtime/xcodegen/bin/xcodegen"
@@ -153,8 +131,6 @@ payload_meets_current_runtime_contract() {
     && [[ "$("$xcodegen" --version 2>/dev/null || true)" == "Version: $TRON_CI_XCODEGEN_VERSION" ]]
 }
 
-# Resolve each identity independently. A malformed or legacy-contract current
-# pointer never supplies identity; the bundled payload is the bounded fallback.
 payload_for() {
   local home="$1" channel="$2" bundled="$3" current version manifest fingerprint actual
   current="$home/gateway/payloads/$channel/current.json"
@@ -227,10 +203,6 @@ verify_payload() {
   else
     fail "$label bundled XcodeGen toolchain is missing/substituted"
   fi
-  # Release staging signs this executable with the app, but a store payload
-  # carries the pinned upstream binary unchanged and its linker-generated
-  # signature does not verify, so provenance is a signature or the pinned
-  # upstream digest.
   if codesign --verify --strict "$xcodegen" >/dev/null 2>&1 \
     || [[ "$(shasum -a 256 "$xcodegen" 2>/dev/null | awk '{print $1}')" == "$TRON_CI_XCODEGEN_BINARY_SHA256" ]]; then
     pass "$label XcodeGen signature valid or pinned upstream digest"
@@ -261,12 +233,6 @@ verify_payload() {
     [[ "$architecture" == x64 ]] && expected_arch="x86_64"
     archs="$(lipo -archs "$runtime" 2>/dev/null || true)"
     grep -Eq "(^| )${expected_arch}( |$)" <<<"$archs" && pass "$label Node $architecture runtime architecture $expected_arch" || fail "$label Node $architecture runtime lacks architecture $expected_arch"
-    # A payload contains both runtimes so the same app can be copied between
-    # Intel and Apple-silicon Macs.  Do not execute the foreign binary during
-    # verification: Rosetta may be absent, and Node's JIT entitlement is not
-    # reliable when a CLI is launched through translation.  The signed Mach-O
-    # and exact architecture checks above are the portable validation for that
-    # runtime; execute only the host-native one.
     native_arch="$HOST_ARCH"
     [[ "$native_arch" == x86_64 ]] && native_arch=x64
     if [[ "$architecture" == "$native_arch" ]]; then
@@ -415,10 +381,6 @@ check_owner() {
   [[ "$listener_pids" == "$pid" ]] \
     && pass "$label is the exact listener PID on port $port" \
     || { fail "$label listener PID set does not exactly match launchd PID"; return; }
-  # The Gateway may hold two listeners on this port: its main one and, when the
-  # LAN endpoint is on, a TLS-only one on a private address. The plain probe
-  # only completes on the main listener, so probe each and check the one that
-  # answers; a listener that answers with the wrong identity still fails below.
   listeners="$(lsof -nP -a -p "$pid" -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9}')"
   [[ -n "$listeners" ]] || { fail "$label has no listening socket on port $port"; return; }
   info=""
@@ -521,9 +483,6 @@ observe_debug() {
     && pass "Debug lifecycle identity matches selected manifest" \
     || fail "Debug lifecycle identity does not match selected manifest"
 
-  # Like Stable, Debug can list its TLS-only LAN socket before its main one.
-  # Stop at the first answer, not the first socket: an identity mismatch must
-  # still fail below, never fall through to a different listener's identity.
   listeners="$(lsof -nP -a -p "$listener_pid" -iTCP:9848 -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9}')"
   [[ -n "$listeners" ]] || { fail "Debug has no listening socket on port 9848"; return; }
   auth_info=""

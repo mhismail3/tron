@@ -21,7 +21,6 @@ function canonical(value: string): string {
 function failureStatus(status: number): WebFailure {
   return status === 429 ? "rate_limited" : [401, 403, 407].includes(status) ? "blocked" : "http_error";
 }
-/** Corroborated short error/login pages, not articles merely discussing these words. */
 function softError(title: string, content: string): WebFailure | undefined {
   const heading = title.replace(/<[^>]*>/gu, " ").trim();
   const text = content.replace(/<[^>]*>/gu, " ").replace(/[#*_]/gu, "").trim();
@@ -34,7 +33,6 @@ function softError(title: string, content: string): WebFailure | undefined {
 }
 interface Stored { scope: string; sources: WebSource[]; bytes: number; expires: number; }
 
-/** One Gateway owner: provider quota, live transports and disposable scoped LRU. No model or account routing. */
 export class WebResearch {
   private active = 0;
   private starts: number[] = [];
@@ -126,8 +124,6 @@ export class WebResearch {
   }
   private async read(url: string, fresh: boolean, raw: boolean, signal: AbortSignal): Promise<WebSource> {
     await this.publicUrl(url, signal);
-    // Keep the existing DNS-pinned, every-hop redirect oracle before disclosing
-    // a URL to a remote renderer. Never use it to bypass a source denial.
     if (this.active >= 2) throw new Failure("rate_limited", undefined, 100);
     this.active++;
     let preflight: Awaited<ReturnType<typeof fetchPublicUrl>>;

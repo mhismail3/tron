@@ -3,7 +3,6 @@ import type { TranscriptForkBoundary } from "../protocol/types.js";
 
 const MAX_FORK_BOUNDARY_ENTRIES = 100_000;
 
-/** One disposable identity, not a copy of either session's transcript. */
 export interface ForkBoundaryAnchor {
   kind: TranscriptForkBoundary["kind"];
   inheritedEntryId: string;
@@ -39,11 +38,6 @@ function validatedGraph(file: FileEntry[]): Map<string, SessionEntry> | undefine
   return byID;
 }
 
-/** Callers admit the immediate parent identity/path before supplying its full
- * tree. Pi copies entry identities, but regenerates/rechains labels and may
- * sanitize or summarize inherited payloads. Payload differences are NOT forks.
- * Validate a contiguous root-to-leaf inherited prefix, not mere ID membership.
- * Parent absence/ambiguity and header-only relationships cannot justify a pill. */
 export function resolveForkBoundaryAnchor(
   childFile: FileEntry[],
   parentFile: FileEntry[],
@@ -67,7 +61,6 @@ export function resolveForkBoundaryAnchor(
   }
   branch.reverse();
 
-  // Memoize only within this bounded scan so long label chains remain O(N).
   const parentByID = parent;
   const normalizedParents = new Map<string, string | null>();
   function withoutLabels(id: string | null): string | null {
@@ -88,8 +81,6 @@ export function resolveForkBoundaryAnchor(
     if (entry.type === "label") continue;
     const source = parent.get(entry.id);
     if (!source) { hasChildEntry = true; continue; }
-    // Matching IDs after divergence, or with conflicting identity/ancestry,
-    // are ambiguous grafts/collisions, not evidence for a guessed transition.
     if (hasChildEntry || source.type !== entry.type || source.timestamp !== entry.timestamp
       || withoutLabels(source.parentId) !== inherited) return undefined;
     inherited = entry.id;
@@ -97,11 +88,6 @@ export function resolveForkBoundaryAnchor(
   return inherited ? { kind, inheritedEntryId: inherited } : undefined;
 }
 
-/** Locate the transition on the CURRENT selected branch. A retained anchor is
- * usable even before the child has appended anything; later snapshots need no
- * parent disk I/O. `displayedEntries` is the canonical projection owner's
- * already-filtered sequence, so counting its rows before the raw anchor derives
- * the stable gap without reimplementing projectability here. */
 export function projectForkBoundary(
   branch: SessionEntry[],
   displayedEntries: SessionEntry[],

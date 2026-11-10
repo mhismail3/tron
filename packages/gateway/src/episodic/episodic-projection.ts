@@ -4,28 +4,19 @@ import { redactCredentials } from "../util/credential-redaction.js";
 import { EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS, EPISODIC_OMITTED_TEXT, type EpisodicLimits, type EpisodicMessageKind, type EpisodicSourceCursor } from "./episodic-contract.js";
 import { capText } from "./episodic-tree.js";
 
-/** One chapter-ordered delta of Home's canonical source, already projected: the
- * memory never receives raw JSONL. A full branch refresh of one physical chapter
- * sets `scopeSessionId`, so only that chapter's entries can be marked off-branch. */
 export interface EpisodicSourceDelta {
   sessionId: string;
   projected: EpisodicProjectedMessage[];
-  /** The cursor after this delta; its `completeBytes` and `leafEntryId` are the
-   * position the memory has read through. */
   cursor: EpisodicSourceCursor;
-  /** True when this delta continued from the previous cursor. */
   incremental: boolean;
   scopeSessionId?: string;
 }
 
 export interface EpisodicProjectedMessage {
   entryId: string;
-  /** The physical chapter the entry was read from. */
   sourceSessionId: string;
   kind: EpisodicMessageKind;
   text: string;
-  /** The canonical entry's instant, carried so the catalog can answer a
-   * message's date without reading the source again. */
   timestamp: string;
   sourceDigest: string;
   projectedDigest: string;
@@ -42,7 +33,6 @@ function parts(content: unknown): Array<Record<string, unknown>> {
   });
 }
 
-/** Text and image parts; anything else is named, never forwarded. */
 function projectContent(content: unknown, omissions: string[]): string {
   const lines: string[] = [];
   for (const part of parts(content)) {
@@ -55,16 +45,12 @@ function projectContent(content: unknown, omissions: string[]): string {
   return lines.join("\n");
 }
 
-/** Redact while the full credential shape still exists, before any cap can
- * split its prefix from its tail. All projections keep the one shared rule set. */
 function redactedContent(text: string, omissions: string[]): string {
   const redacted = redactCredentials(text);
   if (redacted !== text) omissions.push("credentials");
   return redacted;
 }
 
-/** Assistant content: text and tool calls; thinking is excluded and recorded
- * (gist §2 logs no thoughts, and the compactor refused them). */
 function projectAssistantContent(content: unknown, omissions: string[]): string {
   const lines: string[] = [];
   for (const part of parts(content)) {
@@ -115,16 +101,6 @@ function projectEntry(entry: EpisodicCanonicalEntry, edit: Record<string, unknow
   return undefined;
 }
 
-/**
- * Project every projectable entry of the branch, in branch order, at most one
- * message each, stamped with the physical chapter they were read from. Context
- * edits replace their target's content without renumbering anything; a null
- * replacement makes the message `[omitted]`.
- *
- * Credentials are the one shared credential-only rule set
- * (`redactCredentials`), never the process preview's rule set: the memory must
- * keep file paths and ordinary identifiers readable.
- */
 export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits: EpisodicLimits, sourceSessionId: string): EpisodicProjectedMessage[] {
   const edits = new Map<string, Record<string, unknown>>();
   for (const entry of branch) {
@@ -141,8 +117,6 @@ export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits:
     let kind: EpisodicMessageKind = "user";
     let omitted = false;
     if (edit !== undefined && (edit.replacement === null || replacement === undefined)) {
-      // A null edit only omits an entry that is a message in its own right: a
-      // hidden custom message or a state entry never held a slot to begin with.
       const base = projectEntry(entry, undefined);
       if (!base) continue;
       kind = base.kind;
@@ -157,10 +131,6 @@ export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits:
       if (edit !== undefined) omissions.push("context-edit");
       text = content.text;
     }
-    // A projectable entry always holds a message slot, even when its own text
-    // is empty (an all-thinking reply, an empty paste): dropping the slot would
-    // renumber every later message, and indices are permanent. It becomes the
-    // same `[omitted]` free node a null context edit produces.
     if (text === "") {
       text = EPISODIC_OMITTED_TEXT;
       omissions.push("empty");
@@ -168,8 +138,6 @@ export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits:
     }
     text = redactedContent(text, omissions);
     if (!omitted) {
-      // The recipe sends user and assistant text whole; a memory record must
-      // still fit its store's line, so an oversized paste is capped head+tail.
       const capped = capText(text, limits.recordCapChars, EPISODIC_CAP_TAIL_CHARS);
       if (capped.capped) omissions.push("capped");
       text = capped.text;

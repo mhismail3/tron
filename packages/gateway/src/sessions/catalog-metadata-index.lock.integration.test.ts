@@ -5,15 +5,6 @@ import { join } from "node:path";
 import { expect, it, onTestFinished } from "vitest";
 import { CatalogMetadataIndex, catalogActivityTimestamp, catalogMetadataShard, type CatalogMetadataIndexRow, type CatalogMetadataIndexSummary } from "./catalog-metadata-index.js";
 
-/**
- * `gateway/session-catalog` cold-catalog metadata index `gateway/catalog-metadata-v3/`:
- * rows stamped from a summary, sharded saves and their bounds, appends, reconcile with its
- * stop and unproven candidates, shard document and row admission, and disposal. File times are
- * set explicitly, so sizes, times and tail hashes are the index's own arithmetic over
- * real files. Each persisted manifest and shard is asserted as the exact document, except
- * shard digests: those hash bytes that carry the temporary root, so they are checked by
- * shape and by equality across steps whose shard bytes are unchanged.
- */
 it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admission and dispose", async () => {
   const home = join(await realpath(await mkdtemp(join(tmpdir(), "tron-catalog-metadata-"))), "home");
   onTestFinished(() => rm(join(home, ".."), { recursive: true, force: true }));
@@ -24,7 +15,6 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   const index = new CatalogMetadataIndex(gateway, (stage) => { failures.push(stage); });
   const time = "2026-01-01T00:00:00.000Z";
   let tick = 0;
-  // Each write gets its own whole-second modification time, so sizes and times are the store's evidence.
   const stamp = async (path: string) => { tick += 1; const at = new Date(Date.parse(time) + tick * 1_000); await utimes(path, at, at); };
   const header = (id: string, cwd = "/work") => `${JSON.stringify({ type: "session", version: 3, id, cwd, timestamp: time })}\n`;
   const message = (role: string, content: string, minute: number) => `${JSON.stringify({ type: "message", message: { role, content, timestamp: Date.parse(time) + minute * 60_000 } })}\n`;
@@ -36,16 +26,11 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     return { path, id, cwd, fileIdentity: `${info.dev}:${info.ino}`, size: info.size, mtimeMs: info.mtimeMs };
   };
   const reported = async <T>(run: () => Promise<T>) => { failures.length = 0; const value = await run(); return { value: value ?? null, failures: [...failures] }; };
-  /**
-   * The row the index must hold for `path` as the file is now: its identity, size and
-   * time come from the file itself; the counts, text and tail hash from the scenario.
-   */
   const fileRow = async (id: string, path: string, rest: { tailBoundaryHash: string } & Partial<CatalogMetadataIndexRow>): Promise<CatalogMetadataIndexRow> => {
     const info = await lstat(path);
     return { id, path, cwd: "/work", firstMessage: "hello", createdAt: time, updatedAt: time, messageCount: 1,
       fileIdentity: `${info.dev}:${info.ino}`, size: info.size, mtimeMs: info.mtimeMs, eofOffset: info.size, ...rest };
   };
-  /** Every file the index owns under `gateway/`, parsed: the manifest and each shard. */
   const persisted = async (): Promise<Record<string, unknown>> => {
     const files: Record<string, unknown> = {};
     for (const name of (await readdir(gateway).catch(() => [])).sort()) {
@@ -98,7 +83,6 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   expect(await index.load(join(home, "elsewhere")), "load for another catalog root").toBeUndefined();
   expect(await reported(() => index.save(root, Array.from({ length: 25_001 }, () => row))), "a save over the entry bound").toEqual({ value: false, failures: ["save"] });
   expect(await persisted(), "is not written").toEqual(saved);
-  // Every copy of one row lands in one shard, so this is one shard over its byte ceiling.
   expect(await reported(() => index.save(root, Array.from({ length: 2_100 }, () => ({ ...row, cwd: "c".repeat(4_096) })))), "a shard over its byte bound")
     .toEqual({ value: false, failures: ["save"] });
   expect(await persisted(), "is not written, and the manifest records the refusal").toEqual({
@@ -120,7 +104,6 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   expect(grown.size, "the row covers the whole file").toBe(408);
   const appends: Array<[string, () => Promise<CatalogMetadataIndexRow>]> = [
     ["a row whose offset is not its size", async () => ({ ...grown, eofOffset: grown.size - 1 })],
-    // An earlier genuine offset and its tail hash still match the file's bytes; only the size disagrees.
     ["a row whose genuine earlier offset is not its size", async () => ({ ...grown, eofOffset: row.eofOffset, tailBoundaryHash: row.tailBoundaryHash })],
     ["a row of another file", async () => ({ ...grown, fileIdentity: "0:0" })],
     ["a row longer than the file", async () => ({ ...grown, size: grown.size + 10, eofOffset: grown.size + 10 })],
@@ -199,7 +182,6 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   row = (await index.entryFromSummary(summary("s1", one)))!;
   const twoRow = { ...(await index.entryFromSummary(summary("s2", two)))!, messageCount: 7 };
   await index.save(root, [row, twoRow]);
-  // Candidates of one batch are proven in parallel, so the rebuilds are compared as a set.
   const rebuilt: string[] = [];
   const rebuild = async (input: { id: string; path: string }) => { rebuilt.push(input.id); return input.id === "s3" ? undefined : summary(input.id, input.path); };
   rebuilt.length = 0;
@@ -232,7 +214,6 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     expect(lockedRow).toEqual(await fileRow("s6", locked, { tailBoundaryHash: "wwghYw0JCHl8FzHrCgysA92kV1Pv_Czk7l0d9msWJg8" }));
     await index.save(root, [row, lockedRow]);
     const listed = await candidate("s6", locked);
-    // Mode 000 is unreadable only to an unprivileged user; root would read it, so refuse loudly instead of asserting another outcome.
     if (process.getuid?.() === 0) throw new Error("This lock runs as an unprivileged user");
     await chmod(locked, 0o000);
     rebuilt.length = 0;
@@ -269,14 +250,11 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     expect(await persisted(), "proving seventeen candidates writes nothing").toEqual(lockedCut);
   }
 
-  // The index binds a document to the catalog root's canonical path.
   const canonical = await realpath(root);
   const valid = { ...row };
   const shard = catalogMetadataShard(canonical, valid.path);
   const shardPath = join(index.directory, `shard-${shard}.json`);
   const document = (rows: unknown[], extra: Record<string, unknown> = {}) => JSON.stringify({ version: 3, root: canonical, shard, rows, ...extra });
-  // A hand-written shard under a manifest that lists its exact bytes: the load is
-  // complete only when the shard document and every row in it are admitted.
   const loadWritten = async (content: string) => {
     await rm(index.directory, { recursive: true, force: true });
     await mkdir(index.directory, { recursive: true });

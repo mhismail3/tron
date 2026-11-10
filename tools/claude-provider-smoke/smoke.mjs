@@ -1,13 +1,5 @@
 #!/usr/bin/env node
 // Claude subscription smoke for the pinned Pi release (scripts/tron provider-smoke): catalog, Claude Code version, Fable 5.2 and the Tron wiring tests.
-//
-// Offline (default) it reads the Gateway's pinned pi-ai: whether Claude Fable 5.2 is in the
-// built-in catalog, Opus 5.5's thinking levels, and the Claude Code version on the wire, both
-// Pi's own and Tron's (the Gateway's claude-code-identity.json sent as Pi's request header,
-// as the Gateway sends it), captured from requests to a local stub, never the network. It then runs
-// the Gateway tests that prove Tron's wiring on Pi's built-in Anthropic OAuth. `--live` adds at
-// most six short real requests with the current access token from <agent-dir>/auth.json, read
-// only: the OAuth token endpoint is blocked, so the stored login is never refreshed or rotated.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -16,9 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const GATEWAY = join(ROOT, "packages/gateway");
 const FABLE = "claude-fable-5-2";
-/** Anthropic refuses Fable 5.2 to subscription requests claiming an older Claude Code (`claude_code_version_too_old`, measured 2026-11-09). */
 const FABLE_MIN_CLAUDE_CODE = "2.1.290";
-/** The Claude Code version Tron claims (packages/gateway/src/providers/claude-code-identity.ts). */
 const TRON_CLAUDE_CODE = JSON.parse(readFileSync(join(GATEWAY, "src/providers/claude-code-identity.json"), "utf8")).version;
 const tronHeaders = { "user-agent": `claude-cli/${TRON_CLAUDE_CODE}` };
 const OPUS = "claude-opus-5-5";
@@ -34,7 +24,6 @@ const USAGE = `Usage: scripts/tron provider-smoke [--probe-only] [--live --agent
   --require-fable-5-2  fail unless the pinned Pi serves Claude Fable 5.2
   --json               print the result as JSON`;
 
-/** Import a pi-ai subpath through the package's own export map. */
 async function piAi(subpath = ".") {
   const dir = join(GATEWAY, "node_modules/@earendil-works/pi-ai");
   const { exports } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
@@ -57,7 +46,6 @@ async function probe() {
     await Promise.all([piAi(), piAi("./providers/all"), piAi("./api/anthropic-messages")]);
   const models = getBuiltinModels("anthropic");
   const opus = models.find((model) => model.id === OPUS);
-  // OAuth-shaped requests to a stub: the version claimed is a fact of the wire, not of a source file.
   const wire = async (headers) => {
     let agent = null;
     await streamSimple(opus, normalizeContext({ systemPrompt: "probe", messages: [user("probe")] }), {
@@ -80,7 +68,6 @@ async function probe() {
   return { piAi: PI_AI_VERSION, piClaudeCode: pi.version, claudeCode, userAgent, fable52: fable, opusLevels, anthropicModels: models.map((model) => model.id), failures };
 }
 
-/** The current access token, read only. Refuses a token Pi would refresh during the run. */
 function liveToken(agentDir) {
   const login = JSON.parse(readFileSync(join(agentDir, "auth.json"), "utf8")).anthropic;
   if (login?.type !== "oauth" || !String(login.access).startsWith("sk-ant-oat")) throw new Error(`${agentDir}/auth.json has no Anthropic OAuth login`);
@@ -88,7 +75,6 @@ function liveToken(agentDir) {
   return login.access;
 }
 
-/** Every request of the live run goes through this fetch: the token endpoint is refused before any byte leaves. */
 function guardedFetch(real) {
   return async (input, init) => {
     const url = String(input instanceof Request ? input.url : input);
@@ -112,7 +98,6 @@ async function live(agentDir, probed) {
   const steps = [];
   const send = async (name, modelId, context, reasoning) => {
     let headers = {};
-    // Full context as the Gateway sends it (providers/anthropic-full-context.ts): no message thread.
     const model = getBuiltinModel("anthropic", modelId);
     const result = await streamSimple({ ...model, compat: { ...model.compat, supportsMessageThreads: false } }, normalizeContext(context), {
       apiKey: token, headers: tronHeaders, fetch, sessionId: "provider-smoke", cacheRetention: "long", reasoning, maxTokens: 2048,
@@ -137,7 +122,6 @@ async function live(agentDir, probed) {
   const after = await usage();
   const failures = [];
   for (const step of steps) {
-    // Anthropic raised its Claude Code floor: the one value to move is the Gateway's identity version.
     const floor = /version (\d+\.\d+\.\d+) or newer is required/u.exec(step.error ?? "")?.[1];
     if (floor) failures.push(`${step.name}: Anthropic now requires Claude Code ${floor}; raise packages/gateway/src/providers/claude-code-identity.json (${TRON_CLAUDE_CODE}) to the current @anthropic-ai/claude-code release`);
     else if (step.stopReason === "error") failures.push(`${step.name}: ${step.error}`);

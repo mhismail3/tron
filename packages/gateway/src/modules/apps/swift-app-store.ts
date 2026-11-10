@@ -17,14 +17,9 @@ import { admitDigest, admitFeeds, digest, MANIFEST_BYTES, offerIdentity, referen
 import { tronWorkspacePath } from "../../foundation/tron-home-layout.js";
 export type { SwiftAppManifest } from "./swift-app-format.js";
 
-/** Installed single-file Swift apps (#1156). One owner for
- * `<workspace>/state/apps/<appId>/`: `app.json`, immutable `sources/<sha>.swift`
- * (or retained v1 `App.swift`) and `data.sqlite`. docs/swift-apps.md owns the
- * contract that #1158 persistence, #1159 feeds and #1161 the Apps sheet build on. */
 export const SWIFT_APPS_CAPABILITY = "swift-apps.v1";
 
 const SWIFT_APP_LIMITS = {
-  /** Matches the iPhone's complete-text preview bound; a longer file could never run. */
   sourceBytes: 320_000,
   nameBytes: 80,
   iconBytes: 80,
@@ -32,7 +27,6 @@ const SWIFT_APP_LIMITS = {
   keyBytes: 256,
   valueBytes: 256 * 1_024,
   entries: 1_000,
-  /** Keys plus encoded values; a full snapshot stays well inside one RPC frame. */
   stateBytes: 512 * 1_024,
   writesPerCommit: 256,
   valueDepth: 32,
@@ -50,8 +44,6 @@ interface SwiftAppStateSnapshot {
 export interface SwiftAppCommit {
   appId: string;
   expectedRevision: number;
-  /** Interpreter writes must still belong to the source that produced them.
-   * Agent data seeding does not execute source and does not supply this fence. */
   expectedSourceRevision?: number;
   expectedInstanceId?: string;
   set: Array<{ key: string; value: JsonValue }>;
@@ -79,7 +71,6 @@ function admitKey(value: unknown): string {
   return value;
 }
 
-/** Plain JSON only: finite numbers, bounded depth, no prototypes or holes. */
 function admitValue(value: unknown, depth = 0): void {
   if (depth > SWIFT_APP_LIMITS.valueDepth) throw new GatewayError("invalid_request", `State values may nest at most ${SWIFT_APP_LIMITS.valueDepth} levels`);
   if (value === null || typeof value === "string" || typeof value === "boolean") return;
@@ -100,7 +91,6 @@ async function syncDirectory(path: string): Promise<void> {
   try { await syncDurably(handle); } finally { await handle.close(); }
 }
 
-/** Present, owner-only and not a link; absent is `false`; anything else refuses. */
 async function ownerDirectory(path: string): Promise<boolean> {
   let info;
   try { info = await lstat(path); } catch (error) {
@@ -123,8 +113,6 @@ async function ensureOwnerDirectory(path: string): Promise<boolean> {
   return true;
 }
 
-/** Read the source an agent names: a visible relative path under `root`, no
- * links, a regular file within the source bound. */
 export async function readSwiftAppSourceFile(root: string, requestedPath: string): Promise<string> {
   if (!requestedPath || isAbsolute(requestedPath) || requestedPath.includes("\0")
     || requestedPath.split(/[\\/]/).some(part => !part || part === "." || part === ".." || part.startsWith("."))) {
@@ -139,7 +127,6 @@ export async function readSwiftAppSourceFile(root: string, requestedPath: string
     try { info = await lstat(path); } catch { throw new GatewayError("not_found", `No file at ${requestedPath}`); }
     if (info.isSymbolicLink()) throw new GatewayError("invalid_request", "The app source path cannot contain symbolic links");
   }
-  // A FIFO must reach descriptor validation without waiting for a writer.
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const info = await handle.stat();
@@ -169,7 +156,6 @@ export class SwiftAppStore {
       .catch(() => { throw new GatewayError("conflict", "The installed-apps initialization record is unreadable; it was left unchanged"); });
     if (!create) {
       if (await ownerDirectory(apps)) return this.readyRoot(apps);
-      // A recorded container that has gone is lost state, never a fresh start.
       if (initialized) throw new GatewayError("conflict", "Installed apps are missing after they were created; restore state/apps");
       return undefined;
     }
@@ -193,13 +179,10 @@ export class SwiftAppStore {
     return root;
   }
 
-  /** Reconcile against canonical session retention through its existing display
-   * owner. No second session catalog, expiry clock or background sweeper. */
   private async cleanupOffers(root: string): Promise<void> {
     const offers = join(root, ".offers");
     if (!await ownerDirectory(offers)) return;
     const display = this.display();
-    // Failure to prove canonical membership must not authorize deletion.
     await display.maintainArtifacts();
     for (const name of await readdir(offers)) {
       if (!/^[a-f0-9]{64}$/.test(name)) continue;
@@ -211,7 +194,6 @@ export class SwiftAppStore {
         if (!raw.present) continue;
         offer = readSwiftAppOffer(raw.value);
       } catch {
-        // Unreadable or corrupt metadata is not proof of an unowned offer.
         continue;
       }
       if (referenceKey(offer.reference) !== name || display.artifacts.hasOwner(offer.reference.artifactId, offer.reference.sessionId)) continue;
@@ -220,8 +202,6 @@ export class SwiftAppStore {
     await syncDirectory(offers);
   }
 
-  /** Called once under the store mutex by a new owner. Only unreachable
-   * publication staging is retired; current heads, history and v1 backups stay. */
   private async cleanupUnpublished(root: string): Promise<void> {
     for (const name of await readdir(root)) {
       const directory = join(root, name);
@@ -287,8 +267,6 @@ export class SwiftAppStore {
     });
   }
 
-  /** A disposable projection of canonical offers, not another catalog. Even a
-   * retained artifact must still be referenced by its producing session. */
   async pending(): Promise<SwiftAppOffer[]> {
     return this.mutex.run(async () => {
       const apps = await this.appsRoot(false);
@@ -309,8 +287,6 @@ export class SwiftAppStore {
           const displayed = await readSwiftDisplaySource(await this.display().acquireArtifact(offer.reference.sessionId, offer.reference.artifactId));
           if (digest(displayed) === offer.sourceSha256) offers.push(offer);
         } catch (error) {
-          // Invalid or no-longer-owned offers are not installable rows. An
-          // unavailable owner/store is not evidence of a successful empty list.
           if (error instanceof SecureJsonFileError
             || error instanceof GatewayError && ["not_found", "conflict", "invalid_request"].includes(error.code) && !error.retryable) continue;
           throw error;
@@ -329,7 +305,6 @@ export class SwiftAppStore {
     });
   }
 
-  /** One coherent launch snapshot; install/commit/remove cannot interleave. */
   async open(appId: string): Promise<{ app: SwiftAppManifest; source: string; state: SwiftAppStateSnapshot }> {
     admitSwiftAppId(appId);
     return this.mutex.run(async () => {
@@ -345,7 +320,6 @@ export class SwiftAppStore {
     let read;
     try { read = await readSecureText(app.version === 1 ? join(directory, "App.swift") : join(directory, "sources", `${app.sourceSha256}.swift`), SWIFT_APP_LIMITS.sourceBytes); }
     catch { read = { present: false as const }; }
-    // Source precedes its manifest: a torn reinstall must never execute.
     if (!read.present || createHash("sha256").update(read.value).digest("hex") !== app.sourceSha256) {
       throw new GatewayError("conflict", `App ${app.id}'s source does not match its manifest; reinstall it`);
     }
@@ -356,8 +330,6 @@ export class SwiftAppStore {
     if (app.version === 2 && expected !== app.instanceId) throw new GatewayError("conflict", "This app was removed or replaced; reopen its current identity");
   }
 
-  /** Explicitly offers immutable source/config to paired devices, without installing.
-   * Replacing an offer invalidates the old config digest, never changes its meaning. */
   async offer(input: { appId: string; name: string; icon?: string; source: string; feeds: unknown; reference: SwiftAppDisplayReference }, actor: SwiftAppActor): Promise<{ offer: SwiftAppOffer }> {
     const appId = admitSwiftAppId(input.appId);
     const name = boundedLabel(input.name, "name", 80);
@@ -385,9 +357,6 @@ export class SwiftAppStore {
           await rename(temporary, join(directory, "App.swift"));
           temporaryExists = false;
         } else await durableAtomicWriteText(join(directory, "App.swift"), input.source);
-        // Linked bytes are already durable. This metadata publication syncs the
-        // shared directory after the source link/rename, before acknowledgement.
-        // On another filesystem the existing copy path still syncs its own bytes.
         await durableAtomicWriteJson(join(directory, "offer.json"), offer);
       } finally {
         if (temporaryExists) await rm(temporary, { force: true });
@@ -432,8 +401,6 @@ export class SwiftAppStore {
     });
   }
 
-  /** Source/config publication has one atomic manifest cut. Pending transport
-   * receipts already fence interrupted apply; Apps never owns a second receipt. */
   async installOffer(input: { offerId: unknown; reference: SwiftAppDisplayReference; sourceSha256: string; expectedRevision: unknown; expectedSourceSha256: unknown; expectedInstanceId: unknown; upgradeToV2: unknown }, actor: SwiftAppActor): Promise<{ app: SwiftAppManifest; created: boolean }> {
     const offerId = admitDigest(input.offerId);
     if (typeof input.upgradeToV2 !== "boolean") throw new GatewayError("invalid_request", "upgradeToV2 must explicitly be true or false");
@@ -468,14 +435,10 @@ export class SwiftAppStore {
         const previous: SwiftAppRevision[] = existing?.version === 2 ? existing.history : existing ? [{ ...existing, feeds: [], actor: { kind: "unknown" as const } }].map(({ version: _version, ...revision }) => revision) : [];
         const history = [...previous, { ...fields, feeds: offer.feeds, actor }].slice(-20);
         const app: SwiftAppManifest = { version: 2, ...fields, instanceId: existing?.version === 2 ? existing.instanceId : randomUUID(), feeds: offer.feeds, history };
-        // Validate the exact same contract readers use before publishing it.
         readSwiftAppManifest(app, offer.appId);
         await durableAtomicWriteJson(join(staging, "app.json"), app);
         if (!existing) { await rename(staging, directory); published = true; await syncDirectory(root); }
         else published = true;
-        // Only unreachable immutable sources are retired, after the new head is durable.
-        // Publication is committed. Cleanup belongs to the next bounded root
-        // read, never to this already-published command's success receipt.
         this.initialized = false;
         return { app, created: !existing };
       } finally {
@@ -484,7 +447,6 @@ export class SwiftAppStore {
     });
   }
 
-  /** The only v1 upgrade step. Snapshot before publication, no SQLite migration. */
   private async backupV1(directory: string, app: SwiftAppManifest): Promise<void> {
     const backups = join(directory, "backups");
     await ensureOwnerDirectory(backups);
@@ -492,8 +454,6 @@ export class SwiftAppStore {
       throw new GatewayError("conflict", "At most 20 explicit v1 upgrade backups can be retained; existing backups were not changed");
     }
     const original = join(backups, `v1-${app.revision}`);
-    // A failed upgrade can leave a valid but now stale backup at this source
-    // revision. Preserve it, and snapshot this attempt's current SQLite bytes.
     const destination = await ownerDirectory(original) ? `${original}-${randomUUID()}` : original;
     const temporary = join(backups, `.backup-${randomUUID()}`);
     await ensureOwnerDirectory(temporary);
@@ -513,8 +473,6 @@ export class SwiftAppStore {
     } finally { await rm(temporary, { recursive: true, force: true }); }
   }
 
-  /** Delete the app folder (manifest, source and data). The folder is first
-   * renamed aside so a crash can never leave a half-removed app listed. */
   async remove(appId: string, expectedInstanceId?: unknown): Promise<{ appId: string; removed: true }> {
     admitSwiftAppId(appId);
     return this.mutex.run(async () => {
@@ -529,8 +487,6 @@ export class SwiftAppStore {
     });
   }
 
-  /** Rename only. The source revision is the program identity that open runners
-   * fence their writes on, so a label change must not invalidate them. */
   async rename(appId: string, rawName: unknown): Promise<{ app: SwiftAppManifest }> {
     admitSwiftAppId(appId);
     const name = boundedLabel(rawName, "name", SWIFT_APP_LIMITS.nameBytes);
@@ -543,8 +499,6 @@ export class SwiftAppStore {
     });
   }
 
-  /** Clear every stored key in one transaction and advance the state revision,
-   * so a runner holding the previous state cannot write it back. */
   async resetState(appId: string, expectedRevision: number): Promise<{ appId: string; revision: number }> {
     admitSwiftAppId(appId);
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new GatewayError("invalid_request", "expectedRevision must be a non-negative integer");
@@ -577,8 +531,6 @@ export class SwiftAppStore {
     });
   }
 
-  /** Optimistic: a commit names the state revision it was computed from, and
-   * a stale one is refused so the caller reloads instead of overwriting. */
   async commit(input: SwiftAppCommit): Promise<{ appId: string; revision: number }> {
     const appId = admitSwiftAppId(input.appId);
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) throw new GatewayError("invalid_request", "expectedRevision must be a non-negative integer");
@@ -654,8 +606,6 @@ export class SwiftAppStore {
     return { appId, revision: this.revision(database), entries: rows.map(row => ({ key: row.key, value: JSON.parse(row.value) as JsonValue })) };
   }
 
-  /** One short-lived connection per operation under the store mutex. Only a
-   * first install may create state; an existing manifest is not a fresh start. */
   private withDatabase<T>(directory: string, operation: (database: DatabaseSync) => T, create = false): T {
     const path = join(directory, "data.sqlite");
     let database: DatabaseSync;
@@ -664,8 +614,6 @@ export class SwiftAppStore {
         const entry = lstatSync(path);
         if (!entry.isFile() || entry.uid !== process.getuid?.()) throw new Error("Unsafe app database");
       }
-      // SQLite's no-create mode also protects deletion between inspection and
-      // open. Escape the path as a URI so workspace names cannot change its mode.
       database = new DatabaseSync(`${pathToFileURL(path).href}?mode=${create ? "rwc" : "rw"}`, { allowExtension: false });
     } catch {
       throw new GatewayError("conflict", "App state is missing or unsafe; restore its data.sqlite");

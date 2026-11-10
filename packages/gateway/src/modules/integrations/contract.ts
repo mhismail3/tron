@@ -11,7 +11,6 @@ export interface ConnectionPolicy {
   enabled: boolean;
   allowWrites: boolean;
   paidAccessApproved: boolean;
-  /** User-approved monthly paid-spend cap; consumers own usage ledgers separately. */
   paidBudgetCents: number;
   recurringApproved: boolean;
 }
@@ -28,17 +27,14 @@ export interface ConnectionInstance {
   providerAccountId: string;
   scope?: string;
   credentialRef: string;
-  /** Raindrop intake routing is connection-owned setup/policy, never connector progress state. */
   raindropCollections?: RaindropCollectionMapping[];
   policy: ConnectionPolicy;
   health: ConnectionHealth;
   createdAt: string;
   updatedAt: string;
   setupRevision: number;
-  /** Bounded owner observations; absent legacy values are treated as unknown. */
   credentialAvailability?: CredentialAvailability;
   providerIdentity?: ProviderIdentityAdmission;
-  /** Verified provider metadata for display; never an account authority. */
   providerDisplayName?: string;
   lastError?: string;
 }
@@ -55,11 +51,8 @@ export interface ConnectionSetupOperation {
   updatedAt: string;
 }
 
-/** Production has no connection definitions or adapters, so `definitions` and
- * `capabilities` are always empty; the tool output keeps both keys. */
 export interface ConnectionOwnerSnapshot {
   definitions: [];
-  /** Presentation projection: credential refs never leave the owner. */
   instances: ConnectionInstanceProjection[];
   setupOperations: ConnectionSetupOperation[];
   capabilities: [];
@@ -81,7 +74,6 @@ export interface ConnectionOwnerState {
   receipts: Record<string, ConnectionOwnerReceipt>;
 }
 
-/** The read-only projection consumed by the agent `connections` tool. */
 export interface ConnectionAccess {
   snapshot(): Promise<ConnectionOwnerSnapshot>;
 }

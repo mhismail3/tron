@@ -1,18 +1,7 @@
 import { performance } from "node:perf_hooks";
 
-/** Lateness at which a timer counts as having fired after an event-loop stall. */
 const STALL_MS = 100;
 
-/**
- * A deadline for work that runs outside this event loop (a child process, the
- * fs threadpool). Node runs due timers before the I/O callbacks that were
- * already completed while the loop was blocked, so a plain timer that fires
- * after a long synchronous stretch (an extension transform, a GC pause) would
- * expire work that had in fact finished. A timer that fires late by at least
- * `STALL_MS` re-arms for that lateness instead, so the work's completion is
- * delivered first; work still unsettled then expires. The extension is bounded
- * by the window itself, so stalls can at most double the wall-clock bound.
- */
 export class StallTolerantDeadline {
   private timer: NodeJS.Timeout | undefined;
   private extendedMs = 0;

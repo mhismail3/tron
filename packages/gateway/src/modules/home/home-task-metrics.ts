@@ -12,9 +12,6 @@ interface HomeTaskMetricsRequest {
 
 const unavailable = (reason: string) => ({ status: "unavailable" as const, value: null, reason });
 
-/** A disposable projection of the existing task owner, not a second event ledger.
- * Retained check-ins are lower bounds: canonical history owns complete progress.
- * In particular, a terminal record's updatedAt is NOT a landed/settled timestamp. */
 export async function readHomeTaskMetrics(store: HomeTaskStore, homeId: string, input: HomeTaskMetricsRequest) {
   if (input.taskId !== undefined && (typeof input.taskId !== "string" || !input.taskId.trim() || input.taskId.length > 160))
     throw new GatewayError("invalid_request", "task metrics: taskId must be a non-empty string of at most 160 characters");
@@ -43,8 +40,6 @@ export async function readHomeTaskMetrics(store: HomeTaskStore, homeId: string, 
   const groups = homeTaskLineages(records.filter(record => record.homeId === homeId));
   if (input.taskId && !groups.some(group => group.some(task => task.taskId === input.taskId)))
     throw new GatewayError("not_found", "No task with this id in this Home");
-  // Cohort = roots delegated in [from,to). Ancestors and successors outside the
-  // window remain visible for that cohort; this is current state, not time travel.
   const cohort = groups.filter(group => input.taskId ? group.some(task => task.taskId === input.taskId)
     : group[0]!.createdAt >= from && group[0]!.createdAt < to)
     .sort((a, b) => b[0]!.createdAt - a[0]!.createdAt || a[0]!.taskId.localeCompare(b[0]!.taskId));

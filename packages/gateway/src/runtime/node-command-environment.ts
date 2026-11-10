@@ -51,7 +51,6 @@ function pathNode(pathValue: string | undefined): string | undefined {
       const info = statSync(candidate);
       if (info.isFile() && executable(candidate)) return candidate;
     } catch {
-      // Continue through PATH exactly as command lookup would.
     }
   }
   return undefined;
@@ -80,11 +79,6 @@ function normalizedPath(pathValue: string | undefined, aliasDirectory: string, c
   return value;
 }
 
-/**
- * Establish the supervised payload's Node command before any extension package
- * is discovered. The launcher remains the payload identity authority; this
- * function validates and activates the architecture-specific immutable alias.
- */
 function configureValidatedNodeCommandEnvironment(
   options: NodeCommandEnvironmentOptions,
 ): NodeCommandEnvironmentResult {
@@ -102,9 +96,6 @@ function configureValidatedNodeCommandEnvironment(
   const expectedEntryPoint = realpathSync(expectedEntryPointPath);
   if (!expectedEntryPoint.startsWith(`${payloadRoot}/`)) fail("payload entrypoint escapes the selected payload");
   const entryPoint = options.entryPoint ?? process.argv[1];
-  // Supervision markers are inherited by ordinary child processes. Activate
-  // this process-wide contract only for the selected payload's Gateway entry,
-  // never for a source CLI/test process that inherited the parent environment.
   if (!entryPoint || realpathSync(entryPoint) !== expectedEntryPoint) return { managed: false };
 
   const architecture = SUPPORTED_ARCHITECTURES.get(options.architecture ?? process.arch);
@@ -177,9 +168,6 @@ function configureValidatedNodeCommandEnvironment(
   return { managed: true, runtimeAliasDirectory: aliasDirectory, piCommandPath: piAliasPath, path };
 }
 
-/** Adds the canonical Pi agent-bin projection for extension subprocesses. The
- * SDK's shell helper only affects bash; browser extensions spawn directly from
- * process.env, so this must be established before resource discovery. */
 export function configureAgentBinEnvironment(agentDir: string, environment: NodeJS.ProcessEnv = process.env): void {
   const binDirectory = join(agentDir, "bin");
   const browserBinary = join(binDirectory, "agent-browser");
@@ -193,17 +181,10 @@ export function configureAgentBinEnvironment(agentDir: string, environment: Node
   }
   const existing = (environment.PATH ?? "").split(":").filter(Boolean);
   if (existing.some((component) => pathIdentity(component) === pathIdentity(binDirectory))) return;
-  // Keep the supervised payload's first PATH component authoritative for node/pi;
-  // the agent-bin projection is inserted immediately after it.
   const ordered = existing.length > 0 ? [existing[0]!, binDirectory, ...existing.slice(1)] : [binDirectory];
   environment.PATH = ordered.join(":");
 }
 
-/** Homebrew's standard bin on Apple silicon. launchd starts the Gateway with only
- * the system PATH, so agent shells, extension subprocesses and the Gateway's own
- * git could not find Homebrew tools; a global `filter.lfs.required` then fails
- * every checkout of an LFS file (#1467). Appended, so the payload runtime, agent
- * bin and system commands keep precedence. */
 const HOMEBREW_BIN = "/opt/homebrew/bin";
 
 export function configureHomebrewPath(environment: NodeJS.ProcessEnv = process.env): void {

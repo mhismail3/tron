@@ -33,10 +33,6 @@ export function isUserSubagentsPackage(pkg: PackageSource): boolean {
   return /^npm:pi-subagents(?:@|$)/u.test(typeof pkg === "string" ? pkg : pkg.source);
 }
 
-/** Pi's pinned DefaultResourceLoader has no pre-load filter; extensionsOverride
- * runs after execution. Its package resolver reads these scoped settings in both
- * the pre-trust and final passes. Keep that loader's view read-only for packages,
- * while reload/trust and all other settings remain owned by the canonical manager. */
 export function managedProviderSettingsView(settings: SettingsManager): SettingsManager {
   const admitted = (pkg: PackageSource) => !isUserSubagentsPackage(pkg) && !/^npm:pi-web-access(?:@|$)/u.test(typeof pkg === "string" ? pkg : pkg.source);
   const filter = (value: Settings): Settings => ({ ...value,
@@ -69,11 +65,6 @@ interface Entry { name: string; type: string; bytes: Buffer; target: string; mod
 interface JitiOptions { moduleCache: boolean; alias: Record<string, string>; fsCache: string }
 type JitiFactory = (base: string, options: JitiOptions) => { import: (path: string, options: { default?: true }) => Promise<unknown> };
 
-/** Transforms TypeScript modules of the verified build with the Gateway's exact
- * jiti options, exactly as an ESM import would, leaving each result in the private
- * cache. Nothing is evaluated, so no provider code runs here. Without entries it
- * transforms the whole build (factories import lazily); with entries, only the
- * modules they reach through static and literal dynamic imports. */
 const TRANSFORM_CACHE_WORKER = `
 const { parentPort, workerData } = require("node:worker_threads");
 const { existsSync, readdirSync, readFileSync, statSync } = require("node:fs");
@@ -128,8 +119,6 @@ const resolveModule = (from, specifier) => {
 })().then(() => parentPort.postMessage({}), (error) => parentPort.postMessage({ error: String(error && error.message || error) }));
 `;
 
-/** The pinned builder emits ustar only. No arbitrary archive metadata or
- * install scripts are executable at activation; unsupported entries fail closed. */
 function closureEntries(): Entry[] {
   const archivePath = join(gatewayRoot, pin.closure.path);
   const metadata = lstatSync(archivePath);
@@ -166,7 +155,6 @@ function closureEntries(): Entry[] {
 }
 
 function privateDirectory(path: string): void {
-  // Refuse symlinked ancestors before creating or inspecting the reserved root.
   for (let parent = resolve(path);; parent = dirname(parent)) {
     if (existsSync(parent) && lstatSync(parent).isSymbolicLink()) throw new GatewayError("conflict", "managed pi-subagents root contains a symlink");
     if (dirname(parent) === parent) break;
@@ -177,9 +165,6 @@ function privateDirectory(path: string): void {
 function validateSdkPeers(entries: Entry[]): void {
   const manifest = JSON.parse(entries.find((entry) => entry.name === "package.json")!.bytes.toString()) as { peerDependencies: Record<string, string> };
   for (const [name, range] of Object.entries(manifest.peerDependencies)) {
-    // The selected payload's npm tree is the only peer authority. Never search
-    // the provider's home, NODE_PATH, a user npm tree, or a global install.
-    // Pi's loader supplies these modules through host aliases, not disk links.
     const root = realpathSync(join(gatewayRoot, "node_modules", name));
     const peer = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { name: string; version: string };
     const minimum = /^>=(\d+)\.(\d+)\.(\d+)$/u.exec(range);
@@ -190,8 +175,6 @@ function validateSdkPeers(entries: Entry[]): void {
   }
 }
 
-/** One payload/home selection. Activation uses only the selected offline closure,
- * never a user package declaration, network fallback or in-place replacement. */
 export class ManagedSubagents {
   readonly root: string;
   constructor(private readonly tronHome: string, private readonly logger?: ModuleLog) {
@@ -205,8 +188,6 @@ export class ManagedSubagents {
     this.root = tronHomePath(join(realpathSync(ancestor), ...missing), "internal/pi-subagents", pin.version);
   }
 
-  /** Startup returns a selection only after its immutable build is usable.
-   * The same boundary owns fresh activation and restart verification. */
   static activateForStartup(tronHome: string, logger?: ModuleLog): ManagedSubagents {
     const provider = new ManagedSubagents(tronHome, logger);
     provider.install();
@@ -230,7 +211,6 @@ export class ManagedSubagents {
       this.verifyRoot(staging, entries);
       try { renameSync(staging, this.root); }
       catch (error) {
-        // A concurrent installer may have published the same immutable build.
         if (!existsSync(this.root)) throw error;
       }
       return this.verify();
@@ -277,11 +257,7 @@ export class ManagedSubagents {
     if (expected.size) throw new GatewayError("conflict", "managed pi-subagents installed closure mismatch: missing entries");
   }
 
-  /** Called by the load owner after startup/reload, once per operation rather
-   * than on each scoped read or in the pre-trust pass. No paths or user specs. */
   async completeLoad(settings: SettingsManager, cwd: string, agentDir: string, extensions: readonly Extension[]): Promise<void> {
-    // Pi finalizes extension metadata after extensionsOverride. Complete that
-    // same load with the verified package metadata before publishing resources.
     const resources = await this.resources();
     const metadata = new Map(resources.extensions.map(resource => [resource.path, resource.metadata]));
     for (const extension of extensions) {
@@ -314,8 +290,6 @@ export class ManagedSubagents {
     if (!Array.isArray(entries) || (kind === "extensions" && entries.length === 0) || entries.length > 32) {
       throw new GatewayError("conflict", `managed pi-subagents ${kind} entries are absent or invalid`);
     }
-    // Resource identity belongs to the verified build. Extension files and
-    // resource files/directories share one confinement/admission boundary.
     return entries.map((entry: unknown) => {
       if (typeof entry !== "string" || entry.length === 0 || entry.length > 1024 || isAbsolute(entry)
         || entry.split(/[\\/]/u).includes("..")) {
@@ -331,8 +305,6 @@ export class ManagedSubagents {
     });
   }
 
-  /** The registry supplies its own home; the selection cannot be transferred
-   * to another home merely by keeping this process's existing binding. */
   requireBoundArtifactRoot(tronHome: string): void {
     const boundRoot = process.env[DELEGATED_PROVIDER_ROOT_ENV];
     if (resolve(tronHome) !== resolve(this.tronHome)
@@ -341,15 +313,11 @@ export class ManagedSubagents {
     }
   }
 
-  /** Exact SDK-expanded resources and package provenance of this verified build. */
   async resources(): Promise<ResolvedPaths> {
     const root = this.verify();
     for (const kind of ["extensions", "skills", "prompts"] as const) this.resourcePaths(kind);
-    // Use the SDK's manifest expansion, not a second resource walker. The
-    // returned files are the exact admitted identities for both consumers.
     const resolved = await new DefaultPackageManager({ cwd: root, agentDir: root, settingsManager: SettingsManager.inMemory() })
       .resolveExtensionSources([root]);
-    // A verified local build installs nothing; a skipped package means the build is not the one admitted.
     if (resolved.installFailures?.length) throw new GatewayError("conflict", "managed pi-subagents resources failed to resolve");
     const admitted = (kind: "extensions" | "skills" | "prompts") => resolved[kind].map(resource => {
       const inside = relative(root, resource.path);
@@ -362,8 +330,6 @@ export class ManagedSubagents {
   }
 
   async loaderOptions(settings: SettingsManager, internalWake?: ManagedInternalWake): Promise<ManagedLoaderOptions> {
-    // Check before executing extension code; admission repeats it for reloads
-    // and to refuse a process binding changed while the loader was awaiting I/O.
     this.requireBoundArtifactRoot(this.tronHome);
     const resources = existsSync(this.root) ? await this.resources() : { extensions: [], skills: [], prompts: [], themes: [] };
     const paths = resources.extensions.filter(resource => resource.enabled).map(resource => resource.path);
@@ -393,14 +359,9 @@ export class ManagedSubagents {
     };
   }
 
-  /** Host-required child extensions for one parent session (the provider's
-   * `required-child-extensions` API): every managed child of that session, native
-   * foreground or detached, loads them. Its registry is process-global, so the
-   * verified closure's own module registers it. */
   async requireChildExtensions(sessionId: string, extensions: readonly { id: string; path: string }[]): Promise<{ dispose(): void }> {
     this.requireBoundArtifactRoot(this.tronHome);
     const root = this.verify();
-    // One load per verified install: every session start registers through it.
     this.requiredChildApi ??= this.loadModule(join(root, "src", "api", "required-child-extensions.ts")) as Promise<RequiredChildApi>;
     const api = await this.requiredChildApi;
     if (typeof api.registerRequiredChildExtensions !== "function") throw new GatewayError("conflict", "managed pi-subagents has no required child extension API");
@@ -422,16 +383,12 @@ export class ManagedSubagents {
   private requiredChildApi: Promise<RequiredChildApi> | undefined;
   private readonly childExtensions = new Map<string, { groups: Map<symbol, Array<{ id: string; path: string }>>; registration?: { dispose(): void } | undefined }>();
 
-  /** Use the closure's declared TypeScript loader with exact host peer aliases.
-   * No user package tree or copied SDK participates in factory execution. */
   private async loadFactory(path: string): Promise<ExtensionFactory> {
     const factory = await this.loadModule(path, { defaultExport: true });
     if (typeof factory !== "function") throw new GatewayError("conflict", "managed pi-subagents entry does not export a factory");
     return factory as ExtensionFactory;
   }
 
-  /** pi-subagents' own agent discovery module for the subagent catalog. It only
-   * reads definitions and settings, so jiti's module cache keeps it across reads. */
   loadDiscovery(): Promise<unknown> {
     return this.loadModule(this.discoveryEntry(), { moduleCache: true, prepare: "discovery" });
   }
@@ -442,11 +399,6 @@ export class ManagedSubagents {
 
   private async loadModule(path: string, options: { defaultExport?: boolean; moduleCache?: boolean; prepare?: "build" | "discovery" } = {}): Promise<unknown> {
     const loader = this.jitiOptions();
-    // Factory loads evaluate a fresh module graph (sessions keep separate module
-    // state), but only from transforms the worker below left in the private cache.
-    // Without them the import would transform on this thread, so the load refuses
-    // instead and a later load prepares again. Discovery reaches only its own small
-    // graph, so it never waits for the whole build a session's factory needs.
     const scope = options.prepare ?? "build";
     let prepared = this.transformCaches.get(scope);
     if (!prepared) {
@@ -466,10 +418,6 @@ export class ManagedSubagents {
 
   private readonly transformCaches = new Map<"build" | "discovery", Promise<void>>();
 
-  /** Prepare the session factory's transforms off the Gateway thread once the
-   * Gateway serves, so the first session start reads the cache instead of
-   * waiting seconds of worker CPU on a fresh build root (#2229). A session load
-   * joins this same preparation; a failure leaves the next load to prepare again. */
   prepareSessionTransforms(): Promise<boolean> {
     if (!existsSync(this.root)) return Promise.resolve(false);
     let prepared = this.transformCaches.get("build");
@@ -484,9 +432,6 @@ export class ManagedSubagents {
     });
   }
 
-  /** The closure's declared jiti with exact host peer aliases and a private,
-   * per-build transform cache outside the verified installs. No user package tree,
-   * copied SDK or shared temporary directory participates in factory execution. */
   private jitiOptions(): { jitiUrl: string; jiti: JitiOptions } {
     const require = createRequire(join(this.root, "package.json"));
     const fsCache = tronHomePath(dirname(dirname(dirname(this.root))), "internal/pi-subagents-transform-cache", basename(this.root));
@@ -494,10 +439,6 @@ export class ManagedSubagents {
     return { jitiUrl: pathToFileURL(require.resolve("jiti")).href, jiti: { moduleCache: false, alias: piExtensionAliases(), fsCache } };
   }
 
-  /** jiti's TypeScript transform is synchronous and, for this closure, takes
-   * seconds of CPU. A worker transforms each scope once per process (cache hits
-   * after the first) so the Gateway thread reads cached transforms instead of
-   * blocking every session on that work. */
   private async prepareTransformCache(options: { jitiUrl: string; jiti: JitiOptions }, entries?: string[]): Promise<void> {
     let worker: Worker | undefined;
     try {
@@ -528,7 +469,6 @@ export class ManagedSubagents {
       }
       const index = paths.findIndex((_, index) => extension.path === `<inline:tron-managed-subagents-${index + 1}>`);
       if (index >= 0) {
-        // Restore the verified entry identity before SDK source finalization.
         extension.path = paths[index]!;
         extension.resolvedPath = paths[index]!;
         managedExtensions.add(extension);

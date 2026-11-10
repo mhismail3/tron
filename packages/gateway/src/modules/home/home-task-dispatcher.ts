@@ -16,9 +16,7 @@ import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthori
 import { changeReview } from "../../kernel/settings/settings-types.js";
 import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
 
-/** Who may record a one-use grant: the native card's tap, or the maintainer's own command. */
 export type HomeTaskGrantApproval = { confirm: ConfirmChange } | { maintainerCommand: string };
-/** A tapped grant is consumed by the admission that asked for it, within this bound. */
 const HOME_TASK_GRANT_USE_MS = 60_000;
 import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskWrite, type HomeTaskFailureCause, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskPromptTokens, homeTaskSpend, type HomeTaskSpend } from "./home-task-spend.js";
@@ -37,11 +35,8 @@ import { TaskCommandSweep, type TaskCommandDiagnostic } from "./task-command-swe
 import { homeTaskNeedsAttention } from "./home-task-lineage.js";
 import { readHomeTaskHistory } from "./home-task-history.js";
 
-/** One shared home.taskList store pass and the readers waiting on it. */
 interface ListFlight { result: Promise<HomeTaskPage>; readers: number; controller: AbortController }
 
-/** Known refusal messages of the control owners, mapped to finite reasons. Their text names no
- * identifier, but a typed error's message is not a privacy boundary, so only these texts pass. */
 const CONTROL_REFUSAL_REASONS: ReadonlyMap<string, TaskControlRefusalReason> = new Map([
   ["Stale or terminal task operation", "stale-operation"],
   ["Task has no live worker; stop settles it", "no-live-worker"],
@@ -68,21 +63,16 @@ export type HomeTaskDiagnostic =
   | TaskCommandDiagnostic
   | { event: "home.task.runaway-stop"; taskHash: string; operationHash: string; elapsedMs: number; cancelAndJoin: "joined" | "failed"; spendReference: string };
 type HomeTaskRecoveryStatus = { available: true } | { available: false; reason: HomeTaskStoreCode | "not-started" };
-/** `title` names the worker session; it is never persisted with the task record. */
 export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice {
   taskId: string; intent: string; target: string; title?: string; reason?: string;
-  /** Internal Home boundary metadata, never accepted by the delegate tool schema. */
   provenance?: { model: Pick<FixedSetting, "via" | "reason">; thinking: Pick<FixedSetting, "via" | "reason"> };
   modelQueues?: import("../../kernel/settings/tool-contract.js").TaskModelQueues;
 }
-/** The durable record plus the worker's model from its own transcript. The model is
- * projected per read, never persisted with the task. */
 export interface HomeTaskOwnerSettlement {
   taskId: string; sessionId: string; operationId: string;
   markerEntryId: string; terminalEntryId: string; settlementEntryId: string; stoppedAtEnd: number;
 }
 type HomeTaskStatus = HomeTaskRecord & HomeTaskDisplay & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns; ownerSettlement: HomeTaskOwnerSettlement | null };
-/** A task as Home's `task` tool lists it: enough to choose and send the next control. */
 interface HomeTaskControlRow {
   taskId: string;
   title: string;
@@ -100,7 +90,6 @@ interface HomeTaskControlRow {
   actions: Array<"status" | "report" | "steer" | "interrupt" | "stop" | "resume" | "rename">;
 }
 
-/** Levenshtein distance, for suggesting a task ID close to a mistyped one. */
 function editDistance(a: string, b: string): number {
   let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
   for (let i = 1; i <= a.length; i += 1) {
@@ -110,10 +99,8 @@ function editDistance(a: string, b: string): number {
   }
   return previous[b.length]!;
 }
-/** Resume a settled task in place: `taskId`/`operationId` name the stopped task's exact operation. */
 export interface HomeTaskResumeRequest extends TaskWorkerControl { text?: string }
 
-/** The one successor of a task: `<base>.resume-<n+1>` for `<base>.resume-<n>`, else `<id>.resume-1`. */
 export function successorTaskId(taskId: string): string {
   const match = /^(.*)\.resume-([1-9][0-9]{0,5})$/u.exec(taskId);
   const next = match ? `${match[1]}.resume-${Number(match[2]) + 1}` : `${taskId}.resume-1`;
@@ -122,8 +109,6 @@ export function successorTaskId(taskId: string): string {
 }
 
 interface InterruptedQuestion { title: string; questions: unknown[] }
-/** The newest question the operation was stopped before it was answered, from the
- * ask_user tool's own canonical record (it covers questions asked inside codemode). */
 function interruptedQuestion(run: readonly FileEntry[]): InterruptedQuestion | undefined {
   const entry = run.findLast(candidate => candidate.type === "custom" && candidate.customType === TRON_ASK_USER_INTERRUPTED);
   const data = entry?.type === "custom" ? entry.data as { title?: unknown; questions?: unknown } : undefined;
@@ -131,8 +116,6 @@ function interruptedQuestion(run: readonly FileEntry[]): InterruptedQuestion | u
     ? { title: data.title, questions: data.questions } : undefined;
 }
 
-/** The resumed operation's brief. The authorized intent is this exact text. `instructions` are
- * oldest first: those of earlier resumes refused before they started (#959), then this one's. */
 function resumeBrief(previous: HomeTaskRecord, instructions: readonly string[], pending: InterruptedQuestion | undefined): string {
   const parts = [`Continue Home task ${previous.taskId} in place. It stopped (${previous.terminalEvidence?.outcome ?? "unknown"}: ${previous.terminalEvidence?.reason ?? "unknown"}); this is the same worker session, so its worktree and branch are still yours. Pick up exactly where it stopped: re-check the state you were in before acting.`];
   if (instructions.length === 1) parts.push(`Instruction:\n${instructions[0]}`);
@@ -144,39 +127,25 @@ function resumeBrief(previous: HomeTaskRecord, instructions: readonly string[], 
   }
   return parts.join("\n\n");
 }
-/** A started task names its worker and operation. */
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord>;
-  /** The worker choice the delegate boundary resolved, as the brief states it; the `delegate` tool's details carry it. */
   worker?: HomeTaskWorkerSummary;
-  /** The subagent queue's availability at delegation, in fallback order. */
   subagentModels?: readonly QueueModelState[] }
-/** A delegation's resolved worker: display references and where each value came from,
- * with the worker queue's availability when the worker came from it. */
 export interface HomeTaskWorkerSummary { model: string; thinking: string; modelSource: string; thinkingSource: string; note?: string;
   queue?: readonly QueueModelState[] }
 interface HomeTaskLaunch {
   task: HomeTaskRecord; authority: Awaited<ReturnType<HomeTaskAuthorization["authorize"]>>;
   input: HomeTaskDispatchRequest; title: string | undefined;
   choice: HomeTaskWorkerChoice; deferredThinking: HomeTaskDispatchRequest["thinking"];
-  /** A settled task continued in place (#929): its predecessor's worker session is rebound, not
-   * created or configured, and the maintainer's attachments go with the first prompt. */
   resume?: { sessionId: string; images: ImageContent[]; exceptWorkToken?: string };
-  /** The worker operation a resume fixes before its worker starts. */
   operationId?: string;
 }
 const reportDigest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
-/** Every awaited step of delegate admission, in order (#919). Each is bounded by
- * the stage deadline and the delegating turn's Stop, and logs when slow. */
 export type HomeTaskDispatchStage = "choice" | "setup" | "lookup" | "budget" | "target" | "create"
   | "authorize" | "restore-epoch" | "create-worker" | "configure-worker" | "bind";
-/** No single admission step may hold the delegating Home turn longer than this. */
 export const HOME_TASK_DISPATCH_STAGE_DEADLINE_MS = 60_000;
-/** A step slower than this is logged with its stage even when it completes. */
 const HOME_TASK_DISPATCH_STAGE_SLOW_MS = 5_000;
 
-/** A dispatch step the delegating turn stopped or the stage deadline expired. The
- * step itself may still be running; its owner hands any late result back. */
 class HomeTaskDispatchStageError extends GatewayError {
   constructor(readonly stage: HomeTaskDispatchStage, readonly outcome: "timeout" | "cancelled") {
     super(outcome === "timeout" ? "busy" : "cancelled", outcome === "timeout"
@@ -184,37 +153,26 @@ class HomeTaskDispatchStageError extends GatewayError {
   }
 }
 
-/** The longest refusal message a task's terminal evidence keeps. */
 const HOME_TASK_REFUSAL_DETAIL_CHARACTERS = 500;
 
-/** The longest name a task or its worker session is shown by. */
 const HOME_TASK_TITLE_CHARACTERS = 80;
 
-/** The name a task is shown by: the worker session's name when it has one, else the brief's first non-empty line. */
 function homeTaskTitle(brief: string, workerName: string | undefined): string {
   const name = workerName?.trim();
   const line = name || brief.split("\n").map(candidate => candidate.trim()).find(candidate => candidate.length > 0) || "";
   return [...line].slice(0, HOME_TASK_TITLE_CHARACTERS).join("");
 }
 
-// Keep report/settlement reasons unchanged: a provider failure explains why there
-// is no report, not whether work succeeded or child ownership is proven settled.
 function providerFailure(message: AssistantMessage | undefined): HomeTaskFailureCause | undefined {
   return message?.stopReason === "error"
     ? isUsageLimitError(message.errorMessage) ? "provider-usage-limit" : "provider-error"
     : undefined;
 }
 
-/** Installation capability owner. Each dispatch closure, not a parallel ID map,
- * owns its lease, cancellation signal, terminal promise and report lifetime. */
 export class HomeTaskDispatcher {
   private readonly listFlights = new Map<string, ListFlight>();
-  /** Tasks launching or running, until they settle. There is no running cap (#1023):
-   * workers never wait; the memory-heavy steps they run wait in the host heavy queue
-   * (docs/host-load.md). */
   private readonly running = new Set<string>();
   private readonly pressure: HostPressure;
-  /** Reaps each task's commands when it settles; its sweep starts after recovery. */
   readonly commands: TaskCommandSweep;
   private readonly setup = new AsyncMutex();
   private recovery: Promise<HomeTaskRecoveryStatus> | undefined;
@@ -227,13 +185,9 @@ export class HomeTaskDispatcher {
     record => this.diagnostic?.(record));
   }
 
-  /** Only startup calls this, before live dispatch closures can exist. The
-   * durable record outlives a process; its executable lease never does. */
   recover(): Promise<HomeTaskRecoveryStatus> {
     return this.recovery ??= this.recoverOwned().then(() => { this.commands.start(); return { available: true as const }; }, error => {
       const reason = error instanceof HomeTaskStoreError ? error.code : "unsafe-state";
-      // Store errors already emitted their single owning diagnostic. Refusal
-      // is a process-lifetime result, not a retry or an unrelated Gateway stop.
       if (!(error instanceof HomeTaskStoreError)) this.diagnostic?.({ event: "home.task.store-refused", reason });
       return { available: false as const, reason };
     });
@@ -250,11 +204,6 @@ export class HomeTaskDispatcher {
 
   private async recoverOwned(): Promise<void> {
     await this.store.removeAbandonedTemporaries();
-    // The recovery pass already reads every record; it seeds the catalog's
-    // worker index in one batch rather than a second ledger scan.
-    // A worker is named by the task that created it, as live binding records it
-    // (first wins): a resumed task's successor rebinds the same session, so the
-    // ledger's order must not let a successor name it after a restart.
     const workers: Array<[string, string]> = [];
     const successors: Array<[string, string]> = [];
     try {
@@ -270,19 +219,11 @@ export class HomeTaskDispatcher {
   private async recoverTask(task: HomeTaskRecord): Promise<void> {
     if (task.lifecycle !== "terminal") await this.reconcile(task, "cold");
     else if (task.wake?.push === "pending") {
-      // Includes a crash after terminal/outbox co-commit but before advisory
-      // publication. The inbox's durable decision makes repeats harmless.
       await this.inbox.publish(task.taskId);
     }
-    // No root invocation survives startup. Its task result is now durable, so
-    // acknowledge only that operation, including a crash after the terminal write.
     if (task.sessionId && task.operationId) await this.sessions.clearOwnedOperationMarker(task.sessionId, task.operationId);
   }
 
-  /** Settles a non-terminal task from its canonical file alone, with no runtime to stop or
-   * replay through: at startup for every abandoned record (`cold`), and in process when a
-   * worker's live settlement failed or Stop finds a task no launch owns (`live`, #1166). A
-   * durable Stop intent with no report settles `interrupted`. */
   private async reconcile(task: HomeTaskRecord, origin: "cold" | "live", detail?: string): Promise<HomeTaskRecord> {
     const reasons = origin === "cold"
       ? { report: "cold-explicit-report", none: "cold-no-report", unavailable: "cold-evidence-unavailable" }
@@ -294,8 +235,6 @@ export class HomeTaskDispatcher {
     let reason = reasons.none;
     let failureCause: HomeTaskFailureCause | undefined;
     let evidenceRead = false;
-    // No runtime exists here to stop an async run, so a run whose status cannot be
-    // proven terminal makes the task unknown, even with a valid report.
     let detached = false;
     if (task.lifecycle === "active" && task.sessionId && task.operationId) {
       try {
@@ -311,23 +250,17 @@ export class HomeTaskDispatcher {
         if (report) reason = reasons.report;
         else failureCause = providerFailure(last?.type === "message" && last.message.role === "assistant" ? last.message : undefined);
         const asyncDirs = homeTaskSubagentLaunches(runEntries).flatMap(launch => launch.asyncDir ? [launch.asyncDir] : []);
-        // A malformed settlement fact refuses this evidence rather than being guessed.
         homeTaskSubagentsProjection(entries, task.operationId);
         detached = !await this.sessions.delegation.subagentRunsSettled(asyncDirs);
         if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(task.taskId), operationHash: hash(task.operationId), reason: "detached-work-outlived-task" });
         evidenceRead = true;
       } catch (error) {
-        // Namespace refusal is not missing report evidence: retire this
-        // process's capability instead of attempting a terminal write.
         if (error instanceof HomeTaskStoreError) throw error;
-        // Contradictory or unproven bytes cannot qualify a result. Retain
-        // already published spend/authority; never repair or replay work.
         report = undefined; entryId = undefined; entryIds = []; reason = reasons.unavailable; failureCause = undefined;
       }
     }
     const final = await this.store.update(task.taskId, current => {
       if (current.lifecycle === "terminal" || current.operationId !== task.operationId) throw new GatewayError("conflict", "Task settled or changed during reconciliation");
-      // A Stop intent is the maintainer's durable decision and the worker provably runs no more.
       const stopped = evidenceRead && !report && !detached && current.stopIntent !== null;
       const settledReason = detached ? "detached-work-outlived-task" : stopped ? "task-stop" : reason;
       return { ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current),
@@ -341,7 +274,6 @@ export class HomeTaskDispatcher {
   }
 
   private async reportEvidence(task: HomeTaskRecord, entries: readonly FileEntry[]): Promise<{ report: HomeTaskReport; entryId: string } | undefined> {
-    // A resumed task shares its predecessor's session: each operation owns exactly one marker and at most one report.
     const ofOperation = (entry: FileEntry) => entry.type === "custom" && (entry.data as { operationId?: unknown } | null)?.operationId === task.operationId;
     const markers = entries.filter(entry => entry.type === "custom" && entry.customType === HOME_TASK_MARKER && ofOperation(entry));
     if (markers.length !== 1 || markers[0]?.type !== "custom" || !task.sessionId) throw new GatewayError("conflict", "Task marker is missing or contradictory");
@@ -356,21 +288,15 @@ export class HomeTaskDispatcher {
     return { report, entryId: entry.id };
   }
 
-  /** `signal` is the delegating turn's Stop. Admission never outlives it: a stopped
-   * or expired step refuses the dispatch and settles any task record it created. */
   async start(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, signal?: AbortSignal, approval?: HomeTaskGrantApproval): Promise<HomeTaskHandle> {
     if (signal?.aborted) throw new HomeTaskDispatchStageError("choice", "cancelled");
     await this.assertAvailable();
     const registry = this.sessions.administrativeWorkRegistry;
     const work = registry.begin({ kind: "queued-mutation", hostEpoch: registry.runtimeEpoch });
-    // From here startOwned owns `work`; the task settles it when it settles.
     try { return await this.startOwned(identity, request, work, signal, approval); }
     catch (error) { work.settle(); throw error; }
   }
 
-  /** Runs one admission step under the stage deadline and the turn's Stop. The step
-   * cannot be interrupted (a stalled store or session lane ignores signals), so on
-   * refusal its late result goes to `abandon`, never back into this admission. */
   private async stage<T>(stage: HomeTaskDispatchStage, taskId: string, signal: AbortSignal | undefined,
     run: () => Promise<T>, abandon?: (value: T) => unknown): Promise<T> {
     if (signal?.aborted) throw this.stageRefused(stage, taskId, "cancelled", 0);
@@ -406,9 +332,6 @@ export class HomeTaskDispatcher {
     return new HomeTaskDispatchStageError(stage, outcome);
   }
 
-  /** Settles a task whose admission was refused after its record exists, like
-   * every terminal task with its one result wake. Accepted identity stays durable
-   * and is never replayed. */
   private async refuseAdmission(task: Pick<HomeTaskRecord, "taskId">, reason: "admission-cancelled" | "admission-timeout"): Promise<void> {
     const final = await this.store.update(task.taskId, current => current.lifecycle === "terminal" ? current : {
       ...current, lifecycle: "terminal", wake: this.inbox.event(current),
@@ -417,13 +340,6 @@ export class HomeTaskDispatcher {
     await this.inbox.publish(final.taskId);
   }
 
-  /** Continues a settled task in place (#929): a successor task bound to the same worker
-   * session, so its worktree stays with it. The stopped task's record stays
-   * immutable; each task has at most one started successor, so a lineage never forks. A
-   * successor refused before it started is not one (#959): the stopped task stays resumable
-   * and the refused successor's instruction is carried into the next resume's brief. `text`
-   * is the maintainer's or Home's instruction; the brief restates any question the run was
-   * stopped before it was answered. A resume admits like any task and starts at once. */
   async resume(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskResumeRequest,
     options: { signal?: AbortSignal; exceptWorkToken?: string; images?: ImageContent[]; approval?: HomeTaskGrantApproval } = {}): Promise<HomeTaskHandle & { operationId: string }> {
     const { signal } = options;
@@ -431,7 +347,6 @@ export class HomeTaskDispatcher {
     await this.assertAvailable();
     const registry = this.sessions.administrativeWorkRegistry;
     const work = registry.begin({ kind: "queued-mutation", hostEpoch: registry.runtimeEpoch });
-    // From here resumeOwned owns `work`, as startOwned does.
     try { return await this.resumeOwned(identity, request, work, options); }
     catch (error) { work.settle(); throw error; }
   }
@@ -451,8 +366,6 @@ export class HomeTaskDispatcher {
     if (previous.lifecycle !== "terminal" || previous.operationId !== request.operationId || !previous.sessionId)
       throw new GatewayError("conflict", "Only a settled task with a worker session can be resumed in place");
     const sessionId = previous.sessionId;
-    // Successors refused or settled before they started never bound the session (#959): they
-    // are skipped, and the instructions they carried are delivered with this one.
     const carried: string[] = [];
     let taskId = successorTaskId(previous.taskId);
     for (;;) {
@@ -467,7 +380,6 @@ export class HomeTaskDispatcher {
     const instructions = [...carried, ...(text ? [text] : [])];
     const epoch = await this.stage("setup", taskId, signal, () => this.store.restoreEpoch());
     const budget = await this.stage("budget", taskId, signal, () => this.policy.budget());
-    // The settled predecessor's operation precedes anything appended since.
     const entries = await this.sessions.readTaskEvidence(sessionId, { appendStable: true });
     const brief = resumeBrief(previous, instructions, interruptedQuestion(homeTaskOperationSpan(entries, previous.operationId!).run));
     const task = await this.create(taskId, signal, {
@@ -492,8 +404,6 @@ export class HomeTaskDispatcher {
     return { ...handle, sessionId, operationId };
   }
 
-  /** Publishes a new task's pending record. A record published after its admission was
-   * refused, or whose publication is uncertain (#2319), is settled, never left pending. */
   private create(taskId: string, signal: AbortSignal | undefined, record: HomeTaskWrite): Promise<HomeTaskRecord> {
     return this.stage("create", taskId, signal, () => this.store.put(record, null).catch(async error => {
       if (error instanceof HomeTaskStoreError && error.code === "publication-uncertain") await this.admissionFailed(record, error).catch(() => {});
@@ -501,15 +411,12 @@ export class HomeTaskDispatcher {
     }), created => { this.transition(created, "created"); void this.refuseAdmission(created, "admission-cancelled").catch(() => {}); });
   }
 
-  /** A one-use grant comes only from the maintainer: his tap on the exact card an
-   * agent's admission presents, or his own Continue. Nothing else records one. */
   private async authorizeTask(task: HomeTaskRecord, epoch: string, signal: AbortSignal | undefined, approval: HomeTaskGrantApproval | undefined) {
     const request = { intentDigest: task.intentDigest, target: task.target, authorizationScope: "full-work" as const, restoreEpoch: epoch };
     try { return await this.stage("authorize", task.taskId, signal, () => this.authorization.authorize(request)); }
     catch (error) {
       if (!(error instanceof HomeTaskAuthorizationError) || error.code !== "grant-required" || !error.requestId || !approval) throw error;
       const requestId = error.requestId;
-      // A decided request never mints a second grant, so it gets no second card.
       if ((await this.authorization.list()).decisions.some(decision => decision.requestId === requestId)) throw error;
       const grant = async (decisionId: string) => {
         await this.decideGrant(requestId, { decisionId, approved: true, expiresAt: Date.now() + HOME_TASK_GRANT_USE_MS });
@@ -537,7 +444,6 @@ export class HomeTaskDispatcher {
       || typeof input.intent !== "string" || !input.intent.trim() || Buffer.byteLength(input.intent) > 65536) throw new GatewayError("invalid_request", "Invalid task intent");
     const title = typeof input.title === "string" ? input.title.trim() : undefined;
     if (input.title !== undefined && (!title || [...title].length > HOME_TASK_TITLE_CHARACTERS)) throw new GatewayError("invalid_request", "Invalid task title");
-    // Refused before any task record, namespace initialization or worker exists.
     const deferredThinking = input.provenance && !input.model ? input.thinking : undefined;
     const taskId = input.taskId;
     const choice = await this.stage("choice", taskId, signal, () => this.policy.admitChoice(deferredThinking === undefined ? input : {}));
@@ -548,8 +454,6 @@ export class HomeTaskDispatcher {
       return current;
     }));
     if (await this.stage("lookup", taskId, signal, () => this.store.read(taskId))) throw new GatewayError("conflict", "Task already exists; accepted work is never replayed");
-    // The Home profile's task budget, fixed at the task's start (settings-model.md 6.1):
-    // a later raise never reaches this task; a later lower applies at its next turn.
     const budget = await this.stage("budget", taskId, signal, () => this.policy.budget());
     const target = await this.stage("target", taskId, signal, () => this.policy.canonicalTarget(input.target));
     let task = await this.create(taskId, signal, {
@@ -568,14 +472,11 @@ export class HomeTaskDispatcher {
     return this.admit({ task, authority, input, title, choice, deferredThinking }, work, signal);
   }
 
-  /** Starts an authorized task's worker at once, a resume too (#959). */
   private async admit(launch: HomeTaskLaunch, work: GatewayWorkHandle, signal: AbortSignal | undefined): Promise<HomeTaskHandle> {
     this.running.add(launch.task.taskId);
     return this.launch(launch, work, signal);
   }
 
-  /** Starts an authorized task's worker. It counts as running until the task
-   * settles or its launch fails. */
   private async launch(launch: HomeTaskLaunch, work: GatewayWorkHandle, signal: AbortSignal | undefined): Promise<HomeTaskHandle> {
     let { task } = launch;
     const { authority, input, title, choice, deferredThinking } = launch;
@@ -606,7 +507,6 @@ export class HomeTaskDispatcher {
             ...(attention === "requested" ? { lastAttentionAt: accepted.at, attention: { checkin: accepted, wake: this.inbox.attentionEvent(current, accepted) } } : {}) };
         });
         this.diagnostic?.({ event: "home.task.checkin", taskHash: hash(saved.taskId), operationHash: hash(operationId), revision: saved.revision, attention: accepted.attention });
-        // The durable outbox owns the wake. Publication never changes acceptance.
         if (accepted.attention === "requested") await this.inbox.publishAttention(saved.taskId).catch(() => {});
         return accepted;
       });
@@ -617,27 +517,19 @@ export class HomeTaskDispatcher {
         if (limit("inputTokens") === Infinity && limit("outputTokens") === Infinity) return false;
         const span = homeTaskOperationSpan(entries, operationId);
         if (span.index < 0) return false;
-        // The same canonical projection the record publishes; never a second counter.
         let spend: HomeTaskSpend;
         try { spend = homeTaskSpend(span.run); } catch { return false; }
-        // The input budget is documented "cached included": every prompt token counts.
         return homeTaskPromptTokens(spend) >= limit("inputTokens") || spend.outputTokens >= limit("outputTokens");
       });
-      // Trust is rechecked by the neutral creation/admission boundary too.
-      // A worker created after admission was refused is released, never prompted.
       const resume = launch.resume;
       lease = resume
-        // A resumed task rebinds its predecessor's worker session in place (#929).
         ? await this.stage("create-worker", taskId, signal, () => dispatch.resumeWorker(resume.sessionId, reports, resume.exceptWorkToken), late => dispatch.abandonWorker(late, reports))
         : await this.stage("create-worker", taskId, signal, () => dispatch.createWorker(task.target, reports), late => dispatch.abandonWorker(late, reports));
       const { slot } = lease;
       const appliedChoice = resume ? "" : await (async () => {
       const configured = await this.stage("configure-worker", taskId, signal, async () => {
-      // Name the worker before its first prompt; the slot persists the canonical transcript entry.
       if (title) await slot.rename(title);
       await slot.setHomeTaskModelQueues(input.modelQueues ?? await this.policy.modelQueues());
-      // The slot's own configuration owners record the choice in the worker's transcript
-      // before its first prompt. An omitted model keeps the session's default.
       const fixedAt = (value: unknown, field: "model" | "thinking"): FixedSetting => ({ value,
         from: "delegate", at: new Date().toISOString(), ref: randomUUID(), ...input.provenance?.[field] });
       const model = choice.model ?? (input.provenance ? slot.snapshot().model ?? undefined : undefined);
@@ -654,8 +546,6 @@ export class HomeTaskDispatcher {
       return { model, clamped };
       });
       const { model, clamped } = configured;
-      // The canonical worker brief records the actual fallback capability choice;
-      // the authorized task intent/digest is never rewritten after admission.
       const appliedChoice = input.provenance
         ? `\n\nWorker at start: ${model ? `${model.provider}/${model.id}` : "worker default"}; thinking ${slot.snapshot().thinkingLevel}${clamped ? `; ${clamped}` : ""}.`
         : "";
@@ -665,12 +555,9 @@ export class HomeTaskDispatcher {
         grantRef: authority.kind === "one-use-grant" ? authority.grantId : null,
         scopeRef: authority.kind === "standing-scope" ? authority.scopeId : null };
       const bound = task;
-      // Once bound, the record names this worker and operation; a late bind is
-      // refused by settlement rather than prompted.
       task = await this.stage("bind", taskId, signal, () => this.store.put(bound, bound.revision - 1),
         late => { this.transition(late, "operation-bound"); void this.refuseAdmission(late, "admission-cancelled").catch(() => {}); });
       this.transition(task, "operation-bound");
-      // Every command the worker runs from here belongs to this task until it settles.
       this.commands.bind(slot.id, task.taskId);
       let resolve!: (terminal: OwnedOperationTerminal) => void;
       const terminal = new Promise<OwnedOperationTerminal>(done => { resolve = done; });
@@ -678,12 +565,8 @@ export class HomeTaskDispatcher {
         reports.cancel();
         await slot.ownedTurns.cancelHomeTaskOperation(operationId, reason);
       };
-      // Arm before the first asynchronous prompt preflight; cancellation never
-      // queues behind the lane whose blocked admission it must interrupt. The same
-      // deadline bounds the subagent join below, so it is disarmed only at settlement.
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
-      // The task's work is owned by its bound worker session, so a drain waits on it like any foreground owner.
       work.transition("foreground-agent-operation", slot.id);
       const admitted = slot.prompt(`${task.intent.text}${appliedChoice}\n\nThis is a finite Home task. Send a short checkin at milestones and about every 30 minutes (step, done, next; optional blocker/refs). It does not pause or finish work. Use needsAttention only for blockers needing Home; it is rate-limited. Use report with explicit evidence to finish. A normal reply is not a task result.`, launch.resume?.images ?? [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
@@ -700,17 +583,9 @@ export class HomeTaskDispatcher {
         if (!deadlineStopFailed) await admitted.catch(() => {});
         let reportStopFailed = false;
         try { await reports.joinStop(); } catch { reportStopFailed = true; }
-        // Async runs the task started are stopped and joined before the evidence cut,
-        // so the cut records every stop and the outcome reads the join's result.
         const settled = await settleTaskSubagents(slot, operationId, deadline!.signal);
-        // The worker's turn is over: nothing it started may outlive the task (#2209).
         await this.commands.settle(slot.id, active.taskId);
-        // Share cold recovery's durable file cut before publishing any terminal
-        // references/outbox or acknowledging the operation. SDK append visibility
-        // alone cannot guarantee the worker evidence survives a power loss.
         const cut = await this.sessions.readLiveTaskEvidence(slot.id, operationId);
-        // Spend and last-reply evidence remain selected-branch projections;
-        // immutable report addresses are qualified across the durable file.
         const entries = cut.state === "present" ? cut.branch : [];
         const runEntries = homeTaskOperationSpan(entries, operationId).run;
         const evidence = cut.state === "present" ? await this.reportEvidence(active, cut.entries) : undefined;
@@ -728,11 +603,7 @@ export class HomeTaskDispatcher {
             return receipt?.receiptKind === "terminal" && receipt.lifecycle === "interrupted"
               && receipt.operationId === outcome.terminal.operationId && receipt.invocationId === outcome.terminal.invocationId && receipt.sessionId === slot.id;
           });
-        // A Stop that landed between turns interrupted no turn, so it has no interruption receipt to
-        // pin: the waiting terminal and the durable stop intent are its proof.
         const interrupted = interruption !== undefined || (outcome.state === "terminal" && outcome.terminal.errorCode === TASK_STOP_WAITING);
-        // Stop intent is append-only. Qualify before entering the store update:
-        // missing proof is not namespace corruption or a publication attempt.
         const stoppedBeforeConversation = cut.state === "absent";
         if (stoppedBeforeConversation && (!cut.operationSettled || !(await this.store.read(active.taskId))?.stopIntent || deadlineStopFailed || reportStopFailed || detached)) {
           throw new GatewayError("conflict", "Task canonical evidence is unavailable");
@@ -756,17 +627,12 @@ export class HomeTaskDispatcher {
         await this.inbox.publish(final.taskId);
         return (await this.store.read(final.taskId))!;
       })().catch(async (error: unknown) => {
-        // The worker's operation is over and its lease retires below, so nothing else would ever
-        // settle this task in process: it settles now from its canonical file, as cold recovery
-        // would, and names the failure (#1166). A failure after the terminal write is publication's:
-        // cold recovery republishes it.
         if ((await this.store.read(active.taskId))?.lifecycle === "terminal") { await this.commands.settle(slot.id, active.taskId); throw error; }
         const final = await this.reconcile(active, "live", error instanceof Error && error.message.trim() ? error.message.trim() : "settlement failed");
         await this.commands.settle(slot.id, active.taskId);
         await dispatch.acknowledge(slot.id, operationId, ownedLease).catch(() => {});
         return final;
       }).finally(() => { deadline!.disarm(); reports.retire(); ownedLease.release(); work.settle(); this.releaseSlot(taskId); });
-      // Tool callers return admission immediately, but failures remain observed.
       void completion.catch(() => {});
       return { taskId: task.taskId, sessionId: slot.id, operationId, completion };
     } catch (error) {
@@ -785,20 +651,13 @@ export class HomeTaskDispatcher {
     }
   }
 
-  /** Settles a task whose admission failed after its pending record exists. */
   private async admissionFailed(task: Pick<HomeTaskRecord, "taskId">, error: unknown): Promise<void> {
     if (error instanceof HomeTaskDispatchStageError) {
-      // The refused step may still hold the store queue, so the turn's Stop never
-      // waits for this settlement; cold recovery is its backstop if it fails.
       void this.refuseAdmission(task, error.outcome === "timeout" ? "admission-timeout" : "admission-cancelled")
-        .catch(() => { /* A store refusal emits its own diagnostic. */ });
+        .catch(() => { });
       return;
     }
-    // Accepted identity remains durable and cannot be used for prompt replay.
-    // The refusal's own message is kept, so Home and the app can say why (#959).
     const detail = error instanceof Error && error.message.trim() ? [...error.message.trim()].slice(0, HOME_TASK_REFUSAL_DETAIL_CHARACTERS).join("") : undefined;
-    // Settle the persisted record, not the caller's copy: a refused bind write
-    // leaves `task` one revision ahead of the store.
     const final = await this.store.update(task.taskId, current => ({ ...current, lifecycle: "terminal", wake: this.inbox.event(current),
       terminalEvidence: { outcome: "unknown", sessionId: current.sessionId, entryIds: [], reason: "admission-refused", ...(detail ? { detail } : {}) } }));
     this.transition(final, "admission-refused", error instanceof GatewayError ? error.code : "internal");
@@ -809,7 +668,6 @@ export class HomeTaskDispatcher {
     this.running.delete(taskId);
   }
 
-  /** Workers running now, for Home status. */
   workers(): { running: number } {
     return { running: this.running.size };
   }
@@ -834,7 +692,6 @@ export class HomeTaskDispatcher {
     await this.assertAvailable();
     const state = await this.authorization.list();
     const epoch = await this.store.restoreEpoch();
-    // Only active standing scopes can be reconfirmed; one-use grants never renew.
     return { ...state, needsReconfirmation: state.scopes.some(scope => scope.active && scope.restoreEpoch !== epoch) };
   }
   async revokeScope(scopeId: string) { await this.assertAvailable(); await this.authorization.revokeScope(scopeId); }
@@ -864,16 +721,12 @@ export class HomeTaskDispatcher {
   async steer(control: TaskWorkerControl & { text: string }): Promise<void> {
     await this.refusingControl("steer", control, async () => {
       const task = await this.activeControl(control);
-      // A steer would start a fresh turn in a session no task operation owns.
       if (!this.running.has(task.taskId)) throw new GatewayError("conflict", "Task has no live worker; stop settles it");
       if (typeof control.text !== "string" || !control.text.trim() || Buffer.byteLength(control.text) > 65536) throw new GatewayError("invalid_request", "Invalid task steering text");
       await this.sessions.delegation.steerWorker(task.sessionId!, control, control.text);
     });
   }
 
-  /** Interrupts only the running worker's in-flight tool calls (#1189). The optional text is
-   * queued as steering before the abort, so the worker reads it right after the interrupted results; the
-   * worker, its session and its task keep running. Returns the interrupted tools' names. */
   async interrupt(control: TaskWorkerControl & { text?: string }, by: string): Promise<{ interrupted: string[] }> {
     const interrupted = await this.refusingControl("interrupt", control, async () => {
       const task = await this.activeControl(control);
@@ -887,14 +740,6 @@ export class HomeTaskDispatcher {
     return { interrupted: interrupted.interrupted };
   }
 
-  /**
-   * Renames the worker session through its canonical session name (#1336), the one the
-   * maintainer's `session.rename` writes and every display reads: task rows derive their
-   * title from it (`display`), so nothing else is stored. Allowed while the worker runs:
-   * the name is a branch `session_info` entry under the slot lane and never touches the
-   * run. Only `delegate` names a worker automatically, once, before its first prompt; a
-   * resume keeps the session's current name, so an explicit rename is never overwritten.
-   */
   async rename(task: HomeTaskRecord, title: string): Promise<{ title: string; previousTitle: string }> {
     const control = { taskId: task.taskId, ...(task.operationId === null ? {} : { operationId: task.operationId }) };
     const previousTitle = await (async () => {
@@ -914,8 +759,6 @@ export class HomeTaskDispatcher {
     return { title: (await this.display(task)).title, previousTitle };
   }
 
-  /** Both control owners use this at their own rejection boundary. Never log error messages:
-   * Home's earlier guards include caller-supplied task and operation IDs in theirs. */
   controlRefusal(action: "steer" | "interrupt" | "stop" | "rename", control: { taskId: string; operationId?: string }, error: GatewayError,
     reason: TaskControlRefusalReason = CONTROL_REFUSAL_REASONS.get(error.message) ?? error.code): GatewayError {
     this.diagnostic?.({ event: "home.task.control", taskHash: hash(control.taskId),
@@ -923,8 +766,6 @@ export class HomeTaskDispatcher {
     return error;
   }
 
-  /** Record typed control rejections without changing their error or claiming an unknown failure
-   * was a refusal. Cancellation can already have taken partial effect when its owner rejects. */
   private async refusingControl<T>(action: "steer" | "interrupt" | "stop", control: TaskWorkerControl, admit: () => Promise<T>): Promise<T> {
     try {
       return await admit();
@@ -934,8 +775,6 @@ export class HomeTaskDispatcher {
     }
   }
 
-  /** The current task of a worker session: the newest bound to it. Tasks resumed in place
-   * share their predecessor's session, and each task has at most one successor. */
   async latestTaskForSession(sessionId: string): Promise<HomeTaskRecord | undefined> {
     await this.assertAvailable();
     let latest: HomeTaskRecord | undefined;
@@ -948,8 +787,6 @@ export class HomeTaskDispatcher {
 
   async stop(control: TaskWorkerControl): Promise<void> {
     const task = await this.refusingControl("stop", control, () => this.activeControl(control));
-    // An active task no launch in this process owns has no worker to stop: its live settlement
-    // and that settlement's fallback both failed. The durable intent settles it (#1166).
     if (!this.running.has(task.taskId)) {
       const stopped = await this.refusingControl("stop", control, () => this.store.update(task.taskId, current => {
         if (current.lifecycle !== "active" || current.operationId !== control.operationId) throw new GatewayError("conflict", "Task operation changed before Stop");
@@ -959,12 +796,9 @@ export class HomeTaskDispatcher {
       await this.reconcile(stopped, "live");
       return;
     }
-    // No session mutation lane here: Stop must be able to cancel its admission.
     await this.refusingControl("stop", control, () => this.sessions.delegation.stopWorker(task.sessionId!, control));
   }
 
-  /** One task as Home's `task` tool shows it: its state, the operation a control would act on and
-   * the actions it allows now. `continuedAs` names a later in-place resume of the same worker. */
   async controlRow(task: HomeTaskRecord, continuedAs?: string): Promise<HomeTaskControlRow> {
     const state: HomeTaskControlRow["state"] = task.lifecycle === "active" ? "running" : task.lifecycle === "terminal" ? "settled" : "starting";
     const actions: HomeTaskControlRow["actions"] = continuedAs ? ["status", "report"]
@@ -978,8 +812,6 @@ export class HomeTaskDispatcher {
       ...(continuedAs ? { continuedAs } : {}), updatedAt: new Date(task.updatedAt).toISOString(), actions };
   }
 
-  /** Home's newest tasks as control rows, newest first. A settled task whose worker a newer task
-   * in the page continues names it, so a control is sent to the current one. */
   async controlCatalog(limit: number): Promise<{ tasks: HomeTaskControlRow[]; counts: HomeTaskCounts; more: boolean }> {
     await this.assertAvailable();
     const page = await this.store.page({ limit });
@@ -993,7 +825,6 @@ export class HomeTaskDispatcher {
     return { tasks, counts: page.counts, more: page.nextCursor !== undefined };
   }
 
-  /** Up to five task IDs close to one that does not exist, newest first, for an actionable miss. */
   async similarTaskIds(taskId: string): Promise<string[]> {
     const wanted = taskId.toLowerCase();
     const scored: Array<{ taskId: string; createdAt: number; score: number }> = [];
@@ -1017,8 +848,6 @@ export class HomeTaskDispatcher {
     const workerModel = task.sessionId ? await this.sessions.taskWorkerModel(task.sessionId) ?? null : null;
     const status = { ...task, checkins: (task.checkins ?? []).slice(-HOME_TASK_CHECKIN_VISIBLE), ...await this.display(task), workerModel, subagents: await this.subagents(task),
       subagentRuns: await this.liveSubagentRuns(task), ownerSettlement: await this.ownerSettlement(task) };
-    // Neither a transcript read nor a prior terminal projection fences a replaced
-    // task identity. Recheck after every projection await, without updating spend.
     if (task.lifecycle === "terminal" && task.terminalEvidence?.reason === "no-report") {
       const current = await this.store.read(taskId);
       if (!current || current.taskId !== task.taskId || current.sessionId !== task.sessionId
@@ -1030,15 +859,12 @@ export class HomeTaskDispatcher {
     return status;
   }
 
-  /** A no-report result says nothing about success. Only a durable, ordered cut
-   * proves this worker ended and joined its children; terminal run counts are synthetic. */
   private async ownerSettlement(task: HomeTaskRecord): Promise<HomeTaskOwnerSettlement | null> {
     if (task.lifecycle !== "terminal" || task.terminalEvidence?.outcome !== "unknown"
       || task.terminalEvidence.reason !== "no-report" || !task.sessionId || !task.operationId
       || task.terminalEvidence.sessionId !== task.sessionId) return null;
     try {
       const entries = await this.sessions.readTaskEvidence(task.sessionId, { appendStable: true });
-      // The operation's own span: a resumed successor appends its operation after it.
       const span = homeTaskOperationSpan(entries, task.operationId);
       if (span.index < 0) return null;
       const operation = [entries[span.index]!, ...span.run];
@@ -1075,16 +901,10 @@ export class HomeTaskDispatcher {
       return { taskId: task.taskId, sessionId: task.sessionId, operationId: task.operationId,
         markerEntryId: marker.id, terminalEntryId: terminal.id, settlementEntryId: settlement.id, stoppedAtEnd: fact.stoppedAtEnd };
     } catch {
-      // Missing, malformed, or racing canonical bytes are absence of proof, not
-      // authority to repair the transcript or infer settlement from zero counts.
       return null;
     }
   }
 
-  /** The list page of the newest tasks, each with its display, from one store pass
-   * and never a report body. Identical reads in flight share that pass (#906): a
-   * client that re-asks while one read is pending adds no store work. The pass
-   * leaves the store queue once every reader waiting on it has gone. */
   async list(input: { limit?: number; cursor?: string; filter?: "all" | "open" | "finished" }, signal?: AbortSignal): Promise<HomeTaskPage> {
     const key = JSON.stringify([input.limit ?? null, input.cursor ?? null, input.filter ?? "all"]);
     let flight = this.listFlights.get(key);
@@ -1108,7 +928,6 @@ export class HomeTaskDispatcher {
     }
   }
 
-  /** Targets of tasks that are pending or active: one store pass, no display rows. */
   activeTargets(signal?: AbortSignal): Promise<string[]> {
     return this.store.activeTargets(signal);
   }
@@ -1133,14 +952,11 @@ export class HomeTaskDispatcher {
       summary => this.diagnostic?.({ event: "home.task.history-summary", ...summary }));
   }
 
-  /** A task's display. A worker's name is read from its canonical session, never a transcript scan. */
   async display(task: HomeTaskRecord): Promise<HomeTaskDisplay> {
     const workerName = task.sessionId ? await this.sessions.taskWorkerName(task.sessionId) : undefined;
     return { title: homeTaskTitle(task.intent.text, workerName), project: basename(task.target) };
   }
 
-  /** The worker's live subagent runs, newest first and bounded for status. Only an active
-   * task has a live worker to read; a settled task lists none. */
   async liveSubagentRuns(task: HomeTaskRecord): Promise<HomeTaskSubagentRuns> {
     if (task.lifecycle !== "active" || !task.sessionId) return { total: 0, runs: [] };
     const runs = (await this.sessions.acquire(task.sessionId)).ownedTurns.liveSubagentRuns();
@@ -1148,8 +964,6 @@ export class HomeTaskDispatcher {
     return { total: runs.length, runs: newestFirst.slice(0, HOME_TASK_STATUS_RUN_LIMIT) };
   }
 
-  /** The operation's subagent counts, read from the worker's canonical evidence and
-   * never persisted with the task. A task without a worker or operation launched none. */
   async subagents(task: HomeTaskRecord): Promise<HomeTaskSubagents> {
     if (task.sessionId && task.operationId) {
       const sessionId = task.sessionId;
@@ -1170,8 +984,6 @@ export class HomeTaskDispatcher {
       const slot = await this.sessions.acquire(task.sessionId);
       task = await this.store.update(taskId, current => {
         if (current.lifecycle !== "active") return current;
-        // Read canonical deltas while this publication owns the store mutex;
-        // an older status read cannot replace a newer usage projection.
         const spend = homeTaskSpend(homeTaskOperationSpan(slot.canonicalSessionEntries(), current.operationId!).run);
         return JSON.stringify(current.spend) === JSON.stringify(spend) ? current : { ...current, spend };
       });
@@ -1180,7 +992,6 @@ export class HomeTaskDispatcher {
     }
     if (task.reportRef) {
       if (!task.sessionId || !task.operationId) throw new GatewayError("conflict", "Task evidence is missing");
-      // A reference proves its report present; later appends cannot remove it.
       const entries = await this.sessions.readTaskEvidence(task.sessionId, { appendStable: true });
       const evidence = await this.reportEvidence(task, entries);
       const ref = task.reportRef;
@@ -1193,10 +1004,7 @@ export class HomeTaskDispatcher {
     this.diagnostic?.({ event: "home.task.transition", taskHash: hash(task.taskId), revision: task.revision,
       transition: task.lifecycle, reason, operationHash: task.operationId ? hash(task.operationId) : null, ...(errorCode ? { errorCode } : {}),
       ...(task.terminalEvidence?.failureCause ? { failureCause: task.terminalEvidence.failureCause } : {}) });
-    // A bound task names its worker; the catalog marks that row a Home worker.
     if (task.sessionId) this.sessions.recordTaskWorkers([[task.sessionId, task.taskId]]);
-    // Every terminal write reaches here once; attention is presentation state,
-    // so a failed mark never affects the task's own settlement.
     if (task.lifecycle === "terminal" && task.sessionId) {
       const sessionId = task.sessionId;
       void Promise.resolve().then(() => this.sessions.taskWorkerSettled(sessionId, task.taskId)).catch(() => {});
@@ -1204,8 +1012,6 @@ export class HomeTaskDispatcher {
   }
 }
 
-/** Diagnostic counters for a published spend: fresh input and cache read/write
- * stay apart, so a log shows cache health without the session files. */
 function spendCounters(spend: HomeTaskSpend | null): { inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number } {
   return { inputTokens: spend?.inputTokens ?? 0, cacheReadTokens: spend?.cacheReadTokens ?? 0,
     cacheWriteTokens: spend?.cacheWriteTokens ?? 0, outputTokens: spend?.outputTokens ?? 0 };

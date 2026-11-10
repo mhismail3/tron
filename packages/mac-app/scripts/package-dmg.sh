@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Sole owner of fail-closed Mac DMG assembly and mounted-image verification.
-
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
@@ -190,8 +189,6 @@ cleanup() {
         echo "error: failed to detach DMG mount: $mount_point" >&2
         status=1
     fi
-    # Bundled payloads are deliberately immutable. Restore owner write access
-    # only inside this private packaging scratch directory before removing it.
     chmod -R u+w "$work" 2>/dev/null || true
     rm -rf "$work"
     exit "$status"
@@ -199,10 +196,6 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$source" "$mount_point" "$(dirname "$output")"
-# `ditto` applies an immutable directory's mode before copying its children and
-# then cannot populate the complete read-only payload tree. `cp -R` materializes
-# children first; the verification below proves signatures, bytes, and modes
-# survived the copy before the image is created.
 cp -R "$app" "$source/$bundle"
 verify_app_bundle "$source/$bundle"
 rm -f "$output"

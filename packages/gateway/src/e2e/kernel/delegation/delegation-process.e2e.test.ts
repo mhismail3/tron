@@ -4,14 +4,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../../test-support/gateway-process.js";
 import { awaitsWithin, waitFor } from "../../../../test-support/wait-for.js";
 
-/**
- * A delegated child result and its cancellation across the client socket
- * (#2231): a source Gateway process with its real managed pi-subagents install
- * running a foreground child session (its model calls leave the Gateway process
- * itself), the production loopback WebSocket, and a scripted HTTP provider
- * (parent and child models, told apart by model id) as the only scripted party.
- */
-
 const gateways: GatewayProcess[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -21,7 +13,6 @@ type Snapshot = { phase: string; operation?: unknown; transcript: Array<Record<s
 async function delegatingGateway(): Promise<GatewayProcess> {
   const gateway = await startGatewayProcess();
   gateways.push(gateway);
-  // A user-scope agent: its definition needs no project trust.
   await mkdir(join(gateway.agentDir, "agents"), { recursive: true });
   await writeFile(join(gateway.agentDir, "agents", "task-child.md"),
     `---\nname: task-child\ndescription: Scripted task child\nmodel: scripted/${CHILD_MODEL}\ntools: read\n---\nComplete the scripted task.\n`);
@@ -54,7 +45,6 @@ async function prompt(gateway: GatewayProcess, phone: ProcessClient, label: stri
 const subagentCall = { toolCalls: [{ id: "call-subagent", name: "subagent", arguments: { agent: "task-child", task: "Scripted child task", async: false } }] };
 const toolResults = (snapshot: Snapshot) => snapshot.transcript.filter((item) => item.kind === "message" && item.role === "toolResult");
 const childRequests = (gateway: GatewayProcess) => gateway.provider.requests.filter((request) => request.model === CHILD_MODEL);
-// The protocol's terminal process states (kernel/projection/process-activity.ts).
 const TERMINAL_STATES = ["completed", "failed", "stopped", "rejected", "interrupted"];
 const subagents = (snapshot: Snapshot) => (snapshot.processActivities ?? []).filter((activity) => activity.kind === "subagent");
 const liveSubagents = (snapshot: Snapshot) => subagents(snapshot).filter((activity) => !TERMINAL_STATES.includes(activity.lifecycle?.state));
@@ -82,7 +72,6 @@ describe("delegation across the client socket of a real Gateway process", () => 
     expect(subagents(settled)[0]).toMatchObject({ toolCallId: "call-subagent", lifecycle: { state: "completed" } });
     expect(subagents(settled)[0]!.lifecycle.terminalAt).toEqual(expect.any(String));
     expect(gateway.provider.requests.map((request) => request.model)).toEqual(["scripted-model", CHILD_MODEL, "scripted-model"]);
-    // The parent's second request carries the child's answer bytes as the tool result.
     const toolMessage = gateway.provider.requests[2]!.messages.find((message) => message.role === "tool");
     expect(toolMessage?.tool_call_id).toBe("call-subagent");
     expect(JSON.stringify(toolMessage?.content)).toContain("CHILD-ANSWER-7");
@@ -98,7 +87,6 @@ describe("delegation across the client socket of a real Gateway process", () => 
     const aborted = new Promise<void>((resolve) => { childAborted = resolve; });
     gateway.provider.script([
       () => subagentCall,
-      // The child's model call is held until the child session drops it.
       (_request, signal) => new Promise((_resolve, reject) => {
         signal.addEventListener("abort", () => { childAborted(); reject(new Error("child request aborted")); });
         reach();
@@ -123,8 +111,6 @@ describe("delegation across the client socket of a real Gateway process", () => 
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ toolName: "subagent", toolCallId: "call-subagent", isError: true });
     expect(JSON.stringify(results[0]!.content)).toContain("Request aborted");
-    // The aborted child is terminal and did not complete. Which terminal state a
-    // user cancel should read (today `failed`) is the open decision in #2238.
     const activities = subagents(settled);
     expect(activities).toHaveLength(1);
     expect(activities[0]!.toolCallId).toBe("call-subagent");
@@ -162,8 +148,6 @@ describe("delegation across the client socket of a real Gateway process", () => 
       const snapshot = await freshSnapshot(gateway, sessionId);
       return snapshot.phase === "idle" && !snapshot.operation && liveSubagents(snapshot).length === 0 ? snapshot : undefined;
     }, "the parent settled with no live child");
-    // A user's cancel is a stop, as it is for the parent turn: the child's process
-    // row and the parent's delegated run both read stopped, and neither is a problem.
     expect(subagents(settled).map((activity) => [activity.toolCallId, activity.lifecycle.state])).toEqual([["call-subagent", "stopped"]]);
     const run = ((settled as Record<string, any>).extensionActivities as Array<Record<string, any>>).find((activity) => activity.toolCallId === "call-subagent");
     expect(run?.lifecycle?.state).toBe("stopped");

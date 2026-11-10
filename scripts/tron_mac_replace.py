@@ -39,15 +39,10 @@ from tron_rebuild_lock import RebuildLock, RebuildBusy  # noqa: E402
 LIBC = ctypes.CDLL(None, use_errno=True)
 DISK_RESERVE = {'full': 15 * 1024 ** 3, 'quick': 3 * 1024 ** 3}
 WORKER_STOP_TIMEOUT = 10 * 60
-# A kept app copy must not be a `.app` bundle: Launch Services does not resolve
-# a directory without the package extension, even when explicitly registered,
-# so `open -b`, Finder and Spotlight cannot launch it (#2257).
 KEPT_APP_NAME = 'Tron.app.kept'
 RESUME_TEXT = ('The Mac app was replaced while this task ran, so it was stopped and preserved. '
                'Continue the task in place from where you left off.')
 
-
-# Plan ----------------------------------------------------------------------
 
 def source_file(root, revision, path):
     """A source file at the revision being replaced (which may trail the checkout's HEAD)."""
@@ -75,8 +70,6 @@ def plan(platform, root):
     revision = git(root, 'rev-parse', 'origin/main')
     decided = _plan(platform, root, head, revision, '')
     if decided['path'] == 'quick' and (revision != head or git(root, 'status', '--porcelain', '--untracked-files=no')):
-        # Quick rebuild compiles the checkout; use the detached full builder if
-        # its bytes cannot represent the selected main revision.
         decided.update(path='full', reason=f'Full signed build of origin/main ({revision[:9]}): '
                        'the source checkout differs from the selected revision.')
     return decided
@@ -115,8 +108,6 @@ def _plan(platform, root, head, revision, warning):
     return {'path': path, 'reason': reason, 'revision': revision, 'head': head, 'root': str(root),
             'running': running, 'appRevision': app_revision, 'protocol': protocol, 'warning': warning}
 
-
-# Runner --------------------------------------------------------------------
 
 class Runner:
     def __init__(self, platform, journal):
@@ -157,8 +148,6 @@ class Runner:
 
     def run_locked(self):
         if self.data['swap'].get('previousApp') and self.data['state'] != 'succeeded':
-            # A runner that died after the swap (crash, reboot) left no verdict:
-            # restore the previous app before trying again.
             self.journal.note('the previous attempt stopped after the swap; restoring the previous app first')
             self.rollback()
             if self.data['state'] == 'rollback-failed':
@@ -193,7 +182,6 @@ class Runner:
         except Failure:
             return False
 
-    # Steps ---------------------------------------------------------------
     def step_preflight(self):
         platform, path = self.platform, self.data['path']
         platform.admit()
@@ -201,16 +189,12 @@ class Runner:
         if (platform.maintenance / 'active.json').exists():
             raise Failure('a manual `scripts/tron mac reinstall` operation is active; finish it with '
                           '`scripts/tron mac reinstall --verify` then `--finish` (or `--abandon`) first')
-        # Only the quick path reads caller bytes. Full builds own a detached
-        # origin/main checkout and must not depend on the caller's dirty tree.
         if path == 'quick':
             if git(self.root, 'rev-parse', 'HEAD') != self.revision:
                 raise Failure('quick-build source HEAD moved; start again')
             dirty = git(self.root, 'status', '--porcelain', '--untracked-files=no')
             if dirty:
                 raise Failure(f'quick-build source has uncommitted tracked changes:\n{dirty[:600]}')
-            # The source helper loads ws before its build-time repair can run.
-            # Check with the dependency-free verifier before draining workers.
             node, _ = platform.node()
             try:
                 run([node, self.root / 'scripts/gateway-install-inputs.mjs', 'check',
@@ -373,14 +357,10 @@ class Runner:
             snapshot = operation / f'state-snapshot-{self.data["attempt"]}'
             if snapshot.exists():
                 raise Failure(f'raw snapshot already exists; preserving it rather than overwriting: {snapshot}')
-            # One APFS clonefile of the whole tree: a consistent, space-shared
-            # rollback point taken while every Stable writer is stopped.
             if LIBC.clonefile(os.fsencode(platform.tron_home), os.fsencode(snapshot), 0) != 0:
                 raise Failure(f'could not snapshot {platform.tron_home}: {os.strerror(ctypes.get_errno())}')
             swap['snapshot'] = str(snapshot)
             self.journal.save()
-            # Each move is journaled before it happens; rollback restores by what exists,
-            # so a runner that dies between journal and rename still recovers.
             channel = platform.stable_channel()
             if channel.exists():
                 retired = operation / f'retired-stable-payloads-{self.data["attempt"]}'
@@ -401,8 +381,6 @@ class Runner:
                     raise Failure(f'not offline before publishing the app: {blocker}')
                 os.rename(staging, platform.installed)
             finally:
-                # A failed/interrupted copy must not strand partial app bytes in
-                # /Applications after rollback. This is this runner's staging path.
                 if staging.exists():
                     shutil.rmtree(staging)
             swap['installed'] = True
@@ -484,7 +462,6 @@ class Runner:
     def step_finish(self):
         if self.data['path'] != 'full':
             return 'replacement complete'
-        # Pruning reports and never raises: a raise here would roll back a verified install.
         try:
             failures = prune_store(self.platform, self.journal.directory, self.revision)
         except Exception as error:  # noqa: BLE001
@@ -494,15 +471,12 @@ class Runner:
         return 'replacement complete' + (f'; could not prune {len(failures)} superseded path(s), see journal.log'
                                           if failures else '')
 
-    # Failure handling ----------------------------------------------------
     def recover(self):
         swap = self.data['swap']
         if swap.get('previousApp'):
             self.rollback()
             return
         self.journal.settle('failed')
-        # Before the swap only Quit can have changed live state: bring the
-        # unchanged app back rather than leave Tron down.
         try:
             if self.data['path'] == 'full' and self.platform.offline_blocker() is None:
                 self.platform.launch_app(self.log('stop-gateway'))
@@ -588,8 +562,6 @@ def format_age(seconds):
     return f'{seconds // 3600}h {seconds % 3600 // 60}m'
 
 
-# Everything an operation directory gets from this script: the journal's files and the
-# per-attempt rollback set. Anything else there (another tool's recovery archive) stays.
 OPERATION_FILES = {'journal.json', 'journal.log', 'logs', 'runner', 'runner.lock', 'runner.out', 'runner.plist'}
 ROLLBACK_SET = re.compile(r'(state-snapshot|previous-app|retired-stable-payloads|failed-app|failed-stable-payloads)-\d+')
 
@@ -608,7 +580,7 @@ def prune_store(platform, operation, revision):
                 if entry.name in OPERATION_FILES or ROLLBACK_SET.fullmatch(entry.name)]
     failures = [failure for path in targets for failure in remove_tree(path)]
     for other in operations:
-        with contextlib.suppress(OSError):  # only a directory left empty goes
+        with contextlib.suppress(OSError):
             other.rmdir()
     return failures
 
@@ -619,7 +591,6 @@ def remove_tree(path):
         if path.is_dir() and not path.is_symlink():
             for directory, _, _ in os.walk(path):
                 os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
-            # A build checkout is a worktree of the source repository: drop its registration too.
             registration_dropped = not (path / '.git').is_file() or git_succeeds(path, 'worktree', 'remove', '--force', path,
                                                                          timeout=600)
             if path.exists():
@@ -632,8 +603,6 @@ def remove_tree(path):
         return [f'{path}: {getattr(error, "strerror", None) or error}']
     return []
 
-
-# Operation store -----------------------------------------------------------
 
 def current_journal(platform):
     pointer = platform.store / 'current.json'
@@ -682,8 +651,6 @@ def start(platform, root, client_protocol=None, allow_protocol_change=False, scr
         if journal and journal.data['state'] not in TERMINAL_STATES:
             if runner_alive(platform, journal):
                 return journal, 'already running'
-            # Its runner died (crash, reboot): rerun the same operation, which
-            # first restores the previous app if it had already swapped.
             journal.data['source'].update(clientProtocol=client_protocol, allowProtocolChange=allow_protocol_change)
             journal.save()
             launch_runner(platform, journal, script_dir or Path(__file__).resolve().parent)

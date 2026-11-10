@@ -6,12 +6,6 @@ import { RunMarkerStore } from "../../kernel/run/run-markers.js";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
-/**
- * An accepted prompt across a real Gateway-process restart (#2235): a source
- * Gateway process, the production loopback WebSocket and local credential, and
- * a scripted HTTP provider as the only scripted party.
- */
-
 const gateways: GatewayProcess[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -37,7 +31,6 @@ async function listPhase(client: ProcessClient, sessionId: string): Promise<stri
   return (listed.result.sessions as Array<{ id: string; phase: string }>).find((row) => row.id === sessionId)?.phase;
 }
 
-/** One record per process start; `count` names the start whose post-listen recovery finished. */
 async function recoveries(gateway: GatewayProcess, count: number): Promise<void> {
   await waitFor(async () => (await gateway.log()).filter((record) => record.event === "gateway.startup-step"
     && record.step === "attention-recovery").length === count || undefined, `Gateway start ${count} finished attention recovery`);
@@ -50,7 +43,6 @@ describe("an accepted prompt across a real Gateway-process restart", () => {
     const prompt = "Hold this prompt across the restart.";
     let reach = (): void => {};
     const reached = new Promise<void>((resolve) => { reach = resolve; });
-    // The held step never answers: the Gateway process is stopped under it.
     gateway.provider.script([(_request, signal) => {
       reach();
       return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
@@ -67,9 +59,6 @@ describe("an accepted prompt across a real Gateway-process restart", () => {
     await phone.close();
     await recoveries(gateway, 1);
 
-    // Startup attention recovery runs after the listener serves. Holding its
-    // last marker read places the reconnecting phone inside that window, which
-    // a phone reconnecting at once after a restart reaches on a large catalog.
     const before = gateway.pid();
     const hold = join(gateway.root, "attention-recovery");
     await gateway.restart({ environment: { TRON_TEST_HOLD_ATTENTION_RECOVERY: hold } });
@@ -95,7 +84,6 @@ describe("an accepted prompt across a real Gateway-process restart", () => {
     await recoveries(gateway, 2);
     await expectInterrupted("after startup attention recovery");
 
-    // The restarted Gateway runs a new prompt normally, and still never replays the held one.
     gateway.provider.script([() => ({ chunks: ["Fresh reply."] })]);
     const next = await reconnected.request("session.prompt", { commandId: "restart-next-command", sessionId, text: "A new prompt." });
     expect(next.ok, JSON.stringify(next)).toBe(true);
@@ -132,8 +120,6 @@ describe("an accepted prompt across a real Gateway-process restart", () => {
     await phone.close();
     await recoveries(gateway, 1);
 
-    // The durable cut a crash leaves between stamping the completion and
-    // clearing its marker, written through the marker owner while no Gateway runs.
     const hold = join(gateway.root, "attention-recovery");
     await gateway.restart({
       environment: { TRON_TEST_HOLD_ATTENTION_RECOVERY: hold },

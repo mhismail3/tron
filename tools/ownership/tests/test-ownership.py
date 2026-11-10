@@ -117,7 +117,6 @@ class ValidLayoutTests(OwnershipCase):
                                       "why": "registered at startup"}]})
         r.manifest("packages/gw/src/sessions/catalog.module.json",
                    {"layer": "L2", "owns": ["catalog.ts", "catalog.module.json"]})
-        # Lowest common directory: one file two levels down plus its own manifest.
         r.manifest("packages/gw/gateway.module.json", {"layer": "L5", "owns": ["src/.hidden", "gateway.module.json"]})
         r.manifest("packages/ios/Kit/kit.module.json", {"layer": "L3", "owns": ["**"]})
         r.manifest("root.module.json", {"layer": "L5", "owns": ["README.md", "root.module.json"]})
@@ -139,7 +138,7 @@ class ValidLayoutTests(OwnershipCase):
 
     def test_a_declared_directory_is_the_module_its_trivial_manifest_was(self) -> None:
         r = self.repo
-        shutil.copy2(ROOT / "tools/ownership/layout.py", r.path / "tools/ownership/layout.py")  # --ledger reads purposes
+        shutil.copy2(ROOT / "tools/ownership/layout.py", r.path / "tools/ownership/layout.py")
         for path in ("packages/gw/src/util/a.ts", "packages/gw/src/util/deep/b.ts", "README.md"):
             r.write(path)
         r.manifest("root.module.json", {"layer": "L5", "owns": ["README.md", "root.module.json"]})
@@ -215,7 +214,6 @@ class SchemaTests(OwnershipCase):
             "m/keys.module.json: invalid JSON: duplicate key 'layer'",
             "m/list.module.json: must be a JSON object",
             "m/missing.module.json: missing required key 'layer'",
-            # Nothing valid claims the remaining files.
             "unowned: m/Bad_Name.module.json", "unowned: m/broken.module.json",
             "unowned: m/fields.module.json", "unowned: m/keys.module.json", "unowned: m/list.module.json",
             "unowned: m/escape.module.json",
@@ -329,11 +327,9 @@ class DiscoveryTests(OwnershipCase):
         r.track()
         r.git("commit", "-q", "-m", "clean")
         sha = r.git("rev-parse", "HEAD")
-        # Untracked build output and an untracked manifest are invisible.
         r.write("build/DerivedData/x.json")
         r.manifest("build/stray.module.json", {"bogus": True})
         self.assertEqual(r.run().returncode, 0)
-        # The working tree's manifest content counts without a commit; the commit keeps its own.
         r.manifest("src/src.module.json", {"layer": "L3", "owns": ["nothing.ts"]})
         self.assertIn('src/src.module.json: owns entry "nothing.ts" matches no tracked path', r.run().stdout)
         committed = r.run(sha)
@@ -343,7 +339,7 @@ class DiscoveryTests(OwnershipCase):
     def test_indexed_manifest_missing_from_disk_is_reported_not_raised(self) -> None:
         self.repo.manifest("gone/gone.module.json", {"layer": "L3", "owns": ["**"]})
         self.repo.track()
-        (self.repo.path / "gone/gone.module.json").unlink()  # still in the index
+        (self.repo.path / "gone/gone.module.json").unlink()
         result = self.repo.run()
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout.splitlines()[:-1], ["gone/gone.module.json: unreadable: No such file or directory",

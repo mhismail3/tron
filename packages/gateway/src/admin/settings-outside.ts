@@ -15,28 +15,6 @@ import { readPath } from "../kernel/settings/settings-resolver.js";
 import { instanceId } from "../kernel/settings/scope-resolution.js";
 import { formatStoredSetting } from "../kernel/settings/settings-types.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
-/**
- * Outside changes (docs/settings-model.md 5.6, foundation F2).
- *
- * The stores Tron does not own exclusively are compared with what Tron last
- * observed in them: the Mac `settings.json`, `trust.json`, `mcp.json` and
- * `models.json`, and each known project's `.pi/settings.json` and `.pi/mcp.json`.
- * A per-key difference Tron did not write is one `outside` record entry, whatever
- * caused it (a hand edit, a pull, a revert, a stash, a branch switch, the pi CLI):
- * there are no per-git-case rules. `mcp.json` and `models.json` are compared per
- * record subject (one MCP server, one custom model provider; see
- * `RECORD_SUBJECTS`), by digest only: their definitions can carry credentials.
- *
- * Comparison is by content digest on every settings read and on a file event,
- * so dropped or coalesced events and rename-replace writes cannot hide a change.
- * Tron's own writes bracket the store (`begin`/`end`): a scan never runs while
- * Tron is writing, and `end` adopts Tron's values as observed with the change id
- * that wrote them, which is what later offers Apply again.
- *
- * This owner keeps only the last observed values and their provenance in
- * `<tronHome>/gateway/settings/observed.json`; values are always read from the
- * stores (F2), and the record stays audit only.
- */
 
 type ProjectObservedStore = Extract<ObservedStore, { root: string }>;
 const isProjectStore = (store: ObservedStore): store is ProjectObservedStore => store.kind === "project" || store.kind === "project-mcp";
@@ -49,11 +27,8 @@ interface ObservedValue { key: string; qualifiers?: Qualifiers; value?: unknown;
 interface StoreState {
   digest: string;
   values: Record<string, ObservedValue>;
-  /** The Tron change that wrote each instance's current value. */
   tron: Record<string, string>;
-  /** The latest outside change of each instance since Tron last wrote it. */
   outside: Record<string, OutsideMark>;
-  /** Project stores: Tron's staged writes not yet seen in `HEAD`. */
   staged?: Array<{ changeId: string; path: string; blob: string }>;
   head?: string | null;
 }
@@ -65,7 +40,6 @@ interface OutsideObserver {
 }
 
 export interface ObservedReaders {
-  /** pi's own reader for the Mac `settings.json`, so parse rules match the runtime. */
   global(): Promise<Record<string, unknown>>;
   project(root: string): Promise<Record<string, unknown> | undefined>;
 }
@@ -75,12 +49,10 @@ function storeId(store: ObservedStore): string {
   return isProjectStore(store) ? `${store.kind}:${store.root}` : store.kind;
 }
 
-/** The project's `.pi/` stores this owner compares; both follow the Project root. */
 export function projectStores(root: string): ObservedStore[] {
   return [{ kind: "project", root }, { kind: "project-mcp", root }];
 }
 
-/** The observed file of a store. */
 function observedFile(store: ObservedStore, agentDir: string): string {
   switch (store.kind) {
     case "global": return join(agentDir, "settings.json");
@@ -93,8 +65,6 @@ function observedFile(store: ObservedStore, agentDir: string): string {
 }
 
 
-/** The observed store and instance a change to `binding` at `layer` writes, or
- * undefined for stores Tron owns exclusively (Chat, Profile, floors, Home memory). */
 export function observedInstance(key: KeyDeclaration, layer: string, binding: Binding, qualifiers: Qualifiers, projectRoot: string | undefined): { store: ObservedStore; instance: string } | undefined {
   const fixed = key.fixed ?? {};
   if (binding.store === "trust") {
@@ -115,8 +85,6 @@ function modelsAt(document: Record<string, unknown>, path: readonly string[]): s
 }
 
 
-/** One instance per entry of a subject's container (`mcpServers`, `providers`),
- * hashed: a server or provider definition may carry headers, keys or commands. */
 function subjectInstances(document: unknown, subjectId: string): Map<string, ObservedValue> | undefined {
   if (!document || typeof document !== "object" || Array.isArray(document)) return undefined;
   const subject = recordSubject(subjectId)!;
@@ -131,7 +99,6 @@ function subjectInstances(document: unknown, subjectId: string): Map<string, Obs
 }
 
 
-/** Only a missing root removes a project; an unreadable one keeps its state. */
 async function projectRemoved(root: string): Promise<boolean> {
   try { await stat(root); return false; }
   catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; }
@@ -154,7 +121,6 @@ export class OutsideChanges {
   private disposal: Promise<void> | undefined;
   private retired = false;
   private failed: ((error: unknown) => void) | undefined;
-  /** Set when a comparison changed observed state. */
   private changed = false;
 
   constructor(
@@ -173,19 +139,14 @@ export class OutsideChanges {
     this.observer = observer;
   }
 
-  /** Compare each store with what Tron last observed; record what changed outside. */
-  /** `heads` carries a repository state the caller already read for a project root. */
   reconcile(stores: readonly ObservedStore[], heads?: ReadonlyMap<string, GitHeadState | undefined>): Promise<void> {
     if (this.retired) return Promise.reject(new Error("Outside settings comparison is disposed"));
     const work = this.compareStores(stores, heads);
     this.reconciliations.add(work);
-    // Retain the whole comparison, including the observer outside the mutex.
-    // The caller still receives its original result/error, never this cleanup.
     void work.then(() => this.reconciliations.delete(work), () => this.reconciliations.delete(work));
     return work;
   }
 
-  /** Every key instance a pi settings document holds at a layer, from the schema. */
   private piInstances(document: Record<string, unknown>, layer: "global" | "project"): Map<string, ObservedValue> {
     const values = new Map<string, ObservedValue>();
     const add = (key: KeyDeclaration, qualifiers: Qualifiers, value: unknown) => {
@@ -221,7 +182,6 @@ export class OutsideChanges {
     return values;
   }
 
-  /** Redacted keys are compared by digest; their values never enter observed state or audit. */
   private observed(value: ObservedValue): ObservedValue {
     if (!this.schemaKeyOrUndefined(value.key)?.redacted || value.value === undefined) return value;
     const { value: secret, ...rest } = value;
@@ -240,26 +200,16 @@ export class OutsideChanges {
         entries.push(...await this.compare(document, store, undefined, undefined, isProjectStore(store) ? heads?.get(store.root) : undefined, isProjectStore(store) && heads?.has(store.root)));
       }
       if (entries.length) await this.record.append(entries);
-      // Every settings read reconciles first, so an unchanged comparison must not
-      // pay a durable write: under fsync pressure those writes queued every read
-      // behind this mutex for tens of seconds.
       if (this.changed) await this.save(document);
       this.changed = false;
     });
     if (entries.length) await this.observer?.outside(entries);
   }
 
-  /**
-   * File events prompt a rescan so an outside change pushes without waiting for
-   * a read. Events are lossy (rename-replace, coalescing), so they carry no
-   * content: the rescan compares digests. Directories are watched, never files.
-   */
   startWatching(failed: (error: unknown) => void): void {
     if (this.disposal) throw new Error("Outside settings comparison is disposed");
     this.watching = true;
     this.failed = failed;
-    // Native coalescing may deliver only a neighbouring auth/lock filename.
-    // Digests decide relevance; unchanged stores skip their canonical readers.
     this.watchDirectory("agent", this.agentDir, () => true, [{ kind: "global" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }]);
   }
 
@@ -272,8 +222,6 @@ export class OutsideChanges {
     this.timers.clear();
     this.disposal = (async () => {
       const errors: unknown[] = [];
-      // An accepted observer can resolve settings again. Drain that work too;
-      // closing file-event admission must not revoke its after-apply effects.
       while (this.reconciliations.size) {
         const results = await Promise.allSettled([...this.reconciliations]);
         errors.push(...results.flatMap(result => result.status === "rejected" ? [result.reason] : []));
@@ -286,15 +234,11 @@ export class OutsideChanges {
 
   private watchProject(root: string): void {
     if (!this.watching || this.watchers.has(`project:${root}`)) return;
-    // `.pi/` may not exist yet: its parent's events include its creation, and the
-    // rescan that event prompts replaces the parent watch with the `.pi/` one.
     if (this.watchDirectory(`project:${root}`, join(root, ".pi"), name => PROJECT_FILES.has(name), projectStores(root))) {
       this.watchers.get(`project-parent:${root}`)?.close();
       this.watchers.delete(`project-parent:${root}`);
       return;
     }
-    // Directory watchers share libuv's one FSEvents stream on macOS: no file
-    // descriptor per project, so known projects need no watcher bound.
     if (this.watchers.has(`project-parent:${root}`)) return;
     this.watchDirectory(`project-parent:${root}`, root, name => name === ".pi", projectStores(root));
   }
@@ -318,27 +262,17 @@ export class OutsideChanges {
     }
   }
 
-  /** Marks of the latest outside change per instance for a store, for its rows. */
   async marks(store: ObservedStore): Promise<Record<string, OutsideMark>> {
     const document = await this.mutex.run(() => this.load());
     return { ...(document.stores[storeId(store)]?.outside ?? {}) };
   }
 
-  /** Tron starts writing these stores: no scan may read them until `end`. */
   async begin(writes: readonly PlannedWrite[]): Promise<void> {
-    // Under the mutex: a comparison already reading these stores finishes first,
-    // so it can never see a half-written Tron change as an outside one.
     await this.mutex.run(async () => {
       for (const id of new Set(writes.map(write => storeId(write.store)))) this.writing.set(id, (this.writing.get(id) ?? 0) + 1);
     });
   }
 
-  /**
-   * Tron finished writing. Instances that now hold the value Tron wrote are
-   * Tron's (with their change id and staged blob); a planned write that did not
-   * land (rolled back) is adopted silently; any other difference happened
-   * outside meanwhile and is recorded.
-   */
   async end(writes: readonly PlannedWrite[], applied: ReadonlyMap<string, { git?: GitResult; changeId: string }>): Promise<void> {
     const entries: ChangeEntry[] = [];
     await this.mutex.run(async () => {
@@ -366,15 +300,7 @@ export class OutsideChanges {
     if (entries.length) await this.observer?.outside(entries);
   }
 
-  /**
-   * Tron's own writers outside the change path (the MCP and custom-model owners)
-   * write a store as Tron: no scan reads it meanwhile, and whatever it then holds
-   * is adopted as observed, so Tron's write is never an outside change.
-   */
   async adopt<T>(stores: readonly ObservedStore[], write: () => Promise<T>): Promise<T> {
-    // First record what already changed outside, so Tron's write cannot absorb it;
-    // then hold the stores as Tron's. An outside edit made while the owner's own
-    // write runs is indistinguishable from it and is adopted with it.
     const entries: ChangeEntry[] = [];
     await this.mutex.run(async () => {
       const document = await this.load();
@@ -416,7 +342,6 @@ export class OutsideChanges {
       document.stores[id] = { digest: digestOf(text), values, tron: {}, outside: {}, ...(git ? { head: git.head, staged: [] } : {}) };
       return;
     }
-    // An instance Tron rewrote is no longer the outside value its mark described.
     for (const instance of Object.keys(state.outside)) {
       if (fingerprint(state.values[instance]) !== fingerprint(values[instance])) delete state.outside[instance];
     }
@@ -439,8 +364,6 @@ export class OutsideChanges {
   }
 
   private async save(document: ObservedDocument): Promise<void> {
-    // Known projects are bounded by the disk, not by a count: a project whose
-    // root no longer exists (a removed worktree, a deleted project) leaves.
     const roots = new Set(Object.keys(document.stores).flatMap(id => id.startsWith("project:") ? [id.slice("project:".length)]
       : id.startsWith("project-mcp:") ? [id.slice("project-mcp:".length)] : []));
     for (const root of roots) if (await projectRemoved(root)) this.forgetProject(document, root);
@@ -464,7 +387,6 @@ export class OutsideChanges {
   private async values(store: ObservedStore, text: string | undefined): Promise<Map<string, ObservedValue> | undefined> {
     const subject = subjectOf(store);
     if (subject) {
-      // An absent file has no entries; an unparseable one keeps the last observed state.
       if (text === undefined || !text.trim()) return new Map();
       try { return subjectInstances(JSON.parse(text) as unknown, subject); } catch { return undefined; }
     }
@@ -478,19 +400,14 @@ export class OutsideChanges {
     if (store.kind === "global") {
       try { return this.piInstances(await this.readers.global(), "global"); } catch { return undefined; }
     }
-    // An unparseable project file (merge markers) has unknown values: keep the
-    // last observed ones until it parses again, rather than reporting removals.
     const document = await this.readers.project((store as ProjectObservedStore).root).catch(() => undefined);
     return document === undefined ? undefined : this.piInstances(document, "project");
   }
 
-  /** One store's comparison. With `planned`, the bracketed writes are Tron's. */
   private async compare(document: ObservedDocument, store: ObservedStore, planned?: ReadonlyMap<string, PlannedWrite>, applied?: ReadonlyMap<string, { git?: GitResult; changeId: string }>,
     knownHead?: GitHeadState, headKnown = false): Promise<ChangeEntry[]> {
     const id = storeId(store);
     if (isProjectStore(store) && await projectRemoved(store.root)) {
-      // A removed project has nothing to observe; its state leaves rather than
-      // becoming an empty baseline that each later read would rewrite.
       if (document.stores[id]) this.changed = true;
       this.forgetProject(document, store.root);
       return [];
@@ -500,14 +417,12 @@ export class OutsideChanges {
     const at = this.now().toISOString();
     let state = document.stores[id];
     const head = !isProjectStore(store) ? undefined : headKnown ? knownHead : await gitHeadState(store.root);
-    // The repository state names the compared file: `.pi/mcp.json` beside `.pi/settings.json`.
     const git = head && store.kind === "project-mcp" ? { ...head, path: join(dirname(head.path), "mcp.json") } : head;
     if (state && !planned && state.digest === digest && (!git || git.head === (state.head ?? null))) return [];
     const current = await this.values(store, text);
     if (!current) return [];
     this.changed = true;
     if (!state) {
-      // First sight is the baseline: nothing to compare with yet.
       document.stores[id] = {
         digest, values: Object.fromEntries([...current].map(([instance, value]) => [instance, this.observed(value)])), tron: {}, outside: {},
         ...(git ? { head: git.head, staged: [] } : {}),
@@ -525,7 +440,6 @@ export class OutsideChanges {
         const landed = write.value === undefined ? after === undefined : after !== undefined && fingerprint(after) === fingerprint(this.observed({ key: after.key, value: write.value }));
         const recorded = applied?.get(write.changeId);
         if (landed && recorded) {
-          // The recorded entry that holds this value (an approval's fact, not its request).
           state.tron[instance] = recorded.changeId;
           delete state.outside[instance];
           if (store.kind === "project" && recorded.git?.staged && recorded.git.blob) {
@@ -577,7 +491,6 @@ export class OutsideChanges {
     };
   }
 
-  /** A commit that holds Tron's staged blob appends `committed` to that change (doc 5.7). */
   private async committed(store: Extract<ObservedStore, { kind: "project" }>, state: StoreState, head: string | null, at: string): Promise<ChangeEntry[]> {
     if (!head || !state.staged?.length) return [];
     const facts: ChangeEntry[] = [];

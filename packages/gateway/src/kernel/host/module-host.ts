@@ -14,7 +14,6 @@ import type { CanonicalAppendContext, CanonicalAppendPolicy } from "./canonical-
 
 export type AgentTerminalOutcome = "completed" | "limited" | "failed" | "stopped" | "unknown" | "interrupted";
 
-/** Run-owned facts sampled before the notification module admits an alert. */
 export interface RunTerminalInput {
   sessionId: string;
   sourceId: string;
@@ -25,7 +24,6 @@ export interface RunTerminalInput {
   waitingEpisode: boolean;
 }
 
-/** Module-owned persistence at the kernel's identity and visibility cuts. */
 export interface SessionNotificationOperations {
   rekeySession(previousId: string, nextId: string): Promise<boolean>;
   markSessionInboxRead(sessionId: string): Promise<void>;
@@ -37,13 +35,11 @@ export interface InteractionRequiredInput {
   observed: boolean;
 }
 
-/** Run settlement preserves the awaited quiescent cut and synchronous idle notice. */
 export interface RunSettledPolicy {
   quiescent(sessionId: string): Promise<void>;
   idle(sessionId: string, by: "user" | "wake"): void;
 }
 
-/** Provider operations for runtime models and per-session context policy creation. */
 export interface ModelRuntimePolicy {
   attach(runtime: ModelRuntime): () => void;
   initialModel(runtime: ModelRuntime, settings: Pick<SettingsManager, "getDefaultProvider" | "getDefaultModel">): Promise<Model<never> | undefined>;
@@ -54,22 +50,16 @@ export interface ModelRuntimePolicy {
   ): readonly { name: string; factory: ExtensionFactory }[];
 }
 
-/** One log line from a module, in the Gateway logger's shape. */
 export interface ModuleLog {
   log(level: "debug" | "info" | "warning" | "error", message: string, metadata?: Record<string, unknown>): void;
 }
 
-/** What `start` receives: platform facts and the contracts of the modules this
- * one declares in `dependsOn`. Kernel operations join it as each kernel
- * primitive is extracted (kernel.md §3); nothing module-specific is here. */
 export interface GatewayHost {
   tronHome: string;
   log: ModuleLog;
-  /** The started contract of a module named in this descriptor's `dependsOn`. */
   contract<C>(module: ModuleDescriptor<C>): C;
 }
 
-/** Context operations shared by the runtime and extension, not their concrete owner. */
 export interface ContextPolicy {
   restore(): void;
   apply(): void;
@@ -77,31 +67,24 @@ export interface ContextPolicy {
   set(model: ModelRef, raw: unknown): void;
 }
 
-/** Lifecycle operations used by the compaction extension. */
 export interface CompactionPolicyLifecycle {
   restore(): void;
   capture(event: SessionBeforeCompactEvent): void;
 }
 
-/** Per-runtime facts a module's extension reads at call time. */
 export interface SessionContext {
   sessionId(): string;
   cwd(): string;
   modelRuntime: ModelRuntime;
   fixedSettings(): Readonly<Record<string, FixedSetting>>;
   delegatedWorker(): boolean;
-  /** Host-owned native-child capabilities; absent for profiles that cannot delegate. */
   requireChildExtensions?(sessionId: string, extensions: readonly { id: string; path: string }[]): Promise<{ dispose(): void }>;
 
   profile(): SessionProfile;
-  /** The chat's title as notifications show it. */
   title(): string;
-  /** Whether the user is viewing this chat now. */
   presented(): boolean;
   joinTerminalReceiptWrites(): Promise<void>;
-  /** The current session actor and target; installed settings stay late-bound. */
   settings(): SettingsToolAccess | undefined;
-  /** Internal module-only native change port; never installed on extension UI. */
   requestChange: import("./native-change.js").NativeChangeRequest;
   contextPolicy(): ContextPolicy | undefined;
   compaction: {
@@ -111,14 +94,9 @@ export interface SessionContext {
   };
 }
 
-/** One RPC method a module serves, routed before `GatewayService`'s own switch
- * (decision D5). A `read` is disposable and admitted while the Gateway drains; a
- * `mutation` runs once per `commandId` under the transport's command receipt and
- * is refused while draining. `handle` validates its own parameters. */
 interface RpcContext {
   readonly identity: string;
   readonly isLocal: boolean;
-  /** Disconnect only cancels disposable reads, never accepted commands. */
   readonly signal?: AbortSignal;
 }
 export interface RpcHandler {
@@ -126,10 +104,6 @@ export interface RpcHandler {
   handle(params: Record<string, unknown>, context: RpcContext): Promise<JsonValue>;
 }
 
-/** The K3 hooks and their dispatch kind (kernel.md §2.1). A `policy` hook has
- * one implementer; a second fails at start. `observers` hooks run every
- * implementer in composition order. Each signature is typed by the extraction
- * step that wires its call site. */
 const KERNEL_HOOKS = {
   profileDecision: "policy",
   resourceRoot: "policy",
@@ -171,17 +145,13 @@ export type KernelHooks = { [K in Exclude<HookName, "extensionAdmission" | "reso
   inputAdmission(): InputAdmissionPolicy;
   profileDecision(sessionId: string, cwd: string): string | "unrecorded";
   appendGuard(context: CanonicalAppendContext): CanonicalAppendPolicy;
-  /** Resolve optional availability before sampling run-owned facts. */
   runTerminal(): ((input: RunTerminalInput) => Promise<void>) | undefined;
   interactionRequired(): ((input: InteractionRequiredInput) => Promise<void>) | undefined;
   sessionNotifications(): SessionNotificationOperations | undefined;
 };
 
 export interface ModuleInstance<C = void> {
-  /** This module's Pi extension for one session runtime, or undefined when it
-   * offers none to that runtime. */
   extension?(session: SessionContext): ExtensionFactory | undefined;
-  /** Read at every dispatch, never captured. */
   hooks?: Partial<KernelHooks>;
   readonly profiles?: readonly SessionProfile[];
   rpc?: Readonly<Record<string, RpcHandler>>;
@@ -191,14 +161,11 @@ export interface ModuleInstance<C = void> {
 }
 
 export interface ModuleDescriptor<C = void> {
-  /** The Pi inline extension name, so Pi reports `<inline:name>` (B2). */
   name: string;
   purpose: string;
   tools: readonly string[];
   commands: readonly string[];
-  /** Modules whose contracts `start` may read; each starts earlier in the list. */
   dependsOn?: readonly ModuleDescriptor<unknown>[];
-  /** Runs once, in composition order. */
   start(host: GatewayHost): ModuleInstance<C> | Promise<ModuleInstance<C>>;
 }
 
@@ -207,9 +174,6 @@ interface Started {
   instance: ModuleInstance<unknown>;
 }
 
-/** The started modules of one Gateway (K3): it starts the composition in order,
- * answers contracts, per-runtime extensions, descriptor RPCs, capabilities and
- * hook dispatch, and stops modules in reverse order. */
 export class ModuleHost {
   private constructor(private readonly started: readonly Started[], readonly runtimeOrder: readonly string[]) {}
 
@@ -244,7 +208,6 @@ export class ModuleHost {
     return new ModuleHost(started, runtimeOrder);
   }
 
-  /** Composition errors fail at start, never at the first call. */
   private static admit(started: readonly Started[]): void {
     const methods = new Map<string, string>();
     const policies = new Map<string, string>();
@@ -274,14 +237,12 @@ export class ModuleHost {
     }
   }
 
-  /** A started module's contract, for composition. */
   contract<C>(module: ModuleDescriptor<C>): C {
     const entry = this.find(module as ModuleDescriptor<unknown>);
     if (!entry || !("contract" in entry.instance)) throw new Error(`Module ${module.name} offers no started contract`);
     return entry.instance.contract as C;
   }
 
-  /** Definitions stay with their started owner; there is no second profile store. */
   profile(name: string): SessionProfile {
     if (name === ORDINARY_SESSION_PROFILE.name) return ORDINARY_SESSION_PROFILE;
     for (const { instance } of this.started) {
@@ -291,7 +252,6 @@ export class ModuleHost {
     throw new Error(`Profile ${name} is not composed`);
   }
 
-  /** Profile order is explicit; optionality stays with each descriptor. */
   registrations(names: readonly string[], session: SessionContext): { name: string; factory: ExtensionFactory }[] {
     return names.flatMap(name => {
       const factory = this.named(name).instance.extension?.(session);
@@ -320,12 +280,10 @@ export class ModuleHost {
     return undefined;
   }
 
-  /** Every module's capabilities, in composition order. */
   capabilities(): string[] {
     return this.started.flatMap(({ instance }) => [...(instance.capabilities ?? [])]);
   }
 
-  /** The one implementer of a policy hook as it stands at this call. */
   policy<K extends PolicyHook>(name: K): KernelHooks[K] | undefined {
     for (const { instance } of this.started) {
       const hook = instance.hooks?.[name];
@@ -334,8 +292,6 @@ export class ModuleHost {
     return undefined;
   }
 
-  /** Every implementer of an observer hook as it stands at this call, in
-   * composition order. */
   observers<K extends ObserverHook>(name: K): KernelHooks[K][] {
     return this.started.flatMap(({ instance }) => {
       const hook = instance.hooks?.[name];
@@ -343,8 +299,6 @@ export class ModuleHost {
     });
   }
 
-  /** Stops every started module in reverse order; one failure does not skip
-   * the rest. */
   async stop(): Promise<void> {
     const failures: unknown[] = [];
     for (const { instance } of [...this.started].reverse()) {

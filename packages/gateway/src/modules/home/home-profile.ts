@@ -13,23 +13,9 @@ import type { ProfileNoteListResponse, ProfileNoteProvenance, ProfileNoteRecord,
 import type { ProfileStore } from "./profile-store.js";
 import type { ProfileMutationResult, ProfileSortingState } from "./profile-store.js";
 
-/*
- * Tron Home's learned profile (#731): the maintainer's durable preferences,
- * standing decisions, delegation defaults and facts, kept as personal Profile
- * notes. Home writes them through the `profile` tool. Activations carry a metadata
- * index; explicit reads carry exact content/provenance, never Gateway relevance
- * choices or mandatory worker copying. Profile stays the only record authority.
- *
- * Membership is the `home-profile` tag alone, never provenance: provenance changes
- * when the maintainer edits a note natively. A profile item's kind is its one
- * `kind-*` label. Placement is organization, not binding authority.
- */
-
-/** The label that makes a personal note a Home profile item. */
 const HOME_PROFILE_TAG = "home-profile";
 export const HOME_PROFILE_KINDS = ["preference", "standing-decision", "delegation-default", "fact", "correction"] as const;
 export type HomeProfileKind = (typeof HOME_PROFILE_KINDS)[number];
-/** The note role each kind is stored under; the kind label itself is what Home reads back. */
 const KIND_ROLE: Record<HomeProfileKind, NoteContent["role"]> = {
   preference: "preference",
   "standing-decision": "decision",
@@ -38,7 +24,6 @@ const KIND_ROLE: Record<HomeProfileKind, NoteContent["role"]> = {
   correction: "fact",
 };
 
-/** Metadata-index admission headroom; note bodies are read explicitly, never inserted here. */
 export const HOME_PROFILE_BOUND_BYTES = 8 * 1_024;
 const PROFILE_PAGE_LIMIT = 50;
 export type HomeProfileStatus = "active" | "superseded" | "retired";
@@ -52,25 +37,17 @@ interface HomeProfileItem {
   text: string;
   confirmed: boolean;
   status: HomeProfileStatus;
-  /** The profile note this one supersedes, through its own current revision's relation. */
   supersedes?: string;
-  /** The profile note that supersedes this one, when it is superseded. */
   supersededBy?: string;
   record: ProfileNote;
 }
 
 export interface HomeProfileRead {
   items: HomeProfileItem[];
-  /** Existing native-list count: notes without one recognized kind. */
   unclassified: number;
-  /** Mechanical metadata failures, with exact canonical references for explicit repair. */
   diagnostics: Array<{ id: string; revisionId: string; issues: Array<"kind"> }>;
 }
 
-/** Every profile note in the personal scope, classified. A pure read through Profile's
- * list owner: it never admits a model call. Superseded status is derived, not stored: a
- * profile note is superseded when another profile note's current revision names it in a
- * `supersedes` relation. A superseding note that is itself retired still supersedes. */
 export async function readHomeProfile(knowledge: ProfileStore): Promise<HomeProfileRead> {
   const notes: ProfileNote[] = [];
   let cursor: string | undefined;
@@ -87,8 +64,6 @@ export async function readHomeProfile(knowledge: ProfileStore): Promise<HomeProf
   return classifyProfile(notes);
 }
 
-/** Also classifies the already-admitted bounded partition snapshot; never do an
- * unbounded second head load ahead of Profile's resource admission. */
 function classifyProfile(notes: ProfileNote[]): HomeProfileRead {
   const supersededBy = new Map<string, string>();
   for (const note of notes) {
@@ -118,7 +93,6 @@ export interface HomeProfileIndexRead {
   unclassified: number;
   diagnostics: HomeProfileRead["diagnostics"];
 }
-/** Metadata-only discovery; only the full reader loads note bodies. */
 export async function readHomeProfileIndex(knowledge: ProfileStore): Promise<HomeProfileIndexRead> {
   const { rows, sorting } = await knowledge.profileMetadata();
   const superseded = new Set(rows.flatMap(row => row.supersedes));
@@ -129,8 +103,6 @@ export async function readHomeProfileIndex(knowledge: ProfileStore): Promise<Hom
     else items.push({ id: row.id, revisionId: row.revisionId, path: row.profile?.path.join("/") ?? "prior", kind: kinds[0]!, text: row.title,
       confirmed: row.confirmed, status: row.retired ? "retired" : superseded.has(row.id) ? "superseded" : "active", createdAt: row.createdAt, updatedAt: row.updatedAt });
   }
-  // Both native lists and cursor pages use the kind/creation/ID order of the
-  // canonical body reader, independent of file order.
   items.sort((left, right) => HOME_PROFILE_KINDS.indexOf(left.kind) - HOME_PROFILE_KINDS.indexOf(right.kind)
     || left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
   return { items, sorting, diagnostics, unclassified: diagnostics.filter(item => item.issues.includes("kind")).length };
@@ -155,25 +127,11 @@ function unavailableSection(reason: string): string {
   return [PROFILE_SECTION_HEADING, `Unavailable: ${reason}. No item is applied in this instruction, and the profile is not known to be empty.`].join("\n");
 }
 
-// ---- profile changes: one implementation for Home and the maintainer ------------
-//
-// Content changes from Home and the maintainer run through HomeProfileItems inside
-// SettingsChangePath.auditSubject. Label-only groups preflight and freeze the same
-// subject's original snapshots in Profile's backup, then publish only committed
-// facts through publishSubjectAudit. Both use the existing Changes/Undo surface.
-// The actor decides
-// only what the note says about confirmation: Home's changes stay inferred until the
-// maintainer confirms them, and the maintainer's own edits are confirmed by definition.
-
-/** The record subject of a profile change: one instance per note, qualified by `note`. */
 export const HOME_PROFILE_ACTIONS = ["learn", "refine", "supersede", "retire"] as const;
 export type HomeProfileAction = (typeof HOME_PROFILE_ACTIONS)[number];
-/** The maintainer's actions; `confirm` is his alone. */
 export const HOME_PROFILE_MAINTAINER_ACTIONS = ["confirm", "refine", "supersede", "retire"] as const;
 export type HomeProfileChangeAction = HomeProfileAction | "confirm";
 
-/** One requested change. `expectedRevision` is the revision the requester read: a note
- * changed since is refused with a conflict rather than overwritten. */
 export type HomeProfileOp =
   | { action: "learn"; kind: HomeProfileKind; text: string; path?: string; sensitive?: boolean; corrects?: { id: string; revisionId: string } }
   | { action: "confirm"; id: string; expectedRevision?: string }
@@ -185,13 +143,10 @@ export type HomeProfileRequest = HomeProfileOp
   | { action: "reorganize"; assignments: ProfilePartitionRequest["assignments"] }
   | { action: "retry"; commandId: string };
 
-/** Who writes. Home cites the maintainer message its turn answers. */
 export type HomeProfileAuthor =
   | { kind: "home"; sessionId: string; entryId: string }
   | { kind: "maintainer" };
 
-/** A profile note's state as the change record holds it: `before` and `after` of every
- * profile change, and what undo restores. `null` is a note that did not exist. */
 interface HomeProfileValue {
   kind: HomeProfileKind;
   text: string;
@@ -200,7 +155,6 @@ interface HomeProfileValue {
   revisionId: string;
   supersedes?: string;
   supersededBy?: string;
-  /** Absent means Prior organization. */
   profile?: ProfileMetadata;
 }
 
@@ -212,8 +166,6 @@ interface PartitionEnvelope {
   context: SubjectContext;
   writes: SubjectWrite[];
 }
-/** Whether a recorded write changed only placement. It compares the named content
- * fields, so any other recorded field is not part of the comparison. */
 function placementOnlyWrite(before: unknown, after: unknown): boolean {
   if (!before || !after || typeof before !== "object" || typeof after !== "object") return false;
   const content = (value: HomeProfileValue) => JSON.stringify([value.kind, value.text, value.confirmed, value.state, value.supersedes, value.supersededBy]);
@@ -246,7 +198,6 @@ function validatePartitionEnvelope(changes: ProfileChangePath, raw: unknown, com
   return envelope;
 }
 
-/** What one change saved, as the tool result and the RPC answer state it. */
 export interface HomeProfileSaved {
   status: "saved";
   action: HomeProfileChangeAction;
@@ -255,7 +206,6 @@ export interface HomeProfileSaved {
   kind?: HomeProfileKind;
   supersededId?: string;
   previousRevisionId?: string;
-  /** refine, supersede and retire: the changed item's text before this change, so a reader sees what was replaced. */
   previousText?: string;
 }
 
@@ -266,7 +216,6 @@ function profileValue(item: HomeProfileItem | undefined): HomeProfileValue | nul
     ...(item.record.content.profile ? { profile: item.record.content.profile } : {}) };
 }
 
-/** The list projection of an item (`home.profileList` and the change answer). */
 function profileListItem(item: HomeProfileItem) {
   return { id: item.id, revisionId: item.revisionId, path: item.path, kind: item.kind, text: item.text, confirmed: item.confirmed,
     status: item.status, createdAt: item.record.createdAt, updatedAt: item.record.updatedAt };
@@ -276,7 +225,6 @@ const SINGLE_LINE = /[\u0000-\u001f\u007f\u2028\u2029]/;
 export const PROFILE_TEXT_MAX = 512;
 export const PROFILE_REASON_MAX = 2_000;
 
-/** The one validation every actor's request passes. */
 function validateProfileOp(op: HomeProfileOp, author: HomeProfileAuthor["kind"]): string | undefined {
   if (op.action === "learn" && op.sensitive && (op.kind === "correction" || (op.path !== undefined && !op.path.startsWith("inferred/")))) return "Sensitive statements must wait unsorted for exact review; do not infer a correction or personal destination";
   if (op.action === "learn" && ((op.kind === "correction") !== (op.corrects !== undefined))) return "a correction requires an exact wrong-claim ID and revision; other kinds do not take corrects";
@@ -303,7 +251,6 @@ function provenance(author: HomeProfileAuthor, reason?: string): ProfileNoteProv
   };
 }
 
-/** The note's labels with its one kind label set to `kind`; other labels are kept. */
 function kindTags(tags: readonly string[] | undefined, kind: HomeProfileKind): string[] {
   const kept = (tags ?? []).filter(tag => tag !== HOME_PROFILE_TAG && !HOME_PROFILE_KINDS.some(candidate => tag === kindTag(candidate)));
   return [HOME_PROFILE_TAG, kindTag(kind), ...kept];
@@ -317,12 +264,6 @@ function staleConflict(error: unknown, current: HomeProfileItem | undefined): un
   return error;
 }
 
-/**
- * The profile's applier: the Profile note writes behind every profile change and
- * undo. It holds no state: each call reads the profile through `readHomeProfile`, writes
- * notes through the Profile owner with its revision fence, and reads back what it wrote.
- */
-/** `approved` only ever comes from the maintainer's accepted native card. */
 interface ProfileChangeContext extends SubjectContext { author: HomeProfileAuthor; approved?: true; confirm?: ConfirmChange }
 export interface ProfileChangeResult extends ChangeResult {
   status: "applied";
@@ -337,8 +278,6 @@ export class HomeProfileItems {
     return this.knowledge() !== undefined;
   }
 
-  /** Domain effects stay here. Content uses the engine's stripe; partition effects
-   * use Profile's atomic revision fences and the engine's group publisher. */
   async change(changes: ProfileChangePath, requests: readonly HomeProfileRequest[], input: ProfileChangeContext): Promise<ProfileChangeResult | (ChangeResult & { saved: []; items: [] })> {
     const { confirm, ...context } = input;
     if (!this.available()) throw new GatewayError("unsupported", "Profile is not available on this Gateway");
@@ -350,8 +289,6 @@ export class HomeProfileItems {
         return item && !item.confirmed && item.record.content.privacyScope !== "private" && item.record.provenance.actor === "agent"
           && item.record.provenance.source === "home" && item.record.content.profile !== undefined;
       };
-      // Organization changes placement only, through the existing logged/undoable
-      // transaction. Content and confirmation keep their authority checks.
       const needsReview = requests.some(op => ["retry", "learn", "reorganize"].includes(op.action) ? false
         : op.action === "retire" ? !own(op.id) : true);
       if (needsReview) {
@@ -360,10 +297,7 @@ export class HomeProfileItems {
         const pinned = requests.map(op => "id" in op ? { ...op, expectedRevision: op.expectedRevision ?? read.items.find(item => item.id === op.id)?.revisionId } : op) as HomeProfileRequest[];
         const review = profileReview(read, pinned, context.reason);
         const applied = await confirm(review, async () => {
-          // The card is current only if the profile still yields the exact same review.
           if (profileReview(await this.read(), pinned, context.reason!).digest !== review.digest) throw new GatewayError("conflict", "The profile changed since this exact card; nothing was applied");
-          // The tap authorizes this intent; its receipt must not replace the
-          // original operation identity used by the backup and Home's retry.
           return this.change(changes, pinned, { ...context, approved: true });
         });
         return applied ?? { status: "declined", changes: [], saved: [], items: [] };
@@ -401,8 +335,6 @@ export class HomeProfileItems {
     });
   }
 
-  /** One body-free file receipt owns the accepted command; shared Changes owns
-   * its original before/after facts. Opening either owner never replays effects. */
   async partition(changes: ProfileChangePath, request: ProfilePartitionRequest, context: SubjectContext, undoOf?: ReadonlyMap<string, string>): Promise<ProfileChangeResult> {
     if (request.commandId !== context.commandId || !["home", "ui"].includes(context.actor.kind)) throw new GatewayError("invalid_request", "Profile partition needs its original Home or maintainer command");
     const recovery = await this.owner().profilePartitionRecovery(request.commandId).catch(error => {
@@ -436,8 +368,6 @@ export class HomeProfileItems {
     return this.retryPartition(changes, request.commandId, context.actor.kind);
   }
 
-  /** Explicit retry resumes a current-file intent or publishes only its original
-   * committed facts. Later edits cannot replace those shared Changes facts. */
   async retryPartition(changes: ProfileChangePath, commandId: string, actor: SubjectContext["actor"]["kind"]): Promise<ProfileChangeResult> {
     const recovery = await this.owner().profilePartitionRecovery(commandId);
     if (!recovery.committed) {
@@ -459,14 +389,12 @@ export class HomeProfileItems {
     return { ...audit, status: "applied", saved: [], items: read.items.filter(item => envelope.writes.some(write => write.id === item.id)).map(profileListItem) };
   }
 
-  /** Group/value fencing, restoration and projection all remain under the Home stripe. */
   async undo(changes: ProfileChangePath, entry: ChangeEntry, context: Omit<ChangeContext, "undoOf">): Promise<ProfileChangeResult> {
     if (!this.available()) throw new GatewayError("unsupported", "Profile is not available on this Gateway");
     if (context.actor.kind !== "ui") throw new GatewayError("invalid_request", "Only the maintainer undoes a profile change");
     const group = entry.group ? await changes.record.group(entry.group.id, entry.group.size) : [entry];
     if (group.every(member => placementOnlyWrite(member.before, member.after))) {
       const commandId = context.commandId ?? randomUUID();
-      // A retry after a committed domain/failed audit must not apply Undo twice.
       try {
         const recovery = await this.owner().profilePartitionRecovery(commandId);
         const undoLinks = recovery.committed ? (await changes.readPreparedSubjectAudit(recovery.reference)).writes.map(write => write.undoOf) : Object.values(recovery.undoOf);
@@ -521,7 +449,6 @@ export class HomeProfileItems {
     return readHomeProfile(this.owner());
   }
 
-  /** One change. `commandId` keys Profile's idempotency receipts for its writes. */
   async apply(op: HomeProfileOp, author: HomeProfileAuthor, commandId: string): Promise<{ saved: HomeProfileSaved; writes: HomeProfileWrite[] }> {
     const refusal = validateProfileOp(op, author.kind);
     if (refusal) throw new GatewayError("invalid_request", refusal);
@@ -530,8 +457,6 @@ export class HomeProfileItems {
     if (op.action === "learn" && op.kind === "correction" && op.path !== undefined && !op.path.startsWith("corrections")) throw new GatewayError("invalid_request", "Corrections belong in the Corrections area");
     const before = await readHomeProfile(owner);
     const existing = "id" in op ? before.items.find(item => item.id === op.id) : undefined;
-    // The previous contract made confirmed standing rules binding. Home may propose
-    // a new inferred item, but cannot rewrite or retire that existing authority.
     if (author.kind === "home" && existing && (existing.confirmed || existing.record.content.privacyScope === "private" || existing.record.provenance.actor !== "agent" || existing.record.provenance.source !== "home" || op.action !== "retire")) {
       throw new GatewayError("invalid_request", "This change needs the maintainer tap on exact before/after; Home may only retire its own unconfirmed proposals");
     }
@@ -599,18 +524,11 @@ export class HomeProfileItems {
     return { status: "saved", action: "retire", id: record.id, revisionId: record.revisionId, previousRevisionId: current.revisionId, kind: item.kind, previousText: item.text };
   }
 
-  /** Each note's current value, for undo's "unchanged since" check. */
   async values(ids: readonly string[]): Promise<Map<string, HomeProfileValue | null>> {
     const read = await readHomeProfile(this.owner());
     return new Map(ids.map(id => [id, profileValue(read.items.find(item => item.id === id))]));
   }
 
-  /**
-   * Writes each note back to a recorded value: its text, kind and confirmation, its
-   * retirement, and the profile note it supersedes. A note recorded as absent is retired.
-   * A superseded value needs nothing of its own: its superseding note, restored in the
-   * same call, carries the relation. Notes already equal to their target are not written.
-   */
   async restore(targets: ReadonlyArray<{ id: string; value: HomeProfileValue | null }>, author: HomeProfileAuthor, commandId: string, reason?: string): Promise<HomeProfileWrite[]> {
     const owner = this.owner();
     const before = await readHomeProfile(owner);
@@ -651,21 +569,16 @@ export class HomeProfileItems {
   }
 }
 
-/** What the Home runtime gives the tool: the change path, as Home. */
 export interface HomeProfileChangeAccess {
   deferSorting(commandId: string, version: string): Promise<{ status: "deferred"; version: string }>;
   change(ops: HomeProfileRequest[], input: { toolCallId: string; author: HomeProfileAuthor; commandId: string; reason?: string; confirm?: ConfirmChange }): Promise<ProfileChangeResult | (ChangeResult & { saved: []; items: [] })>;
 }
 
-/** The note as the maintainer knows it: its own words, within the row's label bound. */
 function excerpt(text: string): string {
   const line = text.replace(/\s+/gu, " ").trim();
   return line.length <= 80 ? line : `${line.slice(0, 79).trimEnd()}…`;
 }
 
-/** The exact card for Home's request: each note's current text/placement and its
- * exact source revision bind the tap. Text, confirmation and provenance outside the
- * named change stay as they are. */
 function profileReview(read: HomeProfileRead, requests: readonly HomeProfileRequest[], reason: string): ChangeReview {
   const items: ChangeReview["items"] = [];
   for (const op of requests) {

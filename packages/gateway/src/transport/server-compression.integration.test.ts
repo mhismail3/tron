@@ -10,24 +10,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer } from "./server.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
-// permessage-deflate is negotiated only for paired devices (see
-// packages/gateway/docs/connection-resilience.md#frame-compression).
-// Failure modes these cases target:
-// - a local-credential (Mac app, CLI) socket starts receiving compressed frames;
-// - a paired phone's offer, including Apple's parameterless one, is not
-//   negotiated, or a paired client that does not offer it breaks;
-// - server options reject a legal offer (for example server_no_context_takeover)
-//   with a handshake error instead of connecting;
-// - a small compressed inbound frame inflates past maxFrameBytes and is
-//   admitted, because only its wire size was bounded;
-// - the connection-opened record cannot tell compressed and uncompressed apart;
-// - some send path hands ws (and so zlib) a frame over maxFrameBytes. URLSession
-//   bounds only compressed bytes, so the Gateway's decoded ceiling is what
-//   bounds a phone's allocation.
-
 const MAXIMUM_FRAME_BYTES = 16_384;
-// Highly compressible producer content: deflated it would fit the ceiling many
-// times over, so only a decoded-size check can refuse it.
 const OVERSIZED_CONTENT = "producer-content-".repeat(4 * MAXIMUM_FRAME_BYTES / 16);
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -100,8 +83,6 @@ async function startGateway() {
     return { socket, frames, transport: () => transport!, negotiated, opened: openedRecords.at(-1)?.[1] as string };
   };
 
-  // A highly compressible event just under maxFrameBytes: uncompressed it
-  // cannot arrive in fewer bytes; compressed it needs a small fraction.
   const deliverLargeEvent = async (client: Awaited<ReturnType<typeof connect>>) => {
     const before = client.transport().bytesRead;
     const text = "compressible transcript text ".repeat(1_000).slice(0, 12 * 1_024);
@@ -137,8 +118,6 @@ describe("WebSocket frame compression", () => {
 
   it("negotiates Apple's parameterless offer from a paired client and compresses its frames", async () => {
     const fixture = await startGateway();
-    // clientMaxWindowBits false makes ws offer exactly `permessage-deflate`,
-    // the header URLSessionWebSocketTask sends.
     const paired = await fixture.connect(fixture.pairedToken, { clientMaxWindowBits: false });
     expect(paired.negotiated).toBe("permessage-deflate");
     expect(paired.opened).toContain("(paired, mobile role, compression=permessage-deflate)");
@@ -175,8 +154,6 @@ describe("WebSocket frame compression", () => {
     await waitFor(() => client.frames.some((frame) => frame.id === "at-limit"), "at-limit response");
     expect(client.frames.find((frame) => frame.id === "at-limit")).toMatchObject({ ok: true });
 
-    // Compressed, the over-limit message is a few dozen bytes on the wire, so
-    // only a bound on its inflated size can reject it.
     const overLimit = paddedRequest("over-limit", MAXIMUM_FRAME_BYTES + 1);
     expect(deflateRawSync(overLimit).length).toBeLessThan(1_024);
     const closed = new Promise<number>((resolve) => client.socket.once("close", (code) => resolve(code)));
@@ -196,7 +173,6 @@ describe("decoded outbound ceiling on every send path", () => {
     const client = await fixture.connect(credential === "local" ? fixture.localToken : fixture.pairedToken, perMessageDeflate);
     expect(client.socket.extensions).toBe(credential === "local" ? "" : "permessage-deflate");
     const connection = [...(fixture.gateway as any).clients.values()][0];
-    // Every string handed to ws is what zlib would deflate for this socket.
     const handedToWs: string[] = [];
     const send = connection.socket.send.bind(connection.socket);
     vi.spyOn(connection.socket, "send").mockImplementation((data: any, ...rest: any[]) => {
@@ -210,27 +186,22 @@ describe("decoded outbound ceiling on every send path", () => {
     };
     const resyncs = () => client.frames.filter((frame) => frame.topic === "transport.resyncRequired");
 
-    // Direct response.
     expect(await request("response", "test.oversized", {})).toMatchObject({ ok: false, error: { code: "response_too_large" } });
-    // emitToClient.
     fixture.gateway.emitToClient(connection.id, "test.direct", { transcript: OVERSIZED_CONTENT });
     await waitFor(() => resyncs().length === 1, "direct event fallback");
-    // Global broadcast (one prepared frame shared by every client).
     fixture.gateway.broadcast("test.global", { transcript: OVERSIZED_CONTENT });
     await waitFor(() => resyncs().length === 2, "global broadcast fallback");
-    // Session broadcast buffered by the synchronization barrier, then replayed.
     const opened = await request("open", "session.open", { sessionId: "session" });
     fixture.gateway.broadcastSession("session", "session.snapshot", { transcript: OVERSIZED_CONTENT });
     expect(resyncs()).toHaveLength(2);
     await request("sync", "session.sync", { sessionId: "session", syncToken: opened.result.syncToken });
     await waitFor(() => resyncs().length === 3, "barrier replay fallback");
-    // Session broadcast to a synchronized subscriber.
     fixture.gateway.broadcastSession("session", "session.snapshot", { transcript: OVERSIZED_CONTENT });
     await waitFor(() => resyncs().length === 4, "session broadcast fallback");
 
     expect(resyncs().map((frame) => frame.sessionId)).toEqual([undefined, undefined, "session", "session"]);
     expect(client.socket.readyState).toBe(WebSocket.OPEN);
-    expect(handedToWs).toHaveLength(7); // two responses to open/sync plus the five refused payloads
+    expect(handedToWs).toHaveLength(7);
     expect(Math.max(...handedToWs.map((frame) => Buffer.byteLength(frame)))).toBeLessThanOrEqual(MAXIMUM_FRAME_BYTES);
     expect(handedToWs.some((frame) => frame.includes("producer-content"))).toBe(false);
   });

@@ -17,9 +17,6 @@ const usageBody = {
     monthly: { status: "rate-limited", percent: 100, resetsAt: "2026-10-18T21:13:08.000Z" },
   },
 };
-// Shape of the remote catalog pi.dev served for opencode-go on 2026-10-15:
-// every model moved from opencode.ai/zen/go to opencode.ai/inference/go, and a
-// google-generative-ai model joined the three existing wire APIs.
 const refreshedCatalog = [
   { id: "glm-5.3", api: "openai-completions", baseUrl: "https://opencode.ai/inference/go/v1" },
   { id: "minimax-m3", api: "anthropic-messages", baseUrl: "https://opencode.ai/inference/go" },
@@ -57,9 +54,6 @@ describe("provider usage across a model catalog refresh", () => {
     vi.stubEnv("PI_OFFLINE", undefined);
     const catalogRequests: string[] = [];
     const realFetch = globalThis.fetch;
-    // The runtime and the release-date catalog read upstream through global
-    // fetch; answer the pi.dev catalog with the refreshed shape and keep every
-    // other upstream offline.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       if (url.hostname === "pi.dev") {
@@ -102,7 +96,6 @@ describe("provider usage across a model catalog refresh", () => {
     };
     expect(await usageSupported()).toBe(true);
 
-    // Settings › Providers › Model Catalog › Refresh.
     const refresh = await service.invoke(client, "models.refresh", { commandId: "refresh-catalog", force: true }) as { errors: Record<string, string> };
     expect(catalogRequests).toContain("/api/models/providers/opencode-go");
     expect(refresh.errors["opencode-go"]).toBeUndefined();
@@ -112,8 +105,6 @@ describe("provider usage across a model catalog refresh", () => {
     const usage = await service.invoke(client, "provider.usage", { providerId: "opencode-go" }) as { providers: Array<Record<string, unknown>> };
     expect(usage.providers).toMatchObject([{
       providerId: "opencode-go", status: "available", source: "opencode-go.usage", scope: "account",
-      // iOS names each window by its duration and shows every distinct one, so
-      // the exhausted monthly limit (#1163) must arrive with its cadence and reset.
       windows: [
         { id: "rolling", label: "5h", usedPercent: 12, windowSeconds: 18_000 },
         { id: "weekly", label: "Weekly", usedPercent: 34, windowSeconds: 604_800 },
@@ -124,8 +115,6 @@ describe("provider usage across a model catalog refresh", () => {
   });
   it("classifies OpenCode Go usage refusals by their error type and never lets a refused read skip a queue model", async () => {
     root = await mkdtemp(join(tmpdir(), "gateway-provider-usage-"));
-    // Live 2026-10-19 answers of GET /zen/go/v1/usage, plus forbidden shapes that
-    // are not an entitlement refusal (an edge/WAF page, another error type).
     const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
     const answers: Record<string, () => Response> = {
       entitlement: () => json(403, { type: "error", error: { type: "EntitlementError", message: "OpenCode Go subscription required." } }),
@@ -160,7 +149,7 @@ describe("provider usage across a model catalog refresh", () => {
 
     const observe = async (next: string) => {
       answer = next;
-      clock += 31_000; // past the 30 s negative-result retry, so each answer is a fresh read
+      clock += 31_000;
       const usage = await service!.invoke(client, "provider.usage", { providerId: "opencode-go" }) as { providers: Array<{ status: string; message: string | null }> };
       const { status, message } = usage.providers[0]!;
       const [entry] = (await queue.availability("subagent")).models;
@@ -169,13 +158,11 @@ describe("provider usage across a model catalog refresh", () => {
 
     const noSubscription = "OpenCode Go reports no active Go subscription for this account";
     expect(await observe("entitlement")).toEqual({ status: "unsupported", message: noSubscription, skipped: null });
-    // Only OpenCode's own entitlement refusal states a subscription fact.
     expect(await observe("forbiddenAuth")).toEqual({ status: "authentication_required", message: "Provider authentication was rejected", skipped: null });
     expect(await observe("rejectedKey")).toEqual({ status: "authentication_required", message: "Provider authentication was rejected", skipped: null });
     expect(await observe("otherForbidden")).toEqual({ status: "unavailable", message: "OpenCode Go refused the usage request", skipped: null });
     expect(await observe("edgePage")).toEqual({ status: "unavailable", message: "OpenCode Go refused the usage request", skipped: null });
     expect(await observe("limited")).toEqual({ status: "rate_limited", message: "Provider usage is temporarily rate limited", skipped: null });
-    // Quota exhaustion is a readable window at 100%, the one usage state that skips.
     expect(await observe("exhausted")).toEqual({ status: "available", message: null, skipped: "Monthly usage 100%" });
   });
 
@@ -191,20 +178,17 @@ describe("provider usage across a model catalog refresh", () => {
     const weeklyAll = { kind: "weekly_all", group: "weekly", percent: 0, is_active: true, scope: null, resets_at: "2026-11-09T00:00:00Z" };
     const scoped = (name: string, id: string | null, percent: number, active: boolean) =>
       ({ kind: "weekly_scoped", group: "weekly", percent, is_active: active, scope: { model: { display_name: name, id } }, resets_at: "2026-11-09T00:00:00Z" });
-    // Live 2026-11 shape of /api/oauth/usage for an Ultra plan: no 5h window,
-    // and an inactive "Fable" share beside the account's weekly limit.
     let body: unknown = { five_hour: null, seven_day: { utilization: 0, resets_at: "2026-11-09T00:00:00Z" }, limits: [weeklyAll, scoped("Fable", null, 0, false)] };
     let clock = Date.parse("2026-11-02T12:00:00Z");
     const providerUsage = new ProviderUsageOwner({ now: () => clock, fetch: async () => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }) });
     const windows = async () => {
-      clock += 3_600_000; // past any cached answer
+      clock += 3_600_000;
       const [snapshot] = (await providerUsage.read(runtime, "anthropic")).providers;
       expect(snapshot).toMatchObject({ providerId: "anthropic", status: "available", message: null });
       return snapshot!.windows.map(({ id, label, usedPercent, windowSeconds }) => ({ id, label, usedPercent, windowSeconds }));
     };
     expect(await windows()).toEqual([{ id: "seven-day", label: "Weekly", usedPercent: 0, windowSeconds: 604_800 }]);
 
-    // An active per-model limit still reaches the detail sheet.
     body = { five_hour: { utilization: 12 }, seven_day: { utilization: 30 }, limits: [weeklyAll, scoped("Opus", "claude-opus", 45, true), scoped("Fable", null, 0, false)] };
     expect(await windows()).toEqual([
       { id: "five-hour", label: "5h", usedPercent: 12, windowSeconds: 18_000 },
@@ -234,7 +218,6 @@ describe("provider usage across a model catalog refresh", () => {
   });
 });
 
-/** Pi's auth.json with one Anthropic subscription login (synthetic values), as Pi's OAuth login writes it. */
 async function writePiAnthropicLogin(agentDir: string, login: { access: string; refresh: string; expires: number }) {
   await writeFile(join(agentDir, "auth.json"), JSON.stringify({ anthropic: { type: "oauth", ...login } }, null, 2), { mode: 0o600 });
 }
@@ -258,18 +241,16 @@ describe("Anthropic usage under Pi's built-in OAuth", () => {
     const agentDir = join(root, "agent");
     await mkdir(agentDir, { recursive: true });
     await writePiAnthropicLogin(agentDir, { access: "sk-ant-oat01-first", refresh: "sk-ant-ort01-first", expires: Date.now() + 3_600_000 });
-    // Files a CortexKit 1.x/2.x install leaves beside auth.json. Their tokens must never be sent.
     await writeFile(join(agentDir, "anthropic-auth.json"), JSON.stringify({ version: 1, mainAccountId: "main", main: { type: "opencode", provider: "anthropic" }, accounts: [] }));
     await writeFile(join(agentDir, "anthropic-auth-pool.json"), JSON.stringify({ version: 1, mainAccountId: "main", accounts: [{ id: "main", type: "oauth", addedAt: 1 }], claustrum: { mode: "local" } }));
     await writeFile(join(agentDir, "anthropic-auth-pool-state.json"), JSON.stringify({ version: 1,
       accounts: { main: { access: "sk-ant-oat01-retired-pool", refresh: "sk-ant-ort01-retired-pool", expires: Date.now() + 3_600_000 } } }));
-    // Pi refreshes through global fetch; the usage owner reads through its own fetch.
     const tokenRequests: Array<Record<string, unknown>> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input instanceof Request ? input.url : input);
       if (url === "https://platform.claude.com/v1/oauth/token") {
         tokenRequests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-        await new Promise((resolve) => setTimeout(resolve, 20)); // a refresh in flight while the other reader arrives
+        await new Promise((resolve) => setTimeout(resolve, 20));
         return new Response(JSON.stringify({ access_token: "sk-ant-oat01-second", refresh_token: "sk-ant-ort01-second", expires_in: 28_800 }),
           { headers: { "content-type": "application/json" } });
       }
@@ -278,7 +259,6 @@ describe("Anthropic usage under Pi's built-in OAuth", () => {
     const runtime = await createProviderModelRuntime(agentDir);
     let clock = Date.parse("2026-11-09T12:00:00Z");
     const requests: Array<{ url: string; authorization: string | null; beta: string | null }> = [];
-    // Live 2026-11 Ultra shape of /api/oauth/usage.
     const body = { five_hour: null, seven_day: { utilization: 10, resets_at: "2026-11-16T05:00:00Z" }, limits: [], extra_usage: { is_enabled: false } };
     const providerUsage = new ProviderUsageOwner({ now: () => clock, fetch: async (input, init) => {
       const headers = new Headers(init?.headers);
@@ -298,7 +278,7 @@ describe("Anthropic usage under Pi's built-in OAuth", () => {
     const list = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; name: string; usageSupported: boolean }> };
     expect(list.providers.find((provider) => provider.id === "anthropic")).toMatchObject({ name: "Anthropic", usageSupported: true });
     const usage = async () => {
-      clock += 61_000; // past the 60 s usage cache
+      clock += 61_000;
       return (await service!.invoke(client, "provider.usage", { providerId: "anthropic" }) as { providers: Array<Record<string, unknown>> }).providers[0];
     };
     expect(await usage()).toMatchObject({
@@ -308,8 +288,6 @@ describe("Anthropic usage under Pi's built-in OAuth", () => {
     expect(requests).toEqual([{ url: "https://api.anthropic.com/api/oauth/usage", authorization: "Bearer sk-ant-oat01-first", beta: "oauth-2025-04-20" }]);
     expect(tokenRequests).toEqual([]);
 
-    // Inside Pi's five-minute validity margin: the usage read and a chat request's
-    // auth resolve together, and Pi's locked refresh rotates the login exactly once.
     await writePiAnthropicLogin(agentDir, { access: "sk-ant-oat01-first", refresh: "sk-ant-ort01-first", expires: Date.now() + 60_000 });
     requests.length = 0;
     const [snapshot, chat] = await Promise.all([usage(), runtime.getAuth("anthropic")]);

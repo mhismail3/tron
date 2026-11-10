@@ -62,7 +62,6 @@ interface HomeModuleServices {
   read: HomeSessionReader;
 }
 
-/** The composition's Home inputs: platform owners and log sinks, never the registry. */
 export interface HomeComposition {
   triggerSources?: HomeOwnerOptions["triggerSources"];
   runtime: HomeSessionProfileServices["runtime"];
@@ -79,13 +78,10 @@ export interface HomeComposition {
   homeRequestDiagnostic?: ((record: HomeRequestRecord) => void) | undefined;
   homeTaskDiagnostic?: ((record: HomeTaskDiagnostic) => void) | undefined;
   modelQueue?: ModelQueueOwner | undefined;
-  /** Home memory's compactor calls; production omits it and uses the background model queue. */
   homeMemorySummarizer?: (() => EpisodicSummarizer) | undefined;
-  /** Transport injection for Home's web research tools; production uses the pinned DNS-safe transport. */
   homeWebTransport?: WebResearchTransport | undefined;
 }
 
-/** Home's one owner, built on first use over the composition and the registry's ports. */
 function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeComposition, native: () => SessionOperations): () => HomeOwner {
   let owner: HomeOwner | undefined;
   return () => {
@@ -117,8 +113,6 @@ function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCompositio
         },
         createHomeSession: async (cwd) => (await sessions.create(cwd, HOME_SESSION_PROFILE_NAME)).id,
         retireHomeRuntimes: async () => {
-          // Publication recovery runs after construction of the canonical owner.
-          // Keep native map keys/order and re-read authority after every await.
           const homes = sessions.runtimeEntries().filter(([sessionId]) => owner!.chapterStateFor(sessionId).homeId);
           for (const [sessionId, slot] of homes) {
             await slot.retireAfterSettled();
@@ -169,7 +163,6 @@ function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCompositio
           ?.keys[0]?.value as { provider: string; id: string } | undefined,
         chooseHomeModel: async (sessionId, model) => {
           const changes = composition.settings()?.changes;
-          // A host without a settings owner has only the session's own choice.
           if (!changes) return void await sessions.liveRuntime(sessionId)?.setModel(model.provider, model.id);
           const slot = sessions.liveRuntime(sessionId);
           await changes.change({ kind: "home" }, [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: model }],
@@ -195,7 +188,6 @@ function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCompositio
   };
 }
 
-/** Home owns its extension closures; the registry supplies only generic operations. */
 function homeModuleServices(owner: HomeOwner, platform: HomeComposition, sessions: SessionOperations): Omit<HomeModuleServices, "search"> {
   const workerChoice: HomeWorkerChoicePort = { settings: () => platform.settings()?.model,
     homeRuntime: async sessionId => (await sessions.acquire(sessionId)).snapshot(),
@@ -213,7 +205,6 @@ function homeModuleServices(owner: HomeOwner, platform: HomeComposition, session
     delegate: (sessionId, request, signal, confirm) => dispatchWithWorkerChoice(owner, workerChoice, sessionId, request, signal, confirm),
     inputAdmission: homeInputAdmission(owner, platform.homeTaskDiagnostic),
     lifecycle: {
-      // The designation is read before any runtime is built.
       initialize: () => owner.initialize(),
       started: () => owner.resources.start(),
       closing: () => owner.resources.close(),
@@ -258,7 +249,6 @@ function homeModuleServices(owner: HomeOwner, platform: HomeComposition, session
   };
 }
 
-/** Home's profile tool resolves the current change path and actor on each call. */
 function homeProfileChanges(session: SessionContext, changes: SettingsChangePath | undefined, knowledge: () => ProfileStore | undefined, maintainerTurn: () => boolean): HomeProfileChangeAccess | undefined {
   if (!changes || !session.profile().profileChanges) return undefined;
   const requireMaintainerTurn = () => {
@@ -282,16 +272,12 @@ function homeProfileChanges(session: SessionContext, changes: SettingsChangePath
   };
 }
 
-/** What Home's two modules read per runtime: the composition's inputs, the
- * registry's generic ports and the search owner, resolved at each call. */
 interface HomeModuleOwners {
   sessions: SessionOperations;
   composition: HomeComposition;
   search: HomeModuleServices["search"];
 }
 
-/** Home's module and its research module over one owner, which the composition
- * reads through `owner` (transport, recovery, notifications). */
 export function createHomeModules(owners: () => HomeModuleOwners): { home: ModuleDescriptor; research: ModuleDescriptor; owner: () => HomeOwner } {
   let owner: (() => HomeOwner) | undefined;
   const homeOwner = () => {

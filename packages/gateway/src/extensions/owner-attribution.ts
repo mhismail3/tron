@@ -8,7 +8,6 @@ import type { BrowserResultObservation } from "../kernel/projection/tool-result.
 import { isManagedSubagentExtension, MANAGED_SUBAGENTS_SOURCE } from "../kernel/delegation/managed-subagents.js";
 import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
 
-/** First-party inline tool names and the exact inline extension that may own them. */
 const RESERVED_FIRST_PARTY_TOOLS: ReadonlyArray<readonly [string, string]> = [
   ["notify", "tron-notify"],
   ["display", "tron-display"],
@@ -16,13 +15,6 @@ const RESERVED_FIRST_PARTY_TOOLS: ReadonlyArray<readonly [string, string]> = [
   ["computer", "tron-computer"],
   ["web_search", "tron-web-research"],
 ];
-/**
- * Names that identify a container rather than the extension itself. Every
- * project extension lives in `.pi/extensions/`, and packages commonly expose
- * `index.ts`, so deriving a user-visible title from a container name makes
- * unrelated extensions share one label ("Pi") and collapses them into one
- * producer group in native presentation.
- */
 const GENERIC_EXTENSION_NAMES: ReadonlySet<string> = new Set([
   "index", "main", "mod", "entry", "extension", "extensions", "bundle",
   ".pi", "pi", "dist", "src", "lib", "libs", "build", "out", "node_modules",
@@ -41,16 +33,7 @@ function baseNameWithoutExtension(value: string | undefined): string | undefined
   return extension ? name.slice(0, -extension.length) : name;
 }
 
-/**
- * The human-readable producer title for one extension, resolved in a fixed
- * precedence that never accepts a container name: the entry file, then its
- * immediate directory, then the installed package name. A project extension in
- * the standard `.pi/extensions/` layout is therefore named by its own file, and
- * a package whose entry sits in a generic directory falls back to its package
- * name instead of colliding with every other such package.
- */
 function humanizedDisplayName(extension: Extension): string {
-  // Pi's inline extensions carry a generated `<kind:name>` path with no directory.
   const inline = [extension.path, extension.resolvedPath, extension.sourceInfo.path]
     .find((value) => typeof value === "string" && value.startsWith("<") && value.endsWith(">"));
   if (inline) {
@@ -68,8 +51,6 @@ function humanizedDisplayName(extension: Extension): string {
 }
 
 function extensionOwnerFor(extension: Extension): ExtensionOwner {
-  // Inline source labels are loader defaults; this exact generated path is the
-  // stable release-owned capability identity used by native projections.
   const source = isManagedSubagentExtension(extension) ? MANAGED_SUBAGENTS_SOURCE : extension.path === TRON_ASK_USER_INLINE_PATH
     ? TRON_ASK_USER_SOURCE
     : extension.sourceInfo.source;
@@ -95,11 +76,6 @@ function assertAdmissibleToolName(extension: Extension, name: string, requireTro
   throw new GatewayError("conflict", "The ask_user tool name is reserved by Tron");
 }
 
-/**
- * Validates reserved capabilities and first-party ownership across the whole
- * loaded set before any admission boundary is installed, so a conflicting load
- * fails closed without leaving a partially admitted extension behind.
- */
 function validateReservedCapabilities(base: LoadExtensionsResult, options?: { requireTronAskUser?: boolean }): void {
   if (base.extensions.some((extension) => extension.tools.has("bash"))) {
     throw new GatewayError("conflict", "The bash tool name is reserved by Tron");
@@ -127,10 +103,6 @@ function validateReservedCapabilities(base: LoadExtensionsResult, options?: { re
   if (owners.length > 1) throw new GatewayError("conflict", "The first-party ask_user tool was registered more than once");
 }
 
-/** Wraps every callback registered by one loaded extension, including
- * registrations performed later through the same API. The result is safe to
- * apply on every resource reload because each load result is admitted once and
- * all maps/functions are retained as public Pi objects. */
 export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?: BrowserResultObservation,
   options?: { requireTronAskUser?: boolean; managedSubagents?: ManagedExtensionAdmission }): LoadExtensionsResult {
   options?.managedSubagents?.admit(base.extensions);

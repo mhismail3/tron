@@ -4,34 +4,6 @@ import { startLockGateway, type LockClient, type LockGateway } from "../../../te
 import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
-/**
- * Lifecycle RPC lock (packages/gateway/docs/scenario-locks.md#locks; K-0 §7, guarding E5's abort
- * and E7's drain) for the `gateway/run` module: the restart and stop RPCs a
- * phone sends, through the real Gateway (`gateway-lock-harness.ts`, option
- * `lifecycleRequests`: the real terminal owner, and `gateway-main`'s process
- * exit requests recorded instead of acted on; the lock runs the drain
- * `gateway-main` would run, `waitUntilIdle`).
- *
- * `run-lifecycle-rpcs`:
- * - an unsupervised Gateway refuses restart and stop; a supervised one refuses
- *   malformed parameters;
- * - `session.reloadResources` (the session restart) reloads an idle session and
- *   is refused during its run;
- * - `gateway.restart` during a live run schedules a drain naming that session,
- *   cancels waiting auth and asks for the restart after its receipt; a second
- *   restart, a stop and new work are refused while it drains; `restartNow`
- *   during the drain asks for an immediate restart; the drain completes after
- *   the run;
- * - on a second, idle Gateway `gateway.stop` drains nothing and asks for the stop; on a
- *   third, `gateway.restart` answers that it is restarting now.
- *
- * Effects are asserted by name: each exact refusal and result, the drain
- * snapshots and their blockers, the recorded process requests in order, every
- * persisted receipt and message, each provider request's messages and the
- * `session-shapes` shapes. A lifecycle RPC's answer leaves out its own work, so
- * `restarting` and `stopping` are true exactly when nothing else blocks (#1559).
- */
-
 const gateways: LockGateway[] = [];
 const previousSupervised = process.env.TRON_GATEWAY_SUPERVISED;
 afterEach(async () => {
@@ -40,7 +12,6 @@ afterEach(async () => {
   await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose()));
 });
 
-/** A gate a scripted provider step holds until the test opens it. */
 function gate(): { opened: Promise<void>; open(): void; reached: Promise<void>; reach(): void } {
   let open = (): void => {};
   let reach = (): void => {};
@@ -58,7 +29,6 @@ async function createAndOpen(gateway: LockGateway, client: LockClient): Promise<
   return sessionId;
 }
 
-/** A drain snapshot's blockers as `category[:session|method]:state`, in order. */
 function blockers(drain: { blockers: Array<{ category: string; sessionId?: string; method?: string; state: string }> }, sessionId: string): string[] {
   return drain.blockers.map((blocker) => [blocker.category, blocker.sessionId === sessionId ? "live" : blocker.sessionId ?? blocker.method, blocker.state].join(":"));
 }
@@ -76,7 +46,6 @@ describe("gateway/run lifecycle RPC lock", () => {
     const command = (method: string, params: Record<string, unknown> = {}) =>
       phone.request(method, { commandId: gateway.commandId(), ...params });
 
-    // 1. Refusals: no supervisor, then malformed parameters.
     delete process.env.TRON_GATEWAY_SUPERVISED;
     const unsupervisedRestart = await command("gateway.restart");
     const unsupervisedStop = await command("gateway.stop");
@@ -85,7 +54,6 @@ describe("gateway/run lifecycle RPC lock", () => {
     const extraRestart = await command("gateway.restart", { reason: "lock" });
     const extraStop = await command("gateway.stop", { reason: "lock" });
 
-    // 2. The session restart: reload while idle, refused while its run is live.
     const sessionId = await createAndOpen(gateway, phone);
     expect((await command("session.prompt", { sessionId, text: "answer before the reload" })).ok).toBe(true);
     await gateway.settled(sessionId);
@@ -95,7 +63,6 @@ describe("gateway/run lifecycle RPC lock", () => {
     await awaitsWithin(held.reached, "the held provider request");
     const reloadRunning = await command("session.reloadResources", { sessionId });
 
-    // 3. A restart drains the live run; while it drains, everything else is refused.
     const restart = await command("gateway.restart");
     expect(restart.ok, JSON.stringify(restart)).toBe(true);
     await waitFor(() => gateway.lifecycleRequests.some((request) => request.kind === "restart"), "the scheduled restart request");
@@ -110,7 +77,6 @@ describe("gateway/run lifecycle RPC lock", () => {
     const completed = await awaitsWithin(drained, "the restart drain to complete");
     const statusComplete = await phone.request("gateway.drain.status", {});
 
-    // 4. An idle Gateway's stop drains nothing and asks for the stop.
     const idle = await startLockGateway("run-lifecycle-stop", { lifecycleRequests: true });
     gateways.push(idle);
     const mac = await idle.connect("mac");
@@ -119,7 +85,6 @@ describe("gateway/run lifecycle RPC lock", () => {
     const stopCompleted = await awaitsWithin(idle.registry.waitUntilIdle(), "the stop drain to complete");
     const stopStatus = await mac.request("gateway.drain.status", {});
 
-    // 5. An idle Gateway's restart has nothing but its own RPC to drain either.
     const idleRestart = await startLockGateway("run-lifecycle-restart", { lifecycleRequests: true });
     gateways.push(idleRestart);
     const restartIdle = await (await idleRestart.connect("mac")).request("gateway.restart", { commandId: idleRestart.commandId() });
@@ -133,8 +98,6 @@ describe("gateway/run lifecycle RPC lock", () => {
     expect(reloadIdle.result).toEqual({ reloaded: true });
     expect(reloadRunning.error).toEqual(refusal("busy", "Session must be idle for this operation"));
 
-    // The restart names the live session and answers it as the drain's only blocker, not its own RPC; everything else is
-    // refused while it drains.
     const drainShape = { omittedCount: 0, suspectProjectionCount: 0, blockerCount: 1, blockerCounts: { "foreground-agent-operation": 1 } };
     expect(restart.result).toMatchObject({ restarting: false, scheduled: true, activeSessionIds: [sessionId], drainRevision: 4,
       drainId: restart.result.drain.drainId, drain: { ...drainShape, phase: "preparing" } });
@@ -154,7 +117,6 @@ describe("gateway/run lifecycle RPC lock", () => {
     expect(statusComplete.result).toMatchObject({ phase: "complete", blockerCount: 0, blockerCounts: {}, blockers: [], omittedCount: 0,
       suspectProjectionCount: 0, drainId: restart.result.drainId });
 
-    // The drained run settled; the refused prompt left nothing behind.
     const canonicalJsonl = await gateway.canonical(sessionId);
     const messages = canonicalJsonl.flatMap((entry) => {
       const message = (entry as { message?: { role: string; content?: Array<{ text?: string }>; stopReason?: string } }).message;
@@ -179,7 +141,6 @@ describe("gateway/run lifecycle RPC lock", () => {
     ]);
     expectRequestShapes(recorded.providerRequests, ["chat", "chat"]);
 
-    // The idle Gateway's stop has nothing but its own RPC to drain, so it answers stopping, and completes.
     expect(stop.result).toMatchObject({ stopping: true, scheduled: true, activeSessionIds: [], drainRevision: 3, drainId: stop.result.drain.drainId,
       drain: { phase: "preparing", omittedCount: 0, suspectProjectionCount: 0, blockerCount: 0, blockerCounts: {}, blockers: [] } });
     expect(stopCompleted).toBe(true);

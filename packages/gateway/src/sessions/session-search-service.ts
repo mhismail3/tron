@@ -23,15 +23,8 @@ const MAX_SEMANTIC_VECTORS = 100_000;
 const MAX_SEMANTIC_BYTES = 128 * 1_024 * 1_024;
 const MAX_SEMANTIC_WORK = 20_000;
 const MAX_DIRTY_SESSIONS = 256;
-/** Longest stretch of warm-up or reindex work between event-loop yields, so an
- * owned background pass cannot delay an in-flight request. */
 const SEARCH_SLICE_MS = 20;
-/** How long a start waits for the catalog owner's first verified cut before it
- * parses whatever it cannot prove unchanged. The warm-up is a background task,
- * so this never delays listener readiness. */
 const SEARCH_WARMUP_CATALOG_WAIT_MS = 30_000;
-/** A start's optional semantic pass stops here and reports partial coverage: it
- * re-reads and re-embeds the corpus, which must not run without a time bound. */
 const SEARCH_SEMANTIC_WARMUP_BUDGET_MS = 120_000;
 
 async function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -61,9 +54,6 @@ function cosine(left: readonly number[], right: readonly number[]): number {
 
 interface SearchDocument extends SearchIndexDocument {
   texts: Map<string, SearchTextEntry>;
-  /** Set when the document was read from an open session's in-memory branch
-   * rather than from the canonical file, so the catalog's file facts do not
-   * describe it (`RuntimeRegistry.readSearchCut`). */
   runtimeGeneration?: string;
 }
 interface SessionSearchEmbeddingClient {
@@ -85,8 +75,6 @@ interface SemanticVector {
   generation: SemanticGeneration;
 }
 
-/** Gateway-owned coordinator. It holds no canonical transcript mirror: every
- * result is validated against a fresh registry-owned cut before publication. */
 export class SessionSearchService {
   private initialized = false;
   private initializing: Promise<void> | undefined;
@@ -105,8 +93,6 @@ export class SessionSearchService {
   private dirtyGeneration = 0;
   private dirtyRefresh: Promise<void> | undefined;
   private semanticTask: Promise<void> | undefined;
-  // Optional semantic work has its own serialized owner. Lexical rebuilds
-  // never wait behind helper I/O, so canonical refreshes remain searchable.
   private semanticTail: Promise<void> = Promise.resolve();
   private semanticGeneration = 0;
   private semanticModel: SemanticGeneration | undefined;
@@ -124,11 +110,6 @@ export class SessionSearchService {
   ) {
     this.sessions.setSearchInvalidator((sessionID, nextSessionID) => {
       this.semanticGeneration += 1;
-      // This runs inside another owner's summary publication, so it stays
-      // cheap: no SQLite work and no scan of the whole vector map. The dirty
-      // lane replaces the session's rows in a bounded slice, and the old rows
-      // answer nothing meanwhile because every candidate is validated against
-      // a fresh canonical cut before publication.
       for (const [key, value] of this.semanticVectors) {
         if (!key.startsWith(`${sessionID}\u0000`)) continue;
         this.semanticVectors.delete(key);
@@ -152,13 +133,10 @@ export class SessionSearchService {
     });
   }
 
-  /** What the last index pass reused and parsed, for the warm-up record. */
   indexPassStats(): { reusedSessions: number; parsedSessions: number } {
     return { reusedSessions: this.indexReused, parsedSessions: this.indexParsed };
   }
 
-  /** The only way semantic search is armed: the Gateway composition passes the
-   * helper it admitted (gateway-main.ts), never an unadmitted environment path. */
   setSemanticClient(client: SessionSearchEmbeddingClient): void {
     if (!this.semanticClient) {
       this.semanticClient = client;
@@ -203,8 +181,6 @@ export class SessionSearchService {
       const currentAnchor = document.entries.find(item => item.id === candidate.entryId);
       if (!currentAnchor || currentAnchor.ordinal !== candidate.ordinal) continue;
       results.push({
-        // Archive state is the owning store's display projection read at
-        // publication, never part of the index, so this needs no reindex.
         sessionId: candidate.sessionId, archived: this.sessions.isArchived(candidate.sessionId),
         title: candidate.title, cwd: candidate.cwd, updatedAt: candidate.updatedAt,
         entryId: candidate.entryId, ...(candidate.parentEntryId ? { parentEntryId: candidate.parentEntryId } : {}), ordinal: candidate.ordinal,
@@ -246,10 +222,6 @@ export class SessionSearchService {
     const rankingState: SessionSearchResponse["ranking"]["state"] = semanticHits.length > 0 ? "localSemantic" : "lexical";
     results.sort((left, right) => (right.semanticScore ?? -1) - (left.semanticScore ?? -1) || stableSearchResultOrder(left, right));
     results.splice(maxResults);
-    // Semantic ranking awaits the embedding helper while any session continues
-    // to move. Re-cut only result-bearing sessions and publish lexical hits only when the
-    // exact passage still matches; unrelated publications cannot invalidate the
-    // response, and stale semantic scores are discarded rather than reused.
     const currentDocuments = new Map<string, SearchDocument | undefined>();
     const publishable: SessionSearchResult[] = [];
     for (const result of results) {
@@ -314,14 +286,10 @@ export class SessionSearchService {
     this.indexParsed = 0;
     this.sliceStartedAt = performance.now();
     const catalog = await this.sessions.catalog("user");
-    // Home owns its cross-chapter memory route; session_read opens other roots.
     const eligible = catalog.sessions.filter(session => !this.sessions.isLineageMember(session.id));
     this.coverageSessionsTotal = eligible.length;
     this.coverageOmittedSessions = 0;
     this.coverageReason = undefined;
-    // One persisted row is reused while the catalog owner still reports the
-    // exact file facts the row was indexed from: an unchanged corpus is warmed
-    // without reading a transcript, and only what changed is parsed again.
     const identities = await this.catalogIdentities();
     const stored = new Map(this.index.sessionFacts().map(facts => [facts.sessionId, facts]));
     const published = new Set(eligible.map(session => session.id));
@@ -346,10 +314,6 @@ export class SessionSearchService {
       if (!document) { this.coverageOmittedSessions += 1; this.coverageReason = "One or more canonical sessions could not be admitted for search"; continue; }
       corpusFacts.push(`${document.sessionId}:${document.branchDigest}`);
       try {
-        // Only a cut read from the file may carry the catalog's file facts: an
-        // open session's in-memory branch can move (a tree navigation writes
-        // nothing), and a row stamped with facts it was not derived from would
-        // be reused across a restart and then dropped by its own digest.
         await this.index.replace(document, document.runtimeGeneration ? undefined : candidate);
         this.indexParsed += 1;
       } catch { this.coverageOmittedSessions += 1; this.coverageReason = "One or more sessions exceeded bounded search index capacity"; }
@@ -358,9 +322,6 @@ export class SessionSearchService {
     this.corpusRevision = digest(corpusFacts);
   }
 
-  /** The catalog owner's verified file facts, or undefined when no complete cut
-   * arrives within this start's bounded wait: the pass then parses whatever it
-   * cannot prove unchanged instead of trusting an unverified durable row. */
   private async catalogIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
     let timer: NodeJS.Timeout | undefined;
     const expired = new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), SEARCH_WARMUP_CATALOG_WAIT_MS); });
@@ -372,14 +333,10 @@ export class SessionSearchService {
     return identities;
   }
 
-  /** A catalog seam that fails or is unavailable leaves every row unproven, so
-   * the pass parses instead of reusing what it cannot check. */
   private async readCatalogIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
     try { return await this.sessions.searchCatalogIdentities(); } catch { return undefined; }
   }
 
-  /** Hand the loop back between slices: the warm-up is one long background
-   * task, and a transcript read must not hold an in-flight request. */
   private async yieldSlice(): Promise<void> {
     if (performance.now() - this.sliceStartedAt < SEARCH_SLICE_MS) return;
     this.sliceStartedAt = performance.now();
@@ -393,9 +350,6 @@ export class SessionSearchService {
     }).finally(() => { this.semanticTask = undefined; });
   }
 
-  /** Admits one embedded entry under the semantic byte bound. Returns false
-   * when the scan must stop: the vector no longer matches the current
-   * generation, or the exact byte budget is full (coverage becomes partial). */
   private admitSemanticVector(
     sessionId: string,
     document: SearchDocument,
@@ -454,8 +408,6 @@ export class SessionSearchService {
     if (this.semanticCoverage === "indexing") this.semanticCoverage = "complete";
   }
 
-  /** The optional semantic pass stops at its per-start budget with explicit
-   * partial coverage instead of re-embedding the corpus without a time bound. */
   private semanticOutOfBudget(deadline: number): boolean {
     return performance.now() >= deadline;
   }
@@ -484,8 +436,6 @@ export class SessionSearchService {
           }
           if (this.dirtySessions.get(id) === processedGeneration) this.dirtySessions.delete(id);
         }
-        // Vector replacement remains serialized, but is deliberately detached
-        // from this lexical owner. A blocked helper must not delay search.
         if (refreshed.length > 0) {
           void this.enqueueSemantic(() => this.refreshSemanticDocuments(refreshed)).catch(error => {
             if (!this.semanticAbort.signal.aborted) this.semanticReason = error instanceof Error ? error.message : "Semantic refresh failed";
@@ -542,14 +492,9 @@ export class SessionSearchService {
       const branch = validateSearchBranch(cut.entries, boundary, cut.leafEntryId);
       const entries = extractSearchTexts(branch.entries);
       const texts = new Map(entries.map(entry => [entry.id, entry]));
-      // The branch digest is derived state too: changing what it covers (the
-      // entries, their order, or their projection) requires bumping
-      // SESSION_SEARCH_INDEX_DERIVATION_VERSION in session-search-index.ts.
       const branchDigest = digest(branch.entries);
       const fileIdentity = cut.fileIdentity ?? createHash("sha256").update(branchDigest).digest("hex");
       return {
-        // A fallback title is model-visible text too: never resurrect the
-        // catalog's original first message after a context edit or null edit.
         sessionId, title: typeof cut.summary.name === "string" && cut.summary.name.trim()
           ? redactCredentials(cut.summary.name).trim() : entries.find(entry => entry.role === "user")?.text.slice(0, 80) ?? "(untitled)", cwd: cut.summary.cwd,
         updatedAt: cut.summary.modified instanceof Date ? cut.summary.modified.toISOString() : String(cut.summary.modified), fileIdentity, branchDigest, ...(branch.leafEntryId ? { leafEntryId: branch.leafEntryId } : {}), ...(boundary ? { forkBoundary: boundary } : {}), ...(cut.runtimeGeneration ? { runtimeGeneration: cut.runtimeGeneration } : {}), entries, texts,

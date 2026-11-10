@@ -1,24 +1,15 @@
 import os from "node:os";
 import { performance, type EventLoopUtilization } from "node:perf_hooks";
 
-/** Host pressure as one level (#915, docs/host-load.md). It informs Home status and the
- * Gateway log; it never holds a Home worker back. */
 export type HostPressureLevel = "normal" | "elevated" | "critical";
 
 export interface HostPressureSample {
   level: HostPressureLevel;
-  /** 1-minute load average divided by the CPU count. Displayed only: load average does
-   * not track busy CPUs on this Mac, so it never sets the level (#1096). */
   load1PerCpu: number;
-  /** Event-loop utilisation since the previous window, 0..1. */
   eventLoopUtilization: number;
   sampledAt: string;
 }
 
-/** In the Gateway log's field vocabulary (transport/logger.ts keeps only known fields,
- * and its own `level` is the log level), so the record survives the writer: `state` is
- * the new level, `transition` the previous one, and `counts` carries load per CPU, busy
- * CPU and event-loop utilisation as percentages (#1103, #1096). */
 export interface HostPressureDiagnostic {
   event: "host.pressure";
   state: HostPressureLevel;
@@ -26,19 +17,12 @@ export interface HostPressureDiagnostic {
   counts: { loadPerCpuPercent: number; cpuBusyPercent: number; eventLoopUtilizationPercent: number };
 }
 
-/** Busy share of all CPUs, banded like event-loop utilisation. */
 const ELEVATED_CPU_BUSY = 0.7;
 const CRITICAL_CPU_BUSY = 0.95;
 const ELEVATED_UTILIZATION = 0.7;
 const CRITICAL_UTILIZATION = 0.95;
-/** Reads closer together than this reuse the previous sample, so a burst of status
- * reads measures one window instead of many empty ones. It is also the shortest
- * window utilisation and CPU busy are measured over: a window of a few milliseconds is
- * mostly the reading tick itself and reads 0.94 to 0.96 on an idle process, which held a
- * fresh Gateway's first Home worker back as `critical` (#1000). */
 const SAMPLE_REUSE_MS = 2_000;
 
-/** One CPU's cumulative kernel ticks since boot, as `os.cpus()` reports them. */
 export interface CpuTicks { busy: number; total: number }
 
 export function readCpuTicks(): CpuTicks[] {
@@ -48,9 +32,6 @@ export function readCpuTicks(): CpuTicks[] {
   });
 }
 
-/** Busy share of all CPUs between two tick readings, 0..1. A window that cannot be
- * measured reads 0 rather than inventing pressure: the CPU count changed (hotplug),
- * a counter went backwards (reset), or no tick advanced. */
 export function busyShare(previous: readonly CpuTicks[], current: readonly CpuTicks[]): number {
   if (current.length === 0 || previous.length !== current.length) return 0;
   let busy = 0;
@@ -65,8 +46,6 @@ export function busyShare(previous: readonly CpuTicks[], current: readonly CpuTi
   return total > 0 ? Math.min(1, busy / total) : 0;
 }
 
-/** One process-wide sampler, read on demand by Home status. It owns no timer: a level
- * transition is logged when a read sees it. */
 export class HostPressure {
   private mark: { at: number; utilization: EventLoopUtilization; cpus: readonly CpuTicks[] } = {
     at: performance.now(), utilization: performance.eventLoopUtilization(), cpus: readCpuTicks(),
@@ -78,8 +57,6 @@ export class HostPressure {
   sample(): HostPressureSample {
     const now = performance.now();
     if (this.last && now - this.last.at < SAMPLE_REUSE_MS) return this.last.sample;
-    // Until the window since the mark is long enough to measure, utilisation and busy CPU
-    // keep their last measured value (none yet: 0) and the window keeps growing.
     let utilization = this.last?.sample.eventLoopUtilization ?? 0;
     let cpuBusy = this.last?.cpuBusy ?? 0;
     const cpus = readCpuTicks();

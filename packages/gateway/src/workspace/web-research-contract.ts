@@ -1,7 +1,6 @@
 import { Type, type Static } from "../kernel/pi/ai.js";
 import type { ToolDefinition } from "../kernel/pi/coding-agent.js";
 
-/** One executable contract for Home, ordinary sessions and native children. */
 export const WEB_RESEARCH_PARAMETERS = Type.Union([
   Type.Object({ op: Type.Literal("search"), query: Type.String({ minLength: 1, maxLength: 512 }),
     depth: Type.Optional(Type.Union([Type.Literal("fast"), Type.Literal("balanced"), Type.Literal("deep")])),
@@ -46,7 +45,6 @@ export function utf8(text: string, bytes: number): string {
   let end = Math.max(0, bytes); while (end > 0 && (buffer[end]! & 0xc0) === 0x80) end--;
   return buffer.subarray(0, end).toString("utf8");
 }
-/** JSON escaping, diagnostics and citations count too, not merely page characters. */
 export function webToolResult(outcome: WebOutcome): WebToolResult {
   const cap = outcome.budget.limitBytes;
   let text = "";

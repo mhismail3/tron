@@ -25,8 +25,6 @@ import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { SessionSearchService } from "../sessions/session-search-service.js";
 
-/** The owners modules read per runtime: the registry's own services and the
- * composition's, which never pass through the registry. */
 export interface ModuleOwners extends RecentModelSignals {
   registry: RuntimeRegistry;
   home: HomeComposition;
@@ -37,8 +35,6 @@ export interface ModuleOwners extends RecentModelSignals {
   sessionSearch?: SessionSearchService | undefined;
 }
 
-/** One production composition. Callbacks may close over the not-yet-constructed
- * registry: start only captures them; extension assembly resolves the live owner. */
 export function gatewayModules(owners: () => ModuleOwners, projectOptions?: ConstructorParameters<typeof ProjectLifecycle>[2]) {
   const registry = () => owners().registry;
   const home = createHomeModules(() => ({ composition: owners().home, sessions: registry(), search: () => {
@@ -68,7 +64,6 @@ export function gatewayModules(owners: () => ModuleOwners, projectOptions?: Cons
   ] };
 }
 
-/** Pi's process-global theme must precede every extension resource load. */
 export async function startGatewayModules(platform: Omit<GatewayHost, "contract">, owners: () => ModuleOwners, projectOptions?: ConstructorParameters<typeof ProjectLifecycle>[2]) {
   initTheme();
   const composition = gatewayModules(owners, projectOptions);

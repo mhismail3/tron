@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
-# Tron contributor entry point. Production deployment is intentionally absent;
-# releases are performed manually by the repository owner.
+# Tron contributor entry point.
 set -euo pipefail
-# Subcommands here run the pinned npm, whose native builds start node-gyp's Python.
-# That Python must not write __pycache__ into the npm tree, which the npm digest
-# in config/ci-toolchain.env pins by content (#638).
 export PYTHONDONTWRITEBYTECODE=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GATEWAY="$ROOT/packages/gateway"
 
-# Gateway development commands run the one repository-pinned development Node
-# (scripts/tron-node, #242), never whatever `node` is first on PATH, which in an
-# agent shell is the Gateway's signed payload runtime.
 use_pinned_node() {
   local node
   node="$("$ROOT/scripts/tron-node")" || exit
@@ -186,7 +179,6 @@ case "$cmd" in
     exec node "$GATEWAY/dist/client/terminal-chat.js" "$@"
     ;;
   test)
-    # Direct invocation: no shared admission or remembered pass is consulted.
     suite="${1:-}"; shift || true
     case "$suite" in
       gateway)

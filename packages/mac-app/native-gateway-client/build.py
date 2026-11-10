@@ -51,9 +51,6 @@ def validate_output(output):
 
 
 def publish(artifact, output, manifest):
-    # The compile-time freshness check is not publication authority. Pin the
-    # parent and exclusively create BOTH names without following a raced link.
-    # A partial publication stays as failed evidence; never unlink or overwrite.
     metadata = validate_output(output)
     parent = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -125,11 +122,7 @@ def build(output, headers=None):
             raise ValueError("addon uses a forbidden Node/V8/libuv ABI")
         if any((ROOT / name).read_bytes() != data for name, data in snapshot.items()):
             raise ValueError("native client source changed during frozen compilation")
-        # `testOnly` stays in the signed metadata so installed apps keep validating;
-        # only production artifacts are built, so it is always false.
         manifest = {"schema": 1, "testOnly": False, "inputs": {name: digest(data) for name, data in snapshot.items()}}
-        # Signing is deliberately left to the existing Mac nested-Mach-O phase;
-        # its final runtime fingerprint covers these metadata and signed bytes.
         publish(artifact, output, manifest)
         print(f"compiled {output} sha256={digest(artifact.read_bytes())}")
 

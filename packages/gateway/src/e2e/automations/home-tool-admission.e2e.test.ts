@@ -61,8 +61,6 @@ async function resumedHome(label: string, seedStale = true, initialNotifications
   const root = gateway.root;
   await gateway.dispose({ keepRoot: true });
   owned.pop();
-  // A chapter made by an older tool recipe has both canonical declarations and
-  // a carried delegate snapshot. Neither is a maintainer's current Home recipe.
   if (seedStale) {
     const manager = SessionManager.open(sessionFile);
     manager.appendCustomEntry(SESSION_SETTINGS_ENTRY, { settings: {}, fixed: { "tools.active": {
@@ -163,8 +161,6 @@ it("real Gateway: settings changes apply on the next turn in the same chapter wi
   for (const tools of [selected, userTools]) {
     await changeTools(gateway, phone, tools);
     if (tools === userTools) {
-      // A stale SDK selection is not another Home configuration owner. The
-      // next request must adopt the recipe even without a resource reload.
       (await gateway.registry.acquire(sessionId)).runtime.session.setActiveToolsByName(originalTools);
     }
     gateway.script([() => fauxAssistantMessage("Applied the live recipe.")]);
@@ -180,8 +176,6 @@ it("real Gateway: settings changes apply on the next turn in the same chapter wi
 });
 
 it("real Gateway: a newly registered host tool reaches an existing chapter after an upgrade", async () => {
-  // The first Gateway lacks the notification owner; the next has it. This
-  // exercises real module registration, not a mocked tool list or a new chapter.
   const { gateway, phone, sessionId } = await resumedHome("upgrade", false, false);
   gateway.script([() => fauxAssistantMessage("The newly available tool is admitted.")]);
   const prompted = await phone.request("home.prompt", { commandId: gateway.commandId(), text: "Use the current Gateway capabilities." });

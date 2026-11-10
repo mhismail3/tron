@@ -12,9 +12,6 @@ interface IOSBuildsFeed {
   message?: string;
 }
 
-// The publisher already owns POSIX flock. Use the system Python reader for that
-// same lock, rather than an unrelated JS lock or another publication/index service.
-// All opens are descriptor-relative, bounded and link-free; no network is used.
 const snapshot = String.raw`
 import os, sys, stat, json, fcntl, re, plistlib, datetime, urllib.parse
 
@@ -85,8 +82,6 @@ try:
 finally: os.close(root)
 `;
 
-/** Each open reads a fresh locked cut of the publisher's existing files. Failed,
- * missing or contended input is explicit, never a successful empty feed. */
 export async function readIOSBuildsFeed(tronHome: string): Promise<IOSBuildsFeed> {
   let home: string;
   try { home = await realpath(tronHome); }

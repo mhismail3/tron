@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Build, install, launch, and stop a local Tron iOS app variant on a physical device.
-
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,13 +20,8 @@ REQUIRED_SDK_MAJOR="${TRON_IOS_REQUIRED_SDK_MAJOR:-}"
 GATEWAY_PROTOCOL_TARGET="${TRON_IOS_GATEWAY_PROTOCOL_TARGET:-stable}"
 GATEWAY_MAC_APP="${TRON_IOS_GATEWAY_MAC_APP:-/Applications/Tron.app}"
 LOCKER="$ROOT_DIR/scripts/ios-test-lock.py"
-# Host-wide: every worktree, and the Gateway's detached install helper, lease a
-# device here.
 DEVICE_LEASE_DIR="$HOME/.tron/internal/run"
-# Over-the-air development builds: a loopback static server (LaunchAgent) behind
-# Tailscale Serve on a dedicated HTTPS port, reachable only from the tailnet.
 SHARE_DIR="$HOME/.tron/ios-builds"
-# `compile`: one owned DerivedData per worktree, beside ios.build's test products.
 COMPILE_PRODUCTS_ROOT="$HOME/Library/Developer/Tron/ios/device-compile-derived-data"
 SHARE_HTTPS_PORT=8443
 SHARE_BACKEND_PORT=8444
@@ -101,7 +95,6 @@ die() {
     exit 1
 }
 
-# Bound Xcode and XcodeGen to explicit build inputs, not ambient SDK overrides.
 DEVICE_BUILD_ENV=(HOME PATH TMPDIR USER LOGNAME LANG LC_ALL LC_CTYPE DEVELOPER_DIR)
 run_bounded() {
     local name
@@ -120,7 +113,6 @@ xcodegen_command() {
     elif [[ -x "$ROOT_DIR/.ci-tools/bin/xcodegen" ]]; then
         candidate="$ROOT_DIR/.ci-tools/bin/xcodegen"
     else
-        # The same search as scripts/tron-ios-test; the version check below pins it.
         candidate="$(PATH="$PATH:/opt/homebrew/bin" command -v xcodegen 2>/dev/null || true)"
     fi
     [[ -n "$candidate" ]] || die "xcodegen is unavailable; install a current Tron Mac app or run scripts/install-ci-tools.sh xcodegen"
@@ -308,9 +300,6 @@ resolve_device_id() {
     die "set TRON_IOS_DEVICE_ID or TRON_IOS_DEVICE_NAME when zero or multiple physical devices are selectable"
 }
 
-# Re-run this command under the resolved device's lease, unless this process is
-# that leased command. The re-run names the resolved device explicitly, so it
-# cannot select a different device than the one it leased.
 hold_device_lease() {
     local device_id="$1"
     shift
@@ -348,14 +337,6 @@ pretty_xcode_output() {
 
 XCODEBUILD_ARGS=()
 
-# Build the complete argv once. Both modes retain the same scheme, destination,
-# signing, and result-bundle arguments and differ only in compiler overrides.
-# Optimized installs keep -O but compile per file: whole-module optimization
-# recompiles the entire app for any edit (~150s versus ~17s measured for a
-# one-file change). The LocalDevice xcconfig stays whole-module, so the
-# scheme's Instruments Profile action still builds the release-like binary.
-# An empty device id builds for any registered device (share); the signed
-# development profile then carries every device registered to the team.
 prepare_xcodebuild_args() {
     local derived_data_path="$1"
     local result_bundle_path="$2"
@@ -369,7 +350,6 @@ prepare_xcodebuild_args() {
         destination=(-destination "platform=iOS,id=${device_id}" -destination-timeout 30)
         provisioning+=(-allowProvisioningDeviceRegistration)
     fi
-    # Unsigned (compile) builds need no account, profile or device.
     [[ "$signing" == "signed" ]] || provisioning=()
     XCODEBUILD_ARGS=(
         build
@@ -394,17 +374,10 @@ prepare_xcodebuild_args() {
     fi
 }
 
-# Generates the project and builds into DERIVED_DATA for DEVICE_ID (empty: any
-# device), BUILD_MODE and signing ("signed" or "unsigned"). On failure it prints
-# the compiler errors and failed commands and exits with xcodebuild's status;
-# the Gateway's install sheet surfaces that summary. Sets BUILD_LOG and
-# BUILD_XCRESULT. Leaves cwd at IOS_DIR.
 BUILD_LOG=""
 BUILD_XCRESULT=""
 run_device_xcodebuild() {
     local derived_data="$1" device_id="$2" signing="$3"
-    # Only unsigned validation has the bounded environment keyed by the gate.
-    # Signed install/share retain their existing caller environment and signing behavior.
     local runner=()
     if [[ "$signing" == unsigned ]]; then runner=(run_bounded); fi
     ${runner[@]+"${runner[@]}"} xcodebuild -version
@@ -454,8 +427,6 @@ run_device_xcodebuild() {
     BUILD_XCRESULT="$xcresult"
 }
 
-# Builds and validates the canonical app for DEVICE_ID (empty: any registered
-# device) and sets BUILT_APP, BUILD_LOG and BUILD_XCRESULT. Leaves cwd at IOS_DIR.
 BUILT_APP=""
 build_validated_app() {
     local device_id="$1"
@@ -475,19 +446,9 @@ build_validated_app() {
     BUILT_APP="$app"
 }
 
-# An optional direct build of the shipped app: the exact
-# install argv for any iOS device, unsigned, so it needs no device, account or
-# provisioning. The simulator UI-validation build defines HOSTED_TEST, so only
-# this build proves the shipped app compiles without hosted-test symbols and
-# under the optimizer (#1061).
 compile_unsigned_app() {
     require_full_xcode
-    # Products live outside the worktree, like ios.build's: the Swift package
-    # checkouts are nested Git clones that would block removing a finished
-    # worktree (#1063). One owned, stamped directory per
-    # worktree; a directory whose worktree is gone is pruned here first.
     local identity="$ROOT_DIR/scripts/ios-test-build-identity.py" key derived
-    # Fatal, not a warning: a prune that silently never runs leaks gigabytes.
     python3 "$ROOT_DIR/scripts/ios-test-simulator.py" prune --products-root "$COMPILE_PRODUCTS_ROOT" \
         --development-state "${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid" \
         || die "could not prune the device-compile products of deleted worktrees in $COMPILE_PRODUCTS_ROOT"
@@ -531,7 +492,6 @@ tailscale_cli() {
     command -v tailscale 2>/dev/null || printf '%s\n' /Applications/Tailscale.app/Contents/MacOS/Tailscale
 }
 
-# https://<this node>.<tailnet>.ts.net:8443, from Tailscale's own status.
 share_base_url() {
     local name
     name="$("$(tailscale_cli)" status --self --json 2>/dev/null \
@@ -541,21 +501,12 @@ share_base_url() {
     printf 'https://%s:%s\n' "$name" "$SHARE_HTTPS_PORT"
 }
 
-# The server answers (200 or 404 for an empty tree) through Tailscale's HTTPS
-# with a certificate curl trusts, which is exactly what the phone needs.
 share_host_reachable() {
     local code
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$1/" || true)"
     [[ "$code" == 200 || "$code" == 404 ]]
 }
 
-# Everything Tailscale serves on the dedicated port, one line each: web
-# handlers ("<path> <target>"), a raw TCP forward ("tcp-forward <target>") and
-# Funnel ("funnel on"). The share host owns the port only when the sole line is
-# "/ http://127.0.0.1:$SHARE_BACKEND_PORT"; anything else is another owner's
-# configuration that enable/disable must leave alone. Fails (status 2) when
-# Tailscale's serve status cannot be read, so callers never treat an unknown
-# configuration as empty.
 share_serve_handler() {
     local json
     json="$("$(tailscale_cli)" serve status --json 2>/dev/null)" || return 2
@@ -609,7 +560,6 @@ share_host_enable() {
         die "port $SHARE_HTTPS_PORT already serves '$handler'; refusing to replace another serve config"
     fi
     mkdir -p "$SHARE_DIR" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
-    # The server source is embedded so the agent never runs from a checkout.
     python3 - "$SHARE_AGENT_PLIST" "$SHARE_AGENT_LABEL" "$ROOT_DIR/scripts/ios-share-server.py" \
         "$SHARE_DIR" "$SHARE_BACKEND_PORT" "$HOME/Library/Logs/tron-ios-builds.log" <<'PY'
 import plistlib, sys
@@ -638,7 +588,6 @@ PY
         echo "+ tailscale serve --bg --https=$SHARE_HTTPS_PORT http://127.0.0.1:$SHARE_BACKEND_PORT"
         "$(tailscale_cli)" serve --bg --https="$SHARE_HTTPS_PORT" "http://127.0.0.1:$SHARE_BACKEND_PORT"
     fi
-    # The first HTTPS request provisions the node certificate, which takes seconds.
     for _attempt in $(seq 1 12); do
         share_host_reachable "$url" && break
         sleep 5
@@ -646,10 +595,6 @@ PY
     share_host_status
 }
 
-# Disable removes only what enable created: the exact loopback handler on the
-# dedicated port, then the LaunchAgent. Another owner's or a mixed route on that
-# port is refused before anything changes, because `serve --https=PORT off`
-# clears the whole port (#1327). Retained builds are never touched.
 share_host_disable() {
     local handler
     handler="$(share_serve_handler)" || die "cannot read Tailscale serve status; nothing changed"
@@ -667,7 +612,6 @@ share_host_disable() {
 
 share_build() {
     [[ -n "$SHARE_TITLE" && -n "$SHARE_NOTES" ]] || die "share requires --title and --notes"
-    # The page names the commit, so the build must be exactly that commit.
     [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] || die "working tree is dirty: commit before sharing a build"
     local url branch commit
     branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
@@ -685,7 +629,6 @@ share_build() {
     [[ "$bundle_id" == "$PHYSICAL_BUNDLE_ID" ]] || die "built $bundle_id, expected $PHYSICAL_BUNDLE_ID"
 
     local out ipa
-    # One IPA per worktree: each share replaces the previous one.
     out="$IOS_DIR/build/share"
     rm -rf "$out"
     mkdir -p "$out/Payload"
@@ -718,7 +661,6 @@ launch_installed_app() {
     device_id="$(resolve_device_id)"
     [ -n "$device_id" ] || die "could not resolve a physical iOS device"
 
-    # Launching an installed app is independent of build configuration.
     launch_app_for_device "$device_id" "$PHYSICAL_BUNDLE_ID"
 }
 
@@ -729,8 +671,6 @@ tronmobile_pids() {
 }
 
 tronmobile_pids_from_input() {
-    # `devicectl` renders a padded table. Match the executable after its
-    # trailing column padding so status/stop stay correct across Xcode widths.
     awk '$0 ~ /TronMobile\.app\/TronMobile[[:space:]]*$/ { print $1 }'
 }
 
@@ -787,7 +727,6 @@ main() {
     shift || true
     case "$cmd" in
         share)
-            # Device selection does not apply: share signs for every registered device.
             parse_common_args "$@"
             validate_install_pair
             share_build
@@ -806,8 +745,6 @@ main() {
             esac
             ;;
         install)
-            # Serialize with Replace Mac App before any signing/build/install.
-            # The descriptor survives the device lease's recursive invocation.
             local rebuild_lock="$HOME/.tron-maintenance/rebuild.lock"
             if [[ -n "${TRON_REBUILD_LOCK_FD:-}" ]]; then
                 python3 "$ROOT_DIR/scripts/tron_rebuild_lock.py" "$rebuild_lock" --verify-inherited || exit $?
@@ -850,8 +787,6 @@ main() {
 case "${1:-}" in
     source) exec python3 "$ROOT_DIR/scripts/run-main-source.py" ;;
     install|share)
-        # The source owner re-execs from a disposable fetched-main checkout.
-        # Its marker also survives the exact-device lease's own re-exec.
         if [[ "${TRON_MAIN_SOURCE_ROOT:-}" != "$ROOT_DIR" ]]; then
             exec python3 "$ROOT_DIR/scripts/run-main-source.py" -- scripts/tron-ios-device "$@"
         fi

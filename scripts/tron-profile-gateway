@@ -64,8 +64,6 @@ EXIT_HOST = 73
 EXIT_TIMEOUT = 75
 EXIT_INTERRUPTED = 130
 
-# The user's Gateway ports (production, development). The fixture never binds
-# them even if they happen to be free.
 RESERVED_PORTS = {9847, 9848}
 FIXTURE_MARKER = ".tron-profile-gateway-fixture"
 
@@ -113,12 +111,8 @@ SCENARIOS = {
                  False),
     )
 }
-# `all` means the wire-traffic scenarios; the multi-session qualification run
-# (2 GiB of generated catalog, a fixed 120 s mixed window per iteration with a
-# bounded tail) runs only when named.
 WIRE_SCENARIOS = ("stream-reply", "tool-loop", "idle", "dashboard-observer")
 
-# The impairment cases the multi-session scenario can run, in run order.
 IMPAIRMENT_CASES = ("blackhole", "bandwidth", "bandwidth-stream", "restart")
 
 
@@ -133,9 +127,6 @@ def connection_settings() -> dict[str, int]:
 
 
 CONNECTION = connection_settings()
-# Multi-session qualification workload (plan: connection and scale hardening,
-# O-6a). Each phase (the priming start and every iteration) gets its own
-# running and cold sessions from the generated catalog.
 MULTI = {
     "catalogSeed": 2027,
     "catalogFiles": 3000,
@@ -149,91 +140,32 @@ MULTI = {
     "listIntervalMs": 5000,
     "proberIntervalMs": 5000,
     "reconnectIntervalSeconds": 60,
-    # Staggered so the two clients never reconnect in the same instant.
     "mobileReconnectOffsetSeconds": 20,
     "dashboardReconnectOffsetSeconds": 50,
     "settleBeforeMs": 3000,
-    # The mixed window closes on the deadline whatever is in flight; an
-    # operation still running gets this fixed tail before it is censored (its
-    # elapsed time still counts). Half again the phone's 30 s deadline.
     "tailGraceMs": 45_000,
-    # Measured requests may be slow on purpose; the phone's own 30 s deadline
-    # is reported as a count instead of failing the run.
     "measuredDeadlineMs": 180_000,
     "runPrompt": "tron-profile tool-loop tools=100000 lines=24 chars=1500 seed=1",
     "coldPrompt": "tron-profile stream-reply chars=600 thinking=200 seed=1",
-    # Impairment cases (plan: connection and scale hardening, O-6b). They run
-    # after the mixed window, on the same fixture and clients.
     "cases": list(IMPAIRMENT_CASES),
-    # Longer than the Gateway's own 75 s half-open hold (25 s heartbeat x 3), so
-    # the abandoned socket is held past the point the Gateway would retire it by
-    # itself. Nothing the phone sends during the hold reaches the Gateway: the
-    # relay holds attempts unanswered and never forwards them when the path
-    # returns.
     "blackholeSeconds": 90,
-    # One ping interval plus a margin: the outage starts just after a pong, so
-    # the client's next counted miss is one liveness window into it and
-    # `silence_ms` measures a liveness window rather than the outage's length.
     "blackholeSettleMs": 11_000,
     "bandwidthMbps": 2.0,
-    # The bandwidth leg is a fixed duration with `bandwidthInFlight` full bounded
-    # transcript pages in flight at once, each on its own session. One page is
-    # about 39 kB of wire, so even six of them in flight are far under one pong
-    # deadline of this leg's 2 Mbit/s cap (8 s x 250 kB/s = 2 MB of wire). At the
-    # default cap a pong miss and a capacity close are therefore out of reach and
-    # the leg reads as zero whatever the Gateway does; what it reports is the
-    # round trip and the load it offered. The leg that can back the link up is
-    # `bandwidth-stream` (see its cap below).
     "bandwidthLegSeconds": 90,
     "bandwidthInFlight": 6,
-    # The second capped case: the mobile holds several mounted chats on running
-    # sessions, which stream superseding snapshots and keyed events. The cap's
-    # arithmetic, from the fourth review's measurement of seven such streams on
-    # this fixture: their transcripts produced 295,621 B/s of decoded state,
-    # which reached the phone as 11,901 B/s of wire (about 25x compression), so
-    # the workload itself puts about 0.095 Mbit/s on the path. A cap above that
-    # lets the workload, not the link, bound the leg (that run's link_use was
-    # 0.32); 0.08 Mbit/s (10,000 B/s) sits below the measured production, so the
-    # relay holds the excess back and the queue grows for the whole leg. This is
-    # the case that can reach what the page leg's 2 Mbit/s cap cannot: a pong
-    # behind a real backlog, and the Gateway's 8 MiB outbound backstop.
     "bandwidthStreamMbps": 0.08,
     "bandwidthStreamSeconds": 30,
-    # Seven more running sessions plus the mounted chat: every running session
-    # the phase has, so the streams out-produce the cap.
     "bandwidthStreamSessions": 7,
-    # Attaching a stream is a full bounded page plus synchronization on a loaded
-    # fixture; the attach phase is not the measurement.
     "bandwidthStreamAttachDeadlineMs": 120_000,
     "restartStormSeconds": 5,
-    # The profiler's own restart budget: up to 30 s to stop the old Gateway plus
-    # FixtureGateway.restart's 300 s start deadline, plus the storm.
     "restartDeadlineMs": 360_000,
 }
 PHONE_REQUEST_DEADLINE_MS = 30_000
-# A bandwidth leg only means something if the cap limited real traffic: the link
-# has to be nearly full (delivered rate against the cap). Without that rule, a
-# cap that was never reached reads as a pass — zero pong misses, no capacity
-# close — however the Gateway behaved.
 MINIMUM_BANDWIDTH_LINK_USE = 0.5
-# The streaming leg is held to a full cap, not a busy one: its cap sits below
-# what the streams produce, so the link must stay full for the leg or the queue
-# never grew and the leg measured the workload instead of the Gateway.
 MINIMUM_BANDWIDTH_STREAM_LINK_USE = 0.9
-# G-13's restart criterion, reported rather than enforced (see
-# restart_criterion_warnings): every client reconnects within 10 s of its own
-# socket's close and no request the new Gateway served during the storm exceeds
-# 1 s. What a restarting client waits is that close to the new Gateway
-# listening, which starts before the old process finishes shutting down: the
-# driver's and phone's retry schedule is 0, 2, 5.4 and 11.2 s after the close
-# with ±20% jitter, so the third attempt can come as early as 4.3 s and the
-# budget is 4 s. The new process's own start is the Gateway's
-# `gateway.startup-budget` record, which this script reads rather than copies.
 RESTART_RECONNECT_TARGET_MS = 10_000
 RESTART_REQUEST_TARGET_MS = 1_000
 RESTART_CLOSE_TO_LISTENING_BUDGET_MS = 4_000
-# Host guard: a qualification run on a swapping or pressured host measures the
-# host, not the Gateway (plan O-6a).
 HOST_SWAP_LIMIT_BYTES = 4 * 1024 ** 3
 LATENCY_KINDS = {
     "sessionList": "session_list",
@@ -245,9 +177,6 @@ LATENCY_KINDS = {
     "reconnectReadyDashboard": "reconnect_ready_dashboard",
 }
 
-# Seeded history: every turn is user text, assistant thinking/text/tool call,
-# tool result, and assistant text. 160 turns exceed the 512-item and 600 KB
-# snapshot transcript bounds, so session.open returns a full bounded tail page.
 SEED = {"turns": 160, "userChars": 240, "thinkingChars": 280, "assistantChars": 480, "toolChars": 470, "seed": 7}
 
 
@@ -258,8 +187,6 @@ def utc_stamp() -> str:
 def log(message: str) -> None:
     print(f"[tron-profile gateway] {message}", file=sys.stderr, flush=True)
 
-
-# --- Process CPU accounting --------------------------------------------------
 
 class RUsageInfoV4(ctypes.Structure):
     _fields_ = [("ri_uuid", ctypes.c_uint8 * 16)] + [
@@ -301,8 +228,6 @@ def process_usage(pid: int) -> dict[str, int]:
     }
 
 
-# --- Bounded subprocesses ----------------------------------------------------
-
 def bounded(phase: str, command: list[str], evidence_root: Path, overall: float, no_output: float,
             failure_code: int, cwd: Path | None = None) -> None:
     """Run one build step through scripts/ios-test-process.py (process-group
@@ -332,8 +257,6 @@ def adopt_pinned_node() -> None:
         raise ProfileFailure(resolved.stderr.strip() or "scripts/tron-node found no pinned Node", EXIT_FIXTURE)
     bin_dir = Path(resolved.stdout.strip()).parent
     os.environ["PATH"] = os.pathsep.join([str(bin_dir), os.environ.get("PATH", "")])
-    # npm ci under this Node may run node-gyp's Python inside the pinned npm
-    # tree; bytecode written there changes its digest (#638).
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     log(f"using Node from {bin_dir}")
 
@@ -375,21 +298,11 @@ def scrubbed_environment() -> dict[str, str]:
     }
 
 
-# --- Fixture Gateway ---------------------------------------------------------
-
-# The restart case's budget: a slow host can spend seconds in the old Gateway's
-# shutdown, the new one's startup, and any wait for a killed predecessor's
-# runtime lock to go stale.
 RESTART_START_DEADLINE_SECONDS = 300
 RESTART_LOCK_RETRY_SECONDS = 5
-# agent-runtime-lock.ts: one Gateway owns an agent directory, and a lock a
-# killed process left behind is only reusable once it is stale (60 s).
 RUNTIME_LOCK_CONFLICT = "owns a canonical session directory"
 
 
-# The Gateway's log segments: `gateway.jsonl` shifts to `.1` … `.7` at 5 MB
-# (packages/gateway/src/transport/logger.ts), so the records of one restart can
-# be split across a rotation.
 LOG_SEGMENT_COUNT = 8
 
 
@@ -504,12 +417,8 @@ class FixtureGateway:
             self.probe_output = self.root / "probe.json"
             self.process: subprocess.Popen[bytes] | None = None
             self.port = 0
-            # The last restart's start, filled by restart(): the new process's own
-            # start and the span its clients waited.
             self.startup: dict | None = None
         except BaseException:
-            # The caller cannot own this fixture until construction returns.
-            # No child exists yet, so failed initialization must remove its root.
             shutil.rmtree(root)
             raise
 
@@ -589,8 +498,6 @@ class FixtureGateway:
         }
         command = ["node"]
         if self.probe:
-            # Each process numbers its snapshots from 1; a predecessor's file
-            # would make the driver wait for a sequence that never comes.
             self.probe_output.unlink(missing_ok=True)
             environment["TRON_PROFILE_PROBE_OUTPUT"] = str(self.probe_output)
             environment["TRON_PROFILE_PROBE_CATALOG"] = str(self.catalog)
@@ -600,11 +507,7 @@ class FixtureGateway:
             command += ["--cpu-prof", f"--cpu-prof-dir={self.cpu_profile_dir}"]
         command.append(str(ENTRY))
         self.log_path = self.evidence / "gateway.stdout.log"
-        # Append: a multi-session run starts one fixture per phase and the
-        # retained evidence must keep the priming run and every iteration.
         with self.log_path.open("ab") as output:
-            # Own session: a terminal Ctrl-C reaches this orchestrator, which
-            # then stops the fixture deliberately instead of racing it.
             self.process = subprocess.Popen(command, cwd=self.workspace, env=environment, stdin=subprocess.DEVNULL,
                                             stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
         enrollment = self.tron_home / "gateway/enrollment.json"
@@ -648,9 +551,6 @@ class FixtureGateway:
         the same start budget instead of failing the run for the previous
         owner's cleanup."""
         port = self.port
-        # The Gateway's own log, appended across this run's processes: the records
-        # of this restart, and of the predecessor whose shutdown the restarting
-        # clients are waiting out, are both in its tail.
         startup_log = self.tron_home / "logs/gateway.jsonl"
         self.stop()
         deadline = time.monotonic() + RESTART_START_DEADLINE_SECONDS
@@ -663,9 +563,6 @@ class FixtureGateway:
                     raise
                 log(f"{port}: the previous Gateway's runtime lock is still held; waiting for it to go stale")
                 time.sleep(RESTART_LOCK_RETRY_SECONDS)
-        # The new process's start and the span its clients waited, from the
-        # records it just wrote: the restart case reports them and
-        # restart_criterion_warnings judges the criterion on them.
         self.startup = startup_from_log(startup_log)
 
     def log_tail_has(self, text: str, limit: int = 4_000) -> bool:
@@ -685,8 +582,6 @@ class FixtureGateway:
         process = self.process
         if process is None:
             return
-        # Ownership is proved before anything is signalled: a process that is
-        # not this fixture is never touched, not even by the group kill below.
         if process.poll() is None and not self.command_matches():
             raise ProfileFailure(f"refusing to signal PID {process.pid}: not the owned fixture Gateway", EXIT_FIXTURE)
         try:
@@ -699,15 +594,8 @@ class FixtureGateway:
                     process.kill()
                     process.wait(timeout=10)
         finally:
-            # The group id is the fixture's own PID (start_new_session); only
-            # its descendants can still hold it. This runs even when an
-            # interrupt aborted a wait above, so no child is left running.
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(process.pid, signal.SIGKILL)
-            # Only the timeout is suppressed: a first Ctrl-C arriving in this
-            # wait is `Interrupted`, a BaseException that must reach the caller
-            # (every later signal is ignored, so swallowing it would leave the
-            # run unstoppable). The group is already SIGKILLed either way.
             with contextlib.suppress(subprocess.TimeoutExpired):
                 process.wait(timeout=10)
 
@@ -746,8 +634,6 @@ class FixtureGateway:
         """Only reachable from `removals()`, which proved ownership."""
         shutil.rmtree(self.root, ignore_errors=True)
 
-
-# --- Scenario execution --------------------------------------------------------
 
 def run_driver(fixture: FixtureGateway, scenario: Scenario, output: Path, warmup: int, iterations: int,
                window_seconds: float, seeded: list[dict[str, str]], prompt: str | None) -> dict:
@@ -952,8 +838,6 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path
                     fixture.stop()
                 finally:
                     fixture.retain_logs()
-                    # A child that could not be stopped keeps its home; the
-                    # failure names it instead of deleting state under it.
                     removal_to_completion(*fixture.removals())
         effective_prompt = prompt if prompt is not None else scenario.prompt
         problems, validation_warnings = validate(result, scenario, args.iterations, effective_prompt)
@@ -986,8 +870,6 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path
         write_failure(run_dir, scenario, failure)
         raise
 
-
-# --- Multi-session qualification ------------------------------------------------
 
 def swap_used_bytes(text: str) -> int | None:
     """Parses `sysctl -n vm.swapusage` ("total = 2048.00M  used = 991.75M  free = …")."""
@@ -1080,7 +962,6 @@ def wait_with_restart(driver: subprocess.Popen[bytes], fixture: FixtureGateway, 
             fixture.restart()
             done_path.write_text(json.dumps({"restoredAtMs": int(time.time() * 1000),
                                              "pid": fixture.process.pid,
-                                             # None when its log holds no complete start.
                                              "startup": fixture.startup}) + "\n")
         time.sleep(0.2)
 
@@ -1097,22 +978,12 @@ def driver_deadline_seconds(config: dict, restart_case: bool) -> float:
     seconds = config["mixedSeconds"] + config["tailGraceMs"] / 1000
     seconds += config["noSubscriberSeconds"] + 60
     if "blackhole" in config["cases"]:
-        # The settle, the remount that puts the mobile's chat on the shaped path
-        # and the relay's own listen and handshake all come before the outage
-        # clock starts; the recovery budget is one measured deadline.
         seconds += config["blackholeSettleMs"] / 1000 + config["measuredDeadlineMs"] / 1000 + 60
         seconds += config["blackholeSeconds"] + config["measuredDeadlineMs"] / 1000
     if "bandwidth" in config["cases"]:
-        # Each lane may still finish one operation past the leg's deadline, and
-        # every extra chat it mounted is unmounted before the next case (a
-        # visibility request and a close, each on its own deadline).
         seconds += config["bandwidthLegSeconds"] + config["measuredDeadlineMs"] / 1000
         seconds += (config["bandwidthInFlight"] + 1) * 2 * PHONE_REQUEST_DEADLINE_MS / 1000
     if "bandwidth-stream" in config["cases"]:
-        # Every stream is attached before the capped window starts, each on its
-        # own attach deadline; then the leg is its own length and every stream
-        # is unmounted (a visibility request and a close, each on its own
-        # deadline).
         seconds += (config["bandwidthStreamSessions"] + 1) * config["bandwidthStreamAttachDeadlineMs"] / 1000
         seconds += config["bandwidthStreamSeconds"] + 60
         seconds += (config["bandwidthStreamSessions"] + 1) * 2 * PHONE_REQUEST_DEADLINE_MS / 1000
@@ -1523,8 +1394,6 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
             (run_dir / "catalog.json").write_text(json.dumps(catalog, indent=2) + "\n")
             log(f"{scenario.name}: generated {manifest['files']} files, {manifest['bytes'] / 1024 ** 2:.0f} MiB in "
                 f"{manifest['generationSeconds']:.1f} s")
-            # Priming start: pairing and the first catalog load build the
-            # durable index, as on a user's long-lived Gateway.
             fixture.start(deadline_seconds=300)
             prime = run_multi_driver(fixture, run_dir, "prime", "prime", {})
             fixture.stop()
@@ -1555,15 +1424,11 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
                     fixture.stop()
                 finally:
                     fixture.retain_logs()
-                    # The generated catalog never outlives the run; a child that
-                    # could not be stopped keeps its home as evidence.
                     removal_to_completion(*fixture.removals())
         if fixture.root.exists():
             raise ProfileFailure(f"fixture home {fixture.root} was not removed", EXIT_FIXTURE, fixture.root)
         problems, warnings = validate_multi(results)
         problems += validate_impairment(results)
-        # G-13's criterion is a target, not a validity gate: its miss is reported
-        # with the numbers beside the host-busy warnings.
         warnings += restart_criterion_warnings(results)
         if problems:
             raise ProfileFailure("measurement rejected: " + "; ".join(problems), EXIT_MEASUREMENT, run_dir)
@@ -1592,8 +1457,6 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
                     "bandwidth-stream": (result.get("impairment") or {}).get("bandwidth-stream"),
                     "restart": (result.get("impairment") or {}).get("restart"),
                 } for result in results],
-                # Only the bandwidth legs' own windows: the same record from the priming
-                # phase or another iteration is not this leg's capacity evidence.
                 "gateway_outbound_capacity_records": log_event_count(
                     evidence / "gateway.jsonl", "connection.outbound-capacity",
                     [(result["impairment"][name]["startedAtMs"], result["impairment"][name]["endedAtMs"])
@@ -1630,8 +1493,6 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
         raise
 
 
-# --- Recording-path self-test --------------------------------------------------
-
 def self_test(args: argparse.Namespace, root: Path) -> int:
     """Negative control: halving the streamed reply must move session.progress
     frames and bytes beyond the report's noise bound, in the expected ratio,
@@ -1666,8 +1527,6 @@ def self_test(args: argparse.Namespace, root: Path) -> int:
         check(f"{label}: unsubscribed dashboard receives no session.progress", leaked == 0, f"median {leaked:.0f}")
         total, progress = median(report, "wire.mobile.total.bytes"), median(report, "wire.mobile.session.progress.bytes")
         check(f"{label}: per-topic bytes are within the client total", 0 < progress <= total, f"{progress:.0f} of {total:.0f}")
-        # Without negotiated compression every message byte crosses the socket
-        # plus 2-10 bytes of framing each, so the TCP counter must bracket it.
         frames, socket_read = median(report, "wire.mobile.total.frames"), median(report, "wire.mobile.socket_bytes_read")
         negotiated = report["context"]["clients"]["mobile"]["negotiatedExtensions"]
         if negotiated:
@@ -1684,8 +1543,6 @@ def self_test(args: argparse.Namespace, root: Path) -> int:
         print(f"  [{'ok' if item['passed'] else 'FAIL'}] {item['check']}: {item['detail']}")
     return EXIT_OK if passed else EXIT_SELF_TEST
 
-
-# --- Entry point ---------------------------------------------------------------
 
 USAGE_EPILOG = """\
 Scenarios (--list for descriptions): stream-reply, tool-loop, idle, dashboard-observer, or all
@@ -1823,7 +1680,7 @@ def install_interrupt_handlers() -> None:
     cleanup (fixture stop, catalog and home removal) runs to completion."""
     def interrupt(signal_number: int, _frame: object) -> None:
         for handled in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-            signal.signal(handled, signal.SIG_IGN)  # cleanup must finish
+            signal.signal(handled, signal.SIG_IGN)
         raise Interrupted(signal_number)
 
     for handled in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
@@ -1832,7 +1689,6 @@ def install_interrupt_handlers() -> None:
 
 def main(argv: list[str]) -> int:
     if argv[:1] == ["_rusage"]:
-        # Internal: the driver samples fixture CPU counters at window edges.
         print(json.dumps(process_usage(int(argv[1]))))
         return EXIT_OK
     args = parse(argv)
@@ -1846,7 +1702,6 @@ def main(argv: list[str]) -> int:
     try:
         with profile_lock(root / "gateway", args.lock_wait_seconds):
             if "multi-session" in args.scenario:
-                # Checked after the lock wait, so it describes the host this run gets.
                 args.host_state = host_guard(args.catalog_mib * 1024 * 1024)
             adopt_pinned_node()
             if args.no_build:

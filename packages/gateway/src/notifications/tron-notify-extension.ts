@@ -11,7 +11,6 @@ interface TronNotificationEnqueue {
     message: string;
     title?: string;
     route?: { sessionId: string; machineId: string };
-    /** The user is already looking at this session's chat. */
     readOnAdmission?: boolean;
   }): Promise<NotificationAdmissionStatus>;
 }
@@ -25,7 +24,6 @@ const terminalMessages: Record<AgentTerminalOutcome, string> = {
   interrupted: "The agent was interrupted before its outcome could be confirmed.",
 };
 
-/** Static product copy only: provider errors and partial responses stay in chat. */
 export async function notifyTronAgentTerminal(input: {
   sessionId: string;
   sourceId: string;
@@ -57,19 +55,16 @@ export async function notifyTronAgentTerminal(input: {
   });
 }
 
-/** First-party inline Pi extension. Its closures are the entire push capability. */
 export function createTronNotifyExtension(input: {
   sessionId: () => string;
   sessionTitle: () => string;
   machineId?: string;
-  /** The same token-bound foreground lease RuntimeSlot uses for automatic alerts. */
   observed: () => boolean;
   enqueue: TronNotificationEnqueue;
 }): ExtensionFactory {
   return (pi) => {
     pi.registerTool({
       name: "notify",
-      // docs/settings-model.md 5.4: declares it reads no open-world content.
       annotations: { openWorldHint: false },
       label: "Notify",
       description: "Queue a bounded notification to the user's notification-enabled Tron iPhones. Routing and delivery are controlled by Tron.",
@@ -79,8 +74,6 @@ export function createTronNotifyExtension(input: {
       executionMode: "sequential",
       execute: async (toolCallId, params) => {
         const sessionId = input.sessionId();
-        // Sampled at admission: the model called notify while the user was
-        // reading this chat, so the alert is delivered but starts read.
         const observed = input.observed();
         const status = await input.enqueue({
           sessionId,

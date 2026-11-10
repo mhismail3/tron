@@ -66,7 +66,6 @@ export interface AutomationRun {
   terminalAt?: string;
   retryAt?: string;
   preAdmissionAttemptCount: number;
-  /** Immutable Home delivery identity; absent for ordinary session runs. */
   homeName?: string;
   homeDelivery?: "user" | "wake";
   hostEpoch?: string;
@@ -82,9 +81,7 @@ export interface AutomationRun {
 export interface AutomationRecord {
   schemaVersion: 2;
   id: string;
-  /** User-visible definition revision used for optimistic mutation fencing. */
   revision: number;
-  /** Every durable state transition advances this projection revision. */
   stateRevision: number;
   name: string;
   description?: string;
@@ -101,7 +98,6 @@ export interface AutomationRecord {
   nextOccurrenceAt?: string;
   currentRun?: AutomationRun;
   queuedLatestOccurrence?: string;
-  /** Home messages retain every firing, independently of overlap policy. */
   pendingHomeRuns?: AutomationRun[];
   homeWakeAt?: string;
   homeWakeAfter?: string;

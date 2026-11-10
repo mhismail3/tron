@@ -68,7 +68,6 @@ class Repo:
         for relative in COPIED:
             (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.path / relative)
-        # The host's full-Gateway lock belongs to real Gateway runs, not fixtures.
         self.lock = base / "full-gateway.lock"
         host_lock = self.path / "tools/verify/host_lock.py"
         host_lock.write_text(host_lock.read_text().replace("'/tmp/tron-full-gateway.lock'", repr(str(self.lock))))
@@ -76,7 +75,6 @@ class Repo:
         self.write("packages/gateway/src/foundation/tron-home-layout.json", '{"version": 1, "paths": {}}\n')
         self.write("README.md", "# Fixture\n")
         self.write("AGENTS.md", AGENTS)
-        # The least guidance the real agent policy accepts: a catalog naming the iOS skill it reads.
         self.write(".agents/README.md", "# Guidance\n\n[tron-ios](skills/tron-ios/SKILL.md)\n")
         self.write(".agents/skills/NOTICE.md", "# Notice\n")
         self.write(".agents/skills/tron-ios/SKILL.md", "---\nname: tron-ios\ndescription: iOS work.\n---\n\n"
@@ -159,8 +157,6 @@ class ExternalVerificationTests(VerifyCase):
         r.git("branch", "-f", "base")
         r.write("mods/alpha/alpha.py", "VALUE = 'changed'\n")
         r.commit("producer changes")
-        # A change is gated by its own module's tests and declarations (docs/PRINCIPLES.md P1);
-        # a consumer that only `dependsOn` it runs in the batch, not before landing.
         for mode in (("--changed",), ("--module", "repo/alpha")):
             with self.subTest(mode=mode):
                 for name in ("direct", "dependent"):
@@ -173,7 +169,6 @@ class ExternalVerificationTests(VerifyCase):
                 self.assertFalse((r.path / "test-results" / "dependent").exists(), f"a dependent's declaration ran: {result.stdout}")
                 self.assertNotIn("repo/beta", json.dumps(r.report()["selection"]["reasons"]))
                 self.assertEqual(r.report()["passingTests"], 2)
-        # When both declarers change, the shared declaration still runs exactly once.
         r.git("branch", "-f", "base")
         r.write("mods/alpha/alpha.py", "VALUE = 'changed again'\n")
         r.write("mods/beta/beta.py", "VALUE = 'changed'\n")
@@ -187,12 +182,10 @@ class ExternalVerificationTests(VerifyCase):
             self.assertTrue(witness.exists(), f"declared {name} process never ran: {both.stdout}")
             self.assertEqual(witness.read_text().splitlines(), ["executed"], "duplicate declarations ran twice")
         self.assertEqual(r.report()["passingTests"], 4)
-        # --all's declaration selection is checked without its milestone Gateway/iOS builds.
         planned = r.verify("--all", "--plan")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
         selection = json.loads(planned.stdout[planned.stdout.index("{"):])["selection"]["tests"]
         self.assertEqual(selection, ["scripts/test-dependent.py", "scripts/test-direct.py"])
-        # A Markdown-only or test-only change must not run unrelated declarations.
         for relative, content in (("mods/alpha/README.md", "# Alpha\n"), ("mods/alpha/test-alpha.py", PASSING + "# Test-only edit.\n")):
             r.git("branch", "-f", "base")
             r.write(relative, content)
@@ -213,7 +206,6 @@ class ExternalVerificationTests(VerifyCase):
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
         selection = json.loads(planned.stdout[planned.stdout.index("{"):])["selection"]["tests"]
         self.assertIn("tools/fixture/tests/test-tool.py", selection)
-        # Only a tool's own tests/ directory is admitted, not any Python file under tools/.
         self.declare("alpha", ["scripts/tron test tooling tools/fixture/helper.py"])
         r.write("tools/fixture/helper.py", "VALUE = 1\n")
         r.commit("undeclarable helper")
@@ -233,14 +225,11 @@ class ExternalVerificationTests(VerifyCase):
         python = self.external("pooled")
         self.declare("alpha", ["scripts/tron test gateway " + " ".join(files), python])
         r.commit("Gateway consumer declarations")
-        # Plan-only: classify inputs without running Gateway checks or installing dependencies.
         planned = r.verify("--module", "repo/alpha", "--plan")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
         groups = json.loads(planned.stdout[planned.stdout.index("{"):])["groups"]
         for group, path in zip(("gateway", "gateway-nested", "mac-terminal", "node-gateway"), files):
             self.assertEqual(groups[group], [f"packages/gateway/{path}"])
-        # The lanes' runner (#2336): by default the test-host pool, the mini when reachable and idle (an `ssh` that answers
-        # the mini's status probe), else this Mac with the reason; an explicit host overrides the pool.
         ssh = Path(self.temp.name) / "bin" / "ssh"
         ssh.parent.mkdir()
         ssh.write_text('#!/bin/bash\nfor word in "$@"; do [[ "$word" == mini.invalid ]] && { echo "ssh: Could not resolve hostname mini.invalid" >&2; exit 255; }; done\n'
@@ -257,7 +246,6 @@ class ExternalVerificationTests(VerifyCase):
             plan = json.loads(planned.stdout[planned.stdout.index("{"):])
             self.assertEqual({c["name"]: Path(c["command"][1]).name for c in plan["commands"] if c["name"].startswith("tests: gateway")},
                              {"tests: gateway": runner, "tests: gateway-nested": runner}, options)
-            # The Python group goes to the same host (#2397): the same per-file command, run there by mini.py.
             local_python = " && ".join(f"echo '### verify file: {path}' && python3 {path}"
                                        for path in ("mods/alpha/test-alpha.py", "scripts/test-pooled.py"))
             python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
@@ -267,7 +255,6 @@ class ExternalVerificationTests(VerifyCase):
             self.assertEqual(plan["gatewayHost"], {"host": runner.removesuffix(".py").replace("gateway", "local"), "reason": reason})
             self.assertIn(f"gateway and python lanes: on {'the Mac mini' if runner == 'mini.py' else 'this Mac'} ({reason})", planned.stdout)
             self.assertIn("mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", planned.stdout)
-        # A Python-only selection is placed by the pool too, not kept here for want of a Gateway lane.
         r.git("config", "tron.verify.mini", "mini.test")
         self.declare("alpha", [python])
         r.commit("Python-only consumer")
@@ -282,7 +269,6 @@ class ExternalVerificationTests(VerifyCase):
         refused = r.verify("--module", "repo/alpha", "--plan")
         self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
         self.assertIn("unsupported verify declaration", refused.stderr)
-        # #2326: a serial-runner entry naming no tracked file would match nothing and pass silently.
         self.declare("alpha", ["scripts/tron test gateway " + " ".join(files)])
         r.write("packages/gateway/vitest.nested.config.ts",
                 'const nestedTestFiles = ["src/nested.integration.test.ts", "src/deleted.e2e.test.ts"];\n')
@@ -305,7 +291,6 @@ class ExternalVerificationTests(VerifyCase):
         self.assertEqual(report["passingTests"], 1)
         self.assertEqual(next(step for step in report["steps"] if step["name"] == "tests: ios")["status"], "skipped")
         self.assertNotIn("ios build", [step["name"] for step in report["steps"]])
-        # A declaration of a class only an undriven harness runs remains incomplete unless explicitly skipped.
         r.write("packages/ios-app/UITests/TronMacTerminalUITests.swift",
                 "class TronMacTerminalUITests: XCTestCase {}\n")
         self.declare("alpha", ["scripts/tron test ios run --only-testing TronMobileUITests/TronMacTerminalUITests"])
@@ -367,10 +352,8 @@ class GatewayFailureTests(VerifyCase):
         (r.path / "scripts/tron-node").chmod(0o755)
         manifest = json.loads((r.path / "tooling.module.json").read_text())
         manifest["owns"].append("scripts/tron-node")
-        manifest["owns"].remove("packages/gateway/src/foundation/tron-home-layout.json")  # the sample Gateway module owns packages/gateway/**
+        manifest["owns"].remove("packages/gateway/src/foundation/tron-home-layout.json")
         r.write("tooling.module.json", json.dumps(manifest))
-        # The spawned producer writes the actual runner's reporting protocol. It always
-        # executes; verify classifies its output, never suppresses the invocation.
         r.write("tools/verify/gateway.py", "import json,pathlib,sys\n"
                 "out=next(a.split('=',1)[1] for a in sys.argv if a.startswith('--outputFile.json='))\n"
                 "report=json.loads(pathlib.Path('report-input.json').read_text())\n"
@@ -416,7 +399,6 @@ class GatewayFailureTests(VerifyCase):
         r = self.repo
         self.fixture()
         r.git("config", "tron.verify.mini", "nobody@mini.invalid")
-        # A refusing ssh first on PATH: the mini is unreachable without touching the network.
         stub = Path(self.temp.name) / "bin"
         stub.mkdir()
         (stub / "ssh").write_text("#!/bin/sh\necho 'ssh: connect to host mini.invalid port 22: Connection refused' >&2\nexit 255\n")
@@ -427,7 +409,6 @@ class GatewayFailureTests(VerifyCase):
         self.assertIn("gateway and python lanes: on the Mac mini", result.stdout)
         report = r.report()
         step = next(step for step in report["steps"] if step["name"] == "tests: gateway")
-        # No result is not a test outcome (#2446): the run is incomplete, never failed, so a batch reads it as uncovered.
         self.assertEqual((report["verdict"], step["status"], step["exit"]), ("incomplete", "no result", 75))
         self.assertIn("the mini gave no result: could not push", report["message"])
         self.assertIn("Connection refused", step["reason"])
@@ -451,7 +432,6 @@ class GatewayDependenciesTests(VerifyCase):
         r.write("packages/gateway/test-compiler.py", PASSING)
         r.write(".gitignore", "test-results/\npackages/gateway/node_modules/\n")
         r.commit("Gateway compiler consumer")
-        # A global compiler must not satisfy a checkout with no dependencies.
         global_bin = Path(self.temp.name) / "bin"
         global_bin.mkdir()
         compiler = global_bin / "tsc"
@@ -463,23 +443,18 @@ class GatewayDependenciesTests(VerifyCase):
         self.assertIn("Gateway TypeScript", missing.stderr)
         self.assertIn("scripts/tron-node exec npm --prefix packages/gateway ci --include=dev", missing.stderr)
         self.assertNotIn("global-compiler-was-used", missing.stdout + missing.stderr)
-        # Stale package metadata must not masquerade as the repository pin.
         r.write("packages/gateway/node_modules/typescript/package.json", json.dumps({"version": "0.0.0"}))
         stale = r.verify("--module", "gateway/compiler")
         self.assertEqual(stale.returncode, 2, stale.stdout + stale.stderr)
         self.assertIn("installed 0.0.0, pinned 7.0.2", stale.stderr)
-        # A matching package without its npm executable link is still unusable.
         r.write("packages/gateway/node_modules/typescript/package.json", json.dumps({"version": "7.0.2"}))
         broken = r.verify("--module", "gateway/compiler")
         self.assertEqual(broken.returncode, 2, broken.stdout + broken.stderr)
         self.assertIn("local executable", broken.stderr)
-        # Planning is read-only and does not require an installed toolchain.
         planned = r.verify("--module", "gateway/compiler", "--plan")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
 
     def test_any_test_step_refuses_before_step_one_while_the_gateway_install_differs_from_its_lockfile(self) -> None:
-        # Tests well outside the Gateway import its installed packages (scripts/, tools/docs, tools/layers,
-        # tools/proof, tools/verify), so a checkout with a Gateway lockfile prepares it before any test step.
         r = self.repo
         lock = {"lockfileVersion": 3, "packages": {"": {"name": "gateway"},
                 "node_modules/ws": {"version": "8.18.0", "integrity": "sha512-ws"},
@@ -507,13 +482,11 @@ class GatewayDependenciesTests(VerifyCase):
                 self.assertIn(named, refused.stderr)
                 self.assertNotIn("[1/", refused.stdout, "a step ran before the refusal")
                 self.assertFalse((r.path / "test-results/verify").exists(), "a refused run wrote a report")
-        # npm's own record of the install matching the lockfile (a platform-optional package absent) passes.
         installed.write_text(json.dumps({"lockfileVersion": 3, "packages": {"node_modules/ws": lock["packages"]["node_modules/ws"]}}))
         passed = r.verify("--changed")
         self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
 
     def test_a_relay_test_runs_in_the_relay_lane_on_its_installed_lockfile(self) -> None:
-        # A relay-only change once ended `incomplete` or, skipped, `zero tests ran`: no passing path (#2299).
         r = self.repo
         relay = "packages/push-relay"
         lock = {"lockfileVersion": 3, "packages": {"": {"name": "push-relay"}, "node_modules/vitest": {"version": "5.0.5", "integrity": "sha512-v"}}}
@@ -522,7 +495,6 @@ class GatewayDependenciesTests(VerifyCase):
         r.write(f"{relay}/src/registry.ts", "export const value = 1;\n")
         r.write(f"{relay}/tests/worker.integration.test.ts", "// run by the relay's Vitest\n")
         r.write(".gitignore", f"test-results/\n{relay}/node_modules/\n")
-        # scripts/tron-node execs the package's npm: here a producer of Vitest's JSON report protocol.
         r.write("scripts/tron-node", '#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
         (r.path / "scripts/tron-node").chmod(0o755)
         tooling = json.loads((r.path / "tooling.module.json").read_text())
@@ -553,8 +525,6 @@ class GatewayDependenciesTests(VerifyCase):
         self.assertEqual((report["verdict"], report["passingTests"]), ("passed", 3))
 
     def test_a_mac_change_runs_the_mac_integration_tests(self) -> None:
-        # A Mac-only change once ended `incomplete`, or, skipped, `zero tests ran`; a Mac source
-        # change selected no test at all: no passing path (#2371).
         r = self.repo
         mac = "packages/mac-app"
         r.write(f"{mac}/Sources/Server/server.module.json", json.dumps({"layer": "L3", "owns": ["**"], "verify": ["scripts/tron test mac"]}))
@@ -563,7 +533,6 @@ class GatewayDependenciesTests(VerifyCase):
         r.write(f"{mac}/Tests/Integration/SubprocessTests.swift", "struct SubprocessTests {}\n")
         r.write(f"{mac}/Tests/Integration/WizardTests.swift", "struct WizardTests {}\n")
         r.write(f"{mac}/Tests/Integration/TestTempDir.swift", "enum TestTempDir {}\n")
-        # The Mac runner builds and runs TronMacIntegrationTests; this one records its classes and prints the summaries.
         r.write("tools/verify/mac.py", "import pathlib,sys\npathlib.Path('test-results/mac-ran').write_text(' '.join(sys.argv[1:]))\n"
                 "print(\"Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds\")\n"
                 "print(f'Test run with {2 * (len(sys.argv) - 1)} tests in 1 suite passed after 1.0 seconds.')\n")
@@ -610,7 +579,6 @@ class SelectionTests(VerifyCase):
         self.assertIn("tests: python FAILED", failed.stdout)
         self.assertIn("AssertionError: 1 != 2", failed.stdout)
         self.assertNotIn("mods/beta/test-beta.py", json.dumps(r.report()["selection"]["tests"]))
-        # A proof added as a new file beside the test that already owns its behaviour is named for review.
         r.git("reset", "-q", "--hard", "base")
         r.write("mods/alpha/test-alpha.edge.py", "import sys, unittest\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).parent))\n"
                 "import alpha\nclass Edge(unittest.TestCase):\n    def test_value(self):\n        self.assertEqual(alpha.VALUE, 'alpha')\nunittest.main()\n")
@@ -645,7 +613,6 @@ class SelectionTests(VerifyCase):
         selection = r.report()["selection"]
         self.assertEqual(selection["tests"], ["mods/alpha/test-alpha.py", "mods/beta/test-beta.py"])
         self.assertIn("repo/beta: imports changed mods/alpha/alpha.py; its 1 owned test file(s)", selection["reasons"])
-        # A relative JavaScript import is a consumer too; a change to only the producer's tests selects no importer.
         r.git("branch", "-f", "base")
         r.write("mods/core/core.mjs", "export const VALUE = 2;\n")
         r.write("mods/alpha/test-alpha.py", PASSING.replace("test_ok", "test_still_ok"))
@@ -654,7 +621,6 @@ class SelectionTests(VerifyCase):
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
         self.assertIn("repo/untested: imports changed mods/core/core.mjs", planned.stdout)
         self.assertNotIn("repo/beta", planned.stdout)
-        # Deleting the imported file selects its importers too.
         r.git("branch", "-f", "base")
         r.git("rm", "-q", "mods/alpha/alpha.py")
         r.commit("delete alpha")
@@ -688,7 +654,6 @@ class SelectionTests(VerifyCase):
         stray = r.verify("--changed", "--plan")
         self.assertIn("widened to every lock", stray.stdout)
         self.assertIn("unowned stray/notes.py", stray.stdout)
-        # The run itself refuses at the ownership step, before any test.
         self.assertIn("ownership FAILED", r.verify("--changed").stdout)
 
     def test_a_selection_without_tests_fails_as_zero_test(self) -> None:
@@ -706,7 +671,7 @@ class FastPathTests(VerifyCase):
 
     def test_markdown_selects_no_test_and_a_docs_only_change_passes_on_the_documentation_checks(self) -> None:
         r = self.repo
-        r.write("mods/core/README.md", "# Core\n\nThe kernel module.\n")  # an L1 module: code here would widen
+        r.write("mods/core/README.md", "# Core\n\nThe kernel module.\n")
         r.write("AGENTS.md", AGENTS + "\nA new rule.\n")
         r.commit("docs")
         passed = r.verify("--changed")
@@ -715,13 +680,11 @@ class FastPathTests(VerifyCase):
         self.assertEqual((report["selection"]["tests"], report["selection"]["modules"], report["passingTests"]), ([], [], 0))
         self.assertIn("documentation-only change", report["message"])
         self.assertEqual({step["name"]: step["status"] for step in report["steps"]}["agent policy"], "ok")
-        # Known-bad: prose that breaks a documentation rule fails the run.
         r.write("AGENTS.md", "# Charter\n")
         r.commit("drop the stop rule")
         failed = r.verify("--changed")
         self.assertEqual(failed.returncode, 1, failed.stdout)
         self.assertIn("agent policy FAILED", failed.stdout)
-        # Markdown beside code selects only the code's module.
         r.git("reset", "-q", "--hard", "base")
         r.write("mods/core/README.md", "# Core\n")
         r.write("mods/alpha/alpha.py", "VALUE = 'changed'\n")
@@ -729,6 +692,24 @@ class FastPathTests(VerifyCase):
         mixed = r.verify("--changed")
         self.assertEqual(mixed.returncode, 0, mixed.stdout)
         self.assertEqual(r.report()["selection"]["tests"], ["mods/alpha/test-alpha.py"])
+
+    def test_the_privacy_guard_reads_the_change_except_its_own_needles_and_still_fails_a_leak(self) -> None:
+        r = self.repo
+        handle = "mhis" + "mail3"
+        guard = (r.path / "scripts/personal-info-guard.sh").read_text()
+        r.write("scripts/personal-info-guard.sh", guard + f"# {handle}\n")
+        r.commit("guard names its needle")
+        r.git("branch", "-f", "base")
+        r.write("scripts/personal-info-guard.sh", guard)
+        r.write("mods/alpha/alpha.py", "VALUE = 'changed'\n")
+        r.commit("guard needle removed")
+        own = r.verify("--changed")
+        self.assertEqual({step["name"]: step["status"] for step in r.report()["steps"]}["privacy guard"], "ok", own.stdout)
+        r.write("mods/alpha/alpha.py", f"VALUE = '{handle}'\n")
+        r.commit("leak")
+        leaked = r.verify("--changed")
+        self.assertEqual(leaked.returncode, 1, leaked.stdout)
+        self.assertIn("privacy guard FAILED", leaked.stdout)
 
     def test_a_gateway_golden_change_selects_only_the_lock_that_reads_it(self) -> None:
         r = self.repo
@@ -758,7 +739,6 @@ class FastPathTests(VerifyCase):
         refused = r.verify("--changed", "--plan")
         self.assertNotEqual(refused.returncode, 0, refused.stdout)
         self.assertIn("no lock beside packages/gateway/src/e2e/two/locks/unread.golden.json reads it", refused.stdout + refused.stderr)
-        # A lock converted to inline checks deletes its golden: that lock is selected, nothing is refused.
         r.git("reset", "-q", "--hard", "base")
         r.git("rm", "-q", f"{base}/one/locks/state.golden.json")
         r.write(f"{base}/one/one.lock.integration.test.ts", "// inline checks\n")
@@ -767,7 +747,6 @@ class FastPathTests(VerifyCase):
         self.assertEqual(converted.returncode, 0, converted.stdout + converted.stderr)
         self.assertEqual(json.loads(converted.stdout[converted.stdout.index("{\n"):])["selection"]["tests"],
                          [f"{base}/one/one.lock.integration.test.ts"], converted.stdout)
-        # A golden deleted while its lock still names it reruns that lock (the lock now fails for want of it).
         r.git("reset", "-q", "--hard", "base")
         r.git("rm", "-q", f"{base}/one/locks/state.golden.json")
         r.commit("one golden deleted, lock unchanged")
@@ -782,13 +761,11 @@ class FastPathTests(VerifyCase):
         r.write("mods/core/locks/state.golden.json", "{}\n")
         r.commit("more core tests")
         r.git("branch", "-f", "base")
-        # A test-only change in a kernel module runs that test, not every lock.
         r.write("mods/core/test-core-other.py", PASSING + "# reworded\n")
         r.commit("core test")
         only = r.verify("--changed")
         self.assertEqual(only.returncode, 0, only.stdout)
         self.assertEqual(r.report()["selection"]["tests"], ["mods/core/test-core-other.py"])
-        # A golden runs its module's locks; a broken lock still fails.
         r.write("mods/core/locks/state.golden.json", "{\"recorded\": true}\n")
         r.write("mods/core/test-core.lock.py", FAILING)
         r.commit("golden and its lock")
@@ -796,7 +773,6 @@ class FastPathTests(VerifyCase):
         self.assertEqual(failed.returncode, 1, failed.stdout)
         self.assertEqual(r.report()["selection"]["tests"], ["mods/core/test-core-other.py", "mods/core/test-core.lock.py"])
         self.assertIn("AssertionError: 1 != 2", failed.stdout)
-        # Known-bad: code beside the tests selects as before, here widening to every lock.
         r.git("reset", "-q", "--hard", "base")
         r.write("mods/core/test-core-other.py", PASSING + "# reworded\n")
         r.write("mods/core/core.py", "VALUE = 'kernel change'\n")
@@ -809,7 +785,7 @@ class FastPathTests(VerifyCase):
 class ContractTests(VerifyCase):
     def test_a_runner_group_that_runs_zero_tests_fails(self) -> None:
         r = self.repo
-        r.write("mods/beta/test-beta.py", "import unittest\nunittest.main()\n")  # a unittest file with no test
+        r.write("mods/beta/test-beta.py", "import unittest\nunittest.main()\n")
         r.commit("empty beta tests")
         result = r.verify("--module", "repo/beta")
         self.assertEqual(result.returncode, 1, result.stdout)
@@ -818,7 +794,6 @@ class ContractTests(VerifyCase):
         self.assertEqual(report["passingTests"], 0)
         runner = next(step for step in report["steps"] if step["name"] == "tests: python")
         self.assertEqual(runner["status"], "failed")
-        # unittest >= 3.14 exits 5 for no tests; older versions exit 0 and report a zero count.
         self.assertIn(runner["exit"], (0, 5))
         self.assertEqual(runner["tests"], 0 if runner["exit"] == 0 else None)
 
@@ -837,8 +812,6 @@ class ContractTests(VerifyCase):
         self.assertEqual(r.report()["passingTests"], 1)
 
 
-# A stand-in for scripts/tron-ios-test with its real output contract: `build` writes a real index store
-# and the real build stamp; `run` writes an xcresult-style summary.json and names its run directory.
 IOS_TEST_STUB = r"""#!/bin/bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -872,8 +845,6 @@ esac
 """
 
 
-# The real-UI journey harness: its owned journey list, and `run-ui` writing each journey's
-# report.json in the harness's schema (revision from the products' commit) and its result line.
 E2E_STUB = r"""#!/bin/bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -913,12 +884,10 @@ class IosLaneTests(VerifyCase):
         r = self.repo
         products = Path(self.temp.name) / "products"
         calls = Path(self.temp.name) / "ios-calls.txt"
-        # No runner logs: packing never reads this host's real test history.
         (Path(self.temp.name) / "ios-runs").mkdir()
         r.env.update(TRON_IOS_TEST_DERIVED_DATA=str(products), FIXTURE_IOS_CALLS=str(calls),
                      TRON_IOS_TEST_RESULTS_DIR=str(Path(self.temp.name) / "ios-runs"))
         tooling = json.loads((r.path / "tooling.module.json").read_text())
-        # verify reads the host-wide slot count, one lane per slot, from the slot owner: the shipped count.
         tooling["owns"] += ["scripts/tron-ios-test", "scripts/ios-test-lock.py"]
         r.write("tooling.module.json", json.dumps(tooling))
         slots = next(line for line in (ROOT / "scripts/ios-test-lock.py").read_text().splitlines() if line.startswith("HOST_SLOTS = "))
@@ -935,7 +904,7 @@ class IosLaneTests(VerifyCase):
             {"to": "ios-app/chat", "kind": "spawn", "via": f"{ios}/package.module.json", "why": "launches the app"}]}))
         r.write(f"{ios}/UITests/Locks/FixtureLockTests.swift", "class FixtureLockTests {}\n")
         r.write(f"{ios}/UITests/FixtureJourneyUITests.swift", "class FixtureJourneyUITests {}\n")
-        r.write(f"{ios}/UITests/TronMacTerminalUITests.swift", "class TronMacTerminalUITests {}\n")  # harnessed
+        r.write(f"{ios}/UITests/TronMacTerminalUITests.swift", "class TronMacTerminalUITests {}\n")
         r.commit("ios fixture")
         r.git("branch", "-f", "base")
         return calls
@@ -972,14 +941,12 @@ class IosLaneTests(VerifyCase):
                                env={**r.env, "FIXTURE_IOS_PASSED": "0"}, capture_output=True, text=True)
         self.assertEqual(empty.returncode, 1, empty.stdout)
         self.assertIn("tests: ios ran zero passing tests", empty.stdout)
-        # A red source policy fails the lane before it builds.
         calls.write_text("")
         policy = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
                                 env={**r.env, "FIXTURE_IOS_POLICY_EXIT": "1"}, capture_output=True, text=True)
         self.assertEqual(policy.returncode, 1, policy.stdout)
         self.assertIn("ios source policy failed", policy.stdout)
         self.assertEqual(calls.read_text(), "")
-        # The module's own journeys run in the lane, except the harnessed one, which its harness runs.
         calls.write_text("")
         module = r.verify("--module", "ios-app/ui-tests")
         self.assertEqual(module.returncode, 1, module.stdout)
@@ -996,13 +963,11 @@ class IosLaneTests(VerifyCase):
         r.write(f"{ios}/Sources/UI/Chat/chat.module.json", json.dumps({
             "layer": "L4", "owns": ["**"], "dependsOn": ["ios-app/state"]}))
         r.commit("source-only kernel module consumed by hosted chat")
-        # A `dependsOn` consumer adds nothing: with no launching edge the module has no evidence.
         unlaunched = r.verify("--module", "ios-app/state")
         self.assertEqual(unlaunched.returncode, 1, unlaunched.stdout)
         self.assertIn("zero tests ran: an empty selection is not evidence", unlaunched.stdout)
         self.assertEqual(r.report()["selection"]["tests"], [])
         calls.write_text("")
-        # The UI tests' spawn edge to the module makes their locks its rendered tests.
         manifest = json.loads((r.path / f"{ios}/UITests/ui-tests.module.json").read_text())
         manifest["dynamicEdges"].append({"to": "ios-app/state", "kind": "spawn", "via": f"{ios}/package.module.json", "why": "launches the app"})
         r.write(f"{ios}/UITests/ui-tests.module.json", json.dumps(manifest))
@@ -1015,13 +980,10 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(report["passingTests"], 1)
         self.assertEqual(calls.read_text().splitlines(), [
             "build --host-slot-wait-seconds 30", "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"])
-        # Module baselines add the launching module's locks, not its journeys or unrelated kernel locks.
         self.assertNotIn("widened to every lock", baseline.stdout)
-        # Recording remains confined to the explicitly named owner's locks.
         recording = r.verify("--update-locks", "ios-app/state", "--plan")
         self.assertEqual(recording.returncode, 0, recording.stderr)
         self.assertIn('"tests": []', recording.stdout)
-        # An actual runner failure must fail the same source-only module command.
         r.env["FIXTURE_IOS_FAIL"] = "TronMobileUITests/FixtureLockTests/testChat()"
         failed = r.verify("--module", "ios-app/state")
         self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
@@ -1061,23 +1023,19 @@ class IosLaneTests(VerifyCase):
         self.assertEqual((evidence["journey"], evidence["status"], evidence["revision"]),
                          ("TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark", 0, sha))
         self.assertEqual(evidence["sha256"], hashlib.sha256(Path(evidence["report"]).read_bytes()).hexdigest())
-        # Only the changed file's journey, on one lane.
         self.assertEqual(calls.read_text().splitlines(),
                          ["run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark lanes=1"])
 
-        # A red journey fails the run and names itself.
         failed = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
                                 env={**r.env, "FIXTURE_E2E_FAIL": "testBuildsDark"}, capture_output=True, text=True)
         self.assertEqual(failed.returncode, 1, failed.stdout)
         step = next(step for step in r.report()["steps"] if step["name"] == "tests: ios-journeys")
         self.assertEqual(step["failedTests"], ["TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark"])
-        # A report for other source bytes is not evidence for this commit, even with status 0.
         stale = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
                                env={**r.env, "FIXTURE_E2E_REVISION": "0" * 40}, capture_output=True, text=True)
         self.assertEqual(stale.returncode, 1, stale.stdout)
         self.assertIn("no passing report for this commit", stale.stdout)
 
-        # The class's own file holds the shared helpers, so changing it runs every owned journey.
         calls.write_text("")
         r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift",
                 "class RealGatewayPairAndChatUITests {\n    func testPairLight() {}\n    func launch() { _ = 2 }\n}\n")
@@ -1087,14 +1045,12 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(calls.read_text().splitlines(), [
             "run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark"
             " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight lanes=2"])
-        # So does a helper-only extension file, which declares no journey of its own.
         calls.write_text("")
         r.write(f"{journeys}/RealGatewayHelpersUITests.swift", "extension RealGatewayPairAndChatUITests {\n    func reveal() {}\n}\n")
         r.commit("shared extension helper")
         helpers = r.verify("--changed")
         self.assertEqual(helpers.returncode, 0, helpers.stdout + helpers.stderr)
         self.assertEqual(calls.read_text().splitlines()[-1].rsplit(" ", 1)[-1], "lanes=2")
-        # --skip ios still accepts not running them, explicitly.
         skipped = r.verify("--changed", "--skip", "ios")
         self.assertEqual(r.report()["steps"][-1]["status"], "skipped", skipped.stdout)
 
@@ -1104,14 +1060,13 @@ class IosLaneTests(VerifyCase):
         calls = self.ios_fixture()
         ios = "packages/ios-app/UITests"
         r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {}\n")
-        r.write(f"{ios}/TronMacTerminalMoreUITests.swift", "extension TronMacTerminalUITests {}\n")  # harnessed class
+        r.write(f"{ios}/TronMacTerminalMoreUITests.swift", "extension TronMacTerminalUITests {}\n")
         r.commit("extension files")
         module = r.verify("--module", "ios-app/ui-tests")
         self.assertEqual(module.returncode, 1, module.stdout + module.stderr)
         self.assertIn("ios-lanes: 2 file(s)", module.stdout)
         self.assertEqual(calls.read_text().splitlines()[-1],
                          "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests")
-        # A file that names no XCTestCase class fails loudly, unless the run skips iOS.
         r.write(f"{ios}/StrayUITests.swift", "struct Helper {}\n")
         r.commit("stray")
         refused = r.verify("--module", "ios-app/ui-tests")
@@ -1164,16 +1119,15 @@ class IosLaneTests(VerifyCase):
         spec = importlib.util.spec_from_file_location("shipped_verify", ROOT / "tools/verify/verify.py")
         shipped = importlib.util.module_from_spec(spec); spec.loader.exec_module(shipped)
         methods = [f"testCase{index}" for index in range(5)]
-        split = 2  # the class file's methods; the extension file holds the other three
+        split = 2
         body = "\n".join(f"    @MainActor func {name}() {{}}" for name in methods[:split])
         r.write(f"{ios}/FixtureJourneyUITests.swift", "final class FixtureJourneyUITests {\n"
                 + body + "\n    private func testHelper() {}\n    func testWithArgument(_ value: Int) {}\n}\n")
         r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {\n"
                 + "\n".join(f"    func {name}() {{}}" for name in methods[split:]) + "\n}\nstruct Other {\n    func testNotAMethodOfTheClass() {}\n}\n")
-        (r.path / f"{ios}/TronMacTerminalUITests.swift").unlink()  # its harness lane would make the run incomplete
+        (r.path / f"{ios}/TronMacTerminalUITests.swift").unlink()
         r.commit("a large class")
         owner, lock = "TronMobileUITests/FixtureJourneyUITests", "TronMobileUITests/FixtureLockTests"
-        # Sources are read in path order, so the extension file's methods come first.
         ordered = methods[split:] + methods[:split]
         selectors = lambda names: " ".join(f"--only-testing {owner}/{name}" for name in names)  # noqa: E731
         lane = lambda kind: f"verify-{kind}-" + hashlib.sha256(str(r.path.resolve()).encode()).hexdigest()[:12]  # noqa: E731
@@ -1183,14 +1137,10 @@ class IosLaneTests(VerifyCase):
             plan = json.loads(planned.stdout[planned.stdout.index("{"):])
             return [" ".join(c["command"][2:]) for c in plan["commands"] if c["name"].startswith("tests: ios") and "command" in c]
 
-        # With no recorded times every method counts a third of the budget: three to a process.
         self.assertEqual(planned_shards(), [f"--host-slot-wait-seconds 30 {selectors(ordered[:3])}",
                                             f"--host-slot-wait-seconds 30 {selectors(ordered[3:])}",
                                             f"--host-slot-wait-seconds 30 --only-testing {lock}"])
 
-        # The shards run at once, one per host slot, longest estimate first (a class run whole counts
-        # the full budget; ties keep plan order): the worktree's lane first, with the bounded serial
-        # wait, then this worktree's verify lanes, which take a slot only if one is free.
         spans = Path(self.temp.name) / "spans.txt"
         red = ordered[0]
         r.env.update(FIXTURE_IOS_SECONDS="2", FIXTURE_IOS_SPANS=str(spans),
@@ -1213,8 +1163,6 @@ class IosLaneTests(VerifyCase):
                          ["tests: ios 1/3", "tests: ios 2/3", "tests: ios 3/3"])
         r.env.pop("FIXTURE_IOS_FAIL"); r.env.pop("FIXTURE_IOS_FAIL_IN")
 
-        # A verify lane refused a slot beside running shards admitted no work: its shard runs later
-        # on a lane that is admitted, and the run passes without deferring anything.
         calls.write_text("")
         r.env.update(FIXTURE_IOS_BUSY="run", FIXTURE_IOS_BUSY_IN=lane("iphone2"))
         requeued = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
@@ -1226,17 +1174,12 @@ class IosLaneTests(VerifyCase):
         self.assertIn(f"--lane {lane('iphone2')} --host-slot-wait-seconds 0", locks[0], calls.read_text())
         self.assertNotIn(lane("iphone2"), locks[-1], calls.read_text())
 
-        # A refusal with none of the run's other shards in flight is the serial busy exit:
-        # that shard is deferred, never passed, while admitted shards keep their outcomes.
         r.env.update(FIXTURE_IOS_BUSY_IN=f"{owner}/{ordered[3]} ")
         deferred = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
         steps = {step["name"]: step["status"] for step in r.report()["steps"]}
         self.assertEqual([steps[f"tests: ios {index}/3"] for index in (1, 2, 3)], ["ok", "deferred", "ok"], deferred.stdout)
         self.assertEqual(r.report()["verdict"], "deferred", deferred.stdout)
 
-        # Recorded times pack the processes: the longest time any retained runner log records
-        # (failed runs too) is a method's estimate, consecutive methods share a process up to the
-        # budget, and one estimated above it runs alone.
         results = Path(self.temp.name) / "ios-runs"
         case = lambda name, outcome, seconds: f"Test Case '-[TronMobileUITests.FixtureJourneyUITests {name}]' {outcome} ({seconds} seconds).\n"  # noqa: E731
         (results / "a-run.1").mkdir()
@@ -1249,7 +1192,6 @@ class IosLaneTests(VerifyCase):
                                             f"--host-slot-wait-seconds 30 {selectors(ordered[2:3])}",
                                             f"--host-slot-wait-seconds 30 {selectors(ordered[3:])}",
                                             f"--host-slot-wait-seconds 30 --only-testing {lock}"])
-        # With every lane refused, nothing runs and every shard is deferred, including those never started.
         calls.write_text("")
         r.env.update(FIXTURE_IOS_BUSY_IN="")
         refused = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
@@ -1261,8 +1203,6 @@ class IosLaneTests(VerifyCase):
         for item in results.iterdir():
             shutil.rmtree(item)
 
-        # SIGTERM stops and joins every lane's shard: none outlives verify, none starts after it,
-        # and the run is interrupted, never a pass.
         pids = Path(self.temp.name) / "pids.txt"
         calls.write_text("")
         r.env.update(FIXTURE_IOS_SECONDS="120", FIXTURE_IOS_PIDS=str(pids))
@@ -1275,7 +1215,6 @@ class IosLaneTests(VerifyCase):
             started = [int(pid) for pid in pids.read_text().split()]
             self.assertEqual(len(started), 3, "every lane's shard must start before the signal")
             process.send_signal(signal.SIGTERM)
-            # Within the 30 s SIGKILL grace: each runner stops on SIGTERM itself.
             output, _ = process.communicate(timeout=20)
         finally:
             if process.poll() is None:
@@ -1291,14 +1230,12 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(len([line for line in calls.read_text().splitlines() if line.startswith("run ")]), 3)
         r.env.pop("FIXTURE_IOS_SECONDS"); r.env.pop("FIXTURE_IOS_PIDS")
 
-        # A shard whose runner passes fewer tests than it names fails: a selector matched nothing.
         r.env.update(FIXTURE_IOS_PASSED="2")
         short = r.verify("--module", "ios-app/ui-tests", "--skip", "mac")
         self.assertEqual(short.returncode, 1, short.stdout)
         self.assertIn("tests: ios 1/3 passed 2 of its 3 named test(s)", short.stdout)
         r.env.pop("FIXTURE_IOS_PASSED")
 
-        # A test-shaped method the reader cannot place makes the class run whole, never dropped.
         r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {\n    let text = \"\"\"\nunplaced\n    \"\"\"\n"
                 + "\n".join(f"    func {name}() {{}}" for name in methods[split:]) + "\n}\n")
         r.commit("an unreadable extension")
@@ -1306,7 +1243,6 @@ class IosLaneTests(VerifyCase):
         plan = json.loads(planned.stdout[planned.stdout.index("{"):])
         self.assertEqual([step for step in plan["steps"] if step.startswith("tests: ios")], ["tests: ios"])
         self.assertIn(f"--only-testing {owner} ", " ".join(next(c["command"] for c in plan["commands"] if c["name"] == "tests: ios")) + " ")
-        # So does a test in the class itself spelled in a way the reader does not select.
         r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {\n"
                 + "\n".join(f"    func {name}() {{}}" for name in methods[split:]) + "\n    nonisolated func testSpelledDifferently() {}\n}\n")
         r.commit("a differently spelled test")
@@ -1315,15 +1251,15 @@ class IosLaneTests(VerifyCase):
         self.assertEqual([step for step in plan["steps"] if step.startswith("tests: ios")], ["tests: ios"])
 
 
-# The Gateway runner `mutate` drives, faked at `scripts/tron-node`: a flipped comparison
-# fails the lock, a flipped flag hangs it (with a child the timeout must also stop), and
-# FIXTURE_RUN_SECONDS makes every other run that slow, as a loaded host does.
 FAKE_RUNNER = """#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time
 out = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--outputFile="))
 with open("runs.jsonl", "a") as runs:
     runs.write(json.dumps({"home": os.environ["HOME"], "held": os.environ.get("TRON_FULL_GATEWAY_LOCK_HELD"),
                            "pid": os.getpid()}) + "\\n")
+if os.environ.get("FIXTURE_IGNORE_TERM"):
+    import signal
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 source = pathlib.Path("src/store/store.ts").read_text()
 if "hang = false" in source:
     child = subprocess.Popen(["sleep", "300"])
@@ -1360,7 +1296,6 @@ class MutateTests(VerifyCase):
     def setUp(self) -> None:
         super().setUp()
         r = self.repo
-        # Pinned Node is the identity; the Gateway runner execs Vitest, here the fake.
         r.write("scripts/tron-node", '#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
         (r.path / "scripts/tron-node").chmod(0o755)
         r.write("packages/gateway/node_modules/.bin/vitest", FAKE_RUNNER)
@@ -1374,7 +1309,6 @@ class MutateTests(VerifyCase):
         manifest["owns"].append("scripts/tron-node")
         r.write("tooling.module.json", json.dumps(manifest))
         r.commit("gateway store")
-        # The seed that samples the failing mutant first: candidates are in line order.
         self.seed = next(seed for seed in range(100) if (lambda pool: (random.Random(seed).shuffle(pool), pool)[1])([0, 1]) == [0, 1])
 
     def mutate(self, *args: str, env: dict | None = None) -> subprocess.Popen:
@@ -1396,8 +1330,6 @@ class MutateTests(VerifyCase):
         self.fail(f"the hung lock's child {pid} outlived its mutant")
 
     def test_a_hanging_mutant_times_out_and_counts_as_detected(self) -> None:
-        # Every lock run outlasts --timeout, as on a loaded host (#2400): the deadline is measured
-        # from the unmutated run, so only the hanging mutant times out.
         started = time.time()
         process = self.mutate("--timeout", "1", env={"FIXTURE_RUN_SECONDS": "2"})
         output, _ = process.communicate(timeout=120)
@@ -1409,7 +1341,6 @@ class MutateTests(VerifyCase):
         self.assertIn("TIMEOUT", output)
         self.assertEqual((self.repo.path / "packages/gateway/src/store/store.ts").read_text(), SOURCE)
         self.assert_hung_child_stopped()
-        # Every run's temporary HOME is removed, the timed-out one included.
         runs = [json.loads(line) for line in (self.repo.path / "packages/gateway/runs.jsonl").read_text().splitlines()]
         self.assertEqual([run["home"] for run in runs if Path(run["home"]).exists()], [])
 
@@ -1429,7 +1360,6 @@ class MutateTests(VerifyCase):
         self.assert_hung_child_stopped()
 
     def test_an_interrupt_during_the_unmutated_run_stops_its_group(self) -> None:
-        # The unmutated run has no deadline (#2400), so SIGTERM is its only stop.
         process = self.mutate("--timeout", "1", env={"FIXTURE_RUN_SECONDS": "300"})
         runs = self.repo.path / "packages/gateway/runs.jsonl"
         deadline = time.time() + 60
@@ -1452,20 +1382,43 @@ class MutateTests(VerifyCase):
         self.assertFalse(Path(run["home"]).exists(), output)
         self.assertEqual(len(runs.read_text().splitlines()), 1, "no mutant may run after the interrupt")
 
+    def test_a_second_interrupt_during_the_stop_grace_still_kills_the_group(self) -> None:
+        process = self.mutate("--timeout", "1", env={"FIXTURE_RUN_SECONDS": "300", "FIXTURE_IGNORE_TERM": "1"})
+        runs = self.repo.path / "packages/gateway/runs.jsonl"
+        deadline = time.time() + 60
+        while not runs.exists() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertTrue(runs.exists(), "the unmutated run never started")
+        run = json.loads(runs.read_text().splitlines()[0])
+        process.send_signal(signal.SIGTERM)
+        time.sleep(2)
+        os.kill(run["pid"], 0)
+        process.send_signal(signal.SIGTERM)
+        output, _ = process.communicate(timeout=60)
+        self.assertNotEqual(process.returncode, 0, output)
+        for _ in range(100):
+            try:
+                os.kill(run["pid"], 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(run["pid"], signal.SIGKILL)
+            self.fail(f"the unmutated run {run['pid']} outlived a second interrupt during the stop grace:\n{output}")
+
     def test_mutants_run_through_the_gateway_runner_under_the_host_lock(self) -> None:
         import fcntl
         process = self.mutate("--count", "1", "--timeout", "60")
         output, _ = process.communicate(timeout=120)
         self.assertEqual(process.returncode, 0, output)
         runs = [json.loads(line) for line in (self.repo.path / "packages/gateway/runs.jsonl").read_text().splitlines()]
-        self.assertEqual(len(runs), 2, output)  # the unmutated baseline and one mutant
+        self.assertEqual(len(runs), 2, output)
         for run in runs:
-            # The runner's own temporary HOME, never the caller's, and the lock already held for it.
             self.assertNotEqual(run["home"], self.repo.env["HOME"])
             self.assertTrue(run["home"].startswith("/tmp/tron-gateway-tests-"), run)
             self.assertEqual(run["held"], "1")
         self.assertIn(f'"purpose": "mutate packages/gateway/src/store/store.ts"', self.repo.lock.read_text())
-        with self.repo.lock.open() as lock:  # released when mutate exits
+        with self.repo.lock.open() as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 

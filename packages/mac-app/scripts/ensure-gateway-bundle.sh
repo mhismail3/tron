@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Ensure the generated Mac Gateway payload is authenticated before Xcode copies
-# it into the app. Invalid existing output is rebuilt once, then verified again.
+# Ensure the generated Mac Gateway payload is authenticated before Xcode copies it into the app.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -22,10 +21,6 @@ assert_no_symlink_ancestors() {
 assert_no_symlink_ancestors "$RESOURCES_DIR"
 assert_no_symlink_ancestors "$(dirname "$HELPER_CONTENTS")"
 
-# Before touching any generated child, inspect the complete tracked Resources
-# chain with lstat semantics. The app and Contents nodes are disposable
-# skeletons: if either is a symlink, unlink that exact node and recreate it;
-# every other tracked ancestor fails closed rather than being traversed.
 prepare_helper_tree() {
     local path
     for path in "$RESOURCES_DIR/Library" "$RESOURCES_DIR/Library/LoginItems" "$HELPER_APP" "$HELPER_CONTENTS" \
@@ -62,9 +57,6 @@ fi
 echo "==> Mac Gateway payload failed verification; explicitly rebuilding it"
 prepare_helper_tree
 mkdir -p "$RESOURCES_DIR" "$HELPER_CONTENTS/MacOS" "$HELPER_CONTENTS/Resources"
-# bundle-gateway publishes from a private verified staging root and restores the
-# prior generated projection if any bounded publication rename is interrupted.
-# Do not erase the prior projection before that transaction is ready.
 run_bundle
 run_bundle --verify-only
 printf 'Mac Gateway payload is ready after rebuild (verified immutable publication)\n'

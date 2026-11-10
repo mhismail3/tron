@@ -5,7 +5,6 @@ import { disposeFixtures, fixture } from "../../../../test-support/home-task-fix
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 
-// Calibrate the real canonical crossing, not a projected entry-count getter.
 const limits = vi.hoisted(() => ({ entries: 100 }));
 vi.mock("../../../modules/home/home-chapter-state.js", async importOriginal => ({
   ...await importOriginal<typeof import("../../../modules/home/home-chapter-state.js")>(),
@@ -29,7 +28,6 @@ it("keeps the canonical admission fence when an exact chapter-limit Stop cannot 
     await gate;
     return fauxAssistantMessage("owned provider settlement");
   }]);
-  // Fail the real writer's Stop boundary; the model and canonical writer stay live.
   const stop = vi.spyOn(slot, "abort").mockRejectedValue(new Error("controlled exact Stop join failure"));
   const running = slot.prompt("cross the canonical entry boundary");
   void running.catch(() => {});

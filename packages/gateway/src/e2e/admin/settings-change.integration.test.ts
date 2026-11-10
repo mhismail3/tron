@@ -32,51 +32,26 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { waitFor } from "../../../test-support/wait-for.js";
-/**
- * The one settings change path at its real boundaries (docs/settings-model.md
- * 5.1-5.3, 5.7, foundation F2): `settings.change`, `settings.undo` and
- * `settings.history` through the Gateway, over the real Mac file, trust store,
- * a live chat's slot lane, and real git repositories for Project writes. The
- * record and a transcript of each case are retained as an artifact.
- */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-change.json");
 const EVERY_KEY_ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../../test-results/settings-every-key.json");
 const transcript: Array<{ case: string; detail: unknown }> = [];
-/**
- * What one case creates. Its bodies, roots, registries and outside watchers
- * belong to it alone: a body that outlives its test (vitest moves on once the
- * test times out, and the body keeps running until it settles) can then reach
- * only its own fixtures, never a later case's (#1093).
- */
 type CaseOwner = {
   bodies: Array<Promise<void>>;
   roots: string[];
   registries: RuntimeRegistry[];
   outsides: OutsideChanges[];
 };
-/** Register owners before the case's first await: afterEach snapshots this list.
- * Later fixture creation must use its captured owner, never a new global entry. */
 let testOwners: CaseOwner[] = [];
 function newCaseOwner(): CaseOwner {
   const owner: CaseOwner = { bodies: [], roots: [], registries: [], outsides: [] };
   testOwners.push(owner);
   return owner;
 }
-/** Runs a case body and registers it with its owner, so the owner's teardown joins it. */
 function ownCase(owner: CaseOwner, body: () => Promise<void>): Promise<void> {
   const running = body();
   owner.bodies.push(running);
   return running;
 }
-/**
- * Resolves once the directory watcher `startWatching` armed delivers events. `fs.watch`
- * has no readiness signal, and on macOS a write made before its FSEvents stream starts
- * is never reported; under parallel load that window outlasted these cases' first write,
- * so no rescan ever ran (#1650, #1506). The probe rewrites `settings.json` with its own
- * bytes, an unchanged digest that records nothing, until a watcher-driven rescan settles
- * (`outside.reconcile` is wrapped to count it). It never reads settings itself, so a
- * broken watcher still fails here with this label.
- */
 async function watcherDelivers(outside: OutsideChanges, agentDir: string): Promise<void> {
   const settings = join(agentDir, "settings.json");
   const bytes = await readFile(settings);
@@ -90,35 +65,24 @@ async function watcherDelivers(outside: OutsideChanges, agentDir: string): Promi
   try {
     await waitFor(async () => {
       await writeFile(settings, bytes);
-      await new Promise(resolve => setTimeout(resolve, 400)); // past the watcher's 250 ms settle
+      await new Promise(resolve => setTimeout(resolve, 400));
       return rescans > 0;
     }, "the settings directory watcher delivers an event", { intervalMs: 0 });
   } finally {
     delete (outside as { reconcile?: unknown }).reconcile;
   }
 }
-/** Every `it` runs through here: its own owner, and its body joined by that owner's teardown. */
 const caseIt = (name: string, body: (owner: CaseOwner) => Promise<void>) => it(name, () => {
   testOwners = [];
   const owner = newCaseOwner();
   return ownCase(owner, () => body(owner));
 });
-/** One case per listed value, each owned like `caseIt`. */
 const caseEach = (values: string[]) => (name: string, body: (value: string, owner: CaseOwner) => Promise<void>, timeout: number) =>
   it.each(values)(name, value => {
     testOwners = [];
     const owner = newCaseOwner();
     return ownCase(owner, () => body(value, owner));
   }, timeout);
-/**
- * Tears one owner down. Its bodies are joined first, and only then are its
- * registries, outside watchers and roots read: a body registers its fixtures as
- * it runs, and the owner is private, so nothing else can reach them meanwhile.
- *
- * A failed body is reported, and its root is still removed once the body has
- * settled. A failed registry or outside disposal is reported too, and it keeps
- * and names the roots, because a runtime that did not stop may still write there.
- */
 async function disposeCase(owner: CaseOwner): Promise<void> {
   const failures: unknown[] = [];
   let kept: string[] = [];
@@ -146,35 +110,28 @@ async function disposeCase(owner: CaseOwner): Promise<void> {
   }
   if (failures.length > 0) throw new AggregateError(failures, `settings-change case teardown failed${kept.length > 0 ? `; fixture roots kept: ${kept.join(", ")}` : ""}`);
 }
-/** Every owner the test created is torn down, so a failed test cannot leave a root or a registry behind. */
 afterEach(async () => {
   const failures: unknown[] = [];
   for (const owner of testOwners.splice(0)) await disposeCase(owner).catch((failure: unknown) => { failures.push(failure); });
   if (failures.length === 1) throw failures[0];
   if (failures.length > 1) throw new AggregateError(failures, "settings-change case teardowns failed");
 });
-/** Reports when a join first subscribes to the body. `Promise.allSettled` subscribes through `then`; the body's result is unchanged. */
 function observeJoin(body: Promise<void>, onJoin: () => void): void {
   const then = body.then;
   Object.defineProperty(body, "then", { value: function (this: Promise<void>, ...args: unknown[]) { onJoin(); return Reflect.apply(then, this, args); } });
 }
-/** A real child that holds a case body until its stdin ends, so the body waits on the child's exit, not on a timer. */
 function holdChild() {
   const held = spawn(process.execPath, ["-e", "process.stdin.resume()"], { stdio: ["pipe", "ignore", "ignore"] });
   return { held, exited: once(held, "exit") };
 }
-/** Ends a held child's stdin and waits for its exit. A child still running is killed, so a failed test never leaves one behind. */
 async function releaseChild({ held, exited }: ReturnType<typeof holdChild>): Promise<void> {
   held.stdin.end();
   if (held.exitCode === null && held.signalCode === null) held.kill();
   await exited;
 }
-/** A teardown's outcome as a value, so a `finally` can join it without a teardown failure masking the test's own failure. */
 const outcomeOf = (teardown: Promise<void>) => teardown.then(() => undefined, (error: unknown) => ({ error }));
 
 describe("settings-change fixture teardown", () => {
-  // Each test's own body is registered with the test's owner, so afterEach joins it even if vitest moved on.
-  // A teardown under test runs on a nested owner: a body must never join itself.
   caseIt("joins an in-flight case body before it removes the fixture root", async () => {
     const owned = newCaseOwner();
     const f = await fixture(owned);
@@ -188,10 +145,9 @@ describe("settings-change fixture teardown", () => {
         await writeFile(join(f.root, "late-write"), "written after teardown began\n");
       }), joinEntered);
       teardown = outcomeOf(disposeCase(owned));
-      // The child holds the body, so teardown cannot finish before the join: only a real join lets "join entered" win.
       expect(await Promise.race([joining, teardown.then(() => "teardown finished")])).toBe("join entered");
       expect(existsSync(f.root)).toBe(true);
-      child.held.stdin.end(); // released only once the join has entered
+      child.held.stdin.end();
       expect(await teardown).toBeUndefined();
       expect(existsSync(f.root)).toBe(false);
     } finally {
@@ -222,8 +178,6 @@ describe("settings-change fixture teardown", () => {
     await mkdir(cwd);
     await f.trust.set(cwd, true);
     const slot = await f.registry.create(cwd);
-    // A non-empty directory where this idle slot's run marker belongs. Its shutdown removes that file,
-    // and the removal fails on the real filesystem (docs: run markers are gateway-owned state, README).
     const marker = join(f.tronHome, "gateway", "runtime-markers", `${slot.id}.json`);
     await mkdir(join(marker, "blocker"), { recursive: true });
     try {
@@ -236,7 +190,6 @@ describe("settings-change fixture teardown", () => {
       expect(registryFailure!.errors[0]).toMatchObject({ code: "ERR_FS_EISDIR" });
       expect(existsSync(f.root)).toBe(true);
     } finally {
-      // Repair the owned path, then dispose the registry the teardown could not finish, and only then remove the root.
       await rm(marker, { recursive: true, force: true });
       await f.registry.dispose();
       await rm(f.root, { recursive: true, force: true });
@@ -253,15 +206,13 @@ describe("settings-change fixture teardown", () => {
       const f = await fixture(inFlight);
       ownCase(inFlight, async () => {
         await child.exited;
-        // Registered while the teardown waits on this body. The teardown reads the roots only after the join, so it removes this one too.
         const late = await fixture(inFlight);
         lateRoot = late.root;
         await writeFile(join(late.root, "late-write"), "written after teardown began\n");
       });
       teardown = outcomeOf(disposeCase(inFlight));
-      // A later case creates its fixture while this teardown waits; that teardown must not touch it.
       const sibling = await fixture(later);
-      child.held.stdin.end(); // released only once the teardown has started
+      child.held.stdin.end();
       expect(await teardown).toBeUndefined();
       expect(lateRoot).toBeDefined();
       expect(existsSync(f.root)).toBe(false);
@@ -276,7 +227,6 @@ describe("settings-change fixture teardown", () => {
   });
 });
 
-/** Holds real file/observer work at an explicit boundary, never a timing oracle. */
 function outsideLatch() {
   let release!: () => void;
   const promise = new Promise<void>(resolve => { release = resolve; });
@@ -303,8 +253,6 @@ describe("outside settings retirement", () => {
       publishing.release();
       try {
         await observer.promise;
-        // Production after-apply effects can resolve settings again. Closing
-        // the watcher must not revoke a read needed by an accepted observer.
         await outside.reconcile([{ kind: "global" }]);
         await writeFile(join(f.root, "published"), "settled\n");
       }
@@ -314,7 +262,7 @@ describe("outside settings retirement", () => {
     await watcherDelivers(outside, f.agentDir);
     hold = true;
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 8 } }));
-    await reading.promise; // the real directory watcher has entered the store reader
+    await reading.promise;
     const closing = Promise.resolve(outside.dispose()).then(() => { disposed = true; });
     try {
       await writeFile(join(f.root, "retirement-probe"), "reader held\n");
@@ -380,8 +328,6 @@ describe("outside settings retirement", () => {
       transcript.push({ case: "outside retirement error", detail: { code: "EISDIR", originalCausePreserved: true } });
     } finally {
       observer.release(); secondObserver.release(); await operation; await secondWork; await closing;
-      // The intentionally failed disposal has joined its work; teardown must not
-      // re-report that expected error or preserve a root with no live writer.
       owner.outsides.splice(owner.outsides.indexOf(outside), 1);
     }
   });
@@ -390,10 +336,8 @@ describe("outside settings retirement", () => {
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe", env: GIT_ENV }).toString();
 
-/** The paired iPhone whose Mac Terminal key the every-key case changes. */
 const ENROLLED_IPHONE = "00000000-0000-4000-8000-000000000001";
 
-/** A fresh OpenSSH ecdsa-sha2-nistp256 public key, as the iPhone's Secure Enclave key enrolls. */
 function macTerminalSampleKey(): string {
   const point = generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({ format: "der", type: "spki" }).subarray(-65);
   const field = (value: Buffer) => { const length = Buffer.alloc(4); length.writeUInt32BE(value.length); return Buffer.concat([length, value]); };
@@ -429,12 +373,9 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   owner.registries.push(registry);
   await registry.initialize();
   const privateService = new MacTerminalService(tronHome, { launchAgentDirectory: join(root, "agents") });
-  // Real private-store seeding arranges read-only enrollment metadata; generic
-  // tests never fake a running native listener or bypass the mutation owner.
   const macTerminalKeys = new MacTerminalKeys(privateService.root);
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
-  // Production wiring: every read reconciles outside changes (doc 5.6).
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders);
   settingsModel.owner.observeOutside(outside);
   owner.outsides.push(outside);
@@ -448,7 +389,6 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   });
   registry.setSettings(settingsModel, settingsChanges);
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
-  // The relay boundary: what would be pushed to the maintainer's iPhone.
   const pushes: Array<{ sourceId: string; title: string; message: string }> = [];
   const notifications = { enqueue: async (push: { sourceId: string; title: string; message: string }) => { pushes.push(push); } };
   const service = new GatewayService({ display: displayOwnerOf(registry),
@@ -456,7 +396,6 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome), notifications,
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
-    // The production MCP owner over the bundled pi CLI, and the custom-model owner (gateway-main.ts).
     mcpAdmin: new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js")),
     modelConfig: new ModelConfigService(agentDir),
   } as unknown as GatewayServiceDependencies);
@@ -481,8 +420,6 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     return entries;
   };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
-  // Observe publication without resolving stores: a broken watcher must not
-  // be rescued by the oracle itself triggering a reconciliation.
   const published = async (key: string, qualifier?: [string, string]) => {
     for (const event of broadcasts.filter(event => event.topic === "settings.changed")) {
       for (const id of (event.payload as { changeIds: string[] }).changeIds) {
@@ -552,17 +489,14 @@ describe("settings.change", () => {
     expect(entry).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, layer: "global", before: 4, after: 6, status: "applied",
       presentation: { label: "Retries", section: "run", actor: "You", layer: "Global", display: { before: "4 retries", after: "6 retries" } } });
 
-    // A stale `expected` is refused and changes nothing.
     await expect(f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 9, expected: 4 }])).rejects.toMatchObject({ code: "conflict" });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
 
-    // Undo writes `before` back as an ordinary change that names what it undid.
     const undone = await maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId }) as { changes: Array<{ changeId: string }> };
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
     const undoEntry = (await f.history()).find(candidate => candidate.changeId === undone.changes[0]!.changeId);
     expect(undoEntry).toMatchObject({ undoOf: applied.changes[0]!.changeId, before: 6, after: 4 });
 
-    // Undo after a later conflicting change is refused with the current value.
     const second = await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 8 }]);
     await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 10 }]);
     await expect(maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: second.changes[0]!.changeId }))
@@ -570,9 +504,7 @@ describe("settings.change", () => {
         display: { current: "10 retries", after: "8 retries" } } });
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 10 });
 
-    // A redacted key records only "changed", and its change is not undoable.
     const proxy = await f.change({ kind: "global" }, [{ key: "run.httpProxy", layer: "global", op: "set", value: "http://proxy.invalid:3128" }]);
-    // A redacted key's outcome withholds both values, as its record does.
     expect(proxy.changes[0]).toMatchObject({ redacted: true });
     expect(proxy.changes[0]).not.toHaveProperty("after");
     expect(JSON.stringify(proxy)).not.toContain("proxy.invalid");
@@ -583,10 +515,7 @@ describe("settings.change", () => {
     await expect(maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: proxy.changes[0]!.changeId }))
       .rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("not undoable") });
 
-    // A layer the key does not allow, and a key with no writer, are refused.
     await expect(f.change({ kind: "global" }, [{ key: "setup.sessionDir", layer: "global", op: "set", value: "/elsewhere" }])).rejects.toMatchObject({ code: "invalid_request" });
-    // Permanent history remains readable after a schema key retires. The outside
-    // actor must not be mislabeled as a UI change, and projection never rewrites audit.
     await f.record.append([{ ...entry!, changeId: "retired-key-entry", key: "retired.setting", actor: { kind: "outside", id: "fixture" }, before: "old", after: "new" }]);
     expect((await f.history({ key: "retired.setting" }))[0]).toMatchObject({
       presentation: { label: "retired.setting", actor: "Outside Tron", display: { before: '"old"', after: '"new"' } },
@@ -610,7 +539,6 @@ describe("settings.change", () => {
       { fence: { runtimeGeneration: before.runtimeGeneration, model: before.model } }, client([slot.id]));
     expect(slot.snapshot().model).toEqual({ provider: second.provider, id: second.id });
     expect(result.changes[0]!.revision).toBe(slot.snapshot().revision);
-    // A stale fence is refused by the lane guard and changes nothing.
     await expect(f.change({ kind: "session", sessionId: slot.id },
       [{ key: "model.thinking[role=chat]", layer: "session", op: "set", value: "low" }],
       { fence: { runtimeGeneration: "retired", model: before.model } }, client([slot.id]))).rejects.toMatchObject({ code: "conflict" });
@@ -626,7 +554,6 @@ describe("settings.change", () => {
     const homeDirectory = join(f.tronHome, "gateway", "home");
     await mkdir(homeDirectory, { recursive: true });
     await writeFile(join(homeDirectory, "profile.json"), "{}\n");
-    // Home's saved-settings directory refuses the replacement write; the Global write lands first.
     await chmod(homeDirectory, 0o500);
     try {
       await expect(f.change({ kind: "home" }, [
@@ -646,7 +573,6 @@ describe("settings.change", () => {
     const f = await fixture(owner);
     const project = join(f.root, "rollback-refused");
     await mkdir(project);
-    // The trust writer accepts the change and refuses its compensating write.
     let trustWrites = 0;
     const changes = new SettingsChangePath(f.settingsModel, f.record, { setTrust: async (path, decision) => {
       trustWrites += 1;
@@ -658,7 +584,6 @@ describe("settings.change", () => {
       { key: "model.thinking[role=worker]", layer: "session", op: "set", value: "low" },
     ] as Parameters<SettingsChangePath["change"]>[1];
     const context = { actor: { kind: "ui" as const, id: "device:phone" }, reason: "Trust the project and lower worker thinking" };
-    // Home's saved-settings directory refuses the replacement write; trust (an earlier store) lands first.
     const homeDirectory = join(f.tronHome, "gateway", "home");
     await mkdir(homeDirectory, { recursive: true });
     await writeFile(join(homeDirectory, "profile.json"), "{}\n");
@@ -690,7 +615,6 @@ describe("settings.change", () => {
 
     const localBadge = async (cwd: string) => ((await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd }, keys: ["run.transport"] })) as unknown as
       { keys: Array<{ badges: Array<{ label: string; detail?: string }> }> }).keys[0]!.badges.find(badge => badge.label === "Local only");
-    // The repository's own file in an ignored .pi, or outside any repository, says Local only.
     const ignored = await gitProject(f.root, "ignored");
     await f.trust.set(ignored, true);
     git(ignored, "rm", "-q", "--cached", ".pi/settings.json");
@@ -717,9 +641,6 @@ describe("settings.change", () => {
     await maintainerChange(f.service, client(), "settings.undo", { commandId: commandId(), changeId: granted.changes[0]!.changeId });
     expect((await f.trust.inspect(project)).savedDecision).toBeNull();
 
-    // Trust is keyed by the Project root: a Mac request naming a subdirectory
-    // reads, records and writes its worktree root's decision, so Tron's own
-    // write is not reported as an outside change.
     const repository = await realpath(await gitProject(f.root, "rooted"));
     const subdirectory = join(repository, "packages", "app");
     await mkdir(subdirectory, { recursive: true });
@@ -728,9 +649,6 @@ describe("settings.change", () => {
     expect(await f.trust.inspect(subdirectory)).toMatchObject({ projectDir: repository, savedDecision: true });
     expect((await f.history({ key: "permissions.projectTrust" })).some(entry => entry.actor?.kind === "outside")).toBe(false);
 
-    // A decision saved for a parent folder covers the project (pi's nearest-entry
-    // rule): its row shows the inherited value, not Not set, and an explicit
-    // change at the project still undoes to "no decision of its own".
     const parent = join(f.root, "workspace");
     const child = join(parent, "child");
     await mkdir(child, { recursive: true });
@@ -779,7 +697,6 @@ describe("settings.change", () => {
     }
     const query = { key: "run.transport", limit: 50 };
     const newest = await f.service.invoke(client(), "settings.history", query) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
-    // Sparse filters must not scan the forever-growing record in one request.
     expect(newest.entries).toEqual([]);
     expect(newest.nextCursor).toBeDefined();
     const middle = await f.service.invoke(client(), "settings.history", { ...query, cursor: newest.nextCursor }) as unknown as { entries: ChangeEntry[]; nextCursor?: string };
@@ -813,19 +730,12 @@ describe("settings.change", () => {
     for (const name of files) {
       expect((await readFile(join(f.record.path, name), "utf8")).trim().split("\n").length).toBeLessThanOrEqual(5);
     }
-    // Newest first.
     const all = await f.history();
     expect(all[0]!.after).toBe(22 % 20);
     transcript.push({ case: "paging", detail: { pages, segments: files.length } });
   });
 });
 
-/**
- * Outside changes (docs/settings-model.md 5.6, 5.7; #764) against the real Mac
- * file and real git repositories: per-key `outside` entries, Tron's own writes
- * never echo, rename-replace and missed events are caught by digest, git state
- * badges, commit facts, Apply again, and pushes decided by each key's floor.
- */
 describe("outside changes", () => {
   type Row = { key: string; value: unknown; layer: string; badges: Array<{ label: string; detail?: string; action?: { kind: string; changeId?: string } }> };
   const rows = async (f: Awaited<ReturnType<typeof fixture>>, target: Record<string, unknown>, keys: string[]) =>
@@ -836,47 +746,39 @@ describe("outside changes", () => {
 
   caseIt("records one outside entry per hand-edited Global key, never Tron's own write, and catches rename-replace", async owner => {
     const f = await fixture(owner);
-    await row(f, { kind: "global" }, "run.retry.maxRetries"); // the first read is the baseline
+    await row(f, { kind: "global" }, "run.retry.maxRetries");
 
-    // A Tron write: no outside entry (negative control), on this read and the next.
     await f.change({ kind: "global" }, [{ key: "run.retry.maxRetries", layer: "global", op: "set", value: 6 }]);
     expect(await outsideEntries(f)).toEqual([]);
     expect(label(await row(f, { kind: "global" }, "run.retry.maxRetries"), "Changed outside Tron")).toBeUndefined();
 
-    // A hand edit of two keys: exactly one entry per key, the live value follows the file.
     const document = await f.macDocument();
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...document, retry: { maxRetries: 9 }, transport: "sse" }));
     const edited = await row(f, { kind: "global" }, "run.retry.maxRetries");
-    await row(f, { kind: "global" }, "run.retry.maxRetries"); // a second read records nothing more
+    await row(f, { kind: "global" }, "run.retry.maxRetries");
     const first = await outsideEntries(f);
     expect(first.map(entry => [entry.key, entry.before, entry.after, entry.actor.kind]).sort()).toEqual([
       ["run.retry.maxRetries", 6, 9, "outside"], ["run.transport", undefined, "sse", "outside"],
     ]);
     expect(edited.value).toBe(9);
-    // It replaced Tron's value, so the row offers Apply again with the diff.
     const changed = label(edited, "Changed outside Tron")!;
     expect(changed.detail).toBe("Global: 6 retries → 9 retries");
     expect(changed.action).toMatchObject({ kind: "applyAgain", changeId: first.find(entry => entry.key === "run.retry.maxRetries")!.changeId });
-    // A value Tron never wrote shows the change without Apply again.
     expect(label(await row(f, { kind: "global" }, "run.transport"), "Changed outside Tron")!.action).toBeUndefined();
 
-    // Apply again is an ordinary audited change; the row clears.
     const again = await f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: changed.action!.changeId }) as unknown as { status: string; changes: Array<{ changeId: string }> };
     expect(again.status).toBe("applied");
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 6 });
     expect((await f.history())[0]).toMatchObject({ applyAgainOf: changed.action!.changeId, after: 6, actor: { kind: "ui" } });
     expect(label(await row(f, { kind: "global" }, "run.retry.maxRetries"), "Changed outside Tron")).toBeUndefined();
-    // A stale Apply again (the store moved on) is refused, not applied.
     await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: changed.action!.changeId })).rejects.toMatchObject({ code: "conflict" });
 
-    // An editor's rename-replace write is detected like any other.
     const temporary = join(f.agentDir, "settings.json.swp");
     await writeFile(temporary, JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 2 } }));
     await rename(temporary, join(f.agentDir, "settings.json"));
     expect((await row(f, { kind: "global" }, "run.retry.maxRetries")).value).toBe(2);
     expect((await outsideEntries(f)).filter(entry => entry.key === "run.retry.maxRetries").map(entry => entry.after)).toEqual([2, 9]);
 
-    // A redacted key is recorded as changed, never with its value.
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), httpProxy: "http://user:secret@proxy.invalid" }));
     await row(f, { kind: "global" }, "run.httpProxy");
     const proxy = (await outsideEntries(f)).find(entry => entry.key === "run.httpProxy")!;
@@ -894,12 +796,10 @@ describe("outside changes", () => {
     const until = async (done: () => boolean | Promise<boolean>) => {
       for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
     };
-    // Quiet floor: recorded and broadcast, not pushed.
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), retry: { maxRetries: 8 } }));
     await until(() => f.broadcasts.some(event => event.topic === "settings.changed" && JSON.stringify(event.payload).includes("run.retry.maxRetries")));
     expect((await f.record.page({ limit: 10 })).entries.map(entry => [entry.key, entry.status])).toEqual([["run.retry.maxRetries", "outside"]]);
     expect(f.pushes).toEqual([]);
-    // Adding a package (a widening with a notify floor) pushes.
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), packages: ["npm:outside-package"] }));
     await until(() => f.published("sources.packages"));
     expect(await f.published("sources.packages")).toBe(true);
@@ -914,22 +814,19 @@ describe("outside changes", () => {
     const transport = async () => row(f, target, "run.transport");
     const write = (value: Record<string, unknown>) => writeFile(join(project, ".pi", "settings.json"), `${JSON.stringify(value, null, 4)}\n`);
     await transport();
-    const baseline = (await outsideEntries(f)).length; // trust was set by hand before the first read
+    const baseline = (await outsideEntries(f)).length;
 
-    // The owner's uncommitted edit: one outside entry, Uncommitted, never Apply again.
     await write({ transport: "websocket" });
     const edited = await transport();
     expect(edited.value).toBe("websocket");
     expect(label(edited, "Uncommitted")).toBeDefined();
     expect(label(edited, "Changed outside Tron")?.action).toBeUndefined();
     expect((await outsideEntries(f)).length).toBe(baseline + 1);
-    // Committing it changes no value: nothing recorded, and it is no longer uncommitted.
     git(project, "commit", "-q", "-am", "transport");
     const committed = await transport();
     expect(committed.value).toBe("websocket");
     expect(label(committed, "Uncommitted")).toBeUndefined();
     expect((await outsideEntries(f)).length).toBe(baseline + 1);
-    // A stash drops an uncommitted edit: one more outside entry with the repository state.
     await write({ transport: "auto" });
     await transport();
     git(project, "stash", "-q");
@@ -937,8 +834,6 @@ describe("outside changes", () => {
     expect((await outsideEntries(f))[0]).toMatchObject({ key: "run.transport", before: "auto", after: "websocket", git: { branch: "main" } });
     git(project, "stash", "drop", "-q");
 
-    // A pull (fast-forward from a clone): the change lists its commit; a quiet key does not push,
-    // a new package (notify on widening) does.
     const clone = join(f.root, "clone");
     git(f.root, "clone", "-q", project, clone);
     await writeFile(join(clone, ".pi", "settings.json"), `${JSON.stringify({ transport: "auto", packages: ["npm:pulled"] }, null, 4)}\n`);
@@ -956,7 +851,6 @@ describe("outside changes", () => {
 });
 
 describe("outside changes to MCP servers and custom models", () => {
-  // Each wait is a stage row: the watcher-driven push it stands for, and what it cost.
   const until = async (stage: string, done: () => boolean | Promise<boolean>) => {
     const started = performance.now();
     try {
@@ -970,14 +864,11 @@ describe("outside changes to MCP servers and custom models", () => {
   const servers = async (f: Awaited<ReturnType<typeof fixture>>, params: Record<string, unknown>) =>
     ((await f.service.invoke(client(), "mcp.list", params)) as { servers: Array<{ name: string; scope: string }> }).servers.map(server => `${server.scope}:${server.name}`).sort();
   const writeJson = async (path: string, value: unknown) => {
-    // An editor's rename-replace write.
     await writeFile(`${path}.swp`, `${JSON.stringify(value, null, 2)}\n`);
     await rename(`${path}.swp`, path);
   };
-  // Each journey gets its own fixture (root, Gateway, watchers), so the three run independently.
   const stagedFixture = async (owner: CaseOwner) => {
     const f = await fixture(owner);
-    // Each service call is a stage row (the bundled CLI child, Git reads, the resolve's reconcile).
     const invoke = f.service.invoke.bind(f.service);
     f.service.invoke = (async (client: ClientContext, method: string, params: unknown) => {
       const started = performance.now();
@@ -991,8 +882,6 @@ describe("outside changes to MCP servers and custom models", () => {
 
   caseEach(["mcp-auth.json", "coalesced.lock"])("reconciles missed global MCP drift from the directory hint %s (#1900)", async (filename, owner) => {
     const f = await fixture(owner);
-    // A target outside the watched directory controls the missing-filename
-    // condition without replacing fs.watch or depending on FSEvents dropping it.
     const target = join(f.root, "shared-mcp.json");
     await writeFile(target, JSON.stringify({ mcpServers: {} }));
     await symlink(target, join(f.agentDir, "mcp.json"));
@@ -1001,17 +890,14 @@ describe("outside changes to MCP servers and custom models", () => {
     const filenames: string[] = [];
     f.outside.startWatching(error => { failures.push(String(error)); });
     const native = f.outside as unknown as { watchers: Map<string, import("node:fs").FSWatcher>; timers: Map<string, NodeJS.Timeout>; reconciliations: Set<Promise<void>> };
-    // Passive listeners retain the native hints; the owner alone decides rescans.
     for (const watcher of native.watchers.values()) {
       watcher.on("change", (_event, name) => { filenames.push(String(name)); });
     }
     const hint = async () => {
       await writeFile(join(f.agentDir, filename), "{}\n");
-      await new Promise(resolve => setTimeout(resolve, 400)); // past the existing 250ms coalescer
+      await new Promise(resolve => setTimeout(resolve, 400));
     };
     try {
-      // Establish native delivery using only the unrelated file: rewriting a
-      // settings file here could itself admit a rescan of the subsequent drift.
       await waitFor(async () => { await hint(); return filenames.includes(filename); }, "the native auth-file directory event");
       await waitFor(() => native.timers.size === 0 && native.reconciliations.size === 0, "initial native rescans settle before controlled drift");
       filenames.length = 0;
@@ -1027,21 +913,19 @@ describe("outside changes to MCP servers and custom models", () => {
     } finally {
       transcript.push({ case: "coalesced global directory hint", detail: { filename, filenames, broadcasts: f.broadcasts, failures } });
     }
-  }, 30_000); // New controlled missing-event case owns the 12s hang-bound failure plus fixture setup.
+  }, 30_000);
 
   caseIt("records global Mac mcp.json edits per server by digest, pushes, refreshes the MCP owner, and never records Tron's own writes", async owner => {
     const f = await stagedFixture(owner);
-    await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] }); // baselines
+    await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] });
     const baseline = (await outsideEntries(f)).length;
 
-    // Tron's own MCP write (through the bundled CLI) is not an outside change, and refreshes the MCP surface.
     await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "tron-added", transport: "http", url: "http://127.0.0.1:1/tron" });
     expect(f.broadcasts).toContainEqual({ topic: "mcp.changed", payload: { scope: "global" } });
     await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.transport"] });
     expect((await outsideEntries(f)).length).toBe(baseline);
     expect(await servers(f, { scope: "global" })).toEqual(["global:tron-added"]);
 
-    // A hand edit adding a server with a credential header: a file event alone records it by digest and pushes.
     const globalMcp = join(f.agentDir, "mcp.json");
     const current = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
     await writeJson(globalMcp, { ...current, mcpServers: { ...current.mcpServers, "hand-added": { url: "http://127.0.0.1:1/hand", headers: { Authorization: "Bearer outside-secret" } } } });
@@ -1054,9 +938,7 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(f.broadcasts.filter(event => event.topic === "mcp.changed").length).toBe(2);
     expect(JSON.stringify(await f.history())).not.toContain("outside-secret");
     expect(await readFile(f.outside.path, "utf8")).not.toContain("outside-secret");
-    // The MCP owner serves the edited file to the app.
     expect(await servers(f, { scope: "global" })).toEqual(["global:hand-added", "global:tron-added"]);
-    // Removing the server Tron added is one more entry.
     const afterAdd = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
     delete afterAdd.mcpServers["tron-added"];
     await writeJson(globalMcp, afterAdd);
@@ -1064,7 +946,6 @@ describe("outside changes to MCP servers and custom models", () => {
     expect((await outsideEntries(f))[0]).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "tron-added" }, op: "unset",
       presentation: { display: { before: "Configured", after: "Removed" } } });
 
-    // A hand edit just before Tron's own write is recorded, never absorbed into it.
     const beforeTron = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
     await writeJson(globalMcp, { ...beforeTron, mcpServers: { ...beforeTron.mcpServers, "edited-before-tron": { url: "http://127.0.0.1:1/before" } } });
     await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "tron-second", transport: "http", url: "http://127.0.0.1:1/second" });
@@ -1072,7 +953,6 @@ describe("outside changes to MCP servers and custom models", () => {
     const aroundTron = await outsideEntries(f);
     expect(aroundTron.filter(entry => entry.qualifiers?.server === "edited-before-tron").map(entry => entry.op)).toEqual(["set"]);
     expect(aroundTron.some(entry => entry.qualifiers?.server === "tron-second")).toBe(false);
-    // A section filter finds the subject entries with their section's keys.
     expect((await f.history({ section: "tools" })).some(entry => entry.key === "tools.mcp.server")).toBe(true);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
   });
@@ -1084,10 +964,8 @@ describe("outside changes to MCP servers and custom models", () => {
     await mkdir(subdirectory, { recursive: true });
     await f.trust.set(project, true);
     const projectTarget = { kind: "project", cwd: subdirectory };
-    await f.service.invoke(client(), "settings.resolve", { target: projectTarget, keys: ["run.transport"] }); // baselines
+    await f.service.invoke(client(), "settings.resolve", { target: projectTarget, keys: ["run.transport"] });
 
-    // A project whose `.pi/` appears later: its creation is seen through the
-    // root, and later edits inside it push from the file event alone.
     const late = join(f.root, "late-pi");
     await mkdir(late);
     await f.trust.set(late, true);
@@ -1095,18 +973,16 @@ describe("outside changes to MCP servers and custom models", () => {
     await mkdir(join(late, ".pi"));
     await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" } } });
     await until("publication: MCP server first", () => f.published("tools.mcp.server", ["server", "first"]));
-    await new Promise(resolve => setTimeout(resolve, 400)); // the rescan that replaces the root watch settles
+    await new Promise(resolve => setTimeout(resolve, 400));
     await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" }, second: { url: "http://127.0.0.1:1/second" } } });
     await until("publication: MCP server second", () => f.published("tools.mcp.server", ["server", "second"]));
     expect(await f.published("tools.mcp.server", ["server", "second"])).toBe(true);
 
-    // Project scope follows the Project root, not the subdirectory a chat runs in.
     const chat = await f.registry.create(subdirectory);
     expect(chat.cwd).toBe(await realpath(subdirectory));
     expect(chat.projectDir).toBe(await realpath(project));
     await expect(f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "project", cwd: subdirectory, server: "project-tron", transport: "http", url: "http://127.0.0.1:1/project" }))
       .rejects.toMatchObject({ code: "invalid_request" });
-    // An actual repository edit remains observable under its repository root.
     await writeJson(join(project, ".pi", "mcp.json"), { mcpServers: { "project-tron": { url: "http://127.0.0.1:1/project" } } });
     await until("publication: MCP server project-tron", () => f.published("tools.mcp.server", ["server", "project-tron"]));
     await expect(readFile(join(subdirectory, ".pi", "mcp.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
@@ -1115,7 +991,6 @@ describe("outside changes to MCP servers and custom models", () => {
     const beforePull = (await outsideEntries(f)).length;
     await f.service.invoke(client(), "settings.resolve", { target: projectTarget, keys: ["run.transport"] });
     expect((await outsideEntries(f)).length).toBe(beforePull);
-    // A pull adds a server: recorded against the root with its commit, pushed, and served by the project MCP owner.
     const clone = join(f.root, "mcp-clone");
     git(f.root, "clone", "-q", project, clone);
     const cloned = JSON.parse(await readFile(join(clone, ".pi", "mcp.json"), "utf8")) as { mcpServers: Record<string, unknown> };
@@ -1136,7 +1011,6 @@ describe("outside changes to MCP servers and custom models", () => {
 
   caseIt("records custom model provider edits by digest and pushes, and never records Tron's own save", async owner => {
     const f = await stagedFixture(owner);
-    // Custom models: Tron's save is Tron's; a hand edit of a provider is recorded by digest and pushes.
     const document = { providers: { "tron-provider": { baseUrl: "https://tron-models.invalid/v1", api: "openai-completions", apiKey: "tron-key", models: [{ id: "m" }] } } };
     await f.service.invoke(client(), "models.custom.put", { commandId: commandId(), document });
     expect(f.broadcasts.at(-1)).toEqual({ topic: "models.customChanged", payload: {} });
@@ -1157,29 +1031,15 @@ describe("outside changes to MCP servers and custom models", () => {
   });
 });
 
-/**
- * Every declared key at every layer it allows (docs/settings-model.md 4, F1/F4),
- * derived from canonical typed declarations, never editor options or a second key list:
- * `settings.change` as the maintainer, the effective value and source on a target
- * whose top layer that is, the value in the real store bytes through the schema
- * binding, and `settings.undo` restoring the prior value. Keys added later are
- * covered automatically. Native Mac mutation rows run the named real-sshd
- * round trips; this generic boundary retains their read/type/floor previews.
- * The per-instance report is a retained artifact.
- */
 describe("every key at every allowed layer", () => {
-  // One case per layer: each owns its budget and failure, and the per-instance
-  // report accumulates across them into one artifact.
   const report: Array<Record<string, unknown>> = [];
   caseEach(["session", "home", "project", "global"])("changes, resolves, stores and undoes each declared key instance at the %s store", async (only, owner) => {
     const f = await fixture(owner);
     const first = f.faux.getModel("first")!, second = f.faux.getModel("second")!;
-    // A Global default model gives model-qualified keys an instance on every target.
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), defaultProvider: first.provider, defaultModel: first.id }));
     const project = await gitProject(f.root, "every");
     await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({ transport: "sse", modelContextWindows: { [`${first.provider}/${first.id}`]: 64_000 } }));
     await f.trust.set(project, true);
-    // An enrolled iPhone gives the Mac Terminal key its one Mac instance.
     await f.macTerminalKeys.set(ENROLLED_IPHONE, macTerminalSampleKey());
     const slot = await f.registry.create(project);
     await slot.setModel(first.provider, first.id);
@@ -1195,11 +1055,9 @@ describe("every key at every allowed layer", () => {
     };
     const fence = () => { const snapshot = slot.snapshot(); return { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model, revision: snapshot.revision }; };
     const differs = (left: unknown, right: unknown) => JSON.stringify(left ?? null) !== JSON.stringify(right ?? null);
-    /** Mutation coverage follows the canonical type even when no app editor exists. */
     const sample = async (layer: string, row: Served, key: KeyDeclaration): Promise<unknown> => {
       const { kind: valueKind, options, range } = key.type;
       const { optionsSource } = key;
-      // Queue writes remain typed runtime policy, not an app catalog reader.
       if (key.fixed?.role && valueKind === "stringList") return [`${second.provider}/${second.id}`, `${first.provider}/${first.id}`];
       if (optionsSource?.name === "catalog.models") return differs(row.value, { provider: second.provider, id: second.id }) ? { provider: second.provider, id: second.id } : { provider: first.provider, id: first.id };
       if (optionsSource?.name === "catalog.thinkingLevels") {
@@ -1218,7 +1076,6 @@ describe("every key at every allowed layer", () => {
       if (valueKind === "text") return "sample-text";
       throw new Error(`No generic sample for ${row.key} (${valueKind})`);
     };
-    /** The value in the store's own bytes, read through the schema binding. */
     const stored = async (key: KeyDeclaration, layer: string, qualifiers: Record<string, string>) => {
       const binding = key.layers[layer as "global"]!;
       const json = async (path: string) => JSON.parse(await readFile(path, "utf8").catch(() => "{}")) as Record<string, unknown>;
@@ -1233,22 +1090,18 @@ describe("every key at every allowed layer", () => {
       } as unknown as SettingsStores;
       const qualified = binding.store === "pi" && binding.qualified !== undefined && qualifiers.model !== undefined;
       const raw = readBinding(stores, layer as "global", binding, qualifiers, qualified, key.id);
-      // A composing layer may store its selection relative to the layers below.
       return key.type.compose && raw !== undefined ? key.type.compose(composedBelow(stores, key, qualifiers, layer as "global"), raw) : raw;
     };
     for (const key of KEYS) {
       for (const layer of Object.keys(key.layers).filter(layer => layer === only)) {
         const row = await resolve(layer, key.id);
         const instance = { key: key.id, layer, qualifiers: row?.qualifiers };
-        // A key no one may write (the session folder) is not served on any target.
         if (!row) { report.push({ ...instance, result: key.writers.length === 0 ? "verified unserved: no writer" : "no instance on its target" }); continue; }
         const value = await sample(layer, row, key);
-        // A store's public scope: Home's saved settings are Home's Session scope.
         const scope = layer === "home" ? "session" : layer;
         const request = [{ key: key.id, layer: scope, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];
         const extra = layer === "session" ? { fence: fence() } : {};
         if (row.projectSetting && layer === "session") {
-          // A Project selection masks this Session key: the edit refuses and leaves the override inactive.
           await expect(f.change(targets[layer]!, request, extra, client([slot.id]))).rejects.toThrow("edit its Project key instead");
           report.push({ ...instance, result: "verified masked by Project" });
           continue;
@@ -1259,10 +1112,6 @@ describe("every key at every allowed layer", () => {
           continue;
         }
         if (key.id === "permissions.macTerminalKey" || key.id === "permissions.macTerminalServer") {
-          // These rows cross a native user sshd/launchd boundary. Their actual
-          // replacement+undo and enable+undo run in mac-terminal.e2e.test.ts,
-          // not a hosted runner with no Mac/Tailscale. Reads, typing and floors
-          // still cross this real Gateway preview; no fake listener is injected.
           const actor = key.id === "permissions.macTerminalKey"
             ? { ...client([slot.id]), identity: ENROLLED_IPHONE } as ClientContext : client([slot.id]);
           expect(await f.change(targets[layer]!, request, { ...extra, dryRun: true }, actor))
@@ -1272,7 +1121,6 @@ describe("every key at every allowed layer", () => {
         }
         let applied: Awaited<ReturnType<typeof f.change>>;
         try {
-          // An iPhone enrolls only its own Mac Terminal key, so that key is changed as its device.
           const actor = key.id === "permissions.macTerminalKey"
             ? { ...client([slot.id]), identity: ENROLLED_IPHONE } as ClientContext : client([slot.id]);
           applied = await f.change(targets[layer]!, request, extra, actor);
@@ -1288,7 +1136,6 @@ describe("every key at every allowed layer", () => {
         expect(await stored(key, layer, after!.qualifiers ?? row.qualifiers ?? {}), `${key.id}@${layer} store`).toEqual(value);
         const undo = maintainerChange(f.service, client([slot.id]), "settings.undo", { commandId: commandId(), changeId: applied.changes[0]!.changeId, ...(layer === "session" ? { fence: fence() } : {}) });
         if (key.redacted) {
-          // A redacted change has no recorded `before`: never undoable, so unset it directly.
           await expect(undo).rejects.toMatchObject({ code: "conflict" });
           await f.change(targets[layer]!, [{ key: key.id, layer: scope, op: "unset", ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }], extra, client([slot.id]));
           expect(await stored(key, layer, row.qualifiers ?? {}), `${key.id}@${layer} unset`).toBeUndefined();

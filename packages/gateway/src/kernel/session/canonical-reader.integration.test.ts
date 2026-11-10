@@ -6,8 +6,6 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, expect, it, vi } from "vitest";
 import { EpisodicSourceChangedError, readCanonicalSessionFile } from "./canonical-reader.js";
 
-/** One real change to the file at an exact point of the reader's own handle use:
- * before its first read, or just before the stat that closes its first pass. */
 const changeDuringRead = vi.hoisted(() => ({
   path: undefined as string | undefined,
   at: "firstRead" as "firstRead" | "endStat",
@@ -74,8 +72,6 @@ it("refuses an append-stable read when the bytes it read were rewritten in place
   changeDuringRead.path = path;
   changeDuringRead.at = "endStat";
   changeDuringRead.change = async () => {
-    // After the first pass read the original bytes: same inode, longer file,
-    // different prefix. Not an append.
     await writeFile(path, bytes.replace("Settled", "Changed"));
     await appendFile(path, "\n");
   };
@@ -89,7 +85,6 @@ it("reports a malformed rewrite of already-read bytes as a changed source, not a
   changeDuringRead.path = path;
   changeDuringRead.at = "endStat";
   changeDuringRead.change = async () => {
-    // After the first pass: same inode, grown, and its old prefix no longer parses.
     await writeFile(path, bytes.replace(/"type":"message"/, '"type":"message"\u0000'));
     await appendFile(path, bytes.split("\n").at(-2)!.replace(/"id":"[^"]+"/, '"id":"late0000"') + "\n");
   };

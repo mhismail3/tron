@@ -9,7 +9,6 @@ function stringTerminator(value: string, start: number, allowBell: boolean): num
   return value.length;
 }
 
-/** Removes terminal protocol controls and their payloads without interpreting them. */
 export function stripTerminalControls(value: string, preserveNewlines = true): string {
   let result = "";
   for (let index = 0; index < value.length;) {

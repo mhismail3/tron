@@ -38,13 +38,9 @@ function textOf(message: { content: unknown }): string {
   return Array.isArray(content) ? content.map(part => (part as { text?: unknown }).text ?? "").join("") : "";
 }
 
-/** The worker's first request carries the admitted prompt; Home's turns never do. */
 const isWorkerTurn = (context: TranscriptContext) =>
   context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
 
-/** One scripted Home turn that delegates once, then answers the refusal or admission.
- * The worker's request is recorded with the model and thinking level it ran on. Faux
- * serves one shared queue, so every response decides its caller from its context. */
 function scriptedHome(delegate: Record<string, unknown>, observed: ObservedRequest[], refusals: string[]) {
   return (context: TranscriptContext, options: SimpleStreamOptions | undefined, _state: unknown, model: Model<string>): AssistantMessage => {
     if (isWorkerTurn(context)) {
@@ -90,7 +86,6 @@ async function refusalOf(attempt: Promise<unknown>): Promise<Error> {
   expect(refusal).toBeInstanceOf(Error);
   return refusal as Error;
 }
-/** The references a refusal names after "Valid models: ", in any order. */
 function validModelList(refusal: Error): string[] {
   const listed = refusal.message.split("Valid models: ")[1]?.replace(/\.$/, "").split(", ") ?? [];
   return listed.sort();
@@ -186,7 +181,6 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(task.intent.text).toContain("Worker choice: model");
     expect(task.intent.text).toContain("worker queue");
     expect(task.intent.text).toContain("max clamped to high");
-    // The delegate tool's details carry the same resolved choice for its detail sheet (#957).
     const home = await f.registry.acquire(f.home.sessionId);
     const admission = home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "toolResult"
       && entry.message.toolName === "delegate" ? [entry.message] : [])[0];
@@ -217,7 +211,6 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const home = await f.registry.acquire(f.home.sessionId);
     await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
     await home.setThinking("high");
-    // Explicit model only: thinking stays same as Home (high), which this model cannot do.
     const { observed, refusals } = await delegateThroughHome(f, { taskId: "explicit-clamp", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: f.model.id }, reason: "A lookup needs no reasoning" });
     expect(refusals).toEqual([]);
@@ -228,7 +221,6 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(task.intent.text).toContain("high clamped to off");
     const evidence = await f.registry.readTaskEvidence(task.sessionId!);
     expect(readSessionFixedSettings(evidence)["model.thinking[role=chat]"]).toMatchObject({ from: "delegate", value: "off" });
-    // A scope name that is not a current layer is refused; the session does not reinterpret it.
     const settings = evidence.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY)!;
     const retired = structuredClone(settings) as typeof settings & { data: { fixed: Record<string, { from: string }> } };
     retired.data.fixed["model.thinking[role=chat]"]!.from = "mac";
@@ -236,7 +228,6 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
   });
 
   it("skips an unregistered model and a provider at 95% usage in the worker queue, and tells Home and the worker why", async () => {
-    // A second provider whose fresh usage read shows a 97% weekly window; it is never called.
     const usage = { providers: { "usage-full": { baseUrl: "http://127.0.0.1:9/v1", api: "openai-completions", apiKey: "fixture-only",
       models: [{ id: "full", name: "Full", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] } } };
     const read = vi.fn(async (_runtime: unknown, provider: string | undefined) => ({ providers: [provider === "usage-full"
@@ -276,7 +267,6 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     f.faux.setResponses(Array.from({ length: 6 }, () => (context: TranscriptContext, options: SimpleStreamOptions | undefined, state: unknown, model: Model<string>) => {
       if (isWorkerTurn(context) && model.id === f.model.id) {
         observed.push({ model: model.id, reasoning: options?.reasoning });
-        // OpenCode Go's plan limit, as pi-ai reports it: non-retryable, so Pi settles on it.
         return fauxAssistantMessage("", { stopReason: "error", errorMessage: '429 {"type":"error","error":{"type":"GoUsageLimitError","message":"Monthly usage limit reached"}}' });
       }
       return scriptedHome({ taskId: "usage-limit", intent: "Finite work", target: f.cwd }, observed, refusals)(context, options, state, model);
@@ -289,13 +279,11 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     await taskIsTerminal(f, "usage-limit");
     const task = await homeOwnerOf(f.registry).taskStatus("usage-limit");
     expect(task.terminalEvidence?.outcome).toBe("final");
-    // The same request ran again, on the next model of the queue.
     expect(observed.map(request => request.model)).toEqual([f.model.id, TASK_REASONING_MODEL_ID]);
     expect(task.workerModel).toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
     const entries = await f.registry.readTaskEvidence(task.sessionId!);
     expect(entries.filter(entry => entry.type === "custom" && entry.customType === "tron.model-queue").map(entry => entry.type === "custom" ? entry.data : undefined))
       .toEqual([{ role: "worker", skipped: `${f.model.provider}/${f.model.id}`, reason: expect.stringContaining("usage-limit error: 429"), next: `${f.model.provider}/${TASK_REASONING_MODEL_ID}` }]);
-    // The next delegation skips the model that just hit its limit.
     const queue = await queueOwnerOf(f.registry)!.availability("worker", undefined, await f.registry.modelQueueOf("worker", "home"));
     expect(queue.models[0]).toMatchObject({ available: false, reason: expect.stringContaining("GoUsageLimitError") });
   });
@@ -307,7 +295,6 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
     const { observed } = await delegateThroughHome(f, { taskId: "live-home-model", intent: "Finite work", target: f.cwd });
     await taskIsTerminal(f, "live-home-model");
-    // The worker runs Home's own live thinking, which Home's saved settings resolve.
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: home.snapshot().thinkingLevel }]);
     const direct = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "ordinary-default-control", intent: "Finite work", target: f.cwd });
     await direct.completion;
@@ -336,8 +323,6 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const f = await fixture();
     installSettings(f);
     const home = await f.registry.acquire(f.home.sessionId);
-    // The reload holds Home's lane and publishes a new snapshot revision while the
-    // change plans; the runtime and its Home role are unchanged, so the change applies.
     const reloaded = home.reload();
     await home.setModel(f.model.provider, TASK_REASONING_MODEL_ID);
     await reloaded;
@@ -392,7 +377,6 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const f = await fixture();
     const error = await refusalOf(homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "fixed-list", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: "no-such-model" } }));
-    // The fixture's usable models are the default and reasoning models; its virtual router is usable but never a worker choice.
     expect(validModelList(error)).toEqual([`${f.model.provider}/${f.model.id}`, `${f.model.provider}/${TASK_REASONING_MODEL_ID}`].sort());
   });
 
@@ -487,8 +471,6 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     for (const row of retained.keys) expect(row).toMatchObject({
       value: captured, layer: "session", fixedAt: { from: "delegate", via: "home-profile" },
     });
-    // A pre-snapshot worker has no queue launch evidence. Build those actual
-    // persisted bytes only after its owner has shut down, then cold-open them.
     const path = worker.sessionFile!;
     await cold.dispose();
     const entries = (await readFile(path, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
@@ -500,17 +482,10 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     const legacyWorker = await legacy.acquire(task.sessionId!);
     expect(legacyWorker.snapshot().model).toMatchObject({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
     for (const key of keys) expect(legacyWorker.settingsSessionLayer().fixed?.[key]).toBeUndefined();
-    // No task-specific module may be bound to a nonexistent launch snapshot.
     expect(await readdir(join(f.tronHome, "gateway", "model-queue-sessions"))).toEqual([]);
-  }, 60_000); // Managed extension startup plus two cold reopens; not a 15 s latency contract.
+  }, 60_000);
 });
 
-/**
- * The Home profile's task budget (settings-model.md 6.1) at the real dispatcher,
- * worker runtime and canonical transcript: tokens are the record's own spend
- * projection, the budget is fixed at start, a lower applies live at the next turn
- * boundary, a raise never reaches a running task, and no turn runs after the stop.
- */
 describe("Background model queue", () => {
   it("summarizes Home memory on the next background model after a usage-limit error, and skips the limited model afterward", async () => {
     const f = await fixture(false, false, undefined, false, undefined, { queueSummarizer: true });
@@ -518,7 +493,6 @@ describe("Background model queue", () => {
     await setModelQueue(queueOwners(f), "background", [f.model, `${f.model.provider}/${TASK_REASONING_MODEL_ID}`]);
     const summaries: string[] = [];
     f.faux.setResponses(Array.from({ length: 40 }, () => (_context: TranscriptContext, options: SimpleStreamOptions | undefined, _state: unknown, model: Model<string>) => {
-      // The memory compactor's calls carry its cache key; Home's own turns do not.
       if (options?.sessionId?.startsWith("tron-episodic:")) {
         summaries.push(model.id);
         return model.id === f.model.id
@@ -528,12 +502,10 @@ describe("Background model queue", () => {
       return fauxAssistantMessage("Home answered.");
     }));
     const home = await f.registry.acquire(f.home.sessionId);
-    // A message over the memory's node size is summarized; a short one is kept verbatim.
     await home.prompt(`Remember this first turn: ${"first detail ".repeat(200)}`);
     await waitFor(() => home.snapshot().configurationBlocker === null && summaries.includes(TASK_REASONING_MODEL_ID), "a summary on the next model");
     await home.prompt(`Remember this second turn: ${"second detail ".repeat(200)}`);
     await waitFor(() => home.snapshot().configurationBlocker === null && summaries.filter(id => id === TASK_REASONING_MODEL_ID).length >= 2, "later summaries");
-    // One failed request on the limited model; every later summary went straight to the next one.
     expect(summaries[0]).toBe(f.model.id);
     expect(summaries.filter(id => id === f.model.id)).toHaveLength(1);
     expect((await homeOwnerOf(f.registry).memoryStatus()).blocked).toBeUndefined();
@@ -546,8 +518,6 @@ describe("Home task budget", () => {
     { stopReason: "toolUse", usage: { input: 2, output, cacheRead: 0, cacheWrite: 0 } } as never);
   const install = (f: Awaited<ReturnType<typeof fixture>>) =>
     f.settings.settingsChanges;
-  /** The maintainer's paired tap applies a spend widening directly; any other
-   * actor receives only the exact review. */
   const setBudget = (changes: ReturnType<typeof install>, value: Record<string, number> | undefined, context: Parameters<ReturnType<typeof install>["change"]>[2] = ui) =>
     changes.change({ kind: "home" }, [{ key: "permissions.budget.task", layer: "session", op: value ? "set" : "unset", ...(value ? { value } : {}) }], context);
 
@@ -563,7 +533,6 @@ describe("Home task budget", () => {
     expect(task).toMatchObject({ budget: { outputTokens: 10 }, spend: { outputTokens: 12 },
       terminalEvidence: { outcome: "limited", reason: "budget" } });
     expect(calls).toBe(2);
-    // Negative control: the same work without a budget runs to its report.
     await setBudget(changes, undefined);
     f.faux.setResponses([turn(6, "three"), turn(6, "four"), fauxAssistantMessage([reportCall("unbudgeted")], { stopReason: "toolUse" })]);
     const free = await (await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "unbudgeted", intent: "Finite work", target: f.cwd })).completion;
@@ -583,17 +552,14 @@ describe("Home task budget", () => {
       () => { calls++; return fauxAssistantMessage("must never be requested"); }]);
     const lowered = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "lowered", intent: "Finite work", target: f.cwd });
     await waitFor(() => entered, "second worker turn");
-    // Lowering narrows: the maintainer's tap applies quietly and reaches the running task.
     expect((await setBudget(changes, { outputTokens: 5 })).status).toBe("applied");
     release();
     expect(await lowered.completion).toMatchObject({ budget: { outputTokens: 100 }, terminalEvidence: { outcome: "limited", reason: "budget" } });
     expect(calls).toBe(2);
 
-    // Home asking to raise it widens spending: it gets only the exact review for the maintainer's tap.
     const held = await setBudget(changes, { outputTokens: 1_000 }, { actor: { kind: "home", id: "home" }, reason: "Longer research tasks" });
     expect(held).toMatchObject({ status: "review", review: { requiresTap: true }, changes: [] });
 
-    // A raise after start never reaches the running task: it still stops at its start budget.
     entered = false; calls = 0;
     gate = new Promise<void>(resolve => { release = resolve; });
     f.faux.setResponses([async () => { calls++; entered = true; await gate; return turn(6, "c"); }, () => { calls++; return turn(6, "d"); },

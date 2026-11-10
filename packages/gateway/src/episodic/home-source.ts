@@ -13,27 +13,16 @@ interface CompactEntry {
   id: string;
   parentId: string | null;
   projected?: EpisodicProjectedMessage;
-  /** Only presentation kind is needed to project a later context edit. */
   shape?: EpisodicCanonicalEntry;
   edit?: { targetId: string; projected: EpisodicProjectedMessage };
 }
 
-// A persisted cursor's file identity (inode, size, times) is a cache key, not
-// evidence: it lets an unchanged chapter skip a read. A copied or restored home
-// holds byte-identical transcripts under new inodes and change times (#2314),
-// and macOS renumbers st_dev across mounts (#2311), so a key mismatch is settled
-// by the admitted prefix's content digest (`holdsAdmittedPrefix`), never by
-// identity alone. `dev` is compared only within one process.
 function unchanged(info: Stats, cursor: EpisodicChapterSourceCursor): boolean {
   return info.ino === cursor.ino && info.size === cursor.size
     && info.mtimeMs === cursor.mtimeMs && info.ctimeMs === cursor.ctimeMs;
 }
 function fail(message: string): never { throw new EpisodicMemoryError("source", message); }
 
-/** One line at a time. No batch of raw strings survives a parse/project step. A
- * line can be tens of megabytes (an inline image), so its reads are kept as pieces
- * and joined once: joining each read onto the pending bytes copies the line once
- * per read. */
 async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, end: number, maxLineBytes: number) {
   const buffer = Buffer.alloc(64 * 1024);
   let pieces: Buffer[] = [];
@@ -54,19 +43,13 @@ async function* lines(handle: Awaited<ReturnType<typeof open>>, start: number, e
       newline = chunk.indexOf(10, from);
     }
     if (pendingBytes + bytesRead - from > maxLineBytes) fail("Home canonical line exceeds the source bound");
-    // Copy the tail: it must not retain the reused read buffer.
     if (from < bytesRead) {
       pieces.push(Buffer.from(chunk.subarray(from)));
       pendingBytes += bytesRead - from;
     }
   }
-  // A trailing partial line is a live writer's append, or a crash's: it is not an
-  // entry until its newline lands. It stays unread, so the next delta ingests it
-  // once complete, as the episodic reader does.
 }
 
-/** Whether a handle holds a cursor's admitted prefix byte for byte: its digest is
- * re-derived from the first byte, so a rewrite anywhere in it is detected. */
 async function holdsAdmittedPrefix(handle: Awaited<ReturnType<typeof open>>, cursor: EpisodicChapterSourceCursor, size: number, maxLineBytes: number): Promise<boolean> {
   if (size < cursor.completeBytes) return false;
   let prefix = COMPLETE_PREFIX_SEED;
@@ -74,9 +57,6 @@ async function holdsAdmittedPrefix(handle: Awaited<ReturnType<typeof open>>, cur
   return prefix === cursor.completePrefixDigest;
 }
 
-/** A chapter whose cache key changed but whose bytes are the cursor's (same size,
- * same admitted prefix) is the same chapter at a new file identity: the cursor is
- * re-keyed to it without re-projecting anything. Otherwise undefined. */
 async function rekeyedCursor(chapter: HomeSourceChapter, cursor: EpisodicChapterSourceCursor, limits: EpisodicLimits): Promise<EpisodicChapterSourceCursor | undefined> {
   const handle = await open(chapter.path, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => fail("Home canonical source cannot be opened"));
   try {
@@ -97,8 +77,6 @@ function singleProjection(entry: EpisodicCanonicalEntry, limits: EpisodicLimits,
   return projectBranch([entry], limits, sourceSessionId)[0];
 }
 
-/** Raw payloads are projected immediately. Retained state is ID/parent topology,
- * capped text, and the minimal role shape used by context edits, never JSONL. */
 async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits, previous?: EpisodicChapterSourceCursor): Promise<{
   branch: CompactEntry[]; cursor: EpisodicChapterSourceCursor; incremental: boolean;
 }> {
@@ -106,8 +84,6 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
   try {
     const start = await handle.stat();
     if (!start.isFile()) fail("Home canonical source is not a regular file");
-    // A new identity (a copy, a restore) extends the cursor only if its whole
-    // admitted prefix is unchanged; the same file needs only its boundary line.
     if (previous && (start.size < previous.completeBytes
       || (start.ino !== previous.ino && !await holdsAdmittedPrefix(handle, previous, start.size, limits.maxSourceLineBytes)))) {
       if (chapter.sealed) fail("Home canonical source no longer matches its cursor");
@@ -137,8 +113,6 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
         if (!line.trim()) continue;
         const entry = parseEntry(line);
         if (entries.has(entry.id)) fail("Home canonical source repeats an entry ID");
-        // Navigation and edits require the compact branch of this chapter, not a
-        // whole-Home refresh. Close this handle before opening that full cut.
         if (incremental && (entry.parentId !== leaf || entry.type === "context_edit")) {
           incremental = false;
           break;
@@ -163,9 +137,6 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
         entries.set(compact.id, compact);
       }
     } catch (error) {
-      // A delta read of a source that changed while it was read can fail to parse
-      // mid-write or mid-rewrite. That is a transient cut: the next ingestion reads
-      // it again. Only a stable malformed chapter refuses.
       if (error instanceof EpisodicMemoryError && error.kind === "source") {
         const now = await handle.stat().catch(() => undefined);
         if (!now || !sameSnapshot(start, now)) throw new EpisodicSourceChangedError();
@@ -173,7 +144,6 @@ async function compactChapter(chapter: HomeSourceChapter, limits: EpisodicLimits
       throw error;
     }
     if (previous && !incremental) {
-      // The partial delta holds no canonical payload by the time we recurse.
       await handle.close();
       return compactChapter(chapter, limits);
     }
@@ -214,7 +184,6 @@ async function validateSnapshot(snapshot: HomeSourceSnapshot, cursor: EpisodicSo
     if (prior[index] && prior[index]!.sessionId !== chapter.sessionId) fail("Home source chapter order changed");
     const info = await lstat(chapter.path).catch(() => fail("Home canonical source is unavailable"));
     if (!info.isFile()) fail("Home canonical source is not a regular file");
-    // A sealed chapter never grows or shrinks; its bytes are proven where they are read.
     if (prior[index]?.sealed && (!chapter.sealed || info.size !== prior[index]!.size)) fail("Sealed Home source changed since ingestion");
     stats.push(info);
   }
@@ -230,8 +199,6 @@ function aggregate(snapshot: HomeSourceSnapshot, chapters: EpisodicChapterSource
   };
 }
 
-/** Consume/commit one chapter before reading the next. Only capped projections
- * cross the await into EpisodicMemory; old sealed JSONL is never reopened. */
 export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<EpisodicSourceDelta> {
   const stats = await validateSnapshot(snapshot, cursor);
   const chapters = [...(cursor?.home.chapters ?? [])];
@@ -258,45 +225,24 @@ export async function* readCanonicalHomeDeltas(snapshot: HomeSourceSnapshot, cur
     yield { sessionId: snapshot.homeId, projected: [...projected.values()],
       scopeSessionId: chapter.sessionId, cursor: next, incremental: cut.incremental };
   }
-  // Even no-op ingestion acknowledges a ledger-only transition (seal/roll).
   const next = aggregate(snapshot, chapters);
   if (acknowledged?.completePrefixDigest === next.completePrefixDigest
     && acknowledged?.home.ledgerRevision === next.home.ledgerRevision) return;
   yield { sessionId: snapshot.homeId, projected: [], cursor: next, incremental: true };
 }
 
-/** One chapter's exact proof: the admitted prefix's digest and leaf re-derived
- * from its bytes, the file stat it was read under, and where each entry's line
- * sits in that prefix. Positions only; no canonical text is retained. */
 interface ChapterProof {
   stat: Pick<Stats, "dev" | "ino" | "size" | "mtimeMs" | "ctimeMs">;
   completeBytes: number;
   completePrefixDigest: string;
   leafEntryId: string | null;
   leafLineDigest: string | null;
-  /** Every entry of the prefix, on the branch or not: evidence may name either. */
   lines: ReadonlyMap<string, { offset: number; bytes: number }>;
-  /** The branch through the leaf, oldest first. */
   branch: readonly string[];
 }
 
-/**
- * Proofs of admitted chapter prefixes, owned by one Home memory owner (#940).
- * Every memory read proves every admitted chapter against canonical bytes, and
- * re-deriving that digest from all of Home's history on each read made a read's
- * cost grow with every byte Home ever wrote (tens of megabytes; past the browser's
- * 5 s read deadline on a busy Gateway). A proof is reused only while its file's
- * stat is identical, which is the same unchanged-file test sealed chapters are
- * held to. An appended active chapter is extended from its last proof: the line
- * ending at the proven boundary must still hash to the proven leaf (ingestion's
- * own append test), and only the new bytes are read; any other change, a
- * non-linear entry included, re-proves the whole chapter.
- */
 export class HomeSourceProofs {
   private readonly chapters = new Map<string, ChapterProof>();
-  /** One proof per chapter at a time. A cancelled read abandons only its wait:
-   * the bounded pass completes for the next read, so a cold proof slower than the
-   * read deadline still converges instead of restarting on every retry. */
   private readonly running = new Map<string, Promise<ChapterProof>>();
 
   async prove(chapter: HomeSourceChapter, admitted: EpisodicChapterSourceCursor, limits: EpisodicLimits, signal?: AbortSignal): Promise<ChapterProof> {
@@ -304,20 +250,18 @@ export class HomeSourceProofs {
       signal?.throwIfAborted();
       const running = this.running.get(chapter.sessionId);
       if (running) {
-        // Joined work proved some admitted cut; re-check this one against it.
         await abortableRead(signal, () => running.then(() => undefined, () => undefined));
         continue;
       }
       const work = proveChapter(chapter, admitted, limits, this.chapters.get(chapter.sessionId))
         .then(proof => { this.chapters.set(chapter.sessionId, proof); return proof; })
         .finally(() => { this.running.delete(chapter.sessionId); });
-      work.catch(() => {}); // An abandoned failure is observed by the next read, not unhandled.
+      work.catch(() => {});
       this.running.set(chapter.sessionId, work);
       return await abortableRead(signal, () => work);
     }
   }
 
-  /** Forget chapters the ledger no longer admits. */
   retain(sessionIds: ReadonlySet<string>): void {
     for (const sessionId of this.chapters.keys()) if (!sessionIds.has(sessionId)) this.chapters.delete(sessionId);
   }
@@ -338,10 +282,8 @@ async function proveChapter(chapter: HomeSourceChapter, admitted: EpisodicChapte
   try {
     const start = await handle.stat();
     if (!start.isFile()) fail("Home canonical source is not a regular file");
-    // Identity is not compared: the admitted digest below is re-derived from bytes.
     if (start.size < admitted.completeBytes) fail("Home canonical source no longer matches its cursor");
     if (cached && sameStat(cached.stat, start) && provenAt(cached, admitted)) return cached;
-    // Only an appended active chapter extends; a sealed one must be unchanged.
     const base = cached && !chapter.sealed && cached.stat.dev === start.dev && cached.stat.ino === start.ino
       && cached.completeBytes > 0 && cached.completeBytes <= admitted.completeBytes && cached.leafLineDigest !== null
       && await prefixLineDigest(handle, cached.completeBytes, limits.maxSourceLineBytes) === cached.leafLineDigest ? cached : undefined;
@@ -368,7 +310,6 @@ async function proveChapter(chapter: HomeSourceChapter, admitted: EpisodicChapte
       const entry = parseEntry(line);
       if (lineIndex.has(entry.id)) fail("Home canonical source repeats an entry ID");
       if (base && entry.parentId !== leaf) {
-        // Navigation since the last proof: the branch must be walked again.
         diverged = true;
         break;
       }
@@ -376,8 +317,6 @@ async function proveChapter(chapter: HomeSourceChapter, admitted: EpisodicChapte
       if (base) appended.push(entry.id); else parents.set(entry.id, entry.parentId);
       leaf = entry.id; leafDigest = episodicDigest(line);
     }
-    // A base the admitted cut does not extend (navigation, or a rewrite that a
-    // full ingestion read) is stale, not a refusal: prove from the first byte.
     if (diverged || (base && (prefix !== admitted.completePrefixDigest || leaf !== admitted.leafEntryId))) {
       await handle.close();
       return await proveChapter(chapter, admitted, limits, undefined);
@@ -385,7 +324,6 @@ async function proveChapter(chapter: HomeSourceChapter, admitted: EpisodicChapte
     if (!headerSeen) fail("Home canonical source is empty");
     if (prefix !== admitted.completePrefixDigest || leaf !== admitted.leafEntryId) {
       const end = await handle.stat();
-      // A rewrite while it was read is transient; a stable mismatch is a refusal.
       if (!sameSnapshot(start, end)) throw new EpisodicSourceChangedError();
       fail("Home canonical prefix changed since ingestion");
     }
@@ -411,9 +349,6 @@ async function proveChapter(chapter: HomeSourceChapter, admitted: EpisodicChapte
   } finally { await handle.close().catch(() => {}); }
 }
 
-/** Exact frozen cuts are not delta reads. Stream the branch index of each
- * admitted prefix, proving its digest, with no raw text retained or later tail.
- * Without an owner's proofs the read proves every chapter from its first byte. */
 export async function* readCanonicalHomeIndex(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor, limits: EpisodicLimits,
   signal?: AbortSignal, proofs = new HomeSourceProofs()): AsyncIterable<{ id: string; sourceSessionId: string }> {
   await validateSnapshot(snapshot, cursor);
@@ -431,11 +366,6 @@ export async function* readCanonicalHomeIndex(snapshot: HomeSourceSnapshot, curs
   }
 }
 
-/** Read one original entry through its admitted physical prefix. Unlike the
- * projection, this retains only the selected bounded raw line. It never opens
- * SessionManager (which may migrate/repair files). All-chapter proof is the
- * caller's read boundary; this read proves the chapter and then the selected
- * line's own digest at use. */
 export async function readCanonicalHomeEvidence(snapshot: HomeSourceSnapshot, cursor: EpisodicSourceCursor,
   evidence: HomeMemoryEvidence, limits: EpisodicLimits, signal?: AbortSignal, proofs = new HomeSourceProofs()): Promise<EpisodicCanonicalEntry> {
   const index = cursor.home.chapters.findIndex(chapter => chapter.sessionId === evidence.sessionId);

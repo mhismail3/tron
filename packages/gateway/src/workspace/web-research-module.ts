@@ -8,8 +8,6 @@ import { webResearchTool, type WebResearchRequest } from "./web-research-contrac
 import { WebResearch, type WebResearchTransport } from "./web-research.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 
-/** Start once per Gateway, resolve the same service at every call and reload.
- * Child grants carry only a local scoped capability, never provider credentials. */
 export function createWebResearchModule(transport: () => WebResearchTransport | undefined): ModuleDescriptor {
   return { name: "tron-web-research", purpose: "One bounded keyless public-web capability for Home, workers and native children.",
     tools: ["web_search"], commands: [], start: async host => {
@@ -21,7 +19,6 @@ export function createWebResearchModule(transport: () => WebResearchTransport | 
       let server: Server | undefined;
       let opening: Promise<void> | undefined;
       const open = () => opening ??= (async () => {
-        // Unix socket paths have a host limit; inherited fixture TMPDIRs can be much longer.
         directory = await mkdtemp(join("/tmp", "tron-web-")); await chmod(directory, 0o700);
         await mkdir(childDirectory, { recursive: true, mode: 0o700 });
         server = createServer((request, response) => {
@@ -49,8 +46,6 @@ export function createWebResearchModule(transport: () => WebResearchTransport | 
         if (!entry) {
           if (grants.size >= 4096) throw new Error("Shared web research child grant bound exceeded");
           const token = randomBytes(32).toString("hex");
-          // Retained child launches carry an exact extension path. Reopening a
-          // parent must recreate that path with the new runtime's socket grant.
           const path = join(childDirectory, `${createHash("sha256").update(scope).digest("hex")}.ts`);
           const child = fileURLToPath(new URL(`./web-research-child${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
           await writeFile(path, `import { webResearchChild } from ${JSON.stringify(pathToFileURL(child).href)};\nexport default webResearchChild(${JSON.stringify(join(directory!, "service.sock"))}, ${JSON.stringify(token)});\n`, { mode: 0o600 });

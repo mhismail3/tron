@@ -323,9 +323,6 @@ describe("Gateway upload HTTP streaming", () => {
       outgoing.write("1234", () => outgoing.destroy());
     }, failedID);
     await expect(interrupted).rejects.toBeDefined();
-    // The failed-upload record is written once the body stream's own staging
-    // cleanup has finished, so waiting for the record also proves the partial
-    // file is gone; no fixed pause can prove either on a busy host.
     await waitFor(
       () => loggerRecords.some(({ metadata }) => metadata.event === "http.upload" && metadata.requestID === failedID),
       "the failed upload record",
@@ -338,8 +335,6 @@ describe("Gateway upload HTTP streaming", () => {
       message: "HTTP attachment upload failed",
       metadata: { requestID: failedID, outcome: "failure", code: expect.any(String) },
     });
-    // The async body iterator did not yield a partial chunk before abort, so
-    // no observed-byte count is available to report.
     expect(failedRecord?.metadata.counts).toBeUndefined();
     expect(failedRecord?.message).not.toContain("stream.txt");
   });

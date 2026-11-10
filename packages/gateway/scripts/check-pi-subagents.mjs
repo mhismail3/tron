@@ -38,8 +38,6 @@ function safeArtifact(relativePath) {
 }
 
 function runtimeDependencies(manifest) {
-  // Peers are supplied by the host, not runtime edges of the bundled graph.
-  // A package declared in dependencies as well as peers is still a runtime edge.
   return { ...(manifest.dependencies ?? {}), ...(manifest.optionalDependencies ?? {}) };
 }
 function sameRuntimeDeclarations(left, right) {
@@ -76,8 +74,6 @@ function checkClosure(name, version, sourceManifest, lockBytes, closurePath) {
   const entries = new Set(archiveEntries(closurePath));
   const visited = new Set();
   const pending = dependencies.map((dependency) => ["", dependency]);
-  // Resolve each edge exactly as node_modules lookup does, including nested
-  // versions and hoisting. A visited package path bounds cycles and diamond graphs.
   while (pending.length) {
     const [importer, dependency] = pending.pop();
     const path = resolveDependency((candidate) => Object.hasOwn(packages, candidate), importer, dependency);

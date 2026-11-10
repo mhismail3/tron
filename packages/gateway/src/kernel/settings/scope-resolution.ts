@@ -1,8 +1,6 @@
 import type { LayerId, SettingsTarget, Qualifiers } from "./tool-contract.js";
 import type { StoreLayer } from "./settings-types.js";
 
-/** Storage paths remain available to the SDK and historical undo. Grants are
- * checked independently, before values enter resolution or a new mutation. */
 export function scopeAdmitted(key: { projectSettable: boolean; sessionOverridable: boolean }, layer: StoreLayer): boolean {
   return layer === "project" ? key.projectSettable : layer === "session" || layer === "home" ? key.sessionOverridable : true;
 }

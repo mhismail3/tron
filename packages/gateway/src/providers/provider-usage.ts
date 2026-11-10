@@ -42,11 +42,9 @@ export interface ProviderUsageSnapshot {
 }
 export interface ProviderUsageResponse { providers: ProviderUsageSnapshot[]; }
 
-/** One wire API paired with the base URL a first-party model resolves to. */
 interface ProviderShape { api: string; baseUrl: string; }
 interface Adapter {
   id: string;
-  /** Every first-party (api, effective base URL) shape the provider may resolve to. */
   shapes: readonly ProviderShape[];
   endpoint: string;
   source: string;
@@ -54,9 +52,6 @@ interface Adapter {
   oauthOnly?: boolean;
   headers(auth: ResolvedAuth): Record<string, string> | undefined;
   parse(body: unknown): { windows: UsageWindow[]; balances: UsageBalance[] };
-  /** Optional: one first-party HTTP status the default credential/limit mapping
-   * would misreport, classified from its bounded JSON error body (undefined when
-   * absent, unparseable or unreadable). Other statuses never have their body read. */
   failure?: { status: number; classify(body: unknown): { status: ProviderStatus; message: string } | undefined };
 }
 interface ResolvedAuth { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string; }
@@ -121,13 +116,6 @@ const adapters: Record<string, Adapter> = {
     headers: bearerHeaders, parse: parseMoonshotBalance("CNY"),
   },
   "opencode-go": {
-    // Go models resolve across several wire APIs under two base URLs; the plan's
-    // account usage is the one endpoint both the console and the CLI report.
-    // Catalogs have served the same service under `/zen/go`, `/inference/go` and,
-    // from Pi 1.5, one protocol-specific path per API under `/inference/go`
-    // (`/anthropic`, `/openai/v1`, `/google/v1beta`); a refresh can replace the
-    // bundled catalog with another family (#1072). One key and one usage endpoint
-    // serve every path family.
     id: "opencode-go", shapes: [
       { api: "anthropic-messages", baseUrl: "https://opencode.ai/zen/go" },
       { api: "openai-completions", baseUrl: "https://opencode.ai/zen/go/v1" },
@@ -147,15 +135,6 @@ const adapters: Record<string, Adapter> = {
   },
 };
 
-/**
- * A provider whose own credential has no first-party usage endpoint, but whose
- * plan usage another provider's login can read. Pi's `openai` OAuth login is a
- * Sign in with ChatGPT token: audience-bound to api.openai.com/v1, without a
- * ChatGPT account claim, and OpenAI forbids sending it to ChatGPT backend
- * endpoints. The same ChatGPT plan's windows are therefore read only through the
- * `openai-codex` adapter and credential. The borrower's credential is never
- * resolved; account identity across the two logins cannot be proven (#312).
- */
 interface BorrowedUsage { shapes: readonly ProviderShape[]; from: string; }
 const borrowedUsage: Record<string, BorrowedUsage> = {
   openai: { shapes: [{ api: "openai-responses", baseUrl: "https://api.openai.com/v1" }], from: "openai-codex" },
@@ -242,7 +221,6 @@ function anthropicOAuthHeaders(auth: ResolvedAuth): Record<string, string> | und
     Accept: "application/json",
     "Content-Type": "application/json",
     "anthropic-beta": "oauth-2025-04-20",
-    // The same Claude Code version Tron's subscription requests claim.
     "User-Agent": `claude-code/${CLAUDE_CODE_VERSION}`,
   };
 }
@@ -252,8 +230,6 @@ function codexHeaders(auth: ResolvedAuth): Record<string, string> | undefined {
   if (!token) return undefined;
   let account = auth.headers?.["chatgpt-account-id"] ?? auth.headers?.["ChatGPT-Account-Id"];
   if (typeof account !== "string" || account.length === 0) {
-    // Codex OAuth's public toAuth result is an access token; the existing
-    // first-party client derives account context from this non-secret JWT claim.
     try {
       const part = token.split(".")[1];
       const payload = part ? JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as Record<string, unknown> : undefined;
@@ -261,8 +237,6 @@ function codexHeaders(auth: ResolvedAuth): Record<string, string> | undefined {
       account = typeof claim === "string" ? claim : undefined;
     } catch { account = undefined; }
   }
-  // The first-party endpoint requires both the ChatGPT bearer and account
-  // context. An arbitrary API key must never be sent to chatgpt.com.
   if (!account) return undefined;
   return { Authorization: `Bearer ${token}`, "chatgpt-account-id": account };
 }
@@ -359,8 +333,6 @@ function parseAnthropicOAuthUsage(body: unknown) {
     for (const limitValue of root.limits.slice(0, MAX_WINDOWS)) {
       const limit = object(limitValue);
       if (!limit) throw new Error("invalid Anthropic usage limit");
-      // An inactive scoped limit (Ultra's "Fable" share) does not constrain
-      // requests; showing it duplicates the account's weekly row.
       if (limit.kind !== "weekly_scoped" || limit.group !== "weekly" || limit.is_active === false) continue;
       const scope = object(limit.scope); const model = object(scope?.model);
       const modelName = text(model?.display_name); const modelId = text(model?.id);
@@ -382,8 +354,6 @@ function parseAnthropicOAuthUsage(body: unknown) {
     const spend = object(object(root.spend)?.limit);
     const currency = spend?.currency === undefined || spend.currency === null ? "USD" : text(spend.currency);
     const exponent = spend?.exponent === undefined || spend.exponent === null ? 2 : number(spend.exponent);
-    // Extra usage is optional in Anthropic's response; malformed/incomplete
-    // detail must not suppress valid account quota windows above.
     if (usedMinor !== null && usedMinor >= 0 && limitMinor !== null && limitMinor >= 0
         && currency && /^[A-Za-z]{3}$/u.test(currency)
         && exponent !== null && Number.isInteger(exponent) && exponent >= 0 && exponent <= 20
@@ -398,13 +368,6 @@ function parseAnthropicOAuthUsage(body: unknown) {
   if (!knownFields.some((key) => Object.hasOwn(root, key))) throw new Error("usage body has no known Anthropic quota fields");
   return { windows: capWindows(windows), balances: [] };
 }
-/**
- * OpenCode answers a valid key whose account has no active Go plan with 403
- * `{error:{type:"EntitlementError"}}`; only that refusal states a subscription
- * fact, and it is not a rejected credential. A 403 `AuthError` is a rejected
- * credential (the default mapping). Any other 403 (another error type, an edge
- * page) is a refused read that proves nothing about the plan (#1337).
- */
 function openCodeGoForbidden(body: unknown): { status: ProviderStatus; message: string } | undefined {
   const refusal = upstreamAccountRefusal(body);
   if (refusal === "entitlement") return { status: "unsupported", message: "OpenCode Go reports no active Go subscription for this account" };
@@ -415,8 +378,6 @@ function parseOpenCodeGo(body: unknown) {
   const root = object(body); if (!root) throw new Error("usage body is not an object");
   const usage = object(root.usage); if (!usage) throw new Error("usage body has no usage object");
   const windows: UsageWindow[] = [];
-  // The Go plan fixes these three account-wide windows; the endpoint reports a
-  // used percent and reset only, so amounts stay null rather than invented.
   for (const [id, label, windowSeconds] of [["rolling", "5h", 18_000], ["weekly", "Weekly", 604_800], ["monthly", "Monthly", 2_592_000]] as const) {
     const row = object(usage[id]); if (!row) throw new Error("invalid OpenCode Go usage window");
     const usedPercent = number(row.percent);
@@ -425,10 +386,6 @@ function parseOpenCodeGo(body: unknown) {
   }
   return { windows: capWindows(windows), balances: [] };
 }
-/**
- * Moonshot Open Platform reports prepaid balances only; the currency is fixed by
- * the regional host that answered, so no response field can select it.
- */
 function parseMoonshotBalance(currency: string) {
   return (body: unknown): { windows: UsageWindow[]; balances: UsageBalance[] } => {
     const root = object(body); if (!root) throw new Error("usage body is not an object");
@@ -438,14 +395,12 @@ function parseMoonshotBalance(currency: string) {
     const available = number(data.available_balance);
     if (available === null) throw new Error("invalid Moonshot available balance");
     const balances: UsageBalance[] = [{ id: "available", label: "Available", amount: available, currency }];
-    // Voucher and cash detail are optional; a reported amount may be a deficit.
     for (const [id, label] of [["voucher", "Voucher"], ["cash", "Cash"]] as const) {
       const reported = data[`${id}_balance`];
       if (reported === undefined || reported === null) continue;
       const amount = number(reported); if (amount === null) throw new Error("invalid Moonshot balance");
       balances.push({ id, label, amount, currency });
     }
-    // Moonshot reports no quota windows, so only balances are projected.
     return { windows: [], balances: capBalances(balances) };
   };
 }
@@ -455,18 +410,12 @@ function parseBalances(value: unknown): UsageBalance[] {
   return amount === null ? [] : capBalances([{ id: "credits", label: "Credits", amount, currency }]);
 }
 
-/** True when this runtime's effective composition has a first-party usage adapter. */
 export function providerUsageSupported(runtime: ModelRuntime, providerId: string): boolean {
   const borrowed = borrowedUsage[providerId];
   if (borrowed) return borrowerQualifies(runtime, providerId, borrowed) && adapterFor(runtime, borrowed.from) !== undefined;
   const adapter = adapterFor(runtime, providerId);
   return adapter !== undefined && (!adapter.oauthOnly || !runtime.hasConfiguredAuth(providerId) || runtime.isUsingOAuth(providerId));
 }
-/**
- * The provider that currently presents this provider's usage as its own, if any.
- * Clients hide a configured lender row while its borrower qualifies, so one
- * ChatGPT plan appears once (#312); the lender stays visible on its own.
- */
 export function providerUsageLentTo(runtime: ModelRuntime, providerId: string): string | null {
   for (const [borrower, borrowed] of Object.entries(borrowedUsage)) {
     if (borrowed.from === providerId && providerUsageSupported(runtime, borrower)) return borrower;
@@ -474,16 +423,10 @@ export function providerUsageLentTo(runtime: ModelRuntime, providerId: string): 
   return null;
 }
 function loopbackHost(hostname: string): boolean {
-  // URL hostnames bracket IPv6 literals, so compare the unbracketed form.
   const host = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-  // Anything but a literal 127.0.0.0/8 address may resolve elsewhere.
   return host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u.test(host);
 }
 
-/**
- * True when the provider resolves only to a local runtime, which is unmetered:
- * clients show an unlimited indicator instead of reading account usage.
- */
 export function providerLocalOnly(runtime: ModelRuntime, providerId: string): boolean {
   const models = runtime.getModels(providerId);
   if (models.length === 0) return false;
@@ -492,7 +435,6 @@ export function providerLocalOnly(runtime: ModelRuntime, providerId: string): bo
   if (providerBaseUrl) baseUrls.push(providerBaseUrl);
   for (const baseUrl of baseUrls) {
     let parsed: URL;
-    // A malformed or absent host cannot be proven local, so it stays metered.
     try { parsed = new URL(baseUrl); } catch { return false; }
     if (!loopbackHost(parsed.hostname)) return false;
   }
@@ -516,9 +458,6 @@ function adapterFor(runtime: ModelRuntime, id: string): Adapter | undefined {
 }
 function firstPartyComposition(runtime: ModelRuntime, id: string, shapes: readonly ProviderShape[]): boolean {
   const binding = providerBinding(runtime, id);
-  // Matching the effective composed models is intentional: provider IDs alone can
-  // be reused by models.json or an extension for an unrelated upstream, so every
-  // resolved (api, base URL) must be a declared first-party shape.
   const declared = new Set(shapes.map((shape) => `${shape.api}:${normalizeBaseUrl(shape.baseUrl)}`));
   const models = runtime.getModels(id);
   const exactModels = models.length > 0 && models.every((model) => declared.has(`${model.api}:${normalizeBaseUrl(model.baseUrl)}`));
@@ -568,9 +507,6 @@ export class ProviderUsageOwner {
     if (!admission) return emptySnapshot(providerId, "unavailable", adapters[providerId]?.source ?? null, adapters[providerId]?.scope ?? null, "Provider usage is busy");
     try { return await this.readOneAdmitted(runtime, providerId, signal, admission); }
     catch (error) {
-      // A timed-out race may leave the credential provider physically running;
-      // resolveAuth owns that release. Synchronous failures before an auth call
-      // still release their admission here.
       if (!admission.fetchStarted && admission.authSettled) admission.release();
       throw error;
     }
@@ -601,8 +537,6 @@ export class ProviderUsageOwner {
       admission.release();
       return emptySnapshot(providerId, "unsupported", adapter.source, adapter.scope, "Usage is not supported for this provider configuration");
     }
-    // The effective model/provider composition can change while credential
-    // lookup awaits. Never send the credential to a binding captured earlier.
     if (!sameBinding(initialBinding, providerBinding(runtime, providerId))) {
       admission.release();
       return emptySnapshot(providerId, "unsupported", adapter.source, adapter.scope, "Usage is not supported for this provider configuration");
@@ -644,21 +578,15 @@ export class ProviderUsageOwner {
     flight.waiters += 1;
     try {
       const snapshot = await raceAbort(flight.promise, signal);
-      // Auth can be replaced while the socket is in flight. Do not publish a
-      // late response under the newly selected account, even to the same client.
       const verified = await this.verifyCurrentAuth(runtime, providerId, adapter, key, signal);
       if (verified === undefined) return emptySnapshot(providerId, "unavailable", adapter.source, adapter.scope, "Provider usage is busy");
       if (!verified) {
-        // Never route the old cache entry through failed(): it would preserve
-        // old-account windows as a stale available projection.
         return emptySnapshot(providerId, "unavailable", adapter.source, adapter.scope, "Provider usage changed while the request was in flight");
       }
       return snapshot;
     }
     finally {
       flight.waiters -= 1;
-      // Producer settlement, rather than the first waiter, owns flight cleanup.
-      // A cancelled waiter must not cancel or prematurely remove the socket.
     }
   }
   private async readBorrowed(runtime: ModelRuntime, providerId: string, borrowed: BorrowedUsage, signal?: AbortSignal): Promise<ProviderUsageSnapshot> {
@@ -667,9 +595,6 @@ export class ProviderUsageOwner {
       return emptySnapshot(providerId, "unsupported", lender.source, lender.scope, "Usage is not supported for this provider configuration");
     }
     const initialBinding = providerBinding(runtime, providerId);
-    // The lender's read owns credential resolution, account fences, cache and
-    // admission; the borrower only relabels its snapshot. Clients identify the
-    // lent source (`source` names the lender) to explain where usage comes from.
     const lent = await this.readOne(runtime, borrowed.from, signal);
     if (!borrowerQualifies(runtime, providerId, borrowed) || !sameBinding(initialBinding, providerBinding(runtime, providerId))) {
       return emptySnapshot(providerId, "unavailable", lender.source, lender.scope, "Provider usage changed while the request was in flight");
@@ -714,8 +639,6 @@ export class ProviderUsageOwner {
       const pending = runtime.getAuth(providerId, { signal: controller.signal }) as Promise<{ auth: ResolvedAuth } | undefined>;
       if (!admission) return await raceAbort(pending, controller.signal);
       admission.authSettled = false;
-      // Admission remains held until a non-cooperating credential provider
-      // physically settles, even when this caller's race times out.
       physical = pending.then((result) => {
         admission.authSettled = true;
         return result;
@@ -729,8 +652,6 @@ export class ProviderUsageOwner {
       if (admission?.authSettled && !admission.fetchStarted) {
         admission.release();
       } else if (admission && !admission.authSettled) {
-        // A cancelled/timed-out race must retain the token until the detached
-        // credential operation physically settles.
         void physical?.then(() => admission.release(), () => admission.release());
       }
       throw error;
@@ -801,15 +722,12 @@ export class ProviderUsageOwner {
 }
 class BodyTooLargeError extends Error {}
 async function cancelResponseBody(response: Response): Promise<void> {
-  try { await response.body?.cancel(); } catch { /* response cleanup is best effort */ }
+  try { await response.body?.cancel(); } catch { }
 }
-/** A failure's JSON body for adapter classification; never thrown, never retained. */
 async function errorBody(response: Response): Promise<unknown> {
   try { return JSON.parse(await readBoundedBody(response)); } catch { return undefined; }
 }
 async function readBoundedBody(response: Response): Promise<string> {
-  // A real fetch Response has a stream for non-empty bodies. Treat an absent
-  // stream as an empty body rather than calling an unbounded text() fallback.
   if (!response.body) return "";
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = []; let size = 0;

@@ -39,8 +39,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
   const remainingGate = new Promise<void>(resolve => { releaseRemaining = resolve; });
   const external = new AsyncResource("managed-attribution-external-producer");
   const globals = globalThis as typeof globalThis & { tronAttributionPi?: ExtensionAPI; tronWakeInputGate?: Promise<void>; tronWakeInputStarted?: boolean };
-  // Detached provider children inherit the existing test-only recursive join
-  // owner. The fixture keeps its direct spawn handles and joins before files.
   const prototype = ChildProcess.prototype as ChildProcess & { spawn(options: unknown): unknown };
   const spawn = prototype.spawn;
   const children = new Set<ChildProcess>();
@@ -66,8 +64,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const managedSubagents = ManagedSubagents.activateForStartup(tronHome);
     const faux = fauxProvider({ provider: "tron-managed-attribution", tokensPerSecond: 10_000 });
     const model = faux.getModel();
-    // Detached children have their own SDK/provider registry. A loopback
-    // OpenAI-compatible fixture supplies their scripted model, not credentials.
     let childRequests = 0;
     server = createServer(async (request, response) => {
       if (++childRequests > 32) { response.writeHead(500).end("Child fixture request bound exceeded"); return; }
@@ -184,8 +180,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
     expect.soft(realInputs[0]).toMatchObject({ semantic: { origin: { kind: "user" } } });
     for (const input of realInputs.slice(1)) expect.soft(input).toMatchObject({ semantic: { kind: "prompt", direction: "hiddenInternal", visibility: "hidden", origin: { kind: "subagent" } } });
     facts.customMessages = entries.filter(entry => entry.type === "custom_message");
-    // The released provider's path-first header is ownership, not the compact
-    // widget's native detail/coverage contract. Exercise its real four-child file.
     const status = JSON.parse(await readFile(join(asyncDir, "status.json"), "utf8"));
     facts.workflowStatus = status;
     expect.soft(status.lifecycleProjection.sessionId).toBe(slot.sessionFile);
@@ -193,8 +187,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const native = slot.snapshot().extensionActivities?.find(activity => activity.toolCallId === "workflow-launch")
       ?? extensionActivityReceipts(SessionManager.open(slot.sessionFile!).getEntries(), slot.id).find(value => value.receipt.toolCallId === "workflow-launch");
     facts.workflowNative = native;
-    // A terminal workflow is canonical history; capture native process/detail
-    // parity on a running R1-shaped version of the actual provider artifact.
     const running = { ...status, state: "running", status: "running", completedAt: undefined, endedAt: undefined,
       lifecycleProjection: { ...status.lifecycleProjection, root: { ...status.lifecycleProjection.root, state: "running", endedAt: undefined } },
       steps: status.steps.map((step: Record<string, unknown>, index: number) => ({ ...step, state: "running", status: "running", endedAt: undefined,
@@ -220,8 +212,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
     for (let index = 0; index < 4; index++) expect.soft(parity?.children[index]).toMatchObject({ label: "probe", model: "attribution-child/child", thinking: "high",
       currentPath: "owned.ts", output: `Output ${index}`, task: `Task ${index}`, toolCount: index + 1, turnCount: index + 2 });
     expect.soft(slot.snapshot().processActivities?.filter(process => process.toolCallId === parityTool).length ?? 0).toBeGreaterThanOrEqual(4);
-    // Coverage/order belongs to full status, independent of the compact header
-    // which still contains only the four actual child declarations here.
     const expanded = { ...running, steps: Array.from({ length: 40 }, (_, index) => ({ ...running.steps[index % 4], workflowKey: `bounded-${index}`,
       runId: `bounded-child-${index}`, sessionFile: undefined, sessionOwnerId: undefined, children: [] })) };
     await writeFile(join(parityDir, "status.json"), JSON.stringify(expanded));
@@ -237,8 +227,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
     expect.soft(count(tree)).toBe(64);
     facts.boundedChildren = covered?.children;
     facts.boundedTree = tree;
-    // A completed workflow's children are terminal: the provider's real terminal steps
-    // and header children replace the running fixture rows, so no child stays live.
     await writeFile(join(parityDir, "status.json"), JSON.stringify({ ...running, state: "completed", endedAt: status.endedAt, steps: status.steps,
       lifecycleProjection: { ...running.lifecycleProjection, root: { ...running.lifecycleProjection.root, state: "complete", endedAt: status.endedAt,
         children: status.lifecycleProjection.root.children } } }));
@@ -265,8 +253,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
     expect(projected.length).toBeGreaterThan(0);
     for (const row of projected) expect.soft(row).toMatchObject({ semantic: { origin: { kind: "subagent" } } });
     await waitFor(() => workflowCompletionAcknowledged && !slot.isBusy, "parent acknowledges workflow completion before next prompt");
-    // Keep the parent loop busy while a distinct real async child completes.
-    // The provider must steer its notification, not use its idle wake path.
     let completionLoopStarted = false;
     const completionGate = new Promise<void>(resolve => { release = resolve; });
     faux.setResponses([
@@ -321,8 +307,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
     send("busy-steer", reused, { triggerTurn: true, deliverAs: "steer" });
     send("busy-followup", reused, { triggerTurn: true, deliverAs: "followUp" });
     send("busy-stored", "busy stored", { triggerTurn: false });
-    // A competing producer using the same input array must not overwrite the
-    // first sends' identity while those messages are still queued.
     const otherOwner = producerIdentity(MANAGED_SUBAGENTS_SOURCE, "other-fixture", "Subagents", "subagent");
     const other = managedProducerAPI(api, otherOwner);
     external.runInAsyncScope(() => other.sendMessage({ customType: "busy-other", content: reused, display: true }, { triggerTurn: true, deliverAs: "followUp" }));
@@ -340,13 +324,10 @@ it("attributes real workflow completion and supervisor delivery to their managed
       expect.soft(boundaryEntries.find(receipt => receipt.type === "custom" && receipt.customType === "tron.context-delivery.v4"
         && (receipt.data as { targetEntryId?: string }).targetEntryId === entry!.id), type).toMatchObject({ data: { delivery, origin: { owner: expectedOwner } } });
       if (entry?.type === "custom_message") {
-        // The transient carrier must not change the persisted content schema.
         if (type === "idle-stored" || type === "idle-triggered" || type === "busy-stored") expect(typeof entry.content, type).toBe("string");
         else expect(entry.content, type).toEqual(reused);
       }
     }
-    // Per-child notes are always context, even if an emitter requests a turn
-    // or supplies outcome metadata. Independent typed sources carry wakes.
     const sendIncremental = (outcome: string, workflowRunning: boolean) => external.runInAsyncScope(() => managed.sendMessage({
       customType: "subagent-incremental-child-notify", content: `typed-${outcome}-${workflowRunning}`, display: true,
       details: { outcome, workflowRunning },
@@ -361,8 +342,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
     expect.soft(progress, "real supervisor progress stored").toBeDefined();
     if (progress) expect.soft(decodedDeliveries.get(progress.id)).toMatchObject({ delivery: "stored", origin: { owner: { kind: "subagent" } } });
 
-    // A foreground workflow already returns through the active parent tool
-    // loop. No independent user/wake admission is needed for completion.
     const beforeForeground = readEntries().length;
     const beforeForegroundUsers = userCount();
     faux.setResponses([
@@ -379,9 +358,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
       .toMatchObject({ message: { isError: false, details: { mode: "workflow", results: [expect.objectContaining({ agent: "probe", exitCode: 0 })] } } });
     expect.soft(foregroundEntries.find(entry => entry.type === "message" && entry.message.role === "assistant" && JSON.stringify(entry.message.content).includes("FOREGROUND_RESULT_CONSUMED"))).toBeDefined();
 
-    // A quiet recurring schedule suppresses routine success, not failure.
-    // Fire it manually under the same quiet completion policy while the real
-    // parent is busy, then consume its independent notification in that loop.
     const beforeScheduled = readEntries().length;
     let scheduledParentStarted = false;
     const scheduledGate = new Promise<void>(resolve => { release = resolve; });
@@ -413,8 +389,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
     facts.quietScheduledStatus = scheduledStatus;
     expect.soft(scheduledStatus).toMatchObject({ state: "failed", scheduleOrigin: { id: "quiet-failure-probe", quiet: true } });
 
-    // Internal wakes use the exact same owner as prompt/queue invocation
-    // binding, including a concurrent maintainer prompt and queue consumption.
     faux.setResponses(Array.from({ length: 12 }, () => fauxAssistantMessage("WAKE_COMPLETE")));
     globals.tronWakeInputGate = new Promise<void>(resolve => { release = resolve; });
     external.runInAsyncScope(() => {
@@ -557,7 +531,6 @@ it("attributes real workflow completion and supervisor delivery to their managed
         if (server) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()));
       } catch (error) { cleanupError ??= error; }
       names.forEach((name, index) => { if (previous[index] === undefined) delete process.env[name]; else process.env[name] = previous[index]; });
-      // A failed recursive join must not delete files a child could still own.
       if (cleanupError) { facts.passed = false; facts.cleanupError = String(cleanupError); facts.preservedFixture = root; }
       else await rm(root, { recursive: true, force: true });
       const report = process.env.TRON_ATTRIBUTION_REPORT ?? join(process.cwd(), "test-results", "managed-attribution.integration.json");

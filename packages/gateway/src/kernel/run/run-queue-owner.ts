@@ -7,9 +7,6 @@ import { GatewayError } from "../../errors.js";
 import { validateQueue } from "./queue-commands.js";
 
 
-/** Per-runtime accepted SDK queue identities and shared presentation clock.
- * Pi owns its message text; reconciliation retains exact receipt/work owners
- * across queue_update and message_start/agent_start callback gaps. */
 export class RunQueueOwner {
   queueRevision = 0;
   nextQueueOrdinal = 0;
@@ -17,14 +14,8 @@ export class RunQueueOwner {
   pendingQueueAdmission: PendingQueueAdmission | undefined;
   readonly sdkQueuedSteeringIDs = new Set<string>();
   suppressQueueEvents = false;
-  /** Follow-up queue owners removed by Pi immediately before their agent_start. */
   readonly dequeuedFollowUpOwners: string[] = [];
-  /** Steering queue owners removed immediately before Pi emits message_start.
-   * Steering remains inside the current agent run, so it needs a separate
-   * callback-turn latch rather than follow-up's agent_start transfer. */
   readonly dequeuedSteeringOwners: string[] = [];
-  /** Steering owners whose exact user message has crossed message_start and
-   * still needs its canonical binding/terminal receipt persisted. */
   readonly consumedSteeringOperationIDs = new Set<string>();
 
   constructor(private readonly operations: RunOperations<unknown>) {}
@@ -62,8 +53,6 @@ export class RunQueueOwner {
     resolveDisposition: (disposition: QueueAdmissionDisposition) => void,
   ): void {
   this.pendingQueueAdmission = {
-    // The returned operation identity is also the stable projected queue
-    // identity, giving clients an exact settlement receipt.
     id: operationId,
     behavior,
     text: display.text,
@@ -169,9 +158,6 @@ export class RunQueueOwner {
     }
     for (const item of removed) {
       if (item.behavior === "steer" && this.operations.runInvocations.invocationForOperation(item.id)) {
-        // Agent-core's queue_update precedes message_start for steering. Do
-        // not settle this operation or let the enclosing activeOperationId
-        // impersonate it during that exact callback window.
         if (!this.dequeuedSteeringOwners.includes(item.id)) {
           this.dequeuedSteeringOwners.push(item.id);
         }
@@ -182,24 +168,15 @@ export class RunQueueOwner {
       }
       if (item.behavior === "followUp" && this.operations.runWork.has(item.id)) {
         if (!this.operations.hasActiveAgentRun) {
-          // Pi can remove a follow-up immediately before emitting its next
-          // agent_start. Retain the exact accepted owner across that event gap;
-          // the start consumes this FIFO latch instead of deriving new work.
           if (!this.dequeuedFollowUpOwners.includes(item.id)) this.dequeuedFollowUpOwners.push(item.id);
           this.operations.runWork.get(item.id)?.transition("foreground-agent-operation");
           continue;
         }
         if (this.operations.activeOperationId !== item.id) {
-          // Pi can emit agent_start before queue_update. The exact removed
-          // follow-up then retrospectively transfers its pre-cutoff token into
-          // the already-started foreground run; retire only the synthetic owner.
           const syntheticOwner = this.operations.activeOperationId;
           this.operations.runInvocations.terminalizeTransferredOperation(syntheticOwner);
           if (syntheticOwner !== item.id) this.operations.runTerminal.retireOperationObservation(syntheticOwner);
           (this.operations.activeOperationId = item.id);
-          // The follow-up is part of the same activation: its boundary entry and
-          // its frozen memory view must not change, only the operation identity
-          // Tron now reports.
           this.operations.homeRequestPolicy?.transferOperation(syntheticOwner, item.id);
           (this.operations.operation = {
             id: item.id,
@@ -209,9 +186,6 @@ export class RunQueueOwner {
               ? { invocationId: this.operations.runInvocations.invocationForOperation(item.id)!.invocationId }
               : {}),
           });
-          // Queue removal can follow agent_start. Durably transfer the marker
-          // before retiring the synthetic event-time owner, so completion stamps
-          // cannot race a missing exact marker.
           void this.operations.enqueueMarkerOwnership(item.id).then(async () => {
             if (syntheticOwner) await this.operations.clearMarkerOwnership(syntheticOwner);
             this.operations.runWork.settleOperationWork(syntheticOwner);
@@ -250,8 +224,6 @@ export class RunQueueOwner {
 
   projectedQueue(): QueuedMessageState[] {
     this.reconcileQueuedMessages();
-    // Held prompts follow Pi's queue: they are delivered after it. An entry
-    // that Pi has just enqueued is projected once, by Pi's queue.
     const piQueued = new Set(this.queuedMessages.map((item) => item.id));
     return [
       ...this.queuedMessages,

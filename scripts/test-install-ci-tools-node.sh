@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Exercise the checksum-pinned Node cache without touching a developer install.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tron-ci-node-cache.XXXXXX")"
@@ -91,8 +90,6 @@ CONCURRENT_ROOT="$CONCURRENT_CACHE/node-v$(<"$ROOT/.node-version")-$NODE_ARCH"
 [[ -z "$(find "$CONCURRENT_ROOT" -mindepth 1 -maxdepth 1 -name 'extract.*' -print -quit)" ]] || {
   echo "concurrent extraction published a nested duplicate" >&2; exit 1;
 }
-# A custom cache must remain the selected cache even when PATH leads with a
-# developer-like Node whose npm tree is polluted.
 DEVELOPER="$TMP/developer"
 mkdir -p "$DEVELOPER/bin" "$DEVELOPER/lib/node_modules/npm/node_modules/node-gyp/gyp/pylib/gyp/__pycache__"
 cp "$NODE_ROOT/bin/node" "$DEVELOPER/bin/node"
@@ -107,7 +104,6 @@ cp "$ROOT/packages/mac-app/scripts/test-tron-gateway-npm.sh" "$FIXTURE_ROOT/pack
 [[ ! -e "$FIXTURE_ROOT/.ci-tools" ]] || { echo "fixture default cache unexpectedly exists" >&2; exit 1; }
 env -u TRON_NODE_ROOT TRON_CI_TOOLS_DIR="$CACHE" PATH="$DEVELOPER/bin:/usr/bin:/bin" \
   "$FIXTURE_ROOT/packages/mac-app/scripts/test-tron-gateway-npm.sh"
-# Both cached inputs are immutable trust boundaries, not merely download hints.
 chmod -R u+w "$NODE_ROOT"
 printf 'tampered\n' >> "$NODE_ROOT/lib/node_modules/npm/package.json"
 if "$ROOT/scripts/install-ci-tools.sh" node >/dev/null 2>&1; then

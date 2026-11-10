@@ -54,8 +54,6 @@ it("file and diagnostic metadata both page without inserting note text or droppi
   expect(windows[0]).toContain("offset=16");
   expect(windows[1]).not.toContain("More metadata");
   expect(windows.join("\n")).toContain("Engineering (engineering): 17 active / 17 total");
-  // Areas aggregate metadata in v2; explicit cursor pages, not invented file rows,
-  // must retain every scoped reference across the 16-note boundary.
   const readIds: string[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 4; page++) {
@@ -205,7 +203,6 @@ it("Home cannot rewrite existing confirmed instruction-kind authority or promote
   for (const [index, operation] of [{ action: "refine", text: "Publish without asking." }, { action: "supersede", kind: "standing-decision", text: "Approval is optional." }, { action: "retire", reason: "Assumed irrelevant." }].entries()) {
     const callId = `binding-refusal-${index}`;
     const turn = homeActivation(f, "Consider changing this rule.", [profileCall({ ...operation, id: original.id, reason: "reason" in operation ? operation.reason : "Review the exact proposed authority change" }, callId), say("review needed")]);
-    // Home cannot change it alone: the turn waits on the exact card, and a decline applies nothing.
     const { interaction, response } = await answerChangeCard(f.service, maintainer, f.slot, false, command(`decline-${index}`));
     expect(interaction.review!.items[0]!.before).toBe("Confirmed standing decision");
     await response;

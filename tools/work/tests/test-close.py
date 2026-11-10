@@ -53,8 +53,6 @@ def fixture_gh() -> None:
             response = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "item"}}}}
             partial = state.pop("partial_status_once", None)
             if partial:
-                # The write committed before a response-field error; GraphQL
-                # non-null propagation can erase even the whole data object.
                 response_error = "forbidden response field" + (" (HTTP 403)" if partial == "null-data" else "")
                 response["errors"] = [{"type": "FORBIDDEN", "message": response_error}]
                 if partial == "null-data":
@@ -113,8 +111,6 @@ def fixture_gh() -> None:
     path.write_text(json.dumps(state))
     barrier = state.get("hold_comment") if write == "comment" else None
     if barrier:
-        # Signal after the service accepted the comment, while the CLI's audit
-        # attempt is durable but its terminal result is still outstanding.
         with socket.create_connection(("127.0.0.1", barrier["port"]), timeout=60) as peer:
             peer.sendall((barrier["tag"] + "\n").encode())
             if peer.recv(1) != b"1":
@@ -189,8 +185,6 @@ def run() -> None:
             state, _ = close("same close is idempotent", True)
             assert len(state["comments"]) == 1 and state["writes"].count("close") == 1
 
-            # Ordinary checkpoints are supported without claim/session trailers.
-            # Closing is tracking only: preserve the published ref and unpublished work.
             git("checkout", "-b", "experiment/41-checkpoint")
             (repo / "result.txt").write_text("Published result.\n")
             git("add", "result.txt")
@@ -212,7 +206,6 @@ def run() -> None:
             (repo / "result.txt").write_text("Unpublished follow-up.\n")
             git("checkout", "main")
 
-            # Claims already landed by plain Git do not gate closure either.
             git("checkout", "-b", "feat/41-landed")
             git("commit", "--allow-empty", "-m", "claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: fixture-owner\nWork-Claim-Base: main")
             git("push", "origin", "HEAD:refs/heads/feat/41-landed", "HEAD:main")
@@ -289,8 +282,6 @@ def run() -> None:
             for mode in ("concurrent", "reservation"):
                 healthy = audit_path.read_bytes()
                 if mode == "reservation":
-                    # Use measured production record sizes, not a mocked cap or
-                    # reserve. There is space for one result, but not two pairs.
                     free = 2 * (attempt_bytes + result_bytes) - 32
                     padding = 16 * 1024 * 1024 - free - len(healthy)
                     audit_path.write_bytes(healthy[:-1] + b" " * padding + b"\n")
@@ -340,7 +331,6 @@ def run() -> None:
                             detail["pendingAttempts"] = len(pending)
                             assert len(pending) == 2 and all(row["event"] == "attempt" for row in pending), detail
                             assert pending[0]["id"] != pending[1]["id"]
-                            # Reverse completion order must not confuse receipt ownership.
                             peers["B"].sendall(b"1")
                             assert finish("B")[0] == 0, detail
                             interim = [json.loads(line) for line in audit_path.read_bytes()[start_size:].splitlines()]
@@ -375,8 +365,6 @@ def run() -> None:
                             except OSError:
                                 pass
                             peer.close()
-                        # Each CLI has a fresh process group: timeout cleanup
-                        # must join its gh child too, not orphan a held request.
                         for job in jobs.values():
                             try:
                                 job.communicate(timeout=10)
@@ -386,13 +374,8 @@ def run() -> None:
                         detail["allJobsJoined"] = all(job.poll() is not None for job in jobs.values())
                         detail["finalBytes"] = audit_path.stat().st_size
                         if mode == "reservation":
-                            # Only this fixture restores its seed; production
-                            # must retain its result, never rotate to make room.
                             audit_path.write_bytes(healthy)
 
-            # Audit admission is a real on-disk boundary, not a mocked Gh method.
-            # Repeated complete history fills the documented cap; a torn suffix
-            # comes directly from a record the production CLI already wrote.
             commands = (
                 ("close", ["issue", "close", "41", "--reason", "completed", "--comment-file", str(comment)]),
                 ("labels", ["issue", "labels", "41", "--add", "area:ios"]),
@@ -416,15 +399,11 @@ def run() -> None:
                     assert state["state"] == "open" and state["status"] == "Ready" and not state["comments"]
                     assert preserved, evidence[-1]
                     assert cause in result.stderr, evidence[-1]
-                # Only the fixture owner restores its input. The CLI must never
-                # truncate/rotate history or silently recover a refused audit.
                 audit_path.write_bytes(healthy)
                 reset(label="kind:bug")
                 state, _ = close(f"explicit recovery with readable audit after {failure}", True)
                 assert state["state"] == "closed" and state["status"] == "Done" and len(state["comments"]) == 1
 
-            # Filing (#992, #994): a task is classified and on the Project in one command; every
-            # refusal happens before any GitHub write.
             body = root / "issue.md"
 
             def create(name, success, *extra, title="Composer drops a chip", text="The chip is replaced.\n"):
@@ -468,7 +447,6 @@ def run() -> None:
             assert edited.returncode == 0 and state["edited"] == {"body": "## Remaining\nOnly the iOS half is left.\n"}
             assert state["writes"] == ["edit"]
 
-            # Nesting: an epic or a task links under an epic parent.
             def parent(name, success, child, epic, *options):
                 result = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), "issue", "parent", str(child),
                                          "--epic", str(epic), *options], cwd=repo, env=env, capture_output=True, text=True, timeout=30)
@@ -495,7 +473,6 @@ def run() -> None:
             assert state["issue_states"] == {"50": "open", "52": "open"}
             assert state["issue_bodies"] == {"52": "Unfinished backlog work"}
 
-            # Only tracked module identities admit maintenance parents, not arbitrary tasks.
             manifest = repo / "work.module.json"
             manifest.write_text('{"layer":"L5","owns":["**"]}\n')
             git("add", "work.module.json")
@@ -557,7 +534,6 @@ def run() -> None:
                 assert (result.returncode == 0) == success, evidence[-1]
                 return json.loads(state_path.read_text()), result.stderr
 
-            # An issue closed by mistake (for example by a PR's closing keyword) reopens only with a stated reason.
             reset(state="closed", status="Done", label="kind:bug")
             reason.write_text("  \n")
             state, error = reopen("reopen without a reason refused", False)
@@ -574,7 +550,6 @@ def run() -> None:
             state, error = reopen("open issue it did not reopen refused", False)
             assert "is open" in error and not state["writes"]
 
-            # A partial reopen finishes on retry without a second comment.
             reset(state="closed", status="Done", label="kind:bug", fail_status_once=True)
             state, _ = reopen("partial status failure", False)
             assert state["state"] == "open" and state["status"] == "Done"

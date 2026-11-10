@@ -20,8 +20,6 @@ const gatewayRoot = fileURLToPath(new URL("../../../..", import.meta.url));
 const leg = process.env.TRON_SUBAGENTS_ROLLBACK_LEG;
 interface Completion { parentId: string; parentFile: string; childId: string; childFile: string; runId: string; processId?: string }
 
-// Each selection gets a fresh module/process lifetime, just as a payload restart
-// does. Never mutate the repository pin or reuse a loaded extension across legs.
 it("executes previous → candidate → previous with detached resume through the selected Gateway host", async () => {
   if (leg) return runLeg();
   const retainedRoot = process.env.TRON_SUBAGENTS_ROLLBACK_ROOT;
@@ -30,7 +28,7 @@ it("executes previous → candidate → previous with detached resume through th
   const reportPath = process.env.TRON_SUBAGENTS_ROLLBACK_REPORT ?? join(gatewayRoot, "test-results", "managed-subagents.rollback.json");
   const report: { passed: boolean; legs: unknown[]; error?: string } = { passed: false, legs: [] };
   try {
-    if (retainedRoot) await mkdir(root); // Refuse to overwrite a prior retained fixture.
+    if (retainedRoot) await mkdir(root);
     await Promise.all([mkdir(join(root, "agent")), mkdir(join(root, "workspace")), mkdir(join(root, "npm-cache")), mkdir(join(root, "home")), mkdir(join(root, "tmp"))]);
     const pin = JSON.parse(await readFile(join(gatewayRoot, "pi-subagents-pin.json"), "utf8"));
     for (const name of ["previous", "candidate", "rollback"]) {
@@ -50,8 +48,6 @@ it("executes previous → candidate → previous with detached resume through th
         childBefore = await readFile(join(root, candidate!.completion.childFile));
       }
       const output = await promisify(execFile)(process.execPath, [join(gatewayRoot, "node_modules", "vitest", "vitest.mjs"), "run", "--config", "vitest.nested.config.ts", "src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts"], {
-        // Hang guard only: legs run alone in the nested pass (vitest.nested.config.ts);
-        // a passing leg takes about 9-12 s, so a reached bound means a hung leg.
         cwd: payload, timeout: 120_000, maxBuffer: 1024 * 1024,
         env: { PATH: process.env.PATH!, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), PI_SKIP_VERSION_CHECK: "1",
           TRON_SUBAGENTS_ROLLBACK_LEG: name, TRON_SUBAGENTS_ROLLBACK_FIXTURE: root,
@@ -60,8 +56,6 @@ it("executes previous → candidate → previous with detached resume through th
           NODE_OPTIONS: `--import=${join(payload, "test-support", "fixture-process-owner.mjs")}` },
       }).catch(async (error: Error & { stdout?: string; stderr?: string }) => {
         await writeFile(join(root, `${name}.log`), (error.stdout ?? "") + (error.stderr ?? ""));
-        // A leg that exits before writing its report (killed by the budget, or
-        // crashed) fails with its own exit, not with the missing report file.
         const legReport = await readFile(join(root, `${name}.json`), "utf8").catch((readError: NodeJS.ErrnoException) => {
           if (readError.code === "ENOENT") throw error;
           throw readError;
@@ -124,9 +118,6 @@ async function runLeg(): Promise<void> {
   const facts: Record<string, unknown> = { leg, passed: false };
   try {
     Object.assign(process.env, overrides);
-    // Match Gateway startup: the process selects its own host (overriding an
-    // inherited selection) before loading the reserved extension, whose
-    // detached children cannot resolve the Gateway SDK locally.
     delegatedProviderEnvironment(overrides.PI_SUBAGENTS_TEMP_ROOT);
     const managedSubagents = new ManagedSubagents(tronHome);
     const installedRoot = managedSubagents.install();
@@ -136,8 +127,6 @@ async function runLeg(): Promise<void> {
     expect(installedRoot).toBe(join(await realpath(tronHome), "internal", "pi-subagents", pin.version));
     facts.receipt = receipt;
     const model = { provider: "tron-rollback-subagents", id: "rollback-model" };
-    // Requests are keyed by the current canonical turn, not arrival order:
-    // detached revive and parent acknowledgement can arrive concurrently.
     server = createServer(async (request, response) => {
       let bytes = "";
       for await (const chunk of request) {
@@ -164,7 +153,6 @@ async function runLeg(): Promise<void> {
       };
       else if (input.includes("CHILD_ROLLBACK_RESUMED")) scripted = "CHILD_ROLLBACK_RESUMED";
       else if (input.includes(`CHILD_${leg!.toUpperCase()}_COMPLETE`)) scripted = `CHILD_${leg!.toUpperCase()}_COMPLETE`;
-      // Completion notifications are additional parent turns, never child work.
       else if (input.includes("Subagent updates above.") || (input.toLowerCase().includes("subagent") && input.includes("complete"))) scripted = "PARENT_COMPLETE";
       ((facts.modelRoutes ??= []) as unknown[]).push({ role: last?.role, input: input.slice(0, 512), response: scripted });
       if (++requests > 24 || scripted === undefined || request.url !== "/v1/chat/completions") {
@@ -214,8 +202,6 @@ async function runLeg(): Promise<void> {
       await expect(old.ownedTurns.abortSubagentProcess(candidate.completion.processId!, candidate.completion.runId)).rejects.toMatchObject({ code: "conflict" });
       facts.candidateHistory = { parentId: session.getSessionId(), childId: child.getSessionId(), terminalControlRefused: true,
         activities: old.snapshot().processActivities };
-      // Producer-owned status is exercised through the real tool, not inferred
-      // from a surviving directory. No resume is assumed for non-resumable runs.
       candidateTarget = candidate.completion.runId;
       await old.prompt("Inspect the retained candidate run without changing it");
       await waitFor(() => !old.isBusy, "rollback candidate status");
@@ -314,10 +300,6 @@ async function runLeg(): Promise<void> {
     try {
       await registry?.dispose();
     } finally {
-      // Producer terminal evidence proves the run, not fixture retirement.
-      // Join spawn-owned trees even if an assertion failed before asyncDir was
-      // returned. The inherited preload also owns runner descendants and joins
-      // on process exit/signals before the outer harness can remove roots.
       const { disposeFixtureProcesses } = await import("../../../../test-support/fixture-process-owner.mjs");
       await disposeFixtureProcesses();
       server?.closeAllConnections();

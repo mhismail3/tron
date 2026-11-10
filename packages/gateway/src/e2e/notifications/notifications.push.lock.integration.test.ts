@@ -2,27 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { expectRequestShapes } from "../../../test-support/lock-projections.js";
 import { notificationsPushScenario, PUSH_RELAY_ORIGIN } from "../../../test-support/lock-scenarios.js";
 
-/**
- * Push lock (restructure E0b, `packages/gateway/docs/kernel.md` §2.1 `runTerminal`
- * and `interactionRequired`) for the `gateway/notifications` module.
- *
- * The real Gateway (`gateway-lock-harness.ts`) runs with the production
- * `NotificationService` and grant store; the only replaced party besides the
- * faux model is the relay's HTTP fetcher, which is the network boundary. The
- * phone registers push delivery over the socket, then one chat runs to a
- * completed, an input-required, a failed and a stopped end while hidden, and to
- * an input-required and a completed end while the phone presents it. A Home
- * task worker, admitted through the owned-session boundary as the dispatcher
- * admits it, runs to its end too. The lock records every relay request (the
- * exact push envelopes), every notification receipt (queued, suppressed), the
- * phone's inbox and its push, presentation and answer responses, as explicit checks.
- *
- * Each provider request's tools, prompt sections and prompt hash must equal its
- * `session-shapes` shape, and its messages are checked inline; the client event
- * schemas the phone decodes are pinned by `client-event-schemas`, which runs this
- * same scenario.
- */
-
 const owned: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });
 
@@ -68,8 +47,6 @@ describe("gateway/notifications push lock", () => {
         entry("agent_finished", "finish the quiet run", "The agent finished responding.", false),
       ], revision: expect.stringMatching(/^[0-9a-f]{32}$/u), unreadCount: 2 } });
     expect(workerRoles, "the task worker ran a turn and its reminder turn").toEqual(["system", "user", "assistant", "assistant"]);
-    // The model receives the chat's growing conversation, then the worker's turn and its report reminder (the
-    // reminder request has the task worker's shape; its text is the last message).
     const requests = gateway.record().providerRequests;
     expectRequestShapes(requests, [...Array.from({ length: 7 }, () => "chatWithNotificationsSelect"), "taskWorker", "taskWorker"]);
     const select = (text: string) => [{ role: "assistant", text: "", toolCalls: ["lock_select"] }, { role: "toolResult", text: "chosen: Keep", toolName: "lock_select" },

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Compare the Pi dependency graph at two Git revisions without installing anything. */
+// Compare the Pi dependency graph at two Git revisions without installing anything.
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

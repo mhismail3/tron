@@ -2,8 +2,6 @@ import { request } from "node:http";
 import type { ExtensionFactory } from "../kernel/pi/coding-agent.js";
 import { webResearchTool, type WebResearchRequest, type WebToolResult } from "./web-research-contract.js";
 
-/** Child half of the Gateway-owned service. No provider keys, subscriptions or
- * independent quota/store owner exist in a child process. */
 export function webResearchChild(socketPath: string, token: string): ExtensionFactory {
   return pi => {
     pi.registerTool(webResearchTool((input: WebResearchRequest, signal?: AbortSignal) => new Promise<WebToolResult>((resolve, reject) => {

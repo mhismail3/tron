@@ -4,13 +4,11 @@ import type { RequestPolicy } from "./request-policy.js";
 import type { ExtensionToolOrigin } from "../../protocol/types.js";
 
 export type InputDelivery = "user" | "wake";
-/** Gateway-owned trigger sources, never maintainer authority. */
 type InputTriggerSource = "automation";
 export interface InputTriggerAttribution {
   kind: InputTriggerSource; sourceId: string; eventId: string; title: string;
 }
 export interface InputTriggerRoute { homeId: string; routeGeneration: number; sessionId: string; enabled: boolean }
-/** Each producer retains its durable outbox; Home owns only admission and wake policy. */
 export interface InputTriggerInbox {
   pending(route: InputTriggerRoute, delivery: InputDelivery): boolean;
   admit(route: InputTriggerRoute, operationId: string, delivery: InputDelivery,
@@ -23,8 +21,6 @@ export function inputMessageOrigin(message: InputMessage): ExtensionToolOrigin |
   return trigger ? { source: `gateway:trigger:${trigger.kind}`, owner: { id: trigger.sourceId, title: trigger.title, source: `gateway:trigger:${trigger.kind}` } } : undefined;
 }
 export interface InputEnvelope { signal: AbortSignal; tokens: number; freshTokens: number; bytes: number; entries: number }
-/** The kernel needs only these identities to bind canonical input receipts.
- * Implementing modules retain their richer message metadata without conversion. */
 export interface InputMessage {
   customType: string;
   content: string;
@@ -33,8 +29,6 @@ export interface InputMessage {
 }
 export interface InputTrigger {
   taskId?: string; message: InputMessage;
-  /** An already-written producer input: commit its receipt with the new wake binding,
-   * rather than asking Pi to append that producer message a second time. */
   deliveryMessage?: InputMessage;
 }
 export interface InputEnvelopeContext {
@@ -47,14 +41,11 @@ export interface InputEnvelopeContext {
   entries(): number;
 }
 
-/** Admission is awaited in the run lane. An unpersisted trigger is released
- * before terminal settlement; the module owns delivery bounds and diagnostics. */
 export interface InputAdmissionPolicy {
   admit(sessionId: string, operationId: string, delivery: InputDelivery,
     append: (message: InputMessage) => Promise<void>, envelope: () => Promise<InputEnvelope>): Promise<InputTrigger | undefined>;
   release(taskId: string, operationId: string, eventId: string): Promise<void>;
   settle(sessionId: string, operationId: string): Promise<void>;
-  /** Called after canonical attribution is persisted, before source acknowledgement. */
   committed?(sessionId: string, operationId: string): Promise<void>;
   envelope(context: InputEnvelopeContext): Promise<InputEnvelope>;
   finished(startedAt: number, delivery: InputDelivery): void;

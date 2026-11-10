@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Print a deterministic SHA-256 over every regular file and safe symlink in a
-# staged payload. Symlink target digests are part of the canonical line format.
-# Coverage is deliberately complete for app/ (including node_modules) and
-# runtime/, excluding only the root manifest that records this result.
+# Print a deterministic SHA-256 over every regular file and safe symlink in a staged payload.
 set -euo pipefail
 
 [[ $# -eq 1 ]] || { echo "usage: hash-gateway-payload.sh PAYLOAD_ROOT" >&2; exit 64; }
@@ -70,9 +67,6 @@ for architecture in arm64 x64; do
     }
 done
 
-# Validate links before hashing. realpath rejects dangling links, and the
-# target checks permit only regular files inside app/ or runtime/, preventing
-# links from escaping either the payload root or deterministic coverage.
 while IFS= read -r entry; do
     if [[ -L "$entry" ]]; then
         target="$(/bin/realpath "$entry" 2>/dev/null)" || {
@@ -99,8 +93,6 @@ done < <(/usr/bin/find "$ROOT/app" "$ROOT/runtime" -print)
     cd "$ROOT"
     /usr/bin/find app runtime \( -type f -o -type l \) -print | LC_ALL=C /usr/bin/sort | while IFS= read -r file; do
         if [[ -L "$file" ]]; then
-            # readlink emits the target followed by LF; hash exactly those
-            # bytes, matching the JS and Swift implementations.
             targetDigest="$(/usr/bin/readlink "$file" | shasum -a 256 | awk '{print $1}')"
             printf 'symlink:%s  %s\n' "$targetDigest" "$file"
         else

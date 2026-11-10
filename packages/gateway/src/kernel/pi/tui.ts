@@ -1,5 +1,3 @@
-// The pi-tui half of the Pi seam (K-0 §4): every name the Gateway uses from
-// `@earendil-works/pi-tui`. No patched API.
 export {
   Box,
   CURSOR_MARKER,

@@ -35,9 +35,6 @@ function xml(text: string): string {
 }
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
 
-/** One owner for private SSH identity, authorization, configuration and user
- * launchd lifecycle. Neither CLI nor Gateway owns an sshd child. Stock SSH is
- * never read, changed or used as a fallback. */
 export class MacTerminalService {
   readonly root: string;
   readonly configPath: string;
@@ -69,7 +66,6 @@ export class MacTerminalService {
     return await this.secureFile(this.keys.path) ? this.keys.read() : {};
   }
 
-  /** The owned login plist is enabled intent; health is a separate kernel read. */
   async enabled(): Promise<boolean> {
     await this.secureDirectory();
     const text = await this.text(this.plistPath);
@@ -107,7 +103,6 @@ export class MacTerminalService {
       fence();
       await this.secureFile(this.keys.path);
       await this.keys.set(device, key);
-      // Authorization is removed before stopping; a failed stop never restores it.
       if (key === null && Object.keys(await this.keys.read()).length === 0) await this.stop(fence);
     });
   }
@@ -246,7 +241,7 @@ export class MacTerminalService {
   }
 
   private async stop(fence: () => void): Promise<void> {
-    await this.enabled(); // Refuse an unowned on-disk plist before any mutation.
+    await this.enabled();
     if (await this.job()) {
       fence();
       await this.command("/bin/launchctl", ["bootout", `${this.domain}/${this.label}`]);
@@ -282,8 +277,6 @@ export class MacTerminalService {
     if ((await this.listeners()).join("\n") !== `tcp4 ${ip}.${this.port}`) return false;
     const files = await this.run("/usr/sbin/lsof", ["-nP", "-a", "-p", String(pid), `-iTCP:${this.port}`, "-sTCP:LISTEN", "-Fn"], 2_000);
     if (files.code !== 0 || !files.output.split("\n").includes(`p${pid}`) || !files.output.split("\n").includes(`n${ip}:${this.port}`)) return false;
-    // Passive kernel ownership checks do not consume OpenSSH no-auth penalties.
-    // The real client verifies the presented host key before authentication.
     return true;
   }
 

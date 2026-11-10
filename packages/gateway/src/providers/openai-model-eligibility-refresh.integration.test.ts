@@ -20,13 +20,9 @@ class Credentials implements CredentialStore {
 
 const runtimes: ModelRuntime[] = [];
 afterEach(async () => {
-  // Registration starts detached SDK refreshes; fence them before the next case.
   await Promise.all(runtimes.splice(0).map(runtime => runtime.refresh({ allowNetwork: false })));
 });
 
-// `provider.list` and `model.list` call `refresh` on every read. Each session owns a
-// ModelRuntime, so reloading every attached runtime per read made those reads grow
-// with the open sessions (99 ms at 24 sessions, seconds on a loaded host).
 it("reloads attached runtimes only when the eligibility state changes", async () => {
   const credentials = new Credentials();
   const eligibility = new OpenAIModelEligibility({ fetch: async () => { throw new Error("no discovery for API keys"); } });
@@ -46,8 +42,6 @@ it("reloads attached runtimes only when the eligibility state changes", async ()
   for (let read = 0; read < 5; read += 1) await eligibility.refresh();
   expect(reloads).toEqual([1, 1, 1, 1]);
 
-  // Another provider's stored credential changes every runtime's configured/OAuth
-  // snapshot (`provider.list` usage flags), so it reloads them too.
   expect(runtimes[3]!.hasConfiguredAuth("anthropic")).toBe(false);
   credentials.anthropic = { type: "api_key", key: "sk-ant-test" };
   await eligibility.refresh();

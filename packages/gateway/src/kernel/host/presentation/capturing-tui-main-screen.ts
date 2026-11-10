@@ -9,17 +9,10 @@ import { boundedDisplayError } from "./terminal-sanitizer.js";
 interface CapturingTuiMainScreenOptions {
   showHardwareCursor?: boolean;
   onRender?: (state: TuiMainScreenRenderState) => void;
-  /** Called after every compositor request, including failures and stopped renders. */
   onRenderComplete?: (error?: unknown) => void;
   onDiagnostic?: (diagnostic: ComponentDiagnostic) => void;
 }
 
-/**
- * Public-root-only proof that Pi's main-screen compositor can be driven by an
- * in-memory Terminal. Component output is captured by RecordingComponent during
- * Pi's own render pass; this class never invokes a mounted component a second
- * time per mount/compositor pass.
- */
 export class CapturingTuiMainScreen extends TuiMainScreen {
   private readonly renderCallback: ((state: TuiMainScreenRenderState) => void) | undefined;
   private readonly diagnosticCallback: ((diagnostic: ComponentDiagnostic) => void) | undefined;
@@ -49,14 +42,13 @@ export class CapturingTuiMainScreen extends TuiMainScreen {
             message: boundedDisplayError(error),
           });
         } catch {
-          // Host diagnostics must not compromise TUI lifecycle.
         }
       }
     } catch (error) {
       failure = error;
       throw error;
     } finally {
-      try { this.renderCompleteCallback?.(failure); } catch { /* activity cleanup is best effort */ }
+      try { this.renderCompleteCallback?.(failure); } catch { }
     }
   }
 }

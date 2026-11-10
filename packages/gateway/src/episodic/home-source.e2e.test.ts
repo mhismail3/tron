@@ -61,12 +61,10 @@ it("continues two chapters across replay/restart and freezes exact message and n
   expect(await memory.cutAtEntry("b")).toBe(1);
   expect(await memory.cutAtEntry("d")).toBe(2);
   await appendFile(fx.chapters[1]!.path, entry("e", "d", "not yet ingested silver fact"));
-  // A frozen request cannot see even a valid later append.
   expect(await memory.cutAtEntry("e")).toBeUndefined();
   expect(await memory.cutAtEntry("d")).toBe(2);
   await memory.entriesCommitted("home");
   await appendFile(fx.chapters[1]!.path, entry("f", "c", "navigated bronze fact"));
-  // The source moved but the memory's last cursor still contains e.
   expect(await memory.cutAtEntry("e")).toBe(3);
   await memory.entriesCommitted("home");
   expect(await memory.cutAtEntry("e")).toBeUndefined();
@@ -89,8 +87,6 @@ it("continues two chapters across replay/restart and freezes exact message and n
 it("labels an assistant summary from the canonical Home item kind", async () => {
   const fx = await fixture();
   await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
-  // The source projects this assistant message as talk; the model must not be
-  // allowed to relabel its summary as user-authored.
   const memory = await fx.open(fx.source, async () => fauxAssistantMessage("faithfully summarized assistant content"));
   await memory.entriesCommitted("home");
   await memory.whenReady(3);
@@ -109,8 +105,6 @@ it("keeps legitimate byte-limit content instead of treating every size mention a
   expect(memory.renderView(3).text).toContain("talk: Keep output at most 512 bytes");
 });
 
-// #880: OpenAI's prompt-safety flag on a summary request is intermittent, so it is
-// retried within the bound; only a flag on every attempt stops memory.
 const FLAGGED = "Invalid prompt: your prompt was flagged as potentially violating our usage policy. Please try again with a different prompt";
 it.each([["thrown", true], ["returned", false]])("retries a %s prompt-safety flag and keeps memory running", async (_label, thrown) => {
   const fx = await fixture();
@@ -142,9 +136,6 @@ it("stops memory as retries-exhausted only when every attempt is flagged", async
   expect(calls).toBe(resolveLimits({}).maxRetries + 1);
 });
 
-// #1279: Tron stores short messages as kind-labelled free lines ("echo: tool task: ...")
-// and feeds them back when two lines merge, so a model naturally keeps the label.
-// That is summary content, never a reason to stop Home's memory.
 it("keeps memory running when every summary carries Tron's own role labels", async () => {
   const fx = await fixture();
   for (let index = 0; index < 6; index += 1) {
@@ -156,21 +147,19 @@ it("keeps memory running when every summary carries Tron's own role labels", asy
   const memory = await fx.open(fx.source, async () => {
     calls += 1;
     return fauxAssistantMessage(`echo: tool task: steered workers; user: kept the labels ${calls}`);
-  }, { viewBytes: 128 }); // The merge is needed, not an unused eager summary.
+  }, { viewBytes: 128 });
   await memory.entriesCommitted("home");
   const messages = memory.status().messages;
   await memory.whenReady(messages);
   const row = {
     calls,
     blocked: memory.status().blocked,
-    // Home opens merged lines through its memory tools; zoom reads the same nodes.
     summaries: memory.zoomLines(0, 8) ?? [],
     blocks: fx.diagnostics.filter(record => record.event === "episodic.node-blocked").length,
   };
   expect(row.calls).toBeGreaterThan(0);
   expect(row.blocked).toBeNull();
   expect(row.blocks).toBe(0);
-  // Attribution stays Tron's: a merged line is a summary, whatever words the model wrote.
   expect(row.summaries).toHaveLength(2);
   for (const line of row.summaries) expect(line).toMatch(/^\d\+4\|summary: echo: tool task: steered workers/u);
   expect(await readFile(fx.chapters[1]!.path, "utf8")).toBe(canonical);
@@ -200,8 +189,6 @@ it.each(["changed", "grown", "missing"])("blocks %s sealed evidence without chan
 });
 
 it("keeps memory running when a restart remounts its volume under a new device number", async () => {
-  // macOS assigns st_dev when a volume mounts; an OS update or reboot renumbers it
-  // under byte-identical files (#2311). The persisted cursor holds the old mount's.
   const fx = await fixture(); const memory = await fx.open(); await memory.entriesCommitted("home");
   await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
   const statePath = join(fx.root, "home/workspace/state/episodic/home/state.json");
@@ -210,22 +197,15 @@ it("keeps memory running when a restart remounts its volume under a new device n
   await writeFile(statePath, JSON.stringify(state) + "\n");
   const restarted = await fx.open();
   await appendFile(fx.chapters[1]!.path, entry("e", "d", "after the remount teal fact"));
-  // The open chapter seals before its first post-remount ingestion, so its last
-  // writes continue from the old mount's cursor rather than a fresh read.
   fx.chapters[1]!.sealed = true;
   await restarted.entriesCommitted("home");
   expect(restarted.status().blocked ?? null).toBeNull();
   expect(restarted.status().messages).toBe(3);
   expect(restarted.searchMessages("teal", 0, 10)?.matches).toBe(1);
-  // Frozen cuts prove every admitted chapter against its persisted cursor.
   expect(await restarted.cutAtEntry("b")).toBe(1);
   expect(await restarted.cutAtEntry("e")).toBe(3);
 });
 
-// A copied or restored Tron home (an APFS clone, a backup restore) holds byte-identical
-// transcripts under new inodes and change times (#2314). The persisted cursor's file
-// identity is only a cache key: content proves the admitted prefix, so the copy keeps
-// working without new summaries, while a copy whose history was rewritten still refuses.
 async function copiedHome(fx: Awaited<ReturnType<typeof fixture>>, memory: EpisodicMemory, edit?: (root: string) => Promise<void>) {
   await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
   await fx.workspace.dispose(); workspaces.splice(workspaces.indexOf(fx.workspace), 1);
@@ -256,7 +236,6 @@ it("keeps memory on a copied Home whose transcripts have new inodes, without re-
   expect(summaries).toEqual([]);
   expect(await copy.cutAtEntry("b")).toBe(1);
   expect(await copy.cutAtEntry("d")).toBe(2);
-  // The copy's cursor now names the copy's files, so the next delta is an append.
   await appendFile(chapters[1]!.path, entry("e", "d", "after the copy teal fact"));
   await copy.entriesCommitted("home");
   expect(copy.status().blocked ?? null).toBeNull();
@@ -272,14 +251,12 @@ it.each([["sealed", 0, "violet", "orange"], ["active", 1, "amber", "green!"]] as
     const path = join(root, fx.chapters[index]!.sessionId + ".jsonl");
     await writeFile(path, (await readFile(path, "utf8")).replace(from, to));
   });
-  // A frozen cut proves every admitted chapter's bytes, whatever its identity.
   expect(await copy.cutAtEntry("d")).toBeUndefined();
   await copy.entriesCommitted("home");
   if (index === 0) {
     expect(copy.status().blocked?.reason).toBe("source-unavailable");
     expect(copy.searchMessages("orange", 0, 10)?.matches).toBe(0);
   } else {
-    // An active chapter's rewrite is re-read, never extended from the old prefix.
     expect(copy.status().blocked ?? null).toBeNull();
     expect(copy.searchMessages("green!", 0, 10)?.matches).toBe(1);
     expect(copy.searchMessages("amber", 0, 10)?.matches).toBe(0);
@@ -288,8 +265,6 @@ it.each([["sealed", 0, "violet", "orange"], ["active", 1, "amber", "green!"]] as
 });
 
 it("keeps the next delta incremental when the chapter's last line is longer than the cursor's prefix window", async () => {
-  // The cursor proves the previous prefix by its last line. A line longer than the
-  // proof window must still be proven whole, or every later delta rereads the chapter.
   const { chapters } = await fixture();
   const snapshot = { homeId: "home", ledgerRevision: 2, chapters };
   const limits = resolveLimits();

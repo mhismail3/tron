@@ -85,7 +85,7 @@ describe("authenticated disposable live-view HTTP", () => {
     expect(f.sockets).toHaveLength(0);
     await f.devices.revoke(f.device.deviceId, () => f.server.disconnectDevice(f.device.deviceId));
     await f.views.joinRetirements(); expect(native.suspend).toHaveBeenCalled();
-    expect(native.close).not.toHaveBeenCalled(); // Selection is not active capture.
+    expect(native.close).not.toHaveBeenCalled();
     expect(f.views.describe(registration.sessionId, f.descriptor.viewId, f.descriptor.generation)).toEqual(f.descriptor);
   });
   it("reports asynchronous native failure through the existing authenticated HTTP envelope without replay", async () => {
@@ -150,8 +150,6 @@ describe("authenticated disposable live-view HTTP", () => {
     let reached!: () => void;
     const writing = new Promise<void>((resolve) => { reached = resolve; });
     const end = ServerResponse.prototype.end;
-    // Hold a real response at the write boundary, independently of the viewer
-    // registry, to model transport backpressure without timing/socket-size bets.
     vi.spyOn(ServerResponse.prototype, "end").mockImplementation(function (this: ServerResponse, ...args) {
       if (this.req.url?.endsWith("/frame") && !held) { held = this; reached(); return this; }
       return end.apply(this, args);

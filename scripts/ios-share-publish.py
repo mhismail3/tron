@@ -95,8 +95,6 @@ def render_index(base_url: str, builds: list[dict], styles: str) -> bytes:
   </div>
 </section>""")
     body = "".join(rows) or '<p class="tron-card tron-meta">No builds published yet.</p>'
-    # Embed the canonical CSS: index publication stays atomic and an installed
-    # static host needs no new asset route, checkout access, or restart.
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -131,7 +129,6 @@ def main() -> None:
     parser.add_argument("--mode", default="optimized")
     parser.add_argument("--keep", type=int, default=5)
     args = parser.parse_args()
-    # Resolve the page's only asset before touching the published tree.
     styles = SHARED_STYLES.read_text(encoding="utf-8")
 
     base_url = args.base_url.rstrip("/")
@@ -146,7 +143,6 @@ def main() -> None:
         raise SystemExit(f"error: invalid commit {args.commit!r}")
     builds_dir = args.dir / "builds"
     builds_dir.mkdir(parents=True, exist_ok=True)
-    # Concurrent shares (several worktrees) serialize on the published tree.
     lock = open(args.dir / ".publish.lock", "w")
     fcntl.flock(lock, fcntl.LOCK_EX)
 
@@ -175,8 +171,6 @@ def main() -> None:
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
-    # The persisted record owns publication time and identity; filenames are
-    # opaque, not a second retention schema. Ignore uncommitted staging trees.
     for stray in builds_dir.glob(".staging-*"):
         shutil.rmtree(stray, ignore_errors=True)
     releases = []

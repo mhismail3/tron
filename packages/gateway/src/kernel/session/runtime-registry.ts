@@ -103,73 +103,28 @@ import {
 } from "../../sessions/catalog-discovery.js";
 import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
-/** A read-only child observer may page only canonical sessions that fit this
- * explicit parse budget. The parser needs the selected branch graph, so it
- * reads one bounded file rather than maintaining an incremental mirror. */
 const MAX_READ_ONLY_SUBAGENT_SESSION_BYTES = 64 * 1_024 * 1_024;
-// A Pi append can land inside the summary's read window; the summary is retried
-// rather than published with a size its counts do not describe.
 const CATALOG_SUMMARY_ATTEMPTS = 3;
 
-/** Estimated heap the live runtimes may hold together. Below the 4,096 MB V8
- * old-space limit the launcher passes, with room for the catalog index, the
- * projections and the transport, so budgeted sessions cannot reach the heap
- * limit the memory exit criterion measures. */
 const LIVE_RUNTIME_BYTE_BUDGET = 1_536 * 1_024 * 1_024;
 
-/** Estimated heap one loaded runtime holds per canonical transcript byte.
- * Measured 2026-09-28 on the live Gateway: a 108 MB session cost about 310 MB of
- * heap (2.9x). The registry fixture measured 1.0x for plain repeated text, which
- * has no projection duplication, so the live figure is the honest one. */
 export const LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR = 3;
 
-/** Cold runtime loads admitted at once (`G-12`). A load parses a transcript into
- * a runtime the budget then has to hold, so two at a time share the loop and the
- * libuv pool with interactive reads; a third waits its turn instead of thrashing
- * the same disk and heap. The wait, not the load, is what a leaving client
- * abandons. */
 const MAXIMUM_CONCURRENT_COLD_LOADS = 2;
 
-/** Heap share of the V8 limit above which a cold load first reclaims idle
- * runtimes, largest first (`G-12`): the exit criterion is that the heap never
- * passes 70% of the configured limit, so the load that would cross it is the
- * moment to give memory back rather than after it crossed. */
 const HEAP_EVICTION_SHARE = 0.70;
 
-/** Heap share above which a cold runtime load is refused instead of admitted
- * (`G-12`): past this point the load is what would take the process to its
- * limit, and a retryable refusal is cheaper than the OOM it would cause. The
- * byte budget (eviction pressure) deliberately never refuses. */
 const HEAP_REFUSAL_SHARE = 0.85;
 
-/** What a refused cold load tells the client to wait (`G-12`). Heap pressure is
- * released by eviction and the collector rather than by the next tick, so the
- * hint is longer than the transport's own deadline hint; the phone bounds any
- * hint to 10 s. */
 export const HEAP_REFUSAL_RETRY_AFTER_MS = 5_000;
 
-/** Why a runtime was published: the admission that did it, or `oversize` for a
- * transcript whose own estimate exceeds `LIVE_RUNTIME_BYTE_BUDGET`, which is
- * admitted alone because no retirement can make it fit. */
 type RuntimeLoadReason = "open" | "create" | "automation" | "import" | "oversize";
 
-/** What reclaimed a runtime: the idle lifetime, the runtime count, the byte
- * budget's own pass, the heap-pressure pass (`G-12`), or a lifecycle event the
- * user or the process caused.
- * `disposed` is the slot that was already disposed when a later open cleared it
- * from the live set, with no other reason recorded for it. */
 export type RuntimeEvictionReason =
   | "idle" | "capacity" | "bytes" | "heap" | "publication-uncertain" | "closed" | "disposed" | "deleted" | "shutdown";
 
 export type RuntimeLifecycleReason = RuntimeLoadReason | RuntimeEvictionReason;
 
-/** One runtime load or eviction, with the bytes the byte budget charges it.
- * `transcriptBytes` is the canonical JSONL size the estimate came from — at
- * publication for a load, and from the stat the byte pass itself read for an
- * eviction it made — so a reader can cross-check the record against the
- * sampler's runtime inventory. `overBudget` names a load that leaves the live
- * charge over `LIVE_RUNTIME_BYTE_BUDGET`, which the budget admits instead of
- * refusing (it is eviction pressure, not an admission gate). */
 export interface RuntimeLifecycleRecord {
   event: "runtime.loaded" | "runtime.evicted";
   sessionId: string;
@@ -179,40 +134,21 @@ export interface RuntimeLifecycleRecord {
   overBudget?: true;
 }
 
-/** One published runtime's byte charge, as the budget assesses it. */
 interface PublishedRuntimeBytes {
   transcriptBytes: number;
   estimatedHeapBytes: number;
 }
 
-/** One admission the heap-pressure gate refused (`G-12`): a cold runtime load
- * any owner asked `acquire` for (`open`, the same reason its `runtime.loaded`
- * record carries), or a JSONL import. `acquire` serves reads, leases and
- * automation alike, so the registry cannot name the RPC that asked for a cold
- * load; it names the admission it refused instead of claiming one caller. */
 export type ColdLoadAdmission = "open" | "import";
 
-/** One cold start shared by every requester that joined it (`C-6`), with the
- * waiters still holding it. The start is one shared entry, so the signal that
- * drops a queued load belongs to the last waiter rather than to the requester
- * that happened to arrive first. */
 interface PendingColdLoad {
-  /** The shared start, set before the record is published in
-   * `pendingSlotStarts`, so a joiner never sees a half-built record. */
   operation: Promise<RuntimeSlot>;
-  /** Aborted when the last waiter leaves, which is what drops the load still
-   * queued behind the concurrency cap. */
   readonly controller: AbortController;
   waiters: number;
 }
 
-/** One admission refused because the process heap was already past
- * `HEAP_REFUSAL_SHARE` of its limit (`G-12`). The Gateway logs one
- * `gateway.shed` for it with the same reason and counts the transport's own
- * deadline sheds carry, so a triage run sees every shed admission in one event. */
 export interface CapacityShedRecord {
   reason: "heap";
-  /** Which admission was refused; see `ColdLoadAdmission`. */
   admission: ColdLoadAdmission;
   heapUsedBytes: number;
   heapLimitBytes: number;
@@ -224,13 +160,10 @@ interface HeapSample {
   limitBytes: number;
 }
 
-/** The heap one loaded runtime is estimated to hold. */
 function estimateRuntimeHeapBytes(transcriptBytes: number): number {
   return Math.ceil(Math.max(0, transcriptBytes) * LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR);
 }
 
-/** Canonical transcript bytes of a live or starting runtime; a session that has
- * not written its file yet holds none. */
 async function sessionFileBytes(path: string | undefined): Promise<number> {
   if (path === undefined) return 0;
   return stat(path).then((metadata) => metadata.size).catch(() => 0);
@@ -242,9 +175,6 @@ function assertProcessSessionRef(value: string): void {
   }
 }
 
-/** Pi stores the spelling of a parent path; macOS may surface the same path
- * through its `/var` and `/private/var` aliases. Normalize lexically so catalog
- * assembly does not add synchronous filesystem work per session. */
 function sessionCatalogPathKey(path: string): string {
   const absolute = resolve(path);
   return process.platform === "darwin" && absolute.startsWith("/private/var/")
@@ -282,10 +212,6 @@ function orderDashboardSessions<T extends DashboardOrderableSession>(sessions: r
   });
 }
 
-/** The dashboard shows work for a session whose projection is active. Archive
- * admission and archive restoration share this rule: an archived session must
- * be idle, so an active projection both blocks archiving and clears a record
- * that a run reached without Gateway admission. */
 function sessionShowsWork(projection: {
   phase?: SessionSummary["phase"] | undefined;
   foregroundPhase?: SessionSummary["phase"] | undefined;
@@ -300,14 +226,10 @@ function sessionShowsWork(projection: {
     || projection.hasActiveSubagents === true;
 }
 
-/** Privacy-safe archive lifecycle signal, never a session ID or path. */
 type ArchiveDiagnostic =
   | { outcome: "failure"; stage: "set" | "remove" | "auto-unarchive" }
   | { outcome: "auto-unarchived"; trigger: "admission" | "backstop" };
 
-/** The archived container is ordered by when each session was archived, newest
- * first. Archive timestamps are unique per session but a tie still needs one
- * deterministic order across pages. */
 function orderArchivedSessions<T extends { id: string; archivedAt?: string }>(sessions: readonly T[]): T[] {
   return [...sessions].sort((left, right) => {
     const leftInstant = left.archivedAt === undefined ? Number.NaN : Date.parse(left.archivedAt);
@@ -431,13 +353,6 @@ interface CatalogPageSeed {
 
 interface CatalogPageSource {
   readonly generation: string;
-  /** Conditional-read token for this exact projection. It covers the whole
-   * projection, not just structural membership: the page-source generation
-   * plus this Gateway runtime's epoch. Every row field that can change without
-   * moving `listRevision` (a live summary, a cold row's attention projection,
-   * archive state) moves the projection generation inside the token, and the
-   * epoch fences a restart whose revisions begin again at zero. A client may
-   * therefore revalidate a retained token on a replacement connection (G-7). */
   readonly projectionToken: string;
   readonly listRevision: number;
   readonly count: number;
@@ -445,9 +360,6 @@ interface CatalogPageSource {
   readonly page: (offset: number, limit: number) => Promise<SessionSummary[]>;
 }
 
-/** One immutable read cut of the catalog index. `allInfos` is the scope's
- * every indexed row; `infos` is that set without the IDs the index reports as
- * ambiguous, which no reader may resolve. */
 interface CatalogIndexCut {
   allInfos: Array<CatalogSessionInfo & { delegated: boolean }>;
   infos: Array<CatalogSessionInfo & { delegated: boolean }>;
@@ -460,8 +372,6 @@ interface IdleEviction {
   completion?: Promise<boolean>;
 }
 
-/** Native session operations: every method executes on the canonical registry.
- * Profile modules receive this view, never an adapter with a second lifecycle. */
 export type LiveTaskEvidence =
   | { state: "present"; entries: FileEntry[]; branch: FileEntry[] }
   | { state: "absent"; operationSettled: boolean };
@@ -495,13 +405,8 @@ export interface SessionOperations extends LineageRuntimePort<RuntimeSlot>, Owne
 }
 
 export class RuntimeRegistry implements SessionOperations {
-  /** One shared K5 owner; the native tool-interruption operation keeps its K2
-   * reason identity and target/steer/abort ordering behind this I/O boundary. */
   readonly delegation: DelegationOperations<RuntimeSlot>;
   private readonly slots = new Map<string, RuntimeSlot>();
-  /** Live-only generated sessions are bound to the exact Automation operation
-   * until Pi persists their first user or assistant message. Weak ownership cannot outlive
-   * the RuntimeSlot and is never a second session catalog. */
   private readonly automationSessionOwners = new WeakMap<RuntimeSlot, {
     operationId: string;
     automationId: string;
@@ -509,9 +414,6 @@ export class RuntimeRegistry implements SessionOperations {
   private readonly mutex = new RequestSpanLane("registry.mutex");
   private readonly sessionMutations = new Map<string, Promise<void>>();
 
-  /** Registry session ordering precedes the existing registry/slot/attention
-   * lanes; seal takes HomeOwner's recordMutex last, never in reverse. SDK work
-   * keeps its own slot lane. Only this boundary creates/retires queue entries. */
   async serializeSessionMutation<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.sessionMutations.get(sessionId) ?? Promise.resolve();
     const result = previous.then(operation, operation);
@@ -522,31 +424,15 @@ export class RuntimeRegistry implements SessionOperations {
       if (this.sessionMutations.get(sessionId) === tail) this.sessionMutations.delete(sessionId);
     }
   }
-  /** One disposable flight per admission scope. All-scope work may wait for a
-   * user cut, but a dashboard never inherits child-only delay or failure. */
   private readonly catalogMaterializations = new Map<"user" | "all", {
     generation: string;
     promise: Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>>;
   }>();
-  /** Serializes attention membership checks with set/delete/rekey. Archive
-   * state shares this lane: both are Gateway-owned display projections of one
-   * canonical session and must not outlive it.
-   *
-   * Lock order is registry mutex -> session lane -> this lane. The archive
-   * commit and run admission both run on a session's lane and nest this lane
-   * inside it, and the rekey hook already holds a lane while it nests this one.
-   * Nothing holds this lane while it waits for a registry mutex or a session
-   * lane: delete releases this lane before taking the mutex, and setAttention
-   * resolves admission before entering. Keep that direction when adding work
-   * here, or runs and archive commits can deadlock. */
   private readonly attentionLane = new RequestSpanLane("registry.attention-lane");
-  /** Linearizes display lease admission with canonical session deletion. */
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
   private readonly workspace: ResourceRoot;
   private settingsOwners: Readonly<{ model: import("../settings/settings-model.js").SettingsModel; changes: import("../settings/settings-change.js").SettingsChangePath }> | undefined;
-  /** The one owner of Tron Home's designation for this installation. */
-  /** Global gate while a visible Home ledger write invalidates every live Home projection. */
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
   private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
@@ -556,65 +442,34 @@ export class RuntimeRegistry implements SessionOperations {
   private readonly archive: SessionArchiveStore;
   private readonly presentationPresence = new SessionPresentationPresenceRegistry();
   private readonly catalogMetadataIndex: CatalogMetadataIndex;
-  /** The catalog owner: one row per canonical session file (G-1c switches the
-   * readers onto it; until then only the owner and its tests read it). */
   private readonly sessionCatalog: SessionCatalog;
   private readonly configuredSessionDir: string | undefined;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
-  // A reservation is intentionally separate from slot ownership. Acquiring or
-  // subscribing cancels it before RuntimeSlot crosses its lane-protected
-  // disposal boundary, so an idle scan cannot retire a newly live session.
   private readonly idleEvictions = new Map<string, IdleEviction>();
   private readonly summaryRevisions = new Map<string, number>();
   private readonly latestSummaries = new Map<string, SessionSummaryUpdate>();
   private readonly pendingAttentionRemovals = new Set<string>();
   private readonly pendingArchiveRemovals = new Set<string>();
-  /** Archived IDs whose live projection already shows work. The row is visible
-   * from the moment the projection is published and the durable record is
-   * cleared behind it; a failed write stays visible here instead of leaving a
-   * running session hidden. */
   private readonly pendingArchiveRestorations = new Set<string>();
-  /** One durable archive-clear attempt per ID, so a repeated active projection
-   * cannot queue another store write. */
   private readonly archiveRestorationAttempts = new Map<string, Promise<void>>();
   private readonly deletingSessionIds = new Set<string>();
   private readonly trustReloadProjects = new Set<string>();
   private revision = 0;
   private catalogFingerprint: string | undefined;
-  // User and all-scope cuts have different membership contracts. Keeping their
-  // fingerprints separate lets a partial user cut advance its own revision
-  // without treating omitted delegated rows as a deletion from the full list.
   private catalogUserFingerprint: string | undefined;
   private catalogAcquisitionInvalidationGeneration = 0;
   private catalogStructuralGeneration = 0;
-  /** Mutable page overlays are separate from structural listRevision. This
-   * generation keys immutable compact page seeds without making them catalog
-   * authority. */
   private catalogProjectionGeneration = 0;
-  /** Worker session id → the Home task that created it. The task ledger is the
-   * authority; the dispatcher seeds this from its recovery pass and adds each
-   * bind, so the dashboard learns which rows are Home workers from the catalog
-   * it already syncs instead of querying the ledger. */
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, PendingColdLoad>();
   private reservedSlotStarts = 0;
-  /** Heap the byte budget has charged to session starts that are not published yet, keyed by
-   * the session being opened. The byte pass counts them in the projected total, so two concurrent
-   * opens each see the room the other has taken; a session's own reservation is left out of its
-   * own projected total, which is the charge it is opening with. */
   private readonly reservedRuntimeBytes = new Map<string, number>();
-  /** Heap the byte budget charges each published runtime, written synchronously where the
-   * runtime is published, refreshed by the byte pass from the stat it read, and cleared where it
-   * leaves `slots`. It is the live charge the load record's `overBudget` compares against the
-   * budget, and the size an eviction records. */
   private readonly publishedRuntimeBytes = new Map<string, PublishedRuntimeBytes>();
   private readonly readHeapSample: () => HeapSample;
   private evictionTimer?: NodeJS.Timeout;
   private artifactDiscoveryTimer?: NodeJS.Timeout;
   private readonly artifactDiscovery: ExtensionArtifactDiscovery;
-  /** The admitted discovery pass, joined by disposal before the discovery
-   * owner closes its root watchers. */
   private artifactDiscoveryInFlight: Promise<void> | undefined;
   private slotAdmissionsInFlight = 0;
   private readonly slotAdmissionIdleWaiters: Array<() => void> = [];
@@ -637,7 +492,6 @@ export class RuntimeRegistry implements SessionOperations {
       agentDir: string;
       tronHome: string;
       modules: ModuleHost;
-      /** Exact provider-owned root under the resolved Tron home. */
       delegatedArtifactRoot?: string;
       managedSubagents?: ManagedSubagents;
       mcpAuth?: RuntimeSlotDependencies["mcpAuth"];
@@ -653,18 +507,10 @@ export class RuntimeRegistry implements SessionOperations {
       beforeSessionDelete?: (sessionId: string) => Promise<void>;
       sessionClosed?: (sessionId: string) => void;
       persistenceDiagnostic?: (sessionId: string, code: string) => void;
-      /** One runtime load or eviction, for the Gateway log. */
       runtimeLifecycleRecord?: (record: RuntimeLifecycleRecord) => void;
-      /** One cold load the heap-pressure gate refused, for the Gateway log. */
       capacityShedRecord?: (record: CapacityShedRecord) => void;
-      /** The live heap picture the pressure gate reads. The process's own
-       * numbers by default; an injected sample drives the gate in tests without
-       * allocating past a limit the host cannot afford. */
       heapSample?: () => HeapSample;
-      /** Privacy-safe archive lifecycle outcome, never a session ID. */
       archiveDiagnostic?: (diagnostic: ArchiveDiagnostic) => void;
-      /** Read-only automation admission query, so archiving cannot hide a
-       * reserved or already-running automation target. */
       sessionAutomationReserved?: (sessionId: string) => boolean;
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
       stopSteeringDiagnostic?: RuntimeSlotDependencies["stopSteeringDiagnostic"];
@@ -672,40 +518,18 @@ export class RuntimeRegistry implements SessionOperations {
       capabilityDiagnostic?: RuntimeSlotDependencies["capabilityDiagnostic"];
       codemodeDiagnostic?: RuntimeSlotDependencies["codemodeDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
-      /** Handled catalog-index write failures. The index write is fire-and-forget
-       * outside any request span, so its owner records them. */
       catalogIndexFailure?: CatalogMetadataIndexFailure;
-      /** A catalog-index save that passed a warning threshold, well before its
-       * refusal bound. */
       catalogIndexPressure?: (pressure: CatalogMetadataIndexPressure) => void;
-      /** One catalog reconcile, with the files it covered and the rows it
-       * changed. An incomplete or failed pass is reported instead of silent. */
       catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
-      /** One catalog row the folder watcher changed for one file: a change no
-       * request or commit explains. */
       catalogChanged?: (change: SessionCatalogChange) => void;
-      /** The folder watcher stopped observing the catalog folder, so the index
-       * is re-derived from the folder's own cut once a watcher is attached. */
       catalogWatcherReset?: (reset: SessionCatalogWatcherReset) => void;
-      /** A runtime whose extension shutdown overran its disposal grace and was
-       * forced. Outside any request span. */
       runtimeDisposeTimeout?: (graceMs: number) => void;
-      /** The transport's resource sampler; the registry reports the work only it
-       * performs (catalog walks, runtime publications) and answers its runtime
-       * inventory. */
       resources?: ResourceRecorder;
       machineId?: string;
       readonly settingsSchema: SettingsSchema;
       workRegistry?: GatewayWorkRegistry;
-      /** A discovery pass that stopped at one of its budgets instead of the end
-       * of its roots, with the counts it spent. A directory past the stop is
-       * examined by a later pass; the report keeps the stop visible. */
       artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
       extensionArtifactWarning?: (warning: { reason: import("../projection/extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
-      /** The Gateway-wide user-scope runtime, where user provider packages
-       * are registered. Home's chat runs
-       * on it (#480). Only a registry without a Gateway, as in tests, omits it;
-       * Home then gets a runtime of its own, as an ordinary session does. */
       gatewayModelRuntime?: ModelRuntime;
       homeTaskDiagnostic?: (record: TaskWorkerDiagnostic) => void;
     },
@@ -758,9 +582,7 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   get moduleHost(): ModuleHost { return this.options.modules; }
-  /** The installed K6 owner, read late by session and composition consumers. */
 
-  /** Publish a change to session-list membership without creating another index. */
   noteSessionListChanged(): void {
     this.revision += 1;
     this.options.sessionListChanged();
@@ -770,8 +592,6 @@ export class RuntimeRegistry implements SessionOperations {
     this.searchInvalidator = invalidator;
   }
 
-  /** Installs the settings model and its change path for the `settings` tool.
-   * Both are built over this registry, so slots read them late-bound. */
   setSettings(model: import("../settings/settings-model.js").SettingsModel, changes: import("../settings/settings-change.js").SettingsChangePath): void {
     if (this.settingsOwners && this.settingsOwners.changes !== changes) throw new Error("Settings are already installed");
     this.settingsOwners = { model, changes };
@@ -779,11 +599,8 @@ export class RuntimeRegistry implements SessionOperations {
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
-  /** Whether a session belongs to a lineage (a Home chapter): a generic K1 read. */
   isLineageMember(sessionId: string): boolean { return this.lineage().state(sessionId).lineageId !== undefined; }
 
-  /** One construction flight per session (K1): a live runtime is returned as
-   * `existing`, a running flight is joined, otherwise `construct` runs once. */
   async materializeRuntime(sessionId: string, construct: () => Promise<RuntimeSlot>): Promise<{ slot: RuntimeSlot; existing: boolean }> {
     let existingSlot: RuntimeSlot | undefined;
     let selected!: Promise<RuntimeSlot>;
@@ -807,14 +624,12 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /** A session's canonical entries: its live runtime's branch, else the durable file's cut. */
   async canonicalEntries(sessionId: string): Promise<{ entries: readonly FileEntry[] | null; live: boolean }> {
     const live = this.slots.get(sessionId);
     if (live !== undefined && !live.isDisposed) return { entries: live.canonicalSessionEntries(), live: true };
     return { entries: await this.canonicalSessionEvidenceCut(sessionId), live: false };
   }
 
-  /** Builds and publishes a runtime over a caller-prepared manager inside one slot admission (K1). */
   async createRuntimeOver(sessionId: string, build: Parameters<LineageRuntimePort<RuntimeSlot>["createRuntimeOver"]>[1]): Promise<RuntimeSlot> {
     return this.startRuntime<RuntimeSlot>({
       reason: "create", failed: build.failed, manager: build.prepare, admitted: build.admitted, published: build.published,
@@ -826,13 +641,8 @@ export class RuntimeRegistry implements SessionOperations {
     });
   }
 
-  /** One fresh runtime admission (K1): slot admission, capacity, one reservation,
-   * construction and publication. Callers add their gates and identity checks at
-   * the reservation (`reserve`, which may return an existing owner instead) and at
-   * publication (`publish`, which runs before the runtime becomes visible). */
   private async startRuntime<R = RuntimeSlot>(start: {
     reason: "create" | "automation";
-    /** Runs first inside the admission (the caller's trust resolution). */
     admit?(): Promise<void>;
     evictFor?: string;
     reserve?: () => R | undefined;
@@ -840,7 +650,6 @@ export class RuntimeRegistry implements SessionOperations {
     create(manager: SessionManager): Promise<RuntimeSlot>;
     admitted?(slot: RuntimeSlot): void;
     publish(slot: RuntimeSlot, manager: SessionManager): R | void;
-    /** After publication, still inside the admission and its failure handling. */
     published?(slot: RuntimeSlot): Promise<void>;
     failed?(): void;
   }): Promise<R> {
@@ -850,9 +659,6 @@ export class RuntimeRegistry implements SessionOperations {
     try {
       await start.admit?.();
       await this.evictIdle(true, start.evictFor);
-      // A session that has not written a transcript yet holds no bytes, so this
-      // admission adds none to the byte budget's live charge and calls no byte
-      // pass: there is no room to make for it.
       const existing = await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
         const owner = start.reserve?.();
@@ -873,8 +679,6 @@ export class RuntimeRegistry implements SessionOperations {
         reserved = false;
         this.publishRuntime(manager.getSessionId(), slot!, transcriptBytes, start.reason);
         this.invalidateCatalogAdmission();
-        // A fresh session is live before Pi writes its first canonical entry;
-        // the slot's own `changed` commit point adds the row when it does.
         void this.sessionCatalog.refresh(slot!.persistedSessionFile);
         this.revision += 1;
         this.options.sessionListChanged();
@@ -894,9 +698,6 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /** Join the existing writer construction owner before changing its profile.
-   * With no owner, commit under construction selection so a new start cannot
-   * latch the old ledger. Never hold that mutex while joining a constructor. */
   async replaceRuntimeForProfile(sessionId: string, commit: () => Promise<void>): Promise<void> {
     const selected = await this.mutex.run(async () => {
       const flight = this.homeMaterializations.get(sessionId) ?? this.pendingSlotStarts.get(sessionId)?.operation;
@@ -907,8 +708,6 @@ export class RuntimeRegistry implements SessionOperations {
       return {};
     });
     if (selected.flight) {
-      // Construction failure has already retired its candidate. Re-read the
-      // published owner even on failure; a durable profile change still applies.
       await selected.flight.catch(() => {});
       await this.replaceRuntimeForProfile(sessionId, commit);
     } else if (selected.slot) {
@@ -916,36 +715,22 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /** Drain admission is owned here; readers derive it from the canonical phase rather than mirroring a stop flag. */
   get isAdministrativeDrainStarted(): boolean { return this.drainPhase !== "idle"; }
 
   async initialize(onPhase?: (phase: "catalog-warming" | "attention-recovery") => void): Promise<void> {
-    // Lifecycle owners load first (Home's designation), so no session opens with a late profile.
     for (const lifecycle of this.lifecycles()) await lifecycle.initialize();
     await this.workspace.initialize();
-    // Load the durable recovery inputs before capturing catalog membership, as before this
-    // optimization. The later evidence cut therefore cannot omit a marker already admitted to this pass.
     await this.attention.initialize();
     await this.archive.initialize();
-    // The catalog owner loads its durable rows, reconciles once, and watches the folder for external
-    // writers; the periodic pass is the backstop for any event the watcher could not see (G-9 moves
-    // both into the scheduler). A reader joins that first cut rather than walking the folder itself.
     this.sessionCatalog.start();
     for (const lifecycle of this.lifecycles()) lifecycle.started();
     const markerEvidence = await this.markers.evidence();
-    // The listener serves before recovery finishes, so the interruption overlay
-    // a slot or catalog row reads comes from the durable markers now. A session
-    // whose every prompt marker is completion-stamped is the one recovery clears
-    // once it proves those completions, so it is not interrupted in the meantime.
-    // Recovery then re-derives the overlay from the markers it leaves.
     this.interrupted = await this.markers.interruptedSessionIds();
     for (const [sessionId, markers] of markerEvidence) {
       if (markers.every((marker) => marker.assistantCompletionId !== undefined && !marker.operationId.startsWith("automation:"))) {
         this.interrupted.delete(sessionId);
       }
     }
-    // Recovery can open and parse large session files. Do not hold listener
-    // readiness on those full reads; recover them once the Gateway is serving.
     this.pendingAttentionRecovery = markerEvidence;
     this.pendingStartupPhaseObserver = onPhase;
     this.evictionTimer = setInterval(() => void this.evictIdle(), 60_000);
@@ -963,10 +748,6 @@ export class RuntimeRegistry implements SessionOperations {
     if (!markerEvidence) return;
     this.pendingAttentionRecovery = undefined;
     this.pendingStartupPhaseObserver?.("catalog-warming");
-    // Wait for this process's own reconcile pass to report, whatever it found:
-    // pruning attention and archive records for rows a cut omits destroys data,
-    // so it waits for a cut that saw the folder now, and keeps every record when
-    // the pass could not produce one. Recovery never fails startup.
     await this.sessionCatalog.whenReconciled();
     this.pendingStartupPhaseObserver?.("attention-recovery");
     this.pendingStartupPhaseObserver = undefined;
@@ -974,7 +755,6 @@ export class RuntimeRegistry implements SessionOperations {
     const recovered = await this.markers.interruptedSessionIds();
     const changed = recovered.size !== this.interrupted.size || [...recovered].some((id) => !this.interrupted.has(id));
     this.interrupted = recovered;
-    // The overlay is part of the row projection: a moved row moves the token (G-7).
     if (changed) {
       this.catalogProjectionGeneration += 1;
       this.options.sessionListChanged();
@@ -982,9 +762,6 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   async initializeBlobStorage(): Promise<void> {
-    // Loading durable storage must not require transcript-wide presentation
-    // metadata. Preserve owners here; the maintenance pass prunes orphans only
-    // after it obtains a complete catalog. A failed catalog is never absence.
     await Promise.all([
       this.blobs.initialize(),
       this.exports.initialize(),
@@ -997,10 +774,6 @@ export class RuntimeRegistry implements SessionOperations {
     markerEvidence: ReadonlyMap<string, readonly RunMarkerEvidence[]>,
   ): Promise<void> {
     const scanBoundary = new Date().toISOString();
-    // Startup recovery uses the owner's first cut: one indexed row per canonical
-    // file, which is the same membership the listeners serve from. An incomplete
-    // cut cannot prove either membership or absence, so attention records and
-    // the reconciliation cursor are kept for the next startup instead.
     if (!this.sessionCatalog.hasReconciledCut()) return;
     const byID = new Map<string, Array<{ path: string }>>();
     for (const row of this.sessionCatalog.rows()) {
@@ -1009,19 +782,9 @@ export class RuntimeRegistry implements SessionOperations {
       byID.set(row.id, candidates);
     }
     const retainedSessionIds = new Set(byID.keys());
-    // Live ownership is membership too: a session that was opened or created
-    // after this cut, or one that has not reached disk yet, must keep its
-    // record. Recovery runs after the listener is already serving.
     for (const sessionId of this.slots.keys()) retainedSessionIds.add(sessionId);
     await this.attention.prune(retainedSessionIds);
-    // Archive state is a display projection of the same membership, so it
-    // recovers from the same complete cut or keeps its records untouched. It
-    // serializes with delete and rebind, and each dropped record names its live
-    // slot so an open snapshot cannot keep a timestamp the store no longer has.
     await this.attentionLane.run(async () => {
-      // Live ownership is re-read inside the lane: a session created and archived
-      // while the attention prune above was awaiting must keep its record, and
-      // archive commits serialize on this same lane.
       const archiveRetained = new Set(retainedSessionIds);
       for (const sessionId of this.slots.keys()) archiveRetained.add(sessionId);
       const pruned = await this.archive.prune(archiveRetained);
@@ -1029,8 +792,6 @@ export class RuntimeRegistry implements SessionOperations {
     });
     for (const [sessionId, markers] of markerEvidence) {
       const candidates = byID.get(sessionId);
-      // Duplicate IDs are intentionally not recoverable: choosing one file
-      // would make attention state depend on enumeration order.
       if (!candidates || candidates.length !== 1) continue;
       const path = candidates[0]!.path;
       let manager: SessionManager;
@@ -1044,8 +805,6 @@ export class RuntimeRegistry implements SessionOperations {
         const completion = completionOwnedByMarker(manager, marker);
         if (!completion) continue;
         await this.attention.complete(sessionId, completion.id);
-        // Automation recovery must commit its own terminal record before this
-        // exact marker is cleared. Ordinary prompt markers remain attention-owned.
         if (!marker.operationId.startsWith("automation:")) {
           await this.markers.clear(sessionId, marker.operationId);
         }
@@ -1058,24 +817,14 @@ export class RuntimeRegistry implements SessionOperations {
     return {
       broadcast: this.options.broadcast,
       summaryChanged: (summary: SessionSummaryUpdate) => {
-        // A run that Pi started on its own (an extension's `triggerTurn`, a
-        // scheduled wake) never reached run admission, so this is the only
-        // boundary that can notice it. Visibility is restored before the
-        // publication so the row is never both working and hidden, and a
-        // retained override keeps retrying its durable clear.
         if (this.pendingArchiveRestorations.has(summary.sessionId) || sessionShowsWork(summary)) {
           this.restoreArchivedSession(summary.sessionId);
         }
         this.publishRevisionedSummary({ ...summary, ...this.attention.projection(summary.sessionId) });
-        // The slot's summary commit point: every Gateway-owned canonical append
-        // reaches the row here, without a reader walking the folder.
         void this.sessionCatalog.refresh(this.slots.get(summary.sessionId)?.persistedSessionFile);
       },
       changed: (sessionId: string) => {
         this.invalidateCatalogAcquisition();
-        // A structural commit point (a rename or session-info entry): the row is
-        // re-derived from the file. Message appends reach the row through the
-        // summary commit point below.
         void this.sessionCatalog.refresh(this.slots.get(sessionId)?.persistedSessionFile);
         this.revision += 1;
         this.options.sessionListChanged();
@@ -1087,8 +836,6 @@ export class RuntimeRegistry implements SessionOperations {
         recovery: boolean,
         observed: boolean,
       ) => this.attentionLane.run(async () => {
-        // A Home worker's completions are read by construction (#1003). Startup
-        // recovery runs before the worker index is seeded; seeding acknowledges those.
         const read = (!recovery && observed) || this.delegation.hasWorkerAttribution(sessionId);
         const result = await this.attention.complete(sessionId, completion.id, read);
         if (result.changed) await this.publishAttentionSummary(sessionId, result.projection);
@@ -1105,32 +852,18 @@ export class RuntimeRegistry implements SessionOperations {
           this.recordRuntimeEviction(sessionId, "closed");
         }
         this.cancelIdleEviction(sessionId, slot);
-        // The transport owns subscription lifetime: it subscribes a client
-        // before it installs that client's synchronization barrier and
-        // unsubscribes it on close, revoke, or session close. A slot going away
-        // (idle eviction, an extension-requested shutdown) is not an
-        // unsubscribe, so a client still watching this session keeps its
-        // audience and receives snapshots again once the session is acquired.
         this.presentationPresence.removeSession(sessionId);
         this.interrupted.delete(sessionId);
         if (removedLiveOnlySession) {
-          // Empty runtime ownership is permanent only while the slot exists.
-          // Retire both halves of its revisioned row projection together.
           this.summaryRevisions.delete(sessionId);
           this.latestSummaries.delete(sessionId);
           this.invalidateCatalogAdmission();
           this.revision += 1;
           this.options.sessionListChanged();
         } else if (removed && persistedPath !== undefined && !persistedPathWasIndexed) {
-          // The slot may have created its canonical file after the cached disk
-          // generation. Force the next catalog read to discover that file once
-          // runtime ownership is no longer available as the row projection, and
-          // apply the change to the catalog owner at the same commit point.
           this.invalidateCatalogAcquisition();
           void this.sessionCatalog.refresh(persistedPath);
         }
-        // Persisted closure publishes a final idle summary before this hook and
-        // retains its revision continuity; membership did not change.
         this.options.sessionClosed?.(sessionId);
       },
       rekey: async (
@@ -1146,47 +879,25 @@ export class RuntimeRegistry implements SessionOperations {
         }
         const existing = this.slots.get(nextId);
         if (existing && existing !== slot) throw new GatewayError("conflict", "Replacement session is already active");
-        // Every fallible admission check runs before the first change, so a
-        // rejected rebind cannot leave attention and archive state out of step
-        // while the slot rolls back its identity. A reset identity (a new session
-        // or a fork) starts unarchived, and a discarded identity takes its state
-        // away, so both must claim an identity that owns nothing yet. A migrate
-        // moves both records onto the replacement identity, which must therefore
-        // own nothing either. A preserve rebind (an extension switching to an
-        // existing session) is the opposite: the target already owns its records
-        // and keeps them, so it takes no admission here.
         if (previousId !== nextId && disposition !== "preserve") {
           await this.attention.assertAbsent(nextId);
           await this.archive.assertAbsent(nextId);
         }
-        // A reset identity (a new session or a fork) starts unarchived; a
-        // migrated identity carries its archive state; a discarded identity
-        // takes it away. Complete these writes while the slot and registry still
-        // own previousId, then commit both in one synchronous turn.
         if (disposition === "migrate") {
           await this.attention.rekey(previousId, nextId);
           await this.archive.rekey(previousId, nextId);
-          // Inbox rows carry the canonical session identity they belong to, so a
-          // migrated identity takes its alerts with it instead of orphaning them.
           await this.options.modules.policy("sessionNotifications")?.()?.rekeySession(previousId, nextId);
         } else if (disposition === "discard") {
           await this.attention.remove(previousId);
           await this.archive.remove(previousId);
         }
-        // A rebind ends any pending visible override: the identity changed, so
-        // the previous ID's run is no longer the owner of either record.
         this.pendingArchiveRestorations.delete(previousId);
         this.pendingArchiveRestorations.delete(nextId);
         await this.options.beforeSessionRekey?.(previousId, nextId, slot);
-        // A rebind is the only identity change the Gateway owns: a reset
-        // identity (new session or fork) persists beneath a new path, and a
-        // migrate moves the row to the replacement's canonical file.
         const previousCatalogPath = slot.persistedSessionFile;
         commitIdentity();
         if (this.slots.get(previousId) === slot) this.slots.delete(previousId);
         this.slots.set(nextId, slot);
-        // The charge follows the slot's identity: the runtime is the same live
-        // runtime, so this is not an eviction.
         const previousCharge = this.publishedRuntimeBytes.get(previousId);
         if (previousCharge !== undefined) {
           this.publishedRuntimeBytes.delete(previousId);
@@ -1215,8 +926,6 @@ export class RuntimeRegistry implements SessionOperations {
             this.subscribers.set(nextId, subscribers);
           }
         }
-        // Identity and map ownership are already committed. Observers are
-        // notification-only and cannot trigger the slot's pre-commit rollback.
         try { this.searchInvalidator?.(previousId, nextId); } catch {}
         try { this.options.sessionRekeyed?.(previousId, nextId); } catch {}
         this.invalidateCatalogAcquisition();
@@ -1238,17 +947,12 @@ export class RuntimeRegistry implements SessionOperations {
     this.options.sessionSummaryChanged(revisioned);
   }
 
-  /** Both pending sets are display projections of a deleted canonical session
-   * and share one retry owner: the next lane operation, or restart
-   * reconciliation for records with no canonical catalog owner. */
   private async flushPendingProjectionRemovals(): Promise<void> {
     for (const sessionId of [...this.pendingAttentionRemovals]) {
       try {
         await this.attention.remove(sessionId);
         this.pendingAttentionRemovals.delete(sessionId);
       } catch {
-        // Retain for the next lane operation; restart reconciliation also
-        // prunes records with no canonical catalog owner.
       }
     }
     for (const sessionId of [...this.pendingArchiveRemovals]) {
@@ -1257,16 +961,10 @@ export class RuntimeRegistry implements SessionOperations {
         this.pendingArchiveRemovals.delete(sessionId);
         this.pendingArchiveRestorations.delete(sessionId);
       } catch {
-        // Retain for the next lane operation; restart reconciliation also
-        // prunes records with no canonical catalog owner.
       }
     }
   }
 
-  /** A committed archive change is a dashboard membership change, not a
-   * transcript change, so it publishes a list revision instead of a summary.
-   * Archive state is also part of a live slot's snapshot, so every named slot
-   * republishes in the same call. */
   private archiveChanged(sessionIds: readonly string[] = []): void {
     this.revision += 1;
     this.options.sessionListChanged();
@@ -1274,29 +972,15 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   private archivePersistFailed(stage: "set" | "remove" | "auto-unarchive"): void {
-    // Privacy: outcome and stage only. A session ID would turn a bounded
-    // storage diagnostic into a session-identifying record.
     this.options.archiveDiagnostic?.({ outcome: "failure", stage });
   }
 
-  /** Effective archive projection. A pending record change is already visible:
-   * a restoration's record could not be removed yet, and a removal's record
-   * outlives a session that no longer exists, so the live outcome wins until
-   * the store proves otherwise. */
   private archivedAt(sessionId: string): string | undefined {
     if (this.pendingArchiveRestorations.has(sessionId) || this.pendingArchiveRemovals.has(sessionId)) return undefined;
     return this.archive.archivedAt(sessionId);
   }
 
-  /** Clears retained archive state before the Gateway admits a run. The owning
-   * slot calls this inside its lane after every synchronous rejection and
-   * immediately before run ownership begins, so no run can start while the
-   * session is archived and a store failure rejects the run retryably instead of
-   * running it hidden. It must not acquire the registry mutex: the archive
-   * commit holds that mutex while it waits for the very lane this runs on. */
   private async beforeRunAdmission(sessionId: string): Promise<void> {
-    // Cheap gate first: an unarchived session pays no store or lane cost. A
-    // retained visible override still needs its durable clear, so it continues.
     if (!this.pendingArchiveRestorations.has(sessionId) && this.archive.archivedAt(sessionId) === undefined) return;
     await this.attentionLane.run(async () => {
       await this.flushPendingProjectionRemovals();
@@ -1315,31 +999,17 @@ export class RuntimeRegistry implements SessionOperations {
     });
   }
 
-  /** A run that reached the runtime without Gateway admission is already
-   * underway and cannot be rejected, so its row becomes visible immediately and
-   * the durable record is cleared behind it. A failed write keeps the session
-   * visible and retries on the next publication. */
   private restoreArchivedSession(sessionId: string): void {
     if (!this.pendingArchiveRestorations.has(sessionId) && this.archive.archivedAt(sessionId) === undefined) return;
     const wasPending = this.pendingArchiveRestorations.has(sessionId);
     this.pendingArchiveRestorations.add(sessionId);
-    // The effective projection flips on that in-memory override, but this runs
-    // inside the slot's own publication (a summary is what noticed the run), so
-    // the republish is queued behind the publisher rather than re-entering it.
-    // A failed durable clear keeps the override and republishes again on the
-    // next active projection.
     if (!wasPending) {
-      // Visibility changes at this moment, so clients get the membership change
-      // now: waiting for the durable clear would leave the device that archived
-      // this session hiding a row that is already working.
       this.revision += 1;
       this.options.sessionListChanged();
       const slot = this.slots.get(sessionId);
       if (slot) queueMicrotask(() => slot.refreshArchiveProjection());
     }
     if (this.archiveRestorationAttempts.has(sessionId)) return;
-    // The stored promise removes its own entry before it settles, so a disposal
-    // drain can await this map until it is empty.
     const attempt = this.clearArchivedRecord(sessionId).finally(() => {
       if (this.archiveRestorationAttempts.get(sessionId) === attempt) this.archiveRestorationAttempts.delete(sessionId);
     });
@@ -1350,9 +1020,6 @@ export class RuntimeRegistry implements SessionOperations {
     try {
       const removed = await this.attentionLane.run(async () => {
         await this.flushPendingProjectionRemovals();
-        // A re-archive that committed while this clear was queued behind it has
-        // already retired the restoration, so the record on disk is the new
-        // archive and must survive.
         if (!this.pendingArchiveRestorations.has(sessionId)) return false;
         const removed = await this.archive.remove(sessionId);
         this.pendingArchiveRestorations.delete(sessionId);
@@ -1363,15 +1030,10 @@ export class RuntimeRegistry implements SessionOperations {
         this.options.archiveDiagnostic?.({ outcome: "auto-unarchived", trigger: "backstop" });
       }
     } catch {
-      // The row stays visible through the pending restoration; the next
-      // published summary retries this exact record.
       this.archivePersistFailed("auto-unarchive");
     }
   }
 
-  /** The row state a dashboard client sees for one session: the published
-   * summary first, then the live slot, so a cold session still reports its row
-   * state. Archive admission and archive restoration share it. */
   private dashboardProjection(sessionId: string, slot: RuntimeSlot | undefined): {
     phase: SessionSummary["phase"];
     foregroundPhase: SessionSummary["foregroundPhase"];
@@ -1387,20 +1049,12 @@ export class RuntimeRegistry implements SessionOperations {
     };
   }
 
-  /** An archived session must be idle. The dashboard projection is checked as
-   * well as the slot's own run ownership, so a user can never archive a row
-   * that still shows running, waiting for input, or working through detached
-   * subagents. */
   private assertArchiveIdle(sessionId: string, slot: RuntimeSlot | undefined): void {
     if (sessionShowsWork(this.dashboardProjection(sessionId, slot))) {
       throw new GatewayError("busy", "Stop the session before archiving it", false, undefined, "session_operation_busy");
     }
   }
 
-  /** The durable record can land after a run Pi started on its own (an
-   * extension `triggerTurn`) escaped run admission, because the backstop
-   * published before the record existed and reads that same record. Visibility
-   * wins: the row is restored and the clear retries behind it. */
   private restoreArchivedSessionIfWorking(sessionId: string, slot: RuntimeSlot | undefined): void {
     if (!slot || !sessionShowsWork(this.dashboardProjection(sessionId, slot))) return;
     this.restoreArchivedSession(sessionId);
@@ -1410,9 +1064,6 @@ export class RuntimeRegistry implements SessionOperations {
     sessionId: string,
     projection: SessionAttentionProjection = this.attention.projection(sessionId),
   ): Promise<void> {
-    // Completion originates from a live slot, whose latest full row projection
-    // is already retained. Never reacquire the catalog here: doing so could
-    // fabricate a row while duplicate-ID discovery is quarantining membership.
     const summary = this.latestSummaries.get(sessionId);
     if (!summary) return;
     this.publishRevisionedSummary({ ...summary, ...projection });
@@ -1428,9 +1079,6 @@ export class RuntimeRegistry implements SessionOperations {
     liveOnlySlot?: RuntimeSlot;
     persistedSlot?: RuntimeSlot;
   }> {
-    // A live persisted slot owns its canonical file, which is the same
-    // membership proof `acquire` accepts. Opening a chat acknowledges attention
-    // immediately, so this must not cost a whole-catalog header walk.
     const persistedSlot = this.slots.get(sessionId);
     if (persistedSlot && !persistedSlot.isDisposed && persistedSlot.persistedSessionFile !== undefined
       && !this.indexAmbiguousSessionIds().has(sessionId)) {
@@ -1439,9 +1087,6 @@ export class RuntimeRegistry implements SessionOperations {
     const { acquisition, entry } = await stage("attention.resolve", () => this.catalogMembership(sessionId));
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     if (entry) return { generation: this.catalogAcquisitionInvalidationGeneration, entry };
-    // Empty sessions are visible before their first canonical append. Their
-    // exact runtime owner is a valid attention target until it is persisted or
-    // disposed; a disk claimant would already be quarantined above.
     const liveOnlySlot = this.slots.get(sessionId);
     if (liveOnlySlot && !liveOnlySlot.isDisposed && liveOnlySlot.persistedSessionFile === undefined) {
       return { generation: this.catalogAcquisitionInvalidationGeneration, liveOnlySlot };
@@ -1449,7 +1094,6 @@ export class RuntimeRegistry implements SessionOperations {
     throw new GatewayError("not_found", "Tron session was not found");
   }
 
-  /** Lifecycle observers in composition order, resolved at each phase (kernel.md §2.1). */
   private lifecycles(): KernelLifecycleObserver[] {
     return this.options.modules.observers("kernelLifecycle").map(hook => hook());
   }
@@ -1460,7 +1104,6 @@ export class RuntimeRegistry implements SessionOperations {
     return hook();
   }
 
-  /** The composed lineage owner (Home), resolved at each call (kernel.md §2.1). */
   private lineage(): SessionLineagePolicy {
     const hook = this.options.modules.policy("sessionLineage");
     if (!hook) throw new Error("No session lineage owner is composed");
@@ -1477,10 +1120,6 @@ export class RuntimeRegistry implements SessionOperations {
 
   private async setAttentionSerialized(sessionId: string, unread: boolean, throughCompletionRevision?: number): Promise<SessionAttentionProjection> {
     this.assertChapterWritable(sessionId);
-    // Membership resolution is deliberately outside the attention lane. A cold
-    // catalog read must not block completion/rekey/delete ordering for every
-    // other session. Internal catalog mutations advance the generation and are
-    // rechecked immediately before the durable attention commit.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const admission = await this.resolveAttentionAdmission(sessionId);
       const result = await this.attentionLane.run(async () => {
@@ -1493,7 +1132,6 @@ export class RuntimeRegistry implements SessionOperations {
         const currentLiveOnly = this.slots.get(sessionId);
         const admittedEntry = admission.entry;
         if (admission.persistedSlot !== undefined) {
-          // Runtime ownership, not unrelated catalog churn, fences this commit.
           if (currentLiveOnly !== admission.persistedSlot || currentLiveOnly.isDisposed
             || currentLiveOnly.persistedSessionFile === undefined
             || current.ambiguousIDs.has(sessionId)) return undefined;
@@ -1524,16 +1162,9 @@ export class RuntimeRegistry implements SessionOperations {
           () => this.attention.set(sessionId, unread, throughCompletionRevision),
         );
         if (result.changed) {
-          // The store write may suspend while a live summary advances. Merge into
-          // the newest retained facts rather than stamping stale catalog fields
-          // with a newer summary revision. A missing live summary still advances
-          // the captured page-overlay generation directly.
           const latest = this.latestSummaries.get(sessionId);
           if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
           else {
-            // Cold rows have no retained summary to merge. Invalidate every
-            // connected catalog owner so it refetches the authoritative
-            // attention projection; never fabricate a summary event here.
             this.catalogProjectionGeneration += 1;
             this.options.sessionListChanged();
           }
@@ -1545,9 +1176,6 @@ export class RuntimeRegistry implements SessionOperations {
     throw new GatewayError("busy", "Session catalog changed while updating attention", true, undefined, "catalog_changed");
   }
 
-  /** Resolve the inherited transition at runtime bind time. The result is a
-   * disposable projection, fenced by catalog admission and the parent inode;
-   * snapshots never perform parent I/O. */
   private async resolveForkBoundary(manager: SessionManager): Promise<ForkBoundaryAnchor | undefined> {
     const parentPath = manager.getHeader()?.parentSession;
     if (!parentPath) return undefined;
@@ -1593,8 +1221,6 @@ export class RuntimeRegistry implements SessionOperations {
         || parentEntries[0].id !== parentID) return undefined;
       return resolveForkBoundaryAnchor(childEntries, parentEntries, "sessionFork", manager.getLeafId());
     } catch {
-      // A missing, replaced, oversized, malformed, or ambiguous parent cannot
-      // justify a marker; transcript projection remains fully available.
       return undefined;
     }
   }
@@ -1688,9 +1314,6 @@ export class RuntimeRegistry implements SessionOperations {
     this.catalogProjectionGeneration += 1;
   }
 
-  /** The request path's only membership source (G-1c): the owner's rows, kept
-   * current by the Gateway's own commit points and by the folder watcher. No
-   * I/O, so no request can walk the session folder. */
   private catalogIndex(scope: "user" | "all"): CatalogIndexCut {
     const rows = this.sessionCatalog.rows();
     const scoped = scope === "user" ? rows.filter((row) => !row.delegated) : rows;
@@ -1716,16 +1339,10 @@ export class RuntimeRegistry implements SessionOperations {
     };
   }
 
-  /** A duplicate ID is an admission property of the whole canonical tree, so
-   * the quarantine set always comes from every indexed row, not one scope. A
-   * live-only runtime that claims an indexed ID is a second claimant too. */
   private indexAmbiguousSessionIds(): Set<string> {
     const ambiguous = new Set(this.sessionCatalog.duplicateSessionIds());
     const indexedIDs = new Set(this.sessionCatalog.rows().map((row) => row.id));
     for (const [id, slot] of this.slots) {
-      // A persisted slot is the runtime owner of its indexed canonical file,
-      // not a second claimant. Only live-only ownership colliding with any disk
-      // identity creates an additional ambiguity.
       if (!slot.isDisposed && slot.persistedSessionFile === undefined && indexedIDs.has(id)) {
         ambiguous.add(id);
       }
@@ -1733,11 +1350,6 @@ export class RuntimeRegistry implements SessionOperations {
     return ambiguous;
   }
 
-  /** A read needs a cut the owner has already published: the durable rows it
-   * loaded, or a reconcile it completed. Nothing waits here — a read that lands
-   * before either is a retryable `busy`, so a client retries instead of a
-   * request parking on an owner that may never publish. The reason is its own,
-   * so an unready catalog is never mistaken for capacity pressure. */
   private requireCatalogCut(): void {
     if (this.sessionCatalog.hasCompleteCut()) return;
     throw new GatewayError(
@@ -1764,25 +1376,13 @@ export class RuntimeRegistry implements SessionOperations {
     return (await this.catalog(scope)).sessions;
   }
 
-  /** Artifact retention needs membership, never transcript metadata. The index
-   * is that membership, and ambiguous canonical IDs still retain their data.
-   * Live-only slots also retain their staged artifacts. */
   async sessionIDsForStorageMaintenance(): Promise<ReadonlySet<string>> {
-    // Retention prunes artifacts an owner is not in. An incomplete cut is not
-    // membership evidence, so it must refuse rather than tell the store that a
-    // session it could not read is gone.
     this.requireCompleteCatalogCut();
     const ids = new Set(this.sessionCatalog.rows().map((row) => row.id));
     for (const slot of this.slots.values()) if (!slot.isDisposed) ids.add(slot.id);
     return ids;
   }
 
-  /** Automation admission and recovery, and Home's chapter files, are read at
-   * startup, before the owner may have published a cut: `initialize()` starts the
-   * owner and returns. Wait for its first pass, then require the cut — a catalog
-   * that still has none is deferred retryably instead of being reported as a
-   * missing session, so a slow first read cannot fail startup, turn into a
-   * terminal automation outcome, or read as a Home chapter with no file. */
   private async awaitFirstCatalogCut(): Promise<void> {
     if (!this.sessionCatalog.hasCompleteCut()) {
       await Promise.race([this.sessionCatalog.whenPublished(), this.sessionCatalog.whenReconciled()]);
@@ -1790,11 +1390,6 @@ export class RuntimeRegistry implements SessionOperations {
     this.requireCatalogCut();
   }
 
-  /** Membership for one named session. A Gateway-owned change reaches the index
-   * at its commit point (G-1a) but asynchronously, so a read that lands between
-   * a slot's close and its row must wait for that change rather than answer
-   * that the session does not exist: a session must never become unopenable
-   * because its runtime closed. */
   private async catalogMembership(sessionId: string): Promise<{
     acquisition: CatalogAcquisitionResolution;
     entry: CatalogAcquisitionEntry | undefined;
@@ -1810,11 +1405,6 @@ export class RuntimeRegistry implements SessionOperations {
     return { acquisition, entry };
   }
 
-  /** An ID that may name a canonical file the owner could not prove is not a
-   * missing session: reporting absence would tell a client that a session's
-   * records and artifacts are gone when the file is still there. A pass that
-   * could read the file's header names the ID exactly; one that could not leaves
-   * membership unknown for the whole cut. Both refuse retryably. */
   private unprovenSessionRefusal(sessionId: string): GatewayError | undefined {
     if (this.sessionCatalog.unprovenSessionIds().has(sessionId)) {
       return new GatewayError(
@@ -1829,11 +1419,6 @@ export class RuntimeRegistry implements SessionOperations {
     return undefined;
   }
 
-  /** A cut no scan has completed cannot prove absence. An unproven file whose
-   * ID the owner read has no row to return and is only in the owner's unproven
-   * set, so callers that would drop durable records or artifacts for the rows a
-   * cut omits fail retryably instead of acting on it: refusing is what keeps
-   * that session's record in the retained set. */
   private requireCompleteCatalogCut(): void {
     if (!this.sessionCatalog.hasReconciledCut()) {
       throw new GatewayError("busy", "Session membership could not be validated for storage maintenance", true);
@@ -1880,8 +1465,6 @@ export class RuntimeRegistry implements SessionOperations {
     marker?: RunMarkerEvidence;
     invocation?: InvocationProjection;
   }> {
-    // The scheduler's recovery runs at startup: wait for the owner's first pass
-    // rather than deciding an automation's outcome on an unready catalog.
     await this.awaitFirstCatalogCut();
     const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
@@ -1923,11 +1506,6 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /** A recovered marker is a catalog overlay in one place only: a row with no
-   * live summary and no slot reads its `phase` from this set. Removing it moves
-   * that row from `interrupted` to `idle`, which is a projection change like
-   * any other, so the token has to move or a connected owner naming the old one
-   * would keep showing `interrupted` (G-7). */
   private noteRecoveredMarkerCleared(sessionId: string): void {
     if (!this.interrupted.delete(sessionId)) return;
     this.catalogProjectionGeneration += 1;
@@ -1935,10 +1513,6 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   private async catalogStructureEvidence(): Promise<import("../../sessions/catalog-discovery.js").CatalogStructureEvidence> {
-    // The catalog owner's scan is the only whole-folder walk left. It goes
-    // through this one seam, which counts it and says whether a request started
-    // it: the request path's "zero catalog walks" criterion (G-1c) is readable
-    // from the record, and a walk a read *waits on* is still created here.
     const startedAt = performance.now();
     const requestPath = currentRequestSpan() !== undefined;
     const evidence = await this.catalogDiscovery().catalogStructureEvidence();
@@ -1950,11 +1524,6 @@ export class RuntimeRegistry implements SessionOperations {
     return evidence;
   }
 
-  /** The catalog owner's canonical readers. Its scan is this registry's counted
-   * walk, run by the owner (startup, its interval, or a watcher event the owner
-   * cannot resolve from one path), and one file's row is read from that exact
-   * file: a live slot summary is a presentation overlay, never catalog
-   * authority. No request-path reader calls this. */
   private sessionCatalogSource(): SessionCatalogSource {
     return {
       scan: async () => {
@@ -1977,9 +1546,6 @@ export class RuntimeRegistry implements SessionOperations {
     path: string,
     yieldToLoop?: () => Promise<void>,
   ): Promise<CatalogMetadataIndexSummary | undefined> {
-    // Pi appends synchronously between this read's awaits, so a summary is only
-    // published with the size it actually parsed: the row's counts describe that
-    // prefix, and a later size would claim messages it never counted.
     for (let attempt = 0; attempt < CATALOG_SUMMARY_ATTEMPTS; attempt += 1) {
       const before = await lstat(path).catch(() => undefined);
       if (!before?.isFile() || before.isSymbolicLink()) return undefined;
@@ -1989,8 +1555,6 @@ export class RuntimeRegistry implements SessionOperations {
       if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) continue;
       return {
         id: info.id, path: info.path, cwd: info.cwd,
-        // The row's parent path is the same canonical form every other catalog
-        // comparison uses; a header may name its parent through a symlinked root.
         ...(info.parentSessionPath
           ? { parentSessionPath: await this.canonicalSessionPath(info.parentSessionPath) }
           : {}),
@@ -2025,15 +1589,10 @@ export class RuntimeRegistry implements SessionOperations {
       && resolve(slot.persistedSessionFile) === canonicalPath);
   }
 
-  /** An empty runtime that has not persisted yet is a valid attention target
-   * only while no indexed row claims its ID. */
   private async attentionLiveOnlyStillAdmitted(sessionId: string): Promise<boolean> {
     return !this.sessionCatalog.rows().some((row) => row.id === sessionId);
   }
 
-  /** The commit fence for one admitted row: the index must still claim this
-   * exact file, and that file's own stat and header must still be the ones the
-   * index admitted. No other file is read, so a request never walks the tree. */
   private async attentionEntryStillAdmitted(entry: CatalogAcquisitionEntry): Promise<boolean> {
     const claimants = this.sessionCatalog.rows().filter((row) => row.id === entry.id);
     if (claimants.length !== 1 || resolve(claimants[0]!.path) !== entry.path) return false;
@@ -2044,8 +1603,6 @@ export class RuntimeRegistry implements SessionOperations {
     catch { return false; }
     if (!metadata.isFile() || metadata.isSymbolicLink()) return false;
     if (entry.fileIdentity !== undefined && `${metadata.dev}:${metadata.ino}` !== entry.fileIdentity) return false;
-    // A same-inode rewrite can change the header without moving the index. Re-read
-    // only this bounded header at the commit boundary.
     const headerIdentity = (await this.readCatalogHeader(
       entry.path,
       this.catalogDiscoveryLimits().maximumHeaderBytesPerFile,
@@ -2061,18 +1618,11 @@ export class RuntimeRegistry implements SessionOperations {
     scope: "user" | "all" = "user",
     archived: SessionArchiveFilter = "exclude",
   ): Promise<CatalogPageSource> {
-    // Structural materialization is the admission boundary. Live summary,
-    // attention and archive overlays are captured synchronously below, after
-    // I/O completes, so ordinary heartbeat churn cannot starve catalog reads.
     const materialized = await this.sharedCatalogMaterialization(scope);
     const projectionGeneration = this.catalogProjectionGeneration;
-    // The archive filter and its committed revision are part of the generation:
-    // one pagination lease can never mix archive states or serve a stale filter.
     const generation = `${materialized.listRevision}:${materialized.factsDigest}:${projectionGeneration}:${scope}:${archived}:${this.archive.revision}`;
     const existing = this.catalogPageSources.get(generation)?.deref();
     if (existing) return existing;
-    // The dashboard list never shows a Home chapter. Membership (catalog, search,
-    // open by id) keeps them; only this client-facing projection omits them.
     const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs)
       .filter((seed) => scope !== "user" || this.lineage().state(seed.id).lineageId === undefined);
     const archivedCount = seeds.reduce((total, seed) => total + (seed.archivedAt === undefined ? 0 : 1), 0);
@@ -2085,8 +1635,6 @@ export class RuntimeRegistry implements SessionOperations {
       visible,
       archived === "exclude" ? archivedCount : undefined,
     );
-    // RuntimeRegistry does not strongly retain disposable sources. Multi-page
-    // leases own them; one-page responses become collectible immediately.
     this.catalogPageSources.set(generation, new WeakRef(source));
     for (const [key, reference] of this.catalogPageSources) {
       if (!reference.deref()) this.catalogPageSources.delete(key);
@@ -2099,25 +1647,14 @@ export class RuntimeRegistry implements SessionOperations {
     return source;
   }
 
-  /** Read-only archive projection for derived reads such as session search.
-   * Archived sessions stay addressable, so this is a label rather than a
-   * filter, and the archive store remains the only writer. It shares the
-   * effective projection, so a pending restoration is already unarchived. */
   isArchived(sessionId: string): boolean {
     return this.archivedAt(sessionId) !== undefined;
   }
 
-  /** Read-only derived-search seam: the catalog owner's verified identity for
-   * every user-scope canonical session, or undefined until one complete cut has
-   * been verified against the folder. It reads the catalog's published rows
-   * only and parses no transcript. */
   searchCatalogIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
     return this.sessionCatalog.searchIdentities();
   }
 
-  /** Read-only derived-search owner seam. Open sessions use the SDK-selected
-   * branch held by their existing RuntimeSlot; cold sessions use one complete
-   * canonical file parse after catalog admission and never create a runtime. */
   async readSearchCut(sessionId: string): Promise<{
     summary: CatalogSessionInfo;
     entries: FileEntry[];
@@ -2137,16 +1674,11 @@ export class RuntimeRegistry implements SessionOperations {
     }
     const bytes = await readFile(info.path);
     if (bytes.byteLength > MAX_READ_ONLY_SUBAGENT_SESSION_BYTES) throw new GatewayError("busy", "Session exceeds the bounded search read budget", true);
-    // Parse the complete file for graph admission, then ask the pinned SDK
-    // reader for its canonical leaf/branch. Physical line order is not branch
-    // authority when sibling forks are present.
     const entries = parseStrictSessionJSONL(bytes);
     const openRefusal = await this.lineage().openRefusal(sessionId, info.path);
     if (openRefusal) throw openRefusal;
     const coldManager = SessionManager.open(info.path);
     const selectedEntries = coldManager.getBranch();
-    // Full-file graph validation is an admission gate; retain the SDK-selected
-    // branch below as the canonical projection after every sibling is checked.
     validateSearchBranch(entries, undefined, coldManager.getLeafId() ?? undefined);
     const selectedLeafId = coldManager.getLeafId() ?? undefined;
     const selectedFile = coldManager.getHeader() ? [coldManager.getHeader()!, ...selectedEntries] : entries;
@@ -2162,7 +1694,7 @@ export class RuntimeRegistry implements SessionOperations {
             if (gapOrdinal > 0) forkBoundary = { kind: anchor.kind, inheritedEntryId: anchor.inheritedEntryId, gapOrdinal };
           }
         }
-      } catch { /* incomplete parent evidence leaves coverage partial */ }
+      } catch { }
     }
     return { summary: info, entries: selectedFile, ...(info.fileIdentity ? { fileIdentity: info.fileIdentity } : {}), ...(forkBoundary ? { forkBoundary } : {}), ...(selectedLeafId ? { leafEntryId: selectedLeafId } : {}) };
   }
@@ -2170,7 +1702,6 @@ export class RuntimeRegistry implements SessionOperations {
   async catalog(scope: "user" | "all" = "user"): Promise<{
     sessions: SessionSummary[];
     listRevision: number;
-    /** Disposable identity for sharing one immutable page source. */
     generation?: string;
   }> {
     const snapshot = await this.catalogSnapshot(scope);
@@ -2188,9 +1719,6 @@ export class RuntimeRegistry implements SessionOperations {
     listRevision: number;
     generation: string;
   }> {
-    // Capture mutable overlays only after structural I/O has completed. The
-    // seed construction is synchronous, making this one immutable cut without
-    // rejecting it when another heartbeat arrives during discovery.
     const materialized = await this.sharedCatalogMaterialization(scope);
     const projectionGeneration = this.catalogProjectionGeneration;
     const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
@@ -2215,12 +1743,12 @@ export class RuntimeRegistry implements SessionOperations {
     const active = this.catalogMaterializations.get(scope);
     if (active) {
       if (active.generation === generation) return active.promise;
-      try { await active.promise; } catch { /* the successor owns its outcome */ }
+      try { await active.promise; } catch { }
       return this.sharedCatalogMaterialization(scope);
     }
     const user = scope === "all" ? this.catalogMaterializations.get("user") : undefined;
     if (user) {
-      try { await user.promise; } catch { /* all-scope admission remains independent */ }
+      try { await user.promise; } catch { }
       return this.sharedCatalogMaterialization(scope);
     }
     const operation = this.materializeCatalogSnapshot(scope);
@@ -2231,25 +1759,14 @@ export class RuntimeRegistry implements SessionOperations {
     return operation;
   }
 
-  /** One immutable read cut of the catalog index. */
   private async materializeCatalogSnapshot(scope: "user" | "all"): Promise<{
     infos: CatalogSessionInfo[];
     ambiguousIDs: ReadonlySet<string>;
     listRevision: number;
-    /** The index-owned facts of every row in this cut. A row field can change
-     * without moving `listRevision` (a name, a count, a size), and a cached page
-     * source that kept serving the previous facts would hand a revalidating
-     * client a stale row. The digest is therefore part of the page-source
-     * generation, the way the plan's projection token requires. */
     factsDigest: string;
   }> {
-    // The owner's own cut is the membership authority. A read that lands before
-    // the owner has published one joins that cut instead of walking itself, and
-    // never re-derives a row from a transcript it does not return.
     this.requireCatalogCut();
     const cut = this.catalogIndex(scope);
-    // Publishing this cut's identity is what moves listRevision when the
-    // membership the index holds changed.
     this.updateCatalogIdentity(cut.allInfos, scope);
     const facts = createHash("sha256");
     for (const info of cut.allInfos) {
@@ -2269,8 +1786,6 @@ export class RuntimeRegistry implements SessionOperations {
   private catalogIdentityFingerprint(infos: readonly CatalogSessionInfo[]): string {
     const delegated = this.delegatedSessionTopologies(infos);
     return JSON.stringify(infos
-      // Structural membership and classification own listRevision. Mutable
-      // row fields are delivered through revisioned session.summary events.
       .map((session) => [
         session.id,
         session.path,
@@ -2309,12 +1824,6 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /** The only delegated-session catalog contract. pi-subagents reserves
-   * <parent-stem>/forks/<fork-session>.jsonl and
-   * <parent-stem>/<producer>/run-N/session.jsonl beneath the canonical catalog.
-   * The topology remains mutation-protected without an extant or unambiguous
-   * parent. An optional matching header binds the projected parent identity;
-   * a contradictory header fails closed and is omitted from catalog rows. */
   private delegatedSessionTopologies(
     sessions: ReadonlyArray<{
       id: string;
@@ -2355,9 +1864,6 @@ export class RuntimeRegistry implements SessionOperations {
     }>,
     ambiguousIDs: ReadonlySet<string>,
   ): Promise<CatalogAcquisitionResolution> {
-    // Lightweight header and SDK fallback discovery both omit runtime slots.
-    // Count live-only ownership here so an on-disk claimant cannot be opened
-    // after the full catalog correctly omitted the colliding ID.
     const resolvedAmbiguousIDs = new Set(ambiguousIDs);
     const canonicalIDs = new Set(sessions.map((session) => session.id));
     for (const [id, slot] of this.slots) {
@@ -2398,14 +1904,7 @@ export class RuntimeRegistry implements SessionOperations {
     return { entriesByID, ambiguousIDs: resolvedAmbiguousIDs };
   }
 
-  /** Membership for every open, attention, automation and workspace read. The
-   * index is the authority, so this is a pure in-memory projection of the rows
-   * the owner keeps current: no request walks the folder, and the entry a
-   * caller then fences is re-proved against its own file at the commit. */
   private async catalogAcquisition(): Promise<CatalogAcquisitionResolution> {
-    // Every membership read resolves against the cut the owner has published: a
-    // cold open, attention resolution, automation and workspace lookups. An
-    // owner that has published none yet is a retryable busy, not a wait.
     this.requireCatalogCut();
     const index = this.catalogIndex("all");
     return this.buildCatalogAcquisitionFromSessions(index.allInfos, index.ambiguousIDs);
@@ -2516,8 +2015,6 @@ export class RuntimeRegistry implements SessionOperations {
       + (seed.creationOrigin ? Buffer.byteLength(seed.creationOrigin.kind)
         + Buffer.byteLength(seed.creationOrigin.automationId) : 0)
       + (seed.homeTaskId ? Buffer.byteLength(seed.homeTaskId) : 0)
-      // Object/reference, number, and boolean storage for the seed and captured
-      // summary/attention revision fields. String payloads are counted above.
       + 160, 0);
     return Object.freeze({
       generation,
@@ -2603,9 +2100,6 @@ export class RuntimeRegistry implements SessionOperations {
     });
   }
 
-  /** A role's model queue, `provider/id` in order, through the one settings
-   * resolver (Profile > Mac > built-in). The background queue without a value
-   * of its own is the subagent queue. */
   async modelQueueOf(role: Parameters<typeof modelQueueKey>[0], scope: "global" | "home" = "global"): Promise<string[]> {
     const settings = this.settingsOwners?.model;
     if (!settings) return [];
@@ -2641,8 +2135,6 @@ export class RuntimeRegistry implements SessionOperations {
     });
   }
 
-  /** Resolves an opaque child identity only while its live parent still proves
-   * the exact process/tool/run binding. This never acquires a child runtime. */
   async resolveReadOnlySubagentPath(
     childSessionRef: string,
     preferredPath: string | undefined,
@@ -2736,9 +2228,6 @@ export class RuntimeRegistry implements SessionOperations {
           throw new GatewayError("busy", "Subagent session append is still in progress", true);
         }
       }
-      // Parse the already-open descriptor. Opening the path again here would
-      // allow replace/read/swap-back to project a different inode while the
-      // final path metadata appeared unchanged.
       const childEntries = await readOpenedSessionEntries(handle, metadata.size, signal);
       signal?.throwIfAborted();
       const parsed = childEntries ? branchFromParsedSession(childEntries) : undefined;
@@ -2787,9 +2276,6 @@ export class RuntimeRegistry implements SessionOperations {
         throw new GatewayError("conflict", "Subagent session identity changed", true);
       }
       const leafEntryId = parsed.leafEntryId;
-      // The page owns the immutable prefix ending at metadata.size. A concurrent
-      // canonical append belongs to the next watcher revision and must not
-      // invalidate this already-open snapshot.
       const revision = createHash("sha256")
         .update(`${childSessionRef}\0${metadata.dev}\0${metadata.ino}\0${metadata.size}\0${metadata.mtimeMs}\0${leafEntryId ?? ""}\0${JSON.stringify(page.forkBoundary ?? null)}`)
         .digest("hex").slice(0, 32);
@@ -2865,8 +2351,6 @@ export class RuntimeRegistry implements SessionOperations {
     finally { await handle?.close().catch(() => {}); }
   }
 
-  /** Retain one already-live session operation before its first await. The
-   * release uses the slot's shared automation/operation lease authority. */
   retainLiveSession(sessionId: string): (() => void) | undefined {
     this.assertSlotAdmissionOpen();
     if (this.lineage().publicationUncertain() && this.lineage().state(sessionId).lineageId) return undefined;
@@ -2879,15 +2363,12 @@ export class RuntimeRegistry implements SessionOperations {
     return slot.retainLease();
   }
 
-  /** A live chat's selectable tools, for its settings tool selection. The caller
-   * has already opened the chat. */
   liveToolCatalog(sessionId: string): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
     const slot = this.slots.get(sessionId);
     if (!slot || slot.isDisposed) throw new GatewayError("busy", "Session runtime is no longer available", true);
     return slot.settingsToolCatalog();
   }
 
-  /** A disposable insertion-ordered view; membership stays owned by the registry. */
   runtimeEntries(): ReadonlyArray<readonly [string, RuntimeSlot]> { return [...this.slots]; }
 
   async acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {
@@ -2896,8 +2377,6 @@ export class RuntimeRegistry implements SessionOperations {
       throw new GatewayError("conflict", "Tron Home is rebuilding after uncertain ledger publication", true);
     }
     const existing = this.slots.get(sessionId);
-    // A duplicate indexed after this slot started must refuse before any catalog
-    // read, so admission checks the owner's current index.
     if (existing && !existing.isDisposed && !this.indexAmbiguousSessionIds().has(sessionId)) {
       const eviction = this.idleEvictions.get(sessionId);
       if (eviction?.slot === existing && eviction.committed && eviction.completion) {
@@ -2947,16 +2426,11 @@ export class RuntimeRegistry implements SessionOperations {
       if (raced?.isDisposed) {
         if (this.slots.get(sessionId) === raced) {
           this.slots.delete(sessionId);
-          // The slot was already disposed by a path that did not record its own
-          // eviction (a close in flight, for example), so this clearing names only
-          // that fact rather than claiming a reason this path did not observe.
           this.recordRuntimeEviction(sessionId, "disposed");
         }
         raced = undefined;
       }
       if (raced) {
-        // Membership captured before the admission awaits may already be stale, so
-        // the raced slot is admitted only against the owner's current duplicate set.
         this.requireUnambiguousSessionId(sessionId, this.indexAmbiguousSessionIds());
         const eviction = this.idleEvictions.get(sessionId);
         if (eviction?.slot === raced && eviction.committed && eviction.completion) {
@@ -2988,14 +2462,6 @@ export class RuntimeRegistry implements SessionOperations {
     return selected.operation;
   }
 
-  /**
-   * Wait for the cold start already running for a session (`C-6`, `G-12`). The
-   * start is shared, so one requester leaving must not end it for the others: a
-   * phone reconnecting on a new socket joins the load the retiring connection
-   * is still waiting for, and the queued load is dropped only when the last
-   * waiter leaves. Per-requester abandonment stays at the caller's own
-   * `abortableRead`; this only counts who is still waiting.
-   */
   private joinColdLoad(pending: PendingColdLoad, signal: AbortSignal | undefined): Promise<RuntimeSlot> {
     pending.waiters += 1;
     if (signal !== undefined) {
@@ -3006,8 +2472,6 @@ export class RuntimeRegistry implements SessionOperations {
       if (signal.aborted) leave();
       else {
         signal.addEventListener("abort", leave, { once: true });
-        // The listener outlives the start only until it settles, so a requester
-        // that leaves after the load finished cannot end a later one.
         const settled = (): void => signal.removeEventListener("abort", leave);
         pending.operation.then(settled, settled);
       }
@@ -3037,9 +2501,6 @@ export class RuntimeRegistry implements SessionOperations {
       if (await this.projectTrustReloading(entry.canonicalCwd)) {
         throw new GatewayError("busy", "Project trust is being reconfigured", true);
       }
-      // The SDK repairs incomplete tails on open. Reject an in-progress append
-      // before handing this exact file to it; unrelated child tails do not block
-      // header-only catalog acquisition.
       const header = await this.readCatalogHeader(
         canonicalPath, this.catalogDiscoveryLimits().maximumHeaderBytesPerFile,
         () => true, () => {},
@@ -3062,11 +2523,6 @@ export class RuntimeRegistry implements SessionOperations {
         || resolve(manager.getCwd()) !== entry.canonicalCwd) {
         throw new GatewayError("conflict", "Tron session identity changed after catalog discovery", true);
       }
-      // Membership is the index and the file fence above is this exact file:
-      // exactly one indexed claimant that is still this path with this identity.
-      // Unrelated churn (active subagents create child files continuously) must
-      // not make every cold open fail as catalog_changed, and no read here walks
-      // the folder.
       const claimants = this.sessionCatalog.rows().filter((row) => row.id === sessionId);
       if (claimants.length !== 1
         || resolve(claimants[0]!.path) !== canonicalPath
@@ -3076,8 +2532,6 @@ export class RuntimeRegistry implements SessionOperations {
       if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration) {
         throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
       }
-      // The refusal names a cold load rather than the RPC that asked for it:
-      // `acquire` serves reads, leases and automation alike (`G-12`).
       await this.admitColdLoadUnderHeapPressure("open");
       slot = await this.coldLoadGate.run(signal, () => stage(
         "session.open.runtime",
@@ -3126,18 +2580,9 @@ export class RuntimeRegistry implements SessionOperations {
     try {
       const trust = await this.options.trust.requireResolved(cwdInput);
       await this.evictIdle(true);
-      // The fork copies the source transcript, so the source's bytes are the
-      // bytes this admission has to fit beside the runtimes already loaded.
       const incomingBytes = estimateRuntimeHeapBytes(await sessionFileBytes(path));
       await this.makeRoomForRuntimeBytes({ incomingBytes });
-      // An import is the one mutation that is a cold load, and the heap bound
-      // refuses it here, before the fork it would otherwise have to settle:
-      // nothing has been written yet, so the retry hint is the whole recovery
-      // (`G-12`).
       await this.admitColdLoadUnderHeapPressure("import");
-      // The import's own copy is a cold load like an open, so it takes one of
-      // the same places (`G-12`). It has no requester signal: an admitted import
-      // is a mutation whose owner settles it.
       return await this.coldLoadGate.run(undefined, () => this.mutex.run(async () => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.projectDir)) {
@@ -3145,8 +2590,6 @@ export class RuntimeRegistry implements SessionOperations {
         }
         this.requireLiveSlotCapacity();
         const sessionDirectory = this.sessionDirectory(trust.cwd);
-        // Generic imports preserve caller-path provenance and reach source
-        // construction only after capacity admission; Home scans own opens/searches.
         const manager = SessionManager.forkFrom(path, trust.cwd, sessionDirectory);
         const importedId = manager.getSessionId();
         const importedPath = manager.getSessionFile();
@@ -3182,8 +2625,6 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /** Reload every live runtime of one Project root (`TrustInspection.projectDir`),
-   * including chats in its subdirectories. */
   async reloadProject(projectDirInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
     const projectDir = await this.options.trust.canonicalDirectory(projectDirInput);
     const transactional = !publish;
@@ -3239,9 +2680,6 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /** An approved/tapped image-policy widening releases only the fixed inherited
-   * pin in already-open chats at the affected default scope. A Project scope is
-   * its canonical Project root, which every chat of that root shares. */
   async releaseInheritedImageBlock(projectDir?: string): Promise<void> {
     const slots = [...this.slots.values()].filter(slot => !slot.isDisposed && (projectDir === undefined || slot.projectDir === projectDir));
     await Promise.all(slots.map(slot => slot.releaseInheritedImageBlock(projectDir === undefined ? "global" : "project")));
@@ -3252,7 +2690,6 @@ export class RuntimeRegistry implements SessionOperations {
     const slots = await this.mutex.run(() => this.trustReloadProjects.has(projectDir)
       ? [...this.slots.entries()].filter(([, slot]) => slot.projectDir === projectDir)
       : undefined);
-    // An initial busy refusal acquired nothing and must not retire active work.
     if (slots === undefined) return;
     try {
       const results = await Promise.allSettled(slots.map(async ([sessionId, slot]) => {
@@ -3267,14 +2704,11 @@ export class RuntimeRegistry implements SessionOperations {
         ? [{ sessionId: slots[index]![0], message: result.reason instanceof Error ? result.reason.message : String(result.reason) }] : []);
       if (failures.length) throw new GatewayError("internal", "Failed project runtimes could not all retire", false, { failures });
     } finally {
-      // Failed frames stay closed even if physical disposal reports an error;
-      // never strand every other session behind a project-wide reservation.
       await this.mutex.run(() => this.trustReloadProjects.delete(projectDir));
     }
   }
 
   async commitProjectReload(projectDirInput: string): Promise<void> {
-    // The key reloadProject added must leave even if the root vanished since.
     const projectDir = await this.options.trust.canonicalDirectory(projectDirInput).catch(() => projectDirInput);
     await this.mutex.run(() => {
       const slots = [...this.slots.values()].filter((slot) => slot.projectDir === projectDir);
@@ -3283,9 +2717,6 @@ export class RuntimeRegistry implements SessionOperations {
     });
   }
 
-  /** Archive or unarchive one canonical session. Archiving is a dashboard
-   * projection: it never rewrites a session file, never changes its transcript
-   * or `updatedAt`, and never starts a runtime for an inactive session. */
   async setArchived(
     sessionId: string,
     archived: boolean,
@@ -3299,9 +2730,6 @@ export class RuntimeRegistry implements SessionOperations {
   ): Promise<{ archived: boolean; archivedAt?: string }> {
     this.assertChapterWritable(sessionId);
     return this.mutex.run(async () => {
-      // Archive state is written for an admitted canonical session, so it needs
-      // the same index membership delete uses rather than a mutable
-      // presentation projection.
       const { acquisition, entry } = await this.catalogMembership(sessionId);
       this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
       const slot = this.slots.get(sessionId);
@@ -3342,9 +2770,6 @@ export class RuntimeRegistry implements SessionOperations {
         }
         let archivedAt: string;
         try {
-          // A pending restoration means the durable record is stale: its clear
-          // failed while the session was visibly working. Retire it first, or
-          // the new archive would resurrect the old row position.
           if (this.pendingArchiveRestorations.has(sessionId)) await this.archive.remove(sessionId);
           archivedAt = await this.archive.archive(sessionId);
         } catch {
@@ -3355,22 +2780,9 @@ export class RuntimeRegistry implements SessionOperations {
         this.archiveChanged([sessionId]);
         return { archived: true, archivedAt };
       });
-      // A live slot owns the lane that admits runs, so its idle admission and
-      // the durable commit must be one critical section: a run admitted in the
-      // gap would otherwise be working while this record commits over it. A
-      // cold session has no lane to interleave with, and the recheck inside
-      // `commit` rejects any slot published while the commit was in flight.
       if (archived && slot && !slot.isDisposed) {
-        // A long lane holder (a branch summary, Bash before its phase lands, a
-        // reload) is invisible to the published projection and would otherwise
-        // hold this Gateway-wide mutex for its whole duration, so it is rejected
-        // here before the lane wait. The lane re-checks the same rule.
         slot.assertArchivable(initiatingWorkToken);
         await slot.commitArchiveWhileIdle(initiatingWorkToken, commit);
-        // A run Pi started on its own during the durable write makes the row
-        // visible again, so the effective projection—not the record this request
-        // just wrote—is the authoritative response and the value the command
-        // receipt replays.
         this.restoreArchivedSessionIfWorking(sessionId, slot);
         const effective = this.archivedAt(sessionId);
         return effective === undefined ? { archived: false } : { archived: true, archivedAt: effective };
@@ -3393,10 +2805,6 @@ export class RuntimeRegistry implements SessionOperations {
     let deleted = false;
     try {
       await this.mutex.run(async () => {
-        // Deletion needs structural identity and ownership, not a mutable
-        // presentation projection. The index is that membership, and
-        // removeCanonicalCatalogFile re-proves this exact file's path and inode
-        // at the commit.
         const { acquisition, entry } = await this.catalogMembership(sessionId);
         this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
         const slot = this.slots.get(sessionId);
@@ -3430,16 +2838,11 @@ export class RuntimeRegistry implements SessionOperations {
         this.interrupted.delete(sessionId);
         await this.markers.clear(sessionId);
         if (entry) {
-          // Canonical deletion commits before projection cleanup. If cleanup fails,
-          // restart reconciliation prunes the now-unowned record; it can never
-          // resurrect catalog membership or publish a summary.
           await this.removeCanonicalCatalogFile(
             entry.path,
             sessionId,
             entry.fileIdentity,
           );
-          // The deletion is committed; the owner announces it because an
-          // unreadable path proves neither absence nor presence.
           this.sessionCatalog.remove(entry.path);
           this.invalidateCatalogAcquisition();
         } else {
@@ -3462,8 +2865,6 @@ export class RuntimeRegistry implements SessionOperations {
             try {
               archiveRemoved = await this.archive.remove(sessionId);
             } catch {
-              // Report the first failure at the boundary that owned the attempt;
-              // the flush retries this exact removal silently.
               this.archivePersistFailed("remove");
               this.pendingArchiveRemovals.add(sessionId);
             }
@@ -3486,10 +2887,6 @@ export class RuntimeRegistry implements SessionOperations {
       throw new GatewayError("busy", "Session file identity is unavailable for deletion", true);
     }
 
-    // Deletion is the only catalog mutation committed from a prior row
-    // admission. The index must still claim this exact file, and the file's own
-    // inode and header below are the destructive boundary; no other file is
-    // read, so a delete request never walks the folder.
     const acquisition = await this.catalogAcquisition();
     const entry = acquisition.entriesByID.get(expectedSessionId);
     if (acquisition.ambiguousIDs.has(expectedSessionId)
@@ -3530,8 +2927,6 @@ export class RuntimeRegistry implements SessionOperations {
     } finally {
       if (!committed) {
         const originalExists = await lstat(path).then(() => true).catch(() => false);
-        // A refused restore strands the transcript beside its path: that is the
-        // outcome to report. Both the deletion and the restore failure stay its cause.
         if (!originalExists) await rename(quarantine, path).catch((error: unknown) => {
           const failure = new GatewayError("conflict",
             "Tron session deletion failed and its file could not be restored; it remains beside the original as a .tron-delete file");
@@ -3542,27 +2937,8 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /**
-   * Cold runtime loads are queued through this gate (`G-12`): a load parses a
-   * transcript into the runtime the byte budget then has to hold, so
-   * `MAXIMUM_CONCURRENT_COLD_LOADS` of them at once keep the disk, the event
-   * loop and the libuv pool shared with interactive reads. The queue, not the
-   * load, is what a requester that leaves abandons: the start already in flight
-   * keeps running and is shared with whatever retry joins it (`C-6`).
-   */
   private readonly coldLoadGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_COLD_LOADS);
 
-  /**
-   * The heap-pressure gate in front of a cold runtime load (`G-12`). Above
-   * `HEAP_EVICTION_SHARE` of the V8 heap limit, idle runtimes are retired
-   * largest first — the largest reclaims the most — until the share is back
-   * under it or no runtime is eligible. Above `HEAP_REFUSAL_SHARE` after that,
-   * the load is refused with a retryable `busy`, its retry hint, and one
-   * `gateway.shed` record naming the admission: past that point this load is
-   * what would take the process to the limit the memory criterion measures. A
-   * protected runtime is never retired, so a heap made of protected runtimes
-   * refuses instead of pretending it made room.
-   */
   private async admitColdLoadUnderHeapPressure(admission: ColdLoadAdmission): Promise<void> {
     const reclaimedBytes = this.projectedHeapShare(0) > HEAP_EVICTION_SHARE
       ? await this.retireIdleRuntimesForHeap()
@@ -3585,13 +2961,6 @@ export class RuntimeRegistry implements SessionOperations {
     );
   }
 
-  /** Retire idle runtimes largest first while the heap is over
-   * `HEAP_EVICTION_SHARE`, and answer how many estimated bytes the pass gave
-   * back. The eligible set is what terminates the pass: every runtime in the
-   * inventory is considered once, and a protected one is skipped. Progress is
-   * measured from the registry's own accounting — `process.memoryUsage()` does
-   * not fall until V8 collects, so a sampled heap alone would keep every
-   * candidate over the share and retire the whole live set for one load. */
   private async retireIdleRuntimesForHeap(): Promise<number> {
     const candidates = [...await this.resourceInventory()].sort((left, right) => right.bytes - left.bytes);
     let reclaimedBytes = 0;
@@ -3599,9 +2968,6 @@ export class RuntimeRegistry implements SessionOperations {
       if (this.projectedHeapShare(reclaimedBytes) <= HEAP_EVICTION_SHARE) return reclaimedBytes;
       const slot = this.slots.get(candidate.sessionId);
       if (slot === undefined) continue;
-      // The charge the eviction will record, read before the retirement clears
-      // it; the byte pass refreshed every live charge from its own stat in the
-      // same admission, so this is the size the pass is reclaiming.
       const reclaimed = this.publishedRuntimeBytes.get(candidate.sessionId)?.estimatedHeapBytes
         ?? estimateRuntimeHeapBytes(candidate.bytes);
       const retired = await this.retireIdleRuntime({
@@ -3616,10 +2982,6 @@ export class RuntimeRegistry implements SessionOperations {
     return reclaimedBytes;
   }
 
-  /** The heap share this admission expects once `reclaimedBytes` of accounted
-   * runtimes are given back. The eviction pass and the refusal behind it both
-   * read this, so neither waits for a garbage collection the process cannot
-   * schedule (`G-12`). */
   private projectedHeapShare(reclaimedBytes: number): number {
     const sample = this.readHeapSample();
     if (!(sample.limitBytes > 0) || !Number.isFinite(sample.usedBytes)) return 0;
@@ -3633,23 +2995,6 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /** Byte pressure on the admission path: retires idle runtimes largest first
-   * until the projected total fits `LIVE_RUNTIME_BYTE_BUDGET`. The budget is
-   * pressure, not a gate: an admission that still does not fit is admitted beside
-   * what it could not reclaim, and its `runtime.loaded` record carries
-   * `overBudget` — the runtime count and the launcher's heap limit are the
-   * backstop, and refusal under real heap pressure belongs to the memory owner,
-   * not here. Largest first, because the runtime holding the most heap is the one
-   * whose retirement reclaims the most headroom; only a reloadable, unprotected
-   * idle runtime is a candidate, so a subscriber, run or lease keeps its runtime
-   * live.
-   * Nothing is retired when that could not help: a start that adds no bytes
-   * cannot raise the total, a charge larger than the whole budget could never fit
-   * however many runtimes are retired, and retiring every eligible runtime is
-   * skipped as a set when even that would not clear the excess. A start already
-   * pending for the requested session leaves this pass nothing to make room for:
-   * a second open of one session waits for the first, so evicting idle runtimes
-   * for it would buy nothing. */
   private async makeRoomForRuntimeBytes(
     input: { requestedSessionID?: string; incomingBytes: number },
   ): Promise<void> {
@@ -3657,14 +3002,9 @@ export class RuntimeRegistry implements SessionOperations {
       const { requestedSessionID, incomingBytes } = input;
       const estimates = new Map<string, number>();
       for (const runtime of await this.resourceInventory()) {
-        // The session being opened is charged as `incomingBytes` instead, so it
-        // is never summed here or retired below.
         if (runtime.sessionId === requestedSessionID) continue;
         const estimatedHeapBytes = estimateRuntimeHeapBytes(runtime.bytes);
         estimates.set(runtime.sessionId, estimatedHeapBytes);
-        // This stat is newer than the charge the runtime published with, and an
-        // eviction here gives back what this pass measured rather than what the
-        // load charged: record the size this pass saw.
         this.publishedRuntimeBytes.set(runtime.sessionId, { transcriptBytes: runtime.bytes, estimatedHeapBytes });
       }
       const pendingStart = requestedSessionID !== undefined && this.pendingSlotStarts.has(requestedSessionID);
@@ -3691,8 +3031,6 @@ export class RuntimeRegistry implements SessionOperations {
         retireableBytes += estimates.get(sessionId) ?? 0;
       }
       if (projectedBytes() - retireableBytes > LIVE_RUNTIME_BYTE_BUDGET) {
-        // Retiring every eligible runtime still would not fit, so nothing is
-        // retired and the admission is served beside them instead.
         this.blobs.prune();
         return;
       }
@@ -3704,9 +3042,6 @@ export class RuntimeRegistry implements SessionOperations {
           sessionId,
           slot,
           reason: "bytes",
-          // Room may already have been made by a concurrent pass, and a slot may
-          // have become busy since the sort above; neither is a reason to retire
-          // this one.
           eligible: () => projectedBytes() > LIVE_RUNTIME_BYTE_BUDGET
             && this.isIdleEvictionEligible(sessionId, slot, Infinity),
         });
@@ -3716,11 +3051,6 @@ export class RuntimeRegistry implements SessionOperations {
     });
   }
 
-  /** The total the byte budget is applied to: the live estimate, every start
-   * already reserved for, and this admission's own charge. The requested
-   * session's own reservation is left out because `incomingBytes` *is* that
-   * charge; counting both is what made a second open of one session evict idle
-   * runtimes for room its first open had already taken and would not use. */
   private projectedRuntimeBytes(liveBytes: number, incomingBytes: number, requestedSessionID?: string): number {
     let total = liveBytes + incomingBytes;
     for (const [sessionId, bytes] of this.reservedRuntimeBytes) {
@@ -3734,11 +3064,6 @@ export class RuntimeRegistry implements SessionOperations {
     this.options.runtimeLifecycleRecord?.(record);
   }
 
-  /** Records one published runtime that stopped being live, from the charge it
-   * published with. Every path that removes a slot from `slots` calls this, so
-   * the charge cannot outlive its runtime and an eviction is recorded exactly
-   * once. A slot the registry never published has no charge and is not an
-   * eviction. */
   private recordRuntimeEviction(sessionId: string, reason: RuntimeEvictionReason): void {
     const charge = this.publishedRuntimeBytes.get(sessionId);
     if (charge === undefined) return;
@@ -3764,13 +3089,6 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /**
-   * Publishes one newly live runtime, charges it to the byte budget in the same
-   * synchronous turn, and counts it for the resource sample. A runtime loaded
-   * and evicted inside one sample window would be invisible to a comparison of
-   * live sets, so the transition is counted where it happens; the slot only
-   * counts its disposal as an eviction once it was published here.
-   */
   private publishRuntime(
     sessionId: string,
     slot: RuntimeSlot,
@@ -3785,42 +3103,23 @@ export class RuntimeRegistry implements SessionOperations {
     this.recordRuntimeTransition({
       event: "runtime.loaded",
       sessionId,
-      // A session whose own transcript is over the whole budget is admitted
-      // alone (see `makeRoomForRuntimeBytes`); name that so the record explains
-      // why the byte pass could not reclaim anything for it.
       reason: estimatedHeapBytes > LIVE_RUNTIME_BYTE_BUDGET ? "oversize" : reason,
       transcriptBytes,
       estimatedHeapBytes,
-      // The byte budget retires idle runtimes for an admission it cannot fit but
-      // admits it anyway (it is pressure, not a gate), so the load record names
-      // the over-budget state its readers would otherwise have to infer from the
-      // sampler's next minute.
       ...(this.liveChargeExceedsBudget() ? { overBudget: true as const } : {}),
     });
   }
 
-  /** True when the charge of the live runtimes together is over the byte budget.
-   * Every live runtime published its charge, and the byte pass refreshes it from
-   * its own stat, so this is the live set the budget is applied to. */
   private liveChargeExceedsBudget(): boolean {
     let total = 0;
     for (const charge of this.publishedRuntimeBytes.values()) total += charge.estimatedHeapBytes;
     return total > LIVE_RUNTIME_BYTE_BUDGET;
   }
 
-  /**
-   * The live runtimes and the canonical transcript bytes each holds, for the
-   * transport's resource sample and for the byte budget. Bytes come from one
-   * `stat` per live runtime, not from a projection kept in step with every
-   * append. A slot that has already been disposed is not live even while its
-   * removal from `slots` is still in flight.
-   */
   async resourceInventory(): Promise<readonly ResourceRuntimeEntry[]> {
     const entries: ResourceRuntimeEntry[] = [];
     for (const [sessionId, slot] of this.slots) {
       if (slot.isDisposed) continue;
-      // `sessionFile` rather than `persistedSessionFile`: the stat handles a
-      // file that is not there yet, and this path must not add a sync check.
       const file = slot.sessionFile;
       const bytes = file === undefined ? 0 : await stat(file).then((metadata) => metadata.size).catch(() => 0);
       entries.push({ sessionId, bytes, subscribers: this.subscribers.get(sessionId)?.size ?? 0 });
@@ -3846,9 +3145,6 @@ export class RuntimeRegistry implements SessionOperations {
       throw new GatewayError("conflict", "Session presentation subscription is not current", true);
     }
     return this.presentationPresence.set(input, () => {
-      // Transport has resolved aliases and admitted the exact mobile token.
-      // Notification persistence must not block chat or die with its socket;
-      // the notification owner retains captured IDs for its background drain.
       void this.options.modules.policy("sessionNotifications")?.()?.markSessionInboxRead(input.sessionId).catch(() => {});
     });
   }
@@ -3889,9 +3185,6 @@ export class RuntimeRegistry implements SessionOperations {
       && (this.subscribers.get(sessionId)?.size ?? 0) === 0;
   }
 
-  /** One bounded Gateway owner discovers shared extension artifacts. Exact
-   * live bindings are refreshed first; ambient enumeration and routed reads
-   * share one hard work budget and cannot starve a known drain owner. */
   private discoverExtensionArtifacts(): Promise<void> {
     if (this.artifactDiscoveryInFlight || this.shutdownState !== "active") return Promise.resolve();
     const pass = (async () => {
@@ -3915,9 +3208,6 @@ export class RuntimeRegistry implements SessionOperations {
     const candidates = [...this.slots].sort(([, left], [, right]) => left.touchedAt - right.touchedAt);
     for (const [id, slot] of candidates) {
       if (forCapacity && !needsCapacity()) break;
-      // Reclaim only reloadable, unobserved idle runtimes under pressure.
-      // Unsent drafts keep their normal idle lifetime; runs/leases stay protected.
-      // A duplicate acquisition must preserve its own already-published slot.
       const eligible = () => id !== requestedSessionID
         && (!forCapacity || (needsCapacity() && slot.persistedSessionFile !== undefined))
         && this.isIdleEvictionEligible(id, slot, cutoff);
@@ -3926,9 +3216,6 @@ export class RuntimeRegistry implements SessionOperations {
     this.blobs.prune();
   }
 
-  /** One idle runtime's retirement under an eligibility closure that is checked
-   * under the mutex and again inside the slot's own disposal commit, so a
-   * subscription or a run that arrives mid-eviction keeps the runtime live. */
   async retireIdleRuntime(input: {
     sessionId: string;
     slot: RuntimeSlot;
@@ -3969,27 +3256,15 @@ export class RuntimeRegistry implements SessionOperations {
       }
       return disposed;
     } catch {
-      // A slot may have become busy after the eligibility check; retain it.
       return false;
     } finally {
       if (this.idleEvictions.get(id)?.slot === slot) this.idleEvictions.delete(id);
     }
   }
 
-  /** The canonical file behind one session id: the live runtime's when it has
-   * one, else the catalog's exact path. Home's memory must open across an idle
-   * eviction, so a live runtime is not required. */
-  /** One session's indexed file, by direct row lookup on the published cut.
-   * Home task list/status call this per task row; building the whole catalog
-   * acquisition here made every row O(catalog) and timed out `home.taskList`
-   * for the work owner check (#905). An ambiguous ID yields no file; a read
-   * before the first cut joins it, and refuses retryably if none arrives. */
   async sessionFile(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId)?.sessionFile;
     if (live) return live;
-    // No cut is not "no file": every Home caller reads undefined as a chapter whose
-    // file was never created, so the first read after a restart refused Home memory
-    // as having no canonical source (#968). Join the first cut instead.
     await this.awaitFirstCatalogCut();
     const indexed = () => {
       if (this.indexAmbiguousSessionIds().has(sessionId)) return undefined;
@@ -4002,25 +3277,11 @@ export class RuntimeRegistry implements SessionOperations {
     return indexed();
   }
 
-  /** The model a task worker's transcript recorded last (`model_change`). A live worker
-   * answers from its slot's canonical entries; a settled one from the same evidence cut
-   * recovery reads. Undefined before the worker has recorded a model or has no file. */
   async taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined> {
     const change = (await this.readTaskWorkerEntries(sessionId)).findLast(entry => entry.type === "model_change");
     return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
   }
 
-  /** Record which Home task created each worker session. The first task to
-   * name a session owns it (a resumed task rebinds the same worker). A change
-   * invalidates catalogs once per call, so recovery publishes one batch.
-   *
-   * Home workers never read as unread (#1003): their result reports back to
-   * Home, so only sessions the maintainer started himself join the Unread
-   * queue. Every completion of a recorded worker is admitted read. A worker
-   * newly recorded here, which recovery does for every worker in the ledger at
-   * startup, also has any earlier completion acknowledged: that clears unread
-   * left by builds before this rule and completions recovered at startup
-   * before this index was seeded. An explicit mark-unread is kept. */
   recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void {
     let changed = false;
     const acknowledge: string[] = [];
@@ -4046,7 +3307,6 @@ export class RuntimeRegistry implements SessionOperations {
           if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
           else cold = true;
         } catch {
-          // The worker stays unread until the next startup's seeding retries it.
           this.options.persistenceDiagnostic?.(sessionId, "home-worker-attention-failed");
         }
       }
@@ -4057,11 +3317,6 @@ export class RuntimeRegistry implements SessionOperations {
     });
   }
 
-  /** A Home task settled: its worker session gains one attention completion,
-   * keyed by the task, admitted read (#1003) so the worker never joins the
-   * Unread queue; the completion still advances the row's attention revision.
-   * A worker ends through its `report` tool call, which is never a successful
-   * final assistant reply, so the ordinary completion path cannot see it. */
   taskWorkerSettled(sessionId: string, taskId: string): Promise<void> {
     return this.attentionLane.run(async () => {
       const result = await this.attention.complete(sessionId, `task:${taskId}`, true);
@@ -4069,16 +3324,12 @@ export class RuntimeRegistry implements SessionOperations {
       const latest = this.latestSummaries.get(sessionId);
       if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
       else {
-        // A cold worker has no retained summary: invalidate catalogs, as
-        // `session.attention.set` does, rather than fabricating one.
         this.catalogProjectionGeneration += 1;
         this.options.sessionListChanged();
       }
     });
   }
 
-  /** A worker's display name: the live session's own name, else its catalog row.
-   * A list shows it for every row, so it is never a session snapshot build (#905, #906). */
   async taskWorkerName(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId);
     if (live) return live.displayName;
@@ -4086,8 +3337,6 @@ export class RuntimeRegistry implements SessionOperations {
     return path ? this.sessionCatalog.row(path)?.name : undefined;
   }
 
-  /** The live session's branch, or the settled conversation's evidence cut. A worker
-   * that never wrote a conversation has no known file, so nothing was recorded. */
   async readTaskWorkerEntries(sessionId: string): Promise<FileEntry[]> {
     const live = this.slots.get(sessionId);
     if (live) return live.canonicalSessionEntries();
@@ -4095,22 +3344,12 @@ export class RuntimeRegistry implements SessionOperations {
     return [];
   }
 
-  /** Shared live/cold task evidence boundary: never constructs executable
-   * resources or repairs the canonical file. Sync and identity checks precede
-   * immutable terminal/outbox publication and operation acknowledgement. */
-  /** The exact evidence cut by default. `appendStable` accepts a later append to
-   * the session and returns the exact prefix that existed when the read began. A
-   * worker session keeps receiving entries after its operation settles (late
-   * provider notices, a resumed successor), so that cut proves what a settled
-   * operation or an existing report reference recorded. It never proves an entry absent. */
   async readTaskEvidence(sessionId: string, options: { appendStable?: boolean } = {}): Promise<FileEntry[]> {
     const entries = await this.canonicalSessionEvidenceCut(sessionId, options.appendStable === true);
     if (!entries) throw new GatewayError("conflict", "Task canonical session is missing");
     return entries;
   }
 
-  /** Registry ordering precedes the slot lane. The live caller is the dispatch
-   * closure, never in-lane receipt persistence. Cold inspection stays read-only. */
   async readLiveTaskEvidence(sessionId: string, operationId: string): Promise<LiveTaskEvidence> {
     return this.serializeSessionMutation(sessionId, async () => {
       const slot = this.slots.get(sessionId);
@@ -4124,8 +3363,6 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   private async canonicalSessionEvidenceCut(sessionId: string, appendStable = false): Promise<SessionEntry[] | null> {
-    // Task settlement and Home carry-forward publish durable results. A stale
-    // catalog cut or a not-yet-ready projection cannot decide source presence.
     await this.sessionCatalog.whenReconciled();
     const path = await this.sessionFile(sessionId);
     if (!path) throw new GatewayError("conflict", "Canonical session is missing");
@@ -4134,9 +3371,6 @@ export class RuntimeRegistry implements SessionOperations {
       throw error;
     });
     if (!before) {
-      // Pi can settle Stop before appending a conversation. Absence becomes
-      // evidence only after the parent is durable and the exact path is still
-      // absent; the live caller additionally proves settled operation + Stop.
       const directory = await open(dirname(path), "r");
       try { await syncDurably(directory); } finally { await directory.close(); }
       const after = await lstat(path).catch(error => {
@@ -4159,10 +3393,6 @@ export class RuntimeRegistry implements SessionOperations {
     return entries.map(entry => entry.raw as unknown as SessionEntry);
   }
 
-  /** Whether Home's recorded session still exists: a live runtime, or a
-   * canonical session the catalog still holds. A catalog read that cannot
-   * complete is not proof of absence, so the recorded session is kept rather
-   * than replaced. */
   async sessionPresent(sessionId: string): Promise<boolean> {
     if (this.slots.has(sessionId)) return true;
     try {
@@ -4176,15 +3406,10 @@ export class RuntimeRegistry implements SessionOperations {
     return [...this.slots.values()].filter((slot) => slot.isBusy).map((slot) => slot.id);
   }
 
-  /** Close every Gateway work admission in the same synchronous turn as the
-   * accepted restart RPC and return its initial bounded identity, answered
-   * without the requesting RPC's own work (`answeringWorkToken`). */
   beginAdministrativeDrain(answeringWorkToken?: string): AdministrativeDrainSnapshot {
     if (!this.administrativeDrainStarted) {
       this.administrativeDrainStarted = true;
       this.workRegistry.beginDrain();
-      // Existing slot preflights close in this same synchronous turn. Queue
-      // clearing remains asynchronous preparation after the response boundary.
       for (const slot of this.slots.values()) slot.beginAdministrativeDrainCutoff();
       this.drainId = randomUUID();
       this.drainPhase = "preparing";
@@ -4201,9 +3426,6 @@ export class RuntimeRegistry implements SessionOperations {
     this.drainFingerprint = "";
   }
 
-  /** The drain's blockers. A lifecycle RPC answers it without its own work
-   * (`answeringWorkToken`), which only settles after that answer; the revision
-   * still follows every fact, so the drain itself waits on that work. */
   administrativeDrainSnapshot(answeringWorkToken?: string): AdministrativeDrainSnapshot {
     const now = Date.now();
     const facts: Array<{
@@ -4282,11 +3504,8 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   async waitUntilIdle(continueDrain?: (snapshot: AdministrativeDrainSnapshot) => boolean): Promise<boolean> {
-    // Freeze slot/admin admissions synchronously, then wait for every operation
-    // admitted before the cutoff. Graceful restart never cancels accepted work.
     this.beginAdministrativeDrain();
     try {
-      // Polled, not awaited: continueDrain's stall clock must be re-evaluated on each tick.
       while (this.slotAdmissionsInFlight > 0) {
         if (continueDrain && !continueDrain(this.administrativeDrainSnapshot())) {
           this.failAdministrativeDrain();
@@ -4314,7 +3533,6 @@ export class RuntimeRegistry implements SessionOperations {
       );
       let lastArtifactReconciliation = Number.NEGATIVE_INFINITY;
       this.setDrainPhase("waiting");
-      // Polled: isDrainBusy is derived from runtime-owned blockers with no single settlement event, and each tick re-runs continueDrain and the artifact reconciliation clock.
       while (!preparationSettled || this.workRegistry.size > 0 || slots.some((slot) => slot.isDrainBusy)) {
         const snapshot = this.administrativeDrainSnapshot();
         if (continueDrain && !continueDrain(snapshot)) {
@@ -4355,7 +3573,6 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /** Records an unproved process-retirement stage without reopening admission. */
   failAdministrativeDrain(): void {
     if (this.drainPhase === "idle") this.beginAdministrativeDrain();
     this.setDrainPhase("failed");
@@ -4366,8 +3583,6 @@ export class RuntimeRegistry implements SessionOperations {
     if (this.shutdownState === "disposed") return;
     if (this.disposalPromise) return this.disposalPromise;
 
-    // Close admission synchronously before waiting for any in-flight critical section. The mutex
-    // snapshot then includes every slot whose insertion had begun and excludes every later attempt.
     this.shutdownState = "shuttingDown";
     if (this.evictionTimer) clearInterval(this.evictionTimer);
     if (this.artifactDiscoveryTimer) clearInterval(this.artifactDiscoveryTimer);
@@ -4377,10 +3592,6 @@ export class RuntimeRegistry implements SessionOperations {
     try {
       await operation;
     } catch (error) {
-      // Keep shuttingDown admission closed, but do not memoize a failed
-      // retirement forever. Successful slots/stores remain retired; failed
-      // owners stay in place for the next attempt and surface the original
-      // error again if that attempt also fails.
       if (this.disposalPromise === operation) this.disposalPromise = undefined;
       throw error;
     }
@@ -4390,9 +3601,6 @@ export class RuntimeRegistry implements SessionOperations {
     await this.waitForSlotAdmissionsIdle();
     const entries = await this.mutex.run(() => [...this.slots.entries()]);
     const results = await Promise.allSettled(entries.map(([, slot]) => slot.shutdown()));
-    // Admission closed with the timer, so at most the pass already in flight
-    // remains: it is joined after the slots it offers to have retired (their
-    // fence makes its offers transient), and only then are its watchers closed.
     await Promise.allSettled([this.artifactDiscoveryInFlight]);
     this.artifactDiscovery.close();
     const failures: unknown[] = [];
@@ -4416,12 +3624,7 @@ export class RuntimeRegistry implements SessionOperations {
   }
 
   private async disposeSharedStores(): Promise<void> {
-    // The installed approval engine joins deadline effects before native stores
-    // or Home's workspace lifetime are released; the same owner serves Run.
     await this.settingsOwners?.changes.dispose();
-    // Home's memory owns capability state inside the workspace, so lifecycle
-    // owners release before the workspace that owns those files (and so a later
-    // Gateway authority in this process can open the same store again).
     for (const lifecycle of this.lifecycles()) await lifecycle.dispose().catch(() => {});
     const pending: Promise<void>[] = [];
     if (!this.blobsDisposed) {
@@ -4433,8 +3636,6 @@ export class RuntimeRegistry implements SessionOperations {
     if (!this.workspaceDisposed) {
       pending.push(this.workspace.dispose().then(() => { this.workspaceDisposed = true; }));
     }
-    // The catalog owner applies its own Gateway-owned changes and writes the
-    // durable document; settle it before the document's writer refuses writes.
     if (!this.sessionCatalogDisposed || !this.catalogIndexDisposed) {
       pending.push((async () => {
         if (!this.sessionCatalogDisposed) {
@@ -4447,9 +3648,6 @@ export class RuntimeRegistry implements SessionOperations {
         }
       })());
     }
-    // The archive backstop clears records fire-and-forget while sessions
-    // publish, and a summary published during slot shutdown can start one more.
-    // Drain until no attempt remains, so none writes after disposal resolves.
     for (const attempt of this.archiveRestorationAttempts.values()) pending.push(attempt);
     const results = await Promise.allSettled(pending);
     while (this.archiveRestorationAttempts.size > 0) {
@@ -4481,7 +3679,6 @@ export class RuntimeRegistry implements SessionOperations {
     };
   }
 
-  /** Resolves once no slot admission is in flight. Dispose closes admission first, so the count only falls. */
   private waitForSlotAdmissionsIdle(): Promise<void> {
     if (this.slotAdmissionsInFlight === 0) return Promise.resolve();
     return new Promise((resolve) => this.slotAdmissionIdleWaiters.push(resolve));
@@ -4506,7 +3703,6 @@ export class RuntimeRegistry implements SessionOperations {
     }
   }
 
-  /** Native live ownership without acquiring or constructing a runtime. */
   liveRuntime(sessionID: string): RuntimeSlot | undefined { return this.slots.get(sessionID); }
   orderedRuntime(sessionID: string): Promise<RuntimeSlot | undefined> { return this.mutex.run(() => this.slots.get(sessionID)); }
 

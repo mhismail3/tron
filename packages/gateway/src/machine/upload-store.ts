@@ -21,10 +21,6 @@ const DEFAULT_MAXIMUM_STAGING_ENTRIES = 1_024;
 const DEFAULT_MAXIMUM_RETAINED_ENTRIES = 16_384;
 const DEFAULT_MINIMUM_FREE_BYTES = 1_024 * 1_048_576;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
-// Only formats every provider accepts become inline image content, because an
-// inline block a provider rejects is replayed by every later request in the
-// session (#407). Any other image type (HEIC, TIFF, ...) is a file attachment
-// the agent can open by path.
 const INLINE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 interface UploadMetadata {
   version: 2;
@@ -160,7 +156,6 @@ export class UploadStore {
   private readonly stagedUploads = new Map<string, number>();
   private activeDownloadReaders = 0;
   private readonly activeImportLeases = new Map<string, number>();
-  /** Rebuildable physical attachment index; canonical session ownership remains JSONL/catalog authority. */
   private readonly logicalIndex = new Map<string, UploadMetadata>();
   private readonly unclaimedIndex = new Set<string>();
   private indexedUnclaimedBytes = 0;
@@ -182,9 +177,6 @@ export class UploadStore {
     this.bodyDirectory = tronHomePath(tronHome, "gateway/upload-bodies");
     this.importDirectory = tronHomePath(tronHome, "gateway/upload-imports");
     this.objectDirectory = tronHomePath(tronHome, "gateway/upload-objects");
-    // Staging is bounded independently from canonical session ownership. Old
-    // conversations can consume retained storage but can never starve a new
-    // draft while the filesystem still has its configured safety floor.
     this.maximumStagingEntries = options.maximumStagingEntries ?? DEFAULT_MAXIMUM_STAGING_ENTRIES;
     this.maximumRetainedEntries = options.maximumRetainedEntries ?? DEFAULT_MAXIMUM_RETAINED_ENTRIES;
     this.maximumRetainedLogicalBytes = options.maximumRetainedLogicalBytes
@@ -297,9 +289,6 @@ export class UploadStore {
       const diskAvailableBytes = await this.readAvailableDiskBytes();
       const stagingEntriesFull = stagingEntryCount >= this.maximumStagingEntries;
       const stagingBytesFull = reservedBytes > this.maximumStagingBytes - stagingLogicalBytes;
-      // Reservations account for bodies that have not reached disk yet. This is
-      // deliberately conservative; already-written staged bytes may be counted
-      // twice, but the configured filesystem floor can never be crossed.
       const diskFloorReached = reservedBytes + this.outstandingDiskReservations()
         > Math.max(0, diskAvailableBytes - this.minimumFreeBytes);
       if (stagingEntriesFull || stagingBytesFull || diskFloorReached) {
@@ -401,8 +390,6 @@ export class UploadStore {
         this.verifiedObjectDigests.add(digest);
         this.inventoryInitialized = true;
         this.stagedUploads.delete(staged.id);
-        // Publication is already durable. Stale body-directory cleanup is
-        // recoverable maintenance and cannot turn success into a ghost index.
         await rm(staged.folder, { recursive: true, force: true }).catch(() => {});
         return metadata;
       } catch (error) {
@@ -466,7 +453,6 @@ export class UploadStore {
     return { digest: hash.digest("hex"), size };
   }
 
-  /** fsync one owned path, file or directory, after a publication boundary. */
   private async syncPath(path: string): Promise<void> {
     const handle = await open(path, "r");
     try { await syncDurably(handle); }
@@ -660,7 +646,6 @@ export class UploadStore {
     });
   }
 
-  /** Discards client staging only. Canonical prompt ownership is immutable. */
   async discard(id: string): Promise<void> {
     this.validateID(id);
     await this.serialize(async () => {
@@ -693,7 +678,6 @@ export class UploadStore {
   private async acquireOwned(id: string): Promise<UploadLease> {
     this.validateID(id);
     if (this.activeDownloadReaders >= MAXIMUM_ATTACHMENT_READERS) throw new GatewayError("busy", "Attachment reader capacity is full", true);
-    // Metadata/path I/O is part of the reader lifetime, not free preflight.
     this.activeDownloadReaders += 1;
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     let released = false;
@@ -705,8 +689,6 @@ export class UploadStore {
     };
     try {
       const metadata = await this.metadata(id);
-      // Unclaimed staging cannot become an authenticated preview. Only an
-      // exact prompt-owned attachment may acquire this reader.
       if (!metadata.sessionId) throw new GatewayError("not_found", "Attachment is not available");
       const owned = await this.ownedLogicalPath(metadata);
       handle = await open(owned.actual, "r");
@@ -740,15 +722,11 @@ export class UploadStore {
     await this.serialize(async () => { await this.reconcileIndexedOwnership(); });
   }
 
-  /** Runs bounded maintenance without weakening canonical attachment ownership.
-   * Startup rebuilds physical truth once. Later passes use the rebuildable
-   * index, so retained history is never reparsed every ten minutes. */
   async maintain(resolveLiveSessionIds?: () => Promise<ReadonlySet<string>>): Promise<UploadCapacityStatus> {
     return this.serialize(async () => {
       const bodyDirectory = await this.ensureBodyDirectory();
       await this.cleanupStagedUploads(bodyDirectory);
       await this.cleanupImportDirectory();
-      // Membership must follow earlier accepted claims in this storage lane.
       const liveSessionIds = await resolveLiveSessionIds?.();
       const inventory = this.inventoryInitialized
         ? await this.reconcileIndexedOwnership(liveSessionIds)
@@ -879,9 +857,6 @@ export class UploadStore {
           join(owned[index]!.ownedDirectory, "metadata.json"),
           value,
         );
-        // Each durable claim immediately updates the rebuildable index. A later
-        // write failure can be retried by the same session without memory/disk
-        // ownership diverging or allowing another session to steal the prefix.
         this.installIndexedMetadata(value);
       }
       return {
@@ -910,8 +885,6 @@ export class UploadStore {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
 
-    // Crash repair is an exceptional path. Hash the logical file once, then
-    // ordinary inventory validates only inode/size ownership.
     const verified = await this.hashFile(owned.actual);
     if (verified.size !== metadata.size || verified.digest !== metadata.digest) {
       throw new GatewayError("conflict", "Attachment content failed integrity verification");
@@ -1088,9 +1061,6 @@ export class UploadStore {
       await this.ownedUploadDirectory(id, uploadDirectory);
     } catch (error) {
       if (!isConfirmedUploadCorruption(error)) {
-        // An operational ownership-check failure does not prove absence or
-        // corruption. Preserve the canonical folder and rebuilt index so a
-        // later lookup can retry the authoritative filesystem check.
         throw error;
       }
       await rm(folder, { recursive: true, force: true });

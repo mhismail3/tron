@@ -56,17 +56,10 @@ function processHash(namespace: string, ...parts: string[]): string {
   return `process:${namespace}:${createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 32)}`;
 }
 
-/** Process presentation is not an alternate secret store. Canonical JSONL is
- * left untouched; bounded wire previews fail closed for common shell, header,
- * structured, provider-token, and high-entropy credential shapes. The
- * credential-only shapes themselves live in `redactCredentials`, so the
- * episodic projection redacts exactly the same secrets. */
 export function redactProcessText(value: string): string {
   const secretName = "(?:api[_-]?key|access[_-]?key|access[_-]?token|auth(?:orization)?[_-]?token|token|password|passwd|secret|client[_-]?secret|private[_-]?key|session[_-]?key|cookie)";
   const quotedOrToken = "(?:\"[^\"]*\"|'[^']*'|[^\\s]+)";
   const named = value
-    // Environment assignments are intentionally all masked: arbitrary names
-    // can carry credentials and the process surface does not need their value.
     .replace(/(\b[A-Za-z_][A-Za-z0-9_]*\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s]+)/gu, "$1[REDACTED]")
     .replace(new RegExp(`(\\b${secretName}\\b\\s*[=:]\\s*)${quotedOrToken}`, "giu"), "$1[REDACTED]")
     .replace(new RegExp(`(--${secretName})(?:=|\\s+)${quotedOrToken}`, "giu"), "$1=[REDACTED]")
@@ -81,8 +74,6 @@ export function redactProcessText(value: string): string {
     .replace(/([?&](?:api[_-]?key|access[_-]?token|token|password|secret|signature)=)[^&#\s]+/giu, "$1[REDACTED]")
     .replace(/:\/\/([^\s/:@]+):([^\s/@]+)@/gu, "://$1:[REDACTED]@");
   const credentials = redactCredentials(named);
-  // Provider-neutral high-entropy fallback. Preserve ordinary hashes/IDs only
-  // when they are not mixed alphabetic+numeric bearer-like tokens.
   return credentials.replace(/\b[A-Za-z0-9_+/=-]{32,}\b/gu, (token) =>
     /[A-Za-z]/u.test(token) && /\d/u.test(token) ? "[REDACTED]" : token);
 }
@@ -104,9 +95,6 @@ function boundedDurationMs(value: number | undefined, startedAt?: string, termin
 }
 
 function extensionState(value: unknown): SessionProcessState {
-  // Producer `partial` means useful work needs attention; the existing native
-  // process enum has no partial member, so expose it as unsuccessful/attention
-  // rather than claiming completion or keeping the process live forever.
   if (value === "partial") return "failed";
   return value === "queued" || value === "running" || value === "paused"
     || value === "completed" || value === "failed" || value === "stopped"
@@ -132,8 +120,6 @@ export function subagentAbortRoute(
   currentOperationId: string | undefined,
   trustedControllerAvailable: boolean,
 ): SubagentAbortRoute | undefined {
-  // A settled paused row is resumable history with no live process behind it,
-  // so it never offers an abort route even though its state stays `paused`.
   if (!process || !binding || process.kind !== "subagent"
     || !isActiveProcessLifecycle(process.lifecycle)
     || process.runId !== expectedRunId || binding.runId !== expectedRunId) return undefined;
@@ -148,8 +134,6 @@ export function subagentAbortRoute(
   return undefined;
 }
 
-/** Options resolving one frame's settlement: the Gateway-observed instant of
- * an exact paused run's process-terminal proof. */
 interface SubagentProcessOptions {
   pausedSettledAt?: string;
 }
@@ -165,31 +149,20 @@ function childRows(
   const parentState = extensionState(activity.lifecycle?.state);
   const parentIsTerminal = terminalStates.has(parentState);
   for (const child of children) {
-    // Compatibility child IDs may be label/index fallbacks. They are useful to
-    // the old extension renderer but are not process ownership evidence.
     const exactChildId = child.producerId;
     const processId = exactChildId
       ? subagentProcessId(sessionId, activity.toolCallId, exactChildId)
       : undefined;
     const reportedState = extensionState(child.lifecycle ?? (child.status === "running" ? "running" : child.status === "failed" ? "failed" : "completed"));
-    // A terminal receipt cannot author an active historical child. Conversely,
-    // a child may finish while its workflow parent remains active; Gateway
-    // observation time then owns that child's terminal admission.
     const state = parentState === "unknown"
       ? "unknown"
       : parentIsTerminal && !terminalStates.has(reportedState) ? parentState : reportedState;
-    // A paused child of a settled paused run keeps `paused` but is presented as
-    // recent work settled at the Gateway-observed proof instant.
     const settledAt = state === "paused" ? pausedSettledAt : undefined;
     const terminalAt = terminalStates.has(state)
       ? child.endedAt
         ?? (parentIsTerminal ? activity.lifecycle?.terminalAt ?? activity.completedAt : activity.lifecycle?.observedAt ?? activity.updatedAt)
       : settledAt;
     const output = processOutput(child.output);
-    // Child timing is producer-authored. Never substitute the aggregate
-    // parent's duration: parallel children have independent lifetimes. A
-    // settled paused child freezes at that same observation instant instead of
-    // continuing to sample its producer's still-counting elapsed time.
     const durationMs = settledAt === undefined
       ? boundedDurationMs(child.durationMs, child.startedAt, child.endedAt ?? terminalAt)
       : boundedDurationMs(undefined, child.startedAt ?? activity.startedAt, terminalAt);
@@ -236,12 +209,6 @@ function childRows(
   return rows;
 }
 
-/** One subagent lifecycle projection for both the delegated child rows and
- * the aggregated extension process. A terminal row always carries the
- * Gateway-authored five-minute recency deadline the process recency owner
- * schedules from, and never borrows a producer's terminal timestamp. The same
- * holds for a settled paused row: its proof instant is the Gateway's, not the
- * producer's. */
 function subagentRowLifecycle(
   activity: ExtensionRunActivity,
   state: SessionProcessState,
@@ -273,9 +240,6 @@ function aggregateSubagentProcess(
     || activity.currentTool !== undefined || activity.output !== undefined
     || activity.toolCount !== undefined || activity.turnCount !== undefined
     || activity.lifecycle?.producerUpdatedAt !== undefined;
-  // An asyncId-only launcher acknowledgement has correlation but no observed
-  // child execution. The first admitted artifact child, even before that child
-  // has persisted its own run ID, is sufficient to author a temporary root.
   if (mode === "asynchronous" && !hasExecutionEvidence) return undefined;
   const processId = subagentProcessId(sessionId, activity.toolCallId, activity.runId);
   const state = extensionState(activity.lifecycle?.state ?? (activity.status === "running" ? "running" : activity.status === "failed" ? "failed" : "completed"));
@@ -316,20 +280,12 @@ export function subagentProcessesFromActivity(
 ): SessionProcessActivity[] {
   const mode = subagentMode(activity.mode);
   const pausedSettledAt = activity.lifecycle?.state === "paused" ? options.pausedSettledAt : undefined;
-  // Extension ownership and a run ID alone do not prove a delegated process:
-  // pi-subagents supervisor/control tools emit receipts too. Unknown execution
-  // modes fail closed so Gateway never authors an invalid subagent DTO.
   if (mode === "unknown") return [];
   if (activity.children.length > 0) {
     let rows = childRows(sessionId, activity, activity.children, undefined, pausedSettledAt);
     const state = extensionState(activity.lifecycle?.state ?? (activity.status === "running" ? "running" : activity.status === "failed" ? "failed" : "completed"));
     const hasActiveChild = rows.some((row) => row.lifecycle.state === "queued"
       || row.lifecycle.state === "running" || row.lifecycle.state === "paused");
-    // Workflow trace entries acquire a child run ID only after that child
-    // persists. Keep the exact, artifact-owned workflow root until an
-    // executable child can carry the parent's visibility. This covers both the
-    // active interval and a terminal-before-child-persistence race, without
-    // granting the compatibility child ID any ownership.
     const needsAggregate = state !== "unknown"
       && (terminalStates.has(state) ? rows.length === 0 : !hasActiveChild);
     if (needsAggregate) {
@@ -341,9 +297,6 @@ export function subagentProcessesFromActivity(
     }
     return rows;
   }
-  // A single run still has exact run identity and remains a valid row. A bare
-  // workflow launcher acknowledgement stays hidden until its artifact reports
-  // child execution evidence.
   const aggregate = aggregateSubagentProcess(sessionId, activity, mode, pausedSettledAt);
   return aggregate ? [aggregate] : [];
 }
@@ -409,8 +362,6 @@ function canonicalProcessHistory(manager: ReadonlySessionManager): SessionProces
   const receipts = extensionActivityReceipts(manager.getBranch(), manager.getSessionId());
   const subagents = receipts
     .flatMap(({ receipt }) => subagentProcessesFromActivity(manager.getSessionId(), extensionReceiptActivity(receipt)))
-    // Canonical pages are the Earlier partition. Mounted five-minute rows are
-    // supplied independently by RuntimeSlot and deduplicated by processId.
     .map((activity) => ({ ...activity, visibility: "historical" as const }));
   const byID = new Map<string, SessionProcessActivity>();
   for (const activity of subagents) {
@@ -432,9 +383,6 @@ function processHistoryRevisionFor(
     .digest("hex").slice(0, 32);
 }
 
-/** Bounded fingerprint of the exact filter that produced a page offset.
- * The content revision alone cannot identify a position: the same revision
- * with a different filter is a different array. */
 function processHistoryCursorQuery(filter?: { kind?: SessionProcessActivity["kind"]; state?: SessionProcessState }): string {
   return createHash("sha256").update([filter?.kind, filter?.state].map((part) => part ?? "*").join("\u0000")).digest("hex").slice(0, 16);
 }

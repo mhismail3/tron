@@ -10,8 +10,6 @@ import { CONTEXT_WINDOW_ENTRY } from "../../providers/context-window-policy.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-/** Wait for the catalog owner's first published cut: a read that lands before
- * it refuses retryably, and no reader walks the folder (G-1c). */
 async function awaitCatalogCut(registry: RuntimeRegistry): Promise<void> {
   await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } })
     .sessionCatalog.whenPublished();
@@ -80,7 +78,6 @@ describe("Gateway session context windows", { concurrent: false }, () => {
     await slot.prompt("remember this choice");
     await waitFor(() => !slot.isBusy, "the slot to go idle");
     expect(slot.snapshot().contextWindowPolicy?.warning).toBeUndefined();
-    // An idle change in a materialized session must survive without another turn.
     await slot.setContextWindow("context-test", "large", 900_000, slot.snapshot().revision, slot.snapshot().runtimeGeneration);
     const id = slot.id;
     const generation = slot.snapshot().runtimeGeneration;

@@ -13,9 +13,6 @@ import { createProviderModelRuntime } from "../../../providers/provider-runtime.
 import { gatewayModules } from "../../../main/modules.js";
 import { ModuleHost } from "../../../kernel/host/module-host.js";
 
-/** The production module composition under a real `RuntimeRegistry` (kernel.md §2.1):
- * the kernel's resource root is the workspace module's own contract, one authority. */
-
 const log = { log: () => {} };
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });

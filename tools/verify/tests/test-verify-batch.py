@@ -27,9 +27,6 @@ def shipped_runner(root, lock):
     return root / 'tools/verify/gateway.py'
 
 
-# The mini host as this fixture's mini.py runs a job: in this checkout, after recording the job-lock wait cap
-# the job carried, or with no result when `mini-down` exists (`mini-down-probes`: for case probes only).
-# Everything else in the file is the real mini.py.
 MINI_HOST = '''if __name__ == '__main__' and sys.argv[1:2] not in (['remote'], ['status'], ['pool'], ['python']):
     Path('test-results').mkdir(exist_ok=True)
     with Path('test-results/executed').open('a') as f: f.write('mini-job wait=' + os.environ.get('TRON_MINI_JOB_WAIT_SECONDS', 'none') + '\\n')
@@ -119,7 +116,6 @@ class BatchTests(unittest.TestCase):
         for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py', 'vitest_configs.py', 'mac.py', 'mini.py'):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
             text = source.read_text()
-            # The shared host lock path belongs to real full-Gateway runs, not fixtures.
             text = text.replace("'/tmp/tron-full-gateway.lock'", repr(str(Path(self.temporary.name) / 'full-gateway.lock')))
             if file == 'mini.py':
                 assert "\nif __name__ == '__main__':\n" in text, 'mini.py moved its entry point; point this fixture at it'
@@ -286,7 +282,6 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.git('remote', 'add', 'origin', str(self.origin))
         self.git('push', '-q', 'origin', 'main')
         if publish:
-            # The single enable step: name the remote whose main may receive reviewed reverts.
             self.git('config', 'tron.verify.revertRemote', 'origin')
 
     def push(self):
@@ -339,7 +334,6 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(report['verdict'], 'green')
         self.assertEqual(len(report['results']), 9)
         self.assertTrue(all(lane['seconds'] >= 0 for lane in report['results']))
-        # Both Gateway lanes ran as mini jobs (the stand-in lane refuses this Mac), each capping its job-lock wait at 45 minutes.
         self.assertEqual([line for line in (self.root / 'test-results/executed').read_text().splitlines() if line.startswith('mini-job')],
                          ['mini-job wait=2700', 'mini-job wait=2700'])
         self.assertEqual(json.loads((self.root / '.git/verify/green.json').read_text())['commit'], self.git('rev-parse', 'HEAD'))
@@ -347,7 +341,6 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(len(self.reports()), 1)
 
     def test_an_inherited_held_lock_marker_reaches_no_lane(self):
-        # A batch started under a caller's marker must not pass it on: a local Gateway run inside a lane takes the lock itself.
         self.land('good', 'yes')
         self.env['TRON_FULL_GATEWAY_LOCK_HELD'] = '1'
         result = self.run_batch('--base', self.base)
@@ -355,8 +348,6 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(self.reports()[-1]['verdict'], 'green')
 
     def test_a_mini_without_a_result_leaves_gateway_coverage_uncovered_not_red_and_never_runs_it_here(self):
-        # #2446: no fallback to this Mac. A mini job with no result (unreachable, or busy past the cap) is no
-        # test outcome: its lanes are uncovered, nothing is attributed or filed, and green.json stays.
         self.land('good', 'yes')
         self.land('mini-down', 'yes')
         result = self.run_batch('--base', self.base)
@@ -378,8 +369,6 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertFalse((self.root / '.git/verify/green.json').exists())
 
     def test_a_mini_without_a_result_during_attribution_concludes_nothing_and_is_not_memoized(self):
-        # A real red, then no mini result for its case probe: the red is filed unresolved naming the mini,
-        # no probe outcome is cached and no attribution is memoized, so the next batch attributes afresh.
         self.land('bad', 'yes')
         self.land('mini-down-probes', 'yes')
         result = self.run_batch('--base', self.base)
@@ -466,7 +455,6 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(proof['files'], ['bad'])
         head = self.git('rev-parse', 'HEAD')
         fresh = [(p['commit'], p['outcome']) for p in proof['probes'] if p['fresh']]
-        # Fresh controls: head and culprit fail twice, the first parent passes twice.
         self.assertEqual(fresh.count((head, 'bad')), 2)
         self.assertEqual(fresh.count((culprit, 'bad')), 2)
         self.assertEqual(fresh.count((proof['parent'], 'good')), 2)
@@ -508,7 +496,6 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
 
     def test_verifier_nonpass_verdicts_override_zero_exit(self):
-        # Retired exemption labels are not verifier verdicts; neither they nor deferral are green.
         for verdict, expected in [('deferred', 'uncovered'), ('expired', 'uncovered'), ('quarantined', 'uncovered')]:
             with self.subTest(verdict=verdict):
                 self.land('verifier-verdict', verdict)
@@ -560,7 +547,6 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
 
     def test_head_probe_selecting_no_tests_fails_loudly_instead_of_unresolved(self):
-        # The case failed at head, so an exact-case recipe that runs nothing there is a broken selector.
         self.land('bad', 'yes')
         self.land('renamed-probe', 'yes')
         result = self.run_batch('--base', self.base)
@@ -624,7 +610,6 @@ else: sys.exit('unexpected xcrun '+' '.join(args))
                 'slowest': [{'title': 'Tap "Send" Button', 'seconds': 1.5}, {'title': 'Tap "Done" Button', 'seconds': 0.75},
                             {'title': 'Start Test', 'seconds': 0.5}],
                 'byKind': {'Tap … Button': {'count': 2, 'seconds': 2.25}, 'Start Test': {'count': 1, 'seconds': 0.5}}}]}]}])
-        # An unreadable bundle is an observation error, not a coverage or verdict input.
         [error] = ui['errors']
         self.assertEqual(error, f"tests {results / 'broken/Journeys.xcresult'}: xcresulttool exit 1: "
                                 'xcresulttool: cannot open result bundle')
@@ -670,7 +655,6 @@ print('Executed 2 tests, with 0 failures')
         proof = self.reports()[-1]['failures'][0]['attribution']
         self.assertEqual((proof['status'], proof['commit']), ('proven', culprit))
         self.assertTrue(all(p['command'][-1] == 'SampleTests/testExample' for p in proof['probes']))
-        # Each probe reached xcodebuild with exactly that case's filter: never a whole-suite run.
         filtered = [line for line in calls.read_text().splitlines() if '-only-testing:TronMacIntegrationTests/SampleTests/testExample' in line]
         self.assertEqual(len(filtered), len(proof['probes']))
 
@@ -859,8 +843,6 @@ if sys.argv[1] == 'clean':
                 process.communicate(timeout=40)
 
 
-    # Causal source auto-revert (#2194): real Git remote, real batch CLI, controlled reviewer.
-
     def red_with_review(self, *, merge=True):
         self.remote()
         self.land('good', 'yes')
@@ -967,7 +949,6 @@ if sys.argv[1] == 'clean':
     def test_crash_after_remote_acceptance_discovers_the_published_revert(self):
         culprit, tip, repair = self.red_with_review()
         wrapper = Path(self.temporary.name) / 'receive-pack-crash'
-        # Accept the push, then SIGKILL the batch owner before it can record the result.
         wrapper.write_text('#!/bin/sh\n'
                            'git-receive-pack "$@"\n'
                            'pid=$PPID\n'
@@ -987,7 +968,6 @@ if sys.argv[1] == 'clean':
         [repair] = self.repair()
         self.assertEqual(repair['state'], 'published')
         self.assertEqual(len(self.reverts_on_remote(culprit)), 1)
-        # A later batch over the same red range reuses the journal instead of building another revert.
         self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
         self.assertEqual(len(self.reverts_on_remote(culprit)), 1)
 
@@ -1271,12 +1251,9 @@ while other and not Path('test-results/started-'+other).exists() and time.time()
         report = self.reports()[-1]
         self.assertEqual(report['verdict'], 'uncovered')
         self.assertFalse(report['results'][1]['failureComplete'])
-        # #2265: with no exact-case selector there is nothing to bisect: the suite is never rerun.
         self.assertEqual(report['results'][1]['status'], 'uncovered')
         self.assertEqual(report['failures'][0]['attribution'], {'status': 'unresolved', 'reason': 'owner provided no exact-case attribution selector',
                                                                 'candidates': report['commits']})
-        # The issue names the range, not each of its commits and files, so a long range stays within the
-        # issue tracker's 64 KiB bound (#2413: 1,052 commits made a 109 KB body that was refused).
         body = next((self.root / '.git/verify/batches').glob('*/failure-*/issue.md')).read_text()
         self.assertIn(f"Candidates: all {len(report['commits'])} covered commits of the range.", body)
         self.assertIn(f"Files: {len(report['files'])} changed in the range (`report.json` `files`).", body)
@@ -1342,7 +1319,6 @@ class AppleLaneTests(unittest.TestCase):
         self.assertEqual(len(names), 1, names)
         self.assertTrue(all(env['TRON_IOS_TEST_LANE_REPOSITORY'] == common
                             for environment in environments for env in environment.values()), environments)
-        # Smoke products stay each worktree's own: products prune follows their worktree.
         smoke = {environment['iOS smoke']['TRON_IOS_TEST_DERIVED_DATA'] for environment in environments}
         self.assertEqual(len(smoke), 3, smoke)
         theirs = self.apple_environments(other)['real Gateway UI journeys']
@@ -1363,14 +1339,12 @@ class ChainInterruptTests(unittest.TestCase):
         signalled, killpg = threading.Event(), os.killpg
 
         def observed_killpg(group, signum):
-            # The real call; the spy only tells the lane its group was signalled.
             try:
                 return killpg(group, signum)
             finally:
                 signalled.set()
 
         def lane(_index, _lane):
-            # A started lane, as `execute` registers it, that exits before its thread reaps it.
             process = subprocess.Popen(['true'], start_new_session=True)
             with batch.RUNNING_LOCK:
                 batch.RUNNING.add(process.pid)
@@ -1384,8 +1358,12 @@ class ChainInterruptTests(unittest.TestCase):
                 with batch.RUNNING_LOCK:
                     batch.RUNNING.discard(process.pid)
 
-        with mock.patch('os.killpg', observed_killpg), self.assertRaises(KeyboardInterrupt):
-            batch.run_chains([[(0, {})]], lane)
+        inherited = signal.signal(signal.SIGINT, signal.default_int_handler)
+        try:
+            with mock.patch('os.killpg', observed_killpg), self.assertRaises(KeyboardInterrupt):
+                batch.run_chains([[(0, {})]], lane)
+        finally:
+            signal.signal(signal.SIGINT, inherited)
         self.assertFalse(batch.CANCELLED.is_set())
 
 
@@ -1409,7 +1387,6 @@ class ChainInterruptTests(unittest.TestCase):
                 finally:
                     batch.CANCELLED.clear()
                 self.assertIsNone(outcome['exit'], outcome)
-                # A filed issue keeps its number, so the next red comments on it instead of filing again.
                 self.assertEqual(json.loads(journal.read_text()) if journal.exists() else None, previous)
 
 class ShardedIosProbeTests(unittest.TestCase):
@@ -1431,9 +1408,47 @@ class ShardedIosProbeTests(unittest.TestCase):
             result = batch.execute(root, lane, root / 'probe')
         self.assertEqual(result['exit'], 0, result)
 
+    def test_a_verifier_ios_step_probe_builds_its_products_before_running_the_case(self):
+        """#2438: a probe worktree starts without iOS test products, and `tron-ios-test run` only reuses
+        them, so the probe of a failed verifier iOS step builds first, as the verifier did."""
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+        build = 'import pathlib; pathlib.Path("products").write_text("built")\n'
+        run = ('import json, pathlib, sys\n'
+               'if not pathlib.Path("products").exists(): sys.exit("error: test products are missing; run build first")\n'
+               'out = pathlib.Path("run"); out.mkdir()\n'
+               '(out / "summary.json").write_text(json.dumps({"passedTests": 1}))\n'
+               'print("iOS test run complete: " + str(out.resolve()))\n')
+        with tempfile.TemporaryDirectory(prefix='tron-batch-ios-probe-') as temporary:
+            verifier, probe = Path(temporary) / 'verifier', Path(temporary) / 'probe'
+            for root in (verifier, probe):
+                root.mkdir()
+                (root / 'build.py').write_text(build)
+                (root / 'run.py').write_text(run)
+            subprocess.run(['git', 'init', '-q'], cwd=verifier, check=True)
+            subprocess.run(['git', '-c', 'user.name=F', '-c', 'user.email=f@example.invalid', 'commit', '-q',
+                            '--allow-empty', '-m', 'x'], cwd=verifier, check=True)
+            sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=verifier, text=True).strip()
+            report = {'commit': sha, 'verdict': 'failed', 'message': 'tests: ios 1/2 failed', 'passingTests': 1, 'selection': {},
+                      'steps': [{'name': 'ios build', 'status': 'ok', 'command': ['python3', 'build.py'], 'cwd': '.'},
+                                {'name': 'tests: ios 1/2', 'status': 'failed', 'command': ['python3', 'run.py', 'A/B/testC'],
+                                 'cwd': '.'}]}
+            writer = verifier / 'verifier.py'
+            writer.write_text(f'import pathlib; p = pathlib.Path("test-results/verify"); p.mkdir(parents=True)\n'
+                              f'(p / "{sha}.json").write_text({json.dumps(json.dumps(report))})\n')
+            verified = batch.execute(verifier, {'name': 'full verify', 'command': ['python3', 'verifier.py']}, Path(temporary) / 'lane')
+            self.assertIn('probe', verified, verified)
+            probed = batch.execute(probe, {**verified['probe'], 'probe': True}, Path(temporary) / 'attempt')
+            self.assertEqual(probed['exit'], 0, (Path(temporary) / 'attempt/output.log').read_text())
+            self.assertTrue((probe / 'run/summary.json').exists())
+            report['steps'][1]['name'] = 'tests: ios-journeys'
+            writer.write_text(f'import pathlib; p = pathlib.Path("test-results/verify"); p.mkdir(parents=True, exist_ok=True)\n'
+                              f'(p / "{sha}.json").write_text({json.dumps(json.dumps(report))})\n')
+            journeys = batch.execute(verifier, {'name': 'full verify', 'command': ['python3', 'verifier.py']}, Path(temporary) / 'journeys')
+            self.assertEqual(journeys['probe']['command'], ['python3', 'run.py', 'A/B/testC'], 'a journey probe runs its own harness, with no build')
+
     def test_only_an_exact_case_vitest_head_control_requires_a_selection(self):
-        # A verifier-step recipe can select nothing for a real, reproducible reason (a file that
-        # fails to load); only the exact-case Vitest recipe turns an empty head selection into an error.
         import sys
         sys.path.insert(0, str(ROOT / 'tools/verify'))
         import batch
@@ -1455,8 +1470,6 @@ class ShardedIosProbeTests(unittest.TestCase):
                 self.assertEqual(prober.required, [required])
 
     def test_a_verifier_gateway_step_probe_records_how_many_tests_it_selected(self):
-        # A full-verify Gateway step probe counts failed as well as passed cases as selected, so a
-        # reproducing failure is never mistaken for an empty selection, and an empty one is visible.
         import sys
         sys.path.insert(0, str(ROOT / 'tools/verify'))
         import batch
@@ -1498,12 +1511,10 @@ class BrowserForkProvisionTests(unittest.TestCase):
         for script in (root / 'scripts/tron-node', vitest):
             script.chmod(0o755)
         subprocess.run(['git', 'init', '-q', str(root)], check=True)
-        # An already provisioned copy of the pin: the runner reuses it without fetching.
         self.copy = root / '.git/verify/fixtures' / f'pi-agent-browser-native-{self.PIN}'
         self.copy.mkdir(parents=True)
         (self.copy / '.tron-provisioned').write_text(self.PIN)
         self.declare_engine(self.copy, self.ENGINE)
-        # ...and the engine that fork declares, already provisioned beside it.
         self.engine = root / '.git/verify/fixtures' / f'agent-browser-{self.ENGINE}'
         (self.engine / 'bin').mkdir(parents=True)
         (self.engine / 'bin/agent-browser').write_text(f'#!/bin/sh\necho "agent-browser {self.ENGINE}"\n')
@@ -1558,7 +1569,6 @@ class BrowserForkProvisionTests(unittest.TestCase):
                                                             'requires': True, 'packages': {'': {'name': 'pi-agent-browser-native', 'version': '0.4.1'}}}))
         (fork / 'scripts/build.mjs').write_text(build)
         self.declare_engine(fork, self.ENGINE)
-        # A lifecycle script must never run: the lockfile install is --ignore-scripts.
         package = json.loads((fork / 'package.json').read_text())
         (fork / 'package.json').write_text(json.dumps({**package, 'scripts': {'postinstall': "node -e \"require('fs').writeFileSync('postinstall-ran','')\""}}))
         git = ['git', '-C', str(fork), '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null']
@@ -1571,7 +1581,6 @@ class BrowserForkProvisionTests(unittest.TestCase):
         source = runner.read_text()
         self.assertIn("'https://github.com/fitchmultz/pi-agent-browser-native.git'", source)
         runner.write_text(source.replace("'https://github.com/fitchmultz/pi-agent-browser-native.git'", repr(str(fork))))
-        # Provisioning runs npm and the build under the repository's pinned Node.
         (self.root / 'scripts/tron-node').write_text(f'#!/bin/bash\nexec {ROOT / "scripts/tron-node"} "$@"\n')
         self.adapter.write_text(f'"git:github.com/fitchmultz/pi-agent-browser-native@{commit}"\n')
         return commit
@@ -1584,7 +1593,6 @@ class BrowserForkProvisionTests(unittest.TestCase):
         killed = fixtures / '.pi-agent-browser-native-killed'
         killed.mkdir()
         (killed / 'partial').write_text('')
-        # A caller's GIT_DIR (a hook, say) must not redirect the fixture's own repository.
         decoy = self.root / 'decoy.git'
         subprocess.run(['git', 'init', '-q', '--bare', str(decoy)], check=True)
         node = subprocess.check_output([str(ROOT / 'scripts/tron-node')], text=True).strip()
@@ -1665,7 +1673,6 @@ with tarfile.open(destination / f'agent-browser-{{version}}.tgz', 'w:gz') as arc
         done = self.run_gateway(env={'PATH': self.decoy_path()})
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.engine_seen.read_text().split(), [str(self.engine / 'bin/agent-browser')])
-        # A selection without the browser test keeps the inherited PATH.
         done = self.run_gateway('src/e2e/admin/package-updates.lock.integration.test.ts', env={'PATH': self.decoy_path()})
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.engine_seen.read_text().split()[1], str(self.root / 'host-bin/agent-browser'))
@@ -1683,7 +1690,6 @@ with tarfile.open(destination / f'agent-browser-{{version}}.tgz', 'w:gz') as arc
         self.assertEqual(self.engine_seen.read_text().split(), [str(engine / 'bin/agent-browser')])
         self.assertEqual(subprocess.check_output([str(engine / 'bin/agent-browser'), '--version'], text=True).strip(), 'agent-browser 0.40.0')
         self.assertEqual((engine / '.tron-provisioned').read_text(), '0.40.0')
-        # Only this host's platform binary is kept.
         host = {'Darwin': 'darwin', 'Linux': 'linux'}[platform.system()] + '-' + {'x86_64': 'x64', 'amd64': 'x64', 'aarch64': 'arm64'}.get(platform.machine().lower(), platform.machine().lower())
         self.assertTrue((engine / 'bin/agent-browser').read_text().endswith(f'# {host}\n'))
         self.assertFalse(killed.exists(), 'a killed provisioner\'s staging survived')
@@ -1748,9 +1754,7 @@ class FullGatewayLockTests(unittest.TestCase):
             fcntl.flock(held, fcntl.LOCK_EX)
             with errors.open('w') as sink:
                 run = self.start(stderr=sink)
-                # The run announces its wait only after its own non-blocking try on the held lock has failed.
                 wait_until(lambda: 'waiting for ' in errors.read_text(), 'the run to announce that it waits')
-                # It then keeps waiting for as long as the lock is held, not just at the announcement.
                 held_until = time.monotonic() + 2
                 while time.monotonic() < held_until:
                     self.assertIsNone(run.poll(), 'the run waits while another holder has the lock')
@@ -1805,7 +1809,6 @@ class FullGatewayLockQueueTests(unittest.TestCase):
         holder.wait(timeout=30)
         self.runs.wait_all(['after'])
         self.assertEqual(self.runs.names(), ['holder', 'after'])
-        # Nothing stale remains ahead of a newcomer: it takes the free lock without waiting.
         self.runs.start('fresh')
         self.runs.wait_all(['fresh'])
         self.assertNotIn('waiting for', self.runs.stderr('fresh'))

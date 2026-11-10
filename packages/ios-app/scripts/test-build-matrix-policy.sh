@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Deterministic source/build-matrix and artifact metadata policy checks.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/project.yml"
@@ -100,8 +99,6 @@ assert not any((root / "Configuration" / old).exists() for old in ("Beta.xcconfi
 print("iOS build matrix policy passed")
 PY
 
-# XcodeGen materializes default action nodes unless its post-generation
-# normalization removes actions that the source scheme intentionally omits.
 generated_root="$(mktemp -d "${TMPDIR:-/tmp}/tron-ios-matrix.XXXXXX")"
 cleanup() { rm -rf "$generated_root"; }
 trap cleanup EXIT
@@ -172,9 +169,6 @@ for name, path in paths.items():
 print("generated iOS scheme/test-plan action policy passed")
 PY
 
-# Show the settings Xcode will actually apply to every product built by the
-# physical-device scheme. Static xcconfig checks above cannot catch a changed
-# inheritance chain, so keep this as a cheap no-compile policy check.
 effective_settings="$generated_root/local-device-settings.txt"
 xcodebuild -showBuildSettings \
   -project "$generated_root/TronMobile.xcodeproj" \

@@ -24,9 +24,6 @@ const GENERIC_MESSAGE = "Tron has an update. Open Tron to view it.";
 const RETRY_DELAYS_MS = [5_000, 20_000, 60_000, 180_000] as const;
 const ACTIVE_OUTCOMES = new Set(["pending", "retryable"]);
 const SESSION_ROUTE_ID = /^[A-Za-z0-9_:-]{1,160}$/u;
-// Trailing coalescing window for `notification.inbox.changed`. A burst of
-// admission, delivery settlement, and read mutations publishes the final state
-// once instead of one broadcast per committed write.
 const INBOX_CHANGED_DEBOUNCE_MS = 250;
 const INBOX_CURSOR = /^(-?\d{1,16})\.([A-Za-z0-9_-]{8,160})$/u;
 
@@ -62,12 +59,8 @@ interface NotificationInboxPage {
   unreadCount: number;
   nextCursor?: string;
 }
-/** The coalesced `notification.inbox.changed` payload: the committed state the
- * client can compare against its cache and project onto the bell immediately. */
 export type NotificationInboxChanged = { revision: string; unreadCount: number };
 type NotificationInboxFilter = "all" | "unread";
-/** One keyset position in the canonical inbox order: newest `createdAt` first,
- * then ascending id. */
 interface InboxOrderKey { createdAt: number; id: string }
 
 function inboxOrder(createdAt: string, id: string): InboxOrderKey { return { createdAt: Date.parse(createdAt), id }; }
@@ -100,9 +93,6 @@ function boundedRoute(route: { sessionId: string; machineId: string } | undefine
   }
   return route;
 }
-/** Bounded inbox retention over the admission-ordered (oldest-first) rows: read
- * rows are evicted before any unread row, so an unread alert is never dropped
- * while a read row still occupies the bound. */
 function retainInboxRows(inbox: NotificationInboxEntry[]): NotificationInboxEntry[] {
   if (inbox.length <= MAXIMUM_NOTIFICATION_INBOX_ENTRIES) return inbox;
   const excess = inbox.length - MAXIMUM_NOTIFICATION_INBOX_ENTRIES;
@@ -130,7 +120,6 @@ function prune(document: NotificationDocument, now: number): NotificationDocumen
   document.receipts = document.receipts.filter((receipt) => Date.parse(receipt.expiresAt) > now).slice(-512);
   document.pending = document.pending.filter((intent) => Date.parse(intent.expiresAt) > now).slice(-MAXIMUM_PENDING_INTENTS);
   document.inbox = retainInboxRows(document.inbox);
-  // Revocation authority must be retained until the relay acknowledges it.
   document.revocations = document.revocations.slice(-MAXIMUM_REVOCATIONS);
   return document;
 }
@@ -140,8 +129,6 @@ function receiptFor(input: {
   return { dedupeKey: input.dedupeKey, sessionKey: input.sessionKey, grantIds: input.grantIds, createdAt: iso(input.now), expiresAt: iso(input.now + RECEIPT_TTL_MS), result: input.result };
 }
 
-/** Revision over every projected inbox field, so a session rekey that moves
- * rows between identities is as visible to clients as a read or outcome change. */
 function inboxRevision(entries: NotificationInboxEntry[]): string {
   return createHash("sha256")
     .update(entries.map((entry) => `${entry.id}\0${entry.updatedAt}\0${entry.readAt ?? "unread"}\0${entry.outcome}\0${entry.sessionId}`).join("\n"))
@@ -199,10 +186,6 @@ interface PushRegistrationInput {
   notifyWhenWaiting?: boolean;
 }
 
-/** True when `previous` is exactly the grant this registration describes and the
- * retention pass left the document byte-identical (`before`). Both the durable
- * upsert and the receipt-free pre-check answer an identical registration with
- * the stored status, so they share this one predicate. */
 function isUnchangedRegistration(
   document: NotificationDocument,
   before: string,
@@ -222,12 +205,6 @@ function isUnchangedRegistration(
     && before === JSON.stringify(document);
 }
 
-/** The grant projection a reconnecting phone compares against the registration
- * it acknowledged: every grant's identity, activity, disabled reason and relay
- * origin, plus the origin the grants are valid for. It is derived from the
- * durable document alone, so it is stable across a Gateway restart that left
- * the document unchanged, and any runtime change to a grant (including the
- * relay disabling one) changes it (G-7). */
 function registrationRevision(grants: readonly PushGrant[], relayOrigin: string | undefined): string {
   return createHash("sha256")
     .update([
@@ -241,7 +218,6 @@ function registrationRevision(grants: readonly PushGrant[], relayOrigin: string 
     .slice(0, 32);
 }
 
-/** Gateway-owned push authority. Extension code receives only enqueue(), never credentials or transport. */
 export class NotificationService {
   private timer: NodeJS.Timeout | undefined;
   private draining = false;
@@ -270,20 +246,15 @@ export class NotificationService {
   }
 
   private reportDelivery(signal: { kind: NotificationKind; outcome: "refused" | "failed" | "rate_limited"; relayReason: string }): void {
-    try { this.deliverySignal(signal); } catch { /* observability cannot own admission or delivery */ }
+    try { this.deliverySignal(signal); } catch { }
   }
 
-  /** Every notification-document write refreshes the advertised grant revision,
-   * which is what `hello`/`system.info` repeat so a reconnecting phone can tell
-   * whether the registration it holds still describes what this Gateway stores. */
   private async update(transform: (document: NotificationDocument) => NotificationDocument | undefined): Promise<NotificationDocument> {
     const document = await this.store.update(transform);
     this.advertisedGrantRevision = registrationRevision(document.grants, this.relay.relayOrigin);
     return document;
   }
 
-  /** Advertised grant revision; it changes exactly when this Gateway's stored
-   * grants change. Read synchronously by the `system.info` projection. */
   get registrationRevision(): string { return this.advertisedGrantRevision; }
 
   dispose(): void {
@@ -294,8 +265,6 @@ export class NotificationService {
     this.pendingInboxChanged = undefined;
   }
 
-  /** Publish one trailing `notification.inbox.changed` for a burst of committed
-   * inbox mutations. The payload is that of the newest committed state. */
   private publishInboxChanged(document: NotificationDocument): void {
     this.pendingInboxChanged = inboxState(document.inbox);
     if (this.inboxChangedTimer) return;
@@ -304,9 +273,8 @@ export class NotificationService {
       const payload = this.pendingInboxChanged;
       this.pendingInboxChanged = undefined;
       if (!payload) return;
-      try { this.inboxChanged(payload); } catch { /* invalidation delivery never owns canonical admission */ }
+      try { this.inboxChanged(payload); } catch { }
     }, INBOX_CHANGED_DEBOUNCE_MS);
-    // Invalidation must never hold the process (or a test) open on its own.
     this.inboxChangedTimer.unref();
   }
 
@@ -320,13 +288,6 @@ export class NotificationService {
     const now = this.now();
     let rotated = false;
     await this.update((document) => {
-      // The phone re-sends its registration whenever it reconnects. When the
-      // request describes the grant this document already holds, the answer is
-      // the same status and the write would be byte-identical: return
-      // undefined so neither the grant nor the receipt/revocation overlays are
-      // rewritten (G-10's durable-write audit charged this path two fsyncs per
-      // registration). The retention pass above still runs, so the fingerprint
-      // compared below is also what proves it expired nothing.
       const before = JSON.stringify(document);
       retainRevocationAuthority(prune(document, now), now);
       if (document.revocations.some((item) => item.grantId === input.grantId)) {
@@ -386,15 +347,6 @@ export class NotificationService {
     return this.status(input.deviceId);
   }
 
-  /** Answers whether this registration already describes the stored grant
-   * without writing anything, so the RPC owner can answer an identical
-   * registration without opening a command receipt (G-7 Do item 2). The read
-   * runs outside the device's identity lane, so it is not ordered with that
-   * device's lane operations: a remove or revoke racing an identical upsert is
-   * read as whichever the snapshot happened to hold. It is read-only and can
-   * never bring a grant back — it only decides to skip the write — and a relay
-   * outcome that disables the grant in between is still visible in the status
-   * the caller reads after the decision. */
   async registrationIsCurrent(input: PushRegistrationInput): Promise<boolean> {
     if (![input.deviceId, input.installationId, input.grantId].every(isID) || !isEndpointSecret(input.secret)) {
       throw new GatewayError("invalid_request", "Push registration credentials are malformed");
@@ -474,8 +426,6 @@ export class NotificationService {
     };
   }
 
-  /** One newest-first page. `cursor` is an opaque keyset position, so a page
-   * request never fails because the inbox changed between pages. */
   async inbox(input: { filter?: NotificationInboxFilter; cursor?: string; limit?: number } = {}): Promise<NotificationInboxPage> {
     const now = this.now();
     const cursor = input.cursor === undefined ? undefined : parseInboxCursor(input.cursor);
@@ -486,10 +436,6 @@ export class NotificationService {
     const document = await this.update((current) => {
       const queuedBefore = current.inbox.filter((entry) => entry.outcome === "queued").length;
       prune(current, now);
-      // Expiry is the only terminal transition prune applies to an inbox row,
-      // and retention only drops rows, so a queued-count drop is exactly an
-      // inbox-row change. Listing is otherwise a read: without one it must not
-      // rewrite the credential document.
       expiryChanged = current.inbox.filter((entry) => entry.outcome === "queued").length !== queuedBefore;
       return expiryChanged ? current : undefined;
     });
@@ -503,11 +449,8 @@ export class NotificationService {
     return {
       notifications: selected.map(entry => ({
         ...inboxItem(entry),
-        // Historical titles are receipt evidence, not Home's display identity.
         ...(this.isHomeSession(entry.sessionId) ? { title: "Home" } : {}),
       })),
-      // The revision covers the whole inbox state; unreadCount is every unread
-      // row, not only the filtered or paged subset.
       ...inboxState(document.inbox),
       ...(last !== undefined && entries.length > limit ? { nextCursor: inboxCursor(entryOrder(last)) } : {}),
     };
@@ -527,8 +470,6 @@ export class NotificationService {
       const entry = current.inbox.find((candidate) => input.id !== undefined
         ? candidate.id === input.id
         : candidate.requestIds.includes(input.requestId!));
-      // A row evicted by the inbox bound is already gone, so reading it is an
-      // idempotent no-op rather than an error.
       if (!entry) return undefined;
       resolvedId = entry.id;
       if (entry.readAt !== undefined) return undefined;
@@ -541,8 +482,6 @@ export class NotificationService {
     return { changed, ...(resolvedId ? { id: resolvedId } : {}) };
   }
 
-  /** Marks only unread rows at or older than the caller's exact `through` cut
-   * key, so rows the user has not seen stay unread. */
   async markAllInboxRead(input: { through: string }): Promise<{ changed: number }> {
     const cut = parseInboxCursor(input.through);
     const now = this.now();
@@ -562,8 +501,6 @@ export class NotificationService {
     return { changed };
   }
 
-  /** Move inbox rows onto a rekeyed canonical session identity. Row ids are
-   * stable across a rekey, so captured pending reads need no rewriting. */
   async rekeySession(previousId: string, nextId: string): Promise<boolean> {
     if (!SESSION_ROUTE_ID.test(previousId) || !SESSION_ROUTE_ID.test(nextId)) {
       throw new GatewayError("invalid_request", "Notification session identity is malformed");
@@ -581,12 +518,11 @@ export class NotificationService {
     return matched;
   }
 
-  /** Capture one canonical cut; retries must never broaden it to later alerts. */
   async markSessionInboxRead(sessionId: string): Promise<void> {
     if (!SESSION_ROUTE_ID.test(sessionId)) throw new GatewayError("invalid_request", "Notification session identity is malformed");
     try { await this.persistInboxReads(sessionId); }
     catch (error) {
-      try { this.inboxReadFailed(); } catch { /* diagnostics never own read admission */ }
+      try { this.inboxReadFailed(); } catch { }
       throw error;
     }
   }
@@ -606,11 +542,7 @@ export class NotificationService {
     const document = await this.update((current) => {
       const unread = current.inbox.filter((entry) => entry.readAt === undefined);
       const retained = new Set(unread.map((entry) => entry.id));
-      // Capture and mutation share the admission/settlement mutex. Only IDs
-      // survive a failed write, bounded by the canonical inbox's 512 rows.
       for (const id of this.pendingInboxReadIds) if (!retained.has(id)) this.pendingInboxReadIds.delete(id);
-      // Home is one chat across the chapter identities owned by its ledger.
-      // Capture siblings in this same cut; retries still retain only row IDs.
       const readsHome = sessionId !== undefined && this.isHomeSession(sessionId);
       for (const entry of unread) {
         if (entry.sessionId === sessionId || readsHome && this.isHomeSession(entry.sessionId)) {
@@ -627,8 +559,6 @@ export class NotificationService {
       }
       return changed ? current : undefined;
     });
-    // Only a committed transaction retires the captured intent. It outlives
-    // navigation/socket loss; retries never select later rows for that session.
     for (const id of ids) this.pendingInboxReadIds.delete(id);
     if (changed) this.publishInboxChanged(document);
   }
@@ -669,14 +599,10 @@ export class NotificationService {
     title?: string;
     interruptionLevel?: "time-sensitive";
     route?: { sessionId: string; machineId: string };
-    /** Internal admission fence for semantic ask notifications. */
     requireAskPolicy?: boolean;
-    /** The user is watching this exact session, so its row starts read. */
     readOnAdmission?: boolean;
   }): Promise<NotificationAdmissionStatus> {
     const message = boundedText(input.message, 512, "message");
-    // Resolve the role at admission for every producer (including asks and settings),
-    // before persisting the immutable retry envelope. IDs remain opaque routing authority.
     const isHome = this.isHomeSession(input.sessionId);
     const title = isHome ? "Home"
       : input.title === undefined ? undefined : boundedText(input.title, 256, "title");
@@ -688,10 +614,6 @@ export class NotificationService {
     let result: NotificationAdmissionStatus = "queued";
     const document = await this.update((current) => {
       retainRevocationAuthority(prune(current, now), now);
-      // The outer policy read is only an early suppression optimization. The
-      // admission transaction must recheck the canonical policy immediately
-      // before appending an intent, otherwise a concurrent disable can still
-      // deliver an ask notification.
       if (input.kind === "ask" && !current.policy.notifyWhenAskPresented
         || input.kind === "agent_finished" && !current.policy.notifyWhenFinished
         || input.kind === "waiting" && !current.policy.notifyWhenWaiting) {
@@ -708,8 +630,6 @@ export class NotificationService {
         return undefined;
       }
       if (current.pending.length >= MAXIMUM_PENDING_INTENTS) {
-        // Rejection is returned synchronously but is not persisted: a rejected
-        // attempt owns no delivery and must not displace durable quota authority.
         result = "rate_limited";
         this.reportDelivery({ kind: input.kind, outcome: "refused", relayReason: "pending_capacity" });
         return undefined;
@@ -755,8 +675,6 @@ export class NotificationService {
         sessionId: input.sessionId,
         ...(route ? { machineId: route.machineId } : {}),
         outcome: "queued",
-        // An alert produced while the user is already reading that chat is
-        // still delivered, but it must not light the bell afterwards.
         ...(input.readOnAdmission === true ? { readAt: iso(now) } : {}),
       });
       current.inbox = retainInboxRows(current.inbox);
@@ -798,8 +716,6 @@ export class NotificationService {
   }
 
   async drain(): Promise<void> {
-    // Reading an already-open chat is independent of relay availability and
-    // in-flight delivery. Failed writes retain their exact IDs for the next tick.
     await this.flushInboxReads().catch(() => {});
     if (this.draining || !this.relay.available) return;
     this.draining = true;
@@ -831,21 +747,13 @@ export class NotificationService {
         }
       });
       await Promise.all(workers);
-      // Remote revocation is lower priority than live notifications and bounded
-      // to one attempt per drain so an unavailable relay cannot wedge delivery.
       await this.drainRevocations();
     } catch {
-      // The timer owns recovery from storage failures as well as relay failures.
-      // Durable intents remain pending; a detached rejection must not kill the Gateway.
     } finally { this.draining = false; }
   }
 
   private async recordOutcome(intentId: string, grantId: string, result: RelayNotificationResult | RelayNotificationOutcome): Promise<void> {
     let outcome: RelayNotificationOutcome = typeof result === "string" ? result : result.status;
-    // The relay has already reserved this exact request ID. Poll an active
-    // provider attempt through the ordinary bounded retry schedule; replaying
-    // the ID cannot create a second APNs request. Other ambiguous results stay
-    // terminal because the relay did not certify that ownership state.
     if (outcome === "in_progress") outcome = "retryable";
     if (outcome === "rate_limited") outcome = "permanent_failure";
     if (outcome === "invalid_grant") outcome = "invalid_token";
@@ -890,7 +798,7 @@ export class NotificationService {
     const document = await this.store.snapshot();
     for (const item of document.revocations.filter((candidate) => Date.parse(candidate.nextAttemptAt) <= now).slice(0, 1)) {
       let revoked = false;
-      try { revoked = await this.relay.revoke(item.grantId, item.secret, item.requestId) === "revoked"; } catch { /* retained */ }
+      try { revoked = await this.relay.revoke(item.grantId, item.secret, item.requestId) === "revoked"; } catch { }
       await this.update((current) => {
         const candidate = current.revocations.find((entry) => entry.grantId === item.grantId);
         if (!candidate) return undefined;

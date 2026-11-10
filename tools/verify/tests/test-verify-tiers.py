@@ -103,8 +103,6 @@ class TierTests(fixture.VerifyCase):
 
     def test_main_baselines_refuse_unchecked_loaded_docs_at_head(self):
         r = self.repo
-        # The real loaded generator is deliberately unavailable in this tiny repo.
-        # An unchanged block is not proof it was ever generated successfully.
         r.write('README.md', '# Fixture\n\n<!-- tron docs settings -->\nstale\n<!-- /tron docs -->\n')
         r.commit('unchecked generated block already on main')
         for arguments in ([], ['--all']):
@@ -131,7 +129,7 @@ class TierTests(fixture.VerifyCase):
         r.write('mods/alpha/alpha.py', "VALUE = 'dirty'\n")
         r.write('mods/alpha/new.py', 'NEW = True\n')
         planned = self.plan()
-        self.assertEqual(planned['selection']['tier'], 'full')  # untracked ownership is not yet proven
+        self.assertEqual(planned['selection']['tier'], 'full')
         self.assertIn('mods/alpha/new.py', planned['selection']['paths'])
         self.assertEqual(r.verify().returncode, 2)
 
@@ -174,8 +172,6 @@ class TierTests(fixture.VerifyCase):
         r.commit('live producer and consumer')
         r.git('branch', '-f', 'base')
         shutil.rmtree(r.path / 'mods/alpha')
-        # This atomic consumer-edge update selects beta directly. The oracle
-        # proves retired-declaration exclusion, not reverse dependency closure.
         r.write(path, json.dumps(data))
         r.commit('retire producer and remove consumer edge')
         planned = self.plan()
@@ -216,7 +212,6 @@ class TierTests(fixture.VerifyCase):
         self.assertNotIn(nested, changed['selection']['deferredTests'])
         self.assertIn(nested, self.plan('--all')['selection']['tests'],
                       'batch integration must include changed serial tests too')
-        # A module that declares the serial test as its proof runs it now, not in the batch.
         r.write(root + '/src/declaring/declaring.module.json', json.dumps({'layer': 'L2', 'owns': ['**'],
                 'verify': ['scripts/tron test gateway src/worker/nested.integration.test.ts']}))
         r.write(root + '/src/declaring/declaring.ts', 'export const value = 1;\n')
@@ -265,9 +260,6 @@ class TierTests(fixture.VerifyCase):
                 process.send_signal(signal.SIGTERM)
                 process.communicate(timeout=30)
 
-
-# Batch process/Git regressions live in test-verify-batch.py: required lanes,
-# exact-case merge attribution, cleanup preservation, signals and source fencing.
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

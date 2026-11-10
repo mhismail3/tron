@@ -40,13 +40,12 @@ import uuid
 from pathlib import Path
 from typing import Sequence
 
-# The mini runs this source as `python3 -c`, where there is no file and no local checkout.
 ROOT = Path(__file__).resolve().parents[2] if '__file__' in globals() else None
-BASE = 'tron-ci'  # under the mini user's home: tron.git, jobs/, results/
-EXIT_NO_RESULT = 75  # EX_TEMPFAIL; with NO_RESULT_LINE, never a test outcome
+BASE = 'tron-ci'
+EXIT_NO_RESULT = 75
 NO_RESULT_LINE = 'mini: no result: '
 OUTPUT_OPTION = '--outputFile'
-INCOMING = 'refs/tron-jobs/incoming'  # carries a pushed commit to its job; the job checks it out by object id
+INCOMING = 'refs/tron-jobs/incoming'
 
 
 def no_result(reason: str) -> int:
@@ -63,8 +62,6 @@ def no_result_reason(code: int, output: str) -> str | None:
 def frame(nonce: str) -> bytes:
     return f'@@tron-mini {nonce} '.encode()
 
-
-# ---------------------------------------------------------------------------- local side
 
 def git(*args: str) -> str:
     return subprocess.run(['git', '-C', str(ROOT), *args], check=True, capture_output=True, text=True).stdout.strip()
@@ -104,7 +101,6 @@ def choose_host(args: Sequence[str] = ()) -> tuple[str, str]:
         return 'local', 'uncommitted changes; the mini runs a commit'
     ssh = ssh_command()
     ssh[ssh.index('ConnectTimeout=10')] = 'ConnectTimeout=5'
-    # A bounded probe (5 s to connect, 30 s in all) that ships this file, so both halves are one version.
     try:
         probe = subprocess.run([*ssh, shlex.join(['/usr/bin/python3', '-c', Path(__file__).read_text(), 'status'])],
                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
@@ -130,7 +126,6 @@ def pool_main(args: list[str]) -> int:
           file=sys.stderr, flush=True)
     if host == 'mini':
         return local_main(args)
-    # This process becomes the lane, so a stop reaches gateway.py's own signal forwarding and cleanup.
     os.execvp('python3', ['python3', str(ROOT / 'tools/verify/gateway.py'), *args])
 
 
@@ -149,7 +144,6 @@ def outputs(args: list[str]) -> tuple[list[str], list[str]]:
         else:
             pending = word == OUTPUT_OPTION or (word.startswith(OUTPUT_OPTION + '.') and '=' not in word)
             mapped.append(word)
-    # Vitest resolves a relative output path against its root, the Gateway package.
     return mapped, [str(ROOT / 'packages/gateway' / path) for path in paths]
 
 
@@ -163,14 +157,12 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     except SystemExit as error:
         return no_result(str(error).removeprefix('mini: '))
     sha, destination = git('rev-parse', 'HEAD'), ssh[-1]
-    # verify names the commit its report records; a HEAD that moved since then is not that commit.
     expected = os.environ.get('TRON_VERIFY_COMMIT')
     if expected and expected != sha:
         return no_result(f'HEAD is {sha[:12]}, not the commit under verification {expected[:12]}')
     mapped, paths = outputs(args) if lane == 'gateway' else (args, [])
     started = time.time()
     print(f'mini: {lane} lane for {sha[:12]} on {destination}; pushing the commit', flush=True)
-    # One shared incoming ref, overwritten by every push: a push whose job never starts leaves nothing that grows.
     push = subprocess.run(['git', '-C', str(ROOT), 'push', '--no-verify', '--quiet', f'{destination}:{BASE}/tron.git',
                            f'+{sha}:{INCOMING}'], env={**os.environ, 'GIT_SSH_COMMAND': shlex.join(ssh[:-1])},
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -187,7 +179,6 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     remote = shlex.join(['/usr/bin/python3', '-c', source, 'remote', job])
     marker, code, refused, received, stopped = frame(nonce), None, None, set(), []
     with subprocess.Popen([*ssh, remote], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as child:
-        # Closing stdin ends the mini's job: it sends its lane SIGTERM and returns what it has.
         def stop(signum, _frame):
             stopped.append(signum)
             if child.stdin and not child.stdin.closed:
@@ -228,8 +219,6 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
     return code
 
 
-# ---------------------------------------------------------------------------- mini side
-
 def remote_status() -> int:
     """Whether the mini is set up, whether a job holds its job lock, and its load: the pool's availability probe."""
     lock_path = Path.home() / BASE / 'jobs/gateway.lock'
@@ -263,11 +252,9 @@ def remote_main(job: dict) -> int:
     say = lambda text: print(f'mini: {text}', flush=True)  # noqa: E731
     out = sys.stdout.buffer
     cancelled = threading.Event()
-    running: list[subprocess.Popen] = []  # the job's current long child (npm ci or the lane), signalled on cancel
+    running: list[subprocess.Popen] = []
 
     def watch() -> None:
-        # The local side never writes; end of input means it stopped or the connection dropped.
-        # A raw read: a buffered one would hold the stdin lock while the interpreter exits.
         while os.read(sys.stdin.fileno(), 4096):
             pass
         cancelled.set()
@@ -349,16 +336,13 @@ def remote_main(job: dict) -> int:
                 result = run(*command)
                 if result.returncode:
                     return refuse(f'{shlex.join(command)} failed: {(result.stdout + result.stderr).strip()}')
-            # The lane's own paths are resolved (its ROOT); rewriting must match them, symlinked homes included.
             checkout = checkout.resolve()
             head = run('git', '-C', str(checkout), 'rev-parse', 'HEAD').stdout.strip()
             dirty = run('git', '-C', str(checkout), 'status', '--porcelain', '--untracked-files=normal').stdout.strip()
             if head != sha or dirty:
                 return refuse(f'the mini checkout is not exactly {sha} (HEAD {head or "unknown"}; changes: {dirty or "none"})')
-            # The last checked-out commit stays referenced, so the next push sends only new objects.
             run('git', '-C', str(repository), 'update-ref', 'refs/tron-jobs/gateway', sha)
 
-            # The commit's own pins: exact Node version, official binary digest, bundled npm version.
             pins = dict(line.split('=', 1) for line in (checkout / 'config/ci-toolchain.env').read_text().splitlines()
                         if '=' in line and not line.lstrip().startswith('#'))
             resolved = run(str(checkout / 'scripts/tron-node'))
@@ -379,7 +363,6 @@ def remote_main(job: dict) -> int:
             say(f'checkout {sha[:12]} ready; Node v{version} ({digest[:12]}) npm {npm}, macOS {platform.mac_ver()[0]}, '
                 f'Python {platform.python_version()}')
 
-            # `npm ci` runs again exactly when an input it reads changes: the manifest, lockfile, vendored tarballs or Node.
             inputs = run('git', '-C', str(checkout), 'rev-parse', *(f'HEAD:packages/gateway/{path}' for path in
                                                                    ('package.json', 'package-lock.json', 'third_party'))).stdout
             install = hashlib.sha256(f'{inputs}{digest}'.encode()).hexdigest()
@@ -390,22 +373,18 @@ def remote_main(job: dict) -> int:
                                    cwd=checkout)
                 if installed:
                     return refuse(f'npm ci failed (exit {installed})')
-                stamp.parent.mkdir(exist_ok=True)  # npm creates no node_modules for a manifest without dependencies
+                stamp.parent.mkdir(exist_ok=True)
                 stamp.write_text(install)
             say(f'prepared in {time.time() - prepared:.1f}s; running the lane, load {os.getloadavg()[0]:.1f}')
             if cancelled.is_set():
                 return refuse('stopped before the lane started')
 
             if job['lane'] == 'python':
-                # Python tests check proof blocks with the Dafny the commit pins (tools/proof/dafny.pin); a mini
-                # without it refuses with the install command, as for Node, rather than failing those tests.
                 doctor = (run('/bin/bash', str(checkout / 'tools/proof/bootstrap.sh'), 'doctor', cwd=checkout)
                           if (checkout / 'tools/proof/dafny.pin').is_file() else None)
                 if doctor and doctor.returncode != 0:
                     return refuse(f'no pinned Dafny on the mini: {(doctor.stderr or doctor.stdout).strip()}\n'
                                   f'    install it there with: cd {checkout} && scripts/tron proof bootstrap')
-                # One stream, so each file's unittest summary (stderr) stays after its marker (stdout).
-                # The pinned Node first on PATH: Python tests that start `node` get the commit's own.
                 env = {**clean, 'PATH': f'{node.parent}:{clean["PATH"]}'}
                 return finish(stream('/bin/bash', '-c', 'exec 2>&1\n' + job['args'][0], cwd=checkout, env=env))
             results.mkdir(parents=True, exist_ok=True)
@@ -425,8 +404,6 @@ def remote_main(job: dict) -> int:
             finally:
                 shutil.rmtree(results, ignore_errors=True)
     finally:
-        # Only while it still names this commit: a later push owns it otherwise. A commit whose ref moved on stays
-        # readable, unreferenced, until gc's prune expiry (two weeks), far beyond any job lock wait.
         run('git', '-C', str(repository), 'update-ref', '-d', INCOMING, sha)
 
 
@@ -443,5 +420,4 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         sys.exit(130)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
-        # A broken session or frame is infrastructure, never a test failure.
         sys.exit(no_result(str(error)))

@@ -25,11 +25,8 @@ afterAll(async () => {
   await mkdir("test-results", { recursive: true });
   await writeFile("test-results/home-task-checkin-wake.json", JSON.stringify(checkinEvidence, null, 2));
 });
-/** An inbox notice. A wake reply sends none: its turn's own terminal push is the only push for it. */
 const isWakePush = (input: { sourceId: string }) => input.sourceId.startsWith("home-wake:");
-/** Every push Home's session sent: each turn's terminal push, and the inbox's notices. */
 const homePushes = (f: Fixture) => f.notifications.filter(input => input.sessionId === f.home.sessionId);
-/** A reply that stays open until its operation is stopped, then ends aborted. */
 const untilStopped = (text: string): FauxResponseFactory => (_context, options) => new Promise(resolve => {
   options?.signal?.addEventListener("abort", () => resolve(fauxAssistantMessage(text)), { once: true });
 });
@@ -55,7 +52,6 @@ function results(entries: readonly Entry[]): Entry[] {
 function userMessages(entries: readonly Entry[]): Entry[] {
   return entries.filter(entry => entry.type === "message" && entry.message?.role === "user");
 }
-/** Wake operations are the operations whose results are attributed and that have no user message. */
 function operationsWithResults(entries: readonly Entry[]): string[] {
   return [...new Set(results(entries).map(entry => entry.details?.operationId ?? ""))];
 }
@@ -100,7 +96,6 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(await readFile(shellPath, "utf8")).toBe("shell-proof");
     expect(results(home.canonicalSessionEntries() as Entry[])).toHaveLength(1);
 
-    // A subsequent real maintainer turn regains shared tools, not the last wake's ceiling.
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("edit", { path, oldText: "after", newText: "next maintainer" })], { stopReason: "toolUse" }),
       fauxAssistantMessage("Next maintainer turn finished"),
@@ -235,12 +230,9 @@ describe("Home wakes on its own task results (#749)", () => {
     await waitAcknowledged(f, "task-wake");
     const home = await f.registry.acquire(f.home.sessionId);
     const entries = home.canonicalSessionEntries() as Entry[];
-    // Only the wake ran: no user message exists in this chapter, and the delivered result is the first entry of its turn.
     expect(userMessages(entries)).toHaveLength(0);
     expect(results(entries)).toHaveLength(1);
     const delivered = results(entries)[0] as Entry & { content?: string; details: { taskTitle?: string } };
-    // Additive display metadata comes from the canonical worker name, not the
-    // brief or report prose; title-less historical deliveries remain readable.
     expect(delivered.details.taskTitle).toBe("Review chip labels");
     expect((await homeOwnerOf(f.registry).taskStatus("task-wake")).title).toBe(delivered.details.taskTitle);
     expect(delivered.content).toMatch(/^Home task: Finite work \| outcome: final \| subagents: 0 started, 0 stopped at end \| duration: \d+ms\n\nVerified result\n\nEvidence:\n- focused check passed$/);
@@ -248,21 +240,16 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(delivered.content).not.toContain('"taskId"');
     expect(entries.some(entry => entry.type === "message" && entry.message?.role === "assistant"
       && JSON.stringify(entry).includes("Summary for the maintainer"))).toBe(true);
-    // One push for the wake: its turn's own terminal push. The inbox sends no wake notice, and no per-task push.
     await waitFor(() => homePushes(f).length === 1, "wake reply push");
     expect(f.notifications.filter(isWakePush)).toHaveLength(0);
     const eventId = (await settledTask(f, "task-wake")).wake!.eventId;
     expect(f.notifications.filter(input => input.sourceId === eventId)).toHaveLength(0);
-    // The wake's run is an idle admission like any other: SDK auto-compaction stays disabled for Home (`_checkCompaction`
-    // returns early when compaction is not enabled), so the wake's pre-run check cannot compact.
     const session = (home as unknown as { runtime: { session: { settingsManager: { getCompactionSettings(model: unknown): { enabled: boolean } }; model: unknown } } }).runtime.session;
     expect(session.settingsManager.getCompactionSettings(session.model).enabled).toBe(false);
     checkinEvidence.push({ case: "worker-result-title", taskTitle: delivered.details.taskTitle });
-    // The wake's turn projects to the delivered-context row, then Home's reply: no user row.
     const rows = projectTranscriptPage((...args) => f.registry.moduleHost.policy("toolResultProjection")?.().display(...args), (home as unknown as { sessionManager: never }).sessionManager, new BlobStore()).items
       .map(item => item.kind === "message" ? `message:${item.role}` : item.kind)
       .filter(kind => kind !== "modelChange");
-    // The wake's turn starts at its delivered result: no user row before Home's reply.
     expect(rows.slice(rows.indexOf("customMessage"))).toEqual(["customMessage", "message:assistant"]);
   }, 30_000);
 
@@ -283,8 +270,6 @@ describe("Home wakes on its own task results (#749)", () => {
     };
     f.faux.setResponses(Array.from({ length: 40 }, () => response));
     try {
-      // The incident had eight wake operations since the last user message. The
-      // next two results must not depend on a user resetting a lifetime counter.
       for (let i = 0; i < 7; i++) {
         await (await dispatch(f, `warmup-${i}`)).completion;
         await waitAcknowledged(f, `warmup-${i}`);
@@ -328,7 +313,6 @@ describe("Home wakes on its own task results (#749)", () => {
     const b = await dispatch(f, "task-b");
     await a.completion; await b.completion;
     await waitFor(async () => (await settledTask(f, "task-a")).lifecycle === "terminal" && (await settledTask(f, "task-b")).lifecycle === "terminal", "both results settled");
-    // Both settled while the user turn runs: nothing wakes Home yet.
     expect(results(home.canonicalSessionEntries() as Entry[])).toHaveLength(0);
     hold.open();
     await turn;
@@ -337,7 +321,6 @@ describe("Home wakes on its own task results (#749)", () => {
     const entries = home.canonicalSessionEntries() as Entry[];
     expect(results(entries)).toHaveLength(2);
     expect(operationsWithResults(entries)).toHaveLength(1);
-    // The user turn and the one wake each end with their own terminal push; the inbox sends no wake notice.
     await waitFor(() => homePushes(f).length === 2, "user turn and wake pushes");
     expect(f.notifications.filter(isWakePush)).toHaveLength(0);
   }, 30_000);
@@ -356,7 +339,6 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(results((await f.registry.acquire(f.home.sessionId)).canonicalSessionEntries() as Entry[])).toHaveLength(0);
     expect(f.notifications.filter(input => input.sourceId === task.wake!.eventId)).toHaveLength(1);
     expect(f.notifications.filter(isWakePush)).toHaveLength(0);
-    // Resuming delivers the waiting result at once (#1279), not at the user's next message.
     f.faux.setResponses([fauxAssistantMessage("Reviewed after resume")]);
     await homeOwnerOf(f.registry).resumeMemory();
     await waitAcknowledged(f, "task-paused");
@@ -384,7 +366,6 @@ describe("Home wakes on its own task results (#749)", () => {
   it("wakes exactly once after a restart that finds pending results", async () => {
     const f = await fixture();
     await configure(f);
-    // A delegation comes from a Home activation, so Home has a conversation before its result settles.
     f.faux.setResponses([fauxAssistantMessage("Hello reply")]);
     await (await f.registry.acquire(f.home.sessionId)).prompt("hello");
     await waitFor(async () => (await f.registry.acquire(f.home.sessionId)).snapshot().operation === undefined, "hello settled");
@@ -397,8 +378,6 @@ describe("Home wakes on its own task results (#749)", () => {
     f.faux.setResponses([fauxAssistantMessage("Restart wake reply")]);
     f.registry = await f.restart();
     await waitAcknowledged(f, "task-restart");
-    // Exactly one wake request after startup. The result's task-finished notice went out while paused, so
-    // the wake sends no second notice for it.
     expect(f.faux.state.callCount).toBe(beforeRestart + 1);
     expect(f.notifications.filter(isWakePush)).toHaveLength(0);
     const restartEventId = (await settledTask(f, "task-restart")).wake!.eventId;
@@ -434,7 +413,6 @@ describe("Home wakes on its own task results (#749)", () => {
     await (await dispatch(f, "drained")).completion;
     f.faux.setResponses([fauxAssistantMessage("Reply to the maintainer")]);
     const eventsBeforeDrain = f.events.length;
-    // Resume and user input race through the same admission owner.
     await homeOwnerOf(f.registry).resumeMemory();
     await home.prompt("hello");
     await waitAcknowledged(f, "drained");
@@ -442,9 +420,6 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(results(home.canonicalSessionEntries() as Entry[])).toHaveLength(1);
   }, 30_000);
 
-  // #881: delivering a waiting result needs the memory view. When that refuses,
-  // the prompt fails before any run starts and must leave Home idle, not stuck
-  // "running" with nothing running, which made every later prompt wait forever.
   it("leaves Home idle when a prompt is refused while delivering a waiting result, so the next prompt runs", async () => {
     const f = await fixture();
     await configure(f);
@@ -470,8 +445,6 @@ describe("Home wakes on its own task results (#749)", () => {
   }, 30_000);
 
   it("refuses a prompt admitted with a waiting result by its memory cause, not an admission failure", async () => {
-    // A plan limit blocks Home's memory; a task result then settles and waits. The
-    // user's prompt is admitted with that result, and its refusal reaches the client.
     const f = await fixture(false, false, undefined, false, undefined, { queueSummarizer: true });
     await configure(f);
     const hold = gate();
@@ -486,7 +459,6 @@ describe("Home wakes on its own task results (#749)", () => {
       return fauxAssistantMessage([reportCall("rl", "Result while limited")], { stopReason: "toolUse" });
     }));
     const home = await f.registry.acquire(f.home.sessionId);
-    // A message over the memory's node size is summarized (a short one is kept verbatim).
     await home.prompt(`first turn for the limit ${"first detail ".repeat(200)}`);
     await waitFor(async () => (await homeOwnerOf(f.registry).memoryStatus()).blocked === "usage-limit", "memory blocked by the limit");
     const run = await dispatch(f, "task-limited-result");
@@ -496,16 +468,11 @@ describe("Home wakes on its own task results (#749)", () => {
     const wake = (await settledTask(f, "task-limited-result")).wake;
     const refusal = await home.prompt("prompt while the limit holds").then(() => undefined, (error: unknown) => error as GatewayError);
     expect(refusal).toBeDefined();
-    // The client reads the cause first; the uncertain-outcome marker still blocks a replay.
     expect(refusal!.message).toMatch(/^Home request refused \(memory-usage-limit\): .*usage limit/u);
     expect(refusal!.details).toMatchObject({ outcomeUnknown: true });
     expect(wake?.state).toBe("pending");
   }, 60_000);
 
-  // #1279: a blocked memory refused every wake, so finished task results waited
-  // silently until someone found a resume control. A wake now re-arms the memory
-  // like any activation: a failure that persists keeps the result pending and
-  // says Home is waiting, and the first wake after the cause clears delivers.
   it("wakes through a blocked memory once its cause clears, keeping results pending until then", async () => {
     const f = await fixture(false, false, undefined, false, undefined, { queueSummarizer: true });
     await configure(f);
@@ -526,11 +493,9 @@ describe("Home wakes on its own task results (#749)", () => {
       return fauxAssistantMessage(homeTurns === 1 ? "First Home answer" : "Reviewed both results");
     }));
     const home = await f.registry.acquire(f.home.sessionId);
-    // A message over the memory's node size is summarized (a short one is kept verbatim).
     await home.prompt(`first turn ${"first detail ".repeat(200)}`);
     await waitFor(async () => (await homeOwnerOf(f.registry).memoryStatus()).blocked === "permanent-failure", "memory blocked");
 
-    // The cause persists: the wake re-arms, blocks again and is refused before admitting the result.
     const first = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "task-first", intent: "worker-first", target: f.cwd });
     work.first!.open();
     await first.completion;
@@ -540,7 +505,6 @@ describe("Home wakes on its own task results (#749)", () => {
     const summariesWhileFailing = summaries;
     const pushesWhileFailing = f.notifications.length;
 
-    // The cause clears. Nobody resumes memory: the next result's wake heals it and delivers both.
     memoryFails = false;
     const second = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "task-second", intent: "worker-second", target: f.cwd });
     work.second!.open();
@@ -551,7 +515,6 @@ describe("Home wakes on its own task results (#749)", () => {
       pendingWhileFailing,
       homeTurnsWhileFailing: turnsWhileFailing,
       wakeRearmedWhileFailing: summariesWhileFailing > 1,
-      // The refused wake still tells the user a result is waiting.
       pushesWhileFailing,
       delivered: results(home.canonicalSessionEntries() as Entry[]).length,
       blockedAfter: (await homeOwnerOf(f.registry).memoryStatus()).blocked ?? null,
@@ -575,14 +538,11 @@ describe("Home wakes on its own task results (#749)", () => {
     await waitFor(() => f.faux.state.callCount === 1, "user turn request");
     f.faux.setResponses([fauxAssistantMessage([reportCall("stop-report", "Waiting result")], { stopReason: "toolUse" })]);
     await (await dispatch(f, "stop-user")).completion;
-    // The result settled while the user turn ran: it waits for Home to be idle.
     expect((await settledTask(f, "stop-user")).wake?.state).toBe("pending");
     await home.abort("agent");
     await turn.catch(() => {});
     await waitFor(() => home.snapshot().operation === undefined, "stopped user activation settled");
-    // A wake that Stop should have prevented starts within a few milliseconds; wait well past that.
     await new Promise(resolve => setTimeout(resolve, 600));
-    // No wake followed the Stop: no provider call, and the result still waits.
     expect(f.faux.state.callCount).toBe(2);
     expect((await settledTask(f, "stop-user")).wake?.state).toBe("pending");
   }, 30_000);
@@ -596,11 +556,9 @@ describe("Home wakes on its own task results (#749)", () => {
     await waitFor(() => f.faux.state.callCount === 2, "wake for A in flight");
     f.faux.setResponses([fauxAssistantMessage([reportCall("stop-b", "Result B")], { stopReason: "toolUse" })]);
     await (await dispatch(f, "stop-wake-b")).completion;
-    // Home is busy with wake A, so B waits for an idle moment.
     expect((await settledTask(f, "stop-wake-b")).wake?.state).toBe("pending");
     await home.abort("agent");
     await waitFor(() => home.snapshot().operation === undefined, "stopped wake settled");
-    // A wake that Stop should have prevented starts within a few milliseconds; wait well past that.
     await new Promise(resolve => setTimeout(resolve, 600));
     expect(f.faux.state.callCount).toBe(3);
     expect((await settledTask(f, "stop-wake-b")).wake?.state).toBe("pending");
@@ -615,7 +573,6 @@ describe("Home wakes on its own task results (#749)", () => {
       fauxAssistantMessage([reportCall("mid-b", "Result B")], { stopReason: "toolUse" }),
     ]);
     await (await dispatch(f, "midwake-a")).completion;
-    // The wake for A is in flight: its trigger is in the canonical session and its reply is held open.
     await waitFor(() => f.faux.state.callCount === 2, "wake for A in flight");
     await (await dispatch(f, "midwake-b")).completion;
     expect((await settledTask(f, "midwake-b")).wake?.state).toBe("pending");
@@ -623,12 +580,10 @@ describe("Home wakes on its own task results (#749)", () => {
     f.faux.setResponses([fauxAssistantMessage("Wake reply for B")]);
     f.registry = await f.restart();
     await waitAcknowledged(f, "midwake-b");
-    // The trigger was proven or left outcome-unknown, never sent again: its result is in the chapter once.
     const a = await settledTask(f, "midwake-a");
     expect(["acknowledged", "outcome-unknown"]).toContain(a.wake?.state);
     const entries = (await f.registry.acquire(f.home.sessionId)).canonicalSessionEntries() as Entry[];
     expect(results(entries).filter(entry => JSON.stringify(entry).includes("Result A"))).toHaveLength(1);
-    // Exactly one wake after recovery: it delivered B and nothing else.
     expect(f.faux.state.callCount).toBe(beforeRestart + 1);
     expect(f.notifications.filter(isWakePush)).toHaveLength(0);
   }, 60_000);

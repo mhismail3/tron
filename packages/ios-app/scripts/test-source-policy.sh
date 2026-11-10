@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Source-level iOS project policy checks. Generated Info-plists are projections.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/project.yml"
@@ -11,8 +10,6 @@ SOUND="$ROOT/Sources/Resources/Sounds/tron-notification.caf"
 [[ "$(grep -Fc 'Sources/Resources/Sounds/tron-notification.caf' "$PROJECT")" == 1 ]] \
   || fail "project.yml must bundle the notification sound exactly once"
 
-# The application uses a checked-in Info.plist, so that plist—not generated
-# INFOPLIST_KEY settings—must own the runtime orientation arrays.
 ! grep -Fq 'INFOPLIST_KEY_UISupportedInterfaceOrientations' "$PROJECT" \
   || fail "project.yml must not declare ineffective generated orientation keys"
 /usr/bin/python3 - "$INFO" "$ROOT/ShareExtension/Info.plist" <<'PY' \
@@ -32,8 +29,6 @@ with open(sys.argv[2], "rb") as source:
 assert not any(key.startswith("UISupportedInterfaceOrientations") for key in extension)
 PY
 
-# Render into a disposable directory and inspect the actual Xcode project. Do
-# not leave generated projects in the working tree.
 generated_root="$(mktemp -d "${TMPDIR:-/tmp}/tron-ios-source-policy.XXXXXX")"
 cleanup() { rm -rf "$generated_root"; }
 trap cleanup EXIT
@@ -48,16 +43,11 @@ generated_project="$generated_root/TronMobile.xcodeproj/project.pbxproj"
 grep -Fq 'tron-notification.caf' "$generated_project" \
   || fail "generated project omitted the notification sound"
 
-# Presentation activity is an ownership boundary. Raw SwiftUI sheets would
-# bypass token registration and let covered work publish, so the only direct
-# sheet calls must remain inside the managed modifier implementation.
 for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
   /usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" "$sources" \
     || fail "raw native sheet escaped its managed owner"
 done
 
-# Exercise the actual policy command: every native confirmation form is denied,
-# even in the interpreter/managed-sheet owner; prose and shared adapters pass.
 /usr/bin/python3 - "$ROOT/scripts/presentation-source-policy.py" "$generated_root" <<'PY'
 import pathlib, shutil, subprocess, sys
 policy, root = sys.argv[1], pathlib.Path(sys.argv[2]) / "confirmation-policy"
@@ -105,8 +95,6 @@ for sources, expected in cases:
 
 PY
 
-# Sheet loading is one shared, centered pulse (#890): no ad-hoc spinners or
-# visible "Loading…" placeholders, and only the presentation surface hosts it.
 /usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" --self-test \
   || fail "sheet loading policy regressions failed"
 for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
@@ -114,8 +102,6 @@ for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
     || fail "ad-hoc sheet loading UI escaped the shared pulse"
 done
 
-# TronMobileCore is the app's Foundation-only lowest module (docs/architecture.md#modules):
-# UI frameworks belong to the app target, so Core must never import them.
 core_ui_imports() {
   grep -rnE '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*import[[:space:]]+(SwiftUI|UIKit|Observation|UserNotifications)\b' "$1" --include='*.swift'
 }

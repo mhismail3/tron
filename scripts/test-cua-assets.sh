@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Negative staging controls: no network, native execution, signing, or install.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TEMP="$(mktemp -d)"
@@ -24,9 +23,6 @@ grep -q 'Refusing symlinked' "$TEMP/result"
 [[ "$(<"$TEMP/out/cua-driver")" == 'prior artifact' ]]
 printf 'Cua asset rejection controls passed\n'
 
-# Xcode releases disagree about whether one -verify_arch operation accepts
-# multiple architectures. The production verifier uses the stable -archs
-# projection and compares an exact, order-independent set instead.
 VERIFY_ARCHITECTURES="$ROOT/packages/mac-app/scripts/verify-macho-architectures.sh"
 mkdir -p "$TEMP/bin"
 printf '%s\n' \

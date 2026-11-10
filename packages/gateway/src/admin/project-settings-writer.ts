@@ -4,11 +4,6 @@ import { join, relative } from "node:path";
 import { GatewayError } from "../errors.js";
 import type { ProjectGitState } from "../kernel/settings/settings-types.js";
 
-/**
- * Reads the repository-owned Project layer (`.pi/settings.json`) and its git
- * state (docs/settings-model.md 5.7). Tron never writes it.
- */
-
 const GIT_TIMEOUT_MS = 15_000;
 function git(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   return new Promise(resolve => {
@@ -21,7 +16,6 @@ export function projectSettingsPath(root: string): string {
   return join(root, ".pi", "settings.json");
 }
 
-/** Reads the Project store as JSON. A missing file is an empty layer. */
 export async function readProjectDocument(root: string): Promise<{ text: string | undefined; document: Record<string, unknown> }> {
   let text: string | undefined;
   try {
@@ -42,14 +36,8 @@ export async function readProjectDocument(root: string): Promise<{ text: string 
   return { text, document: value as Record<string, unknown> };
 }
 
-/** The repository holding a project's `.pi/settings.json`, its `HEAD` commit and
- * branch, for outside-change entries and commit facts (doc 5.6, 5.7). Undefined
- * outside a repository. */
 export type GitHeadState = { root: string; path: string; head: string | null; branch: string | null };
 export async function gitHeadState(root: string): Promise<GitHeadState | undefined> {
-  // One process for the common case (every settings read asks): top level, HEAD
-  // and its branch ("HEAD" when detached). An unborn HEAD fails after printing
-  // the top level; only then is the branch asked separately.
   const read = await git(root, ["rev-parse", "--show-toplevel", "HEAD", "--abbrev-ref", "HEAD"]);
   const [top, head, branch] = read.stdout.split("\n").map(line => line.trim());
   if (!top || !top.startsWith("/")) return undefined;
@@ -59,15 +47,11 @@ export async function gitHeadState(root: string): Promise<GitHeadState | undefin
   return { ...state, head: null, branch: unborn.ok && unborn.stdout.trim() ? unborn.stdout.trim() : null };
 }
 
-/** The blob id git holds for a revision spec (`HEAD:<path>`, `:<path>`), if any. */
 export async function stagedBlob(root: string, spec: string): Promise<string | undefined> {
   const blob = await git(root, ["rev-parse", "--verify", "-q", spec]);
   return blob.ok ? blob.stdout.trim() : undefined;
 }
 
-/** The Project store's git state, from which the resolver badges each value
- * Project, Staged, Uncommitted or Local only (doc 5.7). A side that is absent or
- * cannot be parsed is an empty document. */
 export async function projectGitState(root: string, known?: GitHeadState | null): Promise<ProjectGitState> {
   const state = known === undefined ? await gitHeadState(root) : known ?? undefined;
   if (!state) return { kind: "local", reason: "not in a git repository" };

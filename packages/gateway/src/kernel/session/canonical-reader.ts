@@ -7,26 +7,10 @@ import { EpisodicMemoryError } from "../../errors.js";
 import { asRecord } from "../../foundation/json.js";
 import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../resources/prompt-bounds.js";
 
-/*
- * Canonical session JSONL is read by a bounded reader that can never repair,
- * migrate or rewrite it. `readCanonicalSession` reads one whole file and follows
- * the branch from the last complete entry to the root through parentId. Home's
- * source (`home-source.ts`) owns the cursor-proven incremental reads. The
- * SDK's `SessionManager.open` is deliberately not used: it migrates.
- * The reader owns its line bound, `CANONICAL_SOURCE_MAX_LINE_BYTES`, derived from
- * what one prompt can write; callers cannot pass a smaller one and refuse a line
- * the producer admitted.
- */
-
-/** The pinned SDK's current session file version. A newer file is refused
- * rather than guessed at. */
 const SUPPORTED_SESSION_VERSION = 3;
-/** How many bytes before a cursor's offset Home's source re-reads to prove the
- * prefix is the one it read last time. */
 const PREFIX_WINDOW_BYTES = 8 * 1_024;
 export const COMPLETE_PREFIX_SEED = createHash("sha256").update("tron-episodic-prefix-v1").digest("hex");
 
-/** A failed parse of a source whose snapshot could not be proven stable. */
 export class EpisodicSourceChangedError extends Error {
   constructor() {
     super("Canonical session changed while it was being read");
@@ -34,8 +18,6 @@ export class EpisodicSourceChangedError extends Error {
   }
 }
 
-/** Whether the file a handle reads is unchanged between two stats: identity, size
- * and times, which a rewrite or an append changes. */
 export function sameSnapshot(start: Stats, end: Stats): boolean {
   return start.dev === end.dev && start.ino === end.ino && start.size === end.size
     && start.mtimeMs === end.mtimeMs && start.ctimeMs === end.ctimeMs;
@@ -47,14 +29,11 @@ export interface EpisodicCanonicalEntry {
   timestamp: string;
   type: string;
   raw: Record<string, unknown>;
-  /** The exact JSON text of the entry's line, without its newline. */
   line: string;
 }
 
-/** One read of a canonical session file: its current branch, root first. */
 interface EpisodicCanonicalBranch {
   branch: EpisodicCanonicalEntry[];
-  /** Bytes of a trailing partial line that were ignored. */
   tornBytes: number;
 }
 
@@ -63,9 +42,6 @@ interface LineBatch {
   tornBytes: number;
 }
 
-/** Read complete lines from the start of the file, bounded per line. A line's reads
- * are kept as pieces and joined once, as in the Home source's reader, because a
- * canonical line can be tens of megabytes. */
 async function readLines(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, maxLineBytes: number, endExclusive?: number): Promise<LineBatch> {
   const lines: string[] = [];
   const buffer = Buffer.alloc(1_024 * 1_024);
@@ -117,10 +93,6 @@ export function parseEntry(line: string): EpisodicCanonicalEntry {
   return { id, parentId, timestamp, type: raw.type, raw, line };
 }
 
-/** The digest of the last complete non-blank line before `offset`. The window
- * widens until it holds that whole line, so a line longer than the first window is
- * proven too. `undefined` when no complete line fits within `maxLineBytes`: such a
- * line cannot be a canonical line, so nothing is proven. */
 export async function prefixLineDigest(handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> }, offset: number, maxLineBytes: number): Promise<string | undefined> {
   if (offset <= 1) return undefined;
   for (let span = Math.min(PREFIX_WINDOW_BYTES, offset); ; span = Math.min(span * 2, offset, maxLineBytes + 2)) {
@@ -133,8 +105,6 @@ export async function prefixLineDigest(handle: { read(buffer: Buffer, offset: nu
       filled += read.bytesRead;
     }
     const lines = buffer.subarray(0, filled).toString("utf8").split("\n");
-    // The window ends at a line boundary, so its last element is the empty tail.
-    // Its first element is whole only when the window starts the file.
     for (let index = lines.length - 2; index >= (start === 0 ? 0 : 1); index -= 1) {
       const line = lines[index]!;
       if (line.trim() !== "") return digest(line);
@@ -143,11 +113,6 @@ export async function prefixLineDigest(handle: { read(buffer: Buffer, offset: nu
   }
 }
 
-/**
- * Read one canonical session file with bounded lines. A trailing partial line
- * (a crash mid-write, or a live writer) is ignored and reported, never parsed;
- * a complete line that is not a well-formed entry refuses the read.
- */
 export async function readCanonicalSession(options: {
   path: string;
   sessionId: string;
@@ -180,15 +145,6 @@ export async function readCanonicalSession(options: {
   }
 }
 
-/**
- * Visit every complete entry of one canonical file in file order, one line at a
- * time, so the visitor decides what survives: nothing is batched. Refuses what the
- * whole-file reader refuses (header, torn tail, over-long line), and a file that
- * shrinks while it is read. Reads only the bytes present when it began.
- * Durable consumers must await successful completion before using visited entries:
- * their exact read cut, file identity and parent entry are synchronized after the
- * read. A visible SDK append alone cannot retire a durable delivery outbox.
- */
 export async function visitCanonicalSessionEntries(options: {
   path: string;
   sessionId: string;
@@ -228,8 +184,6 @@ export async function visitCanonicalSessionEntries(options: {
     if (pending.length > 0) throw new EpisodicMemoryError("source", "Canonical session has an incomplete tail");
     if (!headerSeen) throw new EpisodicMemoryError("source", "Canonical session file is empty");
     if (options.durable) {
-      // Synchronize AFTER reading, on this same handle: syncing the pathname
-      // before a later read could certify an intervening, unsynced append.
       await syncDurably(handle);
       const directory = await open(dirname(options.path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
       try { await syncDurably(directory); } finally { await directory.close(); }
@@ -241,7 +195,6 @@ export async function visitCanonicalSessionEntries(options: {
 
 interface WholeFile {
   batch: LineBatch;
-  /** Every complete entry, in file order. */
   entries: EpisodicCanonicalEntry[];
   byId: Map<string, EpisodicCanonicalEntry>;
 }
@@ -260,11 +213,6 @@ function checkSessionHeader(line: string, sessionId: string): void {
   }
 }
 
-/**
- * Read every complete entry of one canonical file, after checking the header this
- * reader supports. Both the branch walk and the by-id instant read prove the file
- * the same way, so neither can accept a file the other would refuse.
- */
 async function readWholeFile(
   handle: { read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }> },
   options: { path: string; sessionId: string; endBytes?: number },
@@ -285,13 +233,8 @@ async function readWholeFile(
   return { batch, entries, byId };
 }
 
-/** Exact file-wide evidence for cold owners. Unlike a model branch, immutable
- * report addresses survive navigation. Refuse torn/changed graphs; never open
- * the SDK's repairing/migrating SessionManager just to inspect evidence. */
 export async function readCanonicalSessionFile(options: {
   path: string; sessionId: string;
-  /** Accept an append to the same file during the read: the entries are then the
-   * exact prefix that existed when the read began, proven unchanged by a second read. */
   appendStable?: boolean;
 }): Promise<EpisodicCanonicalEntry[]> {
   const handle = await open(options.path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -308,10 +251,7 @@ export async function readCanonicalSessionFile(options: {
     }
     const end = await handle.stat();
     if (!sameSnapshot(start, end)) {
-      // Pi appends to the same inode and never rewrites a session in place, so a
-      // grown file whose first `start.size` bytes read back the same lines kept them.
       if (!options.appendStable || end.dev !== start.dev || end.ino !== start.ino || end.size < start.size) throw new EpisodicSourceChangedError();
-      // Bytes that no longer parse were changed under the first pass, not malformed at its start.
       const again = await readWholeFile(handle, { ...options, endBytes: start.size }).catch((error: unknown) => {
         if (error instanceof EpisodicMemoryError && error.kind === "source") throw new EpisodicSourceChangedError();
         throw error;
@@ -328,5 +268,4 @@ function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-/** One digest rule for every persisted record. */
 export const episodicDigest = digest;

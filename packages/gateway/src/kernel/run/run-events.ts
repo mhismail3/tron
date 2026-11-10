@@ -5,8 +5,6 @@ import { safeJson } from "../projection/projection.js";
 import { redactProcessText } from "../projection/process-activity.js";
 import type { RunOperations } from "./run-operations.js";
 
-/** SDK run transitions operate on the actual authority. The native frame keeps
- * event registration, callback admission and projection I/O at their original cuts. */
 export class RunEventsOwner {
   constructor(private readonly operations: RunOperations<unknown>) {}
 
@@ -22,18 +20,12 @@ export class RunEventsOwner {
           ?? this.operations.runQueue.queuedMessages.find((item) => item.behavior === "followUp")?.id;
         if (this.operations.compactionOperation && this.operations.pendingPrompt?.id === this.operations.activeOperationId
           && this.operations.runInvocations.invocationForOperation(this.operations.activeOperationId)?.lifecycle === "staged") {
-          // An extension triggerTurn during pre-prompt compaction is not the
-          // pending user's admitted turn. Give it a separate owner; the public
-          // preflight callback will reject the displaced request without replay.
           this.operations.activeOperationId = undefined;
           this.operations.operation = undefined;
         }
         const preflightOwner = this.operations.pendingExtensionCommand?.id
           ?? queuedOwner
           ?? this.operations.activeOperationId
-          // A prompt initially offered as queue work can become ordinary only
-          // inside Pi's async input hook. Until queue_update proves otherwise,
-          // its durable preflight owner is the sole valid owner for a new run.
           ?? this.operations.runQueue.pendingQueueAdmission?.id;
         const continuesToolSegment = continuationFromSettlement
           && queuedOwner === undefined
@@ -51,22 +43,9 @@ export class RunEventsOwner {
               this.operations.runAttention.pendingAssistantCompletion = { ...this.operations.runAttention.pendingAssistantCompletion, operationId: this.operations.activeOperationId };
             }
             if (this.operations.activeOperationId) this.operations.runTerminal.observationFor(this.operations.activeOperationId).pendingCompletionId = this.operations.runAttention.pendingAssistantCompletion.id;
-            // Pi may start an extension continuation before the older settlement
-            // callback unwinds. Preserve and immediately commit the prior exact
-            // completion, then give the continuation a distinct marker owner so
-            // cleanup from the older settlement cannot erase the newer run.
-            // Attention is ordered durable presentation state, not authorization
-            // to continue already-accepted canonical agent work. A failed queue
-            // head remains marked/interrupted and blocks later attention commits,
-            // while the continuation may finish and stamp its own completion for
-            // ordered restart recovery. Aborting here would silently discard that
-            // accepted continuation and strand its durable ownership test.
             const completion = this.operations.runAttention.pendingAssistantCompletion;
             void this.operations.runAttention.beginAttentionSettlement(completion).catch((error) => this.operations.runAttention.settleCompletionPersistenceFailure(completion, error));
           }
-          // `message_end` may still be waiting for Pi's canonical append. Its
-          // callback-turn binding owns the preceding operation even before a
-          // completion object exists, so the new run must rotate now.
           this.operations.runInvocations.terminalizeTransferredOperation(this.operations.activeOperationId);
           this.operations.activeOperationId = undefined;
           this.operations.operation = undefined;
@@ -89,9 +68,6 @@ export class RunEventsOwner {
             ?? (rejectedInvocation ? `terminal:${rejectedInvocation.invocationId}` : rejectedOperationId);
           if (rejectedSource) this.operations.runTerminal.completionObserved(rejectedSource);
           void this.operations.runtime.session.abort().then(async () => {
-            // The preceding completion already owns its terminal receipt. A
-            // rejected extension continuation must not overwrite that receipt
-            // with a contradictory interruption under the same invocation ID.
             if (continuationFromSettlement) await this.operations.reconcileAttention();
             else await this.operations.runInvocations.terminalizeInvocation(rejectedOperationId, "interrupted", "drain-cutoff");
             if (rejectedSource) await this.operations.runTerminal.notifyAgentTerminal(rejectedSource, "stopped");
@@ -116,17 +92,12 @@ export class RunEventsOwner {
         if (!continuesToolSegment) {
           if (beginsWithUserInput) {
             this.operations.ownToolSegment(this.operations.activeOperationId);
-            // Recency follows the admitted user run, so a background or
-            // assistant-continuation start never reports the selected model.
             const usedModel = this.operations.runtime.session.model;
             if (usedModel) this.operations.dependencies.modules.policy("modelUsed")?.(this.operations.id, { provider: usedModel.provider, id: usedModel.id });
           } else this.operations.prepareAssistantOwnedToolSegment();
         }
         this.operations.homeRequestPolicy?.responseTiming.started(this.operations.activeOperationId);
         const activeInvocation = this.operations.runInvocations.invocationForOperation(this.operations.activeOperationId);
-        // A public session_compact hook can start the next Agent turn before
-        // compaction_end. Keep the captured compaction owner for its cleanup,
-        // but give the live turn its own visible Stop identity now.
         if (this.operations.operation?.kind === "compaction") this.operations.operation = undefined;
         this.operations.operation ??= {
           id: this.operations.activeOperationId,
@@ -149,24 +120,16 @@ export class RunEventsOwner {
         break;
       case "agent_settled":
         if (this.operations.shuttingDown) break;
-        // An extension completion can trigger the next turn while the previous
-        // settlement callback is still unwinding. Never let that older callback
-        // mark a newer agent-core run idle or erase its live tools.
         if (this.operations.hasActiveAgentRun) {
           this.operations.runAttention.ensureAgentProjection();
           this.operations.publishSnapshot();
           break;
         }
         if (this.operations.manualCompaction.queuedManualCompactionInFlight && !this.operations.manualCompaction.adoptedManualCompaction) {
-          // Standalone queued maintenance owns the session after its prompt has
-          // already settled. An adopted compaction still belongs to the enclosing
-          // agent run, whose terminal receipt must retire independently.
           this.operations.publishSnapshot();
           break;
         }
         this.operations.resetStreamingProjection();
-        // A short extension turn can finish before the outer compaction hook.
-        // Restore that still-live owner instead of publishing false idle.
         this.operations.phase = this.operations.compactionOperation ? "compacting" : "idle";
         const settledOperationId = this.operations.activeOperationId;
         const terminalNotification = this.operations.runTerminal.takeAgentTerminal(settledOperationId);
@@ -178,9 +141,6 @@ export class RunEventsOwner {
           ? (settledOperationId && this.operations.runAbort.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
           : terminalLifecycle === "failed" ? "agent-error" : undefined;
         this.operations.runAbort.completeContinuation(terminalLifecycle);
-        // Observation admission is issued only after the exact terminal receipt
-        // path below settles; before that point canonical durability is still
-        // provisional and must not be projected as memory coverage.
         this.operations.activeOperationId = undefined;
         this.operations.homeRequestPolicy?.settle(settledOperationId);
         this.operations.ownToolSegment(undefined);
@@ -189,26 +149,14 @@ export class RunEventsOwner {
         this.operations.resetToolExecutionProjection();
         if (!this.operations.hasCurrentDashboardWork()) this.operations.stopActivityHeartbeat();
         this.operations.clearToolProgressTimers();
-        // A command-triggered turn owns a distinct foreground token. The
-        // command may still be unwinding when agent_settled arrives; only skip
-        // this lane if the command itself somehow owns the settled identity.
         if (this.operations.pendingExtensionCommand === undefined
           || this.operations.pendingExtensionCommand.id !== settledOperationId) {
           if (this.operations.runAttention.pendingAssistantCompletion) {
             this.operations.runWork.get(settledOperationId ?? "")?.transition("terminal-receipt-persistence");
-            // Pi has settled, but the Gateway remains operationally running until
-            // the exact canonical completion is durable. This is the open/drain
-            // barrier that prevents a snapshot from outrunning attention truth.
             this.operations.phase = "running";
             this.operations.publishSnapshot();
             const completion = this.operations.runAttention.pendingAssistantCompletion;
-            // The whole chain is one durable owner from its first await: disposal
-            // joins pendingReceiptWrites, so a chain admitted only at its later
-            // attention drain could write its marker clear after dispose (#723).
             this.operations.runPersistence.trackSettlementChain((async () => {
-              // An earlier success can still await attention while a queued
-              // follow-up fails. Its receipt cannot stand in for this exact
-              // terminal owner (or overwrite its failure when owners coincide).
               const terminal = await this.operations.runInvocations.persistInvocationTerminal(
                 settledOperationId, terminalLifecycle, terminalErrorCode, undefined,
                 settledOperationId === completion.operationId ? completion.id : undefined,
@@ -240,9 +188,6 @@ export class RunEventsOwner {
               if (terminalNotification) await this.operations.runTerminal.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
               await this.operations.clearMarkerOwnership(settledOperationId);
             });
-            // The foreground token remains the exact owner; do not create a second
-            // receipt token or report drain completion while marker I/O is active.
-            // Disposal still joins the chain, so its marker clear cannot land after it.
             this.operations.runPersistence.trackSettlementChain(markerClear.then(
               () => this.operations.manualCompaction.startPendingManualCompaction(),
               (error) => {
@@ -260,8 +205,6 @@ export class RunEventsOwner {
               this.operations.publishSnapshot();
             }));
           } else {
-            // A duplicate/late SDK callback has no exact marker authority. Never
-            // interpret undefined as permission to clear every session marker.
             this.operations.hooks.settled(this.operations.id);
           }
         }
@@ -270,24 +213,15 @@ export class RunEventsOwner {
       case "compaction_start": {
         const adoptedManual = this.operations.manualCompaction.adoptPending(event);
         this.operations.phase = "compacting";
-        // Canonical compaction is a hard transcript barrier. A provisional
-        // generation keeps older unresolved calls terminal until the next
-        // assistant message supplies its stable presentation identity.
         this.operations.prepareAssistantOwnedToolSegment();
         this.operations.compactionBaselineEntryId = [...this.operations.sessionManager.getBranch()]
           .reverse()
           .find((entry) => entry.type === "compaction")?.id;
-        // Manual compaction already has its own command identity. Automatic
-        // preflight compaction receives a distinct runtime identity so repeated
-        // maintenance within one prompt can never collide with the prompt row
-        // or another canonical compaction.
         const compactionOperation: SessionOperationState = {
           id: adoptedManual?.operationId ?? (this.operations.operation?.kind === "compaction"
             ? (this.operations.operation.id ?? randomUUID())
             : randomUUID()),
           kind: "compaction",
-          // Manual admission already owns this identity, including its start
-          // time. SDK preparation must not invalidate Stop/cleanup matching.
           startedAt: this.operations.operation?.kind === "compaction" && event.reason === "manual"
             ? this.operations.operation.startedAt : new Date().toISOString(),
           reason: event.reason,
@@ -304,8 +238,6 @@ export class RunEventsOwner {
         const errorMessage = event.errorMessage
           ? redactProcessText(event.errorMessage).slice(0, 512)
           : undefined;
-        // Exhausted overflow recovery emits an end without a new start. Keep
-        // that failure observable without inventing a compaction operation ID.
         this.operations.dependencies.compactionDiagnostic?.({
           sessionId: this.operations.id,
           ...(completedOperation?.id ? { operationId: completedOperation.id } : {}),
@@ -325,9 +257,6 @@ export class RunEventsOwner {
         this.operations.compactionBaselineEntryId = undefined;
         this.operations.compactionOperation = undefined;
         this.operations.manualCompaction.settleAdopted(outcome, errorMessage);
-        // Retire only the completed compaction's abort intent. This remains
-        // safe when a successor replaced `operation`, because its identity is
-        // fenced by the captured compaction owner.
         if (completedOperation?.id) this.operations.runAbort.abortedOperations.delete(completedOperation.id);
         if (outcome === "failure" && event.reason !== "manual"
           && (ownerStillCurrent || completedOperation === undefined)) {
@@ -338,15 +267,10 @@ export class RunEventsOwner {
               : "Automatic compaction failed. Check Gateway logs for details.",
           });
         }
-        // A successor may have started from a compaction hook before this event;
-        // never rebuild its phase or operation from the completed compaction.
         if (!ownerStillCurrent) {
           this.operations.publishSnapshot();
           break;
         }
-        // Hooks may append canonical entries after the compaction. A single-row
-        // delta cannot describe that branch and consumes the client's next
-        // cursor when rejected. Publish one immediate bounded authority frame.
         if (this.operations.pendingPrompt) {
           this.operations.phase = "running";
           this.operations.operation = {
@@ -364,8 +288,6 @@ export class RunEventsOwner {
           };
         } else if (completedOperation.kind === "compaction"
           && completedOperation.reason === "manual" && !this.operations.manualCompaction.adoptedManualCompaction) {
-          // The wrapper still owns durable marker retirement. Canonical presence
-          // suppresses the spinner, while phase remains truthful until cleanup.
           this.operations.phase = "compacting";
           this.operations.operation = completedOperation;
         } else {
@@ -408,9 +330,6 @@ export class RunEventsOwner {
         break;
       case "auto_retry_end":
         this.operations.emit("session.retry", safeJson(event));
-        // Retry completion is nested inside the overall AgentSession run. Only
-        // `agent_settled` owns the foreground-to-idle transition; otherwise an
-        // aborted/failed retry can hide a continuation that is already active.
         this.operations.runAttention.ensureAgentProjection();
         this.operations.retry = undefined;
         this.operations.scheduleSnapshot();
