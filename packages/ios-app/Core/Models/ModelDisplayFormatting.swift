@@ -101,9 +101,6 @@ package enum ModelDisplayFormatting {
     private static func formatWord(_ value: String) -> String {
         let normalized = value.lowercased()
         if let alias = wordAliases[normalized] { return alias }
-        if normalized.first == "o", normalized.dropFirst().allSatisfy(\.isNumber) {
-            return normalized.prefix(1).uppercased() + normalized.dropFirst()
-        }
         guard let first = value.first else { return value }
         return first.uppercased() + value.dropFirst().lowercased()
     }

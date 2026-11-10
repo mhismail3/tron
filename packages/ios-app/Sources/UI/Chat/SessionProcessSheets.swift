@@ -251,7 +251,7 @@ enum SessionProcessRowPresentation {
 
     private static func metadataLine(for process: SessionProcessActivity, relativeTo now: Date? = nil) -> String? {
         let parts = [
-            process.model.map(modelDisplayName),
+            process.model.map { ModelDisplayFormatting.model($0.split(separator: "/").last.map(String.init) ?? $0) },
             process.thinking.map { "\($0.capitalized) thinking" },
             now.flatMap { startedText(for: process, relativeTo: $0) },
         ].compactMap { $0 }
@@ -343,18 +343,6 @@ enum SessionProcessRowPresentation {
 
     static func countLabel(_ count: Int, singular: String) -> String {
         "\(count) \(count == 1 ? singular : "\(singular)s")"
-    }
-
-    static func modelDisplayName(_ model: String) -> String {
-        let value = model.split(separator: "/").last.map(String.init) ?? model
-        return value
-            .replacingOccurrences(of: "-", with: " ")
-            .split(separator: " ")
-            .map {
-                if $0.lowercased() == "gpt" { return "GPT" }
-                return $0.first?.isNumber == true ? String($0).uppercased() : $0.prefix(1).uppercased() + $0.dropFirst()
-            }
-            .joined(separator: " ")
     }
 
     static func latestAction(for process: SessionProcessActivity) -> String? {
