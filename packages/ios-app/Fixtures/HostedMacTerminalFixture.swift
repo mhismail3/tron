@@ -30,8 +30,7 @@ struct HostedMacTerminalFixture: View {
             .flatMap { try? JSONDecoder().decode(MacTerminalFixtureConfiguration.self, from: $0) }
         let gateway = MacTerminalFixtureGateway(scenario: scenario, configuration: configuration)
         _gateway = State(initialValue: gateway)
-        if scenario == "migration" { _ = Self.seedMigration }
-        else if scenario != "migration-resume" { _ = Self.startUnenrolled }
+        _ = Self.startUnenrolled
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(profile, token: "fixture-token")
@@ -49,19 +48,13 @@ struct HostedMacTerminalFixture: View {
     /// Each launch starts unenrolled (no key, no cached enrollment), once.
     @MainActor private static let startUnenrolled: Void = {
         try? MacTerminalEnrollmentStore().remove(machineID: "mac-terminal-machine")
-        // Each app launch owns a fresh unenrolled fixture. A previous migration
-        // case may have seeded a key in the shared native daemon’s test file.
+        // Each app launch owns a fresh unenrolled fixture: an earlier case's key
+        // may remain in the shared native daemon’s test file.
         if let path = ProcessInfo.processInfo.environment["TRON_MAC_TERMINAL_FIXTURE"],
            let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
            let configuration = try? JSONDecoder().decode(MacTerminalFixtureConfiguration.self, from: data) {
             try! Data().write(to: URL(fileURLWithPath: configuration.authorizedKeys), options: .atomic)
         }
-    }()
-
-    @MainActor private static let seedMigration: Void = {
-        let path = ProcessInfo.processInfo.environment["TRON_MAC_TERMINAL_FIXTURE"]!
-        let configuration = try! JSONDecoder().decode(MacTerminalFixtureConfiguration.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
-        try! MacTerminalMigrationFixture.seed(configuration)
     }()
 
     var body: some View {
@@ -86,89 +79,11 @@ struct HostedMacTerminalFixture: View {
                 }
             }
             DarwinTrigger.observe("com.tron.mobile.fixture.mac-terminal.fail-removal") { Task { await gateway.failRemoval() } }
-            if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("migration") }) {
-                DarwinTrigger.observe("com.tron.mobile.fixture.mac-terminal.migration-unblock") {
-                    Task { @MainActor in try! MacTerminalMigrationFixture.unblock() }
-                }
-                for name in ["blocked", "done", "second"] {
-                    DarwinTrigger.observe("com.tron.mobile.fixture.mac-terminal.migration-\(name)") {
-                        Task { @MainActor in try! MacTerminalMigrationFixture.snapshot(name) }
-                    }
-                }
-            }
             try? await model.connectHostedGateway(profile: profile, token: "fixture-token")
         }
     }
 }
 
-
-/// Exercises the real defaults, Keychain and controller through the native app.
-/// All paths belong to the separate hosted-test app and the sshd fixture.
-@MainActor
-private enum MacTerminalMigrationFixture {
-    static let key = "macTerminal.enrollments.v1"
-    static let marker = "macTerminal.hostCommandRetired.v1"
-    static let machine = "mac-terminal-machine"
-    static var root: URL {
-        URL(fileURLWithPath: ProcessInfo.processInfo.environment["TRON_MAC_TERMINAL_FIXTURE"]!).deletingLastPathComponent()
-    }
-    static var backup: URL {
-        URL.applicationSupportDirectory.appending(path: "MacTerminal/enrollments.v1-before-host-command-removal.json")
-    }
-    static func json<T: Encodable>(_ value: T) throws -> String {
-        String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
-    }
-
-    static func seed(_ configuration: MacTerminalFixtureConfiguration) throws {
-        let defaults = UserDefaults.standard
-        defaults.removeObject(forKey: marker)
-        let parent = backup.deletingLastPathComponent()
-        var directory: ObjCBool = false
-        if FileManager.default.fileExists(atPath: parent.path, isDirectory: &directory) {
-            if directory.boolValue, FileManager.default.fileExists(atPath: backup.path) {
-                try FileManager.default.removeItem(at: backup)
-            }
-            // Refuses a nonempty directory rather than deleting unknown content.
-            try FileManager.default.removeItem(at: parent)
-        }
-        try FileManager.default.createDirectory(at: parent.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("fixture blocks the backup directory".utf8).write(to: parent)
-        let privateKey = try MacTerminalEnrollmentStore().key(machineID: machine)
-        let publicKey = privateKey.openSSHPublicKey
-        let retired = #""hostCommand" : ["/obsolete/node", "/obsolete/host"], "#
-        let raw = """
-        { "mac-terminal-machine" : {
-          "machineID" : "mac-terminal-machine", "deviceID" : "fixture-iphone",
-          "endpoint" : { "hosts" : \(try json(configuration.hosts)), "port" : \(configuration.port),
-            "username" : \(try json(configuration.username)), \(retired)"hostKeys" : \(try json(configuration.hostKeys)) },
-          "publicKey" : \(try json(publicKey)), "enrolledAt" : 42,
-          "opaque" : { "escaped" : "keep\\u0020this", "number" : 1.2300, "unicode" : "雪" }
-        } }
-        """
-        try Data(raw.utf8).write(to: root.appending(path: "migration-original.json"), options: .atomic)
-        try Data(raw.replacingOccurrences(of: retired.trimmingCharacters(in: .whitespaces), with: "").utf8).write(to: root.appending(path: "migration-expected.json"), options: .atomic)
-        try Data(publicKey.utf8).write(to: root.appending(path: "migration-key-before.txt"), options: .atomic)
-        try Data(backup.path.utf8).write(to: root.appending(path: "migration-backup-path.txt"), options: .atomic)
-        defaults.set(Data(raw.utf8), forKey: key)
-        defaults.synchronize()
-        try (publicKey + "\n").write(to: URL(fileURLWithPath: configuration.authorizedKeys), atomically: true, encoding: .utf8)
-    }
-
-    static func unblock() throws {
-        let parent = backup.deletingLastPathComponent()
-        try FileManager.default.removeItem(at: parent)
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
-    }
-
-    static func snapshot(_ name: String) throws {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let privateKey = try MacTerminalEnrollmentStore().existingKey(machineID: machine) else {
-            throw CocoaError(.fileReadCorruptFile)
-        }
-        try data.write(to: root.appending(path: "migration-\(name).json"), options: .atomic)
-        try Data(privateKey.openSSHPublicKey.utf8).write(to: root.appending(path: "migration-key-\(name).txt"), options: .atomic)
-    }
-}
 
 private struct MacTerminalFixtureConfiguration: Decodable {
     let hosts: [String]

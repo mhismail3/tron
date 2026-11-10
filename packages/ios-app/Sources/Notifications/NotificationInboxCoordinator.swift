@@ -223,8 +223,6 @@ final class NotificationInboxCoordinator {
 
     private struct CacheDocument: Codable { let version: Int; let buckets: [String: Bucket] }
     private static let cacheKey = "notificationInbox.projection.v2"
-    /// Superseded by the two-window bucket shape; dropped once, without migration.
-    private static let supersededCacheKey = "notificationInbox.projection.v1"
 
     private let defaults: UserDefaults?
     private(set) var buckets: [String: Bucket] = [:]
@@ -241,7 +239,6 @@ final class NotificationInboxCoordinator {
 
     init(defaults: UserDefaults? = nil) {
         self.defaults = defaults
-        defaults?.removeObject(forKey: Self.supersededCacheKey)
         guard let data = defaults?.data(forKey: Self.cacheKey),
               data.count <= NotificationInboxAdmissionPolicy.maximumAggregateBytes,
               let cached = try? JSONDecoder.gateway.decode(CacheDocument.self, from: data),

@@ -77,17 +77,12 @@ struct PushGrant: Codable, Equatable, Sendable {
 }
 
 struct PushCredentialDocument: Codable, Equatable, Sendable {
-    static let currentAppAttestCredentialWireVersion = 1
-
     var appAttestKeyID: String?
     var apnsToken: String?
     var grants: [String: PushGrant]
     /// A fresh attestation was definitively rejected. Keep its key for
     /// diagnostics, but do not reinterpret it as an assertion key on reconcile.
     var appAttestKeyRejected: Bool? = nil
-    /// Version of the App Attest credential ID projected to the Worker. Missing
-    /// means the document predates canonical unpadded-base64url projection.
-    var appAttestCredentialWireVersion: Int? = currentAppAttestCredentialWireVersion
 
     static let empty = PushCredentialDocument(appAttestKeyID: nil, apnsToken: nil, grants: [:])
 }
@@ -455,23 +450,7 @@ final class PushNotificationCoordinator {
         self.uuid = uuid
         self.clock = clock
         do {
-            let loaded = try credentials.load() ?? .empty
-            if loaded.appAttestKeyID != nil,
-               loaded.appAttestKeyRejected == true,
-               loaded.appAttestCredentialWireVersion == nil {
-                // A pre-canonical-wire rejection may describe only the retired
-                // request shape, not an invalid Apple key. Rotate that one
-                // legacy key exactly once while preserving every other durable
-                // push projection.
-                var migrated = loaded
-                migrated.appAttestKeyID = nil
-                migrated.appAttestKeyRejected = false
-                migrated.appAttestCredentialWireVersion = PushCredentialDocument.currentAppAttestCredentialWireVersion
-                try credentials.save(migrated)
-                self.document = migrated
-            } else {
-                self.document = loaded
-            }
+            self.document = try credentials.load() ?? .empty
             self.credentialLoadFailed = false
         } catch {
             // Never overwrite an unreadable Keychain document with an empty
@@ -818,7 +797,6 @@ final class PushNotificationCoordinator {
                     var updated = document
                     updated.grants[admittedContext.profile.id] = grant
                     updated.appAttestKeyRejected = false
-                    updated.appAttestCredentialWireVersion = PushCredentialDocument.currentAppAttestCredentialWireVersion
                     do { try credentials.save(updated) }
                     catch { throw PushRegistrationError.persistence }
                     document = updated
@@ -931,7 +909,6 @@ final class PushNotificationCoordinator {
         var updated = document
         updated.appAttestKeyID = keyID
         updated.appAttestKeyRejected = rejected
-        updated.appAttestCredentialWireVersion = PushCredentialDocument.currentAppAttestCredentialWireVersion
         do { try credentials.save(updated) }
         catch { throw PushRegistrationError.persistence }
         document = updated

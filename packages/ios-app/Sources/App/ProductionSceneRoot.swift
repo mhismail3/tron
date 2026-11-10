@@ -149,7 +149,6 @@ struct ProductionSceneRoot: View {
             .task {
                 owner.pathDiagnostics.setSceneActive(scenePhase == .active)
                 configurePushNotifications()
-                await RetiredNotificationBadge.clear()
                 await owner.model.start(scenePhase: appScenePhase(scenePhase))
                 await reconcilePushNotifications()
             }
@@ -207,10 +206,7 @@ struct ProductionSceneRoot: View {
                 switch appScenePhase(phase) {
                 case .active:
                     owner.pathDiagnostics.setSceneActive(true)
-                    Task {
-                        await RetiredNotificationBadge.clear()
-                        await reconcilePushNotifications()
-                    }
+                    Task { await reconcilePushNotifications() }
                     owner.model.becameActive()
                 case .inactive:
                     owner.pathDiagnostics.setSceneActive(false)

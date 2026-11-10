@@ -210,58 +210,9 @@ final class TronMacTerminalUITests: XCTestCase {
     }
 
     @MainActor
-    func testMigrationBacksUpBeforeRewriteAndPreservesIdentityOnce() throws {
-        let files = configuration.deletingLastPathComponent()
-        let app = launch(scenario: "migration")
-        openMacTerminal(app)
-        // A real filesystem failure must prevent the defaults rewrite and SSH.
-        waitForPhase(app, "Unavailable")
-        let original = try Data(contentsOf: files.appending(path: "migration-original.json"))
-        let expected = try Data(contentsOf: files.appending(path: "migration-expected.json"))
-        let key = try String(contentsOf: files.appending(path: "migration-key-before.txt"), encoding: .utf8)
-        let backup = URL(fileURLWithPath: try String(contentsOf: files.appending(path: "migration-backup-path.txt"), encoding: .utf8))
-        try migrationSnapshot("blocked", files: files)
-        XCTAssertEqual(try Data(contentsOf: files.appending(path: "migration-blocked.json")), original)
-        XCTAssertEqual(try String(contentsOf: files.appending(path: "migration-key-blocked.txt"), encoding: .utf8), key)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: backup.path))
-
-        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(rawValue: "com.tron.mobile.fixture.mac-terminal.migration-unblock" as CFString), nil, nil, true)
-        app.navigationBars.buttons["Done"].firstMatch.tap()
-        openMacTerminal(app)
-        waitForPhase(app, "Connected")
-        try migrationSnapshot("done", files: files)
-        XCTAssertEqual(try Data(contentsOf: files.appending(path: "migration-done.json")), expected)
-        XCTAssertEqual(try Data(contentsOf: backup), original)
-        XCTAssertEqual(try String(contentsOf: files.appending(path: "migration-key-done.txt"), encoding: .utf8), key)
-        let attributes = try FileManager.default.attributesOfItem(atPath: backup.path)
-
-        app.terminate()
-        let relaunched = launch(scenario: "migration-resume")
-        openMacTerminal(relaunched)
-        waitForPhase(relaunched, "Connected")
-        try migrationSnapshot("second", files: files)
-        XCTAssertEqual(try Data(contentsOf: files.appending(path: "migration-second.json")), expected)
-        XCTAssertEqual(try Data(contentsOf: backup), original)
-        XCTAssertEqual(try String(contentsOf: files.appending(path: "migration-key-second.txt"), encoding: .utf8), key)
-        let secondAttributes = try FileManager.default.attributesOfItem(atPath: backup.path)
-        XCTAssertEqual(attributes[.modificationDate] as? Date, secondAttributes[.modificationDate] as? Date)
-        XCTAssertEqual(attributes[.systemFileNumber] as? NSNumber, secondAttributes[.systemFileNumber] as? NSNumber)
-    }
-
-    @MainActor
     private func trustHost(_ app: XCUIApplication) {
         XCTAssertTrue(app.buttons["Trust and Enroll"].waitForExistence(timeout: 15), app.debugDescription)
         app.buttons["Trust and Enroll"].tap()
-    }
-
-    @MainActor
-    private func migrationSnapshot(_ name: String, files: URL) throws {
-        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(rawValue: "com.tron.mobile.fixture.mac-terminal.migration-\(name)" as CFString), nil, nil, true)
-        let path = files.appending(path: "migration-key-\(name).txt")
-        let ready = NSPredicate { _, _ in FileManager.default.fileExists(atPath: path.path) }
-        XCTAssertTrue(waitUntil(nil, ready, timeout: 10))
     }
 
     @MainActor
