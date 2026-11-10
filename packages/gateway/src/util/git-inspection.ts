@@ -48,7 +48,6 @@ export async function runGit(
           process.kill(-child.pid, "SIGKILL");
           return;
         } catch {
-          // Fall back to the direct child if the process group already retired.
         }
       }
       child.kill("SIGKILL");
@@ -60,7 +59,6 @@ export async function runGit(
     let truncated = false;
     let timedOut = false;
     let overflowed = false;
-    // Git runs outside this loop; a stalled loop must not expire a finished Git.
     const deadline = new StallTolerantDeadline(options.timeoutMs ?? GIT_TIMEOUT_MS, () => {
       timedOut = true;
       killProcessGroup();

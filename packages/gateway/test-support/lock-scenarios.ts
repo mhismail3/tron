@@ -12,14 +12,6 @@ import { startLockGateway, type LockClient, type LockGateway, type LockGatewayOp
 import { homeOwnerOf } from "./gateway-registry.js";
 import type { TraceValue } from "./scenario-lock.js";
 
-/**
- * Lock scenarios shared by the behavior lock that owns each one and by
- * `client-event-schemas.lock`, which runs the scenarios that together reach every
- * client event payload shape the phone decodes. A scenario drives the real
- * Gateway (`gateway-lock-harness.ts`) and returns what its owner asserts; it
- * asserts only that its own steps were admitted.
- */
-
 export interface LockSession {
   readonly gateway: LockGateway;
   readonly client: LockClient;
@@ -27,7 +19,6 @@ export interface LockSession {
   prompt(text: string, extra?: Record<string, unknown>): Promise<{ ok: boolean; result?: any; error?: any }>;
 }
 
-/** A Gateway with one opened and synced chat, as the phone holds it. The caller disposes the Gateway. */
 export async function openLockSession(name: string, options?: LockGatewayOptions): Promise<LockSession> {
   const gateway = await startLockGateway(name, options);
   try {
@@ -48,7 +39,6 @@ export async function openLockSession(name: string, options?: LockGatewayOptions
   }
 }
 
-/** One prompt streams thinking, text and a tool round trip. Returns once the run settled. */
 export async function promptStreamScenario(session: LockSession): Promise<{ admitted: { ok: boolean; result?: any } }> {
   session.gateway.script([
     async () => {
@@ -67,7 +57,6 @@ export async function promptStreamScenario(session: LockSession): Promise<{ admi
   return { admitted };
 }
 
-/** Two long turns, then a manual compaction: the summary of the cut history and the split turn's prefix. */
 export async function compactionScenario(session: LockSession): Promise<{ compacted: { ok: boolean; result?: any } }> {
   const long = "lock context ".repeat(80);
   session.gateway.script([
@@ -76,8 +65,6 @@ export async function compactionScenario(session: LockSession): Promise<{ compac
       return fauxAssistantMessage(`First answer. ${long}`);
     },
     () => fauxAssistantMessage(`Second answer. ${long}`),
-    // A manual compaction asks for the summary of the cut history, then for the
-    // prefix of the split turn the recent tail keeps.
     () => fauxAssistantMessage("Summary: two answered turns about the lock context."),
     () => fauxAssistantMessage("Turn prefix: the second question."),
   ]);
@@ -90,7 +77,6 @@ export async function compactionScenario(session: LockSession): Promise<{ compac
   return { compacted };
 }
 
-/** A gate a scripted provider step holds until the test opens it. */
 export function gate(): { opened: Promise<void>; open(): void; reached: Promise<void>; reach(): void } {
   let open = (): void => {};
   let reach = (): void => {};
@@ -99,7 +85,6 @@ export function gate(): { opened: Promise<void>; open(): void; reached: Promise<
   return { opened, open: () => open(), reached, reach: () => reach() };
 }
 
-/** A provider step that holds until the request is aborted. */
 export function untilAborted(reached: () => void) {
   return async (_context: unknown, options: { signal?: AbortSignal } | undefined) => {
     reached();
@@ -115,12 +100,6 @@ export function untilAborted(reached: () => void) {
 export interface QueueState { queueRevision: number; queuedItems: Array<{ id: string; behavior: string; text: string }> }
 
 
-/**
- * `run-queue-control`: three follow-ups queue behind a held run and a retried
- * command id replays; queue edits refuse a stale revision and an unknown item, then
- * reorder and drop; an abort naming a queued item is refused; a second held run's
- * follow-ups are cleared; a third run is stopped with a steer queued.
- */
 export async function queueControlScenario(session: LockSession) {
   const { gateway, client: phone, sessionId } = session;
   const slot = await gateway.registry.acquire(sessionId);
@@ -145,7 +124,6 @@ export async function queueControlScenario(session: LockSession) {
     () => fauxAssistantMessage("Stopped steer answered."),
   ]);
 
-  // 1. Three follow-ups queue behind a held run; a retried command id replays.
   const held = await prompt("hold the first run open");
   expect(held.ok, JSON.stringify(held)).toBe(true);
   await awaitsWithin(first.reached, "the first held provider request");
@@ -159,7 +137,6 @@ export async function queueControlScenario(session: LockSession) {
   const retried = prompt("second follow-up", { behavior: "followUp" }, retriedCommand);
   const queuedThree = await queued(3, "three queued follow-ups");
 
-  // 2. Edits: a stale revision and an unknown item are refused; then reorder and drop.
   const [one, two, three] = queuedThree.queuedItems;
   const staleEdit = await phone.request("session.queue.replace", {
     commandId: gateway.commandId(), sessionId, expectedRevision: queuedThree.queueRevision - 1, items: [three, one],
@@ -175,12 +152,10 @@ export async function queueControlScenario(session: LockSession) {
   const afterEdit = queue();
   const wrongAbort = await phone.request("session.abort", { commandId: gateway.commandId(), sessionId, operationId: two!.id });
 
-  // 3. The held run ends; the edited queue reaches the model in order.
   first.open();
   await gateway.settled(sessionId);
   const retriedResponse = await retried;
 
-  // 4. A second held run: its follow-ups are cleared before they are delivered.
   expect((await prompt("hold the second run open")).ok).toBe(true);
   await awaitsWithin(second.reached, "the second held provider request");
   expect((await prompt("cleared follow-up one", { behavior: "followUp" })).ok).toBe(true);
@@ -192,7 +167,6 @@ export async function queueControlScenario(session: LockSession) {
   second.open();
   await gateway.settled(sessionId);
 
-  // 5. A third run is stopped with a steer queued: the steer becomes the next turn.
   const stoppable = await prompt("hold a run to stop");
   expect(stoppable.ok).toBe(true);
   await awaitsWithin(third, "the abortable provider request");
@@ -219,7 +193,6 @@ async function writeProjectFile(path: string, text: string): Promise<void> {
   await writeFile(path, text);
 }
 
-/** A project extension whose tool reports where the SDK says the chat is. */
 export const probeExtension = (tool: string) => `
 export default function (pi) {
   pi.registerTool({
@@ -235,13 +208,7 @@ export default function (pi) {
 export const projectSkill = (name: string, description: string) => `---\nname: ${name}\ndescription: ${description}\n---\n\nFollow ${name}.\n`;
 
 
-/**
- * `project-root-trust`: a chat in the subdirectory of a trusted Git project, each
- * level carrying `.pi/` and `AGENTS.md`; trust is decided for the subdirectory,
- * the chat runs a tool round trip, then trust is revoked and the chat answers again.
- */
 export async function projectRootTrustScenario(gateway: LockGateway) {
-  // Trust and the SDK name canonical paths; the temp root is a symlink on macOS.
   const root = await realpath(gateway.root);
   const project = join(root, "project");
   const nested = join(project, "packages", "app");
@@ -284,7 +251,6 @@ export async function projectRootTrustScenario(gateway: LockGateway) {
   const projectSettings = await phone.request("settings.resolve", { target: { kind: "project", cwd: nested }, keys: ["run.retry.maxRetries", "permissions.projectTrust"] });
   expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId, text: "where does this chat run?" })).ok).toBe(true);
   await gateway.settled(sessionId);
-  // Revoking the root's decision reloads the chat through its projectDir without the Project layer.
   const revoked = await phone.request("settings.change", {
     commandId: gateway.commandId(), target: { kind: "global" }, reason: "Stop trusting the lock project",
     changes: [{ key: "permissions.projectTrust", layer: "global", op: "set", value: false, qualifiers: { project: nested } }],
@@ -299,11 +265,6 @@ export async function projectRootTrustScenario(gateway: LockGateway) {
 interface AutomationRunRecord { runId?: string; state?: string; executionSessionId?: string; assistantCompletionId?: string }
 interface AutomationRecordFile { currentRun?: AutomationRunRecord | null; lastRun?: AutomationRunRecord | null }
 
-/**
- * `automation-owned-run`: one chat turn, then a session-prompt automation into that
- * chat and a workspace-prompt automation, each run now; each run reads a file
- * through a tool, and the phone reads both automations, both runs and the transcript.
- */
 export async function automationOwnedRunScenario(gateway: LockGateway) {
   const phone = await gateway.connect("phone");
   const created = await phone.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
@@ -326,7 +287,6 @@ export async function automationOwnedRunScenario(gateway: LockGateway) {
     });
     expect(run.ok, JSON.stringify(run)).toBe(true);
     const runId = run.result.runId as string;
-    // Settled: the terminal run is the record's last run and no run is current.
     const settled = await waitFor(async () => {
       const record = await raw(automationId);
       return record.lastRun?.runId === runId && !record.currentRun ? record.lastRun : undefined;
@@ -350,7 +310,6 @@ export async function automationOwnedRunScenario(gateway: LockGateway) {
     () => fauxAssistantMessage([fauxToolCall("read", { path: "notes.txt" }, { id: "lock-workspace-read" })], { stopReason: "toolUse" }),
     () => fauxAssistantMessage("The workspace check found: lock notes."),
   ]);
-  // A chat exists for the catalog once its first turn is persisted; only then can it be a target.
   expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId, text: "get ready for scheduled checks" })).ok).toBe(true);
   await gateway.settled(sessionId);
   const existing = await runNow(definition({ kind: "existingSession", sessionId }, "run the scheduled notes check", "Lock session check"), "session prompt");
@@ -388,13 +347,6 @@ const PUSH_SELECT_EXTENSION = `
 export interface PushRelayRequest { method: string; path: string; grantId: string | null; envelope: TraceValue }
 
 
-/**
- * `notifications-push`: a registered phone; one chat runs to a completed, an
- * input-required, a failed and a stopped end while hidden, and to an
- * input-required and a completed end while presented; then a Home task worker,
- * admitted as the dispatcher admits it, runs to its end. `own` receives the
- * Gateway's and the notification owner's disposal.
- */
 export async function notificationsPushScenario(own: (release: () => Promise<void>) => void) {
   const relayRequests: PushRelayRequest[] = [];
   let gateway!: LockGateway;
@@ -402,7 +354,6 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
   gateway = await startLockGateway("notifications-push", {
     extensions: [{ name: "lock-select.ts", source: PUSH_SELECT_EXTENSION }],
     notifications: async (tronHome) => {
-      // The relay boundary: every push the Gateway would send to Tron Push.
       const relay = new PushRelayClient(PUSH_RELAY_ORIGIN, async (url, init) => {
         relayRequests.push({
           method: String(init.method), path: new URL(url).pathname,
@@ -411,7 +362,6 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
         });
         return new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never;
       });
-      // gateway-main's wiring, Home role resolved from the live registry.
       notifications = new NotificationService(new NotificationGrantStore(tronHome), relay, Date.now, () => {}, () => {}, () => {},
         (sessionId) => (gateway ? homeOwnerOf(gateway.registry) : undefined)?.chapterStateFor(sessionId).homeId !== undefined);
       await notifications.initialize();
@@ -443,8 +393,6 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
   expect((await phone.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
   const subscriptionToken = opened.result.subscriptionToken as string;
   const slot = await gateway.registry.acquire(sessionId);
-  // Pin the ordinary idle path before a run can supersede it. Terminal idle
-  // snapshots may all coalesce into rebaselines, even on a loopback socket.
   await waitFor(() => slot.snapshot().configurationBlocker === null, "the initial session ownership to retire");
   const initialEvents = phone.events.length;
   slot.publishSnapshot();
@@ -466,13 +414,11 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
     hostEpoch: pending.hostEpoch, presentationRevision: pending.presentationRevision, value: "Keep",
   });
 
-  // 1. Hidden: a completed run pushes "finished".
   gateway.script([() => fauxAssistantMessage("Finished the quiet run.")]);
   expect((await prompt("finish the quiet run")).ok).toBe(true);
   await gateway.settled(sessionId);
   await sent(1, "the completed-run push");
 
-  // 2. Hidden: input required pushes "Input needed" before the answer; the run's end pushes again.
   gateway.script([
     () => fauxAssistantMessage([fauxToolCall("lock_select", {}, { id: "lock-select-hidden" })], { stopReason: "toolUse" }),
     () => fauxAssistantMessage("Keeping the hidden path."),
@@ -485,7 +431,6 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
   await gateway.settled(sessionId);
   await sent(3, "the push after the answered run");
 
-  // 3. Presented: the same ask and end are suppressed, not pushed.
   responses.presenting = await phone.request("session.presentation.set", { sessionId, subscriptionToken, revision: 1, visible: true });
   gateway.script([
     () => fauxAssistantMessage([fauxToolCall("lock_select", {}, { id: "lock-select-presented" })], { stopReason: "toolUse" }),
@@ -499,7 +444,6 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
     "the presented ask and end to be suppressed");
   responses.hiding = await phone.request("session.presentation.set", { sessionId, subscriptionToken, revision: 2, visible: false });
 
-  // 4. Hidden, renamed: a provider error pushes "stopped because of an error", titled by the name.
   responses.rename = await phone.request("session.rename", { commandId: gateway.commandId(), sessionId, name: "Renamed lock chat" });
   let failedProviderReached!: () => void;
   const failedProvider = new Promise<void>((resolve) => { failedProviderReached = resolve; });
@@ -508,9 +452,6 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
     return fauxAssistantMessage("partial", { stopReason: "error", errorMessage: "lock provider failure" });
   }]);
   const failureEvents = phone.events.length;
-  // A slow writer must receive the idle snapshot as a rebaseline covering
-  // unsent busy state. Otherwise compression versus receipt I/O decides which
-  // topic carries the null configuration blocker, making the schema lock race.
   const releaseWrites = phone.holdWrites();
   try {
     const failedRun = prompt("fail this run");
@@ -527,7 +468,6 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
   }
   await sent(4, "the failed-run push");
 
-  // 5. Hidden: a client abort pushes "was stopped".
   let reached!: () => void;
   const held = new Promise<void>((resolve) => { reached = resolve; });
   gateway.script([async (_context, options) => {
@@ -546,7 +486,6 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
   await gateway.settled(sessionId);
   await sent(5, "the stopped-run push");
 
-  // 6. A Home task worker's end is never a generic chat push (its report owner decides).
   gateway.script([() => fauxAssistantMessage("Worker reply without a report."), () => fauxAssistantMessage("Worker still has no report.")]);
   const operationId = "task-lock-operation";
   const report = new HomeTaskReportOwner({ taskId: "lock-task", homeId: "lock-home", generation: 1, operationId }, async () => {});
@@ -559,7 +498,6 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
     });
   });
   await awaitsWithin(workerTerminal, "the task worker's terminal");
-  // The owner acknowledges settlement, as the dispatcher does; only then is the operation released.
   await dispatch.acknowledge(lease.slot.id, operationId, lease);
   report.retire();
   await gateway.settled(lease.slot.id);
@@ -568,7 +506,6 @@ export async function notificationsPushScenario(own: (release: () => Promise<voi
     return role ? [role] : [];
   });
 
-  // Every queued push has reached a final relay outcome before the inbox is read.
   await waitFor(async () => (await document()).pending.length === 0, "every queued push to settle at the relay");
   const inbox = await phone.request("notification.inbox.list", {});
   const stored = await document();
@@ -600,8 +537,6 @@ export const WAITING_COMMAND = `
   }
 `;
 
-/** An extension tool that starts a declared asynchronous run: its status artifact
- * lives under the project's async run root, and the tool returns at once. */
 export const DETACHED_RUN = `
   import { mkdirSync, writeFileSync } from "node:fs";
   import { join } from "node:path";
@@ -621,12 +556,6 @@ export const DETACHED_RUN = `
 `;
 
 
-/**
- * `run-drain-blockers`: a detached extension run and an extension command awaiting
- * its select hold the administrative drain until the answer and the run's terminal
- * artifact; the drain status is read before, while waiting, after the answer and
- * at completion.
- */
 export async function drainBlockersScenario(gateway: LockGateway) {
   const phone = await gateway.connect("phone");
   gateway.script([
@@ -636,24 +565,18 @@ export async function drainBlockersScenario(gateway: LockGateway) {
   const asking = await createAndOpen(gateway, phone);
   const detached = await createAndOpen(gateway, phone);
   const roles = new Map([[asking.sessionId, "command"], [detached.sessionId, "detached"]]);
-  // Each RPC's own work settles just after its response frame; wait for it, so
-  // each status names only the blockers under test.
   const rpcSettled = () => waitFor(() => !gateway.registry.administrativeDrainSnapshot().blockers
     .some((blocker) => blocker.category === "rpc-mutation"), "the RPCs' own work to settle");
 
-  // The detached session's turn starts the background run and ends; the run stays live.
   expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId: detached.sessionId, text: "start the background run" })).ok).toBe(true);
-  // The slot stays busy while it owns the run, so the turn's end is its settled operation.
   const detachedSlot = await gateway.registry.acquire(detached.sessionId);
   await waitFor(() => !detachedSlot.snapshot().operation && gateway.record().providerRequests.length === 2
     && detachedSlot.snapshot().extensionActivities?.some((activity) => activity.status === "running")
     && gateway.registry.administrativeDrainSnapshot().blockers.every((blocker) => blocker.category === "detached-extension-run"),
   "the detached turn and its receipts to settle with its run live");
-  // The command session waits on the user's answer, with no agent run.
   const command = phone.send("session.prompt", { commandId: gateway.commandId(), sessionId: asking.sessionId, text: "/lockask" });
   const pending = await waitFor(() => {
     for (const event of phone.events) {
-      // A command runs no agent turn, so its select arrives on the presentation topic alone.
       if (event.topic !== "session.extensionPresentation" || event.sessionId !== asking.sessionId) continue;
       const shown = (event.payload as { data?: { interactionList?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> } })
         ?.data?.interactionList?.[0];
@@ -670,7 +593,6 @@ export async function drainBlockersScenario(gateway: LockGateway) {
   await rpcSettled();
   const statusWaiting = await phone.request("gateway.drain.status", {});
 
-  // The answer settles the command; the detached run still holds the drain.
   expect((await phone.request("extension.respond", {
     commandId: gateway.commandId(), sessionId: asking.sessionId, interactionId: pending.id,
     hostEpoch: pending.hostEpoch, presentationRevision: pending.presentationRevision, value: "Keep",
@@ -681,7 +603,6 @@ export async function drainBlockersScenario(gateway: LockGateway) {
   await rpcSettled();
   const statusAfterAnswer = await phone.request("gateway.drain.status", {});
 
-  // The run's terminal artifact ends it, and the drain completes.
   const endedAt = Date.now();
   await writeFile(join(gateway.cwd, ".pi", "subagents", "async-subagent-runs", "lock-background-run", "status.json"), JSON.stringify({
     runId: "lock-background-run", state: "complete", startedAt: endedAt - 1_000, endedAt, lastUpdate: endedAt + 1,
@@ -692,7 +613,6 @@ export async function drainBlockersScenario(gateway: LockGateway) {
   return { phone, asking, detached, roles, commandResponse, statusBefore, statusWaiting, statusAfterAnswer, completed, statusComplete, activities };
 }
 
-/** The extension the extension-UI scenario's chat loads: a tool whose `select` waits for the client. */
 export const EXTENSION_UI_OPTIONS: LockGatewayOptions = { extensions: [{ name: "lock-select.ts", source: `
   export default function (pi) {
     pi.registerTool({
@@ -706,7 +626,6 @@ export const EXTENSION_UI_OPTIONS: LockGatewayOptions = { extensions: [{ name: "
   }
 ` }] };
 
-/** `run-extension-ui`: an extension tool's select waits for the client's answer and resumes the turn with it. */
 export async function extensionUiScenario(session: LockSession) {
   session.gateway.script([
     async () => {
@@ -716,7 +635,6 @@ export async function extensionUiScenario(session: LockSession) {
     () => fauxAssistantMessage("Keeping the lock path."),
   ]);
   const running = session.prompt("ask me which path");
-  // The client answers what it was shown: the interaction arrives on an event.
   const pending = await waitFor(() => {
     for (const event of session.client.events) {
       const shown = (event.payload as { extensionPresentation?: { pendingInteractions?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> } })

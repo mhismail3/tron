@@ -17,11 +17,6 @@ import { catalogOwner, createColdRegistryFixture, settleCatalog, temporaryRoot }
 import { waitFor } from "../../../test-support/wait-for.js";
 import type { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 
-/**
- * `gateway/session-catalog` sharded catalog metadata store (#2164) over real
- * files: the store that replaced the single 8 MiB document, its bounds and
- * signals, pruning, and crash and corruption isolation.
- */
 const MIB = 1_024 * 1_024;
 const LEGACY_BOUND = 8 * MIB;
 const SHARD_WARN_BYTES = 2 * MIB;
@@ -52,8 +47,6 @@ async function shardFiles(directory: string): Promise<Map<string, { bytes: numbe
   return files;
 }
 
-/** Real canonical session files with rows stamped by the index itself, so a
- * reconcile can verify them. */
 async function canonicalSessions(root: string, index: CatalogMetadataIndex, count: number) {
   const workspace = join(root, "workspace");
   await mkdir(workspace, { recursive: true });
@@ -85,8 +78,6 @@ describe("catalog metadata store (#2164)", () => {
 
   it("saves and reloads a realistic 6,510-session catalog that the single 8 MiB document refused", async () => {
     const { root, gateway, index, failures, pressure } = await storeFixture("realistic");
-    // The live catalog had 6,510 canonical files when the 8,387,899-byte
-    // document stopped saving; this fixture has the measured row shape.
     const rows = realisticCatalogRows(root, 6_510);
     const singleDocument = Buffer.byteLength(JSON.stringify({ version: 3, root, rows }));
     expect(singleDocument).toBeGreaterThan(LEGACY_BOUND);
@@ -98,7 +89,6 @@ describe("catalog metadata store (#2164)", () => {
     const shards = await shardFiles(join(gateway, "catalog-metadata-v3"));
     const sizes = [...shards.values()].map((file) => file.bytes);
     expect(shards.size).toBe(64);
-    // Every shard sits far below the warning, which sits far below refusal.
     expect(Math.max(...sizes)).toBeLessThan(SHARD_WARN_BYTES / 4);
     expect(pressure).toEqual([]);
   });
@@ -106,8 +96,6 @@ describe("catalog metadata store (#2164)", () => {
   it("publishes a catalog over the old document bound from the catalog owner without a save failure", async () => {
     const failures: string[] = [];
     let workspace = "";
-    // Names and previews at their 1,024-byte bound, so fewer files than the
-    // live catalog already exceed the old single-document bound.
     const count = 3_600;
     const fixture = await createColdRegistryFixture(registries, "catalog-over-document-bound", {
       catalogIndexFailure: (stage) => { failures.push(stage); },
@@ -164,8 +152,6 @@ describe("catalog metadata store (#2164)", () => {
 
     await fixture.registry.setArchived(parentId, true);
     await rm(removed);
-    // A partial final line makes the file unprovable: it proves neither
-    // presence nor absence, so its last proven row stays.
     await appendFile(unprovable, "{\"type\":\"message\"");
     await settleCatalog(fixture.registry);
 
@@ -180,7 +166,6 @@ describe("catalog metadata store (#2164)", () => {
     const directory = join(gateway, "catalog-metadata-v3");
     const before = await shardFiles(directory);
     const target = catalogMetadataShard(root, rows[0]!.path);
-    // Rows that all land in the target shard, each at the working-directory bound.
     const heavy: CatalogMetadataIndexRow[] = [];
     for (let number = 10_000; heavy.length < 2_100; number += 1) {
       const row = realisticCatalogRow(root, number);
@@ -197,8 +182,6 @@ describe("catalog metadata store (#2164)", () => {
     const otherShard = catalogMetadataShard(root, other.path);
     expect(after.get(otherShard)!.content.equals(before.get(otherShard)!.content)).toBe(false);
     expect(JSON.parse(await readFile(join(directory, "manifest.json"), "utf8")).refused).toEqual([target]);
-    // A refused cut is never loaded as complete, but every kept row still
-    // accelerates the rebuild.
     expect(await new CatalogMetadataIndex(gateway).load(root)).toBeUndefined();
 
     failures.length = 0;
@@ -230,7 +213,6 @@ describe("catalog metadata store (#2164)", () => {
     const before = await shardFiles(directory);
     const changed = catalogMetadataShard(root, rows[3]!.path);
     const next = rows.map((row, number) => number === 3 ? { ...row, messageCount: row.messageCount + 1 } : row);
-    // Debris of an interrupted write: a temporary file the rename never reached.
     const debris = join(directory, `shard-${changed}.json.999.deadbeef0000.tmp`);
     await writeFile(debris, "{\"version\":3,\"rows\":[");
     expect(sortedCatalogRows(await new CatalogMetadataIndex(gateway).load(root))).toEqual(sortedCatalogRows(rows));
@@ -254,7 +236,6 @@ describe("catalog metadata store (#2164)", () => {
     const first = realisticCatalogRows(root, 640, 1);
     const second = realisticCatalogRows(root, 640, 2);
     expect(await index.save(root, first)).toBe(true);
-    // The same cut saved elsewhere gives the exact bytes a later save would rename into place.
     const elsewhere = join(base, "elsewhere");
     expect(await new CatalogMetadataIndex(elsewhere).save(root, second)).toBe(true);
     const directory = join(gateway, "catalog-metadata-v3");
@@ -263,7 +244,6 @@ describe("catalog metadata store (#2164)", () => {
 
     const reader = new CatalogMetadataIndex(gateway);
     expect(await reader.load(root)).toBeUndefined();
-    // A shard a newer manifest no longer lists (a crash before its removal) is not part of that cut.
     expect(await index.save(root, first.filter((row) => catalogMetadataShard(root, row.path) !== shard))).toBe(true);
     await copyFile(join(elsewhere, "catalog-metadata-v3", `shard-${shard}.json`), join(directory, `shard-${shard}.json`));
     expect(sortedCatalogRows(await reader.load(root)))
@@ -292,7 +272,6 @@ describe("catalog metadata store (#2164)", () => {
           if (child.exitCode !== null) throw new Error(`crash child exited (${child.exitCode}): ${output}`);
           return lstat(marker).then(() => true, () => undefined);
         }, "crash child completed its first save");
-        // Each kill lands at a different point of the alternating saves.
         await new Promise((resolve) => setTimeout(resolve, 7 * kill));
       } finally {
         child.kill("SIGKILL");

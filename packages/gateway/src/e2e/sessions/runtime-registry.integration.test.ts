@@ -51,33 +51,16 @@ import { syntheticOversizedJpeg, syntheticPng } from "../../../test-fixtures/syn
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 import { catalogOwner, createColdRegistryFixture, initializeRegistry, settleCatalog, temporaryRoot } from "../../../test-support/runtime-registry-fixture.js";
 
-/** Test-owned producer for one deterministic status.json replacement.
- *
- * `openOwnedExtensionArtifact` (runtime-slot) opens the artifact and then
- * verifies that the inode it opened is the one it stats; a producer that
- * atomically renames a new file over `status.json` in that window makes the
- * read lose, which is the race "retries a status.json read that raced an atomic
- * replacement" is about. Racing a real producer loop for that window made the
- * case load-dependent (#430: its sample-size guard was a speed budget), so the
- * `open` wrapper below performs exactly one real write+rename inside that
- * window instead. `vi.mock` factories are hoisted, so their state lives here. */
 const statusJsonReplace = vi.hoisted(() => ({
-  /** Armed only by the case that injects the replacement. */
   armed: false,
-  /** Real replacements performed, and the reads they made lose. */
   replacements: 0,
   losses: 0,
   payload: "",
   statusPath: "",
   tempPath: "",
-  /** True only inside the read-with-retry invocation under observation. */
   insideRetryInvocation: (): boolean => false,
 }));
 
-/** Test-owned window for one deletion whose quarantine can neither be removed
- * nor restored: when armed, the quarantined file's folder is made read-only
- * just before its removal, so the real `rm` and the restoring `rename` both
- * fail with the operating system's own EACCES. */
 const quarantineLock = vi.hoisted(() => ({ armed: false, directory: "" }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -112,53 +95,28 @@ async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-/** A snapshot is built and broadcast only for a subscriber, so a test that reads
- * published snapshots has to be one. */
 function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
   registry.subscribe("test-audience", sessionId);
 }
 
-/** The activity artifact discovery projected for one tool call. A missing one fails
- * here, at the lookup, rather than as a later read of an undefined property. */
 function projectedExtensionActivity(activities: ExtensionRunActivity[] | undefined, toolCallId: string): ExtensionRunActivity {
   const activity = activities?.find((candidate) => candidate.toolCallId === toolCallId);
   if (!activity) throw new Error(`no extension activity projected for ${toolCallId}`);
   return activity;
 }
 
-/** The catalog owner's whole-folder walk: the one seam that re-derives
- * membership from the folder. A read must add none — G-1c moved every reader
- * onto the owner's rows, and the O-5 counter counts walks here. */
 function catalogWalks(): { count: () => number; restore: () => void } {
   const walk = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence");
   return { count: () => walk.mock.calls.length, restore: () => walk.mockRestore() };
 }
 
-/** Every canonical file whose header the registry read while installed. The
- * commit fence may read the file it admits, and nothing else. */
 function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
   const reads = vi.spyOn(CatalogDiscovery.prototype, "readCatalogHeader");
   return { paths: () => reads.mock.calls.map(([path]) => String(path)), restore: () => reads.mockRestore() };
 }
 
-/** Passes `discoverExtensionArtifactsUntil` may run before it stops on its own.
- * It only stops the loop: the caller's pass assertion is the bound, so a lagging
- * routing is reported as a pass count instead of a hang. It sits well above the
- * one pass the production code implies for the cases that assert a count. */
 const DISCOVERY_PASS_LIMIT = 8;
 
-/** Registry discovery is a bounded single owner: a call that arrives while a
- * pass is in flight returns without discovering anything, and the next scheduled
- * pass is up to 750 ms away. A test that asserts on an artifact must run a pass
- * of its own instead of treating the awaited call as a barrier; `settled` names
- * the state that pass must publish (T-1). This helper runs only its own passes
- * and reports how many, so a caller can assert the pass count the production code
- * implies instead of a wall-clock budget (epic #400): a loaded host stretches a
- * pass, which used to report a pass that was merely slow as one that would never
- * settle (T-6).
- *
- * `passLimit` only stops the loop; the caller's assertion is the bound. A pass
- * that never settles reports its own label at the shared hang bound. */
 async function discoverExtensionArtifactsUntil(
   registry: RuntimeRegistry,
   settled: () => boolean = () => true,
@@ -167,9 +125,6 @@ async function discoverExtensionArtifactsUntil(
   const state = registry as unknown as { artifactDiscoveryInFlight: Promise<void> | undefined };
   let passes = 0;
   await waitFor(async () => {
-    // A pass that is already in flight returns without discovering anything; let
-    // it finish first (on the shared poll), so every pass counted here is one
-    // this call ran, and a caller's pass assertion is about its own passes.
     if (state.artifactDiscoveryInFlight) return false;
     await (registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
     passes += 1;
@@ -178,13 +133,9 @@ async function discoverExtensionArtifactsUntil(
   return passes;
 }
 
-/** Anthropic's inline image limit, measured on the base64 payload a request carries. */
 const PROVIDER_INLINE_IMAGE_BASE64_LIMIT = 5 * 1_048_576;
-/** Raw JPEG bytes whose base64 form exceeds the provider limit. */
 const OVERSIZED_PHOTO_BYTES = 6 * 1_048_576;
 
-/** Replies as a provider that rejects any inline image above its limit: the rejection
- * stays in the request's history, so every later request would fail the same way. */
 function providerReply(context: TranscriptContext, text: string): AssistantMessage {
   const oversized = context.messages.some(message => Array.isArray(message.content)
     && message.content.some(part => part.type === "image" && part.data.length > PROVIDER_INLINE_IMAGE_BASE64_LIMIT));
@@ -193,17 +144,14 @@ function providerReply(context: TranscriptContext, text: string): AssistantMessa
     : fauxAssistantMessage(text);
 }
 
-/** A photo above the provider's inline limit; Pi must bound it before history. */
 function oversizedPhoto(): ImageContent {
   return { type: "image", mimeType: "image/jpeg", data: syntheticOversizedJpeg(OVERSIZED_PHOTO_BYTES).toString("base64") };
 }
 
-/** A small valid PNG, which Pi must pass through with its bytes unchanged. */
 function smallPhoto(): ImageContent {
   return { type: "image", mimeType: "image/png", data: syntheticPng(64, 48).toString("base64") };
 }
 
-/** Holds the first model call open until the test releases it, so input can queue behind a live run. */
 function holdFirstReply(text: string): { response: FauxResponseFactory; started: Promise<void>; release: () => void } {
   let release!: () => void;
   let started!: () => void;
@@ -220,7 +168,6 @@ function holdFirstReply(text: string): { response: FauxResponseFactory; started:
   };
 }
 
-/** A registry session on a scripted faux provider, with the model selected. */
 async function queuedImageSession(registries: RuntimeRegistry[], root: string, provider: string, responses: FauxResponseStep[]): Promise<RuntimeSlot> {
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
@@ -248,7 +195,6 @@ async function queuedImageSession(registries: RuntimeRegistry[], root: string, p
   return slot;
 }
 
-/** Content of each canonical user message, in history order. */
 function canonicalUserContents(slot: RuntimeSlot): Array<Array<TextContent | ImageContent>> {
   return slot.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "user"
     && Array.isArray(entry.message.content) ? [entry.message.content as Array<TextContent | ImageContent>] : []);
@@ -261,8 +207,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
   const coldFixture = createColdRegistryFixture.bind(undefined, registries);
 
-  /** An admitted provider root with the private mode and canonical path the
-   * slot's artifact policy requires; the caller removes `delegated.root`. */
   async function delegatedFixtureRoot(label: string): Promise<{ root: string; delegatedRoot: string }> {
     const root = await realpath(await temporaryRoot(`tron-delegated-${label}-`));
     const delegatedRoot = join(root, "delegated");
@@ -301,7 +245,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       const entry = fixture.manager.appendMessage({ role: "user", content: "Full selected message", timestamp: 1 });
       const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
       const runtime = slot.snapshot().runtimeGeneration;
-      // Acquiring the SDK runtime can append model/thinking metadata after the prompt.
       expect(slot.history(runtime).nodes.find(node => node.id === entry)).toMatchObject({ role: "user", preview: "Full selected message" });
       expect(slot.historyDetail(runtime, entry, 0).text).toBe("Full selected message");
       expect(() => slot.history("retired-runtime")).toThrow(/runtime changed/);
@@ -325,7 +268,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         const terminalAt = `2026-01-01T00:00:0${index + 1}.000Z`;
         fixture.manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, { ...receipt, activityId: `activity-${index}`, toolCallId: `tool-${index}`, runId: `run-${index}`, terminalAt });
       }
-      // All fixture writes precede acquisition by the sole live runtime.
       const slot = await fixture.registry.acquire(sessionId);
       const terminals: string[] = [];
       const pages: number[] = [];
@@ -348,7 +290,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       expect(cursor).toBeUndefined();
       expect(pages).toEqual([2, 2, 1]);
       expect(terminals).toEqual([5, 4, 3, 2, 1].map((second) => `2026-01-01T00:00:0${second}.000Z`));
-      // A cursor is bound to its filter scope and to the canonical revision.
       const first = slot.processHistory(undefined, 2, { kind: "subagent" });
       expect(() => slot.processHistory(first.nextCursor, 2, { kind: "command" })).toThrow(/cursor conflict/u);
       expect(() => slot.processDetail(first.activities[0]!.processId, "stale-revision")).toThrow(/generation changed/u);
@@ -387,8 +328,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         await stage("holder.work", () => { now += 10; return Promise.resolve(); });
       }));
       await admitted;
-      // Queued behind the holder: its own span has to carry both the wait for
-      // the lane and the work the lane then admits within its async context.
       const waiting = runInRequestSpan(waiter, () => lane.run(async () => {
         await stage("waiter.work", () => { now += 5; return Promise.resolve(); });
       }));
@@ -396,9 +335,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       release();
       await Promise.all([holding, waiting]);
 
-      // The wait covers the holder's 40 ms hold plus the 10 ms of work it did
-      // before releasing; the holder was admitted immediately, so 0 ms is
-      // dropped rather than named.
       expect(holder.breakdown(50)!.stages).toBe("holder.work=10ms");
       const queued = waiter.breakdown(55)!;
       expect(queued.stages).toBe("registry.mutex=50ms;waiter.work=5ms");
@@ -427,7 +363,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(first.slot.id).toBe(sessionId);
     expect((await fixture.registry.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
-    // Replaying the exact owner at capacity must not evict that owner first.
     (first.slot as unknown as { sessionManager: SessionManager }).sessionManager
       .appendMessage(fauxAssistantMessage("persisted automation"));
     first.release();
@@ -498,9 +433,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     expect((await cold.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
-    // A user-scoped cut intentionally omits delegated metadata and is not an
-    // all-scope durable-index candidate. An administrative read establishes the
-    // complete sidecar used by the restart half of this regression.
     await cold.list("all");
     const indexPath = join(fixture.root, "tron-cold", "gateway", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(cold);
@@ -521,13 +453,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     });
     registries.push(indexed);
     await initializeRegistry(indexed);
-    // Settle the owner's own startup pass, so what the spy sees belongs to the
-    // read under test.
     await settleCatalog(indexed);
     const walks = catalogWalks();
     expect((await indexed.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
-    // The origin comes from the owner's row; the read adds no walk.
     expect(walks.count()).toBe(0);
     walks.restore();
   });
@@ -673,9 +602,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   it("recovers a canonical successful completion missed before restart", async () => {
     const fixture = await coldFixture("attention-restart");
     expect(fixture.registry.attentionProjection(fixture.manager.getSessionId()).isUnread).toBe(false);
-    // Simulate the crash window: accepted work retained its marker and Pi's
-    // successful terminal leaf committed after the persisted reconciliation
-    // cursor, but attention admission/marker cleanup did not.
     const markerStore = (fixture.registry as unknown as {
       markers: {
         mark: (sessionId: string, operationId: string) => Promise<void>;
@@ -802,9 +728,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
   it("resolves attention membership without materializing the full catalog", async () => {
     const fixture = await coldFixture("attention-scoped-resolution");
-    // Requirement: acknowledging attention resolves membership through the
-    // bounded acquisition, never the full row projection. That no heavy read
-    // happened is only observable by spying on the projection entry point.
     const catalog = vi.spyOn(fixture.registry, "catalog");
     const projection = await fixture.registry.setAttention(fixture.manager.getSessionId(), true);
     expect(projection.isUnread).toBe(true);
@@ -832,15 +755,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const sessionId = fixture.manager.getSessionId();
     const slot = await fixture.registry.acquire(sessionId);
     expect(slot.persistedSessionFile).toBeDefined();
-    // Requirement: an exact live runtime owner is itself the membership proof,
-    // so acknowledging attention must not walk catalog headers. The absent walk
-    // is visible only at the structure-evidence seam.
     const evidence = vi.spyOn(fixture.registry as any, "catalogStructureEvidence");
     await expect(fixture.registry.setAttention(sessionId, true)).resolves.toMatchObject({ isUnread: true });
     await expect(fixture.registry.setAttention(sessionId, false, 0)).resolves.toMatchObject({ isUnread: false });
     expect(evidence).not.toHaveBeenCalled();
 
-    // Once the runtime owner is gone, membership again requires catalog proof.
     await fixture.registry.delete(sessionId);
     await expect(fixture.registry.setAttention(sessionId, true)).rejects.toMatchObject({ code: "not_found" });
   });
@@ -905,10 +824,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     const deleting = fixture.registry.delete(sessionId);
     await disposeEntered;
-    // Requirement (lock order): a rekey racing a deletion must fail closed with
-    // busy instead of holding the attention lane while the deletion waits on
-    // the slot lane. The private hook is the only rekey driver that does not
-    // itself queue behind that slot lane.
     const hooks = (fixture.registry as unknown as { hooks: () => {
       rekey: (
         previousId: string,
@@ -925,11 +840,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   });
 
   it("projects empty live sessions until deletion, persistence, eviction, or restart", async () => {
-    // Requirement: an empty live session is a catalog row only while its exact
-    // slot exists, and retirement drops the row and both halves of its
-    // revisioned summary together. Idle eviction runs on a 60s interval, so the
-    // private trigger and the retained summary maps are the only way to reach
-    // that transition without a real-time sleep.
     const root = await temporaryRoot("tron-live-empty-catalog-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -974,11 +884,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const persistedManager = (persistedSlot as unknown as { sessionManager: SessionManager }).sessionManager;
     persistedManager.appendMessage(fauxAssistantMessage("persisted catalog row"));
     expect(persistedSlot.persistedSessionFile).toBeDefined();
-    // The slot's own persist reaches the row through the owner's commit point.
-    // Applying it here is deterministic where polling the row is not: the hook
-    // that fires it is covered by "resolves a list, a cold open and a hot
-    // re-acquire from the owner's rows without a walk", and a loaded host can
-    // starve a 5 s poll.
     await catalogOwner(registry).refresh(persistedSlot.persistedSessionFile!);
     const afterPersistence = await registry.catalog("user");
     expect(afterPersistence.sessions.filter((session) => session.id === persistedSlot.id)).toHaveLength(1);
@@ -1130,9 +1035,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   });
 
   it("folds summary facts from appended entries and rebuilds when the entry set is replaced", async () => {
-    // Failure modes (G-11): a fold that stops at its first boundary misses
-    // later appends, and a replaced session file (branch switch, re-open)
-    // keeps the previous file's messageCount/firstMessage.
     const fixture = await coldFixture("summary-fold");
     try {
       const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
@@ -1161,7 +1063,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       await mkdir(replacementDirectory, { recursive: true });
       const replacement = SessionManager.create(fixture.cwd, replacementDirectory);
       replacement.appendMessage({ role: "user", content: "replacement prompt", timestamp: beforeAt + 5_000 });
-      // Pi persists a session file only once it holds an assistant message.
       replacement.appendMessage(fauxAssistantMessage("replacement answer"));
       manager.setSessionFile(replacement.getSessionFile()!);
       await slot.rename("fold three");
@@ -1178,9 +1079,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   });
 
   it("never rebroadcasts a snapshot already covered by an immediate publication", async () => {
-    // Failure mode: an event schedules the 20 ms coalesced snapshot, then an
-    // immediate publication (run settlement, prompt admission) broadcasts that
-    // state and the stale timer later broadcasts the identical state again.
     const root = await temporaryRoot("tron-duplicate-snapshot-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -1214,11 +1112,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     const before = snapshots.length;
     const receipt = await slot.prompt("duplicate snapshot owner");
-    // A client that opens mid-admission installs the current snapshot, then
-    // applies only later sequences, exactly like the phone reducer.
     const midAdmission = slot.snapshot();
     await waitFor(() => !slot.isBusy, "the slot to go idle");
-    // Outlive any coalescing window still pending after settlement.
     await new Promise((resolve) => setTimeout(resolve, 60));
 
     const published = snapshots.slice(before);
@@ -1230,8 +1125,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(final.phase).toBe("idle");
     expect(final.pendingPrompt).toBeUndefined();
     expect(final.transcript.find((item: any) => item.role === "user")?.presentationId).toBe(receipt.operationId);
-    // Both an early subscriber and the mid-admission subscriber converge on
-    // the owner's settled state.
     const projected = (snapshot: any) => configurationEvents
       .filter(event => event.runtimeGeneration === snapshot.runtimeGeneration && event.eventSequence > snapshot.eventSequence)
       .reduce((current, event) => ({ ...current, configurationBlocker: event.data.configurationBlocker }), snapshot);
@@ -1284,8 +1177,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(after.listRevision).toBe(before.listRevision);
     expect(listChanges).toBe(structuralChangesBeforeSummary);
     expect(after.sessions[0]?.phase).toBe(slot.catalogPhase);
-    // Runtime-owned deferred publication may legitimately call snapshot(sequence)
-    // here; catalog listing must never call the former zero-argument full snapshot.
     expect(snapshot.mock.calls.filter((arguments_) => arguments_.length === 0)).toHaveLength(0);
   });
 
@@ -1297,9 +1188,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       mkdir(join(catalog, "first"), { recursive: true }),
       mkdir(join(catalog, "second"), { recursive: true }),
     ]);
-    // The discovery budgets bound the owner's whole-folder pass. A catalog over
-    // one of them reports a failed pass and publishes nothing, so a read refuses
-    // retryably instead of serving a cut that saw only part of the folder.
     const bounded = async (
       label: string,
       maximumDirectories: number,
@@ -1387,9 +1275,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     directSession.appendMessage(fauxAssistantMessage("direct catalog fixture"));
     childSession.appendMessage(fauxAssistantMessage("child catalog fixture"));
 
-    // Requirement: the pinned SDK lists one directory at a time, so recursion belongs
-    // to the registry; the catalog must still yield both nested sessions inside its
-    // bounded directory budget.
     expect((await SessionManager.listAll(catalog)).map((session) => session.id)).toEqual([
       directSession.getSessionId(),
     ]);
@@ -1420,7 +1305,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const name = "Long session 😀 ".repeat(1_000);
     fixture.manager.appendMessage({ role: "user", content: prompt, timestamp: Date.now() });
     fixture.manager.appendSessionInfo(name);
-    // This test writes the canonical file itself: index it before reading.
     await settleCatalog(fixture.registry);
     const before = await readFile(fixture.sessionFile, "utf8");
     const row = (await fixture.registry.catalog("all")).sessions[0]!;
@@ -1440,8 +1324,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await store.initialize();
     await writeFile(join(fixture.cwd, "retained.txt"), "retained display artifact");
     const display = await store.ingest(fixture.cwd, "retained.txt", fixture.manager.getSessionId());
-    // A membership cut no in-process reconcile completed cannot authorize orphan
-    // removal: the maintenance read refuses retryably and the artifact stays.
     const evidence = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence")
       .mockImplementation(async () => ({
         catalogRoot: await realpath(dirname(dirname(fixture.sessionFile))),
@@ -1461,13 +1343,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       expect((await collectStream(displayLease.stream)).toString()).toBe("retained display artifact");
     } finally { await displayLease.release(); }
-    // Only a subsequent successful membership cut can authorize orphan removal.
     const membership = vi.spyOn(fixture.registry, "sessionIDsForStorageMaintenance").mockResolvedValueOnce(new Set());
     await displayOwnerOf(fixture.registry).maintainArtifacts();
     membership.mockRestore();
     await expect(store.acquire(display.id, fixture.manager.getSessionId())).rejects.toMatchObject({ code: "not_found" });
-    // Storage and an exact canonical session remain usable even when the
-    // aggregate presentation catalog cannot be materialized.
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const artifact = await slot.export("jsonl");
     const lease = await fixture.registry.acquireBlob(artifact.blobId);
@@ -1493,8 +1372,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await Promise.all(infos.map((info) => writeFile(info.path, `${JSON.stringify({
       type: "session", version: 3, id: info.id, timestamp: now.toISOString(), cwd: root,
     })}\n`)));
-    // A session-count budget the folder exceeds fails the owner's pass, so no cut
-    // is published and a read refuses retryably instead of serving a partial one.
     const bounded = async (label: string, maximumSessions: number) => {
       const reconciled: SessionCatalogReconcileOutcome[] = [];
       const registry = await createTestRegistry({
@@ -1532,14 +1409,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const agentDir = join(root, "agent");
     await mkdir(join(agentDir, "sessions"), { recursive: true });
     const now = new Date("2026-01-01T00:00:00Z");
-    // The parent sorts last, so the pass's first header batch is two children
-    // and both normalize at once.
     const parentPath = join(agentDir, "sessions", "z-parent.jsonl");
     await writeFile(parentPath, `${JSON.stringify({
       type: "session", version: 3, id: "parent", timestamp: now.toISOString(), cwd: root,
     })}\n`);
-    // Each child names its parent, so the header phase resolves six parent paths
-    // through `canonicalSessionPath` while the pass is bounded at 2.
     const infos = Array.from({ length: 6 }, (_, index) => ({
       id: `session-${index}`,
       path: join(agentDir, "sessions", `session-${index}.jsonl`),
@@ -1568,8 +1441,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const canonicalize = vi.spyOn(internals, "canonicalSessionPath").mockImplementation(async (path) => {
       active += 1;
       maximumActive = Math.max(maximumActive, active);
-      // Hold each call briefly so overlapping work is observable without ever
-      // blocking the owner's lane.
       await new Promise((resolve) => setTimeout(resolve, 5));
       active -= 1;
       return resolve(path);
@@ -1578,15 +1449,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       const owner = catalogOwner(registry);
       await registry.initialize();
-      // The first pass populates the durable rows, so the pass under measurement
-      // reuses them and its only normalizations are the header phase's own.
       await owner.whenReconciled();
       await owner.settled();
       maximumActive = 0;
 
       await owner.reconcile();
-      // The header phase resolves parent paths in batches of the configured
-      // width: two are in flight, never more.
       expect(maximumActive).toBe(2);
       expect(reconciled.at(-1)?.outcome).toBe("reconciled");
       expect(reconciled.at(-1)?.files).toBe(infos.length + 1);
@@ -1606,12 +1473,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const catalog = await fixture.registry.catalog("user");
     expect(catalog.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
     fixture.manager.appendMessage(fauxAssistantMessage("ordinary append after catalog"));
-    // The Gateway-owned append reaches its row at the owner's commit point.
     await settleCatalog(fixture.registry);
     const readsFrom = walks.count();
     expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
     expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
-    // A hot slot resolves against the same rows.
     expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
     expect(walks.count()).toBe(readsFrom);
     walks.restore();
@@ -1649,8 +1514,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       const unchanged = await restarted.catalog("all");
       expect(unchanged.sessions.find((session) => session.id === fixture.manager.getSessionId())?.messageCount).toBe(2);
       expect(unchanged.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
-      // An external append advances one row from its own tail; the reader cut
-      // neither walks the folder nor re-parses a transcript.
       fixture.manager.appendMessage(fauxAssistantMessage("external append after restart"));
       await settleCatalog(restarted);
       const readsFrom = walks.count();
@@ -1667,28 +1530,16 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
   it("writes the durable catalog document from its owner, not from a reader cut", async () => {
     const fixture = await coldFixture("owner-only-index-writer");
-    // The owner's own cut is what reaches the document; nothing else may write
-    // it, because a reader materialization parses its own summaries for the
-    // in-memory cut and their counts and sizes are not the ones the owner
-    // stamped. Those rows would hand the next startup content it must distrust.
     await settleCatalog(fixture.registry);
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
     expect(existsSync(indexPath)).toBe(true);
-    // With no document to load, the next read takes the full canonical
-    // materialization path — the one that used to persist a second copy.
     await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v3"), { recursive: true, force: true });
     (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
     const save = vi.spyOn(CatalogMetadataIndex.prototype, "save");
     try {
       await fixture.registry.catalog("all");
-      // The reader-path write this case guards was fire-and-forget: it reached
-      // `save` only after awaiting one summary per row, so an assertion taken
-      // the moment `catalog()` returns cannot observe it and would pass against
-      // the very bug the case names. Flush that deferred chain first.
       await new Promise((resolve) => setTimeout(resolve, 250));
       expect(save).not.toHaveBeenCalled();
-      // And the document the read removed is still gone, not rewritten a moment
-      // later by a caller other than its owner.
       expect(existsSync(indexPath)).toBe(false);
     } finally {
       save.mockRestore();
@@ -1701,9 +1552,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v3", "manifest.json");
     await settleCatalog(fixture.registry);
     expect(existsSync(indexPath)).toBe(true);
-    // A restart is how a reader reaches the durable index with no in-memory cut.
-    // The append is injected inside reconciliation because no public caller can
-    // schedule work between the index read and its post-read evidence cut.
     await fixture.registry.dispose();
     const restarted = await createTestRegistry({
       agentDir: fixture.agentDir,
@@ -1717,15 +1565,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     });
     registries.push(restarted);
     await initializeRegistry(restarted);
-    // The catalog owner reconciles behind the listener. Settle it so the
-    // injected append lands in the reader's reconciliation, which this case is
-    // about, rather than in background maintenance.
     await settleCatalog(restarted);
     const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
     try {
-      // The indexed row is one message stale and its file is not runtime-owned,
-      // so the owner's next cut must re-read it: the published row carries the
-      // appended body instead of the index's message count.
       fixture.manager.appendMessage(fauxAssistantMessage("unowned append during index reconciliation"));
       await settleCatalog(restarted);
       expect(reconcile).toHaveBeenCalled();
@@ -1747,8 +1589,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const at = walks.count();
     const after = (await fixture.registry.catalog("all")).sessions
       .find((session) => session.id === fixture.manager.getSessionId())!;
-    // A partial tail is not membership evidence: the row keeps the counts of the
-    // exact prefix it proved, and the read neither walks nor refuses.
     expect(after.messageCount).toBe(before.messageCount);
     expect(walks.count()).toBe(at);
     walks.restore();
@@ -1803,7 +1643,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await mkdir(collisionDirectory, { recursive: true });
     const collision = SessionManager.create(fixture.cwd, collisionDirectory, { id: live.id });
     collision.appendMessage(fauxAssistantMessage("collision"));
-    // The claimant is an external writer: index it, then the ID is ambiguous.
     await settleCatalog(fixture.registry);
     await expect(fixture.registry.setAttention(live.id, true)).rejects.toMatchObject({ code: "conflict" });
   });
@@ -1833,8 +1672,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       await mkdir(collisionDirectory, { recursive: true });
       const collision = SessionManager.create(fixture.cwd, collisionDirectory, { id: live.id });
       collision.appendMessage(fauxAssistantMessage("late collision"));
-      // The fence is the index at commit, not a walk: the claimant has to be
-      // indexed for the boundary to see it, and it still rejects the update.
       await settleCatalog(fixture.registry);
       release();
       await expect(update).rejects.toMatchObject({ code: "conflict" });
@@ -1845,10 +1682,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }
   });
 
-  // G-1c/B1: a file the scan read a header for but could not prove, with no
-  // stored row to keep, is unknown membership. Publishing that cut would report
-  // the session as absent and let every destructive caller drop its records and
-  // artifacts for a file that is still there (review probe-prune.mjs).
   it("keeps the records of an unprovable session that has no stored row", async () => {
     const fixture = await coldFixture("unproven-no-row");
     const sessionId = fixture.manager.getSessionId();
@@ -1858,8 +1691,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(fixture.registry.isArchived(sessionId)).toBe(true);
     await fixture.registry.dispose();
     registries.splice(registries.indexOf(fixture.registry), 1);
-    // The durable document is what would otherwise keep a row: drop it, then
-    // leave the transcript mid-append so no row can be rebuilt from the file.
     await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v3"), { recursive: true, force: true });
     const completeBytes = (await fsPromises.stat(fixture.sessionFile)).size;
     await appendFile(fixture.sessionFile, '{"type":"message"');
@@ -1880,18 +1711,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const owner = catalogOwner(restarted);
     await owner.whenReconciled();
 
-    // The pass proves nothing about that file, so it is not a complete cut: its
-    // rows are served, and no destructive caller and no "this session is gone"
-    // answer is authorized.
     expect(reconciled.at(-1)).toMatchObject({ outcome: "incomplete" });
     expect(reconciled.at(-1)!.unproven).toBeGreaterThan(0);
     expect(owner.hasReconciledCut()).toBe(false);
     expect(owner.hasUnknownMembership()).toBe(true);
     expect(owner.unprovenSessionIds().has(sessionId)).toBe(true);
-    // Startup recovery keeps the record, maintenance refuses, and acquire refuses
-    // retryably instead of reporting the session as absent. The row cannot be
-    // built from a torn file, so the session is missing from the list until a
-    // pass can prove it — its records and artifacts are what must survive.
     await restarted.recoverCanonicalAttention();
     expect(restarted.isArchived(sessionId)).toBe(true);
     await expect(restarted.sessionIDsForStorageMaintenance())
@@ -1900,8 +1724,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await expect(restarted.acquire(sessionId)).rejects.toMatchObject({ code: "busy", retryable: true, diagnosticReason: "catalog_not_ready" });
     await expect(restarted.delete(sessionId)).rejects.toMatchObject({ code: "busy", retryable: true });
 
-    // The torn append is rolled back, which proves the file again: the cut
-    // publishes and the session is still the archived session it was.
     await truncate(fixture.sessionFile, completeBytes);
     await settleCatalog(restarted);
     expect(owner.hasReconciledCut()).toBe(true);
@@ -1911,10 +1733,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect((await restarted.acquire(sessionId)).id).toBe(sessionId);
   });
 
-  // G-1c/B2: automations.initialize() runs right after sessions.initialize(),
-  // which starts the catalog owner and returns before its first cut. Admission
-  // and recovery must wait for that cut instead of failing startup with a
-  // retryable busy (review probe-automation.mjs).
   it.each([false, true])("admits an existing-session automation while the first cut runs (durable index: %s)", async (withDocument) => {
     const root = await temporaryRoot("tron-automation-startup-");
     const agentDir = join(root, "agent");
@@ -1984,8 +1802,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     } finally {
       evidence.mockRestore();
     }
-    // An incomplete traversal publishes nothing: the rows the last complete cut
-    // produced stay, and no destructive caller may act on them.
     expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id)).toEqual(published);
     expect(catalog.hasReconciledCut()).toBe(false);
     await expect(fixture.registry.sessionIDsForStorageMaintenance())
@@ -2075,8 +1891,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
       expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
-      // Membership is the owner's row; the open reads no other file and walks
-      // nothing.
       expect(walks.count()).toBe(before);
       expect(headers.paths().length).toBeGreaterThan(0);
       expect(new Set(headers.paths().map((path) => basename(path)))).toEqual(new Set([basename(fixture.sessionFile)]));
@@ -2095,8 +1909,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
         .toBe(fixture.manager.getSessionId());
-      // A directory whose name ends in .jsonl is no row, and the open walks
-      // nothing to decide that.
       expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id))
         .toEqual([fixture.manager.getSessionId()]);
       expect(walks.count()).toBe(before);
@@ -2116,8 +1928,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     const listed = await fixture.registry.catalog("all");
     expect(listed.sessions.map((session) => session.id)).toEqual([fixture.manager.getSessionId()]);
-    // A producer's artifact folder is ignored by the owner's traversal, so the
-    // pass still reconciles and adds no row for it.
     expect(reconciled.at(-1)).toMatchObject({ outcome: "reconciled" });
 
     const walks = catalogWalks();
@@ -2143,9 +1953,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
         .toBe(fixture.manager.getSessionId());
-      // The unreadable neighbour is unproven: it neither forces a second
-      // discovery pass nor removes the admitted session from the cut, and its
-      // unknown membership keeps every destructive caller off this cut.
       expect(reconciled.at(-1)).toMatchObject({ outcome: "incomplete" });
       expect(reconciled.at(-1)!.unproven).toBeGreaterThan(0);
       expect(catalogOwner(fixture.registry).hasReconciledCut()).toBe(false);
@@ -2167,8 +1974,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       join(duplicateDirectory, "duplicate.jsonl"),
     );
     await settleCatalog(duplicateFixture.registry);
-    // One ID, two canonical files: neither may be resolved, so the list omits
-    // the ID entirely.
     expect((await duplicateFixture.registry.catalog("all")).sessions).toHaveLength(0);
 
     await expect(duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).rejects.toMatchObject({
@@ -2235,10 +2040,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       writeFile(arbitraryDeep, header("deep")),
     ]);
 
-    // Requirement: only the exact pi-subagents reserved layouts beneath the
-    // canonical catalog are delegated sessions; any neighbouring depth or
-    // basename stays an ordinary user session, and a contradictory parent
-    // header keeps the reserved child immutable without publishing a row.
     await settleCatalog(fixture.registry);
     const rows = new Map((await fixture.registry.catalog("all")).sessions.map((row) => [row.id, row]));
     expect(rows.get("fork")).toMatchObject({ kind: "subagent", parentSessionId: "parent" });
@@ -2286,8 +2087,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       const original = internals.catalogAcquisition.bind(fixture.registry);
       const admission = vi.spyOn(internals, "catalogAcquisition").mockImplementation(async () => {
         const acquired = await original();
-        // The file changes after admission and before the commit fence, which
-        // re-reads this exact file's header.
         const lines = (await readFile(fixture.sessionFile, "utf8")).split("\n");
         const header = JSON.parse(lines[0]!) as Record<string, unknown>;
         lines[0] = JSON.stringify({
@@ -2308,8 +2107,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       }
     }
 
-    // A duplicate claimant that the owner has indexed makes the ID ambiguous, and
-    // no acquisition may create a runtime for it.
     const duplicateFixture = await coldFixture("duplicate-race");
     await settleCatalog(duplicateFixture.registry);
     const duplicateDirectory = join(duplicateFixture.agentDir, "sessions", "duplicate-gap");
@@ -2328,8 +2125,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const original = internals.catalogAcquisition.bind(fixture.registry);
     const admission = vi.spyOn(internals, "catalogAcquisition").mockImplementation(async () => {
       const acquired = await original();
-      // An active parent's subagent writes a new delegated child, and another
-      // client creates an unrelated session, before this open validates.
       const childDirectory = join(fixture.agentDir, "sessions", "active-parent", "worker", "run-0");
       await mkdir(childDirectory, { recursive: true });
       await writeFile(join(fixture.agentDir, "sessions", "active-parent.jsonl"), `${JSON.stringify({
@@ -2362,9 +2157,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(quarantineLock.directory).toBe(await realpath(dirname(fixture.sessionFile)));
     expect(outcome).toMatchObject({ code: "conflict", retryable: false,
       message: "Tron session deletion failed and its file could not be restored; it remains beside the original as a .tron-delete file" });
-    // Both failures stay diagnosable: the refused removal and the refused restore.
     expect(((outcome as Error).cause as AggregateError).errors.map(error => (error as NodeJS.ErrnoException).code)).toEqual(["EACCES", "EACCES"]);
-    // The transcript bytes are kept, never removed by the failed deletion.
     expect(existsSync(fixture.sessionFile)).toBe(false);
     expect((await readdir(dirname(fixture.sessionFile))).filter(name => name.startsWith(`${basename(fixture.sessionFile)}.tron-delete-`))).toHaveLength(1);
   });
@@ -2379,8 +2172,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       timestamp: new Date().toISOString(), cwd: fixture.cwd,
     })}\n`;
     await writeFile(external, externalContent);
-    // The path is a symlink by the time the deletion commits: its own stat is the
-    // fence that refuses to follow it, and the aliased file is untouched.
     await rename(fixture.sessionFile, moved);
     await symlink(external, fixture.sessionFile);
 
@@ -2409,7 +2200,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
           })}\n`);
         } else if (mutation === "duplicate") {
           await copyFile(fixture.sessionFile, join(mutationDirectory, "duplicate.jsonl"));
-          // A claimant the owner has indexed is an ambiguity the commit sees.
           await settleCatalog(fixture.registry);
         } else {
           await mkdir(dirname(movedFile), { recursive: true });
@@ -2419,9 +2209,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       });
 
       if (mutation === "parent") {
-        // A new unrelated parent file is not evidence about this session, so the
-        // deletion still commits: the index, not a whole-tree scan, is the
-        // membership authority.
         await fixture.registry.delete(fixture.manager.getSessionId());
         expect(existsSync(fixture.sessionFile)).toBe(false);
       } else {
@@ -2440,9 +2227,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await mkdir(forks, { recursive: true });
     const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
     child.appendMessage(fauxAssistantMessage("child"));
-    // A complete line the index can prove, so this case measures membership
-    // rather than an in-progress append (its unprovable-neighbour half uses the
-    // header-less file below).
     await appendFile(child.getSessionFile()!, '{"type":"message"}\n');
     await copyFile(parentFile, join(forks, "ambiguous.jsonl"));
     const live = await fixture.registry.create(fixture.cwd);
@@ -2450,14 +2234,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const walks = catalogWalks();
     const before = walks.count();
     try {
-      // Membership is the index and the live slots: the maintenance read parses
-      // no transcript and walks nothing.
       const ids = await fixture.registry.sessionIDsForStorageMaintenance();
       expect([...ids].sort()).toEqual([fixture.manager.getSessionId(), child.getSessionId(), live.id].sort());
       expect(walks.count()).toBe(before);
-      // An unprovable neighbour adds no row and removes none: its membership is
-      // unknown, so the maintenance read refuses retryably rather than reporting
-      // any owner as gone.
       await writeFile(join(dirname(parentFile), "incomplete-header.jsonl"), "{}");
       await settleCatalog(fixture.registry);
       await expect(fixture.registry.sessionIDsForStorageMaintenance())
@@ -2478,8 +2257,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const walks = catalogWalks();
     const before = walks.count();
     try {
-      // A user cut resolves only the non-delegated rows; the all-scope cut
-      // resolves the delegated child too, from the same owner rows.
       const user = await fixture.registry.catalog("user");
       expect(user.sessions.map((session) => session.id)).toEqual([fixture.manager.getSessionId()]);
       const all = await fixture.registry.catalog("all");
@@ -2515,7 +2292,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const childLines = (await readFile(childFile, "utf8")).split("\n");
     childLines[0] = JSON.stringify({ ...JSON.parse(childLines[0]!), parentSession: join(fixture.agentDir, "sessions", "not-the-parent.jsonl") });
     await writeFile(childFile, childLines.join("\n"));
-    // Both files above are this test's own writes: index them before reading.
     await settleCatalog(fixture.registry);
 
     const repairedUser = await fixture.registry.catalog("user");
@@ -2537,8 +2313,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       expect((await fixture.registry.catalog("user")).sessions.map(row => row.id)).toEqual([parentID]);
       children.forEach(child => child.appendMessage(fauxAssistantMessage("parallel child progress")));
-      // The children are external writers; index them, then the user cut must
-      // still resolve the parent and a live-only session without a walk.
       await settleCatalog(fixture.registry);
       const live = await fixture.registry.create(fixture.cwd);
       const results = await Promise.all([
@@ -2550,7 +2324,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       }
       expect(results[2]).toMatchObject({ summary: { id: parentID } });
       const settled = walks.count();
-      // A partial acceleration must never hide children from administration.
       const all = await fixture.registry.catalog("all");
       expect(all.sessions.map(row => row.id)).toEqual(expect.arrayContaining(children.map(child => child.getSessionId())));
       expect(walks.count()).toBe(settled);
@@ -2569,8 +2342,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await settleCatalog(fixture.registry);
     const initialPage = await fixture.registry.pageSource("user");
     fixture.manager.appendSessionInfo("Updated canonical name");
-    // The rename is this test's own write: index it, then the page source must be
-    // a different projection of a different row.
     await settleCatalog(fixture.registry);
     const refreshedPage = await fixture.registry.pageSource("user");
     expect(refreshedPage).not.toBe(initialPage);
@@ -2628,12 +2399,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       await headerRegistry.initialize();
       await catalogOwner(headerRegistry).whenReconciled();
-      // The per-file header budget cannot prove this file, so no row is added for
-      // it and the pass still reports a complete traversal (G-1c).
       expect(reconciled.at(-1)).toMatchObject({ outcome: "incomplete" });
       expect(reconciled.at(-1)!.unproven).toBe(1);
       expect((await headerRegistry.catalog("all")).sessions).toEqual([]);
-      // The read serves the owner's cut and walks nothing.
       const settled = walks.count();
       expect((await headerRegistry.catalog("all")).sessions).toEqual([]);
       expect(walks.count()).toBe(settled);
@@ -2654,9 +2422,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     registries.push(admissionRegistry);
     await admissionRegistry.initialize();
     await catalogOwner(admissionRegistry).whenReconciled();
-    // The identity-retention budget cannot hold any row, so every file is
-    // unproven: the acquisition refuses retryably instead of reporting the
-    // session as absent.
     expect((await admissionRegistry.catalog("all")).sessions).toEqual([]);
     await expect(admissionRegistry.acquire(fixture.manager.getSessionId()))
       .rejects.toMatchObject({ code: "busy", retryable: true, diagnosticReason: "catalog_not_ready" });
@@ -2853,8 +2618,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       writeFile(parentFile, `${JSON.stringify({ type: "session", version: 3, id: parentId, timestamp, cwd: fixture.cwd })}\n`),
       writeFile(childFile, `${JSON.stringify({ type: "session", version: 3, id: childId, timestamp, cwd: fixture.cwd })}\n`),
     ]);
-    // Leave the old physical root present: its existence does not prove that
-    // the configured alias still names it. Reconcile the real owner, no list.
     await rm(alias);
     await symlink(nextRoot, alias);
     if (read === "row refresh") {
@@ -3013,8 +2776,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         armed = false;
         rmSync(alias);
         symlinkSync(nextRoot, alias);
-        // A genuine header replacement makes append reuse fail, so the owner
-        // must rebuild from the physical path that realpath just proved.
         writeFileSync(childFile, header("pinned-root-child"));
       }
       return physical;
@@ -3200,8 +2961,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     const first = await internals.catalogStructureEvidence();
     const second = await internals.catalogStructureEvidence();
-    // The traversal covered the folder; the files whose header exceeded the
-    // aggregate budget are unproven instead of blinding the whole cut (G-1c).
     expect(first.complete).toBe(true);
     expect(first.unprovenPaths.size).toBeGreaterThan(0);
     expect(first.identitiesByPath.size).toBe(4);
@@ -3307,9 +3066,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await initializeRegistry(registry);
     const catalog = (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
     const catalogRoot = await realpath(sessions);
-    // The comparison is the Gateway's own walk of the folder plus one read of
-    // every canonical file, never the index's rows, so an index row is checked
-    // against the file it was built from.
     const discovery = new CatalogDiscovery({
       limits: DEFAULT_CATALOG_DISCOVERY_LIMITS,
       catalogDirectory: () => catalogRoot,
@@ -3359,7 +3115,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       }
     };
 
-    // create: a fresh session persists its first canonical entry.
     const live = await registry.create(cwd);
     const model = faux.getModel();
     await live.setModel(model.provider, model.id);
@@ -3369,18 +3124,15 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await compareToFullScan("create");
     expect(catalog.rows().map((row) => row.id)).toContain(live.id);
 
-    // rename: the session name the dashboard shows.
     await live.rename("catalog index renamed");
     await catalog.settled();
     await compareToFullScan("rename");
     expect(catalog.row(await realpath(live.sessionFile!))?.name).toBe("catalog index renamed");
 
-    // fork: the replacement identity persists its own canonical file.
     const forkedId = live.snapshot().runtimeGeneration;
     const userEntry = live.history(forkedId).nodes.find((node) => node.role === "user");
     expect(userEntry?.id).toBeTruthy();
     const forked = await live.fork(userEntry!.id, "at");
-    // Pi reserves the forked session's path; its first entry persists the file.
     await live.prompt("catalog index fork entry");
     await waitFor(() => !live.isBusy, "the live slot to go idle");
     await catalog.settled();
@@ -3388,7 +3140,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(catalog.rows().map((row) => row.id)).toContain(forked.sessionId);
     expect([...catalog.duplicateSessionIds()]).toEqual([]);
 
-    // delete: the deleted session's canonical file is gone.
     await registry.delete(forked.sessionId);
     await catalog.settled();
     await compareToFullScan("delete");
@@ -3427,10 +3178,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await copyFile(slot.persistedSessionFile!, duplicatePath);
     await settleCatalog(registry);
 
-    // Every live-slot admission reads the owner's current duplicate set, not the
-    // registry's last list projection, so each probe refuses before any catalog-list
-    // read. A probe that resolves reports only its outcome, never the RuntimeSlot or
-    // projection it returned.
     const outcomeOf = (attempt: Promise<unknown>) => attempt.then(
       () => ({ outcome: "resolved" }),
       (error: { code?: string }) => ({ outcome: "rejected", code: error.code }),
@@ -3445,8 +3192,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(await outcomeOf(registry.acquire(slot.id))).toEqual({ outcome: "rejected", code: "conflict" });
     await expect(registry.delete(slot.id)).rejects.toMatchObject({ code: "conflict" });
 
-    // The cut is keyed by canonical path, so enumeration order cannot move it, and
-    // an ID two files claim resolves to neither.
     const conflicted = await registry.catalog("all");
     expect(conflicted.sessions.find((session) => session.id === slot.id)).toBeUndefined();
     const reordered = await registry.catalog("all");
@@ -3481,8 +3226,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       managers.push(manager);
       const forks = join(directory, basename(manager.getSessionFile()!, ".jsonl"), "forks");
       await mkdir(forks, { recursive: true });
-      // One delegated child per parent still gives every parent a forks topology
-      // that each wave appends to; more children multiply the same per-file work.
       const fork = SessionManager.forkFrom(manager.getSessionFile()!, cwd, forks);
       fork.appendMessage(fauxAssistantMessage(`child-${index}`));
       children.push(fork);
@@ -3819,9 +3562,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       hasActiveSubagents: true,
     });
 
-    // Parent settlement does not change aggregate phase while detached work is
-    // active. The shallow foreground fact must still publish the visual-state
-    // transition to every dashboard.
     slot.phase = "idle";
     slot.publishSnapshot();
     const active = fixture.summaries.at(-1)!;
@@ -3878,8 +3618,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(Date.parse(fixture.summaries.at(-1)!.updatedAt))
       .toBeGreaterThanOrEqual(Date.parse(heartbeat.updatedAt));
 
-    // A cold artifact reconciliation may publish terminal history with a fresh
-    // projection as-of time. That observation must not impersonate new work.
     const settledRecency = fixture.summaries.at(-1)!.updatedAt;
     internal.extensionActivityAsOf = new Date(Date.parse(settledRecency) + 60_000).toISOString();
     const staleTerminal = {
@@ -3954,10 +3692,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     const endedAt = Date.now();
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
-      // Deployed sessions may outlive the producer version that launched them.
-      // pi-subagents persists after recording completion, so lastUpdate normally
-      // follows endedAt. A later direct drain pass must reconcile this evidence
-      // without watcher delivery or ambient discovery.
       runId,
       state: terminalState,
       startedAt: Date.parse(startedAt),
@@ -4152,7 +3886,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       expect.objectContaining({ runId: replacementRunId, status: "completed", lifecycle: expect.objectContaining({ state: "completed" }) }),
     ]));
     expect(slot.snapshot().processOverview.activeCount).toBe(0);
-    // A delayed original artifact cannot resurrect the retired execution.
     await writeFile(join(sourceDir, "status.json"), JSON.stringify({
       lifecycleArtifactVersion: 3, runId: sourceRunId, state: "running", startedAt: started, lastUpdate: Date.now(),
     }));
@@ -4305,8 +4038,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(fixture.events.find((event) => event.topic === "session.processActivity")?.payload.data)
       .not.toHaveProperty("removedProcessIds");
 
-    // A later terminal enrichment with exact child identity replaces the root
-    // atomically rather than retaining a duplicate recent workflow row.
     fixture.events.splice(0);
     internal.syncSubagentProcesses({
       ...base,
@@ -4329,10 +4060,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   });
 
   it("never reports a canonical receipt as durable when Pi only staged it in memory", async () => {
-    // The pinned SDK removes an entry from its live branch when `_persist`
-    // fails, so the branch cannot show whether the record reached the JSONL.
-    // Gateway must report an unknown outcome for that exact identity instead of
-    // retrying an append that may already be on disk.
     const fixture = await coldFixture("canonical-receipt-staged-only");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const internal = slot as unknown as {
@@ -4351,7 +4078,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const staged = (): boolean => manager.getBranch().some((entry) =>
       entry.type === "custom" && (entry.data as { receiptId?: unknown })?.receiptId === "staged-only-receipt");
 
-    // Make the owned JSONL append fail without disturbing the live branch.
     const aside = `${sessionFile}.aside`;
     await rename(sessionFile, aside);
     await mkdir(sessionFile);
@@ -4359,8 +4085,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       await expect(internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receipt, "staged-only-receipt"))
         .rejects.toMatchObject({ details: { outcomeUnknown: true } });
       expect(staged()).toBe(false);
-      // The staged entry is not durability evidence: a repeat attempt must not
-      // report success from the live branch alone.
       await expect(internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receipt, "staged-only-receipt"))
         .rejects.toMatchObject({ details: { outcomeUnknown: true } });
     } finally {
@@ -4385,8 +4109,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         .rejects.toMatchObject({ details: { outcomeUnknown: true } });
       expect(await readFile(sessionFile, "utf8")).not.toContain("healthy-receipt");
     } finally {
-      // Test-only release of the deliberately poisoned fixture for teardown.
-      // Production has no bypass: the SDK must supply verified recovery first.
       internal.runPersistence.durableWrites.clear();
     }
   });
@@ -4418,7 +4140,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     } finally {
       await rm(file, { recursive: true, force: true });
       await rename(aside, file);
-      slot.runPersistence.durableWrites.clear(); // test-only disposal of the faulted runtime
+      slot.runPersistence.durableWrites.clear();
       internal.releaseExtensionReceiptOwnership(activity.id, owner);
     }
   });
@@ -4453,14 +4175,13 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       finish();
       await stalled;
       await vi.advanceTimersByTimeAsync(1_000);
-      // A late physical completion cannot resume the abandoned dependent work.
       expect(slot.isDrainBusy).toBe(true);
       await expect(internal.runPersistence.retryDurableWrite("test:storage-fault", operation)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
     } finally {
       finish();
       clock.mockRestore();
       vi.useRealTimers();
-      internal.runPersistence.durableWrites.clear(); // test-only teardown of synthetic blocked owner
+      internal.runPersistence.durableWrites.clear();
     }
   });
 
@@ -4529,8 +4250,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         startedAt: Date.parse(startedAt),
         lastUpdate: Date.now(),
         mode: "workflow",
-        // The artifact itself is authoritative running evidence even before a
-        // workflow publishes its first child step.
         steps: [],
       }));
       await rename(pendingStatus, join(asyncDir, "status.json"));
@@ -4713,8 +4432,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         const childFile = join(childSessionDir, "session.jsonl");
         await rename(manager.getSessionFile()!, childFile);
         await mkdir(asyncDir, { recursive: true });
-        // Derive the workflow/child documents from the producer capture, retaining
-        // its real header and lifecycle shape rather than mocking the read owner.
         const captured = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "../../sessions/fixtures", "frozen-real-active.json"), "utf8"));
         const started = captured.startedAt as number;
         const edge = { agent: "worker", label: "Worker", status: "running", async: true, runId: childRun,
@@ -4736,13 +4453,11 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         };
         const internal = slot.ownedTurns;
         try {
-          // Seed the same admitted launcher boundary as the producer-capture fixture.
           internal.extensionActivities.set(toolCallId, { id: toolCallId, runId, toolCallId,
             source: { source: "pi-subagents" }, title: "Subagents", status: "running", children: [],
             startedAt: new Date(started).toISOString(), updatedAt: new Date(started).toISOString(),
             lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: new Date(started).toISOString() } });
           internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
-          // Canonical launch evidence, not optional child detail, admits the root.
           const runtimeManager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
           runtimeManager.appendMessage({ role: "toolResult", toolName: "subagent", toolCallId, content: [{ type: "text", text: "Workflow started" }],
             details: { runId, asyncId: runId, asyncDir, mode: "workflow", state: "running" }, isError: false, timestamp: started });
@@ -4779,19 +4494,13 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
             expect(JSON.stringify(activity())).not.toContain("FORGED_MODEL");
           }
           expect(internal.extensionActivityWatchers.has(toolCallId), "child failure cannot retire root").toBe(true);
-          // No discovery or root write: the child edge observation alone must wake
-          // hydration after a missing directory, invalid document or absent status.
           await replace(childDir, { ...child, steps: [{ ...child.steps[0], model: "fixture/recovered", toolCount: 4 }] });
           await waitFor(() => activity()?.children[0]?.model === "fixture/recovered", "child-only write hydrates detail");
           expect(partial() ?? 0).toBe(0);
           expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ model: "fixture/recovered", toolCount: 4 })]));
-          // Retire subscriptions only on authoritative edge removal/root disposal.
           await replace(asyncDir, { ...root, steps: [] });
           await waitFor(() => internal.extensionActivityWatchers.get(toolCallId)?.children.size === 0, "root edge removal retires observation");
         } finally {
-          // This fixture owns synthetic running evidence, not a provider process.
-          // Always settle it before the registry's drain-aware cleanup, even when
-          // an assertion fails against the unfixed optional-detail reader.
           await replace(asyncDir, { ...root, state: "completed", endedAt: started + 20_000, lastUpdate: started + 20_000, steps: [],
             lifecycleProjection: { ...root.lifecycleProjection, root: { ...root.lifecycleProjection.root, state: "complete", endedAt: started + 20_000, updatedAt: started + 20_000 } } });
           await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
@@ -4803,9 +4512,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }, 15_000,
   );
 
-  /** One admitted running workflow root with one reciprocal child edge, built like
-   * the optional-child case above from the producer capture. The registry's 750 ms
-   * pass is stopped so each case owns every discovery read of these artifacts. */
   async function workflowChildFixture(label: string) {
     const fixture = await coldFixture(label);
     const registryInternal = fixture.registry as unknown as { artifactDiscoveryTimer?: NodeJS.Timeout };
@@ -4858,8 +4564,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     return {
       slot, owner, toolCallId, asyncDir, childDir, child, replace,
       activity: () => owner.extensionActivities.get(toolCallId),
-      /** Evicts this row through the runtime map's own 64-row trim, runs `check`,
-       * then removes the newer filler rows the trim kept. */
       evict: async (check: () => void | Promise<void>) => {
         const row = owner.extensionActivities.get(toolCallId)!;
         const fillers = Array.from({ length: 64 }, (_, index) => `${label}-filler-${index}`);
@@ -4873,8 +4577,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
           for (const id of fillers) owner.extensionActivities.delete(id);
         }
       },
-      // This fixture owns synthetic running evidence, not a provider process.
-      // Settle it before drain-aware cleanup, even after a failed assertion.
       dispose: async () => {
         try {
           await replace(asyncDir, document(runId, "workflow", [], started + 20_000, "completed"));
@@ -4890,9 +4592,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const fixture = await coldFixture("ownership-write-stall");
     try {
       const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-      // A real durable marker write: its fsync chain runs on the fs threadpool
-      // and needs the loop between steps. Block the thread past the 20 s window,
-      // as a synchronous extension transform does under load.
       const write = slot.enqueueMarkerOwnership("stalled-ownership-operation");
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 21_000);
       await expect(write).resolves.toBeUndefined();
@@ -4911,8 +4610,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       await f.replace(f.childDir, f.child({ model: "fixture/child", toolCount: 3 }));
       expect(await f.owner.discoverExtensionArtifact(f.asyncDir), "root artifact admission").toBe("accepted");
       expect(f.activity()?.children[0]).toMatchObject({ model: "fixture/child", toolCount: 3 });
-      // Watchers are a second reader of the child file. Retire them so the one
-      // injected rename lands inside this discovery read's own child open.
       f.owner.stopExtensionActivityWatcher(f.toolCallId);
       const discovery = new AsyncLocalStorage<true>();
       statusJsonReplace.insideRetryInvocation = () => discovery.getStore() === true;
@@ -4929,8 +4626,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         statusJsonReplace.insideRetryInvocation = () => false;
       }
       expect(statusJsonReplace.replacements, "one real rename between the child open and its verifying stat").toBe(1);
-      // The child never stopped publishing its detail: the lost read is a reader race,
-      // not an unavailable child, so the frame keeps model and tool count.
       expect(f.activity()?.lifecycleOmissions?.children ?? 0).toBe(0);
       expect(f.activity()?.children[0]).toMatchObject({ model: "fixture/child", toolCount: 4 });
       expect(f.slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ model: "fixture/child", toolCount: 4 })]));
@@ -4942,8 +4637,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   it("never publishes an older artifact read over a newer read's frame", async () => {
     const f = await workflowChildFixture("read-order");
     try {
-      // The older read observes the root edge before the child's runner has written
-      // its status, then is held after its real reads and before its publication.
       let observeHeld!: () => void;
       const held = new Promise<void>((resolve) => { observeHeld = resolve; });
       let release!: () => void;
@@ -4970,8 +4663,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       expect(f.activity()?.lifecycleOmissions?.children ?? 0, "older bytes never replace a newer frame").toBe(0);
       expect(f.activity()?.children[0]).toMatchObject({ model: "fixture/child", toolCount: 0 });
       expect(f.slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ model: "fixture/child", toolCount: 0 })]));
-      // Read tickets live exactly as long as their row: the runtime map's own
-      // eviction retires them, so successive runs never accumulate entries.
       expect(f.owner.extensionActivityPublishedReads.has(f.toolCallId)).toBe(true);
       await f.evict(() => {
         expect(f.owner.extensionActivityPublishedReads.has(f.toolCallId)).toBe(false);
@@ -5005,11 +4696,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       await awaitsWithin(held, "older read holds its real bytes before publication");
       await f.replace(f.childDir, f.child({ model: "fixture/child", toolCount: 0 }));
       expect(await f.owner.discoverExtensionArtifact(f.asyncDir), "newer read").toBe("accepted");
-      // The row leaves the runtime map while the older read is still in flight.
       await f.evict(async () => {
         expect(f.owner.extensionActivityPublishedReads.has(f.toolCallId), "older read still in flight").toBe(true);
         release();
-        // Canonical ownership would let it re-admit the row; its bytes are older.
         expect(await older, "older read cannot re-admit an evicted row").not.toBe("accepted");
         expect(f.activity()).toBeUndefined();
         expect(f.owner.extensionActivityPublishedReads.has(f.toolCallId), "retired once older reads finish").toBe(false);
@@ -5045,8 +4734,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       const parsed = JSON.parse(await readFile(fixturePath(name), "utf8")) as {
         lifecycleProjection: { sessionId?: string };
       };
-      // The frozen producer capture uses a placeholder owner; bind it to this
-      // fixture's exact canonical parent session before exercising admission.
       parsed.lifecycleProjection.sessionId = slot.sessionFile;
       return JSON.stringify(parsed)
         .replaceAll("/tmp/frozen-real-child/session.jsonl", childFile)
@@ -5074,10 +4761,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ childSessionRef: "frozen-child-session", currentTool: "bash" })]));
     expect(slot.snapshot().processOverview.extensionChildOmissions).toMatchObject({ children: 34, byteLimitExceeded: true });
 
-    // A legacy status payload may contain a presentation-shaped
-    // `lifecycleProjection`, but that key is not proof that its sessionOwnerId
-    // was emitted by the admitted status header. A forged owner must not make
-    // a child outside this run's reserved path admissible.
     const foreignDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forged-owner", "run-0");
     await mkdir(foreignDirectory, { recursive: true });
     const foreignManager = SessionManager.create(fixture.cwd, foreignDirectory, { id: "forged-child-session" });
@@ -5117,8 +4800,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       const parsed = JSON.parse(await readFile(join(fixtureDirectory, name), "utf8")) as { lifecycleProjection: Record<string, unknown> };
       return structuredClone(parsed.lifecycleProjection);
     };
-    // These compact first-property headers were serialized by writeAsyncStatusAtomic
-    // from packed pi-subagents d3bd36e5c1767c807615151922192554fef36ec3.
     const ownedHeader = await loadHeader("packed-producer-owned-lifecycle-header.json");
     ownedHeader.sessionId = slot.sessionFile;
     const foreignHeader = await loadHeader("packed-producer-foreign-lifecycle-header.json");
@@ -5153,7 +4834,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       expect.objectContaining({ id: "step-c", status: "running" }),
     ]) });
 
-    // Exact run/tool/path bindings do not authorize this producer header's foreign session.
     await writeHeader(foreignHeader);
     await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     const afterForeign = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
@@ -5167,8 +4847,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       .filter((entry) => entry.type === "custom" && entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE).length;
     expect(await receiptCount(slot.sessionFile!)).toBe(0);
 
-    // A cold reconstructed slot must reject the same foreign terminal header before
-    // it can synthesize a child or append a terminal parent receipt.
     await fixture.registry.dispose();
     const recoveredRegistry = await createTestRegistry({
       agentDir: fixture.agentDir, tronHome: join(fixture.root, "tron"), idleRuntimeMs: 60_000,
@@ -5257,8 +4935,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect((slot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)?.status).toBe("running");
     await writeModern();
 
-    // Known-bad control: the old headerless oversized artifact cannot refresh;
-    // after the existing missing grace it hides the live activity as unknown.
     const slotState = slot.ownedTurns;
     slotState.stopExtensionActivityWatcher(toolCallId);
     await writeFile(statusPath, JSON.stringify({
@@ -5274,8 +4950,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(slotState.extensionActivities.get(toolCallId)?.lifecycle?.state).toBe("unknown");
     expect((slot.snapshot().extensionActivities ?? []).some((activity) => activity.toolCallId === toolCallId)).toBe(false);
 
-    // Reconstruct the Gateway runtime and verify bounded-header ambient discovery
-    // re-admits the same canonical owner without parsing its large report body.
     await fixture.registry.dispose();
     await writeModern();
     const recoveredRegistry = await createTestRegistry({
@@ -5411,7 +5085,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const projectRoot = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs");
     await mkdir(projectRoot, { recursive: true });
-    // The slot attributes the artifact through this session's canonical JSONL.
     const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } })
       .runtime.session.sessionManager;
     manager.appendMessage({
@@ -5444,12 +5117,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
   it("examines every ambient artifact within a bounded number of passes and reports a stopped pass", async () => {
     const stopped: ExtensionArtifactDiscoveryCounts[] = [];
-    // The whole root exists before the registry does, so every pass — including
-    // the one `initialize` starts — walks the same artifact set: a pass that
-    // exhausts its read budget always reports the same counts.
     const delegated = await delegatedFixtureRoot("ambient-change-gate");
-    // One pass reads at most MAX_EXTENSION_DISCOVERY_WORK (1,024) artifacts whose
-    // identity changed, so this root always stops a pass short of its last entries.
     const artifactCount = 1_100;
     const startedAt = Date.now();
     const runsRoot = join(delegated.delegatedRoot, "async-subagent-runs");
@@ -5462,11 +5130,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
         lifecycleArtifactVersion: 3, runId: run.runId, state: "running", startedAt, lastUpdate,
       }));
     };
-    // The whole root has to exist before the registry does. Writing the 1,100 run
-    // directories concurrently instead of one await at a time keeps this
-    // fixture's own cost inside the test's hang bound: the serial version spent
-    // 2,200 event-loop round trips before the case could start, and on a loaded
-    // host that alone pushed the test past its 15 s bound (2026-10-06).
     await Promise.all(runDirectories.map(async (run) => {
       await mkdir(run.asyncDir, { recursive: true });
       await writeStatus(run, startedAt);
@@ -5479,23 +5142,12 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const routed = vi.spyOn(slot.ownedTurns, "discoverExtensionArtifact");
 
     await discoverExtensionArtifactsUntil(fixture.registry);
-    // The first pass stops at the read budget after 1,025 entries and reads
-    // 1,024 of them. The next reaches the end of the root, reading only the 76
-    // entries the first could not: no artifact here belongs to a live slot, so
-    // no candidate is deferred work and nothing further is reported.
     expect(stopped).toEqual([{ entries: 1_025, statusReads: 1_024, work: 0, dropped: 0 }]);
     expect(routed.mock.calls).toEqual([]);
 
-    // The unchanged root has no changed work left, so a later pass does not stop
-    // and records nothing.
     await discoverExtensionArtifactsUntil(fixture.registry);
     expect(stopped).toHaveLength(1);
 
-    // A second live slot halves the pass's per-root routing budget, so a pass
-    // that read every entry could not offer all 1,100 candidates. The last run
-    // in the walk order is the one this slot can attribute: it is still offered,
-    // because the candidates the slot cannot attribute never spend that budget
-    // and are never reported as deferred work (G-8d).
     const second = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
     second.appendMessage(fauxAssistantMessage("second ambient slot"));
     await settleCatalog(fixture.registry);
@@ -5508,15 +5160,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       content: [{ type: "text", text: "launched" }],
       details: { runId: late.runId, asyncDir: late.asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
     });
-    // The run must be offered by the first pass this call runs. Everything the
-    // pass needs is already derived: the root was swept above, so every
-    // unchanged artifact fact is cached by identity and the pass spends none of
-    // the `MAX_EXTENSION_DISCOVERY_WORK` read budget; the per-root routing budget (`rootBudget`, the remaining work split
-    // across the roots and live slots — 512 at most for one root and two slots)
-    // is an upper bound, and candidates no live slot can attribute are filtered
-    // out before that slice, so the late run is the only candidate left to
-    // offer. A second pass means attribution or routing regressed, which is the
-    // bound this case's title claims.
     const passes = await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.some(([asyncDir]) => asyncDir === late.asyncDir));
     expect(passes, "the pass that offers the newly attributed run").toBe(1);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([late.asyncDir]));
@@ -5525,10 +5168,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   });
 
   it("offers a run known only from the session log again after a claim the slot could not take", async () => {
-    // A run after a Gateway restart: the saved session log names it, no live
-    // ownership binding exists until an artifact is accepted, and its finished
-    // status.json never changes again. An offer the slot could not decide is not
-    // a delivered artifact, so the next pass must offer the same bytes again.
     const delegated = await delegatedFixtureRoot("ambient-claim-retry");
     const completedAt = Date.now() - 1_000;
     const fixture = await coldFixture("ambient-claim-retry", { delegatedRoot: delegated.delegatedRoot });
@@ -5547,8 +5186,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       role: "toolResult", toolCallId, toolName: "subagent", content: [{ type: "text", text: "launched" }],
       details: { runId, asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
     });
-    // The Gateway work registry is full for one offer: the terminal receipt
-    // claim is refused, exactly as a busy Gateway refuses it in production.
     const claim = vi.spyOn(slot.ownedTurns, "claimExtensionReceiptOwnership");
     claim.mockReturnValueOnce(undefined);
     const offered = vi.spyOn(slot.ownedTurns, "discoverExtensionArtifact");
@@ -5593,18 +5230,13 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }
     const routed = vi.spyOn(slot.ownedTurns, "discoverExtensionArtifact");
 
-    // Only the two runs this slot can attribute are offered.
     await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.length >= 2);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([finishedDir, liveDir]));
 
-    // A pass over the unchanged root offers the finished artifact to nobody: it
-    // already reached this slot, and the live one is refreshed by its exact
-    // binding.
     routed.mockClear();
     await discoverExtensionArtifactsUntil(fixture.registry);
     expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([liveDir]));
 
-    // A changed artifact is offered again, even when its exact binding is terminal.
     await writeFile(join(finishedDir, "status.json"), JSON.stringify({
       lifecycleArtifactVersion: 3, runId: finishedRunId, state: "complete",
       startedAt: startedAt - 120_000, lastUpdate: startedAt + 1_000, endedAt: startedAt + 1_000,
@@ -5622,9 +5254,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const asyncDir = join(delegated.delegatedRoot, "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    // The registry's own 750 ms pass can offer this same artifact, which would put
-    // a second retry invocation inside the injected window; this case is about the
-    // slot's retry path, so it owns the cadence and makes one read the only one.
     const registryInternal = fixture.registry as unknown as { artifactDiscoveryTimer?: NodeJS.Timeout };
     if (registryInternal.artifactDiscoveryTimer) clearInterval(registryInternal.artifactDiscoveryTimer);
     registryInternal.artifactDiscoveryTimer = undefined;
@@ -5647,27 +5276,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const projected = () => slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId);
     expect(projected()).toMatchObject({ status: "running" });
 
-    // A producer replaces an active run's status.json by an atomic rename, so a
-    // read can open one inode and stat another. `openOwnedExtensionArtifact`
-    // verifies that the inode it opened is the one it stats, and the discovery
-    // lane used to report the first losing read as a rejected artifact.
-    //
-    // The loss is injected, not raced for: the file-scoped `open` wrapper above
-    // performs exactly one real write+rename between this path's own open and its
-    // verifying stat, so the read it is inside loses by construction. Host
-    // scheduling, the fs threadpool and any load on the machine can therefore no
-    // longer decide whether the case observes its event — the old sample guard
-    // (`passes > 100`) was the speed budget that let them (#430). Only the
-    // test-owned producer is deterministic here; the spies below only observe.
     const slotInternals = slot.ownedTurns.artifacts;
     const readOnce = slotInternals.readExtensionStatusArtifact.bind(slotInternals);
     const readWithRetry = slotInternals.readExtensionStatusArtifactWithReplacementRetry.bind(slotInternals);
-    // The watcher lane reads the same file through the same inner method
-    // (`refreshExtensionActivityFromArtifact`), so a read count taken across the
-    // retry path's wall-clock window would count its reads too. Scoping the count
-    // to the retry invocation's own async context keeps the observation exact:
-    // more than one read inside it is this path retrying a read that lost the
-    // race with the producer's rename.
     const retryInvocation = new AsyncLocalStorage<{ reads: number }>();
     statusJsonReplace.insideRetryInvocation = () => retryInvocation.getStore() !== undefined;
     let retriedLosingReads = 0;
@@ -5693,8 +5304,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     statusJsonReplace.statusPath = join(canonicalAsyncDir, "status.json");
     statusJsonReplace.tempPath = join(canonicalAsyncDir, "status.tmp");
     try {
-      // One read; the product's retry path runs because the injected replace made
-      // that read lose, and its second read succeeds.
       await slot.ownedTurns.discoverExtensionArtifact(asyncDir);
     } finally {
       statusJsonReplace.armed = false;
@@ -5738,8 +5347,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
     expect(slot.isDrainBusy).toBe(true);
 
-    // This is the native supervisor's actual receipt shape. Its runId is a
-    // reference, not another launch, and must not poison canonical ownership.
     const reply = { content: [{ type: "text" as const, text: "Replied" }], details: { replyTo: "request-1", runId, agent: "worker" } };
     manager.appendMessage({
       role: "toolResult", toolCallId: "supervisor-reply-call", toolName: "subagent_supervisor",
@@ -5812,8 +5419,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(pathPolicy.extensionArtifactPathAllowed(`${projectRoot}/.`)).toBe(false);
     expect(pathPolicy.extensionArtifactPathAllowed(`${projectRoot}/../escape`)).toBe(false);
 
-    // A non-extension tool result carrying an arbitrary runId is not ownership
-    // evidence, even when the artifact claims this exact session and cwd.
     fixture.manager.appendMessage({
       role: "toolResult",
       toolCallId: "ordinary-tool-call",
@@ -5888,14 +5493,9 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       status: "completed",
       completedAt: artifactCompletedAt,
     });
-    // Terminal time is the Gateway's admission instant, never the producer's
-    // earlier `endedAt`. The registry's artifact discovery pass also re-reads
-    // this owned directory every 750 ms and may admit first, so the oracle is
-    // the admission window rather than this call's own observation (#406).
     const terminalAt = Date.parse(admitted?.lifecycle?.terminalAt ?? "");
     expect(terminalAt).toBeGreaterThanOrEqual(admissionWindowStartedAt);
     expect(terminalAt).toBeLessThanOrEqual(Date.parse(admitted?.lifecycle?.observedAt ?? ""));
-    // A later observation of the same terminal artifact keeps that instant.
     await new Promise((resolve) => setTimeout(resolve, 2));
     await refreshSubagentActivityFromArtifact(internal, asyncDir);
     const reobserved = slot.snapshot().extensionActivities?.find((candidate) => candidate.toolCallId === toolCallId);
@@ -5957,8 +5557,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     model.inputLimits = { images: { resize: { maxWidth: 1_000, maxHeight: 1_000 } } };
     await slot.setModel(model.provider, model.id);
 
-    // Pi applies the active model's profile once before the attachment enters
-    // canonical history. Gateway must not pre-resize it with a second profile.
     const screenshot: ImageContent = { type: "image", mimeType: "image/png", data: syntheticPng(1320, 2868).toString("base64") };
     const originalData = screenshot.data;
     await slot.prompt("Look at this screenshot", [screenshot]);
@@ -5997,8 +5595,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       releaseSteering();
     });
     const faux = fauxProvider({ provider: "tron-queued-image-bound", tokensPerSecond: 10_000 });
-    // Each model call holds the run open where the test queues the next input.
-    // The steering reply and every later reply go through the provider limit.
     faux.setResponses([
       async (context) => {
         initialStarted();
@@ -6051,7 +5647,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await slot.prompt("steer with photo", [steeredPhoto], "steer");
     releaseInitial();
     await steeringStart;
-    // Pi writes the delivered steer before its model call, so its photo is already canonical.
     expect(canonicalUserPhotos()).toHaveLength(1);
     expectWithinProviderLimit(canonicalUserPhotos());
     await slot.prompt("follow-up with photo", [followUpPhoto], "followUp");
@@ -6064,11 +5659,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(canonicalAssistantText("steering complete")).toBe(true);
     expect(canonicalAssistantText("follow-up complete")).toBe(true);
     expect(canonicalUserPhotos()).toHaveLength(2);
-    // Delivery dequeues by the queue entry's text before Pi appends the photo's hint to it.
     expect(slot.snapshot().queuedItems).toEqual([]);
 
-    // The session stays usable: a later turn with no image must reach the provider
-    // and complete, not replay the rejected photo.
     await slot.prompt("after the queued photos");
     await waitFor(() => !slot.isBusy, "the recovery turn to settle");
     expect(canonicalAssistantText("recovered complete")).toBe(true);
@@ -6098,7 +5690,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     const [, imageOnlySteer, textSteer, imageOnlyFollowUp, textFollowUp] = canonicalUserContents(slot);
     expect(canonicalUserContents(slot)).toHaveLength(5);
-    // The empty queue entry dequeues; the bounded photo's hint follows it in the text, as for a prompt.
     for (const message of [imageOnlySteer!, imageOnlyFollowUp!]) {
       expect(message[0]).toEqual({ type: "text", text: expect.stringMatching(/^\n\n\[Image: /u) });
       const photos = message.filter((part): part is ImageContent => part.type === "image");
@@ -6123,7 +5714,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await slot.prompt("steer photo", [oversizedPhoto()], "steer");
     await slot.prompt("steer text", [], "steer");
     const queued = slot.snapshot();
-    // Replacing the queue re-queues each item with its Gateway images; Pi normalizes the photo once, at delivery.
     let replaced: Awaited<ReturnType<typeof slot.replaceQueue>>;
     try {
       replaced = await slot.replaceQueue(queued.queueRevision, queued.queuedItems.map(({ id, behavior, text }) => ({ id, behavior, text })));
@@ -6134,7 +5724,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await waitFor(() => !slot.isBusy, "the rebuilt steers to deliver and the run to settle");
     await initial;
 
-    // Persisted user-message order, not a private SDK queue, proves the requested order survived the rebuild.
     const userTexts = canonicalUserContents(slot).map(message => message[0]?.type === "text" ? message[0].text : undefined);
     expect(userTexts).toEqual(["initial", expect.stringMatching(/^steer photo\n\n\[Image[^\n]*\]$/u), "steer text"]);
     const photoText = canonicalUserContents(slot)[1]!.flatMap(part => part.type === "text" ? [part.text] : []).join("\n");
@@ -6153,7 +5742,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     ]);
     const initial = slot.prompt("initial");
     await hold.started;
-    // Not a decodable PNG: Pi omits it with a hint, and the steer's text still delivers.
     const undecodable: ImageContent = { type: "image", mimeType: "image/png", data: Buffer.from("not a png").toString("base64") };
     await slot.prompt("steer with undecodable photo", [undecodable], "steer");
     expect(slot.snapshot().queuedItems.map(item => item.text)).toEqual(["steer with undecodable photo"]);
@@ -6238,8 +5826,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       await waitFor(() => slot.snapshot().extensionPresentation.semanticState.statuses["oversized-widget-callback"] === "completed", "the oversized widget callback to complete");
     } catch (cause) {
-      // A timeout alone cannot distinguish an unloaded producer from a rejected
-      // callback. Retain the owning projection, including callback diagnostics.
       throw new Error(`Oversized-widget callback did not complete: ${JSON.stringify(slot.snapshot().extensionPresentation)}`, { cause });
     }
     expect(slot.snapshot().extensionPresentation.semanticState.widgets).toEqual([]);
@@ -6285,7 +5871,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       "context-has-ui": "true", "context-mode": "rpc", "custom-deferred": "not-invoked",
     });
     expect(snapshot.extensionPresentation.semanticState.widgets).toEqual([]);
-    // A widget key is opaque: one that looks like a reserved prefix still gets its own fallback frame.
     expect(snapshot.extensionPresentation.surfaces).toHaveLength(2);
     expect(snapshot.extensionPresentation.surfaces).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "widget:ZmFjdG9yeQ", kind: "widget", placement: "aboveEditor", lifecycle: "retained", focused: false, inputMode: "none" }),
@@ -6373,8 +5958,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
     await mkdir(extensionDir, { recursive: true });
-    // A sectioned extension menu: each option carries its status lines, which
-    // Pi's terminal select renders and the app shows as one row.
     await writeFile(join(extensionDir, "sectioned-menu.ts"), `export default function (pi) {
       pi.registerCommand("sectioned-menu", { handler: async (_args, ctx) => {
         const answer = await ctx.ui.select("Claude", [
@@ -6439,7 +6022,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(slot.snapshot().extensionPresentation.semanticState.statuses.late).toBeUndefined();
 
     const pending = internal.ui.context().confirm("Pending", "Retire me");
-    // Attach rejection observation before the command retires the epoch.
     const retiredPending = expect(pending).rejects.toMatchObject({ code: "cancelled" });
     await slot.prompt("/reload-host");
     await retiredPending;
@@ -6600,8 +6182,6 @@ export default function (pi) {
     await waitFor(() => !slot.isBusy, "the slot to go idle");
     const settled = slot.snapshot();
     expect(settled).toMatchObject({ phase: "idle" });
-    // Producer-hidden continuation context is model input but not ordinary
-    // transcript UI. Its canonical receipt remains available in the branch.
     expect(settled.transcript.find((item) => item.kind === "customMessage")).toBeUndefined();
     expect(settled.transcript.some((item) =>
       item.role === "user"
@@ -6772,11 +6352,6 @@ export default function (pi) {
     for (let index = 1; index < sequences.length; index += 1) {
       expect(sequences[index]).toBe(sequences[index - 1]! + 1);
     }
-    // Deterministic paused-consumer oracle: hold every ordered frame until
-    // the owner has finished the accepted prompt. This proves the complete
-    // serialized burst exceeds the 2 MiB connection budget independently of
-    // CI scheduling. A resumed consumer can then dequeue the same frames in
-    // order; no frame is silently removed by this fixture.
     const pausedQueue = events.slice(before).map((event) => Buffer.byteLength(JSON.stringify({
       type: "event", topic: event.topic, sessionId: slot.id, payload: event.payload,
     })));
@@ -6786,8 +6361,6 @@ export default function (pi) {
     for (const bytes of pausedQueue) resumedBytes -= bytes;
     expect(resumedBytes).toBe(0);
     expect(slot.snapshot().transcript.some((item) => item.kind === "message" && item.presentationId === receipt.operationId)).toBe(true);
-    // The owner emits complete snapshots for distinct lifecycle revisions; no
-    // safe frame can be subtracted here without a receiver rebaseline contract.
     expect(snapshots.every((event) => event.payload.sessionId === slot.id)).toBe(true);
   });
 
@@ -6799,10 +6372,6 @@ export default function (pi) {
     process.env.PI_CODING_AGENT_DIR = agentDir;
     const content = "Report line 🦌\\n".repeat(3_000);
     const path = join(cwd, "report.txt");
-    // The write's 51 KB of arguments are what the live frame has to survive, so
-    // they stay; the chunk size only keeps the provider's per-chunk timer yield
-    // from spending seconds of wall clock (3,188 chunks at 100k tokens/s) on a
-    // case that asserts nothing about pacing.
     const faux = fauxProvider({ provider: "tron-large-streamed-write", tokensPerSecond: 100_000, tokenSize: { min: 32, max: 32 } });
     faux.setResponses([
       fauxAssistantMessage([
@@ -6831,7 +6400,6 @@ export default function (pi) {
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     currentSlot = slot;
-    // A test that reads published progress frames has to be a subscriber (G-3a).
     subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -6871,9 +6439,6 @@ export default function (pi) {
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
-    // Deterministic 4-character chunks at 100 tokens/second stream ~240 SDK
-    // updates over ~2.4 seconds. Uncoalesced, every update would republish the
-    // cumulative message to each subscriber.
     const text = "streaming chunk ".repeat(60);
     const faux = fauxProvider({ provider: "tron-streaming-coalesce", tokensPerSecond: 100, tokenSize: { min: 1, max: 1 } });
     const createModels = async () => {
@@ -6912,13 +6477,6 @@ export default function (pi) {
     const progress = events.filter((event) => event.topic === "session.progress");
     expect(progress.length).toBeGreaterThanOrEqual(2);
 
-    // Throttle cadence: while updates keep arriving, at most one frame per
-    // 150 ms window. A frame published immediately before a snapshot is that
-    // state transition's ordering flush, and the last frame is message_end's
-    // finalized declaration; neither is paced. The window starts when the
-    // timer is armed, just before the leading frame's projection, so a slow
-    // projection shortens the measured gap; a leading edge re-firing right
-    // after each trailing flush would instead land within a few milliseconds.
     const cadence = progress.filter((event, index) => {
       if (index === progress.length - 1) return false;
       return events[events.indexOf(event) + 1]?.topic !== "session.snapshot";
@@ -6927,8 +6485,6 @@ export default function (pi) {
     for (let index = 1; index < cadence.length; index += 1) {
       expect(cadence[index]!.at - cadence[index - 1]!.at).toBeGreaterThanOrEqual(100);
     }
-    // A paced frame always carries the newest cumulative text, so frames never
-    // regress to an older message.
     const progressTextLengths = progress.map((event) => (event.payload.data?.message?.content ?? [])
       .filter((part: any) => part.type === "text")
       .reduce((length: number, part: any) => length + part.text.length, 0));
@@ -6936,14 +6492,11 @@ export default function (pi) {
       expect(progressTextLengths[index]).toBeGreaterThanOrEqual(progressTextLengths[index - 1]!);
     }
 
-    // Coalescing must never reorder or gap the sequenced event stream.
     const sequenced = events.filter((event) => typeof event.payload.eventSequence === "number");
     for (let index = 1; index < sequenced.length; index += 1) {
       expect(sequenced[index]!.payload.eventSequence).toBe(sequenced[index - 1]!.payload.eventSequence! + 1);
     }
 
-    // The last live frame carries the complete cumulative message and the
-    // settled canonical transcript keeps the full text.
     const progressMessages = progress.map((event) => event.payload.data?.message).filter(Boolean);
     const lastMessage = progressMessages.at(-1)!;
     const lastText = (lastMessage.content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text).join("");
@@ -6967,10 +6520,6 @@ export default function (pi) {
     expect(transcriptText).toContain(text.trimEnd());
   });
 
-  // G-3a: the progress frame is the whole cumulative streaming message
-  // re-projected and serialized on every flush window, so an unsubscribed
-  // session must pay for none of it. The subscriber record is the slot's whole
-  // audience fact, the same one `publishSnapshot` reads.
   it("projects no streaming progress for a session with no subscriber and resumes it on subscribe", async () => {
     const root = await temporaryRoot("tron-streaming-unwatched-");
     const agentDir = join(root, "agent");
@@ -6978,9 +6527,6 @@ export default function (pi) {
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
-    // Deterministic 1-token chunks at 100 tokens/second: the first half streams
-    // with no subscriber, the second with one, and both cross several 150 ms
-    // flush windows.
     const unwatched = "unwatched chunk ".repeat(20);
     const watched = "watched chunk ".repeat(20);
     const faux = fauxProvider({ provider: "tron-streaming-unwatched", tokensPerSecond: 100, tokenSize: { min: 1, max: 1 } });
@@ -7011,8 +6557,6 @@ export default function (pi) {
     await waitFor(() => slot.snapshot().streaming !== undefined, "the streaming projection");
     await unwatchedPrompt;
     await waitFor(() => !slot.isBusy, "the slot to go idle");
-    // The response streamed to completion (its canonical message is settled),
-    // so the absent frames are the rule and not a stream that never ran.
     expect(slot.snapshot().transcript.some((item) => item.kind === "message"
       && item.role === "assistant" && item.content.some((part) => part.type === "text" && part.text.includes(unwatched.trimEnd())))).toBe(true);
     expect(events.filter((event) => event.topic === "session.progress")).toHaveLength(0);
@@ -7027,7 +6571,6 @@ export default function (pi) {
       .filter((part: any) => part.type === "text")
       .map((part: any) => part.text)
       .join("").trimEnd()).toBe(watched.trimEnd());
-    // Nothing from the unobserved stream leaks into the observed one.
     expect(JSON.stringify(frames)).not.toContain("unwatched chunk");
   });
 
@@ -7329,8 +6872,6 @@ export default function (pi) {
     vi.spyOn(internal.runtime.session, "isStreaming", "get").mockReturnValue(true);
     internal.activeOperationId = "prior-agent-operation";
     const compactingSnapshot = slot.snapshot();
-    // The Gateway queues compaction-time input itself; no Agent tool segment
-    // is live while the summary runs.
     expect(compactingSnapshot.acceptsQueuedPrompts).toBe(true);
     expect(compactingSnapshot.activeToolSegmentId).toBeUndefined();
     internal.activeOperationId = undefined;
@@ -7442,7 +6983,6 @@ export default function (pi) {
     expect(beforeSegment).toBe(toolSegmentId("operation-before-compaction"));
 
     internal.onEvent({ type: "compaction_start", reason: "threshold" });
-    // Compaction-time input is Gateway-queued, yet no Agent segment is live.
     expect(slot.snapshot()).toMatchObject({
       phase: "compacting",
       acceptsQueuedPrompts: true,
@@ -7541,8 +7081,6 @@ export default function (pi) {
       await attentionBarrier;
       return originalComplete(...args);
     });
-    // This lifecycle-only record has no public projection. Inspect private
-    // state rather than adding a production accessor for the regression.
     const slotInternals = (slot as unknown as { runTerminal: { operationObservations: Map<string, unknown> } }).runTerminal;
 
     const initial = slot.prompt("initial");
@@ -7565,8 +7103,6 @@ export default function (pi) {
     releaseInitial();
     try {
       await followUpStart;
-      // Canonical receipt ordering cannot depend on the delayed attention store:
-      // ownership transfer settles the predecessor before the next input appends.
       const entries = slot.canonicalSessionEntries();
       const completionIndex = entries.findIndex(entry => entry.type === "message"
         && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"));
@@ -7574,8 +7110,6 @@ export default function (pi) {
       const followUpIndex = entries.findIndex(entry => entry.type === "message" && entry.message.role === "user"
         && contentText(entry.message.content).includes("queued follow-up"));
       if (appendOutcome === "pre-staging append failure") expect(failed).toBe(true);
-      // Transfer ends the predecessor, not completion admission. The next
-      // canonical input must wait even when its receipt needs a bounded retry.
       expect(entries[completionIndex + 1]).toMatchObject({
         type: "custom",
         customType: INVOCATION_RECEIPT_TYPE,
@@ -7665,9 +7199,6 @@ export default function (pi) {
     await waitFor(() => slot.snapshot().phase === "running", "the initial run");
     const initialOperationId = slot.snapshot().operation?.id;
     expect(initialOperationId).toBeTruthy();
-    // The steer must arrive after the first model call has started. A steer
-    // accepted before that call is folded into its context and no steering turn
-    // runs, which is what the phase poll alone allowed under load.
     await initialStart;
     const steer = await slot.prompt("steer during foreground run", [], "steer");
     releaseInitial();
@@ -7922,8 +7453,6 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
 
     const initial = slot.prompt("initial");
-    // Steering queued before the agent sends its first request is drained into that
-    // request; wait until the request is in flight so both stay queued behind it.
     await awaitsWithin(initialStarted, "the initial request in flight");
     const queued = await slot.prompt("steer me", [], "steer", {
       text: "steer me",
@@ -8099,7 +7628,6 @@ export default function (pi) {
         && entry.data?.receiptKind === "terminal",
     )?.data).toMatchObject({ lifecycle: "failed", errorCode: "runtime-prompt-failed" });
 
-    // The synthetic foreground owner belongs only to this test fixture.
     internal.phase = "idle";
     internal.activeOperationId = undefined;
     internal.operation = undefined;
@@ -8634,13 +8162,9 @@ export default function (pi) {
       expect(faux.state.callCount).toBe(2);
       expect(fixture.events.some(({ topic, payload }) => topic === "session.snapshot"
         && payload.phase === "retrying" && payload.retry?.attempt === 1)).toBe(true);
-      // The real pinned SDK emits agent_start from agent.continue(). The
-      // attempt metadata remains until message_end; it is not waiting state.
       const resumedSnapshot = slot.snapshot();
       expect(resumedSnapshot.phase).toBe("running");
       expect(resumedSnapshot.retry).toMatchObject({ source: "agent", attempt: 1 });
-      // A fresh open uses this same authority, rather than reconstructing
-      // retry waiting from the still-present attempt metadata.
       expect((await fixture.registry.acquire(slot.id)).snapshot().phase).toBe("running");
     } finally {
       releaseResponse();
@@ -8732,8 +8256,6 @@ export default function (pi) {
     await expect(slot.navigate("target", { summarize: true })).rejects.toMatchObject({ code: "cancelled" });
     expect(slot.snapshot().operation).toBeUndefined();
     expect(slot.snapshot().retry).toBeUndefined();
-    // A snapshot is published only for a subscriber, so an empty recording would
-    // make the last assertion below pass without reading a publication at all.
     expect(snapshots.length).toBeGreaterThan(0);
     expect(snapshots.at(-1)?.operation).toBeUndefined();
   });
@@ -8826,7 +8348,6 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompt = slot.prompt("interrupt me");
-    // Stop only after the SDK admitted the run; see the failed-Stop case below.
     await agentAdmitted;
     const aborting = slot.abort("agent");
     release();
@@ -8839,9 +8360,6 @@ export default function (pi) {
   });
 
   it("joins a completed run's settlement chain before dispose resolves", async () => {
-    // agent_settled starts the completed run's settlement chain (terminal receipt,
-    // attention, marker clear) outside any operation token. Dispose must join the
-    // whole chain, or its marker clear lands after dispose (#723).
     const root = await temporaryRoot("tron-dispose-settlement-");
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -8860,7 +8378,6 @@ export default function (pi) {
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
-    // Hold only the settlement chain's terminal persistence, its first await.
     const internal = (slot as unknown as { runInvocations: { persistInvocationTerminal(...args: unknown[]): Promise<unknown> } }).runInvocations;
     const terminalize = internal.persistInvocationTerminal.bind(internal);
     let releaseTerminal!: () => void;
@@ -8913,13 +8430,9 @@ export default function (pi) {
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompt = slot.prompt("finish on its own");
-    // `isBusy` turns true at slot admission, before the SDK admits the run; a Stop
-    // in that window revokes the prompt and never reaches `session.abort`.
     await agentAdmitted;
     const session = (slot as unknown as { runtime: { session: { abort(): Promise<void> } } }).runtime.session;
     const sdkAbort = session.abort.bind(session);
-    // Inject refusal only at the SDK cancellation boundary. The Registry, Pi
-    // session/model run, event settlement, and canonical receipt I/O remain real.
     session.abort = async () => { throw new Error("abort refused"); };
     try {
       await expect(slot.abort("agent")).rejects.toThrow(/did not stop/);
@@ -9983,14 +9496,8 @@ export default function (pi) {
     };
     internal.toolMetadata.set("canonical-old", metadata);
     internal.toolStartedAtMonotonicMs.set("canonical-old", performance.now() - 1_500);
-    // The full-branch backstop removes the live row even before the lifecycle
-    // handoff reaches this slot; ownership does not depend on the bounded
-    // transcript page containing the result.
     expect(slot.snapshot().toolExecutions).toEqual([]);
     const streaming = vi.spyOn(internal.runtime.session, "isStreaming", "get").mockReturnValue(true);
-    // The handoff removes the live row immediately while preserving the
-    // metadata map for canonical enrichment. A later terminal callback cannot
-    // re-admit the exact ID.
     internal.onEvent({
       type: "message_end",
       message: {
@@ -10011,9 +9518,6 @@ export default function (pi) {
     const handoffDurationMs = (internal.toolMetadata.get("canonical-old") as { durationMs: number }).durationMs;
     expect(handoffDurationMs).toBeGreaterThanOrEqual(1_500);
     expect(internal.toolStartedAtMonotonicMs.has("canonical-old")).toBe(true);
-    // A continuation clears old-run monotonic starts before a compatibility
-    // terminal callback can arrive. The retained handoff sample must not grow
-    // to callback-arrival wall time in that ordering.
     internal.toolStartedAtMonotonicMs.delete("canonical-old");
     internal.onEvent({
       type: "tool_execution_end", toolCallId: "canonical-old", toolName: "read",
@@ -10147,8 +9651,6 @@ export default function (pi) {
     const operationId = slot.snapshot().operation?.id;
     expect(operationId).toBeDefined();
 
-    // Mobile derives this advisory kind from a snapshot. A stale `.bash`
-    // classification must not bypass the agent run or exact process owner.
     await slot.abort("bash", operationId);
     await expect(prompting).resolves.toMatchObject({ operationId });
     await waitFor(() => {
@@ -10273,9 +9775,6 @@ export default function (pi) {
         toolExecutions?: Array<{ toolCallId: string }>;
       })
       .filter((snapshot) => snapshot.phase === "running");
-    // A sibling remains authoritative while one call transfers from terminal
-    // runtime evidence to its canonical toolResult. There must be no active
-    // snapshot in which the settled call is absent from both sources.
     expect(activeSnapshots.some((snapshot) => {
       const runtimeRead = snapshot.toolExecutions?.some((tool) => tool.toolCallId === "call-read");
       const runtimeBash = snapshot.toolExecutions?.some((tool) => tool.toolCallId === "call-bash");
@@ -10336,8 +9835,6 @@ export default function (pi) {
     const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const extensions = join(cwd, ".pi", "extensions");
-    // Recursive extension setup owns its parent too; a simultaneous plain
-    // mkdir(cwd) races that creation and can fail before the journey begins.
     await Promise.all([
       mkdir(agentDir), mkdir(sessionDir), mkdir(extensions, { recursive: true }),
     ]);
@@ -10428,9 +9925,6 @@ export default function (pi) {
   });
 
   it("projects every nested call Pi records, live and after a cold reload, within one argument budget", async () => {
-    // Failure modes: the Gateway drops calls Pi kept (it projected only the
-    // first 32 of Pi's 256), so a long script's call list is cut short; or a
-    // long list of calls with large arguments makes every live frame unbounded.
     const root = await temporaryRoot("tron-nested-call-list-e2e-");
     const agentDir = join(root, "agent");
     const sessionDir = join(root, "sessions");
@@ -10451,8 +9945,6 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    // 48 small calls, then 40 calls whose ~900-byte arguments pass the
-    // per-call bound but together exceed the 32 KiB argument budget.
     const script = `for (let i = 0; i < 48; i++) await tools.test_echo({ note: "small " + i });\n`
       + `for (let i = 0; i < 40; i++) await tools.test_echo({ note: "x".repeat(900) + i });\nreturn "done";`;
     faux.setResponses([
@@ -10653,8 +10145,6 @@ export default function (pi) {
     const tools = [{ name: "echo", description: "Echo searchable fixture input", inputSchema: { type: "object", properties: { value: { type: "string" } } } }];
     await Promise.all([writeFile(stdioState, JSON.stringify({ tools })), writeFile(httpState, JSON.stringify({ tools })), writeFile(codeState, JSON.stringify({ tools })), writeFile(deferredState, JSON.stringify({ tools }))]);
     const httpProcess = spawn(process.execPath, [fixtureScript, "http", httpState, httpPortFile], { stdio: "ignore" });
-    // Registered as a test hook, not only in `finally`: a body vitest abandons
-    // at its timeout never reaches `finally`, which orphaned this server (#406).
     onTestFinished(async () => {
       if (httpProcess.exitCode !== null || httpProcess.signalCode !== null) return;
       const exited = new Promise<void>((resolve) => httpProcess.once("exit", () => resolve()));
@@ -10703,9 +10193,6 @@ export default function (pi) {
       const slot = await registry.create(cwd);
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
-      // The faux model names tools unconditionally, unlike a real model whose
-      // catalog is supplied at dispatch. Join actual asynchronous registration
-      // before issuing those calls; runtime creation alone is not MCP readiness.
       await waitFor(() => {
         const tools = (slot as any).runtime.session.getAllTools() as Array<{ name: string; exposure?: string }>;
         return ["mcp__stdio__echo", "mcp__http__echo"].every(name =>
@@ -10813,14 +10300,11 @@ export default function (pi) {
       await waitFor(() => existsSync(pidFile) && existsSync(childPidFile), "the starting MCP process and child");
       serverPid = Number(await readFile(pidFile, "utf8"));
       childPid = Number(await readFile(childPidFile, "utf8"));
-      // Prove disposal races a live initialization, not an already timed-out server.
       expect(existsSync(readyPath)).toBe(false);
       process.kill(serverPid, 0);
       process.kill(childPid, 0);
       await registry.dispose();
       registries.splice(registries.indexOf(registry), 1);
-      // A killed grandchild can remain a zombie until the OS reaps it. It is
-      // terminal and cannot write; kill(pid, 0) alone mistakes it for live work.
       try {
         await waitFor(() => Object.values(states()).every(terminal), "the starting MCP process group to exit after runtime disposal");
         expect(existsSync(readyPath)).toBe(false);
@@ -10831,8 +10315,6 @@ export default function (pi) {
     } finally {
       if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
-      // Clean both exact fixture PIDs before any retry of the runtime shutdown:
-      // a failing shutdown/negative control must not strand its child at timeout.
       if (serverPid === undefined && existsSync(pidFile)) serverPid = Number(await readFile(pidFile, "utf8"));
       if (childPid === undefined && existsSync(childPidFile)) childPid = Number(await readFile(childPidFile, "utf8"));
       for (const pid of [serverPid, childPid]) {
@@ -11651,13 +11133,10 @@ export default function (pi) {
       expect.soft(slot.isEvictionProtected).toBe(false);
       expect((await registry.ownedOperationRecoveryEvidence(slot.id, run.operationId!)).marker).toBeUndefined();
 
-      // The same installed command remains available to an explicit user.
       await slot.prompt(action.text);
       expect(await readFile(sentinel, "utf8")).toBe("executed");
       expect(work.size).toBe(0);
     } finally {
-      // A broken admission still belongs only to this fixture: release its
-      // returned handle before disposing the synthetic runtime and files.
       await handle?.acknowledgeTerminal?.();
       await registry.dispose();
       registries.splice(registries.indexOf(registry), 1);
@@ -11877,16 +11356,8 @@ export default function (pi) {
     expect(workspace).toHaveBeenCalledTimes(1);
   });
 
-  // G-1c/review minor 2: the close commit point queues the row, so a reopen can
-  // land between a slot leaving `slots` and its row reaching the index. The row
-  // build is held open here to make that window deterministic: membership must
-  // wait for the queued change instead of answering not_found, because a session
-  // must never become unopenable because its runtime closed.
   it("reopens a session whose runtime closed before its index row landed", async () => {
     const fixture = await coldFixture("close-before-row");
-    // Every row build is held open, so the persisted session below has no index
-    // row at the moment its slot closes. That makes the window the intermittent
-    // merge-gate failure landed in deterministic.
     const build = CatalogMetadataIndex.prototype.entryFromSummary;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -11902,8 +11373,6 @@ export default function (pi) {
       const manager = (created as unknown as { sessionManager: SessionManager }).sessionManager;
       manager.appendMessage(fauxAssistantMessage("persisted before extension close"));
       const persisted = (created as unknown as { session: () => void });
-      // `publishSnapshot` is what a real close path observes as the persisted
-      // commit; the row it queues cannot land while the build is held.
       created.publishSnapshot();
       await waitFor(() => created.persistedSessionFile !== undefined, "the persisted session file");
       await waitFor(() => (fixture.registry as unknown as { latestSummaries: Map<string, unknown> }).latestSummaries.has(created.id), "the latest summary for the created session");
@@ -11912,8 +11381,6 @@ export default function (pi) {
       (created as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
       await waitFor(() => created.isDisposed
         && !(fixture.registry as unknown as { slots: Map<string, unknown> }).slots.has(created.id), "the disposed session to leave the slot map");
-      // The reopen lands in that window: it must wait for the queued row rather
-      // than report the session as gone.
       const reopening = fixture.registry.acquire(created.id);
       await new Promise((resolve) => setTimeout(resolve, 25));
       release();
@@ -12116,11 +11583,6 @@ export default function (pi) {
 
     const slot = await registry.create(cwd);
     const resources = await slot.resources() as any;
-    // The inventory is the complete display-safe registration view for every
-    // loaded extension: this project extension plus Tron's own inline
-    // capabilities. Assert the accounting contract rather than a fixed count,
-    // which changes whenever Tron adds or removes a first-party capability;
-    // the exact per-extension rows are asserted below.
     const inventory = resources.hookInventory;
     for (const key of ["extensions", "handlerEvents", "loadErrors"] as const) {
       expect(inventory[key].retained + inventory[key].omitted).toBe(inventory[key].total);
@@ -12170,8 +11632,6 @@ export default function (pi) {
     expect(resourceEvents).toContain("session.resourcesChanged");
   });
 
-  /** A real runtime slot whose project, user and settings-listed package
-   * resources exercise every distribution branch, with pi-subagents absent. */
   async function distributionFixture(): Promise<any> {
     const root = await temporaryRoot("tron-resource-distribution-");
     const agentDir = join(root, "agent");
@@ -12185,8 +11645,6 @@ export default function (pi) {
       mkdir(join(pi, "skills", "review"), { recursive: true }),
       mkdir(join(packageRoot, "extensions"), { recursive: true }),
     ]);
-    // A settings-listed local package resolves with Pi's `package` origin, the
-    // same shape an npm-installed tool carries, without installing anything.
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: [packageRoot] }));
     await Promise.all([
       writeFile(join(agentDir, "skills", "user-skill", "SKILL.md"), `---\nname: user-skill\ndescription: A user skill\n---\nUse it.\n`),
@@ -12216,13 +11674,9 @@ export default function (pi) {
     const resources = await slot.resources() as any;
     const tool = (name: string) => resources.tools.find((candidate: any) => candidate.name === name);
 
-    // External: a settings-listed package's tool carries Pi's package origin.
     expect(tool("package_echo")).toMatchObject({ distribution: "external" });
-    // Module: an inline Tron extension factory tool.
     expect(tool("ask_user")).toMatchObject({ distribution: "module" });
-    // Local: a project extension's tool.
     expect(tool("project_echo")).toMatchObject({ distribution: "local" });
-    // Pi built-ins carry no tag at all.
     expect(Object.prototype.hasOwnProperty.call(tool("read"), "distribution")).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(tool("bash"), "distribution")).toBe(false);
 
@@ -12234,7 +11688,6 @@ export default function (pi) {
       expect.objectContaining({ name: "review", scope: "project", distribution: "local" }),
     ]));
 
-    // Commands keep Pi's resourceOrigin and gain the separate distribution tag.
     const promptCommand = resources.commands.find((candidate: any) => candidate.source === "prompt" && candidate.name === "review");
     expect(promptCommand).toMatchObject({ resourceOrigin: "top-level", distribution: "local" });
     const skillCommand = resources.commands.find((candidate: any) => candidate.source === "skill" && candidate.name === "skill:user-skill");
@@ -12244,7 +11697,6 @@ export default function (pi) {
   it("fails soft for subagents when pi-subagents is absent", async () => {
     const slot = await distributionFixture();
     const resources = await slot.resources() as any;
-    // Discovery must not take down the whole response.
     expect(resources.subagents).toEqual([]);
     expect(typeof resources.subagentDiagnostics).toBe("string");
   });
@@ -12297,8 +11749,6 @@ export default function (pi) {
         && entry.data?.receiptKind === "start");
       expect(firstReceipt).toBeDefined();
 
-      // Runtime teardown/reopen exercises the canonical persistence boundary,
-      // not just the old slot's in-memory SessionManager branch.
       await registry.dispose();
       registries.splice(registries.indexOf(registry), 1);
       registry = await createRegistry();
@@ -12374,9 +11824,6 @@ export default function (pi) {
       : [];
     const assertAbsent = vi.spyOn(internals.attention, "assertAbsent")
       .mockRejectedValueOnce(new Error("injected attention prepare failure"));
-    // Retaining the assistant makes Pi materialize the candidate fork before
-    // registry rekey admission. A rejected pre-commit hook must roll that file
-    // back rather than leaking an orphan catalog row.
     await expect(slot.fork(assistantEntry!.id, "at")).rejects.toThrow("injected attention prepare failure");
     expect(slot.id).toBe(original);
     expect((await registry.list()).map((session) => session.id)).toEqual([original]);
@@ -12403,8 +11850,6 @@ export default function (pi) {
     });
     expect((await registry.acquire(fork.sessionId)).id).toBe(fork.sessionId);
 
-    // Pi 0.99 materializes a fork as soon as its retained first user entry is
-    // appended, so catalog identity now comes from the canonical file.
     expect(slot.persistedSessionFile).toBeDefined();
     const forkHeader = JSON.parse((await readFile(slot.persistedSessionFile!, "utf8")).split("\n", 1)[0]!) as {
       parentSession?: string;
@@ -12425,17 +11870,12 @@ export default function (pi) {
       messageCount: 1,
     });
 
-    // The retained prompt-only fork must carry one boundary through both
-    // snapshot/page seams after Pi materializes its first user entry.
     const prePromptBoundary = slot.snapshot().forkBoundary;
     expect(prePromptBoundary).toMatchObject({
       kind: "sessionFork", inheritedAnchorId: userEntry!.id, gapOrdinal: expect.any(Number),
     });
     expect(slot.transcriptPage().forkBoundary).toEqual(prePromptBoundary);
 
-    // The first child completion materializes Pi's reserved JSONL. Catalog
-    // authority must cross from the live parent ID to the canonical header/path
-    // without losing identity, classification, or retained history.
     faux.setResponses([fauxAssistantMessage("continued")]);
     await slot.prompt("continue here");
     await waitFor(() => !slot.isBusy, "the slot to go idle");
@@ -12489,8 +11929,6 @@ export default function (pi) {
     const { manager, registry } = await coldFixture("notification-rekey", { notifications });
     const sessionId = manager.getSessionId();
     const slot = await registry.acquire(sessionId);
-    // The private hook is the only rekey driver that does not itself need a
-    // provider run; every other path is covered by its own focused case.
     const hooks = (registry as unknown as { hooks: () => {
       rekey: (previousId: string, nextId: string, slot: unknown, disposition: string, commit: () => void) => Promise<void>;
     } }).hooks();
@@ -12498,8 +11936,6 @@ export default function (pi) {
     await hooks.rekey(sessionId, "migrated-session", slot, "migrate", () => { commits += 1; });
     expect(commits).toBe(1);
     expect(rekeys).toEqual([[sessionId, "migrated-session"]]);
-    // A reset rebind (a fork or a new session) starts a distinct identity: the
-    // previous identity keeps the alerts it produced.
     await hooks.rekey("migrated-session", "reset-session", slot, "reset", () => { commits += 1; });
     expect(commits).toBe(2);
     expect(rekeys).toEqual([[sessionId, "migrated-session"]]);
@@ -12574,8 +12010,6 @@ export default function (pi) {
       if (!bash || bash.kind !== "bash") throw new Error("expected canonical Bash projection");
       expect(bash.output).toContain(`PI_SESSION_ID=${manager.getSessionId()}`);
       for (const name of names) expect(bash.output).not.toContain(`${name}=`);
-      // PATH may legitimately locate Pi's managed agent tools under the live home;
-      // no other variable may name a path inside a Tron home.
       const nonPath = bash.output.split("\n").filter((line) => !line.startsWith("PATH=")).join("\n");
       expect(nonPath).not.toContain(`${homedir()}/.tron/`);
       expect(nonPath).not.toContain(`${homedir()}/.tron-dev/`);
@@ -12632,8 +12066,6 @@ export default function (pi) {
   });
 
   it("force-invalidates an extension runtime whose idle-eviction shutdown never settles", async () => {
-    // The registry's own option, so the test drives the production failure path;
-    // a throwing recorder must not become another disposal barrier.
     const timedOut = vi.fn(() => { throw new Error("instrumentation failed"); });
     const { manager, registry } = await coldFixture("idle-eviction-shutdown-timeout", { runtimeDisposeTimeout: timedOut });
     const sessionId = manager.getSessionId();
@@ -12695,10 +12127,6 @@ export default function (pi) {
     expect(registry.isSubscribed("race-client", sessionId)).toBe(true);
   });
 
-  /** Every counter the resource sampler takes from the registry, as the registry
-   * would report them; one object per fixture keeps the recorder shape in one
-   * place. `recordSnapshotBuild` is not here: it is the transport's own method on
-   * `ResourceSampler`, because only the transport counts recipient sockets. */
   function resourceRecorder() {
     return {
       recordTopicFrame: vi.fn(),
@@ -12709,8 +12137,6 @@ export default function (pi) {
     };
   }
 
-  // The registry is the only owner of live runtimes and of the subscriber set,
-  // so it has to answer the resource sample and count its own transitions.
   it("answers the resource sample with live runtimes, their audience and their transitions", async () => {
     const recorded = resourceRecorder();
     const fixture = await coldFixture("resource-inventory", { resources: recorded });
@@ -12730,9 +12156,6 @@ export default function (pi) {
     expect(inventory[0]).toMatchObject({ sessionId: slot.id, subscribers: 1 });
     expect((inventory[0] as { bytes: number }).bytes).toBeGreaterThan(0);
 
-    // The subscriber set is the slot's only audience fact: with nobody left to
-    // receive a snapshot a state change still reaches the dashboard as a summary
-    // and projects no transcript at all.
     fixture.registry.unsubscribe("phone", slot.id);
     const published = fixture.events.length;
     const summaries = fixture.summaries.length;
@@ -12746,8 +12169,6 @@ export default function (pi) {
     expect(recorded.recordRuntimeEvicted).toHaveBeenCalledTimes(1);
   });
 
-  /** One collected `runtime.loaded`/`runtime.evicted` record, as the registry's
-   * log seam receives it. */
   function runtimeLifecycleRecords() {
     const records: RuntimeLifecycleRecord[] = [];
     return { records, record: (record: RuntimeLifecycleRecord) => records.push(record) };
@@ -12755,10 +12176,6 @@ export default function (pi) {
 
   const mebibyte = 1_024 * 1_024;
 
-  /** Grows a canonical transcript to a real `bytes` size with a sparse truncate
-   * and leaves it on a complete line, as a written transcript is: the header
-   * reader treats a file whose final byte is not a newline as an append still in
-   * progress. */
   async function resizeSyntheticTranscript(path: string, bytes: number): Promise<void> {
     if (!syntheticTranscriptSizes.has(path)) {
       syntheticTranscriptSizes.set(path, (await fsPromises.stat(path)).size);
@@ -12771,13 +12188,6 @@ export default function (pi) {
     await appendFile(path, "\n");
   }
 
-  // Failure mode: the smallest idle runtime is retired when the largest would
-  // have been enough, so extra sessions lose their state. The small session is
-  // acquired first, so it is also the least recently touched and first in
-  // `slots` order: a smallest-first, iteration-order or least-recently-used pass
-  // all retire it, and only largest-first retires the large one. The sizes are
-  // real (a sparse `truncate` of the live transcript), so the pass reads what
-  // production supplies.
   it("retires the largest idle runtime first when the byte budget cannot hold an opening session", async () => {
     const fixture = await coldFixture("byte-budget-largest-first");
     const small = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
@@ -12788,25 +12198,15 @@ export default function (pi) {
     await fixture.registry.catalog("all");
     const smallSlot = await fixture.registry.acquire(small.getSessionId());
     const largeSlot = await fixture.registry.acquire(large.getSessionId());
-    // A live runtime grown to two budgets' worth of estimated heap, as a long run
-    // does; the opening session starts near empty, so only retiring the large one
-    // fits. A sparse truncate costs no disk.
     await growTranscript(largeSlot.sessionFile!, 800 * mebibyte);
 
     const opened = await fixture.registry.acquire(fixture.manager.getSessionId());
     expect(largeSlot.isDisposed).toBe(true);
     expect(smallSlot.isDisposed).toBe(false);
-    // Exactly one runtime was retired: the largest one reclaims enough on its own.
     const live = await fixture.registry.resourceInventory();
     expect(live.map((entry) => entry.sessionId).sort()).toEqual([opened.id, smallSlot.id].sort());
   });
 
-  // Failure mode: two opens of the same session at once charge that session
-  // twice — once as the start already reserved for it and again as the opening
-  // charge — so the pass retires idle runtimes for room the first open had
-  // already taken, and the second open then only waits for it. The second pass is
-  // held until the first open has reserved and resumed once it has read its
-  // inventory, which is the window that double charge lived in.
   it("does not retire idle runtimes for a second open of the session the byte budget already charged", async () => {
     const fixture = await coldFixture("byte-budget-same-session");
     const idle = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
@@ -12816,10 +12216,6 @@ export default function (pi) {
     await settleCatalog(fixture.registry);
     await fixture.registry.catalog("all");
     const idleSlot = await fixture.registry.acquire(idle.getSessionId());
-    // 470 MiB is 1,410 MiB of estimated heap and the 30 MiB target is 90 MiB, so
-    // the two fit together (1,500 MiB of the 1,536 MiB budget); charging the
-    // target's reservation and its opening charge (1,590 MiB) is what would
-    // retire the idle runtime.
     await growTranscript(idleSlot.sessionFile!, 470 * mebibyte);
     await growTranscript(target.getSessionFile()!, 30 * mebibyte);
 
@@ -12830,8 +12226,6 @@ export default function (pi) {
     const openResumed = new Promise<void>((resolve) => { resumeOpen = resolve; });
     const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
     vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
-      // This is the first open, past its reservation and before its publication,
-      // so the reservation stays held across the second open's byte pass.
       targetReserved();
       await openResumed;
       return await realCreate(...args);
@@ -12853,11 +12247,6 @@ export default function (pi) {
     expect(idleSlot.isDisposed).toBe(false);
   });
 
-  // Failure mode: an opening session whose bytes fit nowhere is refused on the
-  // budget, so a loaded session it cannot reclaim makes every later open of a
-  // non-empty transcript unopenable. The byte budget is eviction pressure, not a
-  // gate: the admission is served, its load record names the over-budget state,
-  // and the idle runtime that could not make it fit is not retired for nothing.
   it("admits an opening session the byte budget cannot fit and names the over-budget load", async () => {
     const lifecycle = runtimeLifecycleRecords();
     const fixture = await coldFixture("byte-budget-over-budget", { runtimeLifecycleRecord: lifecycle.record });
@@ -12876,11 +12265,6 @@ export default function (pi) {
     fixture.registry.subscribe("phone", firstSlot.id);
     fixture.registry.subscribe("phone", secondSlot.id);
     const idleSlot = await fixture.registry.acquire(idle.getSessionId());
-    // 300 + 250 MiB of protected transcript is 1,650 MiB of estimated heap: over
-    // the 1,536 MiB budget with nothing else loaded, so no retirement can bring
-    // this admission under it. The 15 MiB idle runtime is the only retireable
-    // candidate and is smaller than that excess, so the pass retires nothing and
-    // serves the (tiny) waiting session over budget.
     await growTranscript(firstSlot.sessionFile!, 300 * mebibyte);
     await growTranscript(secondSlot.sessionFile!, 250 * mebibyte);
     await growTranscript(idleSlot.sessionFile!, 5 * mebibyte);
@@ -12901,9 +12285,6 @@ export default function (pi) {
     expect(loaded.at(-1)!.transcriptBytes).toBeGreaterThan(0);
   });
 
-  // The byte budget charges a session that has not written a transcript yet
-  // nothing, and creating one is not gated by it: the protected set here is over
-  // the budget on its own, so this is the worst case for that decision.
   it("admits a session with no transcript yet beside a protected set already over the budget", async () => {
     const fixture = await coldFixture("byte-budget-zero-charge");
     const protectedSession = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
@@ -12912,7 +12293,6 @@ export default function (pi) {
     await fixture.registry.catalog("all");
     const protectedSlot = await fixture.registry.acquire(protectedSession.getSessionId());
     fixture.registry.subscribe("phone", protectedSlot.id);
-    // 800 MiB is 2,400 MiB of estimated heap: over the whole budget on its own.
     await growTranscript(protectedSlot.sessionFile!, 800 * mebibyte);
 
     const created = await fixture.registry.create(fixture.cwd);
@@ -12920,11 +12300,6 @@ export default function (pi) {
     expect((await fixture.registry.resourceInventory()).map((entry) => entry.sessionId)).toContain(created.id);
   });
 
-  // Failure mode: a session larger than the whole budget retires every idle
-  // runtime and can then never open, pure collateral damage with no retry that
-  // can succeed. 600 MiB is 1,800 MiB of estimated heap, over the 1,536 MiB
-  // budget on its own, so the pass must retire nothing for it; the refusal below
-  // is the append fence, not the budget.
   it("does not retire another session for a runtime larger than the whole byte budget", async () => {
     const fixture = await coldFixture("byte-budget-oversize");
     const idle = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
@@ -12934,9 +12309,6 @@ export default function (pi) {
     await settleCatalog(fixture.registry);
     await fixture.registry.catalog("all");
     const idleSlot = await fixture.registry.acquire(idle.getSessionId());
-    // Sparse, so the file is 600 MiB without writing it. The admission stops on
-    // the append fence this tail trips, which is as far as a fixture can carry an
-    // oversize session without a real 512 MiB+ parseable transcript.
     await resizeSyntheticTranscript(oversize.getSessionFile()!, 600 * mebibyte);
 
     await expect(fixture.registry.acquire(oversize.getSessionId())).rejects.toMatchObject({
@@ -12946,10 +12318,6 @@ export default function (pi) {
     expect(idleSlot.isDisposed).toBe(false);
   });
 
-  // Failure mode: the transitions are counted but never named, so an incident
-  // cannot tell which session's runtime was loaded or evicted, what the byte
-  // budget charged it, or why it went away. The eviction names the bytes the pass
-  // itself measured, not the charge the load published with.
   it("records runtime.loaded and runtime.evicted with the reason and the bytes the budget charged", async () => {
     const lifecycle = runtimeLifecycleRecords();
     const fixture = await coldFixture("runtime-lifecycle-records", { runtimeLifecycleRecord: lifecycle.record });
@@ -12958,9 +12326,6 @@ export default function (pi) {
     await settleCatalog(fixture.registry);
     await fixture.registry.catalog("all");
     const idleSlot = await fixture.registry.acquire(idle.getSessionId());
-    // The runtime grows from a few KB to 800 MiB (2,400 MiB of estimated heap)
-    // after it was published, so an eviction record that carried the load's charge
-    // would name a few KB.
     await growTranscript(idleSlot.sessionFile!, 800 * mebibyte);
 
     const loaded = lifecycle.records.find((record) => record.event === "runtime.loaded");
@@ -12975,9 +12340,6 @@ export default function (pi) {
     expect(evicted!.estimatedHeapBytes).toBe(800 * mebibyte * LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR);
   });
 
-  // Failure mode: a slot disposed outside the registry is recorded as the
-  // extension-requested close this path never observed, so the reason points at
-  // the wrong owner and hides that the disposal happened earlier.
   it("records a slot disposed outside the registry as disposed, not closed", async () => {
     const lifecycle = runtimeLifecycleRecords();
     const fixture = await coldFixture("runtime-eviction-disposed", { runtimeLifecycleRecord: lifecycle.record });
@@ -12993,11 +12355,6 @@ export default function (pi) {
     });
   });
 
-  // The transport owns subscription lifetime: it subscribes a client before
-  // installing that client's synchronization barrier and unsubscribes it on
-  // close, revoke or session close. An extension-requested shutdown is not an
-  // unsubscribe, so a client still watching the session keeps its audience and
-  // the re-acquired slot publishes snapshots to it again.
   it("keeps a transported subscription across a closed slot and snapshots the re-acquired session", async () => {
     const fixture = await coldFixture("closed-slot-subscription");
     const sessionId = fixture.manager.getSessionId();
@@ -13005,8 +12362,6 @@ export default function (pi) {
     fixture.registry.subscribe("phone", sessionId);
 
     (slot as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
-    // `session.closed` is emitted in the same synchronous block as the slot's
-    // close hook, so observing it means the registry's close handling has run.
     await waitFor(() => fixture.events.some(({ topic }) => topic === "session.closed"), "the session closed event");
     await waitFor(() => slot.isDisposed, "the slot disposal");
     expect(fixture.registry.isSubscribed("phone", sessionId)).toBe(true);
@@ -13017,9 +12372,6 @@ export default function (pi) {
     expect(fixture.events.slice(published).some(({ topic }) => topic === "session.snapshot")).toBe(true);
   });
 
-  // A start that is retired before the registry publishes it was never a live
-  // runtime: counting its disposal as an eviction would let `runtimesEvicted`
-  // exceed loads and write an info record for a retried `catalog_changed` open.
   it("does not count an eviction for a start that was never published", async () => {
     const recorded = resourceRecorder();
     const fixture = await coldFixture("unpublished-start", { resources: recorded });
@@ -13034,14 +12386,9 @@ export default function (pi) {
     expect(recorded.recordRuntimeEvicted).not.toHaveBeenCalled();
   });
 
-  // G-1c: the request path joins the owner's cut, so the record shows no
-  // request-path walk at all while the owner's own walks stay background work.
   it("counts no request-path walk while the reader joins the owner's cut", async () => {
     const recorded = resourceRecorder();
     const fixture = await coldFixture("request-path-walk", { resources: recorded });
-    // Settle the catalog owner before the request: its own background reconcile
-    // must not interleave and be misattributed as request-path work, so every
-    // walk in the request's window is the request's own.
     await settleCatalog(fixture.registry);
     const backgroundWalks = recorded.recordCatalogWalk.mock.calls.length;
 
@@ -13051,23 +12398,17 @@ export default function (pi) {
     expect(requestWalks).toEqual([]);
     expect(recorded.recordCatalogWalk.mock.calls.every((call) => call[2] === false)).toBe(true);
 
-    // The same walk with no request waiting on it is background work.
     const evidenceSeam = fixture.registry as unknown as { catalogStructureEvidence: () => Promise<unknown> };
     await evidenceSeam.catalogStructureEvidence();
     expect(recorded.recordCatalogWalk).toHaveBeenLastCalledWith(expect.any(Number), expect.any(Number), false);
   });
 
-  // G-1b: a writer the Gateway does not own (a subagent child, a copied file)
-  // reaches its catalog row through the folder watcher, so external writers add
-  // no request-path walks to the criterion this file measures above.
   it("publishes an external append to a catalog row without a walk", async () => {
     const recorded = resourceRecorder();
     let watchRequest: SessionCatalogWatchRequest | undefined;
     const fixture = await coldFixture("external-append", {
       resources: recorded,
       beforeInitialize: async (_sessionFile, registry) => {
-        // Inject at the catalog's existing backend seam before it starts; the
-        // registry keeps its production discovery/index/row publication owners.
         (catalogOwner(registry) as unknown as { watchCatalog: SessionCatalogOptions["watchCatalog"] }).watchCatalog = (request) => {
           watchRequest = request;
           return { close: () => {} };
@@ -13086,8 +12427,6 @@ export default function (pi) {
     })}\n`);
     expect(watchRequest?.root).toBe(await realpath(join(fixture.agentDir, "sessions")));
     const deliverHint = async (): Promise<void> => {
-      // Advance only the owner's debounce. No FSEvents delivery or latency is
-      // part of the oracle; the serial lane is the row-publication barrier.
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       try {
         watchRequest!.onEvent(relative(watchRequest!.root, child));
@@ -13107,15 +12446,11 @@ export default function (pi) {
     })}\n`);
     await deliverHint();
 
-    // The watcher's hint, not a walk, publishes the canonical append facts.
     expect(catalog.row(child)?.messageCount).toBe(1);
     expect(catalog.row(child)?.size).toBe((await fsPromises.stat(child)).size);
     expect(recorded.recordCatalogWalk.mock.calls.length).toBe(walksBeforeAppend);
   });
 
-  // Failure mode (G-12): a cold runtime load that queues behind the concurrency
-  // cap keeps loading for a client that already left, so a transcript nobody
-  // waits for is parsed into the live set.
   it("queues cold runtime loads and drops a queued one whose client disconnects", async () => {
     const fixture = await coldFixture("cold-load-queue");
     const directory = dirname(fixture.sessionFile);
@@ -13125,8 +12460,6 @@ export default function (pi) {
     abandonedSession.appendMessage(fauxAssistantMessage("abandoned cold load"));
     await settleCatalog(fixture.registry);
     const loads: string[] = [];
-    // The loader is held to queue real cold loads, so no earlier case's spy on
-    // `RuntimeSlot.create` may still be installed.
     vi.restoreAllMocks();
     const releaseLoads: Array<() => void> = [];
     const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
@@ -13141,22 +12474,15 @@ export default function (pi) {
     await waitFor(() => loads.length === 2, "the second catalog load");
     const controller = new AbortController();
     const abandoned = fixture.registry.acquire(abandonedSession.getSessionId(), controller.signal);
-    // The third waits for one of the two places instead of loading beside them.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(loads).toHaveLength(2);
     controller.abort(new Error("the client left"));
     await expect(abandoned).rejects.toThrow("the client left");
     for (const release of releaseLoads.splice(0)) release();
     await Promise.all([first, second]);
-    // Which of two concurrently admitted loads reaches the loader first is I/O
-    // order, not a contract; what this case owns is that only those two started.
     expect([...loads].sort()).toEqual([fixture.manager.getSessionId(), queued.getSessionId()].sort());
   });
 
-  // Failure mode (G-12): one requester leaving ends the shared cold load for
-  // everyone waiting on it, so a phone that reconnected on a new socket while the
-  // retired connection's open was still queued gets a non-busy `cancelled` and
-  // does not retry (`C-6`).
   it("keeps a queued cold load for the waiters that are still there when one leaves", async () => {
     const fixture = await coldFixture("cold-load-shared");
     const directory = dirname(fixture.sessionFile);
@@ -13178,8 +12504,6 @@ export default function (pi) {
     });
     const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50));
 
-    // Two loads hold both places, so the shared session's start queues behind
-    // them and the waiters of that one start are what this case counts.
     const held = [fixture.registry.acquire(fixture.manager.getSessionId()), fixture.registry.acquire(filler.getSessionId())];
     await waitFor(() => loads.length === 2, "the second catalog load");
     const firstLeaving = new AbortController();
@@ -13189,21 +12513,14 @@ export default function (pi) {
     await tick();
     expect(loads).toHaveLength(2);
 
-    // The first requester's connection retires while the second still waits: the
-    // queued load is still the second requester's answer, so it stays queued.
     firstLeaving.abort(new Error("the first connection left"));
     await tick();
     expect(loads).toHaveLength(2);
 
-    // The last waiter leaves: now the queued load has no audience and is dropped
-    // before it parses anything.
     secondLeaving.abort(new Error("the second connection left"));
     await expect(secondWaiter).rejects.toThrow("the second connection left");
     await expect(firstWaiter).rejects.toThrow("the second connection left");
 
-    // The place a held load releases is handed to the waiter queued for it, and
-    // the gate still counts the place the other held load occupies: a later
-    // arrival queues rather than loading beside it.
     const thirdLeaving = new AbortController();
     const thirdWaiter = fixture.registry.acquire(shared.getSessionId(), thirdLeaving.signal);
     await tick();
@@ -13221,9 +12538,6 @@ export default function (pi) {
     }
     for (const release of releaseLoads.splice(0)) release();
     await Promise.all([...held, thirdWaiter, otherWaiter]);
-    // The two held loads started first in whatever order the loader reached
-    // them; the queued one is third because the place it waited for was handed
-    // to it, and the fourth followed it.
     expect([...loads].sort()).toEqual([
       fixture.manager.getSessionId(),
       filler.getSessionId(),
@@ -13232,20 +12546,11 @@ export default function (pi) {
     ].sort());
   });
 
-  // Failure mode (G-12): heap pressure retires a runtime that has an audience, or
-  // the refusal it should make instead never happens and the load takes the
-  // process to the limit.
   it("reclaims the largest idle runtime under heap pressure and refuses a cold load when only a protected one is left", async () => {
-    // The fixture loads real runtimes; an earlier case's spy on the loader would
-    // never settle for this one.
     vi.restoreAllMocks();
     const mebibyte = 1_024 * 1_024;
     const records: RuntimeLifecycleRecord[] = [];
     const sheds: CapacityShedRecord[] = [];
-    // A sample that never changes on eviction, like the process's own:
-    // `heapUsed` does not fall until V8 collects, so only the registry's
-    // accounting of what it retired can end the pass. A sample that dropped on
-    // eviction hid the pass retiring every idle runtime for one load.
     let heapUsedBytes = 100 * mebibyte;
     const fixture = await coldFixture("heap-pressure", {
       heapSample: () => ({ usedBytes: heapUsedBytes, limitBytes: 1_000 * mebibyte }),
@@ -13263,21 +12568,14 @@ export default function (pi) {
     const protectedSlot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const largeSlot = await fixture.registry.acquire(large.getSessionId());
     const survivorSlot = await fixture.registry.acquire(survivor.getSessionId());
-    // The protected runtime is the one that must survive every pass.
     subscribeAudience(fixture.registry, fixture.manager.getSessionId());
     await growTranscript(protectedSlot.sessionFile!, 4 * mebibyte);
     await growTranscript(largeSlot.sessionFile!, 100 * mebibyte);
     await growTranscript(survivorSlot.sessionFile!, 10 * mebibyte);
 
-    // 900 MiB of 1,000, held there: the largest idle runtime's own 300 MiB
-    // estimate (`LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` x 100 MiB) takes the
-    // projection under `HEAP_EVICTION_SHARE`, so the pass stops after one
-    // retirement — the second idle runtime keeps its state — and admits.
     heapUsedBytes = 900 * mebibyte;
     const admitted = await fixture.registry.acquire(target.getSessionId());
     expect(admitted.id).toBe(target.getSessionId());
-    // The largest idle runtime gave the memory back; the protected one and the
-    // runtime the pass no longer needed did not.
     expect(records.filter((record) => record.event === "runtime.evicted").map((record) => [record.sessionId, record.reason])).toEqual([
       [large.getSessionId(), "heap"],
     ]);
@@ -13285,9 +12583,6 @@ export default function (pi) {
     expect(survivorSlot.isDisposed).toBe(false);
     expect(protectedSlot.isDisposed).toBe(false);
 
-    // The one idle runtime left cannot take the projection under
-    // `HEAP_REFUSAL_SHARE` and the protected runtime is never retired, so the
-    // load is refused instead of pushing the process to its limit.
     const another = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000012" });
     another.appendMessage(fauxAssistantMessage("second refused cold load"));
     await settleCatalog(fixture.registry);
@@ -13298,8 +12593,6 @@ export default function (pi) {
     expect(records.filter((record) => record.event === "runtime.evicted").map((record) => [record.sessionId, record.reason])).toEqual([
       [large.getSessionId(), "heap"],
       [survivor.getSessionId(), "heap"],
-      // The runtime the first load published is idle now too, and reclaiming it
-      // still leaves the projection above the refusal share.
       [target.getSessionId(), "heap"],
     ]);
     expect(sheds).toEqual([{

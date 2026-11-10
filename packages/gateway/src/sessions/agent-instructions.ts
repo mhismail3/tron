@@ -1,10 +1,5 @@
 import { basename } from "node:path";
 
-/** Where one piece of the assembled prompt came from. `pi` is text Pi itself
- * writes; `module` is a built-in Tron extension (`<inline:name>`); `package` is
- * an installed Pi package; `local` is a user/project extension or skill file;
- * `file` is an instruction file Pi reads verbatim (AGENTS.md, SYSTEM.md,
- * APPEND_SYSTEM.md). */
 type InstructionSource =
   | { kind: "pi" }
   | { kind: "module"; name: string }
@@ -17,26 +12,19 @@ interface InstructionEntry {
   name?: string;
   path?: string;
   text: string;
-  /** Tools whose guidelines produced this rule; empty for Pi's own rules. */
   tools?: string[];
   source: InstructionSource;
 }
 
 export interface InstructionSection {
-  /** Pi's section name (`preamble`, `tools`, …), `tron` for the per-turn
-   * operating context, or `prompt` when the text has no recognisable structure. */
   id: string;
-  /** `session`: part of the session's base prompt. `turn`: added when each
-   * turn starts and not stored in the session. */
   timing: "session" | "turn";
-  /** The section body as the model reads it, without Pi's `<name>` wrapper. */
   text: string;
   source?: InstructionSource;
   entries?: InstructionEntry[];
 }
 
 export interface AgentInstructions {
-  /** The exact system prompt the model receives for a turn. */
   text: string;
   sections: InstructionSection[];
 }
@@ -44,12 +32,7 @@ export interface AgentInstructions {
 interface SourceInfoLike { path: string; source: string; scope: string; origin: string }
 
 interface AgentInstructionsInput {
-  /** Pi's current prompt: between runs its idle prompt (base options plus the
-   * extension sections, e.g. `mcp_servers`, the transcript still gives the model;
-   * #1312), or the run's forced prompt (already carrying the Tron context) while a
-   * turn is running. */
   prompt: string;
-  /** What `tron-core` appends at the start of each turn. */
   tronContext: string;
   customPrompt?: { text: string; path?: string };
   append: { text: string; path?: string }[];
@@ -58,18 +41,10 @@ interface AgentInstructionsInput {
   tools: { name: string; promptGuidelines?: string[]; sourceInfo: SourceInfoLike }[];
 }
 
-// Pi 0.99.2's MCP extension sets this section before each prompt and appends
-// changed content to the conversation (changelog, issue #10212), so this is
-// session context rather than a turn-only addition.
 const SESSION_SECTIONS = new Set(["preamble", "tools", "rules", "docs", "addendum", "project_context", "skills", "cwd", "mcp_servers"]);
 const TRON_HEADING = "## Tron operating context\n";
 const OPEN_TAG = /\n\n<([a-z][a-z0-9_-]*)>\n/y;
 
-/** Splits the prompt Pi renders (`preamble`, then `\n\n<name>\nbody\n</name>`
- * blocks, then any per-turn text a `before_agent_start` handler appended) into
- * attributed sections. Pi does not expose its section map, so this reads the
- * rendered text; every byte stays in exactly one section, and a prompt without
- * Pi's structure is returned verbatim as one `prompt` section. */
 export function projectAgentInstructions(input: AgentInstructionsInput): AgentInstructions {
   const parsed = splitPrompt(input);
   if (!parsed) return { text: input.prompt, sections: [{ id: "prompt", timing: "turn", text: input.prompt }] };
@@ -89,8 +64,6 @@ export function projectAgentInstructions(input: AgentInstructionsInput): AgentIn
     sections.push(section);
   }
 
-  // Idle, the per-turn context is not in Pi's prompt yet; mid-turn it is the
-  // appended remainder. Either way the sheet shows what the next request carries.
   const appended = parsed.rest === "" ? input.tronContext : parsed.rest.slice(2);
   const text = parsed.rest === "" ? `${input.prompt}\n\n${input.tronContext}` : input.prompt;
   sections.push(appended.startsWith(TRON_HEADING)
@@ -111,8 +84,6 @@ function splitPrompt(input: AgentInstructionsInput) {
     cursor = first.index;
   }
   const preamble = prompt.slice(0, cursor);
-  // Bodies that embed user files are known exactly, so hostile file content
-  // such as a literal `</project_context>` cannot move a section boundary.
   const known: Record<string, string | undefined> = {
     project_context: input.contextFiles.length === 0 ? undefined : [
       "Project-specific instructions and guidelines:",
@@ -138,7 +109,6 @@ function splitPrompt(input: AgentInstructionsInput) {
     blocks.push({ name, body: prompt.slice(start, end) });
     cursor = end + close.length;
   }
-  // Pi always renders `<cwd>`; without blocks this is some other forced prompt.
   if (blocks.length === 0) return undefined;
   const rest = prompt.slice(cursor);
   if (rest !== "" && !rest.startsWith("\n\n")) return undefined;
@@ -180,9 +150,6 @@ function sectionEntries(
   }
 }
 
-/** Pi renders each rule as `- rule` joined by newlines, and a tool guideline
- * may itself span lines or contain bullets. Known guidelines are matched whole
- * so they keep their tool attribution; anything else is one of Pi's own rules. */
 function ruleEntries(body: string, tools: AgentInstructionsInput["tools"]): InstructionEntry[] {
   const owners = new Map<string, string[]>();
   for (const tool of tools) {
@@ -217,7 +184,6 @@ function sourceOf(info: SourceInfoLike): InstructionSource {
   return { kind: "local", scope: info.scope, path: info.path };
 }
 
-/** `npm:@scope/name@1.2.3` → `@scope/name`; `git:github.com/o/repo@sha` → `repo`. */
 function packageName(source: string): string {
   const spec = source.replace(/^(npm|git|github|https?):/, "");
   const versionAt = spec.indexOf("@", spec.startsWith("@") ? 1 : 0);

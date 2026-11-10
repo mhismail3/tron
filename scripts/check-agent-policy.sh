@@ -3,8 +3,6 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { echo "agent policy: $*" >&2; exit 1; }
-# The catalog and iOS skill checks below fail if .agents/README.md or the iOS skill is missing; the
-# notice, which nothing below reads, keeps its own check.
 [[ -f "$ROOT/.agents/skills/NOTICE.md" ]] || fail "missing skill adaptation notice"
 python3 - "$ROOT" <<'PY' || fail "skill catalog contract"
 from pathlib import Path
@@ -57,7 +55,6 @@ for path in paths:
     names.add(name)
 
 PY
-# A localized guide adds local facts only; the root charter stays the one place for shared rules.
 for guide in $(git -C "$ROOT" ls-files --cached --others --exclude-standard '*/AGENTS.md'); do
   up=$(dirname "$guide" | sed -E 's|[^/]+|..|g')
   grep -Fq "($up/AGENTS.md)" "$ROOT/$guide" || fail "$guide does not link the root charter"
@@ -67,9 +64,6 @@ grep -Fq 'SIGSTOP' "$ROOT/AGENTS.md" \
 grep -Fq 'XcodeBuildMCP' "$ROOT/AGENTS.md" \
   && grep -Fq 'xcrun mcpbridge' "$ROOT/.agents/skills/tron-ios/SKILL.md" \
   || fail "simulator lease rule lacks the agent (MCP/AXe) simulator paths"
-# Scan tracked and not-yet-tracked source so the check is trustworthy before
-# commit as well as in CI. Only the device helper's refusal and policy tests may
-# spell retired names.
 python3 - "$ROOT" <<'PY' || fail "stale iOS build guidance outside bounded compatibility"
 from pathlib import Path
 import re

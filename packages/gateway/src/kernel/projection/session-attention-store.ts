@@ -22,7 +22,6 @@ interface SessionAttentionRecord {
 
 interface SessionAttentionDocument {
   version: 1;
-  /** Canonical session files at or before this cursor have been reconciled. */
   reconciledThrough: string;
   sessions: AttentionDictionary;
 }
@@ -48,9 +47,6 @@ export class SessionAttentionStore {
   private readonly mutex = new AsyncMutex();
   private readonly write: ((path: string, value: unknown) => Promise<void>) | undefined;
   private readonly now: () => Date;
-  /** Undefined until `initialize` admits the stored document. Read-only
-   * projections stay safe before that; every mutation is gated, so a change can
-   * never replace a document this owner has not read. */
   private document: SessionAttentionDocument | undefined;
 
   constructor(tronHome: string, options: SessionAttentionStoreOptions = {}) {
@@ -77,9 +73,6 @@ export class SessionAttentionStore {
     return projection(document === undefined ? undefined : ownRecord(document.sessions, sessionId));
   }
 
-  /** Admit an exact canonical successful assistant completion once. A
-   * foreground-observed completion advances read-through in the same durable
-   * replacement, so no intermediate unread projection can escape. */
   async complete(
     sessionId: string,
     completionId: string,
@@ -129,8 +122,6 @@ export class SessionAttentionStore {
     });
   }
 
-  /** Acknowledge every admitted completion without touching an explicit
-   * mark-unread: a Home worker's completions are read by construction. */
   async acknowledgeCompletions(sessionId: string): Promise<SessionAttentionMutation> {
     return this.mutex.run(async () => {
       const current = ownRecord(this.requireDocument().sessions, sessionId);
@@ -147,7 +138,6 @@ export class SessionAttentionStore {
     });
   }
 
-  /** Whether an admitted completion is still unacknowledged (not a manual mark). */
   hasUnacknowledgedCompletion(sessionId: string): boolean {
     const record = this.document === undefined ? undefined : ownRecord(this.document.sessions, sessionId);
     return record !== undefined && record.completionRevision > record.readThroughRevision;
@@ -164,7 +154,6 @@ export class SessionAttentionStore {
     });
   }
 
-  /** Migrate only a true canonical identity replacement; never overwrite a target. */
   async rekey(previousId: string, nextId: string): Promise<boolean> {
     return this.mutex.run(async () => {
       const document = this.requireDocument();
@@ -199,7 +188,6 @@ export class SessionAttentionStore {
     });
   }
 
-  /** Advance only after every canonical file through the scan boundary was admitted. */
   async advanceReconciliationCursor(through: string): Promise<void> {
     await this.mutex.run(async () => {
       const document = this.requireDocument();
@@ -231,8 +219,6 @@ export class SessionAttentionStore {
     this.document = document;
   }
 
-  /** Mutations never run against an unread document: a change admitted before
-   * `initialize` would otherwise replace the stored file blind. */
   private requireDocument(): SessionAttentionDocument {
     if (this.document === undefined) throw new Error("Session attention store is not initialized");
     return this.document;

@@ -25,10 +25,6 @@ function textFromContent(content: unknown): string {
   }).join("\n");
 }
 
-/** Search-only extractor. It intentionally does not use UI/history flatteners.
- * Changing what this derives requires bumping
- * `SESSION_SEARCH_INDEX_DERIVATION_VERSION` in session-search-index.ts, or
- * durable rows keep postings that no longer match this extractor. */
 export function extractSearchTexts(branch: readonly SessionEntry[]): SearchTextEntry[] {
   const edits = new Map<string, ContextEditEntry["replacement"]>();
   for (const entry of branch) {
@@ -38,9 +34,6 @@ export function extractSearchTexts(branch: readonly SessionEntry[]): SearchTextE
     if (entry.type !== "message" || !entry.message || typeof entry.message !== "object" || Array.isArray(entry.message)) return [];
     const message = entry.message as unknown as Record<string, unknown>;
     if (message.role !== "user" && message.role !== "assistant") return [];
-    // Like the cited reader's projection, the selected branch's last edit
-    // wins. Redact whole text before bounds/postings/embeddings or excerpts;
-    // truncating a credential first can leave an unrecognizable secret tail.
     const content = edits.has(entry.id) ? edits.get(entry.id)?.content : message.content;
     const text = redactCredentials(textFromContent(content)).normalize("NFC").trim();
     if (!text || Buffer.byteLength(text, "utf8") > SESSION_SEARCH_MAX_ENTRY_BYTES) return [];
@@ -68,10 +61,6 @@ export function terms(value: string): string[] {
   return [...new Set(normalizeForSearch(value).match(/[\p{L}\p{N}_-]+/gu) ?? [])].filter(Boolean);
 }
 
-/** Bounded substring grams. One- and two-character identifiers are indexed
- * deliberately; exact canonical reread still proves the final match. Both this
- * and `terms()` feed durable postings: changing how they tokenize requires
- * bumping `SESSION_SEARCH_INDEX_DERIVATION_VERSION` in session-search-index.ts. */
 export function trigrams(value: string): string[] {
   const normalized = normalizeForSearch(value).replace(/\s+/gu, " ");
   const output = new Set<string>();

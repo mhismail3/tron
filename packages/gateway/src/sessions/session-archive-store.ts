@@ -8,8 +8,6 @@ const MAXIMUM_BYTES = 2 * 1_048_576;
 const MAXIMUM_SESSIONS = 50_000;
 const MAXIMUM_ID_BYTES = 200;
 
-/** Advertised by a Gateway that owns archive state and can hide archived rows
- * from `session.list`. */
 export const SESSION_ARCHIVE_CAPABILITY = "session-archive.v1";
 
 type ArchiveDictionary = Record<string, SessionArchiveRecord>;
@@ -27,20 +25,10 @@ interface SessionArchiveStoreOptions {
   now?: () => Date;
 }
 
-/**
- * Tron-owned archive state for canonical sessions. Archiving is a dashboard
- * projection: it never rewrites a session file, and the record follows the
- * canonical session through delete, rebind and restart recovery. A document
- * that cannot be admitted fails instead of resetting to empty, because an empty
- * store would silently make every archived session visible again.
- */
 export class SessionArchiveStore {
   private readonly path: string;
   private readonly mutex = new AsyncMutex();
   private readonly now: () => Date;
-  /** Undefined until `initialize` admits the stored document. Read-only
-   * projections stay safe before that; every mutation is gated, so a change can
-   * never replace a document this owner has not read. */
   private document: SessionArchiveDocument | undefined;
   private changeRevision = 0;
 
@@ -58,8 +46,6 @@ export class SessionArchiveStore {
     this.document = loaded;
   }
 
-  /** Monotonic count of committed changes. It joins the catalog page-source
-   * generation so one pagination lease cannot mix archive states. */
   get revision(): number {
     return this.changeRevision;
   }
@@ -69,8 +55,6 @@ export class SessionArchiveStore {
     return document === undefined ? undefined : ownRecord(document.sessions, sessionId)?.archivedAt;
   }
 
-  /** Archive once. An already-archived session keeps its original timestamp, so
-   * a replayed command cannot reorder the archived list. */
   async archive(sessionId: string): Promise<string> {
     return this.mutex.run(async () => {
       const document = this.requireDocument();
@@ -98,7 +82,6 @@ export class SessionArchiveStore {
     });
   }
 
-  /** Migrate only a true canonical identity replacement; never overwrite a target. */
   async rekey(previousId: string, nextId: string): Promise<boolean> {
     return this.mutex.run(async () => {
       const document = this.requireDocument();
@@ -113,10 +96,6 @@ export class SessionArchiveStore {
     });
   }
 
-  /** Drop records with no canonical owner, and name the dropped IDs so their
-   * owners can republish. Callers must pass a retained set derived from complete
-   * structural evidence plus live ownership; a partial scan cannot prove that a
-   * session disappeared. */
   async prune(retainedSessionIds: ReadonlySet<string>): Promise<readonly string[]> {
     return this.mutex.run(async () => {
       const document = this.requireDocument();
@@ -143,8 +122,6 @@ export class SessionArchiveStore {
     this.changeRevision += 1;
   }
 
-  /** Mutations never run against an unread document: a change admitted before
-   * `initialize` would otherwise replace the stored file blind. */
   private requireDocument(): SessionArchiveDocument {
     if (this.document === undefined) throw new Error("Session archive store is not initialized");
     return this.document;

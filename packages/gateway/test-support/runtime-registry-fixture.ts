@@ -14,13 +14,6 @@ import type { SessionCatalog, SessionCatalogReconcileOutcome } from "../src/sess
 import type { ExtensionArtifactDiscoveryCounts } from "../src/sessions/extension-artifact-discovery.js";
 import { RuntimeRegistry, type CapacityShedRecord, type RuntimeLifecycleRecord } from "../src/kernel/session/runtime-registry.js";
 
-/** Shared cold-start RuntimeRegistry fixture for the runtime-registry journeys. Each caller owns
- * the registry array it passes in: disposal and PI_CODING_AGENT_DIR restoration stay in that
- * caller's afterEach, and the fixture root is removed when its test finishes. */
-
-/** Initialize a registry and wait for the catalog owner's first published cut.
- * A read that lands before that cut refuses retryably (G-1c), and no reader
- * walks the folder any more, so a test lets the owner publish one first. */
 export async function initializeRegistry(
   registry: RuntimeRegistry,
   phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void,
@@ -29,24 +22,15 @@ export async function initializeRegistry(
   await catalogOwner(registry).whenPublished();
 }
 
-/** A test that writes canonical files itself is an external writer: the folder
- * watcher observes it, but no reader polls for it. Forcing one owner reconcile
- * is the deterministic equivalent of waiting the watcher out, and settling the
- * owner then makes its rows and the durable document current without waiting
- * out the persist debounce. */
 export async function settleCatalog(registry: RuntimeRegistry): Promise<void> {
   await catalogOwner(registry).reconcile();
   await catalogOwner(registry).settled();
 }
 
-/** The registry's catalog owner: the index every read path serves from (G-1c). */
 export function catalogOwner(registry: RuntimeRegistry): SessionCatalog {
   return (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
 }
 
-/** A fixture root that is removed when its test finishes. `onTestFinished` runs on pass, failure
- * and timeout, so the directory is owned by the test that created it, including roots created
- * inside shared fixture helpers. */
 export async function temporaryRoot(prefix: string): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), prefix));
   onTestFinished(() => rm(root, { recursive: true, force: true }));
@@ -65,8 +49,6 @@ export async function createColdRegistryFixture(registries: RuntimeRegistry[], l
   catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
   artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
   runtimeDisposeTimeout?: (graceMs: number) => void;
-  /** Admit one explicit delegated artifact root, as Gateway startup
-   * does, so ambient discovery scans exactly that root. */
   delegatedRoot?: string;
   beforeInitialize?: (sessionFile: string, registry: RuntimeRegistry) => Promise<void>;
   notifications?: NotificationService;

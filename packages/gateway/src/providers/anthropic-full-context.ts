@@ -2,14 +2,6 @@ import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
 
 const installed = new WeakSet<ModelRuntime>();
 
-/**
- * Every Anthropic Messages request carries its full context. Pi continues a server-side
- * message thread by default on Anthropic's own endpoint and then sends only the messages after
- * the previous reply; Tron keeps threads off for chats, Home and workers alike. Turning
- * `supportsMessageThreads` off on the request's model leaves Pi's request exactly as without
- * threads: no `thread` field and no threads beta. Every Gateway Anthropic Messages request, including the
- * SDK's cache-warm requests, goes through this runtime's `stream` or `streamSimple`.
- */
 export function installAnthropicFullContext(runtime: ModelRuntime): ModelRuntime {
   if (installed.has(runtime)) return runtime;
   installed.add(runtime);

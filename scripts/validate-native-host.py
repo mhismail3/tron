@@ -64,8 +64,6 @@ def validate(app):
         raise ValueError('Native bundle identity/executable mismatch')
     if host.get('LSUIElement') is not True or host.get('LSBackgroundOnly') is not False:
         raise ValueError('Native helper must be an accessory Aqua application')
-    # Only the explicitly placed helper is valid. Xcode's automatic embedding
-    # of an application dependency can otherwise add a second Resources copy.
     for candidate in (app / 'Contents').rglob('*.app'):
         if candidate == app / BUNDLE:
             continue

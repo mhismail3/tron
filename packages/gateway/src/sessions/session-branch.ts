@@ -7,7 +7,6 @@ interface ParsedSessionBranch {
   leafEntryId?: string;
 }
 
-/** Select the leaf-to-root branch after the caller has proved file identity. */
 export function branchFromSessionEntries(entries: readonly SessionEntry[]): SessionEntry[] | undefined {
   const byID = new Map(entries.map(entry => [entry.id, entry]));
   const reversed: SessionEntry[] = [];
@@ -23,8 +22,6 @@ export function branchFromSessionEntries(entries: readonly SessionEntry[]): Sess
   return reversed.reverse();
 }
 
-/** A parsed file supplies its own header identity; evidence readers may instead
- * validate that identity before returning entries without the header. */
 export function branchFromParsedSession(entries: FileEntry[]): ParsedSessionBranch | undefined {
   const header = entries[0];
   if (!header || header.type !== "session" || !header.id) return undefined;
@@ -86,8 +83,6 @@ function validateGraph(file: readonly FileEntry[]): Map<string, SessionEntry> {
   return byID;
 }
 
-/** Full-file validation before branch selection; unlike the older helper this
- * rejects malformed disconnected records and duplicate IDs too. */
 export function validateSearchBranch(
   file: readonly FileEntry[],
   forkBoundary?: SessionSearchForkBoundary,

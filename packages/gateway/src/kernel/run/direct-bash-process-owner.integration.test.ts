@@ -10,9 +10,6 @@ import { configureHomebrewPath } from "../../runtime/node-command-environment.js
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
 const roots: string[] = [];
-/** Markers carried by every process a timeout test spawns. Cleanup kills by
- * marker, independently of the code under test, so a failing implementation or
- * a partial fixture start cannot leak a busy loop past the test. */
 const markers: string[] = [];
 const testSessionId = process.env.PI_SESSION_ID ?? "test-session";
 function markedPids(marker: string): number[] {
@@ -50,7 +47,6 @@ describe("DirectBashProcessOwner", () => {
         stdio: "ignore",
       });
       const unrelatedPid = unrelated.pid!;
-      // Marked so afterEach kills the detached process even when an assertion fails.
       const marker = `tron-636-${randomUUID()}`;
       markers.push(marker);
       const childProgram = `/*${marker}*/ setInterval(() => {}, 1000)`;
@@ -59,7 +55,6 @@ describe("DirectBashProcessOwner", () => {
         `/*${marker}*/ const { spawn } = require('node:child_process');`,
         "const { writeFileSync, renameSync } = require('node:fs');",
         `const child = spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(childProgram)}], { detached: true, stdio: 'ignore' });`,
-        // Renamed into place, so the reader sees the whole pid or no file.
         `writeFileSync(${JSON.stringify(pidTempFile)}, String(child.pid)); renameSync(${JSON.stringify(pidTempFile)}, ${JSON.stringify(pidFile)});`,
         "setInterval(() => {}, 1000);",
       ].join(" ");
@@ -73,8 +68,6 @@ describe("DirectBashProcessOwner", () => {
         undefined,
       );
 
-      // An empty or missing file is not a process id: Number("") is 0, which would
-      // otherwise be probed as the process group 0.
       const detachedPid = await waitFor(async () => {
         try {
           const pid = Number(await readFile(pidFile, "utf8"));
@@ -97,8 +90,6 @@ describe("DirectBashProcessOwner", () => {
     },
   );
 
-  // #499 T1-T3: the tool's timeout is enforced. Observed: a call with timeout 900
-  // ran for 57 minutes until the user aborted it.
   it.skipIf(process.platform === "win32")(
     "times out a command, kills its whole tree and keeps the output it wrote",
     async () => {
@@ -107,8 +98,6 @@ describe("DirectBashProcessOwner", () => {
       const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), testSessionId);
       const marker = `tron-499-${randomUUID()}`;
       markers.push(marker);
-      // A busy loop in its own process group, and a grandchild that inherits and
-      // holds the output pipe: neither may outlive the timeout.
       const busy = `/*${marker}*/ while (true) {}`;
       const hold = `/*${marker}*/ setInterval(() => {}, 1000)`;
       const parent = [
@@ -123,7 +112,6 @@ describe("DirectBashProcessOwner", () => {
         .then(() => "completed", (error: unknown) => error instanceof Error ? error.message : String(error));
       expect(outcome).toContain("before-timeout");
       expect(outcome).toMatch(/Command timed out after 1 seconds/u);
-      // Not killed early: the command ran for its timeout.
       expect(performance.now() - started).toBeGreaterThanOrEqual(900);
       await waitFor(async () => markedPids(marker).length === 0, "every process of the tree to be killed");
       expect(owner.hasActiveProcesses).toBe(false);
@@ -131,11 +119,6 @@ describe("DirectBashProcessOwner", () => {
     20_000,
   );
 
-  // #499 review: a descendant that keeps the inherited output pipe after the shell exits
-  // must not hang the call. Pi's rule (pi#5303) releases the call once that pipe has been
-  // silent for the post-exit grace. Output written after a longer silence is not read, and
-  // no test asserts it: whether a write lands inside the grace window is a load-dependent
-  // race (packages/gateway/src/sessions/execution.md documents the limit).
   it.skipIf(process.platform === "win32")(
     "settles when a quiet descendant keeps the output pipe after the shell exits",
     async () => {
@@ -144,8 +127,6 @@ describe("DirectBashProcessOwner", () => {
       const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), testSessionId);
       const marker = `tron-499-${randomUUID()}`;
       markers.push(marker);
-      // Detached, holding the inherited stdout/stderr, and silent. The launcher waits for
-      // its ready message, so the pipe is provably held when the shell exits.
       const quiet = `/*${marker}*/ process.send('ready'); setInterval(() => {}, 1000)`;
       const launcher = `/*${marker}*/ const child = require('node:child_process').spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(quiet)}], { detached: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'] }); child.once('message', () => { child.disconnect(); child.unref(); });`;
       const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(launcher)}; echo started`;
@@ -160,8 +141,6 @@ describe("DirectBashProcessOwner", () => {
     20_000,
   );
 
-  // #499 review: timeout aborts a running command, while Stop settles an escaped writer
-  // only after its shell has exited and the writer still holds the inherited pipe open.
   it.skipIf(process.platform === "win32")(
     "times out a running command and stops an escaped writer after the shell exits",
     async () => {
@@ -177,8 +156,6 @@ describe("DirectBashProcessOwner", () => {
         const readyFile = join(root, `${name}-writer-ready`);
         const shellPidFile = join(root, `${name}-shell.pid`);
         const shellExitFile = join(root, `${name}-shell-exited`);
-        // The same 150 ms delayed first write crosses the owner's 100 ms idle grace.
-        // Keep the launcher (and therefore its shell) alive until that write is flushed.
         const writer = `/*${marker}*/ const fs = require('node:fs'); setTimeout(() => { process.stdout.write('tick\\n', () => { fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready'); process.send('ready'); }); setInterval(() => process.stdout.write('tick\\n'), 20); }, 150)`;
         const launcher = `/*${marker}*/ const fs = require('node:fs'); const { spawn } = require('node:child_process'); const child = spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(writer)}], { detached: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc'] }); child.on('message', () => { fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready'); child.disconnect(); child.unref(); child.channel?.unref(); process.stdout.write('started\\n'); }); child.once('error', () => process.exit(1)); child.unref();`;
         const command = `printf '%s' "$$" > ${JSON.stringify(shellPidFile)}; ${JSON.stringify(process.execPath)} -e ${JSON.stringify(launcher)}; printf '%s' exited > ${JSON.stringify(shellExitFile)}`;
@@ -224,7 +201,6 @@ describe("DirectBashProcessOwner", () => {
     20_000,
   );
 
-  // #499 T4-T6.
   it.skipIf(process.platform === "win32")(
     "leaves commands that finish in time alone, applies no default, and refuses an invalid timeout",
     async () => {
@@ -240,7 +216,6 @@ describe("DirectBashProcessOwner", () => {
       expect(performance.now() - started).toBeGreaterThanOrEqual(1_900);
       await expect(tool.execute("invalid", { command: "echo never", timeout: 0 }, undefined, undefined, undefined))
         .rejects.toThrow(/Invalid timeout/u);
-      // Validated before the abort check, as Pi orders them.
       const aborted = new AbortController();
       aborted.abort();
       await expect(tool.execute("invalid-aborted", { command: "echo never", timeout: 0 }, aborted.signal, undefined, undefined))
@@ -291,9 +266,6 @@ describe("DirectBashProcessOwner", () => {
     }
   });
 
-  // #1467: launchd starts the Gateway with only the system PATH. Gateway startup
-  // adds Homebrew's bin, so an agent shell finds git-lfs, which the global
-  // `filter.lfs.required` makes mandatory for any checkout of an LFS file.
   it.skipIf(process.platform !== "darwin")("an agent shell started from launchd's PATH resolves Homebrew git-lfs", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-path-"));
     roots.push(root);

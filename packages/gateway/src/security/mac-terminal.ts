@@ -5,22 +5,13 @@ import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { syncDurably } from "../foundation/durable-json.js";
 
-/** Private authorized_keys store used only by MacTerminalService. Marked
- * device lines are logged settings resources; unrelated bytes are preserved.
- * No production caller points this store at the user’s global SSH directory. */
-
-/** The marker that identifies a Tron line. Anything after it is commentary. */
 const MAC_TERMINAL_MARKER = "tron-mac-terminal:";
-/** Defense in depth: the private service accepts device keys only from Tailnet IPv4. */
 export const MAC_TERMINAL_SOURCES = "100.64.0.0/10";
 const KEY_OPTIONS = `from="${MAC_TERMINAL_SOURCES}",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc`;
-/** The iPhone's key is a Secure Enclave P-256 key; nothing else is admitted. */
 const KEY_TYPE = "ecdsa-sha2-nistp256";
 const MAXIMUM_AUTHORIZED_KEYS_BYTES = 1024 * 1024;
 const DEVICE_ID = /^[A-Za-z0-9-]{1,100}$/u;
 
-/** A Tron line's public key, validated as an OpenSSH `ecdsa-sha2-nistp256`
- * key whose blob names the same type and curve and holds an uncompressed point. */
 export function validateMacTerminalKey(value: unknown, field = "value"): string {
   if (typeof value !== "string") throw new GatewayError("invalid_request", `${field} must be an OpenSSH public key`);
   const parts = value.trim().split(/\s+/u);
@@ -49,7 +40,6 @@ function validateMacTerminalDevice(deviceId: string): string {
   return deviceId;
 }
 
-/** The Tron device a line belongs to, and its key, or undefined for any other line. */
 function parseLine(line: string): { device: string; key: string } | undefined {
   const tokens = line.trim().split(/\s+/u);
   const marker = tokens.find(token => token.startsWith(MAC_TERMINAL_MARKER));
@@ -67,13 +57,10 @@ function macTerminalLine(device: string, key: string): string {
 export class MacTerminalKeys {
   private readonly lock = new AsyncMutex();
 
-  /** The private service’s authorization directory; fixtures name their own. */
   constructor(readonly sshDirectory: string) {}
 
   get path(): string { return join(this.sshDirectory, "authorized_keys"); }
 
-  /** The Tron keys in the file now, by device. A hand-deleted line is simply
-   * absent: the file is the store (F2), so a Mac-side removal is a revocation. */
   async read(): Promise<Record<string, string>> {
     const keys: Record<string, string> = {};
     for (const line of (await this.readLines()).lines) {
@@ -83,8 +70,6 @@ export class MacTerminalKeys {
     return keys;
   }
 
-  /** Writes or removes one device's line under the store's lock, atomically,
-   * preserving every other line exactly. */
   async set(device: string, key: string | null): Promise<void> {
     validateMacTerminalDevice(device);
     const admitted = key === null ? null : validateMacTerminalKey(key);
@@ -100,13 +85,10 @@ export class MacTerminalKeys {
     });
   }
 
-  /** The file as raw lines: every line Tron does not own is written back with
-   * exactly the bytes it had, whatever its encoding. */
   private async readLines(): Promise<{ lines: Buffer[]; trailingNewline: boolean; exists: boolean }> {
     let bytes: Buffer;
     try {
       const stat = await lstat(this.path);
-      // Replacing a symlink with a file would silently move the user's keys.
       if (stat.isSymbolicLink() || !stat.isFile()) {
         throw new GatewayError("conflict", `${this.path} is not a regular file; Tron does not edit it`);
       }

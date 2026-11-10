@@ -1,6 +1,3 @@
-// Proves scripts/models/update-model-release-dates.mjs end to end over a copy of the repository
-// paths it reads: the providers come from the pinned Pi catalog, models.dev is answered by a
-// fetch stand-in, and the snapshot it writes is what --check later accepts or calls stale.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -29,7 +26,6 @@ function fixture() {
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, "catalog.json"), JSON.stringify({ a: { m1: { provider: "anthropic" } }, b: { m2: { provider: "openai-codex" } } }));
   writeFileSync(join(root, "catalog.json"), JSON.stringify(CATALOG));
-  // The script's only network read, answered from the fixture catalog.
   writeFileSync(join(root, "fetch.mjs"), `import { readFileSync } from "node:fs";
 globalThis.fetch = async () => new Response(readFileSync(${JSON.stringify(join(root, "catalog.json"))}, "utf8"));\n`);
   const run = (...args) => spawnSync(process.execPath, ["--import", join(root, "fetch.mjs"), join(root, SCRIPT), ...args], { encoding: "utf8" });

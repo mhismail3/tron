@@ -12,13 +12,6 @@ import type { ToolCatalogEntry } from "./settings-model.js";
 import { PI_BUILTIN_TOOL_NAMES } from "../kernel/settings/settings-types.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 
-/** The tools a Mac or Project `defaultTools` selection can name, without a session.
- *
- * pi starts a chat with its selected built-in tools, and an extension's tool is
- * active once registered unless it declares `defaultActive: false` (codemode).
- * So a scope's selection means something only for pi's built-ins and those
- * opt-in tools (hidden tools cannot be selected). Reading registrations loads extension modules, so this read
- * takes the `hooks.list` treatment: serialized, drain-aware administrative work. */
 export class ScopeToolCatalog {
   private readonly mutex = new AsyncMutex();
 

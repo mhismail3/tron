@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Three real builds, stale-receipt refusal, then refused runtime mutations. Runs
-# in this checkout and restores the valid published runtimes on every exit. The
-# first build downloads Node; --skip-download skips downloads, not npm install.
-# Retains packages/mac-app/test-results/bundle-gateway-rebuild.log.
-# --cleanup-only exercises disposal without downloading or building a payload.
 set -euo pipefail
 cleanup_only=0
 gnu_shadow=0
@@ -40,7 +35,6 @@ restore_runtime() {
     if [[ -L "$npm" ]]; then
         unlink "$npm"
     else
-        # find's default physical walk leaves symlink targets untouched.
         find "$npm" -type d -exec chmod u+w {} +
         rm -rf "$npm"
     fi
@@ -61,7 +55,6 @@ trap restore EXIT
 trap 'exit 130' INT TERM HUP
 
 step() { printf '==> %s\n' "$*" | tee -a "$LOG"; }
-# A failure shows the end of the build log, where the failing command names what it missed.
 fail() {
     local recent
     recent="$(tail -n 15 "$LOG" 2>/dev/null | sed 's/^/  | /')"
@@ -75,8 +68,6 @@ manifest_field() {
 sha() { shasum -a 256 "$1" | awk '{print $1}'; }
 leftovers() { find "$RESOURCES_DIR" -maxdepth 1 -name '.tron-gateway-*' -print; }
 snapshot() {
-    # Independent oracle for the whole published tree, including symlink targets
-    # and permissions. A rejected build must not replace even an invalid tree.
     python3 - "$PAYLOAD_DIR" <<'PY'
 import hashlib, os, stat, sys
 root = sys.argv[1]
@@ -139,8 +130,6 @@ for directory in [leaf, *leaf.parents]:
         break
     directory.chmod(0o555)
 PY
-# Each directory used to retain a shell stream plus a producer subprocess until
-# every descendant finished. Disposal must not consume descriptors with depth.
 (ulimit -n 16; bash "$fixture/packages/mac-app/scripts/bundle-gateway.sh" --clean) >>"$LOG" 2>"$TMP/cleanup-errors" || { cat "$TMP/cleanup-errors" >>"$LOG"; fail "bounded-descriptor cleanup failed"; }
 cat "$TMP/cleanup-errors" >>"$LOG"
 [[ ! -s "$TMP/cleanup-errors" ]] || fail "cleanup emitted filesystem or descriptor errors"
@@ -265,8 +254,6 @@ PY
     status=$?
     set -e
     cat "$attempt_log" >> "$LOG"
-    # Check owned resources before status so residue names the broken lifecycle
-    # even when cleanup has overwritten the intended refusal status.
     [[ ! -e "$RESOURCES_DIR/.tron-gateway-bundle.lock" ]] || fail "$mutation refusal left its build lock"
     [[ -z "$(leftovers)" ]] || fail "$mutation refusal left private roots: $(leftovers)"
     [[ $status -eq $expected_status ]] || fail "$mutation was not refused with status $expected_status (status $status)"

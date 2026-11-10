@@ -5,9 +5,6 @@ import { expect, it, vi } from "vitest";
 import { startLockGateway } from "../../../../test-support/gateway-lock-harness.js";
 import { ConnectionOwner } from "../../../integrations/connection-owner.js";
 
-// Faults at the migration's publication: `hook` runs once as the temporary file
-// beside connections.json opens (a write after the backup); `directorySync` fails
-// the directory open after the rename once.
 const beforePublish = vi.hoisted(() => ({ hook: undefined as undefined | (() => Promise<void>), directorySync: undefined as undefined | string }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -21,9 +18,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 import { applyConnectionsResidue, planConnectionsResidue, restoreConnectionsResidue } from "../../../integrations/connections-residue-migration.js";
 import { createTronCoreExtension } from "../../../workspace/tron-core-extension.js";
 
-// The agent `connections` tool is the owner's only consumer. Historical state on
-// disk is projected as-is: credential references never leave the owner, nothing
-// is initialized, migrated or rewritten, and production advertises no definitions.
 it("projects retained connection state read-only and redacts credential references through the agent tool", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-connections-projection-"));
   try {
@@ -69,9 +63,6 @@ it("projects retained connection state read-only and redacts credential referenc
   }
 });
 
-// The one-shot residue migration keeps every instance and its credential
-// reference, backs up before publishing, refuses a raced or reused backup and
-// restores only the bytes it published.
 it("removes retired setup operations, receipts and Raindrop mappings once, behind a restorable backup", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-connections-residue-"));
   try {

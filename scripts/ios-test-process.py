@@ -78,7 +78,6 @@ def capture_evidence(evidence_dir: Path, process: subprocess.Popen[bytes], reaso
         fields = line.strip().split(None, 5)
         if len(fields) != 6 or not fields[0].isdigit() or fields[2] != str(process.pid):
             continue
-        # Names are labels, never ownership: other worktrees use the same tools.
         owned_lines.append(line)
         pid, command = int(fields[0]), fields[5]
         label = "xcodebuild" if "xcodebuild" in command else "testmanagerd" if "testmanagerd" in command else "test-host"
@@ -176,8 +175,6 @@ def main() -> int:
             try:
                 os.killpg(process.pid, signum)
             except (ProcessLookupError, PermissionError):
-                # The command already exited: macOS answers EPERM while it awaits
-                # reaping (ESRCH once reaped); the group is ours, so no other cause.
                 pass
 
         previous_handlers = {

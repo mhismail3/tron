@@ -5,20 +5,6 @@ import { startLockGateway, type LockClient, type LockGateway } from "../../../te
 import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin } from "../../../test-support/wait-for.js";
 
-/**
- * Kernel reconnect-snapshot lock (packages/gateway/docs/scenario-locks.md#locks) for the
- * `gateway/transport` module, through the real Gateway over loopback WebSockets.
- *
- * The invariant (AGENTS.md architecture): an accepted prompt survives a client
- * disconnect, and a reconnecting client gets an authoritative snapshot — while
- * the run is still live, and again after it settled — without the interrupted
- * prompt being replayed. Effects are asserted by name: both reconnect snapshots'
- * phase, operation, queue, model, policies, extension presentation and transcript
- * rows, the receipts and messages the file keeps, the one provider request and the
- * `session-shapes` shapes. Receipt identity and the session preamble entries are
- * pinned by `run.lock`'s prompt-stream, which has the same receipt and preamble shape.
- */
-
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -29,7 +15,6 @@ async function openAndSync(client: LockClient, sessionId: string): Promise<{ ok:
   return opened;
 }
 
-/** A snapshot's transcript as `head | lifecycle | text` rows. */
 function rows(snapshot: { transcript: Array<{ kind: string; role?: string; stopReason?: string; semantic?: { lifecycle?: string }; content?: Array<{ text?: string }> }> }): string[] {
   return snapshot.transcript.map((item) => [item.kind === "message" ? `${item.role}${item.stopReason ? `:${item.stopReason}` : ""}` : item.kind,
     item.semantic?.lifecycle ?? "", ...(item.content ?? []).map((part) => part.text)].join(" | "));
@@ -62,12 +47,10 @@ describe("gateway/transport kernel locks", () => {
     await gateway.settled(sessionId);
     const settled = await openAndSync(await gateway.connect("reconnect-settled"), sessionId);
 
-    // The same idle session facts in every snapshot: queue, thinking, policies, cwd.
     const steady = { cwd: await realpath(gateway.cwd), queueRevision: 0, queuedItems: [], toolExecutions: [], compactionQueued: false,
       automaticCompactionEnabled: false, availableThinkingLevels: ["off"], thinkingLevel: "off", diagnostics: [], liveActivityRevision: 0,
       compactionPolicy: { currentBudgets: { enabled: false, keepRecentTokens: 120, reserveTokens: 2048 } },
       model: { provider: "tron-lock-transport-reconnect-snapshot" },
-      // The first message is saved, so the unsaved-context warning is gone from both reconnects.
       contextWindowPolicy: { default: 128_000, effective: 128_000, maximum: 128_000, minimum: 3192, override: 128_000, source: "session",
         model: { provider: "tron-lock-transport-reconnect-snapshot" } },
       extensionPresentation: { version: 3, pendingInteractions: [], surfaces: [],
@@ -80,7 +63,6 @@ describe("gateway/transport kernel locks", () => {
         ],
         semanticState: { editorRevision: 0, editorText: "", statusOwners: {}, statuses: {}, toolsExpanded: false, widgets: [],
           working: { indicator: { frames: [], kind: "default" }, visible: true } } } };
-    // While the run is live: the admitted operation, a running phase that accepts queued prompts, and the accepted prompt.
     expect(admitted.result.operationId).toEqual(expect.any(String));
     expect(live.result.completionRevision).toBe(0);
     expect(live.result.session).toMatchObject({ ...steady, phase: "running", configurationBlocker: "running", acceptsQueuedPrompts: true, transcriptStart: 0, transcriptTotal: 3,
@@ -91,7 +73,6 @@ describe("gateway/transport kernel locks", () => {
       expect(snapshot.extensionPresentation.semanticState).toEqual(steady.extensionPresentation.semanticState);
     }
     expect(rows(live.result.session)).toEqual(["modelChange | ", "thinkingChange | ", "user | accepted | survive my disconnect"]);
-    // After it settled: no operation, idle, the answer, and the completion counted once.
     expect(settled.result.completionRevision).toBe(1);
     expect(settled.result.session).toMatchObject({ ...steady, sessionId, phase: "idle", configurationBlocker: null, acceptsQueuedPrompts: false, transcriptStart: 0, transcriptTotal: 4 });
     expect(settled.result.session.operation ?? null).toBeNull();
@@ -100,7 +81,6 @@ describe("gateway/transport kernel locks", () => {
     expect(rows(settled.result.session)).toEqual(["modelChange | ", "thinkingChange | ", "user | completed | survive my disconnect",
       "assistant:stop |  | Answered after the reconnect."]);
 
-    // The prompt reached the model exactly once and was never replayed.
     const recorded = gateway.record();
     expect(recorded.providerRequests.map((request) => request.messages.map((message) => `${(message as { role: string }).role}:${(message as { text?: string }).text ?? ""}`)))
       .toEqual([["user:survive my disconnect"]]);

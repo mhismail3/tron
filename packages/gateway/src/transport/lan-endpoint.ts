@@ -8,37 +8,10 @@ import type { Duplex } from "node:stream";
 import { resolveLanAddresses, type LanAddress } from "../config.js";
 import type { GatewayLogger, LogLevel } from "./logger.js";
 
-/**
- * The LAN endpoint (E-3a): a second, TLS-only listener on the Mac's private LAN
- * address, so a phone at home does not depend on Tailscale's path. It shares
- * its HTTP and WebSocket handling with the main listener — the same admission,
- * capacity, heartbeat, revocation and hello — and adds only what a second
- * address needs: a pinned certificate, a private-address-only bind, and a
- * rebind when that address changes.
- *
- * What this listener must never do: bind a wildcard or a public address, serve
- * `POST /v1/pair` or any unauthenticated route beyond a health check, or
- * regenerate its key under a certificate a paired phone already pinned.
- *
- * E-3b adds the other half of that pin: `lanPin` and `advertisement()`, what a
- * paired phone needs to dial this lane. They travel only on the pairing
- * response and hello, the two channels a paired device owns.
- */
-
-/** No portable event says a host's private address changed. One cheap
- * `getifaddrs` read per interval — the phone's own liveness interval is
- * independent of it — rebinds the listener and disables it when no private
- * address remains. */
 const LAN_ADDRESS_RECONCILE_MS = 15_000;
-/** A LAN peer that has not retired within this bound after shutdown began is
- * destroyed: the phone falls back to its other leg, and transport shutdown
- * never waits on a silent socket. Matches the transport's own HTTP grace. */
 const LAN_SHUTDOWN_GRACE_MS = 1_000;
 const LAN_KEY_FILE = "tls-key.pem";
 const LAN_CERTIFICATE_FILE = "tls-certificate.pem";
-/** Ten years, inside the UTCTime range. The certificate is created once and
- * only an explicit rotation replaces it: every paired profile pins its public
- * key (E-3b), so a silent regeneration would break the pin rather than fix it. */
 const LAN_CERTIFICATE_LIFETIME_DAYS = 3_650;
 
 const OID_ECDSA_WITH_SHA256 = "1.2.840.10045.4.3.2";
@@ -46,26 +19,17 @@ const OID_COMMON_NAME = "2.5.4.3";
 const OID_BASIC_CONSTRAINTS = "2.5.29.19";
 const OID_KEY_USAGE = "2.5.29.15";
 
-/** A `lan.listener` record names the state and, while bound, the address
- * family and port. Never the address: the record exists to say whether the LAN
- * leg is up, not to publish the home network. */
 type LanListenerReason = "setting_off" | "no_private_address" | "bind_failed" | "certificate_incomplete" | "certificate_unreadable" | "certificate_mismatched" | "certificate_generation_failed";
 
 export interface LanEndpointConfig {
   readonly enabled: boolean;
-  /** The Gateway's private state directory for the key and certificate. */
   readonly stateDirectory: string;
-  /** Host facts: the private LAN addresses, most preferred first. A fixture
-   * presents a loopback address here to be the LAN address under test. */
   readonly lanAddresses?: () => readonly LanAddress[];
   readonly reconcileIntervalMs?: number;
 }
 
 interface LanEndpointHandlers {
   readonly onConnection: (socket: Duplex) => void;
-  /** The TLS socket a completed handshake produced. The upgrade handler is
-   * handed that same socket later, so the accept time the listener recorded at
-   * `onConnection` is carried across here. */
   readonly onSecureConnection: (socket: Duplex) => void;
   readonly onClientError: (error: Error, socket: Duplex) => void;
   readonly onTlsClientError: (error: Error, socket: Duplex) => void;
@@ -73,13 +37,6 @@ interface LanEndpointHandlers {
   readonly onUpgrade: (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
 }
 
-/** The bounds the transport applies to every HTTP listener it owns. The lane
- * serves the same routes to the same peers out of the same connection budget,
- * so it takes them from the transport rather than from Node's defaults: Node's
- * 60 s header and 120 s handshake allowances would let a peer that has not
- * signed in hold slots the phone's own leg needs. Every one is required, so a
- * listener cannot silently fall back to a Node default. `idleTimeout` is
- * `server.timeout`, which has no `createServer` option. */
 export interface LanListenerLimits {
   readonly headersTimeout: number;
   readonly requestTimeout: number;
@@ -88,8 +45,6 @@ export interface LanListenerLimits {
   readonly idleTimeout: number;
 }
 
-/** The `createServer` subset of those bounds, so both listeners spell "which
- * field goes where" once. */
 export function httpListenerOptions(limits: LanListenerLimits): HttpsServerOptions {
   return {
     headersTimeout: limits.headersTimeout,
@@ -101,10 +56,7 @@ export function httpListenerOptions(limits: LanListenerLimits): HttpsServerOptio
 
 interface LanEndpointOptions extends LanEndpointConfig, LanEndpointHandlers {
   readonly logger: GatewayLogger;
-  /** The listener's port. The LAN leg serves the same route surface as the main
-   * listener, so it uses the same port on the other address. */
   readonly port: number;
-  /** The main listener's HTTP and TLS bounds, which this lane shares. */
   readonly listenerLimits: LanListenerLimits;
 }
 
@@ -113,37 +65,11 @@ interface LanCredentials {
   readonly certificate: string;
 }
 
-/**
- * What a paired phone needs to reach this lane and pin its certificate. Every
- * field is derived from state this endpoint already holds, so `server.ts`
- * advertises it without knowing how the lane is bound.
- */
 export interface LanAdvertisement {
-  /** The lane's current bind, or empty while it is enabled but unbound. Empty
-   * is a truthful answer, not an error: a phone replaces the endpoints it
-   * saved, falls back to its other leg, and does not dial an address this Mac
-   * no longer offers. */
   readonly endpoints: readonly { readonly host: string; readonly port: number }[];
-  /** Absent until the credential pair exists (the setting is off, or the pair
-   * is broken), because a phone can only pin a key it was told about. */
   readonly pin?: string;
 }
 
-/**
- * The pin a paired phone compares the served certificate against: standard
- * base64 of SHA-256 over the certificate's public key as the raw uncompressed
- * X9.63 point (`0x04 || X || Y`).
- *
- * That encoding is what each platform hands out without synthesising a key
- * structure — `SecKeyCopyExternalRepresentation` on iOS, the JWK coordinates
- * here — so both sides hash the same bytes for the same key. The certificate
- * is always the P-256 EC key this endpoint generates; a key of another type
- * has no point to hash and leaves the lane unadvertised rather than pinning
- * something the phone would compute differently.
- *
- * `protocol-fixtures/lan-endpoint-pin.json` freezes this value for one
- * certificate, and both sides assert against it.
- */
 export function lanPin(certificate: string): string {
   let publicKey: KeyObject;
   try {
@@ -200,12 +126,6 @@ function derSet(...items: Buffer[]): Buffer {
 }
 
 function derInteger(bytes: Buffer): Buffer {
-  // X.690 minimal form: no leading zero octet, and one added only where the
-  // value's first octet has the high bit set and would otherwise read as
-  // negative. OpenSSL refuses a certificate whose serial is not minimal — the
-  // 16 random bytes a serial is drawn from carry a leading zero about one time
-  // in 256 — so a pair that skipped this normalization could keep the Gateway
-  // from starting or disable the lane for good.
   let first = 0;
   while (first < bytes.length - 1 && bytes[first] === 0) first += 1;
   const minimal = bytes.subarray(first);
@@ -241,8 +161,6 @@ function derBitString(value: Buffer, unusedBits = 0): Buffer {
   return der(0x03, Buffer.concat([Buffer.from([unusedBits]), value]));
 }
 
-/** Context-specific, constructed: the `[0] EXPLICIT` version and `[3] EXPLICIT`
- * extensions fields of a v3 certificate. */
 function derContext(tagNumber: number, content: Buffer): Buffer {
   return der(0xa0 | tagNumber, content);
 }
@@ -259,19 +177,12 @@ function toPem(label: string, derBytes: Buffer): string {
   return `-----BEGIN ${label}-----\n${lines.join("\n")}\n-----END ${label}-----\n`;
 }
 
-/**
- * A self-signed v3 certificate for `privateKey`. It carries no subject
- * alternative name on purpose: the phone pins the key rather than validating
- * the address it dialled, and the address is exactly what changes when the Mac
- * joins another network.
- */
 export function selfSignedCertificate(privateKey: KeyObject, commonName: string, now = new Date()): string {
   const algorithm = derSequence(derOid(OID_ECDSA_WITH_SHA256));
   const name = derSequence(derSet(derSequence(derOid(OID_COMMON_NAME), derUtf8(commonName))));
   const subjectPublicKeyInfo = createPublicKey(privateKey).export({ type: "spki", format: "der" });
   const extensions = derContext(3, derSequence(
     derSequence(derOid(OID_BASIC_CONSTRAINTS), derBoolean(true), derOctetString(derSequence(derBoolean(false)))),
-    // digitalSignature(0) and keyEncipherment(2): three significant bits.
     derSequence(derOid(OID_KEY_USAGE), derBoolean(true), derOctetString(derBitString(Buffer.from([0xa0]), 5))),
   ));
   const tbsCertificate = derSequence(
@@ -316,9 +227,6 @@ function validateCredentials(key: string, certificate: string): LanCredentials {
   return { key, certificate };
 }
 
-/** The stored key and certificate, created once when both are absent. A key
- * without its certificate is completed from that key; a certificate without its
- * key, or an unreadable or mismatched pair, is refused rather than overwritten. */
 async function loadOrCreateLanCredentials(stateDirectory: string): Promise<LanCredentials> {
   const keyPath = join(stateDirectory, LAN_KEY_FILE);
   const certificatePath = join(stateDirectory, LAN_CERTIFICATE_FILE);
@@ -328,17 +236,11 @@ async function loadOrCreateLanCredentials(stateDirectory: string): Promise<LanCr
   if (certificate !== null) throw new LanCredentialError("certificate_incomplete");
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
   const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-  // A new pair is read back before it is written: a certificate this Gateway
-  // cannot load would otherwise be stored, pinned by a phone, and disable the
-  // lane on every later start. A refused pair writes nothing, so the next
-  // start draws a new one.
   const created = validateCredentials(
     privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
     selfSignedCertificate(privateKey, hostname()),
   );
   try {
-    // `wx` keeps the create-once invariant: a key that appeared between the
-    // read above and this write is validated, never replaced.
     await writeFile(keyPath, created.key, { mode: 0o600, flag: "wx" });
     await writeFile(certificatePath, created.certificate, { mode: 0o600, flag: "wx" });
   } catch (error) {
@@ -350,10 +252,6 @@ async function loadOrCreateLanCredentials(stateDirectory: string): Promise<LanCr
   return created;
 }
 
-/** Creation writes the key before the certificate, so a crash between the two
- * leaves a key alone. No phone can have pinned it (the pin is advertised only
- * once both load), and the pin is the key's own public point, so a certificate
- * issued from the stored key keeps the pin a later pairing would record. */
 async function completeLanCredentials(key: string, certificatePath: string): Promise<LanCredentials> {
   let privateKey: KeyObject;
   try {
@@ -366,7 +264,6 @@ async function completeLanCredentials(key: string, certificatePath: string): Pro
     await writeFile(certificatePath, completed.certificate, { mode: 0o600, flag: "wx" });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    // Another start completed the pair first: use what it published.
     const existing = await readOptional(certificatePath);
     if (existing === null) throw new LanCredentialError("certificate_incomplete");
     return validateCredentials(key, existing);
@@ -376,30 +273,17 @@ async function completeLanCredentials(key: string, certificatePath: string): Pro
 
 export class LanEndpoint {
   private credentials: LanCredentials | undefined;
-  /** Derived once with the credentials: it is the same value for every hello
-   * until an explicit rotation replaces the pair. */
   private pin: string | undefined;
   private listener: SecureServer | undefined;
   private bound: (LanAddress & { readonly port: number }) | undefined;
   private timer: NodeJS.Timeout | undefined;
-  /** Set by `stop`: a reconcile that is already past its checks closes what it
-   * bound instead of publishing it, and no new interval starts. */
   private stopped = false;
-  /** The reconcile in flight, so an interval tick joins it rather than starting
-   * a second bind, and `stop` can wait for the one that is running. */
   private reconcileInFlight: Promise<void> | undefined;
-  /** The sockets this listener accepted, so a rebind or a shutdown retires
-   * exactly the LAN leg: `server.close()` waits for an upgraded socket forever,
-   * because Node stops tracking it as an HTTP connection. */
   private readonly acceptedSockets = new Set<Duplex>();
-  /** The disabled reason already written, so a reconcile that keeps finding the
-   * same condition does not repeat the record every interval. */
   private disabledReason: LanListenerReason | undefined;
 
   constructor(private readonly options: LanEndpointOptions) {}
 
-  /** Start the listener if the setting is on. Never throws: a LAN endpoint that
-   * cannot come up must not stop the Gateway or its main listener. */
   async start(): Promise<void> {
     if (!this.options.enabled) {
       this.recordDisabled("setting_off", "info");
@@ -409,24 +293,15 @@ export class LanEndpoint {
       this.credentials = await loadOrCreateLanCredentials(this.options.stateDirectory);
       this.pin = lanPin(this.credentials.certificate);
     } catch (error) {
-      // A malformed or half-present pair is not retried: only the explicit
-      // rotation replaces an existing certificate.
       this.recordDisabled(failureReason(error), "warning");
       return;
     }
     await this.reconcile();
-    // A `stop` that landed while the first pair was loading owns the endpoint
-    // now: an interval started here would outlive it.
     if (this.stopped) return;
-    // Keep reconciling even while disabled for want of a private address: a Mac
-    // that starts with Wi-Fi off must expose the LAN leg once it associates.
     this.timer = setInterval(() => void this.reconcile(), this.options.reconcileIntervalMs ?? LAN_ADDRESS_RECONCILE_MS);
     this.timer.unref();
   }
 
-  /** What a paired phone is told about this lane (E-3b). Called on the pairing
-   * response and every hello, so it reads only state the reconcile already
-   * published: the current bind and the pin derived at start. */
   advertisement(): LanAdvertisement {
     return {
       endpoints: this.bound === undefined ? [] : [{ host: this.bound.address, port: this.bound.port }],
@@ -434,10 +309,6 @@ export class LanEndpoint {
     };
   }
 
-  /** Stop listening. Sockets this listener accepted keep their own bounded
-   * retirement: a peer that does not leave within the grace is destroyed. A
-   * bind still in flight is joined first, so nothing this endpoint bound is
-   * left listening once this promise settles. */
   async stop(): Promise<void> {
     this.stopped = true;
     clearInterval(this.timer);
@@ -446,8 +317,6 @@ export class LanEndpoint {
     await this.retireListener(false);
   }
 
-  /** One reconcile at a time: a tick that arrives while a bind is in flight
-   * joins it, and `stop` waits on the same promise. */
   private reconcile(): Promise<void> {
     if (this.reconcileInFlight !== undefined) return this.reconcileInFlight;
     const running = this.reconcileOnce().finally(() => {
@@ -461,10 +330,6 @@ export class LanEndpoint {
     if (this.stopped || !this.credentials) return;
     const next = (this.options.lanAddresses ?? resolveLanAddresses)()[0];
     if (next !== undefined && this.listener && this.bound?.address === next.address) return;
-    // Retire before the new bind: the address this listener served is no longer
-    // the preferred one, so a socket on it cannot reach the phone anyway. A
-    // failed bind is retried on the next interval, because the port or the
-    // address may be transient.
     const rebound = this.listener !== undefined;
     await this.retireListener(true);
     if (this.stopped) return;
@@ -474,8 +339,6 @@ export class LanEndpoint {
     }
     const listener = await this.bind(next);
     if (this.stopped) {
-      // `stop` returned while this bind was still in flight. The listener it
-      // could not see is this pass's own, so this pass closes it.
       if (listener) await this.closeListener(listener, true);
       return;
     }
@@ -487,9 +350,6 @@ export class LanEndpoint {
     this.bound = { ...next, port: this.options.port };
     this.disabledReason = undefined;
     this.options.logger.log("info",
-      // The details ride in the message, like every other bounded diagnostic
-      // record: the family and port say the LAN leg is up without publishing
-      // which address on the home network it is.
       `LAN endpoint ${rebound ? "rebound" : "bound"} (state=${rebound ? "rebound" : "bound"} family=${next.family} port=${this.options.port})`,
       { event: "lan.listener", source: "transport" });
   }
@@ -499,9 +359,6 @@ export class LanEndpoint {
     const limits = this.options.listenerLimits;
     let listener: SecureServer;
     try {
-      // The TLS context is part of the bind: a credential the platform refuses
-      // disables this listener rather than reaching `start`, which must never
-      // throw (the Gateway would fail to start with it).
       listener = createServer({
         ...httpListenerOptions(limits),
         key: credentials.key,
@@ -519,8 +376,6 @@ export class LanEndpoint {
     });
     listener.on("secureConnection", (socket) => this.options.onSecureConnection(socket));
     listener.on("clientError", (error, socket) => this.options.onClientError(error, socket));
-    // Observe before HTTPS forwards the error to clientError and retires the
-    // wrapper; its live address/port still joins the accepted physical socket.
     listener.prependListener("tlsClientError", (error, socket) => this.options.onTlsClientError(error, socket));
     listener.on("upgrade", (request, socket, head) => this.options.onUpgrade(request, socket, head));
     try {
@@ -532,8 +387,6 @@ export class LanEndpoint {
         });
       });
     } catch {
-      // Only the state reaches the log: the `lan.listener` record the caller
-      // writes names the family and the retry, never the refused address.
       listener.close(() => {});
       return undefined;
     }

@@ -1,9 +1,3 @@
-/** Dynamic JSON node ceiling shared with iOS JSONValueDecodingLimits.gateway.
- * Count encoded values, not object keys. Normally undefined object members are
- * omitted; projection fitting counts them as null because safeJson materializes
- * them later. Callers pass plain JSON-compatible projections, never canonical
- * objects or objects with custom toJSON serialization.
- */
 export const GATEWAY_JSON_MAXIMUM_NODES = 32_768;
 
 export function jsonNodeCount(value: unknown, stopAfter = GATEWAY_JSON_MAXIMUM_NODES, undefinedAsNull = false): number {

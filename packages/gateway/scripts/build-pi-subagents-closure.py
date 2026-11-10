@@ -61,8 +61,6 @@ def main():
             raise SystemExit("fork lockfile root dependencies do not match source manifest")
         manifest["bundledDependencies"] = sorted(declared)
         canonical_manifest = (json.dumps(manifest, indent=2) + "\n").encode()
-        # npm ci validates even omitted development dependencies. Runtime-only
-        # predecessor locks must not resolve them; preserve them in the artifact.
         install_manifest = {key: value for key, value in manifest.items() if key != "devDependencies"}
         manifest_path.write_text(json.dumps(install_manifest, indent=2) + "\n")
         npm = shutil.which("npm")

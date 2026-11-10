@@ -1,4 +1,3 @@
-/** Closed Tron installation registry and APNs transport. */
 import {
   CHALLENGE_PATH,
   GRANT_PATH_PREFIX,

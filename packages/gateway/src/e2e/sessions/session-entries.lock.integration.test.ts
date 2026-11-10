@@ -7,24 +7,7 @@ import {
 } from "../../../test-support/lock-scenarios.js";
 import { compareWithGolden, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
 
-/**
- * Tron's persisted session entries (#2279): every distinct Tron custom entry
- * (`tron.chat-invocation.v1`, `tron.settings.v1`, `tron.context-window.v1`,
- * `tron.extension-activity.v1`) the shared lock
- * scenarios write into canonical session JSONL, with its values, normalized as
- * `gateway.canonical` normalizes them. Each lock's faux provider is named after
- * the lock, so that name becomes `<lock>`. The behavior locks assert what a
- * scenario does; this lock pins the persisted format and values those entries
- * take, so a format change is reviewed once, here.
- *
- * Scenarios (`test-support/lock-scenarios.ts`): run-prompt-stream, run-compaction,
- * run-extension-ui, run-queue-control, project-root-trust, automation-owned-run
- * (both sessions) and run-drain-blockers. Home and delegation sessions keep their
- * entries in `home-contention-restart` and `delegation-subagent`.
- */
-
 const GOLDEN = resolve(process.cwd(), "test-fixtures", "pi-sdk", "session-entries.golden.json");
-/** Every release in creation order, run newest first: each Gateway restores the agent-dir environment it found. */
 const owned: Array<() => Promise<void>> = [];
 const own = (gateway: LockGateway) => { owned.push(() => gateway.dispose()); };
 afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });

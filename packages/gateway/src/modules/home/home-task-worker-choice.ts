@@ -11,30 +11,20 @@ import type { SessionSnapshot } from "../../protocol/types.js";
 import type { HomeOwner } from "./home-owner.js";
 import type { HomeTaskDispatchRequest } from "./home-task-dispatcher.js";
 
-/** The thinking levels a delegation may name: the set the slot's `setThinking` accepts. */
 export const HOME_TASK_THINKING_LEVELS: readonly ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-/** A refusal lists at most this many valid models, so the Home tool error stays bounded. */
 const VALID_MODEL_LIMIT = 20;
 
-/** The model and thinking level a delegation chooses for its worker. Both are optional;
- * an omitted model keeps the worker session's default, and a thinking level needs a model. */
 export interface HomeTaskWorkerChoice {
   model?: { provider: string; id: string };
   thinking?: ModelThinkingLevel;
 }
 
-/** Validates a delegation's choice against the Gateway's model runtime, before any task
- * record or worker session exists. A virtual model is refused by the same rule as Home's
- * designation: routing runs on the canonical transcript, which a worker does not own. A
- * registered model without credentials is refused too, since the worker's own model
- * change would be refused only after its session exists. */
 async function admitTaskWorkerChoice(runtime: WorkerModelCatalog | undefined, choice: HomeTaskWorkerChoice): Promise<HomeTaskWorkerChoice> {
   if (choice.model === undefined) {
     if (choice.thinking !== undefined) {
       throw refusal("thinking-requires-model", "thinking needs a model: name the model the worker runs with, or omit thinking to keep the Gateway default");
     }
-    // An omitted choice validates nothing, so it needs no model runtime.
     return {};
   }
   if (!runtime) throw new GatewayError("unsupported", "Task worker models need the Gateway model runtime");
@@ -66,8 +56,6 @@ function refusal(reason: string, message: string, details: Record<string, unknow
   return new GatewayError("invalid_request", message, false, { reason, ...details });
 }
 
-/** The models a choice would be accepted for: fixed and usable. The catalog holds
- * far more models than a refusal can name, so the list is a bounded sample. */
 async function validModelReferences(runtime: Pick<ModelRuntime, "getAllAvailable">): Promise<string> {
   const references = (await runtime.getAllAvailable())
     .filter(model => !isVirtualModel(model))
@@ -76,7 +64,6 @@ async function validModelReferences(runtime: Pick<ModelRuntime, "getAllAvailable
   return references.length ? `Valid models: ${references.join(", ")}.` : "No valid model is available.";
 }
 
-/** Delegate-boundary reads; Home supplies queue policy over the native owners. */
 export interface HomeWorkerChoicePort {
   settings(): Pick<SettingsModel, "resolve"> | undefined;
   homeRuntime(sessionId: string): Promise<Pick<SessionSnapshot, "model" | "thinkingLevel">>;
@@ -85,11 +72,6 @@ export interface HomeWorkerChoicePort {
   model(provider: string, id: string): Model<Api> | undefined;
 }
 
-/** Home resolves its typed worker profile at the delegate boundary: the first
- * available model of the worker queue (settings-model.md 6.3), else Home's own
- * model when the queue is empty. The selected values are copied into this task
- * only; later Home/profile changes cannot retarget it. The worker queue's and
- * subagent queue's availability is returned to Home and written into the brief. */
 export async function dispatchWithWorkerChoice(owner: Pick<HomeOwner, "dispatchTask">, ports: HomeWorkerChoicePort,
   sessionId: string, request: HomeTaskDispatchRequest, signal?: AbortSignal, confirm?: ConfirmChange) {
   if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
@@ -150,20 +132,17 @@ export async function dispatchWithWorkerChoice(owner: Pick<HomeOwner, "dispatchT
 
 type WorkerModelCatalog = Pick<ModelRuntime, "getModel" | "checkAuth" | "getAllAvailable">;
 
-/** Canonical native reads; Home owns the scope/role/choice policy over them. */
 export interface HomeTaskPolicyInputs {
   settings: HomeWorkerChoicePort["settings"];
   modelQueueOf(role: Parameters<typeof modelQueueKey>[0], scope: "home"): Promise<string[]>;
   modelRuntime(): WorkerModelCatalog | undefined;
 }
 
-/** Resolve launch queues in parallel at each call, never retaining a prior recipe. */
 export async function homeTaskModelQueues(read: HomeTaskPolicyInputs["modelQueueOf"]) {
   const [worker, subagent] = await Promise.all([read("worker", "home"), read("subagent", "home")]);
   return { worker, subagent };
 }
 
-/** Home task policy is stateless: admission and each turn read the current owners. */
 export function homeTaskPolicy(inputs: HomeTaskPolicyInputs, trust: Pick<TrustService, "inspect">) {
   return {
     canonicalTarget: async (target: string) => {
@@ -179,7 +158,6 @@ export function homeTaskPolicy(inputs: HomeTaskPolicyInputs, trust: Pick<TrustSe
         { inputTokens?: number; outputTokens?: number } | undefined;
     },
     modelQueues: () => homeTaskModelQueues(inputs.modelQueueOf),
-    // Keep the admission wrapper's promise adoption around the authenticated read.
     admitChoice: async (choice: HomeTaskWorkerChoice) => admitTaskWorkerChoice(inputs.modelRuntime(), choice),
   };
 }

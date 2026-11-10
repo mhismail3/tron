@@ -15,20 +15,17 @@ import unittest
 
 HOST = "TronSheetLoadingHostModifier"
 HOST_OWNERS = {"UI/Theme/TronPresentation.swift", "State/PresentationActivityCoordinator.swift",
-               "App/TronMobileApp.swift"}  # surfaces, then the app (and fixture) root
-# Indeterminate spinners that are not sheet loading states: main-chat rows and
-# transcript artifacts outside any sheet. A new entry needs the same justification.
+               "App/TronMobileApp.swift"}
 SPINNER_ALLOWED = {
-    "UI/Chat/ArchivedSessionsSection.swift",  # chat-list section header
-    "UI/Chat/ChatDisplayViews.swift",  # inline transcript image chip
-    "UI/Chat/HomePinnedRow.swift",  # chat-list Home row status
-    "UI/Chat/SessionShellView.swift",  # chat-list search field
-    "UI/SwiftApps/SwiftAppDisplayCard.swift",  # inline transcript Swift app card control
-    "UI/SwiftApps/SwiftAppViews.swift",  # renders a displayed Swift app's own ProgressView
+    "UI/Chat/ArchivedSessionsSection.swift",
+    "UI/Chat/ChatDisplayViews.swift",
+    "UI/Chat/HomePinnedRow.swift",
+    "UI/Chat/SessionShellView.swift",
+    "UI/SwiftApps/SwiftAppDisplayCard.swift",
+    "UI/SwiftApps/SwiftAppViews.swift",
 }
-# Visible text that names in-flight work but is not a loading placeholder.
 TEXT_ALLOWED = {
-    ("UI/Chat/ChatTranscriptEventViews.swift", "Preparing details…"),  # transcript event row
+    ("UI/Chat/ChatTranscriptEventViews.swift", "Preparing details…"),
 }
 COMMENTS = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/')
 STRINGS = re.compile(r'"""[\s\S]*?"""|"(?:\\.|[^"\\])*"')

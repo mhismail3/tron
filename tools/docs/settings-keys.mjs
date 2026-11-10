@@ -1,7 +1,4 @@
-// Print the Gateway settings schema (KEYS, RECORD_SUBJECTS, LAYERS) as JSON for
-// `scripts/tron docs settings` (tools/docs/README.md). Real composition constructs
-// the schema; keys are built in code (template ids, role maps, owner contributions).
-// Node strips TypeScript; this hook maps the sources' `./x.js` specifiers to `./x.ts`.
+// Print the Gateway settings schema (KEYS, RECORD_SUBJECTS, LAYERS) as JSON for `scripts/tron docs settings` (tools/docs/README.md).
 import { existsSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";

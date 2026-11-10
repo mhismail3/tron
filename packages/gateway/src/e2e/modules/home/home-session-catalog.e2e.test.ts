@@ -34,7 +34,6 @@ describe("Home chapters in the dashboard session list", () => {
     f.faux.setResponses([fauxAssistantMessage("Ordinary reply")]);
     await ordinary.prompt("hello");
     await waitFor(() => ordinary.snapshot().configurationBlocker === null, "ordinary terminal");
-    // Titles are presentation only, including a title identical to Home's role.
     await ordinary.rename("Home");
     await home.rename("An ordinary-looking chapter");
 
@@ -42,16 +41,13 @@ describe("Home chapters in the dashboard session list", () => {
       uploads: new UploadStore(join(f.root, "catalog-uploads"), 1024),
       receipts: new CommandReceiptStore(join(f.root, "catalog-receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "catalog-client", identity: "device:catalog-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
-    // The dashboard's list traversal: the rows a client receives.
     const clientRows = async () => (await service.invoke(client, "session.list", { scope: "user", limit: 500 }) as { sessions: Array<{ id: string }> })
       .sessions.map(session => session.id);
 
     expect(await clientRows()).toEqual([ordinary.id]);
-    // Membership is unchanged: search and derived reads still resolve Home's chapters.
     expect((await f.registry.list("user")).map(session => session.id)).toEqual(expect.arrayContaining([predecessor, ordinary.id]));
     expect((await f.registry.list("all")).map(session => session.id)).toEqual(expect.arrayContaining([predecessor, ordinary.id]));
 
-    // Rollover seals the predecessor and reserves its successor without materializing it.
     const port = (owner as any).options.sessions;
     const metrics = vi.spyOn(port, "chapterMetrics").mockResolvedValue({ bytes: 25 * 1024 * 1024, entries: 10, quiescent: true });
     await owner.chapterQuiescent(predecessor);
@@ -59,7 +55,6 @@ describe("Home chapters in the dashboard session list", () => {
     expect(await owner.status()).toMatchObject({ phase: "rollover-pending", openSessionId: predecessor });
     expect(await clientRows()).toEqual([ordinary.id]);
 
-    // Materializing the successor makes it the current chapter; neither chapter reaches the dashboard.
     f.faux.setResponses([fauxAssistantMessage("Successor Home conversation")]);
     const accepted = await service.invoke(client, "home.prompt", { commandId: "successor-chapter-command", text: "Continue Home" }) as { sessionId: string };
     expect(accepted.sessionId).not.toBe(predecessor);
@@ -67,12 +62,9 @@ describe("Home chapters in the dashboard session list", () => {
     await waitFor(() => successor.snapshot().configurationBlocker === null, "successor Home terminal");
     expect(await clientRows()).toEqual([ordinary.id]);
 
-    // Opening a chapter by id is the pinned row's and the Chapters sheet's route, so it still resolves.
     expect((await f.registry.acquire(predecessor)).id).toBe(predecessor);
     expect((await f.registry.acquire(accepted.sessionId)).id).toBe(accepted.sessionId);
 
-    // A sealed chapter's transcript opens read-only after its runtime was evicted (#911):
-    // the cold open is the Chapters sheet's route once the chapter has idled out.
     const registry = f.registry as unknown as { slots: Map<string, unknown>; retireIdleRuntime(input: unknown): Promise<boolean> };
     const sealedSlot = registry.slots.get(predecessor);
     expect(await registry.retireIdleRuntime({ sessionId: predecessor, slot: sealedSlot, reason: "idle", eligible: () => true })).toBe(true);
@@ -80,7 +72,6 @@ describe("Home chapters in the dashboard session list", () => {
     const reopened = await f.registry.acquire(predecessor);
     expect(registry.slots.get(predecessor)).toBe(reopened);
     expect(JSON.stringify(reopened.canonicalSessionEntries())).toContain("Initial Home conversation");
-    // Read-only: the sealed chapter still refuses a prompt.
     await expect(reopened.prompt("write to a sealed chapter")).rejects.toThrow();
     evidence.push({ case: "chapter-membership-not-title", predecessor, successor: accepted.sessionId,
       ordinary: ordinary.id, dashboardIDs: await clientRows() });
@@ -92,7 +83,6 @@ describe("Home chapters in the dashboard session list", () => {
     f.faux.setResponses([fauxAssistantMessage("Ordinary reply")]);
     await ordinary.prompt("hello");
     await waitFor(() => ordinary.snapshot().configurationBlocker === null, "ordinary terminal");
-    // A worker ends through its `report` tool call, never a final assistant reply.
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const task = await (await dispatch(f, "worker-row")).completion;
     expect(task.lifecycle).toBe("terminal");
@@ -120,8 +110,6 @@ describe("Home chapters in the dashboard session list", () => {
       const status = await service.invoke(client, "home.status", {}) as { waitingForUser?: boolean };
       return { byId: new Map(listed.map(row => [row.id, row])), status, pages };
     };
-    // The settled worker records its completion read; the maintainer's own
-    // chat, finished with nobody watching, is unread.
     await waitFor(async () => ((await rows()).byId.get(worker)?.completionRevision ?? 0) >= 1, "settled worker records its completion");
     const live = await rows();
     expect(live.byId.get(worker)).toMatchObject({ name: "Ordinary-looking session", homeTaskId: "worker-row", isUnread: false });
@@ -129,7 +117,6 @@ describe("Home chapters in the dashboard session list", () => {
     expect(live.byId.get(ordinary.id)?.homeTaskId).toBeUndefined();
     expect(live.status.waitingForUser).toBe(false);
 
-    // A resumed worker reuses its session and settles read again.
     f.faux.setResponses([fauxAssistantMessage([reportCall("report-two")], { stopReason: "toolUse" })]);
     const resumed = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "resume", taskId: task.taskId, operationId: task.operationId }) as
       { taskId: string; sessionId: string };
@@ -138,8 +125,6 @@ describe("Home chapters in the dashboard session list", () => {
     await waitFor(async () => ((await rows()).byId.get(worker)?.completionRevision ?? 0) >= 2, "resumed worker records its completion");
     expect((await rows()).byId.get(worker)).toMatchObject({ homeTaskId: "worker-row", isUnread: false });
 
-    // Unread left by an earlier build (a worker completion admitted unread) is
-    // acknowledged when startup recovery seeds the worker index.
     const attention = (f.registry as unknown as { attention: {
       complete(id: string, completion: string, observed: boolean): Promise<{ projection: { isUnread: boolean } }>;
     } }).attention;
@@ -150,8 +135,6 @@ describe("Home chapters in the dashboard session list", () => {
     expect(recovered.byId.get(worker)).toMatchObject({ homeTaskId: "worker-row", isUnread: false });
     expect(recovered.byId.get(ordinary.id)).toMatchObject({ isUnread: true });
     expect(recovered.byId.get(ordinary.id)?.homeTaskId).toBeUndefined();
-    // A user's read acknowledges only that exact completion; it changes neither
-    // catalog membership nor the worker metadata after cold recovery.
     const completionRevision = recovered.byId.get(ordinary.id)!.completionRevision!;
     await cold.setAttention(ordinary.id, false, completionRevision);
     const read = await rows(cold);

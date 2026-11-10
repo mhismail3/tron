@@ -62,7 +62,6 @@ describe("Home receipts at real-process crash cuts", () => {
           expect(entries[0]).toMatchObject({ type: "session", id: binding.physicalSessionId });
           expect(entries.filter(entry => entry.type === "message" && entry.message.role === "user")).toHaveLength(1);
         }
-        // Only current route facts change; the old command's durable binding must not.
         await writeFile(ledgerPath, JSON.stringify({ enabled: false,
           binding: { ...binding, bindingRevision: 2, physicalSessionId: "successor-chapter" } }));
         store = new CommandReceiptStore(root);

@@ -11,36 +11,11 @@ import { startLockGateway, type LockClient, type LockGateway, type LockGatewayOp
 import { compareWithGolden, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
 import { awaitsWithin } from "../../../test-support/wait-for.js";
 
-/**
- * Model-visible session shapes (#2279): what the model receives for each kind of
- * session the Gateway runs, recorded once here so the behavior locks need not pin
- * it. For each shape: the declared tool names in order, the system-prompt section
- * headings and a hash of the normalized prompt text; and for the requests whose
- * text the product writes itself (the compaction summary prompts and the task
- * worker's report reminder), the messages too. Each chat shape, the task
- * worker and the project chat also record their canonical system entries: the
- * prompt sections' text and the tools added, as the session JSONL persists them
- * (shared tools' descriptions and parameters are stripped at comparison, as in
- * every scenario lock; `home-activation-wake` pins those).
- *
- * Shapes: a plain chat; a chat with an extension tool; a chat with push
- * notifications (the `notify` tool) with and without an extension; a chat with
- * automations (the `schedule` tool); a Home task worker (`checkin`, `report`) and
- * its reminder turn; a trusted project subdirectory chat (project context, the
- * root's skill and extension) and the same chat after trust is revoked; and a
- * manual compaction's two summary requests. Tron Home's own prompts stay in
- * `home-activation-wake`.
- *
- * It is the `gateway/pi-sdk` module's scenario lock beside the SDK behavior trace:
- * intended prompt or tool changes update it with `TRON_UPDATE_LOCKS=gateway/e2e`.
- */
-
 const GOLDEN = resolve(process.cwd(), "test-fixtures", "pi-sdk", "session-shapes.golden.json");
 const gateways: LockGateway[] = [];
 const releases: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const release of releases.splice(0).reverse()) await release();
-  // Sequentially, newest first: each Gateway restores the agent-dir environment it found.
   for (const gateway of gateways.splice(0).reverse()) await gateway.dispose();
 });
 
@@ -74,13 +49,11 @@ const BACKGROUND_TOOL = { name: "lock-background.ts", source: `
   }
 ` };
 
-/** The shape of one provider request: no messages unless the product writes them. */
 const shape = (request: ProviderRequestRecord, messages = false): TraceValue => ({
   tools: [...request.tools], promptSections: [...request.promptSections], promptHash: request.promptHash,
   ...(messages ? { messages: request.messages as TraceValue[] } : {}),
 });
 
-/** The session's canonical system entries (prompt sections and the tool schemas added), normalized. */
 async function systemEntries(gateway: LockGateway, sessionId: string): Promise<TraceValue[]> {
   return (await gateway.canonical(sessionId)).flatMap((entry) => {
     const message = (entry as { message?: { role?: string; sections?: TraceValue; toolsAdded?: TraceValue } }).message;
@@ -88,7 +61,6 @@ async function systemEntries(gateway: LockGateway, sessionId: string): Promise<T
   });
 }
 
-/** A Gateway whose chat answers one prompt; returns that request's shape and the session's system entries. */
 async function chatShape(name: string, options: LockGatewayOptions = {}): Promise<TraceValue> {
   const gateway = await startLockGateway(name, options);
   gateways.push(gateway);
@@ -105,14 +77,12 @@ async function chatShape(name: string, options: LockGatewayOptions = {}): Promis
   return { ...(shape(requests[0]!) as Record<string, TraceValue>), system: await systemEntries(gateway, sessionId) };
 }
 
-/** Open and sync a session as a phone does before prompting. */
 async function attach(phone: LockClient, sessionId: string): Promise<void> {
   const opened = await phone.request("session.open", { sessionId });
   expect(opened.ok, JSON.stringify(opened)).toBe(true);
   expect((await phone.request("session.sync", { sessionId, syncToken: opened.result.syncToken })).ok).toBe(true);
 }
 
-/** The production notification owner over an always-accepting relay. */
 const withNotifications = (relayOrigin = "https://relay.lock.invalid") => async (tronHome: string) => {
   const service = new NotificationService(new NotificationGrantStore(tronHome),
     new PushRelayClient(relayOrigin, async () => new Response(JSON.stringify({ status: "accepted_by_apns" }), { status: 200 }) as never),
@@ -137,8 +107,6 @@ describe("gateway/pi-sdk session shapes", () => {
     shapes.chatWithNotificationsBackground = await chatShape("session-shape-notify-background", { extensions: [BACKGROUND_TOOL], notifications: withNotifications() });
     shapes.chatWithAutomations = await chatShape("session-shape-automations", { automations: true });
 
-    // A Home task worker, admitted as the dispatcher admits it, with no report: its
-    // turn, then the reminder turn the product writes.
     {
       const gateway = await startLockGateway("session-shape-worker", { extensions: [SELECT_TOOL], notifications: withNotifications() });
       gateways.push(gateway);
@@ -163,9 +131,6 @@ describe("gateway/pi-sdk session shapes", () => {
       shapes.taskWorkerReminder = shape(requests[1]!, true);
     }
 
-    // A chat in the subdirectory of a trusted Git project: the root's Project layer
-    // (skill, extension, instructions) reaches the prompt; after revoking trust the skill and
-    // extension drop while the AGENTS.md instructions stay.
     {
       const gateway = await startLockGateway("session-shape-project");
       gateways.push(gateway);
@@ -214,11 +179,9 @@ export default function (pi) {
       expect(requests).toHaveLength(2);
       shapes.trustedProjectSubdirectory = shape(requests[0]!);
       shapes.revokedProjectSubdirectory = shape(requests[1]!);
-      // Both prompts' system entries, in session order: the trusted prompt, then what revoking changed.
       shapes.projectSubdirectorySystem = await systemEntries(gateway, sessionId);
     }
 
-    // A manual compaction: the summary of the cut history, then the prefix of the split turn.
     {
       const gateway = await startLockGateway("session-shape-compaction");
       gateways.push(gateway);

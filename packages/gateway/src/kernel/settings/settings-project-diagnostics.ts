@@ -1,14 +1,11 @@
 import type { Diagnostic } from "./tool-contract.js";
 import type { SettingsSchema } from "./settings-schema.js";
 
-/** An exact JSON path for applied values; diagnostics bound untrusted key names. */
 export function projectSettingPath(parts: readonly string[]): string {
   return parts.map((part, index) => /^[A-Za-z_]\w*$/.test(part)
     ? `${index ? "." : ""}${part}` : `[${JSON.stringify(part)}]`).join("");
 }
 
-/** Report ignored fields without copying their values or descending into unknown
- * objects. Both traversal and output are bounded independently of repo content. */
 export function projectSettingsDiagnostics(schema: SettingsSchema, raw: Record<string, unknown>, file: string): {
   diagnostics: Diagnostic[]; diagnosticsTruncated?: true;
 } {

@@ -15,11 +15,9 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 GATEWAY = "packages/gateway"
 IOS = "packages/ios-app"
 TARGETS = {"gateway": (GATEWAY, "gateway/", "Gateway"), "ios": (IOS, "ios-app/", "iOS")}
-# Every module may import platform (L0) and contracts (L1): an edge into them is never upward or undeclared.
 FOUNDATION = {"L0", "L1"}
-# Ratcheted rule kinds; `undeclared` pairs are counted and reported, never ratcheted or failed.
 RATCHETED = ("upward ", "two-way ", "unindexed ")
-PI_SEAM = "gateway/pi"  # the one module that may import or name the Pi SDK (kernel.md §4, decision D2)
+PI_SEAM = "gateway/pi"
 PI_PACKAGE = re.compile(r"(?:^|/)node_modules/@earendil-works/")
 REASON = re.compile(r"^\s+(?:Imported|Referenced) via (?:\"[^\"]*\"|'[^']*'|\S+) from file '([^']+)'")
 
@@ -67,7 +65,6 @@ def gateway_graph(config: str = "tsconfig.json", roots: tuple[str, ...] = ("src/
     edges, current, files, pi_importers = set(), None, set(), set()
     for line in done.stdout.splitlines():
         if not line.startswith((" ", "\t")):
-            # A file header is a bare path; diagnostics carry "(line,col): error".
             current = None if re.search(r"\(\d+,\d+\): error ", line) or not line.strip() else line.strip()
             if current is not None and current.startswith(roots):
                 files.add(f"{GATEWAY}/{current}")
@@ -181,7 +178,6 @@ def load_baseline(text: str | None, origin: str) -> dict:
             raise ValueError("unindexed must map modules to positive file counts")
     except (ValueError, KeyError, TypeError) as error:
         raise LayersError(f"{origin}: malformed baseline ({error})") from error
-    # A baseline written before undeclared pairs became report-only still lists them; they bound nothing.
     return {**dict.fromkeys((rule for rule in pairs if rule.startswith(RATCHETED)), 1),
             **{f"unindexed {key}": count for key, count in gaps.items()}}
 
@@ -247,7 +243,6 @@ def main(argv: list[str]) -> int:
     baseline_path = f"{directory}/layer-baseline.json"
     command = f"scripts/tron layers {target}"
     try:
-        # Fail closed: the base revision's baseline bounds this one, so the base must exist.
         if git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", check=False).returncode:
             raise LayersError(f"base {base} not found; pass --base <ref> with the revision this work starts from")
         shown = git("show", f"{base}:{baseline_path}", check=False)
@@ -284,12 +279,11 @@ def main(argv: list[str]) -> int:
         for rule in new:
             source, target_file = stats["examples"][rule]
             problems.append(f"new violation: {rule} [{counts[rule]} edge(s), e.g. {source} -> {target_file}]")
-        for rule in grew:  # only unindexed counts can grow; a pair's file edges are not ratcheted
+        for rule in grew:
             problems.append(f"grew: {rule} [{baseline[rule]} -> {current[rule]} file(s)]")
         for rule in fixed:
             problems.append(f"improved, tighten the baseline ({command} --update): {rule} "
                             f"[{baseline[rule]} -> {current.get(rule, 0)}]")
-        # The committed base revision's baseline bounds this one: an entry can only leave or shrink.
         if bound is None:
             print(f"layers: {base} has no {baseline_path}; this change introduces it")
         else:

@@ -6,7 +6,6 @@ import type { ActivitySource } from "../projection/activity.js";
 import type { ExtensionActivityRecency } from "../../sessions/extension-activity-recency.js";
 import type { ExtensionArtifactRejectionReason } from "../projection/extension-run-projection.js";
 
-/** An existing native work handle, not another work registry or receipt owner. */
 export interface ArtifactReceiptOwner {
   readonly token: string;
   readonly settled: Promise<void>;
@@ -15,9 +14,6 @@ export interface ArtifactReceiptOwner {
   settle(): void;
 }
 
-/** Same physical native frame, never a copied context or callback binding bag.
- * K5 owns run/artifact policy and mutable state; native lane, canonical I/O,
- * SDK, work registry and publication retain their original identity/lifetime. */
 export interface OwnedTurnRuntime {
   readonly activeOperationId: string | undefined;
   readonly operation: { readonly id?: string } | undefined;

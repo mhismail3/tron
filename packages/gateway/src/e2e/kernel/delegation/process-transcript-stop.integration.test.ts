@@ -10,17 +10,12 @@ import { ProcessTranscriptLeaseStore } from "../../../transport/process-transcri
 const servers: ChildModelServer[] = [];
 afterEach(async () => {
   try {
-    // Keep the model endpoint alive for its actual Registry/work/runner owner's
-    // disposal join. All teardown retains the existing 10-second hook deadline.
     await disposeFixtures();
   } finally {
     for (const server of servers.splice(0)) await server.close();
   }
 });
 
-/** Real Registry/Pi, managed producer, child process, canonical child admission
- * and Transport lease store. The child model holds its HTTP connection until
- * the real producer stops it; no controller/runtime/store replacement. */
 it("stops only the exact connection-owned child transcript through the K5 run owner", async () => {
   const f = await fixture(false, false, undefined, true);
   const server = await startScriptedChild(f);

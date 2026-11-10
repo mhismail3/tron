@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Verify one exact Mach-O architecture set without relying on lipo's
-# version-sensitive multi-architecture -verify_arch argument parsing.
+# Verify one exact Mach-O architecture set without relying on lipo's version-sensitive multi-architecture -verify_arch argument parsing.
 set -euo pipefail
 
 [[ $# -ge 2 ]] || { echo "usage: verify-macho-architectures.sh BINARY ARCH..." >&2; exit 64; }

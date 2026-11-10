@@ -63,7 +63,7 @@ function runGit(cwd: string, args: string[], timeout = COMMAND_TIMEOUT_MS): Prom
     const terminateGroup = (signal: NodeJS.Signals): void => {
       if (!child.pid) return;
       try { process.kill(-child.pid, signal); }
-      catch { try { child.kill(signal); } catch { /* retained as uncertain below */ } }
+      catch { try { child.kill(signal); } catch { } }
     };
     const groupGone = (): boolean => {
       if (!child.pid) return true;
@@ -72,8 +72,6 @@ function runGit(cwd: string, args: string[], timeout = COMMAND_TIMEOUT_MS): Prom
     };
     const finish = (error?: Error, code?: number | null, signal?: NodeJS.Signals | null, deadlineExpired = false): void => {
       if (settled) return;
-      // A nonzero direct-child exit is no more proof of descendant retirement
-      // than a successful one. Never permit destructive rollback on that basis.
       if (!deadlineExpired && !groupGone()) {
         requestTermination("process group outlived Git");
         return;
@@ -89,8 +87,6 @@ function runGit(cwd: string, args: string[], timeout = COMMAND_TIMEOUT_MS): Prom
           terminationReason === undefined,
           terminationReason ? { outcomeUnknown: true } : { exitCode: code ?? undefined }));
       }
-      // Late callbacks are observed but never accumulate more output or publish
-      // a second result. Deadline expiry is uncertainty, not proof of group exit.
       if (deadlineExpired) { child.stdout.destroy(); child.stderr.destroy(); }
     };
     const requestTermination = (reason: string): void => {
@@ -168,38 +164,24 @@ export class GitWorktreeService {
         cleanup: async () => {
           let worktreeRemoved = false;
           if (createdBranch && baseCommit) {
-            // The branch is deleted while its exact worktree association still
-            // proves this operation owns it. A failed/uncertain add never gets
-            // here and therefore never gets permission to delete a same-named
-            // branch created by a concurrent Git actor.
             await this.assertOwnedWorktree(repositoryRoot, canonical, branch);
             try {
               await this.removeCreatedBranch(repositoryRoot, branch, baseCommit);
             } catch (error) {
-              // A timed-out ref operation may still be running. Preserve the
-              // exact worktree as well; no destructive cleanup may race it.
               if (isUncertainOutcome(error)) throw error;
               const current = await runGit(repositoryRoot, ["rev-parse", "--verify", `refs/heads/${branch}`])
                 .catch(failure => { throw asUncertainOutcome(failure, "Git branch cleanup could not be reconciled"); });
               if (current.stdout.trim() === baseCommit) {
                 throw asUncertainOutcome(error, "Git branch cleanup failed without a confirmed branch move");
               }
-              // The worktree is still ours, so it is safe to release it even
-              // when a session commit or external actor moved the branch. The
-              // compare-and-delete has already preserved that branch.
               await this.removeWorktree(repositoryRoot, canonical);
               worktreeRemoved = true;
-              // The failed compare-and-delete has not granted permission to
-              // alter the surviving branch.
             }
           }
           if (!worktreeRemoved) await this.removeWorktree(repositoryRoot, canonical);
         },
       };
     } catch (error) {
-      // An unsuccessful add has no proof that this operation created either
-      // the branch or target. Preserve both as ambiguous residue rather than
-      // racing a concurrent Git actor with destructive cleanup.
       throw error;
     }
   }
@@ -256,9 +238,6 @@ export class GitWorktreeService {
     const branchName = branch.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 100) || "worktree";
     const managedRoot = resolve(this.worktreeRoot);
     const folder = join(managedRoot, repositoryName);
-    // Never use recursive mkdir here: it follows a pre-existing symlink in an
-    // intermediate component. Both components are checked before Git sees the
-    // target, then realpath containment proves the resolved parent remains owned.
     await ensureDirectoryNoSymlink(dirname(managedRoot));
     await ensureDirectoryNoSymlink(managedRoot);
     const canonicalRoot = await realpath(managedRoot);
@@ -273,8 +252,6 @@ export class GitWorktreeService {
     }
     try {
       const metadata = await lstat(target);
-      // A pre-existing target, especially a symlink, must never be handed to
-      // worktree add or removed by the failure cleanup path.
       if (metadata) throw new GatewayError("conflict", "Managed Git worktree target already exists", false);
     } catch (error) {
       if (error instanceof GatewayError) throw error;
@@ -303,16 +280,12 @@ export class GitWorktreeService {
   }
 
   private async removeCreatedBranch(repositoryRoot: string, branch: string, expectedCommit: string): Promise<void> {
-    // update-ref's expected-old argument makes this a compare-and-delete: a
-    // session commit or another actor moving the branch leaves it intact.
     try {
       await runGit(repositoryRoot, ["update-ref", "-d", `refs/heads/${branch}`, expectedCommit]);
     } catch (error) {
       if (isUncertainOutcome(error)) {
         throw asUncertainOutcome(error, "Git branch cleanup did not settle; preserve the branch for reconciliation");
       }
-      // update-ref's expected-old mismatch is a definitive no-effect result;
-      // callers release their still-owned worktree while preserving the branch.
       throw error;
     }
   }
@@ -321,8 +294,6 @@ export class GitWorktreeService {
     try {
       await runGit(repositoryRoot, ["worktree", "remove", "--force", target]);
     } catch (error) {
-      // The target is deliberately not rm'ed or pruned after an uncertain Git
-      // command: another actor may have taken ownership while it was running.
       throw asUncertainOutcome(error, "Git worktree cleanup did not settle; preserve the worktree for reconciliation");
     }
   }

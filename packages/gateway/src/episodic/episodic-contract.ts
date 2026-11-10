@@ -1,110 +1,51 @@
 import { EpisodicMemoryError } from "../errors.js";
 import { CANONICAL_SOURCE_MAX_LINE_BYTES } from "../kernel/resources/prompt-bounds.js";
 import type { AssistantMessage } from "../kernel/pi/ai.js";
-/*
- * The episodic memory is the projected-summary tree of the OptChat recipe: a
- * binary tree of one-line summaries over one source session, a soft-budgeted
- * view of the tree, and a background pump that builds nodes. The recipe's
- * sections are cited as "gist §N" throughout this module. This file owns the
- * values and shapes shared by its parts. The limits in `EpisodicLimits` are the
- * production defaults that tests shrink (tree size, view budget, retry wait);
- * the recipe's remaining constants are exported as fixed values.
- */
 
-/** The kinds Tron projects into the memory. They are the compactor prompt's
- * vocabulary and the prefix of a level-0 free node (gist §2, §3). */
 export type EpisodicMessageKind = "user" | "talk" | "echo" | "event";
 
 export interface EpisodicLimits {
-  /** Target size of one summary line (gist `NODE`). */
   nodeBytes: number;
-  /** Byte budget of the view (gist `VIEW`); soft, see `fitView`. */
   viewBytes: number;
-  /** Compactor calls in flight at once (gist `JOBS`). */
   jobs: number;
-  /** Max characters of one projected user, assistant or event text. The recipe
-   * sends those whole; a memory record must still fit its store's line, so this
-   * is the store bound, not a model-input bound (a JSON string can expand to
-   * six bytes per character, and the record carries the digests around it). */
   recordCapChars: number;
-  /** Wait before retrying a transiently failed node (gist `RETRY`). */
   retryMs: number;
-  /** Transient retries per compactor call before the node blocks. The recipe
-   * retries forever because its next turn waits on the summary; here a blocked
-   * memory is visible state and an operator resume restarts it, so the retries
-   * are bounded. */
   maxRetries: number;
-  /** Bound on one compactor call before it is abandoned as transient. A call
-   * that never returns would hold its build slot forever: the pump would neither
-   * block nor retry, and every turn waiting on that node would wait for the life
-   * of the process. Always positive. */
   compactorTimeoutMs: number;
-  /** One canonical JSONL line larger than this refuses the read. Home's sources
-   * hold every line the prompt path writes, so this is at least that producer's
-   * largest line (`maximumPromptLineBytes`). */
   maxSourceLineBytes: number;
-  /** One stored JSONL record larger than this refuses the store. */
   maxStoreLineBytes: number;
 }
 
-/** Production defaults equal the recipe's table (gist §1). */
 export const EPISODIC_DEFAULTS: Readonly<EpisodicLimits> = {
   nodeBytes: 512,
   viewBytes: 128_000,
   jobs: 8,
-  // 128 Ki characters: six bytes per character of JSON escaping plus the record
-  // around it stays under the one-megabyte store line bound.
   recordCapChars: 128 * 1_024,
   retryMs: 10_000,
   maxRetries: 3,
-  // The recipe has no such bound: its compactor retries forever because its next
-  // turn waits on the summary and it never gives up. Here a blocked memory is
-  // visible state with an operator resume, so a call that is simply gone has to
-  // become a block instead of an unbounded wait.
   compactorTimeoutMs: 120_000,
   maxSourceLineBytes: CANONICAL_SOURCE_MAX_LINE_BYTES,
   maxStoreLineBytes: 1_024 * 1_024,
 };
 
-/** Attempts per node to get its line under `nodeBytes` (gist `TRIES`). */
 export const EPISODIC_TRIES = 5;
-/** Max characters of one projected tool result (gist `CAP`). */
 export const EPISODIC_CAP_CHARS = 30_000;
-/** Characters of the tail kept when a text is capped; the head keeps the rest. */
 export const EPISODIC_CAP_TAIL_CHARS = 4_000;
 
-/** Shared ledger/source bound; no second chapter-count authority. */
 export const HOME_MAX_CHAPTERS = 100_000;
 
-/** Each strict Home cursor fits 640 bytes including its nested JSON indentation.
- * This covers the pinned SDK UUID/entry IDs, two SHA-256 digests, file
- * identity/offset/timestamps and field syntax; oversized identities refuse.
- * State fits the ledger's maximum cursor count plus 64 KiB for fixed fields.
- * Readers and every publication use this same bound, including checkpoints. */
 export const EPISODIC_HOME_CURSOR_MAX_BYTES = 640;
 export const EPISODIC_STATE_MAX_BYTES = HOME_MAX_CHAPTERS * EPISODIC_HOME_CURSOR_MAX_BYTES + 64 * 1_024;
 
-/** Version of every persisted episodic document. */
 export const EPISODIC_STORE_VERSION = 2 as const;
 
-/** How many revoked nodes one invalidation record carries. The record is
- * written once per chunk in ancestor-first order, so any prefix of a batch
- * leaves a consistent store. */
 export const EPISODIC_INVALIDATION_CHUNK = 2_048;
 
-/** What a level-0 node whose message is not a message any more shows. */
 export const EPISODIC_OMITTED_TEXT = "[omitted]";
-/** How the view renders a part whose node is not built (gist §6). */
 export const EPISODIC_PLACEHOLDER = "(not summarized yet: zoom it)";
 
-/* The memory's own search (Tron's addition to the recipe, src/episodic/README.md):
- * one case-insensitive substring pass over the projected catalog. */
-
-/** Longest accepted search query, in characters. */
 export const EPISODIC_SEARCH_QUERY_CHARS = 200;
-/** Most hits one search returns; the match count still covers the whole range. */
 export const EPISODIC_SEARCH_HITS = 20;
-/** Bound on one hit's snippet, in characters, including its truncation marks. */
 export const EPISODIC_SEARCH_SNIPPET_CHARS = 300;
 
 export type EpisodicBlockedReason =
@@ -118,71 +59,37 @@ export interface EpisodicBlocked {
   detail?: string;
 }
 
-/**
- * One canonical session entry, projected: the memory never holds canonical text,
- * only this bounded projection.
- */
 export interface EpisodicMessageRecord {
-  /** Store-wide monotonic sequence; the latest record for an index wins. */
   revision: number;
-  /** Permanent index in this memory; never renumbered. */
   index: number;
   sessionId: string;
   entryId: string;
   kind: EpisodicMessageKind;
-  /** Projected text without the kind prefix. `[omitted]` when omitted. */
   text: string;
-  /** sha256 of the canonical entry's JSON line as it was read. */
   sourceDigest: string;
-  /** sha256 of `text`. */
   projectedDigest: string;
-  /** Why content was left out: `thinking`, `attachment`, `capped`,
-   * `record-cap`, `credentials`, `context-edit`, `off-branch`, `empty`,
-   * `unsupported-part`. */
   omissions: string[];
-  /** The entry contributes no text of its own (a null context edit, or a
-   * navigation that left the branch). Never sent to the model. */
   omitted: boolean;
-  /** The canonical entry's instant, as the source projected it. */
   timestamp: string;
 }
 
-/**
- * One run of the view lines a node's compactor call was given: `[level, count]`
- * in view order. The view tiles from message 0, so the run list reconstructs
- * every address exactly and stays bounded by the number of level changes
- * instead of growing with the view.
- */
 export type EpisodicContextRun = readonly [level: number, count: number];
 
-/** One node of the binary tree (gist §3). */
 export interface EpisodicNodeRecord {
   revision: number;
   level: number;
   index: number;
   kind: "free" | "summary";
   text: string;
-  /** Revisions of the two children a merge was built from. */
   childRevisions?: readonly [number, number];
-  /** View lines a summary depends on, as level runs from message 0. The
-   * owner writes none; a store may still hold summaries with runs, which stay
-   * readable and make the summary a dependent of those lines. */
   contextRuns: readonly EpisodicContextRun[];
   textDigest: string;
-  /** sha256 of the child texts (merge) or the source message text (leaf). */
   sourceDigest: string;
 }
 
-/**
- * Append-only revocation, one record per chunk of one invalidation. Addresses
- * are encoded as space-separated base-36 codes (see `encodeNodeCode`), and the
- * chunks are written ancestor-first, so a crash between chunks leaves a
- * consistent store: every live parent still has live children.
- */
 export interface EpisodicInvalidationRecord {
   revision: number;
   generation: number;
-  /** Zero-based chunk number and the chunk count of this invalidation. */
   part: number;
   parts: number;
   nodes: string;
@@ -190,8 +97,6 @@ export interface EpisodicInvalidationRecord {
 
 export type EpisodicNodeLogRecord = EpisodicNodeRecord | EpisodicInvalidationRecord;
 
-/** Where the canonical reader stopped, and the identity of the file it read, so
- * the next read can continue at the offset when the file only grew. */
 export interface EpisodicChapterSourceCursor {
   sealed: boolean;
   mtimeMs: number;
@@ -206,14 +111,10 @@ export interface EpisodicChapterSourceCursor {
   completePrefixDigest: string;
 }
 
-/** Home's aggregate cursor. The position is the chapter cursors' concatenation:
- * file identity and line digests live per chapter, where they are read. */
 export interface EpisodicSourceCursor {
   completeBytes: number;
   leafEntryId: string | null;
-  /** Ordered canonical chapter cursors for a stable Home namespace. */
   home: { version: 2; ledgerRevision: number; chapters: EpisodicChapterSourceCursor[] };
-  /** sha256 chain over every complete source line through this cursor. */
   completePrefixDigest: string;
 }
 
@@ -222,8 +123,6 @@ export interface EpisodicStoreState {
   generation: number;
   cursor: EpisodicSourceCursor | null;
   blocked: EpisodicBlocked | null;
-  /** Tokens this memory's compactor calls have spent, over the whole life of the
-   * store. Reported, never a ceiling (#493); a restart must not reset it. */
   spend: number;
 }
 
@@ -235,8 +134,6 @@ export interface EpisodicViewPartStatus {
   built: boolean;
 }
 
-/** The bounded status query. `view.parts` is capped and reports
- * how many it left out, so the object cannot grow with the history. */
 export interface EpisodicMemoryStatus {
   sourceSessionId: string;
   generation: number;
@@ -253,34 +150,23 @@ export interface EpisodicMemoryStatus {
   coverage: { admitted: number; summarized: number };
   pump: { busy: number };
   blocked: EpisodicBlocked | null;
-  /** Spend, reported and never a ceiling (#493). */
   tokens: {
     used: number;
-    /** What the provider reported since this memory opened, so caching can be
-     * checked from its own usage fields (gist §8); not persisted. */
     sinceOpen: EpisodicUsage;
   };
 }
 
 export interface EpisodicUsage { input: number; output: number; cacheRead: number; cacheWrite: number }
 
-/** The bounded view-part list status returns; more parts than this are counted
- * but not listed. A production view holds ~250 parts, so this is headroom. */
 export const EPISODIC_STATUS_PARTS = 1_024;
 
-/** One compactor conversation (gist §4.2, §4.3). The step is the first turn. */
 export interface EpisodicCompactorRequest {
-  /** The COMPACT prompt (gist §4.4), constant for every call. */
   system: string;
-  /** Alternating turns: the step, the reply, the size feedback, the reply. */
   turns: Array<{ role: "user" | "assistant"; text: string }>;
   signal: AbortSignal;
-  /** Stable for one memory, so a provider routes its calls to one cache. */
   cacheKey: string;
 }
 
-/** Runs one compactor conversation on the injected model. The default
- * implementation uses `ModelRuntime.completeSimple`. */
 export type EpisodicSummarizer = (request: EpisodicCompactorRequest) => Promise<AssistantMessage>;
 
 export interface EpisodicDiagnostic {
@@ -291,7 +177,6 @@ export interface EpisodicDiagnostic {
   reason?: string;
 }
 
-/** Delta ingestion and frozen historical lookup are deliberately distinct. */
 export interface EpisodicSessionSource {
   read(cursor: EpisodicSourceCursor | null, limits: EpisodicLimits): AsyncIterable<import("./episodic-projection.js").EpisodicSourceDelta>;
   branchAtCursor(cursor: EpisodicSourceCursor, limits: EpisodicLimits): AsyncIterable<{ id: string; sourceSessionId: string }>;
@@ -299,17 +184,11 @@ export interface EpisodicSessionSource {
 
 export interface EpisodicMemoryDependencies {
   workspace: import("../workspace/tron-workspace.js").TronWorkspace;
-  /** The canonical session this memory is over; also its store namespace. */
   sessionId: string;
-  /** The ordered canonical chapters this memory reads. Read only, never repaired. */
   sessionSource: EpisodicSessionSource;
-  /** The compactor. The caller names the model it runs on; there is no default model. */
   summarizer: EpisodicSummarizer;
-  /** Optional admission authority owned by Home, never persisted in this store. */
   isPaused?: () => boolean;
   limits?: Partial<EpisodicLimits>;
-  /** Where this module raises its bounded records; the caller (gateway-main)
-   * decides whether to persist them. */
   diagnostic?: (record: EpisodicDiagnostic) => void;
 }
 

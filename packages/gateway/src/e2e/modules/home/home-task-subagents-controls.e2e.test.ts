@@ -25,11 +25,9 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
         child.releaseHeld();
         const slot = await f.registry.acquire(run.sessionId);
         await waitFor(() => !slot.catalogHasActiveSubagents, "async run ended before the report", bound);
-        // The provider's notice never reaches canonical evidence: settlement sees no notice for the run.
         const canonical = slot.canonicalSessionEntries.bind(slot);
         vi.spyOn(slot, "canonicalSessionEntries").mockImplementation(() =>
           canonical().filter(entry => !(entry.type === "custom_message" && entry.customType === "subagent-notify")));
-        // Captured from the report on, so the armed 60 s timer is the settlement's own stop-join bound.
         stopJoin = captureTimer(HOME_TASK_SUBAGENT_STOP_JOIN_MS);
         return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
       },
@@ -71,9 +69,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     const child = await childModel(f);
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch"),
-      // The turn ends with the run live and no report: the task waits instead of settling.
       fauxAssistantMessage("Launched the background check; waiting for it."),
-      // The run's completion wakes the same task into its next turn, which reports.
       async () => fauxAssistantMessage([reportCall("report-after-wake")], { stopReason: "toolUse" }),
     ]);
     const run = await dispatch(f);
@@ -112,7 +108,6 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     await waitFor(() => turns.length === 1, "Home's steering starts the task's next turn", bound);
     await waitFor(() => (slot as unknown as { ownedTurns: { waitingTask?: { wakeOperationId?: string } } }).ownedTurns.waitingTask?.wakeOperationId === undefined
       && (slot as unknown as { ownedTurns: { waitingTask?: unknown } }).ownedTurns.waitingTask !== undefined, "task waits again", bound);
-    // The maintainer's composer sends an ordinary prompt; it joins the same lane, not refused.
     await slot.prompt("Maintainer between turns");
     await waitFor(() => turns.length === 2, "the maintainer's message starts the task's next turn", bound);
     await waitBetweenTurns(slot);
@@ -161,9 +156,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch"),
       fauxAssistantMessage("Launched the background check; waiting for it."),
-      // The provider wake starts the task's next turn, which runs a long command.
       () => fauxAssistantMessage([fauxToolCall("bash", { command: `echo $$ > ${pidFile}; exec sleep 600` }, { id: "wake-stuck" })], { stopReason: "toolUse" }),
-      // The turn after the interrupt reads Home's steering, then is held while a second steer queues.
       async (context: FauxContext, options?: { signal?: AbortSignal }) => {
         seen.push(...context.messages.filter(message => message.role === "user").map(message => typeof message.content === "string"
           ? message.content : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("")));
@@ -190,9 +183,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     await waitFor(() => !alive(commandPid), "the wake turn's command to end", bound);
     await waitFor(() => reportTurnStarted, "the turn that reads the steer", bound);
     expect(seen.join("\n")).toMatch(/STEER-DURING-WAKE/u);
-    // A control the owner refuses is recorded with its reason, and only hashed identifiers leave the Gateway.
     await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { taskId: run.taskId, operationId: "stale-operation", text: "late" })).rejects.toThrow(/Stale or terminal task operation/u);
-    // The tool's earlier operation guard must be observable too, without logging its user-supplied ID.
     await expect(homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, operationId: "private-wrong-operation", text: "late" })).rejects.toThrow(/operationId guard/u);
     const refused = f.signals.filter(record => record.event === "home.task.control" && record.disposition === "refused");
     expect(refused).toEqual([
@@ -202,7 +193,6 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     expect(JSON.stringify(refused)).not.toContain(run.taskId);
     expect(JSON.stringify(refused)).not.toContain("private-wrong-operation");
 
-    // A steer queued while the report's turn streams is still undelivered when the report seals the task.
     await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, text: "STEER-AFTER-REPORT" });
     openReportTurn();
     const result = await run.completion;
@@ -320,12 +310,10 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
         await waitFor(() => child.heldRequests() === 1, "workflow child live", bound);
         seen.workflowDir = launchedAsyncDir(context, "workflow-launch");
         seen.childRunId = await workflowChildRunId(seen.workflowDir);
-        // The provider's guidance names the child's own run id, so the worker steers that id.
         return fauxAssistantMessage([fauxToolCall("subagent", { action: "steer", id: seen.childRunId, message: "STEER-PROBE change course" }, { id: "steer-child" })], { stopReason: "toolUse" });
       },
       async (context: FauxContext) => {
         seen.steer = toolResultText(context, "steer-child");
-        // The held child answers with a tool call; its next request carries the steer.
         child.releaseHeld();
         const slot = await f.registry.acquire(run.sessionId);
         await waitFor(() => child.steerProbeRequests() === 1, "steer reached the child's model", bound);
@@ -348,10 +336,8 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     await writeFile(join(f.cwd, "hold-workflow.js"), HELD_WORKFLOW_SCRIPT);
     const seen: { foreignChildRunId?: string; results?: Record<string, { isError: boolean; text: string }> } = {};
     f.faux.setResponses([
-      // The first task launches a held workflow, then waits for it between turns.
       holdingWorkflowLaunch("workflow-launch"),
       fauxAssistantMessage("Launched the search; waiting for it."),
-      // The second task controls the first task's workflow child, and an id no task owns.
       () => {
         assert.ok(seen.foreignChildRunId, "the first task must publish its workflow child ID before the foreign control");
         return fauxAssistantMessage([
@@ -377,12 +363,6 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
       expect(seen.results?.[id]).toMatchObject({ isError: true, text: HOME_TASK_PRODUCER_REFUSAL_REASON });
     }
     expect(child.steerProbeRequests()).toBe(0);
-    // The workflow's launch of its stopped child notices the stop at its next status poll
-    // (the provider's waitForImportedAsyncRoot), then records the child's outcome in the
-    // workflow's mission. Stretching only that poll widens the window in which the launch
-    // settles after the stop: the stopped workflow must still publish its outcome, and the
-    // task settle, only after that record, so nothing writes the mission after the task settled and its fixture was
-    // disposed (#1078: ENOTEMPTY on agent/missions).
     const setTimer = globalThis.setTimeout;
     vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) =>
       setTimer(callback, new Error().stack?.includes("waitForImportedAsyncRoot") ? 3_000 : delay, ...args)) as typeof setTimeout);
@@ -426,7 +406,6 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch", "ASK-SUPERVISOR which branch should the search take?"),
       fauxAssistantMessage("Launched the search; waiting for its question."),
-      // The child's question wakes the task: the worker replies to that exact request.
       async () => {
         const slot = await f.registry.acquire(run.sessionId);
         const request = slot.canonicalSessionEntries().findLast(entry => entry.type === "custom_message"

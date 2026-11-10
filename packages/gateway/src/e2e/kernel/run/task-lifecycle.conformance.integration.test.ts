@@ -117,8 +117,6 @@ class TaskCommand implements fc.AsyncCommand<TaskLifecycleModel, Real> {
     } else if (this.action === "steer") {
       await owner.maintainTask({ taskId: current!.taskId, operationId: current!.operationId, text: "Retain this operation and report its evidence." });
     } else if (this.action === "interrupt") {
-      // The provider is held, with no executing tools. Interrupt must not Stop
-      // the model run or mint a successor just because no tool needs abortion.
       expect(await owner.interruptTask({ taskId: current!.taskId, operationId: current!.operationId })).toEqual({ interrupted: [] });
     } else if (this.action === "terminal-stop") {
       await expect(owner.stopTask({ taskId: current!.taskId, operationId: current!.operationId })).rejects.toThrow();
@@ -143,8 +141,6 @@ async function scenario(commands: Iterable<fc.AsyncCommand<TaskLifecycleModel, R
         }
       });
     }`);
-    // Suspend only the second real durable stamp: the historical collision must
-    // arrive after the canonical invocation terminal, not win a scheduler race.
     const markers = (f.registry as unknown as { markers: RunMarkerStore }).markers;
     const stamp = markers.reassertAssistantCompletion.bind(markers);
     const gate = new Promise<void>(resolve => { releaseStamp = resolve; });

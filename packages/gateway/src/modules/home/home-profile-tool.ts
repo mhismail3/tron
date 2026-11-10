@@ -9,8 +9,6 @@ import { profileIndex } from "./home-profile-hierarchy.js";
 import { HOME_PROFILE_ACTIONS, HOME_PROFILE_KINDS, PROFILE_TEXT_MAX, PROFILE_REASON_MAX, readHomeProfileIndex, type HomeProfileAction, type HomeProfileKind, type HomeProfileSaved, type HomeProfileRequest, type HomeProfileChangeAccess } from "./home-profile.js";
 const SINGLE_LINE = /[\u0000-\u001f\u007f\u2028\u2029]/;
 
-// ---- the profile tool -----------------------------------------------------------
-
 const PROFILE_PARAMETERS = Type.Object({
   action: Type.Union([...HOME_PROFILE_ACTIONS, "read" as const, "reorganize" as const, "retry" as const, "defer" as const].map((action) => Type.Literal(action)), { description: "read an explicit file or the metadata index; learn, refine, supersede or retire an item." }),
   path: Type.Optional(Type.String({ minLength: 1, maxLength: 131, description: "Explicit personal path or inferred holding bucket; read prior for historical organization. No path reads the metadata index. New notes default to inferred/review." })),
@@ -30,7 +28,6 @@ const PROFILE_PARAMETERS = Type.Object({
   reason: Type.Optional(Type.String({ minLength: 1, maxLength: PROFILE_REASON_MAX, description: "Why the change is made. Required for retire; recorded in the ledger." })),
 }, { additionalProperties: false });
 
-/** Tool-result details: the saved revision, or the typed reason a change was refused. */
 type HomeProfileToolDetails =
   | HomeProfileSaved
   | { status: "deferred"; version: string }
@@ -62,7 +59,6 @@ type ProfileRequest = {
   reason?: string;
 };
 
-/** Which fields each action takes. Anything else is refused, never silently ignored. */
 const ACTION_FIELDS: Record<ProfileToolAction, { required: Array<keyof ProfileRequest>; allowed: Array<keyof ProfileRequest> }> = {
   read: { required: [], allowed: ["path", "offset", "cursor", "includeInactive", "id", "revisionId", "contentOffset"] },
   defer: { required: ["version"], allowed: ["version"] },
@@ -74,15 +70,9 @@ const ACTION_FIELDS: Record<ProfileToolAction, { required: Array<keyof ProfileRe
   retire: { required: ["id", "reason"], allowed: ["id", "reason"] },
 };
 
-/**
- * Content and placement use the existing Changes owner. Not now is a Profile
- * control decision with that owner's ordinary command receipt, not a note edit.
- * The tool owns no parallel note, decision or receipt store.
- */
 export function homeProfileTool(access: () => HomeProfileChangeAccess | undefined, knowledge: () => ProfileStore | undefined, requestChange: NativeChangeRequest): ToolDefinition<TSchema, HomeProfileToolDetails> {
   return {
     name: "profile",
-    // docs/settings-model.md 5.4: declares it reads no open-world content.
     annotations: { openWorldHint: false },
     label: "Profile",
     description: "Read the seven-area personal profile index, an explicit path, inferred holding notes or prior organization. Home decides relevance and worker brief content; no note text is automatically inserted. Learn/refine/supersede/retire only durable statements with evidence. Explicit reorganize assigns only placement with a backed-up, logged, undoable group; retry uses its original command after an unacknowledged result. Use defer with the exact index arrival version for receipt-backed Not now, only on a maintainer turn. Declare sensitive capture with sensitive=true: never infer it, quote this maintainer message verbatim, and keep it unsorted for exact review. Home writes remain inferred, never binding by inference. Existing explicit standing/safety rules retain their authority; confirmation and provenance must not be silently weakened.",
@@ -142,7 +132,6 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
       if (!changes) return answer({ status: "unavailable", action: request.action }, "Profile is unavailable on this Gateway, so the profile cannot change.");
       const citation = triggeringMessage(context);
       if (!citation) return refused(request.action, "no maintainer message in this chat to cite as evidence");
-      // Edits Home may not make alone wait for the maintainer's tap on the exact card.
       const confirm = nativeChangeConfirmer(context, requestChange, signal);
       const declined = () => answer({ status: "declined", action: request.action }, "The maintainer declined the exact profile card; the original notes are unchanged.");
       if (request.action === "defer") {
@@ -164,8 +153,6 @@ export function homeProfileTool(access: () => HomeProfileChangeAccess | undefine
           return answer({ status: "organized", action: request.action, commandId: original, changeIds: result.changes.map(change => change.changeId) },
             `Profile ${request.action} acknowledged through Changes. Original command ${original}; ${result.changes.length} label-only changes. No content or authority was inferred.`);
         } catch (error) {
-          // Publication may have failed AFTER the domain committed. Never call it
-          // saved, mint another identity, or invite an unqualified second apply.
           if (error instanceof GatewayError && !isUncertainOutcome(error) && ["invalid_request", "conflict"].includes(error.code)) return refused(request.action, error.message);
           const reason = error instanceof Error ? error.message : String(error);
           return answer({ status: "retry_required", action: request.action, commandId: original, reason },
@@ -235,8 +222,6 @@ function validateRequest(request: ProfileRequest): string | undefined {
   return undefined;
 }
 
-/** The maintainer message the current turn answers: the last user message on this chat's
- * branch. Its canonical entry is the evidence every profile revision cites. */
 function triggeringMessage(context: ExtensionToolContext): { sessionId: string; entryId: string } | undefined {
   const entry = context.sessionManager.getBranch().filter((candidate) => candidate.type === "message" && candidate.message.role === "user").at(-1);
   return entry ? { sessionId: context.sessionManager.getSessionId(), entryId: entry.id } : undefined;
@@ -249,7 +234,6 @@ function triggeringStatement(context: ExtensionToolContext, entryId: string): st
   return typeof content === "string" ? content : content.filter(block => block.type === "text").map(block => block.text).join("\n");
 }
 
-/** Idempotency: a replayed tool call maps to the same command, and so to the same receipt. */
 function commandId(sessionId: string, toolCallId: string): string {
   return `profile-${createHash("sha256").update(`${sessionId}\0${toolCallId}`).digest("hex").slice(0, 48)}`;
 }

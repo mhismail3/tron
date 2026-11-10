@@ -35,7 +35,6 @@ export class GatewayClientError extends Error {
   }
 }
 
-/** Small stable-protocol client shared by Tron's terminal surfaces and tests. */
 export class GatewayProtocolClient {
   private socket: WebSocket | undefined;
   private readonly pending = new Map<string, PendingRequest>();
@@ -100,8 +99,6 @@ export class GatewayProtocolClient {
         if (this.isCurrent(socket)) this.closeError = new GatewayClientError("disconnected", error.message, true);
       });
       socket.on("close", (code, reason) => {
-        // A typed protocol refusal outranks any transport error ws reported
-        // first: the version pair is permanent, so retrying it never converges.
         const closeFailure = this.protocolMismatchFailure(code, reason)
           ?? this.closeError
           ?? new GatewayClientError("disconnected", reason.toString() || "Gateway disconnected", true);
@@ -117,11 +114,6 @@ export class GatewayProtocolClient {
     });
   }
 
-  /** The typed ending of a protocol refusal, or undefined for any other close.
-   * The Gateway answers an unspeakable hello with `PROTOCOL_MISMATCH_CLOSE_CODE`
-   * and a JSON reason carrying its own protocol range; the raw reason is not a
-   * message a user reads, and a mismatch is retryable only if the build pair
-   * changes. */
   private protocolMismatchFailure(code: number, reason: Buffer): GatewayClientError | undefined {
     if (code !== PROTOCOL_MISMATCH_CLOSE_CODE) return undefined;
     let range: { gatewayProtocol?: number; minProtocol?: number } = {};

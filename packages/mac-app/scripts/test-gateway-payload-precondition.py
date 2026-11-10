@@ -46,9 +46,6 @@ class GeneratedPayloadPrecondition(unittest.TestCase):
                 path.touch()
             (payload / "manifest.json").write_text('{"channel":"dev"}\n')
             (payload / "app/PushService.xcconfig").write_text("TRON_PUSH_SERVICE_ORIGIN =\n")
-            # Deliberately invalid bytes reach the real pinned checksum check.
-            # The helper/app leaves are synthetic and must never be executed:
-            # this is failure-path coverage, not a positive payload fixture.
             (payload / "runtime/node-arm64").write_bytes(b"stale runtime bytes\n")
             helper.parent.mkdir(parents=True)
             helper.write_text("#!/bin/sh\nexit 99\n")
@@ -88,7 +85,6 @@ class GeneratedPayloadPrecondition(unittest.TestCase):
                 self.assertTrue(report["generatedInputsUnchanged"])
                 self.assertEqual(report["scratchEntries"], [])
             finally:
-                # The test owns only this temporary immutable source tree.
                 for path in resources.rglob("*"):
                     if path.is_dir():
                         path.chmod(0o755)

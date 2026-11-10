@@ -5,8 +5,6 @@ type ProfileResourceOptions = Pick<NonNullable<NonNullable<Parameters<typeof cre
   "noExtensions" | "noContextFiles" | "skillsOverride" | "systemPromptOverride" | "appendSystemPromptOverride">;
 export interface ProfileModelRuntime { runtime: ModelRuntime; ownership: "owned" | "borrowed" }
 
-/** An immutable recipe selected once per runtime. Record-based canonical append
- * classification resolves a recipe separately on every append. */
 interface ProfileRecipe {
   readonly name: string;
   readonly extensions: "ordinary" | readonly string[];
@@ -16,7 +14,6 @@ interface ProfileRecipe {
   readonly managedSubagents: boolean;
   readonly directBash: boolean;
   readonly tools?: readonly string[];
-  /** Native selection metadata and the profile owner’s explicit-change admission. */
   readonly modelSelection?: Readonly<{ physicalOnly: true; assertAllowed(model: Model<any>): void }>;
   readonly launchDefaults: "settings-home-recipe" | "none";
   readonly compaction: "policy" | "disabled";
@@ -25,7 +22,6 @@ interface ProfileRecipe {
   readonly chapter: boolean;
   readonly subagentCatalog: boolean;
   readonly profileChanges: boolean;
-  /** Selects the call-time module hook, never a captured policy instance. */
   readonly requestPolicy: boolean;
 }
 export type SessionProfile = ProfileRecipe & (

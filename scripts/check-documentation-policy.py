@@ -8,8 +8,6 @@ import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
-# Generated roots: absent from clean checkouts but valid documentation subjects.
-# test-results/ holds the regenerable E2E evidence AGENTS.md asks tests to retain.
 EXCLUDED_PARTS = {"build", "dist", "node_modules", "DerivedData", ".build", "test-results"}
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 BACKTICK = re.compile(r"`([^`]+)`")
@@ -131,15 +129,11 @@ def validate_repository_literal(
         return
     if candidate.endswith("/"):
         return
-    # Generated directories such as packages/gateway/dist and build evidence
-    # roots are valid documentation subjects but absent in clean checkouts.
-    # Validate command paths and file-like literals against source inventory.
     if not (candidate.startswith("scripts/") or Path(candidate).suffix):
         if not check_directories:
             return
         if any(relative.startswith(f"{candidate.rstrip('/')}/") for relative in files):
             return
-    # Markdown links often repeat a docs/ path relative to their owning doc.
     if source.suffix in {".md", ".mdx"} and candidate.startswith("docs/"):
         package_index = source.relative_to(ROOT).parts[:1] == ("packages",)
         if (source.parent / candidate).exists():

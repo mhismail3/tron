@@ -1,30 +1,5 @@
 #!/usr/bin/env node
 // Purpose: `scripts/tron proof facade <block> [--check]`: the generated core façade of a proof block.
-// Writes into the block's shell directory (block.json "shell") core.mjs, the block compiled to JavaScript by the
-// pinned Dafny without the Dafny runtime (so a core needs no package at run time), and facade.ts, a typed
-// TypeScript wrapper that marshals plain values to and from the compiled datatypes, so no hand adapter sits between a shell and a core.
-// --check regenerates into a temporary directory and fails if the checked-in files differ.
-//
-// core.mjs is the compiler's module-only output, unedited, between a generated header and an export line. A
-// block may use only what compiles to plain JavaScript (bounded newtypes, booleans, datatypes, reading
-// sequences and arrays, loops) plus runtime helpers that are closed functions (integer division and modulo
-// on numbers): those are copied verbatim from the runtime the same compiler emits. Anything else that would
-// need the runtime (an unbounded int, building a sequence, datatype equality, a tuple) is refused, naming
-// the function. Only the members the compiler emits for the runtime's own use (a datatype's toString and
-// equals, a newtype's _Is and IntegerRange) may name it; nothing a core or its façade runs calls them.
-//
-// The façade exposes every compiled (non-ghost) function and predicate the block's laws declare, with the
-// signatures stated there, and checks each stated precondition (a call of a compiled predicate on parameters)
-// before calling, because compiled code does not check `requires`; any other precondition is refused. Types:
-// a newtype over a literal integer range within the JavaScript safe integers -> number (checked to be an
-// integer in that range, both ways), bool -> boolean, a datatype whose constructors all take no arguments ->
-// a string union of their names, a one-constructor datatype named like its type -> a plain object, any other
-// datatype -> an object tagged by `$` (the constructor name), seq<T> -> a readonly array of T, and a linked
-// list `datatype L<T> = Nil | Cons(head: T, tail: L<T>)` -> a readonly array of T. Other
-// Dafny types (int and nat among them) are refused. Such a block may also declare a compiled method that works in
-// arrays: the façade lends each array, fresh and as long as the sequence parameter its precondition names
-// (`a.Length == |s|`), and the method's TypeScript signature has the other parameters only.
-// Exit 0: written or fresh. 1: --check found a difference. 2: usage, unsupported type or toolchain error.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -39,17 +14,13 @@ export class UsageError extends Error {}
 function splitTop(s, sep) { const out = []; let depth = 0, cur = ""; for (const ch of s) { if ("(<".includes(ch)) depth++; if (")>".includes(ch)) depth--; if (ch === sep && depth === 0) { out.push(cur); cur = ""; } else cur += ch; } out.push(cur); return out.map((x) => x.trim()).filter(Boolean); }
 const param = (p) => { const [name, ...type] = p.split(":"); return { name: name.trim(), type: type.join(":").trim() }; };
 
-// Datatypes, compiled signatures and their preconditions in the block's laws file. Anything the façade
-// cannot translate faithfully is refused, never skipped.
 export function readLaws(text) {
   const code = text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, "");
-  // Declarations start a line; a declaration runs to the next one (or the module's closing brace).
   const starts = [...code.matchAll(/^[ \t]*((?:(?:ghost|opaque|static|function|predicate|method|lemma|datatype|codatatype|newtype|type|const|import|module|abstract)\b[ \t]*)+)/gm)];
   const datatypes = new Map();
   const newtypes = new Map();
   const lists = new Map();
   const functions = [];
-  // A literal bound: exact up to 2^53 either way, so an exclusive bound of the widest range is read exactly.
   const literal = (text) => { const digits = text.replace(/_/g, "").replace(/^-\s*/, ""); const n = Number(digits); return /^(0x[0-9a-fA-F]+|[0-9]+)$/.test(digits) && n <= 2 ** 53 ? (text.startsWith("-") ? -n : n) : NaN; };
   starts.forEach((m, i) => {
     const words = m[1].trim().split(/\s+/);
@@ -62,8 +33,6 @@ export function readLaws(text) {
         return { name: (p < 0 ? c : c.slice(0, p)).trim().replace(/^ghost\s+/, ""), fields: p < 0 ? [] : splitTop(c.slice(p + 1, c.lastIndexOf(")")), ",").map(param) };
       });
       if (d[2]) {
-        // A linked list, `datatype L<T> = Nil | Cons(head: T, tail: L<T>)` under any names, crosses as an array.
-        // Any other generic datatype is refused where a signature uses it (no shape is known).
         const t = /^<\s*(\w+)\s*>$/.exec(d[2])?.[1];
         const [nil, cons] = ctors;
         if (t && ctors.length === 2 && nil.fields.length === 0 && cons.fields.length === 2 && cons.fields[0].type === t
@@ -74,7 +43,6 @@ export function readLaws(text) {
       return;
     }
     if (words.includes("newtype")) {
-      // A newtype over a literal integer range: the compiler represents it as a JavaScript number.
       const n = /^newtype\s+(\w+)\s*=\s*(\w+)\s*:\s*int\s*\|\s*(-?\s*[\w]+)\s*(<=?)\s*\2\s*(<=?)\s*(-?\s*[\w]+)$/.exec(text.replace(/\s+/g, " "));
       const lo = n ? literal(n[3]) + (n[4] === "<" ? 1 : 0) : NaN;
       const hi = n ? literal(n[6]) - (n[5] === "<" ? 1 : 0) : NaN;
@@ -84,9 +52,6 @@ export function readLaws(text) {
     }
     if (words.includes("method") && !words.includes("function") && !words.includes("lemma")) {
       if (words.includes("ghost")) return;
-      // A compiled method: sequences and plain values in, one value out, and arrays it works in. The façade lends
-      // the arrays, so each must be sized by a sequence parameter, and every precondition must be one it can
-      // establish or check: `a.Length == |s|`, `|s| < literal`, or a call of a compiled predicate on parameters.
       const m = /^method\s+(\w+)\s*\(([^)]*)\)\s*returns\s*\(\s*\w+\s*:\s*([^)]+?)\s*\)([\s\S]*)$/.exec(text);
       if (!m) throw new UsageError(`cannot read method signature: ${text.slice(0, 80)}`);
       const all = splitTop(m[2], ",").map(param);
@@ -110,16 +75,14 @@ export function readLaws(text) {
       return;
     }
     if (!words.includes("function") && !words.includes("predicate")) return;
-    if (words.includes("ghost")) return; // erased: not compiled, so not in the façade
+    if (words.includes("ghost")) return;
     if (words.includes("method")) throw new UsageError(`'${words.join(" ")}' is not Dafny 4 syntax: ${text.slice(0, 60)}`);
     const f = /^(?:\w+\s+)*(function|predicate)\s+(\w+)\s*(<[^>]*>)?\s*\(([^)]*)\)\s*(?::\s*(\w+(?:<(?:[^<>]|<[^<>]*>)*>)?))?([\s\S]*)$/.exec(text);
     if (!f) throw new UsageError(`cannot read signature: ${text.slice(0, 80)}`);
     if (f[3]) throw new UsageError(`${f[2]}: generic functions are not supported by the façade`);
     const params = splitTop(f[4], ",").map(param);
-    // The generated wrapper's own names; a parameter with one of them would shadow it.
     const taken = params.find((p) => ["M", "_dafny", "seq", "BigNumber", "require", "int", "nat", "bool", "num", "natNum", "bad", "unknown"].includes(p.name));
     if (taken) throw new UsageError(`${f[2]}: parameter name ${taken.name} is reserved by the façade`);
-    // Preconditions the façade checks before calling: each must be a call of a compiled predicate on parameters.
     const spec = f[6].split("{")[0];
     const requires = [...spec.matchAll(/\brequires\b([\s\S]*?)(?=\brequires\b|\bensures\b|\bdecreases\b|\breads\b|$)/g)].map((r) => r[1].trim());
     const checks = requires.flatMap((r) => splitTop(r, "&").filter((x) => x !== "&")).map((clause) => {
@@ -146,7 +109,6 @@ export function emitFacade({ datatypes, newtypes, lists, functions }, module, so
     return "union";
   };
   const elem = (t) => /^seq<(.+)>$/.exec(t)?.[1];
-  // A linked list of the block: [its datatype, its item type].
   const list = (t) => { const m = /^(\w+)<(.+)>$/.exec(t); return m && lists.has(m[1]) ? [m[1], m[2]] : null; };
   const item = (t) => elem(t) ?? list(t)?.[1];
   const tsType = (t) => {
@@ -162,7 +124,6 @@ export function emitFacade({ datatypes, newtypes, lists, functions }, module, so
   const fromCore = (t, v) => (elem(t) ? `Array.from(${v} as unknown[], (x: any) => ${fromCore(elem(t), "x")})`
     : list(t) ? `from${list(t)[0]}(${v}, (x: any) => ${fromCore(list(t)[1], "x")})`
     : newtypes.has(t) ? `in${t}(${v})` : t === "bool" ? v : `from${t}(${v})`);
-  // What crosses in each direction (the Gateway compiles with noUnusedLocals, so only converters in use are emitted).
   const used = new Set();
   const numbers = new Set();
   const into = new Set();
@@ -177,7 +138,6 @@ export function emitFacade({ datatypes, newtypes, lists, functions }, module, so
     if (shape(t) && !way.has(t)) { way.add(t); used.add(t); for (const c of datatypes.get(t)) for (const f of c.fields) visit(f.type, way); }
   };
   for (const f of functions) { f.params.forEach((p) => { tsType(p.type); visit(p.type, into); }); tsType(f.returns); visit(f.returns, outOf); }
-  // The wrapper's own names; a parameter with one of them would shadow it inside the wrapper.
   const own = new Set(["M", "seq", "bool", ...[...numbers].map((t) => `in${t}`), ...[...used, ...lists.keys()].flatMap((t) => [`to${t}`, `from${t}`, `the${t}`])]);
   const taken = functions.flatMap((f) => f.params.map((p) => [f.name, p.name])).find(([, name]) => own.has(name));
   if (taken) throw new UsageError(`${taken[0]}: parameter name ${taken[1]} is reserved by the façade`);
@@ -201,12 +161,10 @@ export function emitFacade({ datatypes, newtypes, lists, functions }, module, so
   );
   if (into.has("bool")) out.push(`  const bool = (b: boolean): boolean => { if (typeof b !== "boolean") throw new TypeError(\`not a boolean: \${String(b)}\`); return b; };`);
   if (into.has("seq")) out.push(`  const seq = <T>(v: readonly T[], each: (x: T) => unknown): unknown[] => { if (!Array.isArray(v)) throw new TypeError(\`not an array: \${JSON.stringify(v)}\`); return v.map(each); };`);
-  // A number crosses unchanged, in either direction, only as an integer of its newtype's range.
   for (const t of [...numbers].sort()) {
     const { lo, hi } = newtypes.get(t);
     out.push(`  const in${t} = (n: number): number => { if (!Number.isSafeInteger(n) || n < ${lo} || n > ${hi}) throw new RangeError(\`not a ${t}: \${n}\`); return n; };`);
   }
-  // A linked list crosses as an array, built and read in a loop, so its length is bounded by memory alone.
   for (const t of [...lists.keys()].sort()) {
     const { nil, cons, head, tail } = lists.get(t);
     if (listsIn.has(t)) out.push(`  const to${t} = <T>(v: readonly T[], each: (x: T) => unknown): unknown => { if (!Array.isArray(v)) throw new TypeError(\`not an array: \${JSON.stringify(v)}\`); let list = M.${t}.create_${nil}(); for (let i = v.length - 1; i >= 0; i--) list = M.${t}.create_${cons}(each(v[i] as T), list); return list; };`);
@@ -217,7 +175,6 @@ export function emitFacade({ datatypes, newtypes, lists, functions }, module, so
     const kind = shape(t);
     const args = (c, src) => c.fields.map((f) => toCore(f.type, `${src}.${f.name}`)).join(", ");
     const fields = (c, src) => c.fields.map((f) => `${f.name}: ${fromCore(f.type, `${src}.dtor_${f.name}`)}`).join(", ");
-    // A constructor without fields is built once: compiled datatype values are never changed, so one can be shared.
     const shared = ctors.filter((c) => c.fields.length === 0);
     if (into.has(t) && shared.length) out.push(`  const the${t}: Record<string, unknown> = Object.assign(Object.create(null), { ${shared.map((c) => `${c.name}: M.${t}.create_${c.name}()`).join(", ")} });`);
     if (kind === "enum") {
@@ -231,12 +188,10 @@ export function emitFacade({ datatypes, newtypes, lists, functions }, module, so
       if (outOf.has(t)) out.push(`  const from${t} = (v: any): ${t} => ${ctors.map((c) => `v.is_${c.name} ? { $: ${JSON.stringify(c.name)}${c.fields.length ? ", " : ""}${fields(c, "v")} } : `).join("")}bad("${t}");`);
     }
   }
-  // Compiled code does not check \`requires\`, so each precondition the laws state is checked here first.
   const call = (f) => `M.__default.${f.name}(${(f.method?.order ?? f.params.map((p) => p.name)).map((name) => `${name}$`).join(", ")})`;
   const body = (f) => {
     const converted = f.params.map((p) => `const ${p.name}$ = ${toCore(p.type, p.name)};`);
     const checks = f.checks.map((c) => `if (!M.__default.${c.predicate}(${c.args.map((a) => `${a}$`).join(", ")})) throw new RangeError("precondition ${c.predicate}(${c.args.join(", ")}) of ${f.name} does not hold");`);
-    // A method's arrays are lent here, fresh and as long as the sequence its precondition names.
     const bounds = (f.method?.bounds ?? []).map((b) => `if (!(${b.seq}$.length < ${b.limit})) throw new RangeError("precondition |${b.seq}| < ${b.limit} of ${f.name} does not hold");`);
     const arrays = [...(f.method?.sized ?? [])].map(([array, of]) => `const ${array}$ = new Array(${of}$.length);`);
     return `{ ${[...converted, ...checks, ...bounds, ...arrays, `return ${fromCore(f.returns, call(f))};`].join(" ")} }`;
@@ -249,16 +204,9 @@ export function emitFacade({ datatypes, newtypes, lists, functions }, module, so
   return out.join("\n");
 }
 
-// Members the compiler emits in every datatype class (instance toString and equals) and newtype class (static
-// _Is and the generator IntegerRange) for the Dafny runtime's own use. Nothing a core runs calls them, so they
-// alone may name the runtime. No declaration of a block compiles to one of these: its module-level functions are
-// members of __default, the compiler renames a member called toString or equals, a Dafny name cannot start with
-// an underscore, and a member function is never a generator.
 const runtimeOnly = (owner, name, isStatic, isGenerator) => owner !== "__default"
   && (isStatic ? (name === "_Is" && !isGenerator) || (name === "IntegerRange" && isGenerator) : !isGenerator && (name === "toString" || name === "equals"));
 
-// A runtime helper stands alone when it is a function whose every name is a parameter, a local or JavaScript's own
-// Math, so it means the same outside the runtime.
 export function closedHelper(source) {
   let helper;
   try { helper = new Function(`"use strict"; return (${source});`)(); } catch { return false; }
@@ -270,9 +218,6 @@ export function closedHelper(source) {
   return [...code.matchAll(/(\.\s*)?\b([A-Za-z_$][\w$]*)/g)].every((m) => m[1] !== undefined || known.has(m[2]));
 }
 
-// The block at `translate` (relative to `root`) compiled to a JavaScript module that needs no Dafny runtime:
-// the compiler's module-only output between a header and `export { <module> as compiled }`. Refuses a block
-// whose compiled functions would call into the runtime, apart from helpers that are closed functions there.
 export function compileCore(root, translate, env = process.env) {
   const module = /^\s*module\s+(\w+)\s+refines\b/m.exec(readFileSync(join(root, translate), "utf8"))?.[1];
   if (!module) throw new UsageError(`${translate}: no refining module`);
@@ -285,7 +230,6 @@ export function compileCore(root, translate, env = process.env) {
   try {
     const compiled = run([], "core");
     if (!compiled.includes(`\nlet ${module} = (function() {\n`)) throw new UsageError(`${translate}: the compiler did not emit module ${module}`);
-    // Each use of the runtime outside the members only the runtime calls: a helper call, or anything else.
     const needs = (member, i, line) => new UsageError(`${translate}: ${member ?? "the module"} needs the Dafny runtime (compiled line ${i + 1}: ${line.trim().slice(0, 120)}); a core may use only bounded newtypes, booleans, datatypes, sequence and array reads and loops`);
     const helpers = new Map();
     let owner = null, member = null, exempt = false;
@@ -301,7 +245,6 @@ export function compileCore(root, translate, env = process.env) {
     });
     let header = "";
     if (helpers.size) {
-      // The runtime the same compiler emits; a helper is copied only if it is a function that stands alone.
       const full = run(["--include-runtime"], "full");
       const sources = [...helpers.keys()].sort().map((name) => {
         const start = full.indexOf(`\n  $module.${name} = function(`);
@@ -319,8 +262,6 @@ export function compileCore(root, translate, env = process.env) {
   } finally { rmSync(work, { recursive: true, force: true }); }
 }
 
-// Where a block's generated files go: its shell's directory (block.json "shell", relative to the repository
-// that holds the core root at packages/core).
 function target(block) {
   const { shell } = JSON.parse(readFileSync(join(CORE, "blocks", block, "block.json"), "utf8"));
   if (shell === undefined) throw new UsageError(`${block}: block.json names no shell`);
@@ -336,10 +277,8 @@ function generate(block, outDir) {
   if (!module) throw new UsageError(`${cfg.translate}: no refining module`);
   const doctor = spawnSync("/bin/bash", [join(REPO, "tools/proof/bootstrap.sh"), "doctor"], { encoding: "utf8" });
   if (doctor.status !== 0) throw new UsageError(`pinned toolchain unavailable: ${doctor.stderr.trim()}`);
-  // The laws are read first: a declaration the façade cannot carry is refused before anything compiles.
   const signatures = readLaws(laws.map((f) => readFileSync(join(CORE, f), "utf8")).join("\n"));
   const source = `${laws.join(", ")} and ${cfg.translate}`;
-  // Both files are made before either is written: a refused block leaves nothing behind.
   const facade = emitFacade(signatures, module, source);
   const core = compileCore(CORE, cfg.translate);
   mkdirSync(outDir, { recursive: true });

@@ -28,59 +28,25 @@ import time
 from typing import Any, Iterator, NamedTuple
 
 DESTINATION_EXIT = 66
-# A lane a live process holds must not be changed by another command.
 BUSY_EXIT = 73
 SCHEMA = "tron.ios-test-simulator.v1"
 OWNER = "tron-ios-test"
-# A lane is one state directory holding a marker, a lease and its simulator's
-# identity. The lease file name is the lock owner's contract
-# (`scripts/ios-test-lock.py`), which the sweep must take before releasing.
 MARKER_NAME = "simulator.json"
 LEASE_NAME = "lease.lock"
-# Lanes live in the default state directory and in the directories beside or
-# inside it; the sweep scans no deeper, so it never walks a simulator's own tree.
 SWEEP_DEPTH = 2
-# A lane that no command has used for this long is reclaimed by the sweep. The
-# default lane's directory is `ios-test` and a named lane's is its
-# `ios-test-<name>` sibling, which is what a lane's reported name strips.
 LANE_TTL_SECONDS = 7 * 24 * 60 * 60
-# A lane a whole repository owns rather than one worktree (verify --batch's Apple lanes, which
-# each batch reuses from a fresh worktree): the repository's git common directory, recorded
-# once in the marker. Its lane outlives the worktree that created it and is reaped when that
-# repository is gone or the lane is idle past the TTL.
 LANE_REPOSITORY_ENVIRONMENT = "TRON_IOS_TEST_LANE_REPOSITORY"
 LANE_DIRECTORY_PREFIX = "ios-test"
-# A lease records the holder's pid and the second it started; the process table's
-# own age for that pid is what proves the pid has not been recycled into another
-# process. The window is wider than the truncation on either side (the recorded
-# second and the reported one) and narrow enough that a recycled pid would have
-# to appear within seconds to be believed.
 HOLDER_START_TOLERANCE_SECONDS = 5.0
-# The runner's ownership marker, written by `owned_directory` in
-# `scripts/tron-ios-test` before it creates a results or products directory.
-# Deletion outside the tool's own trees is refused without it.
 OWNERSHIP_MARKER_NAME = ".tron-ios-test-owned"
-# The owner of one run directory, written when the runner creates it: the
-# worktree and lane that produced the run, which is what `clean` and `prune`
-# scope and group by.
 RUN_OWNER_NAME = "owner.json"
 RUN_METADATA_NAME = "metadata.json"
-# The products stamp `scripts/ios-test-build-identity.py` writes after a
-# successful build; its `worktree` is the path whose existence decides whether
-# those products still have an owner.
 BUILD_IDENTITY_NAME = "build-identity.json"
-# Retention: a run of a worktree is kept while it is one of its newest
-# RUNS_KEPT_PER_WORKTREE runs or younger than RUN_TTL_SECONDS. The runner names
-# a run directory `<UTC timestamp>-<command>.<suffix>`, so a run from before
-# `owner.json` existed can still be dated from its name.
 RUNS_KEPT_PER_WORKTREE = 50
 RUN_TTL_SECONDS = 7 * 24 * 60 * 60
 RUN_NAME_PATTERN = re.compile(r"^(\d{8}T\d{6}Z)-")
 UNKNOWN_WORKTREE = "an unrecorded worktree"
-# `status --all` reports owned and unowned simulators.
 STATUS_COLUMNS = ("SIMULATOR", "STATE", "OWNER", "WORKTREE", "LEASE", "UPTIME", "DISK")
-# A booted simulator's boot time is proven by the device's own init process; the
-# GUI app is the other long-lived holder of the Mac's memory.
 DEVICE_UDID_PATTERN = re.compile(r"/Devices/([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})/")
 SIMULATOR_APP_PROCESS = "Simulator.app/Contents/MacOS/Simulator"
 ELAPSED_PATTERN = re.compile(r"^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$")
@@ -88,7 +54,6 @@ FREE_PERCENTAGE_PATTERN = re.compile(r"System-wide memory free percentage:\s*([0
 SWAP_USED_PATTERN = re.compile(r"\bused\s*=\s*([0-9.]+)\s*([KMGT]?)")
 SIZE_SCALES = {"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
 READER_TIMEOUT_SECONDS = 10.0
-# Bound a wedged boot to its own command.
 BOOT_TIMEOUT_SECONDS = 180.0
 
 
@@ -293,9 +258,6 @@ def delete_owned(marker_path: Path, arguments: argparse.Namespace) -> None:
         raise DestinationError("refusing to delete a simulator whose current identity does not match its ownership marker")
     current = find_device(document, marker["udid"])
     if current is not None:
-        # Check immediately before either destructive simctl boundary. The
-        # Development marker can change while inventory is being inspected;
-        # never shut down or delete a simulator that has become its owner.
         if marker["udid"] == development_udid(arguments):
             raise DestinationError("refusing to delete the remembered Development simulator")
         if current[1].get("state") == "Booted":
@@ -405,7 +367,6 @@ def holder_is_live(metadata: dict[str, Any], table: list[tuple[int, int, str]] |
     except ProcessLookupError:
         return False
     except PermissionError:
-        # Another user's process is alive; this Mac's lanes are this user's.
         return True
     started_at = metadata.get("started_at_epoch_seconds")
     if not isinstance(started_at, (int, float)) or isinstance(started_at, bool):
@@ -413,10 +374,6 @@ def holder_is_live(metadata: dict[str, Any], table: list[tuple[int, int, str]] |
     elapsed = next((seconds for holder, seconds, _ in table or [] if holder == pid), None)
     if elapsed is None:
         return True
-    # One-sided: a recycled pid always started after the holder recorded its
-    # start, while the recorded holder may have started earlier than it wrote
-    # that second (bash or the profiler becomes the holder by exec, keeping its
-    # fork time), so only a later start disproves it.
     return (time.time() - elapsed) <= float(started_at) + HOLDER_START_TOLERANCE_SECONDS
 
 
@@ -489,10 +446,6 @@ def same_path(first: Path, second: Path) -> bool:
     return os.path.realpath(first) == os.path.realpath(second)
 
 
-# The one lane selection every iOS test tool - the runner, the profiler and the
-# Gateway E2E harness - asks for, so one worktree and one selection name one
-# lane in all three. A lane name becomes `<lane root>/ios-test-NAME` and the
-# device `Tron iOS Tests (NAME)`, so it cannot start with a dot or contain a path separator.
 DEFAULT_DEVICE_NAME = "Tron iOS Tests"
 LANE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 IDENTITY = Path(__file__).resolve().parent / "ios-test-build-identity.py"
@@ -979,8 +932,6 @@ def shutdown_owned(marker_path: Path, arguments: argparse.Namespace) -> str:
     if not owned_identity_matches(document, marker):
         raise DestinationError("refusing to release a simulator whose current identity does not match its ownership marker")
     if marker["udid"] == development_udid(arguments):
-        # The remembered Development simulator owns the paired app container and
-        # is released only by the owner that started it.
         raise DestinationError("refusing to release the remembered Development simulator")
     current = find_device(document, marker["udid"])
     if current is None:
@@ -1023,8 +974,6 @@ def sweep_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
     with lease_hold(marker_path.parent / LEASE_NAME) as held:
         if not held:
             return "busy"
-        # Under the lease the lane cannot start a command that would adopt the
-        # device, and the owner that just released may already have shut it down.
         try:
             document = inventory()
             current = find_device(document, marker["udid"])
@@ -1090,8 +1039,6 @@ def delete_unowned(arguments: argparse.Namespace) -> int:
         raise DestinationError("refusing the remembered Development simulator")
 
 
-    # Re-read ownership-sensitive evidence immediately before the destructive
-    # boundary; never infer that a device is unowned from its name or state.
     if arguments.udid == development_udid(arguments):
         raise DestinationError("refusing the remembered Development simulator")
     assert_target_unowned(arguments)
@@ -1130,9 +1077,6 @@ def sweep(arguments: argparse.Namespace) -> int:
         if sweep_lane(arguments, marker_path) == "failed":
             failures += 1
     reclaim_abandoned_lanes(arguments)
-    # Disk is the other half of what a command leaves behind, so the sweep that
-    # reclaims memory reclaims it too: every provisioning command and `reap`
-    # pass the runner's roots and prune through the same paths as `prune`.
     failures += prune_artifacts(arguments)
     return DESTINATION_EXIT if failures else 0
 
@@ -1177,7 +1121,6 @@ def reclaim_abandoned_lanes(arguments: argparse.Namespace) -> None:
                 (directory / LEASE_NAME).unlink()
                 directory.rmdir()
             except OSError:
-                # Raced by a command starting in this lane: the lane is its now.
                 continue
         print(f"removed abandoned lane {lane_label(directory, arguments.default_state_dir)} ({directory}): "
               "no ownership marker and nothing but an idle lease file")
@@ -1271,16 +1214,12 @@ def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
     with lease_hold(marker_path.parent / LEASE_NAME) as held:
         if not held:
             return "busy"
-        # Under the lease the lane cannot start a command that would refresh it,
-        # so this second reading decides.
         try:
             outcome = expiry_of(marker_path, time.time(), arguments.default_state_dir)
             if outcome not in REMOVABLE_EXPIRY:
                 return outcome
             remove_lane(marker_path.parent, arguments)
         except (DestinationError, OSError) as error:
-            # OSError covers the file system racing this removal: a directory or
-            # file that vanished, or a state directory the sweep cannot delete.
             print(f"warning: could not remove lane {marker_path.parent}: {error}", file=sys.stderr)
             return "failed"
     reason = {"worktree-deleted": "its worktree no longer exists",
@@ -1329,7 +1268,6 @@ def run_started(run: Path, owner: dict[str, Any] | None) -> float:
     try:
         return run.stat().st_mtime
     except OSError:
-        # An unreadable timestamp must not age a run into deletion.
         return time.time()
 
 
@@ -1552,8 +1490,6 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
                 raise
             current = find_device(document, marker["udid"])
             if current is not None:
-                # Stale recovery is destructive too: apply the Development
-                # exclusion at each simctl boundary, not just on validation.
                 if marker["udid"] == development_udid(arguments):
                     raise DestinationError("refusing to delete the remembered Development simulator")
                 if current[1].get("state") == "Booted":
@@ -1644,12 +1580,10 @@ def parse_args() -> argparse.Namespace:
             parser.error("delete-unowned does not take --marker")
         return arguments
     if arguments.command == "lane":
-        # Selection only: it reads no simulator, so it needs no Development state.
         if arguments.worktree is None:
             parser.error("lane requires --worktree")
         return arguments
     if arguments.command == "latest-run":
-        # Read-only over the results root: no simulator, no Development state.
         for required in ("results_root", "worktree", "lane"):
             if getattr(arguments, required) is None:
                 parser.error(f"latest-run requires --{required.replace('_', '-')}")
@@ -1692,7 +1626,6 @@ def parse_args() -> argparse.Namespace:
         return arguments
     if arguments.marker is None:
         parser.error(f"{arguments.command} requires --marker")
-    # Only state and shutdown read everything they need from the marker alone.
     if arguments.command not in ("state", "shutdown") and not (arguments.runtime and arguments.device_type and arguments.name):
         parser.error(f"{arguments.command} requires --runtime, --device-type and --name")
     return arguments

@@ -9,7 +9,6 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-# Independent known-bad input, split so fixtures don't themselves ship the identity.
 DEVELOPER_WORD = "m" + "oose"
 NEEDLE = "/Users/" + DEVELOPER_WORD
 
@@ -23,8 +22,6 @@ class PersonalInfoGuardTests(unittest.TestCase):
         self.guard.parent.mkdir()
         shutil.copyfile(ROOT / "scripts/personal-info-guard.sh", self.guard)
         self.git = shutil.which("git")
-        # Hook/alternate-index variables must never redirect this fixture to a
-        # caller's repository. User Git config is not part of the test input.
         self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
         self.env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
         self.run_git("init", "--quiet")
@@ -132,7 +129,6 @@ class PersonalInfoGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
     def test_stdin_text_uses_the_same_needles(self):
-        # Text posted to public GitHub is outside the repository inventory.
         self.check_text("Checks passed in <repo> and ~/Workspace\n", 0)
         for text in (NEEDLE + "/Workspace/x", "line one\nby " + DEVELOPER_WORD + "\n",
                      "github.com/" + DEVELOPER_WORD, "mh" + "ismail3/tron"):

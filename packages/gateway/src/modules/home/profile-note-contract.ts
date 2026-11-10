@@ -17,7 +17,6 @@ interface ProfileNoteSessionEntryCitation {
 }
 
 export interface ProfileNoteEvidenceRef {
-  /** A record citation is exact when revisionId is supplied. */
   recordId?: string;
   revisionId?: string;
   sessionEntry?: ProfileNoteSessionEntryCitation;
@@ -31,7 +30,6 @@ export interface ProfileNoteProvenance {
   sessionId?: string;
   branchId?: string;
   invocationId?: string;
-  /** Why the current value was written, when supplied. Bounded provenance, never evidence. */
   reason?: string;
   evidence: ProfileNoteEvidenceRef[];
 }
@@ -70,25 +68,17 @@ export interface NoteFieldQualification {
 }
 
 export interface NoteContent {
-  /** Read projection of the current section; exact claim anchors retain captured placement. */
   profile?: import("./profile-placement.js").ProfileMetadata;
   title: string;
   body?: string;
   fields?: NoteFieldQualification[];
   role: "fact" | "preference" | "concept" | "decision" | "workflow" | "synthesis";
   confirmed: boolean;
-  /** Explicitly retained evidence against a candidate or claim. */
   contraryEvidence?: ProfileNoteEvidenceRef[];
-  /** Review/freshness metadata is descriptive and never an automatic deletion date. */
   freshness?: "current" | "aging" | "stale" | "unknown";
   privacyScope?: "private" | "shared";
   usageConstraint?: string;
-  /** Note labels that name an owner's role for the note, such as Home's `home-profile`
-   * and `kind-*` labels. Not the source tag vocabulary: a note's labels are free, bounded by
-   * `NOTE_TAG_PATTERN` and `NOTE_TAGS_MAX`, and an owner alone decides what they mean. */
   tags?: string[];
-  /** Set on a note that has left active use. A draft may name `false` for owner Undo;
-   * ordinary stored writes retain only `true` or nothing, never an edition ledger. */
   retired?: boolean;
 }
 
@@ -137,7 +127,6 @@ export function assertProfileNoteId(value: unknown, label = "profile-note id"): 
   if (typeof value !== "string" || !ID.test(value) || value === "." || value === "..") throw new Error(`Invalid ${label}`);
 }
 
-/** Project identity is a bounded workspace reference, not a record ID. */
 function assertProfileNoteProjectId(value: unknown, label = "project id"): asserts value is string {
   if (typeof value !== "string" || value.length < 1 || value.length > 4_096 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`Invalid ${label}`);
   if (value.startsWith("/")) {

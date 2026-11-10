@@ -1,7 +1,6 @@
 import { Type } from "../pi/ai.js";
 import type { HomeTaskCheckin, HomeTaskCheckinRequest } from "../../protocol/types.js";
 
-/** Small durable progress snapshots, not another transcript or a result. */
 export const HOME_TASK_CHECKIN_LIMIT = 12;
 export const HOME_TASK_CHECKIN_VISIBLE = 3;
 export const HOME_TASK_ATTENTION_INTERVAL_MS = 30 * 60 * 1000;

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Real iOS SSH/tmux journey. Only the test sshd and its keys are fixture-owned;
-# no Gateway build, Tron host process or system service is started.
+# Real iOS SSH/tmux journey.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 artifacts="$repo_root/packages/ios-app/test-results/mac-terminal"
@@ -9,7 +8,6 @@ tailscale_cli=/Applications/Tailscale.app/Contents/MacOS/Tailscale
 address="$(TAILSCALE_BE_CLI=1 "$tailscale_cli" ip -4)"
 [[ "$address" =~ ^100\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: Mac is not on Tailscale" >&2; exit 69; }
 tmux="$(command -v tmux)" || { echo "error: install tmux before running this journey" >&2; exit 69; }
-# Exactly the synthetic Mac/iPhone identity used by HostedMacTerminalFixture.
 session="tron-$(printf '%s' 'mac-terminal-machine:fixture-iphone' | shasum -a 256 | cut -d ' ' -f 1)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/tron-ssh-journey.XXXXXX")"
 sshd_pid=""

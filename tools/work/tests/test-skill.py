@@ -39,7 +39,6 @@ class GitSkill(unittest.TestCase):
         self.git(repo, "commit", "-m", "change " + path)
 
     def skill(self, heading):
-        # Read the actual maintained instructions, not a test-side landing algorithm.
         match = re.search(r"^## " + re.escape(heading) + r"\n.*?```bash\n(.*?)```", SKILL.read_text(), re.M | re.S)
         self.assertIsNotNone(match, f"Missing executable skill block: {heading}")
         return subprocess.run(["bash", "-e", "-c", match[1]], cwd=self.task, env=self.env,
@@ -55,8 +54,6 @@ class GitSkill(unittest.TestCase):
         fetched_main = self.git(self.remote, "rev-parse", "main")
         pushed = self.skill("Publish")
         self.assertEqual(pushed.returncode, 0, pushed.stdout + pushed.stderr)
-        # A --no-ff merge lands: fetched main stays first parent, the tested branch is second,
-        # and the landed tree is exactly the tested one. The task stays on its branch.
         self.assertEqual(self.git(self.remote, "rev-parse", "main^1"), fetched_main)
         self.assertEqual(self.git(self.remote, "rev-parse", "main^2"), integrated)
         self.assertEqual(self.git(self.remote, "rev-parse", "main^{tree}"), self.git(self.task, "rev-parse", "HEAD^{tree}"))

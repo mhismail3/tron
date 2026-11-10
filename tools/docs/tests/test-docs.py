@@ -68,7 +68,7 @@ class RealRepositoryTests(unittest.TestCase):
         manifests = subprocess.run(["git", "ls-files", "*.module.json"], cwd=ROOT, text=True,
                                    stdout=subprocess.PIPE, check=True).stdout.split()
         expected = set()
-        for path in manifests:  # each manifest's module, and each whole directory it declares
+        for path in manifests:
             expected.add(ownership.module_id(path))
             directories = ownership.directory_modules(path, json.loads((ROOT / path).read_text()), [])
             expected |= {own_id for own_id, *_ in directories.values()}
@@ -87,8 +87,6 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual(int(output.split(" ", 1)[0]), len(listed))
 
     def test_settings_list_holds_the_key_the_settings_lock_edited(self) -> None:
-        # The admin settings lock changes one key at one layer through the real Gateway and
-        # asserts the group the Gateway resolves it in; the generated list must agree.
         source = (ROOT / "packages/gateway/src/e2e/admin/admin.lock.integration.test.ts").read_text()
         keys = re.findall(r'^const KEY = "([^"]+)";$', source, re.M)
         edited_layers = set(re.findall(r'changes: \[\{ key: KEY, layer: "([a-z]+)", op: "set"', source))
@@ -101,8 +99,6 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual(row.split(" | ")[2], groups[0])
 
     def test_signals_print_and_committed_blocks_are_current(self) -> None:
-        # Today no module README has a Signals section and no doc embeds a block; consumers (#1501, #1497,
-        # #1498) add them, and this then checks the real ones. The fixture cases prove both mechanisms.
         self.assertTrue(self.generate("signals").strip())
         self.assertRegex(self.generate("check"), r"^docs: \d+ generated block\(s\), current\n$")
 
@@ -158,7 +154,6 @@ class FixtureTests(unittest.TestCase):
         self.assertIn("| `gw/beta` | L3 | 2 | `packages/gw/src/b/beta.module.json` | — |", index)
         self.assertEqual(first_cells(self.docs("modules")), ["`gw/alpha`", "`gw/beta`", "`repo/root`", "`repo/tooling`"])
 
-        # Known bad: a deleted manifest changes the map, so the committed block is stale.
         self.git("rm", "-q", "--cached", "packages/gw/src/b/beta.module.json")
         (self.repo / "packages/gw/src/b/beta.module.json").unlink()
         self.assertEqual(first_cells(self.docs("modules", "packages/gw")), ["`gw/alpha`"])
@@ -278,7 +273,6 @@ class FixtureTests(unittest.TestCase):
         ])
         self.assertIn("| `tools.mcp.server` | tools | server |", (self.repo / "settings.md").read_text())
 
-        # Known bad: a key added to the schema leaves the committed block stale.
         self.write("packages/gateway/src/kernel/settings/settings-schema.ts", schema.replace(
             '"background"]', '"background", "subagent"]'))
         self.assertIn("settings.md: `tron docs settings` is stale", self.docs("check", code=1))
@@ -296,7 +290,6 @@ class FixtureTests(unittest.TestCase):
         self.write("other.md", "# Other\n")
         self.write("root.module.json", json.dumps({"layer": "L5", "owns": ["settings.md", "other.md", "root.module.json"]}))
         self.docs("update")
-        # The schema now needs a package this worktree has not installed, as a fresh worktree's Gateway does.
         self.write("packages/gateway/src/kernel/settings/settings-schema.ts", 'import "@earendil-works/pi-ai";\n' + schema)
         self.git("add", "-A")
         self.git("-c", "user.name=F", "-c", "user.email=f@example.invalid", "commit", "-q", "-m", "base")
@@ -307,7 +300,6 @@ class FixtureTests(unittest.TestCase):
         self.write("other.md", "# Other, edited\n")
         self.assertEqual(self.docs("check", "--base", "main"), "docs: 1 generated block(s), current (1 unchanged "
                          "since main with unchanged sources, not regenerated)\n")
-        # Known bad: an edited block, or a changed Gateway source, is regenerated against the base.
         self.write("settings.md", "<!-- tron docs settings -->\nhand-edited\n<!-- /tron docs -->\n")
         self.assertIn("node_modules is missing", self.docs("check", "--base", "main", code=1))
         self.write("settings.md", (self.repo / "settings.md").read_text().replace("hand-edited\n", ""))
@@ -324,12 +316,12 @@ class FixtureTests(unittest.TestCase):
         output = self.docs("check", code=1)
         self.assertIn("open.md: a `<!-- tron docs … -->` block has no `<!-- /tron docs -->` end", output)
         self.assertIn("unknown.md: unknown generator `tron docs nosuch`", output)
-        self.docs("update", code=1)  # an unclosed opener never rewrites its file (it would swallow the next block)
+        self.docs("update", code=1)
         self.assertEqual((self.repo / "open.md").read_text(), unclosed)
         self.docs("nosuch", code=2)
         self.docs("signals", "extra", code=2)
         self.docs("check", "extra", code=2)
-        missing = run(self.repo, self.env, "rpc")  # no gateway-service.ts: a named failure, not an empty list
+        missing = run(self.repo, self.env, "rpc")
         self.assertEqual(missing.returncode, 1)
         self.assertIn("cannot read packages/gateway/src/transport/gateway-service.ts", missing.stderr)
 

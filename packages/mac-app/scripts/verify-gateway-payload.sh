@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Verify a generated Gateway payload without changing it. The verifier compiles
-# a fresh launcher from the tracked C source; it never trusts the staged helper.
+# Verify a generated Gateway payload without changing it.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -46,10 +45,6 @@ NODE_VERSION_LINES="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
 [[ -f "$PAYLOAD_DIR/manifest.json" && ! -L "$PAYLOAD_DIR/manifest.json" ]] || fail "manifest is missing or symlinked"
 [[ -f "$HELPER" && ! -L "$HELPER" && -x "$HELPER" ]] || fail "staged helper is missing, symlinked, or not executable"
 
-# Check the publication mode before invoking any verifier. The C verifier also
-# checks this recursively, including the manifest, while this explicit check
-# keeps the policy visible and rejects any write bit (S_IWUSR|S_IWGRP|S_IWOTH,
-# as `immutable_tree` does) before Xcode runs.
 writable="$(/usr/bin/find "$PAYLOAD_DIR" \( -type f -o -type d \) \( -perm -200 -o -perm -020 -o -perm -002 \) -print -quit)" ||
     fail "cannot inspect published payload permissions"
 [[ -z "$writable" ]] || fail "published payload tree is writable"
@@ -90,7 +85,6 @@ validate_runtime() {
     [[ "$actual_sha" == "$expected_sha" ]] || fail "Node $arch runtime checksum mismatch"
     file_description="$(file "$path" 2>/dev/null)" || fail "cannot inspect Node $arch runtime"
     [[ "$file_description" == *Mach-O* ]] || fail "Node $arch runtime is not Mach-O"
-    # One architecture-set owner shared with the bundle and DMG scripts.
     "$SCRIPT_DIR/verify-macho-architectures.sh" "$path" "$expected_arch" >/dev/null ||
         fail "Node $arch runtime architecture mismatch"
 }
@@ -157,16 +151,11 @@ validate_pi_alias() {
 validate_pi_alias arm64
 validate_pi_alias x64
 
-# Use the trusted source checker against payload-owned inputs. Do not execute a
-# staged checker before the launcher has established the complete fingerprint.
 HOST_ARCH="$(uname -m)"
 [[ "$HOST_ARCH" == arm64 ]] || HOST_ARCH=x64
 "$PAYLOAD_DIR/runtime/node-$HOST_ARCH" "$REPO_ROOT/packages/gateway/scripts/check-pi-subagents.mjs" --root "$PAYLOAD_DIR/app" ||
     fail "managed provider pin or immutable inputs are invalid"
 
-# The helper must remain unsigned until Xcode's signing phases. This keeps the
-# deterministic pre-signing byte comparison meaningful and makes signing the
-# explicit boundary protecting the immutable resource tree.
 HELPER_CONTENTS="$(cd "$(dirname "$HELPER")/.." && pwd -P)"
 [[ "$(/bin/realpath "$HELPER")" == "$HELPER" && ! -L "$HELPER_CONTENTS" && ! -L "$HELPER_CONTENTS/MacOS" && ! -L "$HELPER_CONTENTS/Resources" ]] ||
     fail "staged helper contains an escaping symlink"
@@ -183,8 +172,6 @@ xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations 
     -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
     "$SCRIPT_DIR/tron-gateway-launcher.c" -o "$TRUSTED_VERIFIER" || fail "trusted verifier compilation failed"
 [[ ! -d "$HELPER_CONTENTS/_CodeSignature" ]] || fail "staged helper must be unsigned before Xcode signing"
-# The linker emits a fresh LC_UUID on each build. Normalize only that
-# non-source identity field before comparing every remaining helper byte.
 normalize_helper_uuid() {
     local input="$1" output="$2"
     perl -0777 -pe 'my $count = s/\x1b\x00\x00\x00\x18\x00\x00\x00[\s\S]{16}/\x1b\x00\x00\x00\x18\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00/gs; die "unexpected Mach-O UUID command count: $count\\n" unless $count == 2;' "$input" > "$output"

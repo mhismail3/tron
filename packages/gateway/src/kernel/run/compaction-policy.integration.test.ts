@@ -10,10 +10,6 @@ import { compactionAdmission } from "../settings/settings-admission.js";
 import { TEST_SETTINGS_SCHEMA } from "../../../test-support/settings-schema.js";
 import { CompactionOperationPolicy, compactionPolicyExtension } from "./compaction-policy.js";
 
-/** Captured verbatim from opencode-go rejecting a 48MB conversation: the
- * provider edge answered HTTP 413 with an opaque body, so the pinned SDK
- * classified it as a transient server error, retried the identical oversized
- * request, and left the session unable to continue until it was compacted. */
 const OVERSIZED_REQUEST_ERROR = "413: {\"type\":\"server_error\",\"code\":\"server_error\",\"message\":\"Error from provider (Console Go): Upstream request failed: [server_error] Upstream response was not valid JSON\"}";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -53,7 +49,6 @@ async function fixture(configuration: Record<string, unknown> = {}, adapted = tr
     policy = new CompactionOperationPolicy(session, root, compactionAdmission.bind(undefined, TEST_SETTINGS_SCHEMA));
     session.agent.streamFunction = policy.wrap(abortAwareStream(session.agent.streamFunction));
   }
-  // Like RuntimeSlot, bind an actual host callback so reload emits session_start.
   await session.bindExtensions({ mode: "rpc", onError: error => { throw new Error(error.error); } });
   const calls: Array<{ context: TranscriptContext; options?: SimpleStreamOptions }> = [];
   const record = (text: string) => (context: TranscriptContext, options: SimpleStreamOptions | undefined) => {
@@ -77,8 +72,6 @@ function normalized(calls: Awaited<ReturnType<typeof fixture>>["calls"]) {
 function checkpoint(session: AgentSession) {
   const entry = session.sessionManager.getBranch().findLast(entry => entry.type === "compaction");
   if (!entry || entry.type !== "compaction") throw new Error("No canonical checkpoint");
-  // UUIDs are independent in the two canonical fixtures. Compare retained
-  // content and every non-identity compaction field, not generated IDs.
   const { id: _id, parentId: _parent, timestamp: _time, firstKeptEntryId, ...result } = entry;
   return { ...result, retained: session.sessionManager.getEntry(firstKeptEntryId)?.type,
     context: session.sessionManager.buildSessionContext().messages.map(message => JSON.stringify(message, (key, value) => key === "timestamp" ? undefined : value)) };
@@ -102,8 +95,6 @@ describe("provider request-size overflow classification", { concurrent: false },
       const item = await fixture();
       const response = fauxAssistantMessage("Provider-authored content", errorMessage === undefined
         ? {} : { stopReason: "error", errorMessage });
-      // Permit the SDK's ordinary transient retry without a missing-response
-      // failure disguising the provider error this journey must preserve.
       item.faux.setResponses(Array.from({ length: 4 }, () => response));
       await item.session.prompt("Continue the task");
       const entries = item.session.sessionManager.getBranch();
@@ -113,8 +104,6 @@ describe("provider request-size overflow classification", { concurrent: false },
       });
       expect(messages.at(-1)?.errorMessage, errorMessage ?? "successful response").toBe(expectedError);
       expect(item.faux.state.callCount).toBeGreaterThan(0);
-      // Disabled auto-compaction leaves the canonical provider message visible;
-      // the RuntimeSlot body-limit journey separately proves compact-and-retry.
       expect(entries.some(entry => entry.type === "compaction")).toBe(false);
     }
   });
@@ -236,7 +225,6 @@ describe("pinned SDK compaction request policy", { concurrent: false }, () => {
     expect(normalized(adapted.calls)).toEqual(normalized(baseline.calls));
     expect(getCurrentSystemPrompt(adapted.calls[0]!.context.messages)).not.toContain("Compaction only");
     expect(adapted.policy.snapshot().active).toBeUndefined();
-    // The reloaded factory still binds the original live session policy.
     adapted.faux.setResponses([adapted.record("Compaction after reload"), adapted.record("Prefix after reload")]);
     adapted.session.sessionManager.appendMessage({ role: "user", content: "Next request", timestamp: 7 });
     adapted.session.sessionManager.appendMessage(fauxAssistantMessage("New response ".repeat(150)));
@@ -277,8 +265,6 @@ describe("pinned SDK compaction request policy", { concurrent: false }, () => {
     item.faux.setResponses([item.record("History"), item.record("Prefix")]);
     await item.session.compact();
     expect(item.calls).toHaveLength(2);
-    // The fixture model supports through High: accepted XHigh/Max policies must
-    // clamp at the provider boundary, not reject canonical settings or leak them.
     expect(item.calls.map(call => call.options?.reasoning)).toEqual([reasoning, reasoning]);
     expect(item.policy.snapshot().next.thinkingLevel).toBe(thinkingLevel);
     expect(item.session.thinkingLevel).toBe("high");
@@ -317,8 +303,6 @@ describe("pinned SDK compaction request policy", { concurrent: false }, () => {
     item.faux.setResponses([item.record("History"), item.record("Prefix")]);
     await item.save(invalid as Record<string, unknown>);
     await expect(Promise.resolve().then(() => {
-      // The real manual-compaction admission reads canonical settings before
-      // entering the SDK. Invalid data must spend no summary request or checkpoint.
       item.policy.applyBudgets();
       return item.session.compact();
     })).rejects.toMatchObject({ code: "conflict" });

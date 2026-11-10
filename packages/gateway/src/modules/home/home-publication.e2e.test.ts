@@ -46,7 +46,6 @@ describe("Home durable publication reconciliation", () => {
       tronHome,
       trust: new TrustService(join(root, "agent")),
       workspace,
-      // These native operations are the only ones publication recovery uses.
       runtimes: {
         sessionFile: async () => join(root, "sessions", "session-1.jsonl"),
         sessionPresent: async () => true,
@@ -95,7 +94,6 @@ describe("Home durable publication reconciliation", () => {
       tronHome,
       trust: new TrustService(join(root, "agent")),
       workspace,
-      // These native operations are the only ones publication recovery uses.
       runtimes: {
         sessionFile: async () => join(root, "sessions", "session-1.jsonl"),
         sessionPresent: async () => true,

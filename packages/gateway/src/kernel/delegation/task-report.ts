@@ -6,9 +6,6 @@ import type { HomeTaskCheckin, HomeTaskCheckinRequest } from "../../protocol/typ
 
 export const HOME_TASK_MARKER = "tron-home-task";
 export const HOME_TASK_REPORT = "tron-home-task-report";
-/** One operation's canonical span: the entries after its marker, up to the next task
- * marker. A resumed task continues in its predecessor's session (#929), so a later
- * operation's entries are never this operation's evidence. `index` is -1 without a marker. */
 export function homeTaskOperationSpan<T extends FileEntry>(entries: readonly T[], operationId: string): { index: number; run: T[] } {
   const isMarker = (entry: T) => entry.type === "custom" && entry.customType === HOME_TASK_MARKER;
   const index = entries.findIndex(entry => isMarker(entry) && (entry as { data?: { operationId?: unknown } }).data?.operationId === operationId);
@@ -27,7 +24,6 @@ interface HomeTaskReportRequest {
   resultId: string;
   outcome: "progress" | "needs-input" | "final";
   text: string;
-  /** Acceptance evidence is separate from the claimed outcome. */
   evidence: string[];
 }
 export interface HomeTaskReport extends HomeTaskWorkerIdentity, HomeTaskReportRequest {
@@ -55,8 +51,6 @@ function admit(value: unknown): HomeTaskReportRequest {
   return { resultId: request.resultId, outcome: request.outcome, text: request.text, evidence: [...request.evidence] };
 }
 
-/** Canonical reports cross a cold-process trust boundary too: the tool schema
- * alone cannot qualify persisted evidence after restart. */
 export function parseHomeTaskReport(value: unknown): HomeTaskReport {
   const report = value as HomeTaskReport;
   const identityKeys = ["version", "taskId", "homeId", "generation", "operationId", "receiptId", "sessionId", "acceptedAt"];
@@ -70,16 +64,12 @@ export function parseHomeTaskReport(value: unknown): HomeTaskReport {
   return report;
 }
 
-/** The refusal text while subagent runs the task started are live. It names the count and
- * the remedy; a refused report seals nothing and the turn continues. */
 export function reportLiveRunsRefusal(count: number): string {
   const runs = count === 1 ? "1 subagent run this task started is" : `${count} subagent runs this task started are`;
   const pronoun = count === 1 ? "it" : "them";
   return `Report refused: ${runs} still live. Wait for ${pronoun} (subagent status, or a blocking bg_wait) or stop ${pronoun}, then report.`;
 }
 
-/** One immutable result belongs to one worker operation, not to a slot-wide map.
- * Append evidence before sealing; failure leaves no false accepted result. */
 export class HomeTaskReportOwner {
   private readonly mutex = new AsyncMutex();
   private sealed: { request: string; report: HomeTaskReport; entryId: string } | undefined;
@@ -90,7 +80,7 @@ export class HomeTaskReportOwner {
   requestStop(stop: () => Promise<void>): void {
     if (!this.stopping) {
       this.stopping = stop();
-      void this.stopping.catch(() => {}); // The task settlement owner joins this promise.
+      void this.stopping.catch(() => {});
     }
   }
   async joinStop(): Promise<void> { await this.stopping; }
@@ -102,13 +92,9 @@ export class HomeTaskReportOwner {
     this.admission = { interrupt };
   }
 
-  /** The task's budget check at a worker turn boundary (settings-model.md 6.1),
-   * set by the dispatcher; `budgetExceeded` is its settlement evidence. */
   private budget: ((entries: readonly FileEntry[]) => Promise<boolean>) | undefined;
   private exceeded = false;
   private reportReminderSent = false;
-  /** One normal no-report ending may ask for an explicit partial result. The
-   * task owner, not a rebuilt runtime or each child wake, owns this allowance. */
   takeReportReminder(): boolean {
     if (this.reportReminderSent || !this.acceptsSteering || this.signal.aborted) return false;
     this.reportReminderSent = true;
@@ -116,18 +102,14 @@ export class HomeTaskReportOwner {
   }
   limitBudget(check: (entries: readonly FileEntry[]) => Promise<boolean>): void { this.budget = check; }
   get budgetExceeded(): boolean { return this.exceeded; }
-  /** True once the run's canonical spend reached its budget; the run then ends at this boundary. */
   async exceedsBudget(entries: readonly FileEntry[]): Promise<boolean> {
     if (!this.exceeded && this.budget && await this.budget(entries)) this.exceeded = true;
     return this.exceeded;
   }
 
   get controlsActive(): boolean { return this.admission !== undefined; }
-  /** The report is sealed: the run ends at its turn boundary and runs no more tools. */
   get reportSealed(): boolean { return this.sealed !== undefined; }
   get acceptsSteering(): boolean { return !!this.admission && !this.sealed && !this.stopping; }
-  /** Settlement releases execution callbacks with the lease, even when exact
-   * Stop failed. Immutable evidence remains, but no late report can rewrite it. */
   retire(): void { this.admission = undefined; this.cancel(); }
 
   async stop(): Promise<void> {
@@ -156,7 +138,6 @@ export class HomeTaskReportOwner {
     });
   }
 
-  /** Shares the report lease/mutex, but never seals or pauses the worker. */
   checkinTool(sessionId: () => string, operationId: () => string | undefined): ToolDefinition {
     return { name: "checkin", label: "Check in", annotations: { openWorldHint: false },
       description: "Send Home a short durable progress check-in without pausing or ending work. Use at milestones and about every 30 minutes: step, done, next, optional blocker and branch/commit/issue refs. Quiet by default. needsAttention requires a blocker and requests a Home wake at most once per 30 minutes across resumes; it is not a final report.",
@@ -172,9 +153,6 @@ export class HomeTaskReportOwner {
     };
   }
 
-  /** Sealing ends the task without a stop: the runtime ends the run at this
-   * turn's boundary (`reportSealed`), so no further model request starts and the
-   * worker session shows no aborted reply. */
   tool(sessionId: () => string, operationId: () => string | undefined,
     append: (report: HomeTaskReport) => Promise<string>): ToolDefinition {
     return { name: "report", label: "Report", annotations: { openWorldHint: false }, description: "Seal the task's explicit immutable result with acceptance evidence. Ends this task immediately; do no work afterwards. Refused while a subagent run this task started is still live: wait for it or stop it first.",

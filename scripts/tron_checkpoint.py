@@ -14,8 +14,6 @@ from tron_mac_replace_platform import MacPlatform, Failure, git
 
 ROOT = Path(__file__).resolve().parents[1]
 UI = "TronMobileUITests/RealGatewayPairAndChatUITests/"
-# Reuse real UI/socket/process oracles, not preview-only tests. Future product
-# stages extend these probes when their owning slice ships, not before it exists.
 OUTCOMES = [
     ("Chat: pairing, streaming, reconnect and photo steer", [
         "testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground",
@@ -60,8 +58,6 @@ def main():
     def run(source, argv, log, env=None):
         with (result / log).open("a") as stream:
             stream.write("$ " + " ".join(map(str, argv)) + "\n"); stream.flush()
-            # The existing harness owns its processes, simulator lease and the
-            # three host slots. Forward cancellation and wait for its cleanup.
             child = subprocess.Popen(list(map(str, argv)), cwd=source, env=env, stdout=stream, stderr=subprocess.STDOUT)
             interrupted = []
             def forward(signum, _frame):
@@ -81,20 +77,13 @@ def main():
 
     save()
     with tempfile.TemporaryDirectory(prefix="tron-checkpoint-") as temporary:
-        # MacPlatform.build is the existing signed full-build path. Calling it
-        # alone cannot quit, swap, launch or restart anything.
         platform = MacPlatform(home=temporary) if args.test_mode else MacPlatform()
         source = platform.checkout(ROOT, revision)
         fixture = Path(temporary) / "fixture"
         derived = Path(temporary) / "derived"
-        # The signed full build already installed this exact lockfile. Reuse
-        # that tree through the harness's existing no-install option, rather
-        # than running npm ci again from a different working directory.
         environment = {**os.environ, "TRON_IOS_E2E_STATE_DIR": str(fixture), "TRON_IOS_E2E_DERIVED_DATA": str(derived), "TRON_IOS_E2E_NO_INSTALL": "1"}
         try:
             try:
-                # Reuse the existing descendant-aware process owner so a stop
-                # during npm/Xcode also joins the detached build descendants.
                 build_code = "import sys; sys.path.insert(0, sys.argv[1] + '/scripts'); from tron_mac_replace_platform import MacPlatform; MacPlatform(home=sys.argv[2]).build(sys.argv[1], sys.argv[3], sys.argv[4])"
                 status = run(source, [sys.executable, source / "scripts/ios-test-process.py",
                     "--log", result / "build-process.log", "--evidence-dir", result / "build-process",
@@ -134,8 +123,6 @@ def main():
                 report["reinstall_preparation"] = run(source, [source / "scripts/tron", "mac", "reinstall", "--app", app], "reinstall.log")
                 save()
         finally:
-            # Preserve xcresults/logs even if another outcome failed. The
-            # harness's clean owns fixture shutdown and lane/product removal.
             if (fixture / "results").exists():
                 shutil.copytree(fixture / "results", result / "journeys", symlinks=True, dirs_exist_ok=True)
                 latest = result / "journeys/latest-ui"
@@ -146,8 +133,6 @@ def main():
             cleanup = run(source, [source / "scripts/ios-gateway-e2e-test", "clean"], "cleanup.log", environment)
             report["cleanup_exit"] = cleanup
             if args.test_mode:
-                # Payload staging seals directories read-only. Restore write
-                # permission only in this disposable checkout before removal.
                 for directory, _, _ in os.walk(source):
                     path = Path(directory)
                     path.chmod(path.stat().st_mode | 0o200)

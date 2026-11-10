@@ -55,8 +55,6 @@ export class FilesystemService {
     }
     const maximumEntries = this.maximumEntries;
     const directory = await opendir(canonical);
-    // Candidates stream out of the open handle, so both ceilings are enforced
-    // while the folder is read rather than after buffering it.
     const candidates = async function* (): AsyncGenerator<WorkspaceEntry> {
       let examinedEntries = 0;
       for await (const entry of directory) {

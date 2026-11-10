@@ -26,7 +26,6 @@ interface StoredCatalog {
   access: number;
 }
 
-/** Connection-runtime-local immutable model traversals avoid repeated whole-catalog work. */
 export class ModelCatalogPager {
   private readonly byOwner = new Map<object, Map<string, StoredCatalog>>();
   private access = 0;
@@ -48,10 +47,6 @@ export class ModelCatalogPager {
     let catalog: PreparedCatalog<T>;
     if (rawCursor === undefined) {
       catalog = prepareCatalog(await build());
-      // The build yields to other owners. An empty owner map may have been
-      // pruned while it was suspended, so never publish into the detached map
-      // captured before the await: reacquire the live owner lease and apply
-      // capacity/expiry accounting to that authoritative map.
       const live = this.liveCatalogs(owner, Date.now());
       this.access += 1;
       live.set(catalog.fingerprint, {

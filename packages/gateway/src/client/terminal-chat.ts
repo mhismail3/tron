@@ -69,8 +69,6 @@ async function connectResilient(client: GatewayProtocolClient): Promise<void> {
       await client.connect();
       return;
     } catch (error) {
-      // Protocol incompatibility is definitive; retrying it forever hides the
-      // operator action required to upgrade the peer.
       if (error instanceof GatewayClientError && !error.retryable) throw error;
       client.close();
       await sleep(delay);
@@ -97,16 +95,12 @@ async function acknowledgeTerminalAttention(
   }
 }
 
-/** Install and render the synchronized cut before best-effort attention I/O. */
 async function synchronizeTerminalSession(
   client: Pick<GatewayProtocolClient, "request">,
   sessionId: string,
   install: (baseline: SnapshotEnvelope) => void,
 ): Promise<SnapshotEnvelope> {
   const baseline = await client.request("session.open", { sessionId }) as unknown as SnapshotEnvelope;
-  // The acquisition owns the candidate until installation succeeds. A sync
-  // failure occurs before callers can see its token, so only this boundary can
-  // retire it without disturbing the previously installed attachment.
   try {
     await client.request("session.sync", { sessionId, syncToken: baseline.syncToken });
     install(baseline);
@@ -182,7 +176,6 @@ async function listSessions(
   throw new Error("Gateway session catalog exceeds its bounded page count");
 }
 
-/** The `/home` commands, listed once for the usage line and for `/home` errors. */
 const HOME_COMMANDS = [
   "/home [status]", "/home designate [provider/id]", "/home disable", "/home memory <provider/id>...", "/home resume", "/home context",
   "/home reconfirm-permissions", "/home permissions", "/home revoke-scope <id>", "/home revoke-grant <id>",
@@ -198,8 +191,6 @@ function usage(): never {
   process.exit(64);
 }
 
-/** `home.status`: the protocol's bounded projection, rendered without a terminal-only shape. */
-/** One `/home` line, resolved without touching the Gateway. */
 export type HomeCommand =
   | { kind: "status" }
   | { kind: "designate"; model?: { provider: string; id: string } }
@@ -218,9 +209,6 @@ export type HomeCommand =
   | { kind: "context" }
   | { kind: "usage" };
 
-/** Returns undefined for any line that is not a `/home` command, so it continues
- * to the model. An unknown subcommand prints usage instead of reaching the
- * model, and a malformed model argument throws for the caller to report. */
 function parseHomeCommand(input: string): HomeCommand | undefined {
   if (input !== "/home" && !input.startsWith("/home ")) return undefined;
   if (input === "/home" || input === "/home status") return { kind: "status" };
@@ -245,8 +233,6 @@ function parseHomeCommand(input: string): HomeCommand | undefined {
   }
   if (input === "/home memory" || input.startsWith("/home memory ")) {
     const arguments_ = input.slice("/home memory".length).trim().split(/\s+/u).filter((part) => part !== "");
-    // One or more models, in fallback order; the memory regulates its own spend (#493).
-    // Any other shape is usage; a model that cannot be read reports its reason.
     if (arguments_.length === 0) return { kind: "usage" };
     return { kind: "memory", models: arguments_.map(argument => { const model = parseHomeModelArgument(argument); return `${model.provider}/${model.id}`; }) };
   }
@@ -267,7 +253,6 @@ async function homeStatusCommand(client: Pick<GatewayProtocolClient, "request">)
   return describeHomeStatus(await client.request("home.status", {}) as unknown as HomeStatus);
 }
 
-/** `provider/id`, the same spelling the model picker uses. */
 function parseHomeModelArgument(argument: string): { provider: string; id: string } {
   const separator = argument.indexOf("/");
   const provider = separator > 0 ? argument.slice(0, separator) : "";
@@ -276,8 +261,6 @@ function parseHomeModelArgument(argument: string): { provider: string; id: strin
   return { provider, id };
 }
 
-/** What the memory projection says, in one line: its model, the spend so far,
- * whether its store is open yet and the reason it is blocked. */
 function describeHomeMemory(memory: HomeMemoryStatus): string {
   if (!memory.configured) {
     return `Home memory is not configured${memory.reason ? `: ${memory.reason}` : ""}. /home memory <provider/id>... sets its background models.`;
@@ -294,8 +277,6 @@ function describeHomeMemory(memory: HomeMemoryStatus): string {
   return `Home memory: ${model}${spend}, ${open}${blocked}${progress}${reason}.`;
 }
 
-/** What the request-context projection says: the activation's start, whether it
- * is still open, the size of the request it prepared, and its own refusal. */
 function describeHomeContext(context: HomeContextProjection): string {
   if (!context.available) return "Home has no activation to report yet.";
   const start = context.activationStartEntryId ?? "the start of the conversation";
@@ -313,7 +294,6 @@ export async function configureHomeMemory(
   client: Pick<GatewayProtocolClient, "request">,
   models: string[],
 ): Promise<string> {
-  // Memory runs on the background model queue, a Home profile key changed through the one settings path.
   await client.request("settings.change", {
     commandId: randomUUID(), target: { kind: "home" },
     changes: [{ key: "model.queue[role=background]", layer: "session", op: "set", value: models }],
@@ -347,7 +327,6 @@ async function disableHome(client: Pick<GatewayProtocolClient, "request">): Prom
   return `Home disabled: session ${result.sessionId}, generation ${result.generation}. It is an ordinary session now.`;
 }
 
-/** Resolve and run one `/home` line without letting malformed arguments escape the prompt loop. */
 export async function runHomeInput(client: Pick<GatewayProtocolClient, "request">, input: string): Promise<boolean> {
   let command: HomeCommand | undefined;
   try {
@@ -361,7 +340,6 @@ export async function runHomeInput(client: Pick<GatewayProtocolClient, "request"
   return true;
 }
 
-/** Run one parsed `/home` command, reporting its outcome on stdout and failures on stderr. */
 async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, command: HomeCommand): Promise<void> {
   if (command.kind === "usage") {
     process.stderr.write(HOME_USAGE);
@@ -465,11 +443,6 @@ async function runTerminalChat(): Promise<void> {
       process.stdout.write("\n");
       accepted.settle();
     };
-    // Foreground retirement only schedules an evidence read; phase can remain
-    // running while Home quiescence unwinds. Follow the exact branch cut back
-    // to the submission leaf (or this invocation's start in a new Home chapter),
-    // stopping at its terminal receipt. Canonical entries, not transcript rows,
-    // also cover inputs handled without a user message. No history-page scan.
     if (accepted.reading || snapshot.operation || snapshot.pendingPrompt
       || snapshot.queuedItems.some(item => item.id === accepted.operationId)) return;
     const cut = snapshot;
@@ -544,8 +517,6 @@ async function runTerminalChat(): Promise<void> {
           const rebaseline = event.topic === "session.rebaseline"
             ? event.payload as unknown as { subscriptionToken: string; snapshot: SessionSnapshot }
             : undefined;
-          // Queue coalescing replaces covered sequences with a token-bound
-          // authoritative snapshot, not an ordinary sequenced event.
           if (rebaseline && rebaseline.subscriptionToken !== subscriptionToken) return;
           const next = rebaseline?.snapshot ?? event.payload as unknown as SessionSnapshot;
           if (next.runtimeGeneration === cursor.runtimeGeneration && next.eventSequence <= cursor.eventSequence) return;
@@ -568,8 +539,6 @@ async function runTerminalChat(): Promise<void> {
             const data = envelope.data as Record<string, JsonValue>;
             if (data.message) snapshot.streaming = data.message as unknown as TranscriptItem;
           } else if (event.topic === "session.toolProgress") {
-            // Tool evidence is rendered by native clients; retain ordering here
-            // and let the next authoritative snapshot converge terminal state.
           }
         }
         const current = assistantText(snapshot);
@@ -586,8 +555,6 @@ async function runTerminalChat(): Promise<void> {
   reconnect = (reason = "disconnected"): Promise<void> => {
     reconnecting ??= (async () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
-      // Resync can replace a healthy transport too. Retire the connection and
-      // all of its server-owned tokens before losing the only client reference.
       client.close();
       process.stderr.write(`\n[Tron disconnected; reconnecting…] reason=${reason}\n`);
       while (true) {
@@ -628,9 +595,6 @@ async function runTerminalChat(): Promise<void> {
       let replayAllowed = false;
       let failedClient: GatewayProtocolClient | undefined = submittedClient;
       while (Date.now() < deadline) {
-        // A disconnect listener may already have replaced the failed transport.
-        // Join its recovery; never close the healthy successor to recover an
-        // older connection's command receipt.
         if (reconnecting) await reconnecting;
         else if (client === failedClient) await reconnect("command-recovery");
         const recoveryClient = client;
@@ -672,8 +636,6 @@ async function runTerminalChat(): Promise<void> {
         else process.stdout.write("No active Home chapter to abort.\n");
         continue;
       }
-      // Home commands are Gateway-wide, not session-scoped, so they work before
-      // or without an attached session's runtime being the Home one.
       if (await runHomeInput(client, prompt)) continue;
       const commandId = randomUUID();
       const submissionCut = snapshot;
@@ -704,9 +666,6 @@ async function runTerminalChat(): Promise<void> {
         }
       }
       if (!sessionId) throw new Error("Accepted prompt returned no terminal session identity");
-      // The command receipt identifies acceptance, never completion. Only this
-      // exact physical chapter's canonical invocation terminal cut retires it,
-      // even when reconnect recovered an outgoing idle chapter first.
       const operationSessionId = sessionId;
       const submissionLeaf = submissionCut?.sessionId === operationSessionId ? submissionCut.leafEntryId : undefined;
       await new Promise<void>((settle, fail) => {

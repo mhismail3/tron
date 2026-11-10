@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-# Focused real-Gateway/iOS integration harness. Gateway build inputs, the owned
-# simulator, DerivedData, and test products persist across invocations; each run
-# renews only its isolated Gateway, enrollment, and canonical session state.
-# The fixture and DerivedData belong to one worktree, never to the user: `run`
-# executes only products stamped with this worktree's current source identity.
-
+# Focused real-Gateway/iOS integration harness.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,34 +7,14 @@ gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
 source "$repo_root/config/ci-toolchain.env"
-# .ci-tools/bin contributes repository-pinned helpers such as XcodeGen, and the
-# cache is wherever scripts/install-ci-tools.sh put it (TRON_CI_TOOLS_DIR). Its
-# verified Node is never put on PATH here: the fixture's Node is resolved below.
 export PATH="${TRON_CI_TOOLS_DIR:-$repo_root/.ci-tools}/bin:$PATH:/opt/homebrew/bin"
 
-# The fixture's Node is the repository-pinned one, from the one repository
-# resolver scripts/tron-node (#242): TRON_NODE_BIN, the pinned nvm directory, the
-# verified cache, then PATH and Homebrew, never a signed Gateway payload runtime. A shell spawned by
-# the Stable or Debug Gateway carries that runtime first on PATH; it answers the
-# pinned version and owns a sibling npm. The resolver refuses it by its payload
-# layout and signature, and the preflight below still refuses the Node finally
-# chosen if it cannot load the Gateway's native modules (#445).
 NODE_BIN=""
 NPM_BIN=""
 fixture_environment=()
-# The two detached fixture processes run under the minimal environment a Gateway
-# gets from launchd, never this shell's: the same allow-list `scripts/tron dev`
-# re-executes itself with (#144), without SSH_AUTH_SOCK - the fixture never needs
-# the user's SSH agent. A caller spawned by the Stable or Debug Gateway carries
-# that Gateway's PATH, its TRON_GATEWAY_* values, its payload identity and its
-# PI_* store paths; none of it may reach the fixture, which binds its own home,
-# state, agent directory and listener.
 build_fixture_environment() {
   fixture_environment=("PATH=$(dirname "$NODE_BIN"):/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin")
   local name
-  # An unset variable must not become this function's status: this call is the
-  # last statement of require_gateway_node, so an unset name (on Linux,
-  # __CF_USER_TEXT_ENCODING never exists) made errexit end the harness silently.
   for name in USER LOGNAME SHELL TMPDIR LANG LC_ALL LC_CTYPE TERM __CF_USER_TEXT_ENCODING; do
     if [[ -n "${!name:-}" ]]; then fixture_environment+=("$name=${!name}"); fi
   done
@@ -49,14 +24,10 @@ require_gateway_node() {
   [[ -n "$NODE_BIN" ]] && return 0
   NODE_BIN="$("$repo_root/scripts/tron-node")"
   NPM_BIN="$(dirname "$NODE_BIN")/npm"
-  # npm's launcher runs `/usr/bin/env node`; only the resolved directory moves to
-  # the front, so every child of this harness uses this exact toolchain.
   export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"
   build_fixture_environment
 }
 identity_owner="$repo_root/scripts/ios-test-build-identity.py"
-# Keyed by worktree as scripts/tron-ios-test keys its products, so two worktrees
-# never share a Gateway pid, state.env, npm lock hash, log or test products.
 worktree_key="$(python3 "$identity_owner" worktree-key --worktree "$repo_root")" \
   || { echo "error: cannot derive this worktree's E2E fixture key" >&2; exit 1; }
 run_root="${TRON_IOS_E2E_STATE_DIR:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-$UID-$worktree_key}"
@@ -67,10 +38,6 @@ lock_owner="$repo_root/scripts/ios-test-lock.py"
 
 die() { echo "error: $*" >&2; exit 1; }
 
-# The real-UI journeys `run-ui` owns. Any other selector (a class, a suite, another
-# lane's UI test) would run here and be reported as a real-UI journey with evidence,
-# so the parse admits only these. Each gets a fresh fixture and pairing code: an
-# invitation is one-use.
 ui_owned_journeys=(
   'TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallLight'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testPendingAppReviewInstallDark'
@@ -127,11 +94,6 @@ ui_journey_is_owned() {
   return 1
 }
 
-# The WebSocket connections the fixture Gateway's own log must show for a journey,
-# as "<minimum opened> <retire-then-reconnect required: yes|no>". A journey that
-# backgrounds the app retires its socket and reconnects when it returns, so one
-# connection closes before a *different* one opens; a journey that never connects
-# requires none.
 ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
@@ -145,8 +107,6 @@ ui_journey_connections() {
 command="${1:-all}"
 lane=""
 if (($#)); then shift; fi
-# One exact-method selection travels unchanged through the lease-holder re-exec.
-# Validate against the chosen command's owned cases after its defaults are set.
 selectors=()
 while (($#)); do
   case "$1" in
@@ -170,9 +130,6 @@ while (($#)); do
     *) die "unsupported argument: $1 (see '$0 help')" ;;
   esac
 done
-# The lane scripts/tron-ios-test would use for this worktree and selection, from
-# the one selection owner, so this harness leases, releases and reclaims exactly
-# the runner's lane.
 lane_selector=(lane --worktree "$repo_root")
 [[ -z "$lane" ]] || lane_selector+=(--lane "$lane")
 lane_selection="$(python3 "$simulator_owner" "${lane_selector[@]}")" || exit 1
@@ -183,8 +140,6 @@ lane_selection="$(python3 "$simulator_owner" "${lane_selector[@]}")" || exit 1
   IFS= read -r test_discovery_root
   IFS= read -r test_default_state_root
 } <<<"$lane_selection"
-# An extra run-ui lane is a named lane; its parent passes the default lane it
-# selected, which the pre-lane overrides named there.
 if [[ "$command" == run-ui-lane && -n "${TRON_IOS_E2E_UI_DEFAULT_STATE_DIR:-}" ]]; then
   test_default_state_root="$TRON_IOS_E2E_UI_DEFAULT_STATE_DIR"
 fi
@@ -197,18 +152,11 @@ log_file="$run_root/gateway.log"
 proxy_pid_file="$run_root/proxy.pid"
 proxy_ready="$run_root/proxy-ready.json"
 proxy_script="$repo_root/scripts/fault-proxy/ios-gateway-fault-proxy.mjs"
-# The command's test filter and whether this fixture Gateway runs its pinned
-# LAN lane (E-3c). `run` keeps the lane off, so the fault proxy owns every leg
-# the boundary test drives; `run-lan` turns it on, because the two-lane cases
-# dial the lane itself.
 e2e_test_filters=(
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness"
 )
 e2e_lan_endpoint="off"
-# One build input per lane: the hosted E2E target, whose runner pairs and drives
-# the client API, and the UI target, whose runner drives the real app interface.
-# Both products stay in this worktree's one E2E DerivedData and run on its lane.
 e2e_scheme="Tron Development"
 e2e_test_plan="GatewayE2E"
 e2e_test_target="TronMobileE2ETests"
@@ -217,21 +165,10 @@ ui_scheme="Tron UI Validation"
 ui_test_plan="UIValidation"
 ui_test_target="TronMobileUITests"
 ui_xctestrun_glob="Tron UI Validation_UIValidation_*.xctestrun"
-# The lane's simulator and hosted app a real-UI command owns while it runs; both
-# stay empty for every other command, whose runs never pair the app.
 ui_simulator_id=""
 ui_app_state_owner=0
-# Whether this command has already returned the lane's hosted app to its fresh
-# state: a signal and the EXIT trap both ask for it, so it runs once.
 ui_app_state_reset=0
-# Whether this command's fixture must be stopped when it ends. A real-UI command
-# renews a fixture per journey and has nothing to iterate against, so it never
-# leaves one running; the E2E lane keeps its fixture for iteration.
 stop_fixture_on_exit=0
-# How many lanes `run-ui` runs its journeys on at once (TRON_IOS_E2E_UI_LANES,
-# default 1): this command's lane plus extra leased lanes, each with its own
-# simulator, host slot and fixture, all taking journeys from one queue. A
-# `run-ui-lane` command is one such extra lane and names its parent's queue.
 ui_lanes="${TRON_IOS_E2E_UI_LANES:-1}"
 ui_queue="${TRON_IOS_E2E_UI_QUEUE:-}"
 ui_lane_pids=()
@@ -343,8 +280,6 @@ when it inherits an iOS test lease that does not cover its lane.
 USAGE
 }
 
-# The Pi release the fixture Gateway reports, from its own built version owner
-# (dist/kernel/pi/version.js), which also resolves Tron's declared patched tarball.
 manifest_pi_version() {
   "$NODE_BIN" --input-type=module -e 'import { pathToFileURL } from "node:url"; const { PI_VERSION } = await import(pathToFileURL(process.argv[1]).href); process.stdout.write(PI_VERSION)' "$gateway_dir/dist/kernel/pi/version.js" \
     || die "the fixture Gateway's Pi version could not be read from its build"
@@ -354,9 +289,6 @@ provision_test_simulator() {
   local simulator_id status=0
   simulator_id="$(python3 "$simulator_owner" provision "${simulator_args[@]}")" || status=$?
   if ((status != 0)); then
-    # The shared provisioner's "not now" exit is the caller's to decide about,
-    # exactly as scripts/tron-ios-test keeps it: a lane a live process holds, or
-    # a Mac too short of memory to admit the boot.
     if ((status == 73)); then
       echo "error: owned test simulator is leased or this Mac refused the boot (73)" >&2
       exit 73
@@ -451,10 +383,6 @@ stop_gateway() {
   rm -f "$pid_file"
 }
 
-# Ends a process this start spawned when the start then fails. It is this shell's own
-# background child, so its pid is exact. stop_gateway and stop_proxy first prove the
-# command line of the pid, the very proof a failed start did not pass; refusing there
-# would leave the process running with no owner.
 retire_spawned() {
   local pid="$1" _
   kill "$pid" 2>/dev/null || true
@@ -465,7 +393,6 @@ retire_spawned() {
 
 load_state() {
   [[ -s "$state_file" ]] || die "fixture is not prepared; run '$0 prepare'"
-  # Generated exclusively by this script with shell-escaped values.
   # shellcheck disable=SC1090
   source "$state_file"
   [[ "${TRON_E2E_WORKSPACE:-}" == "$(realpath "$run_root/home/Workspace")" \
@@ -503,23 +430,12 @@ source "$repo_root/scripts/ios-gateway-e2e-fixture.sh"
 prepare_fixture() {
   stop_gateway
   install_gateway_if_needed
-  # The fixture stays running on success; a failure after the Gateway spawned stops it, as `run` does.
   trap finish_e2e_run EXIT
   start_fresh_fixture
   trap - EXIT
 }
 
-# Start a process this harness keeps past the command: the Gateway fixture and
-# the fault proxy outlive it on purpose, so they are not part of the command
-# tree the lease holder owns. The holder passes that tree the lease's descriptor
-# (so a killed holder cannot leave a live command whose simulator the sweep
-# would release), and a detached process must not inherit it, or the lane would
-# stay leased for as long as the Gateway runs and the next command would fail
-# 73. `exec` inside the subshell keeps `$!` the detached process's own pid, and
-# `nohup` keeps it ignoring the SIGHUP the holder forwards to the tree.
 detach() {
-  # The lease's descriptor and the host slot's: a Gateway that outlives the
-  # command holds neither.
   (
     for held_descriptor in "${TRON_IOS_TEST_LEASE_FD:-}" "${TRON_IOS_TEST_SLOT_FD:-}"; do
       [[ -z "$held_descriptor" ]] || eval "exec ${held_descriptor}>&-"
@@ -537,7 +453,6 @@ start_fresh_fixture() {
   chmod 700 "$tron_home" "$tron_home/gateway" "$gateway_home" "$workspace"
   gateway_home="$(realpath "$gateway_home")"
   workspace="$(realpath "$workspace")"
-  # Project instructions the Agent Instructions projection must attribute.
   printf '# E2E Project Rules\n\nKeep the boundary fixture honest.\n' >"$workspace/AGENTS.md"
   cp "$repo_root/packages/gateway/src/modules/apps/fixtures/InstalledPersistence.swift" "$workspace/InstalledPersistence.swift"
   cp "$repo_root/tools/web/apps/builds/Builds.swift" "$workspace/Builds.swift"
@@ -574,9 +489,6 @@ PY
   spawned_pid="$!"
   echo "$spawned_pid" >"$pid_file"
 
-  # The exact child PID is authoritative during startup. `ps` can briefly show
-  # an incomplete command immediately after fork, so defer the stricter command
-  # ownership check until readiness instead of misclassifying a live child.
   sleep 0.1
   for _ in {1..200}; do
     [[ -s "$tron_home/gateway/enrollment.json" ]] \
@@ -648,9 +560,6 @@ PY
   echo "Gateway fixture upstream 127.0.0.1:$upstream_port (pid $(<"$pid_file")); fault proxy 127.0.0.1:$port (pid $proxy_pid)"
 }
 
-# The newest xctestrun this lane's target produced, if any. Python rather than
-# BSD `stat -f`, which GNU stat reads as a file-system query: the hardware-free
-# fixtures run this on Linux CI.
 find_xctestrun() {
   python3 - "$derived_data/Build/Products" "$1" <<'PY'
 from pathlib import Path
@@ -661,8 +570,6 @@ if runs:
 PY
 }
 
-# The fixture Gateway's own settings schema (its built settings-schema.ts), one row
-# per exposed editor with its section, scopes, label and qualifier.
 settings_inventory_json() {
   "$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
@@ -686,8 +593,6 @@ build_tests() {
   command -v xcodegen >/dev/null || die "pinned XcodeGen is missing; run scripts/install-ci-tools.sh xcodegen"
   "$repo_root/scripts/verify-ci-toolchain.sh" ios xcodegen
   local simulator_id destination attempt attempt_dir source_identity
-  # Measured before the build, as scripts/tron-ios-test does: the stamp names
-  # the source state this build started from.
   source_identity="$(python3 "$identity_owner" show --worktree "$repo_root")" \
     || die "cannot determine this worktree's source identity"
   simulator_id="$(provision_test_simulator)"
@@ -711,9 +616,6 @@ build_tests() {
   local xctestrun
   xctestrun="$(find_xctestrun "$xctestrun_glob")"
   [[ -n "$xctestrun" ]] || die "$label build did not produce an xctestrun file"
-  # Stamp only after a successful build, as scripts/tron-ios-test does: products
-  # whose build never succeeded stay unstamped, so run refuses them. A failed
-  # rebuild keeps the earlier stamp in both tools.
   printf '%s\n' "$source_identity" \
     | python3 "$identity_owner" write --worktree "$repo_root" --derived-data "$derived_data" \
     || die "cannot stamp the $label products with their source identity"
@@ -722,9 +624,6 @@ build_tests() {
 
 run_one_test_case() {
   local test_filter="$1" attempt_id attempt_dir result_bundle status case_started=$SECONDS
-  # Pairing invitations are one-use. Each independently registered real-Gateway
-  # test receives a newly owned private fixture and pairing code; the simulator
-  # lane stays leased while Gateway state is renewed between cases.
   start_fresh_fixture
   load_state
   patch_xctestrun "$xctestrun" "$e2e_test_target"
@@ -745,16 +644,11 @@ run_one_test_case() {
     status=$?
   fi
   ln -sfn "$attempt_dir" "$run_root/results/latest"
-  # Evidence is kept whatever the case's status: a possibly_sent or pong_timeout
-  # is exactly the case whose Gateway-side and phone-side records must be read
-  # together. Missing evidence is reported, never turned into a case status.
   capture_journey_evidence "$attempt_dir" \
     || echo "warning: $test_filter's Gateway or proxy evidence is incomplete (see above)" >&2
   export_phone_liveness_records "$result_bundle" "$attempt_dir" \
     || echo "warning: $test_filter attached no phone liveness records to its result bundle" >&2
   if ((status == 0)); then
-    # A missing fixture must not turn XCTest's conditional skip into a green
-    # cross-layer qualification receipt.
     if ! require_single_passing_case "$result_bundle" "$attempt_dir/summary.json" "boundary case"; then
       echo "error: isolated boundary test was skipped, missing, or failed ($test_filter)" >&2
       status=65
@@ -765,9 +659,6 @@ run_one_test_case() {
   return "$status"
 }
 
-# The one exactly-once XCTest check both lanes use: exactly one case executed and
-# passed, and nothing was skipped or missing. A missing fixture must not turn
-# XCTest's conditional skip into a green cross-layer qualification receipt.
 require_single_passing_case() {
   local result_bundle="$1" summary_path="$2" description="$3"
   xcrun xcresulttool get test-results summary --path "$result_bundle" >"$summary_path" || return 1
@@ -778,28 +669,12 @@ assert result.get('passedTests') == 1 and result.get('failedTests') == 0 and res
 PY
 }
 
-# The failure lines of a finished result bundle, when one exists. Optional
-# evidence: extracting it never changes the case's own status.
 report_result_bundle_failures() {
   python3 "$repo_root/scripts/xcresult-failures.py" --tests --root "$repo_root" "$1" || true
 }
 
-# One directory per journey: the result bundle, the fixture Gateway's canonical
-# runtime log, the fault proxy's link statistics, the XCTest summary and
-# report.json, which names every verdict artifact with the sha256 of its bytes (or, for
-# the result bundle, of its whole file tree) and records what the journey
-# asserted. A reviewer can therefore re-derive each artifact without trusting
-# this run.
-# The hosted app's `app-log/` sits beside them as diagnosis only: it is no
-# artifact of the journey's verdict, so the report neither hashes nor requires it.
-#
-# The two halves are separate because the report must carry the journey's FINAL
-# status: when an artifact cannot be captured, an otherwise passing journey has
-# produced no evidence, which is not a passing run.
 capture_journey_evidence() {
   local attempt_dir="$1" failure=0
-  # The Gateway's authoritative log is its runtime JSONL, not the fixture
-  # process's stderr (which only carries Node's own warnings).
   if ! cp "$TRON_E2E_TRON_HOME/logs/gateway.jsonl" "$attempt_dir/gateway.jsonl"; then
     echo "error: cannot copy the fixture Gateway's runtime log into $attempt_dir" >&2
     failure=1
@@ -814,12 +689,6 @@ capture_journey_evidence() {
   return "$failure"
 }
 
-# The phone's liveness and transport records that the boundary case attaches as
-# `phone-liveness-records` (one JSON line per record, tagged with its client).
-# They are exported from the result bundle and joined into one file: with the
-# fault proxy's per-ping timeline, a reader separates a stalled Gateway (no pong
-# recorded, or a late one) from a stalled phone (the pong was forwarded to the
-# phone but the phone's deadline still fired).
 export_phone_liveness_records() {
   local result_bundle="$1" attempt_dir="$2" export_dir status=0
   [[ -d "$result_bundle" ]] || return 1
@@ -928,11 +797,6 @@ print(f"evidence report: {path} (sha256 {digest})")
 PY
 }
 
-# What the fixture Gateway's own log says about this device's connections, in the
-# log's own order, as "<opened> <closed> <retired before a different connection
-# opened: 1|0>". The Gateway's log is canonical truth for both halves; the third
-# value is the lifecycle fact a backgrounded journey must leave, and it cannot be
-# satisfied by the app terminating (which always closes the last socket).
 gateway_connection_counts() {
   python3 - "$TRON_E2E_TRON_HOME/logs/gateway.jsonl" <<'COUNTS'
 import json, sys
@@ -968,26 +832,16 @@ COUNTS
 run_ui_journey() {
   local journey="$1" xctestrun="$2"
   local attempt_dir attempt_id result_bundle status case_started=$SECONDS
-  # A pairing invitation is one-use, and a journey may restart the fixture, so
-  # each journey pairs against its own freshly owned Gateway and code while the
-  # simulator lane stays leased.
   local -a runtime_limits=()
-  # Force a real cold JSONL load after answering, not just a second phone view
-  # of the still-live runtime and its ephemeral tool-origin map (#1302).
   if [[ "$journey" == *testCompletedAskUserColdReplayRetainsSelectedAnswers ]]; then
     runtime_limits+=("TRON_GATEWAY_MAX_LIVE_RUNTIMES=1")
   fi
-  # Remote restart is admitted only under a supervisor; the fault proxy plays
-  # launchd and respawns the Gateway once it has exited on its own (#2366). The
-  # supervised marker needs a payload root with a regular entrypoint; the source
-  # Gateway is not that entrypoint, so the payload's Node contract stays inactive.
   if [[ "$journey" == *testGatewayRestartWaitsForLiveWorkThenRestartsIdleAndReconnects ]]; then
     rm -rf "$run_root/payload"
     mkdir -p "$run_root/payload/app/dist"
     : >"$run_root/payload/app/dist/index.js"
     runtime_limits+=("TRON_GATEWAY_SUPERVISED=1" "TRON_GATEWAY_PAYLOAD_ROOT=$run_root/payload")
   fi
-  # macOS Bash 3 treats an empty array as unset under nounset.
   start_fresh_fixture ${runtime_limits[@]+"${runtime_limits[@]}"}
   load_state
   if [[ "$journey" == *testHomeAutomationEditorAndAttributedMessageLight || "$journey" == *testHomeAutomationEditorAndAttributedMessageDark ]]; then
@@ -997,9 +851,7 @@ run_ui_journey() {
     prepare_home_automation_fixture 100
   fi
   if [[ "$journey" == *testProjectLifecycleBusyTrustUsesCanonicalReason ]]; then
-    # A real linked worktree exercises the lifecycle owner's canonical busy reason.
     local busy="$TRON_E2E_WORKSPACE/busy-project"
-    # Empty canonical fixture store: there has been no trust decision to grant.
     printf '{}\n' >"$run_root/agent/trust.json"
     /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git init --template= -b main "$busy"
     /usr/bin/env -i PATH=/usr/bin:/bin HOME="$run_root/home" /usr/bin/git -C "$busy" -c user.name=Fixture -c user.email=fixture@example.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null commit --allow-empty -m fixture
@@ -1026,22 +878,12 @@ run_ui_journey() {
   fi
   ln -sfn "$attempt_dir" "$run_root/results/latest-ui"
   hosted_app_log export "$attempt_dir"
-  # One report path for every journey of a lane: the consumer that asked for one
-  # journey on one lane reads `results/latest-ui/report.json` as soon as the
-  # command returns, before the next journey's run moves this link. A parallel
-  # run has one such link per lane; its journeys' evidence directories are the
-  # ones each journey's completion line names.
   if ((status == 0)); then
-    # A journey that cannot reach the fixture skips, and a skip is not a passing
-    # real-UI journey: exactly one journey must have executed and passed.
     if ! require_single_passing_case "$result_bundle" "$attempt_dir/summary.json" "journey"; then
       echo "error: real-UI journey was skipped, missing, or failed ($journey)" >&2
       status=65
     fi
   fi
-  # The Gateway's own log is the record of what the app did with its socket: a
-  # journey that backgrounds the app must close one connection before opening a
-  # different one, and a journey that never connects requires none.
   local opened=0 closed=0 reconnected=0
   local required_opened=0 requires_reconnect=no
   read -r opened closed reconnected <<<"$(gateway_connection_counts)"
@@ -1057,8 +899,6 @@ run_ui_journey() {
   fi
   local evidence_failure=0
   capture_journey_evidence "$attempt_dir" || evidence_failure=1
-  # An incomplete evidence directory is not evidence, so it cannot be a passing
-  # run; a failed journey keeps its own status and reports the gap.
   local final_status="$status"
   if ((final_status == 0 && evidence_failure != 0)); then
     final_status=1
@@ -1072,10 +912,6 @@ run_ui_journey() {
   return "$final_status"
 }
 
-# One run-ui command's journey queue, shared by every lane that runs it: the
-# journeys still to run in order, each lane's claims and completions, and the
-# first failure. Every read and write holds the queue's one lock, which also
-# keeps the lanes' journey output whole on the shared stdout.
 ui_queue_tool() {
   python3 - "$ui_queue" "$@" <<'PY'
 import fcntl, shutil, sys
@@ -1119,11 +955,6 @@ with (root / "lock").open("a") as lock:
 PY
 }
 
-# The journeys in the order the lanes take them: longest first by the seconds a
-# previous run recorded (TRON_IOS_E2E_UI_JOURNEY_SECONDS, a JSON object of
-# journey to seconds), so the slowest journey never starts last. A journey with
-# no recorded seconds goes first, since its length is unknown; ties keep the
-# declared order.
 ui_journey_order() {
   python3 - "${TRON_IOS_E2E_UI_JOURNEY_SECONDS:-}" "$@" <<'PY'
 import json, math, sys
@@ -1142,23 +973,11 @@ print("\n".join(sorted(journeys, key=lambda journey: -seconds.get(journey, math.
 PY
 }
 
-# Run journeys from the shared queue on this command's lane until none is left or
-# one has failed. Each journey runs in its own subshell, so a failure ends that
-# journey rather than the lane, and the lane records it before it stops. The
-# queue, not this function's status, carries the outcome; callers run it outside
-# any `||`/`&&`/`if` context, which would disable errexit inside every journey
-# subshell and let a failed setup step run the journey anyway. With
-# more than one lane the journey's output is held until it ends and then
-# published whole, so the shared log reads as a serial run's.
 run_ui_lane() {
   local xctestrun="$1" journey status journey_log
   while journey="$(ui_queue_tool claim "$test_lane")" && [[ -n "$journey" ]]; do
     journey_log="$run_root/journey-output.log"
     ((ui_lanes == 1)) || ui_queue_tool say "Real-UI journey $journey started on lane $test_lane"
-    # The subshell runs in the foreground, as the serial loop's journey did: a
-    # signal's trap in this shell then runs only once the journey has ended
-    # (journey_signal_traps), and an async subshell would ignore SIGINT. Errexit
-    # is off here only to read its status; the subshell turns it back on.
     set +e
     if ((ui_lanes > 1)); then
       ( set -e; journey_signal_traps; run_ui_journey "$journey" "$xctestrun" ) >"$journey_log" 2>&1
@@ -1177,22 +996,12 @@ run_ui_lane() {
   return 0
 }
 
-# A journey subshell keeps running until its foreground step has ended: bash runs
-# a caught signal's trap only after the foreground command returns, so a signal
-# that reaches the command tree lets the journey's process owner stop its
-# xcodebuild before the subshell exits, and this command's own handler (deferred
-# behind the foreground subshell) resets the app and stops the fixture only then.
-# A subshell left with the default disposition would die at once, mid-teardown.
 journey_signal_traps() {
   trap 'exit 130' INT
   trap 'exit 143' TERM
   trap 'exit 129' HUP
 }
 
-# This lane's own copy of the UI xctestrun, beside the built one so the products'
-# __TESTROOT__ paths still resolve: each journey patches its fixture into the
-# copy, and two lanes must never patch one file. The name stays outside the
-# build's xctestrun glob, so `find_xctestrun` never picks a lane's copy.
 lane_xctestrun() {
   local built="$1" copy
   copy="$(dirname "$built")/ui-lane-$test_lane.xctestrun"
@@ -1200,18 +1009,10 @@ lane_xctestrun() {
   printf '%s\n' "$copy"
 }
 
-# The lane names of a parallel run's extra lanes: this command's own lane name
-# with a suffix, so they are this worktree's, distinct from each other and from
-# every other worktree's lanes.
 ui_extra_lane() {
   printf '%s-ui%s\n' "$test_lane" "$1"
 }
 
-# Start one extra lane as its own leased command: the same lease and host-slot
-# owner as every lane command, never this command's lease or slot, whose
-# descriptors it closes. It runs `run-ui-lane` against this command's queue,
-# built products and Gateway build, with its own fixture directory: a short
-# `laneK` beside this command's, since the fixture's paths must stay short.
 spawn_ui_lane() {
   local index="$1" lane_name
   lane_name="$(ui_extra_lane "$index")"
@@ -1221,9 +1022,6 @@ spawn_ui_lane() {
     done
     unset TRON_IOS_TEST_LOCK_HELD TRON_IOS_TEST_LEASE_FD TRON_IOS_TEST_LEASE_LOCK TRON_IOS_TEST_SLOT_FD \
       TRON_IOS_TEST_LANE TRON_IOS_TEST_STATE_DIR TRON_IOS_TEST_DEVICE_NAME
-    # A named lane lives under the same lane root as this command's lane, and
-    # names the same default lane: the pre-lane overrides that select it here
-    # cannot travel with a named lane, so its directory does.
     export TRON_IOS_TEST_DISCOVERY_ROOT="$test_discovery_root"
     export TRON_IOS_E2E_UI_DEFAULT_STATE_DIR="$test_default_state_root"
     export TRON_IOS_E2E_STATE_DIR="$run_root/lane$index"
@@ -1236,12 +1034,6 @@ spawn_ui_lane() {
   ui_lane_names+=("$lane_name")
 }
 
-# Wait for every extra lane. An extra lane that never claimed a journey (its lane
-# was leased, the Mac refused its simulator, or the queue was empty before it
-# got a host slot) cost no coverage: the other lanes ran the journeys. It is
-# reported, never hidden, and never turned into a pass or a failure on its own.
-# A lane that claimed journeys and then failed (for example its hosted-app reset
-# or fixture stop) fails the run, as it would have failed a serial one.
 join_ui_lanes() {
   local index status claimed
   ((${#ui_lane_pids[@]})) || return 0
@@ -1260,8 +1052,6 @@ join_ui_lanes() {
   ui_lane_names=()
 }
 
-# An extra lane still waiting for a host slot or booting when the queue is empty
-# can claim nothing more; it is stopped instead of awaited.
 retire_idle_ui_lanes() {
   local index
   ((${#ui_lane_pids[@]})) || return 0
@@ -1271,8 +1061,6 @@ retire_idle_ui_lanes() {
   done
 }
 
-# The run's verdict from its queue: the first failed journey's status, else a
-# failure if any journey was never run or never finished, else success.
 ui_queue_verdict() {
   python3 - "$ui_queue" <<'PY'
 import sys
@@ -1299,8 +1087,6 @@ PY
 }
 
 run_ui() {
-  # Journey code and the fixture that drives it are one source state, exactly as
-  # the E2E lane: prove the products before renewing any Gateway state.
   local started=$SECONDS xctestrun lane_run status verdict index
   local -a journeys
   xctestrun="$(find_xctestrun "$ui_xctestrun_glob")"
@@ -1321,9 +1107,6 @@ run_ui() {
   mkdir -p "$ui_queue"
   ui_journey_order "${journeys[@]}" >"$ui_queue/selected"
   cp "$ui_queue/selected" "$ui_queue/pending"
-  # The trap stays installed on success too: it is what stops the fixture this
-  # command renewed and returns the lane's hosted app to the unpaired state the
-  # E2E lane expects, and it joins every extra lane before the command ends.
   trap finish_e2e_run EXIT
   for ((index = 2; index <= ui_lanes; index++)); do
     spawn_ui_lane "$index"
@@ -1335,8 +1118,6 @@ run_ui() {
   verdict="$(ui_queue_verdict)"
   status="${verdict%% *}"
   if ((status != 0)); then
-    # No duration here: the batch compares this line between a red run and its
-    # single-journey probe.
     echo "error: real-UI journeys failed (status $status; ${verdict#* })" >&2
     exit "$status"
   fi
@@ -1345,8 +1126,6 @@ run_ui() {
   echo "Real-UI journeys completed in $((SECONDS - started))s on $ui_lanes lane(s) (status 0); evidence: $evidence"
 }
 
-# One extra lane of a parallel run-ui: its own lease, host slot, simulator and
-# fixture directory, the parent's products and queue.
 run_ui_lane_command() {
   [[ -n "$ui_queue" && -d "$ui_queue" ]] || die "run-ui-lane runs only under run-ui (TRON_IOS_E2E_UI_QUEUE)"
   local xctestrun lane_run
@@ -1365,10 +1144,6 @@ run_ui_lane_command() {
 }
 
 run_test() {
-  # Pairing invitations are intentionally one-use. Renew the isolated Gateway
-  # and canonical session state without rebuilding test products.
-  # Prove the products before renewing anything: only products this worktree
-  # built from its current source state may run against its Gateway.
   local started=$SECONDS simulator_id xctestrun destination test_filter
   xctestrun="$(find_xctestrun "$e2e_xctestrun_glob")"
   [[ -f "$xctestrun" ]] || die "test products are not built; run '$0 build'"
@@ -1385,12 +1160,6 @@ run_test() {
   echo "Focused E2E run completed in $((SECONDS - started))s (status 0); artifacts: $run_root/results"
 }
 
-# The built hosted app's bundle identifier, read from the product the lane just
-# built rather than hardcoded, for the two commands that own its persisted state.
-# The hosted app's own log (`AppLog`, Library/Caches/Logs/app.jsonl in its data
-# container), one per journey: cleared before the journey and copied into its
-# evidence after, so a red shows what the app did as well as what the Gateway
-# saw. An app that is not installed yet has no log; a missing log is not a status.
 hosted_app_log() {
   local action="$1" attempt_dir="${2:-}" bundle_id container
   bundle_id="$(hosted_app_bundle_id)" || return 0
@@ -1426,23 +1195,6 @@ print(value)
 PY
 }
 
-# The hosted test app persists whatever a real-UI journey pairs or configures, and
-# the hosted E2E lane launches that same app in this worktree's lane. Only the
-# command can guarantee it is left unpaired: a deadline, a signal or a crash ends
-# the journey before its own teardown runs.
-#
-# The reset removes the app with its data container (`simctl uninstall`), while
-# this command still holds the lane's booted simulator, rather than launching the
-# app with its own HOSTED_TEST reset hook: that hook only runs once the app has
-# launched and built its model, and a deadline or a signal can cut that short -
-# the pairing would survive, which is the poisoning this reset prevents. The next
-# run installs the app under test again. A SIGKILL of this command runs none of
-# this, which is the documented residual.
-#
-# It runs once per command: a signal and the EXIT trap both ask for it, and the
-# second ask must not try to uninstall an app that is already gone. It returns
-# non-zero when it could not reset, because an otherwise passing run must not
-# leave the E2E lane poisoned.
 reset_hosted_app_state() {
   ((ui_app_state_owner)) || return 0
   ((ui_app_state_reset)) && return 0
@@ -1461,21 +1213,14 @@ reset_hosted_app_state() {
 finish_e2e_run() {
   local status=$?
   trap - EXIT
-  # A command ending early stops its extra lanes from starting more journeys and
-  # waits for the ones running, so each keeps its evidence and its lane's lease
-  # is released before this command's.
   if ((${#ui_lane_pids[@]})); then
     ((status == 0)) || ui_queue_tool stop "$status" "run-ui ended (status $status)" || true
     retire_idle_ui_lanes
     join_ui_lanes
   fi
-  # A passing run whose reset failed is not a passing run: the lane would keep the
-  # pairing the E2E lane shares.
   if ! reset_hosted_app_state && ((status == 0)); then
     status=1
   fi
-  # A real-UI command owns the fixture it renewed for its journeys: it stops it on
-  # success too, so no run leaves a Gateway and its fault proxy behind.
   if ((status != 0 || stop_fixture_on_exit)); then
     stop_gateway
   fi
@@ -1548,44 +1293,22 @@ spec.loader.exec_module(module)
 print(module.HOST_SLOTS)
 PY
 )" || die "cannot read the host-wide simulator slot count"
-  # Each lane takes one host slot, so a run never asks for more than the cap.
   [[ "$ui_lanes" =~ ^[1-9][0-9]*$ ]] && ((ui_lanes <= host_slots)) \
     || die "TRON_IOS_E2E_UI_LANES must be 1 to $host_slots (one host slot per lane): $ui_lanes"
 fi
 if [[ "$command" != status && "$command" != logs && "$command" != -h && "$command" != --help && "$command" != help ]]; then
-  # Only the lease holder creates the lane's state directory: a read-only
-  # command, or one refused for the lease it inherited, must not leave a
-  # marker-less lane directory that no sweep reclaims.
   if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
-    # The same lease, and the same release, as scripts/tron-ios-test: when this
-    # command ends, on success, failure, deadline or signal, the holder shuts down
-    # the lane's simulator - and never the remembered Development simulator.
-    # The lane travels with the command, as in scripts/tron-ios-test: the command
-    # the holder starts re-derives every lane path from the lane it leased.
     lock_arguments=(--lock "$test_lock" --marker "$simulator_marker" --development-state "$development_state")
-    # As in scripts/tron-ios-test: only the holder can remove the lane
-    # directory `clean` empties down to its lease file.
     [[ "$command" == clean ]] && lock_arguments+=(--remove-empty-lane)
-    # The simulator-heavy commands take one of the three host-wide simulator
-    # slots (waiting for it); `stop` and `clean` only tear down.
     case "$command" in stop|clean) ;; *) lock_arguments+=(--host-slot) ;; esac
-    # The selected journeys travel with the command: the holder starts `run-ui`
-    # again, and it must run the journeys the caller named.
     exec python3 "$lock_owner" "${lock_arguments[@]}" -- "$0" "$command" --lane "$test_lane" \
       "${selectors[@]/#-only-testing:/--only-testing:}"
   fi
-  # The runner's refusal (74), from the same owner: an inherited lease that does
-  # not cover this lane would leave this command running on it unleased.
   python3 "$lock_owner" --lock "$test_lock" --verify-inherited "$test_lane" || exit $?
 fi
 case "$command" in
   prepare|build|run|run-lan|run-ui|run-ui-lane|iterate|all|stop|clean)
-    # The same sweep as scripts/tron-ios-test, before this command provisions
-    # anything: owned lanes booted with no live lease are reclaimed, and this
-    # command's own lane is leased above, so the sweep never touches it.
     if [[ "$command" == run-ui-lane ]]; then
-      # The shared stdout carries whole journeys; an extra lane's sweep report
-      # goes through the queue's lock like any other line.
       sweep_report="$(python3 "$simulator_owner" sweep \
         --discovery-root "$test_discovery_root" --default-state-dir "$test_default_state_root" \
         --development-state "$development_state")" \
@@ -1602,15 +1325,10 @@ esac
 handle_signal() {
   local signal_number="$1"
   trap - INT TERM HUP
-  # The extra lanes of a parallel run-ui end with this command: each stops its own
-  # journey, fixture and simulator under its own lease.
   if ((${#ui_lane_pids[@]})); then
     kill -TERM "${ui_lane_pids[@]}" 2>/dev/null || true
     join_ui_lanes
   fi
-  # A signal ends a real-UI command before its tests finish: the hosted app is
-  # still paired, and the E2E lane shares it. The signal's own exit stands even
-  # when the reset cannot run.
   reset_hosted_app_state || true
   stop_gateway
   exit $((128 + signal_number))
@@ -1621,8 +1339,6 @@ trap 'handle_signal 1' HUP
 
 case "$command" in
   prepare) prepare_fixture ;;
-  # The products and the Gateway they run against come from the same source: a fresh
-  # worktree has no dist, and an old one would test a stale Gateway (#1211).
   build) install_gateway_if_needed; build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test" ;;
   run) run_test ;;
   run-lan) run_test ;;

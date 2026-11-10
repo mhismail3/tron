@@ -27,7 +27,6 @@ it("publishes one original Home audit group through file/parent faults, cold ret
   const replayAt = "2026-01-01T12:00:00.000Z";
   expect(() => changes.validateSubjectAudit([{ id: "oversize", before: null, after: "x".repeat(1024 * 1024), direction: "widen" }], context, replayAt)).toThrow(/bound/);
 
-  // Real domain effects, deliberately separate from publication/recovery.
   const one = await profile.apply({ action: "learn", kind: "preference", text: "First original instruction" }, { kind: "maintainer" }, "domain-first");
   const two = await profile.apply({ action: "learn", kind: "preference", text: "Second original instruction" }, { kind: "maintainer" }, "domain-second");
   const writes: SubjectWrite[] = [...one.writes, ...two.writes].map(write => ({ ...write, direction: "widen" }));
@@ -43,7 +42,6 @@ it("publishes one original Home audit group through file/parent faults, cold ret
     if (fault === "file" && value.ino === fileInode && value.dev === parent.dev) throw new Error("Owned audit file sync fault");
     await sync(handle);
   });
-  // The owner message is generic; the actual sync fault is the retained diagnostic cause.
   await expect(changes.publishSubjectAudit(writes, context, replayAt)).rejects.toMatchObject({ code: "conflict", message: "Committed Profile audit could not be published", details: { outcomeUnknown: true }, cause: { message: "Owned audit directory sync fault" } });
   expect((await changes.history({ key: "home.profile.item" })).entries).toEqual([]);
   const [name] = (await fs.readdir(changes.record.path)).filter(name => name.startsWith("once-") && name.endsWith(".jsonl"));

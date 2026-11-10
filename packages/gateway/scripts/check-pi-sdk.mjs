@@ -1,20 +1,10 @@
 #!/usr/bin/env node
-/**
- * Validate the locked Pi SDK cohort without contacting a registry.
- * package.json is the version authority; package-lock.json remains npm's
- * authoritative resolved graph (including pi-coding-agent's shrinkwrap).
- * pi-coding-agent-patch.json, when present, is the sole owner of a Tron-built
- * pi-coding-agent tarball that replaces the registry package at the same
- * version; every other family package still resolves from the registry.
- */
+// Validate the locked Pi SDK cohort without contacting a registry.
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Published packages in the Pi SDK family. Some are optional at a given
-// release: validate the resolved lock graph rather than requiring every
-// historical support package to remain a coding-agent dependency.
 export const PI_PACKAGES = Object.freeze([
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-ai",
@@ -44,7 +34,6 @@ export const PATCH_PIN_FILE = "pi-coding-agent-patch.json";
 const PATCHED_PACKAGE = "@earendil-works/pi-coding-agent";
 const PATCH_PIN_MAX_BYTES = 8 * 1024;
 const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024;
-/** Kept apart from artifacts/, which source updates rewrite to the pi-subagents pin set. */
 const THIRD_PARTY_DIRECTORY = "third_party/pi-coding-agent";
 export function validSha512Integrity(value) {
   if (typeof value !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/u.test(value)) return false;
@@ -77,11 +66,6 @@ function boundedRegularFile(path, maximum) {
   } catch { return false; }
 }
 
-/**
- * Read the patched pi-coding-agent declaration. Absent means the registry
- * package is used. `requireSources` also checks the patch and license, which
- * exist in the source tree but are not staged into a runtime payload.
- */
 export function readPiCodingAgentPatch(gatewayDir, { requireSources = false } = {}) {
   const root = resolve(gatewayDir);
   const path = join(root, PATCH_PIN_FILE);
@@ -254,11 +238,6 @@ function validateInstalled(root, lockPackages, version, issues) {
 const KNOWN_DELTA_KEYS = ["store", "from", "to", "reason", "rollbackState", "credentialKey"];
 const CREDENTIAL_KEY_KEYS = ["from", "to"];
 const KNOWN_DELTA_PLACEHOLDERS = ["{namespace}", "{url}"];
-/**
- * The stores and rollback states the sequential rollback matrix can act on. An
- * entry naming anything else would validate but never match, so it is rejected
- * instead of sitting in the file looking authoritative.
- */
 const KNOWN_DELTA_STORES = Object.freeze(["mcp-auth"]);
 const KNOWN_DELTA_ROLLBACK_STATES = Object.freeze(["needs-auth"]);
 
@@ -268,13 +247,6 @@ function isCredentialKeyTemplate(value) {
   return !withoutPlaceholders.includes("{") && !withoutPlaceholders.includes("}");
 }
 
-/**
- * A `knownOneWayDeltas` entry accepts exactly one store's documented re-keying
- * for exactly one version range. It names the store, the range, the credential
- * key transform (`{namespace}` and `{url}` placeholders) and the rollback
- * state that transform is allowed to leave behind, so the matrix can keep
- * asserting every other runtime, step and state.
- */
 function validateKnownOneWayDeltas(entries, issues) {
   for (const entry of entries) {
     const keys = entry && typeof entry === "object" && !Array.isArray(entry) ? Object.keys(entry) : [];
@@ -294,10 +266,6 @@ function validateKnownOneWayDeltas(entries, issues) {
   }
 }
 
-/**
- * Validate the Pi family in a Gateway package directory.
- * Returns a stable report and never performs network or filesystem mutation.
- */
 export function readPiSdkBaseline(gatewayDir) {
   const issues = [];
   const path = join(resolve(gatewayDir), BASELINE_FILE);
@@ -337,8 +305,6 @@ export function validatePiSdk({ gatewayDir = resolve(dirname(fileURLToPath(impor
     addIssue(issues, `${DIRECT_PI_PACKAGES[0]} must be an exact semver dependency (found ${version ?? "missing"})`);
     return { ok: false, version, issues };
   }
-  // The patched package is the one direct dependency that names its declared
-  // tarball; its lock entry must carry exactly that tarball's integrity.
   const patchedSpec = patch.value ? `file:${patch.value.artifact.path}` : undefined;
   const expectedSpec = (name) => (patchedSpec && name === PATCHED_PACKAGE ? patchedSpec : version);
   for (const [index, name] of DIRECT_PI_PACKAGES.entries()) {

@@ -1,33 +1,6 @@
 import { workspaceModule } from "../src/workspace/workspace-module.js";
 import { TEST_SETTINGS_SCHEMA } from "./settings-schema.js";
 import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "./gateway-registry.js";
-/**
- * Tron Home's learned profile (#731), end to end: the `profile` tool called by a
- * faux Home model inside real activations, the real Knowledge store behind it,
- * metadata-only discovery and explicit reads, and a delegated worker receiving
- * the brief Home deliberately chose from that evidence.
- *
- * Failure modes these cases exist for, written before the code they test:
- *  F1 learn writes a confirmed note, or one without its tag, provenance, or the
- *     triggering maintainer message's entry;
- *  F2 discovery inserts note text automatically, or an explicit read loses text/identity;
- *  F3 refine, supersede or retire destroys the prior revision or leaves the old
- *     item active;
- *  F4 a retired or superseded item is still changed by profile actions;
- *  F5 discovery or paged explicit reads drop over-bound records;
- *  F6 the system prompt changes between activations while the profile is unchanged;
- *  F7 a native confirmation or edit, which models neither tags nor retirement,
- *     removes the item from the profile;
- *  F9 a delegated worker's first message lacks the brief the profile informed;
- *  F10 an ordinary session receives the Home-only `profile` tool.
- *  F11 the maintainer's confirm, refine, supersede, retire and undo over RPC are
- *     recorded as Changes and reach the next activation as they now stand;
- *  F12 a stale maintainer edit or undo is refused with the current state;
- *  F13 Home's own profile changes are recorded and undoable by the maintainer.
- *  F14 failure to restore a partial batch or record its ungrouped failed diffs.
- *
- * The retained artifact is `test-results/home-profile/report.json`.
- */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "./settings-dependencies.js";
 import { tmpdir } from "node:os";
@@ -57,7 +30,6 @@ export const MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: "compactor" };
 export const MODEL = { provider: PROVIDER, id: MODEL_ID };
 let REPORT_PATH = "test-results/home-profile/report.json";
 export function profileReportFile(path: string): void { REPORT_PATH = path; }
-/** The instruction head every Home request carries; a worker's request never does. */
 export const HOME_MARKER = "## Tron Home";
 export const PROFILE_HEADING = "## Learned profile";
 
@@ -70,10 +42,6 @@ afterEach(async () => {
   await retireFixtures();
 });
 
-/** Disposes every registry, then removes every root this file created. Each registry settles its work
- * first, in gateway-main's shutdown order (cancel, settle, dispose): a delegated Home task's terminal
- * write is work the registry owns, and disposing first closes the stores it writes through (#1020).
- * A failed disposal may leave work live under a root, so every root is kept as the diagnostic. */
 export async function retireFixtures(): Promise<void> {
   const disposals = await Promise.allSettled(registries.splice(0).map(async (registry) => {
     await registry.administrativeWorkRegistry.requestCancellation();
@@ -87,22 +55,13 @@ export async function retireFixtures(): Promise<void> {
 }
 
 export interface HeldTerminalWrite {
-  /** Resolves once the task's terminal write has been requested and is held. */
   requested: Promise<void>;
-  /** Resolves once teardown has begun waiting on the registry's work to settle. An observed barrier, not a timer. */
   settling: Promise<void>;
-  /** `held` until the write settles; then whether the store accepted or refused it. */
   outcome(): "held" | "accepted" | "refused";
-  /** Lets the held write proceed. Idempotent. */
   release(): void;
-  /** Resolves once a requested write has settled; immediately when none was requested. */
   finished(): Promise<void>;
 }
 
-/** Holds the delegated task's terminal write at the Home task store boundary, before the store applies
- * it, so the write is live when teardown starts (#1020). Only the update that transitions the task to
- * terminal is held; once released it runs through the store's own mutex and publication. The registry's
- * `waitUntilSettled` is observed, not replaced: it is the real settle step teardown must wait on. */
 export function holdTerminalWrite(registry: RuntimeRegistry): HeldTerminalWrite {
   const update = HomeTaskStore.prototype.update;
   const work = registry.administrativeWorkRegistry;
@@ -142,8 +101,6 @@ export function holdTerminalWrite(registry: RuntimeRegistry): HeldTerminalWrite 
   };
 }
 
-/** Whether `change` transitions the task to terminal. The store applies `change` under its own mutex, so
- * it is evaluated here on a copy first. A change that refuses the record is left to the store to refuse. */
 export async function setsTerminal(store: HomeTaskStore, taskId: string, change: (current: HomeTaskRecord) => HomeTaskRecord): Promise<boolean> {
   const current = await store.read(taskId);
   if (!current || current.lifecycle === "terminal") return false;
@@ -170,8 +127,6 @@ export function recordCase(name: string, data: Record<string, unknown>): void {
   report.cases.push({ name, ...data });
 }
 
-// ---- fixture --------------------------------------------------------------------
-
 export type HomeSlot = Awaited<ReturnType<RuntimeRegistry["acquire"]>>;
 export interface Captured { home: boolean; systemPrompt: string; messages: Array<Record<string, unknown>>; blob: string }
 export interface Context { systemPrompt: string; messages: Array<Record<string, unknown>> }
@@ -185,11 +140,9 @@ export interface Fixture {
   project: string;
   sessionId: string;
   slot: HomeSlot;
-  /** Scripted replies, consumed in order per side (Home or worker). */
   home: Step[];
   worker: Step[];
   captured: Captured[];
-  /** The Gateway the maintainer's iPhone talks to, over the same registry and change path. */
   service: GatewayService;
   record: SettingsChangeRecord;
   broadcasts: Array<{ topic: string; payload: unknown }>;
@@ -231,8 +184,6 @@ export async function fixture(label: string): Promise<Fixture> {
 
   const store = new ProfileStore(registry.moduleHost.contract(workspaceModule));
   knowledge = store;
-  // The one settings change path, wired as gateway-main wires it: Home's profile tool
-  // and the maintainer's home.profileChange share its profile applier and record.
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime: runtime }));
   const record = new SettingsChangeRecord(tronHome);
   const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, record, {
@@ -252,16 +203,12 @@ export async function fixture(label: string): Promise<Fixture> {
     knowledge, home: homeOwnerOf(registry),
   } as unknown as GatewayServiceDependencies);
 
-  // Task recovery runs after listen, as in gateway-main; delegation is refused before it.
   await homeOwnerOf(registry).recoverTasks();
   const designation = await homeOwnerOf(registry).designate({ model: MODEL }, () => MODEL);
   await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);
   const state: Fixture = { registry, knowledge, store, workspace: registry.moduleHost.contract(workspaceModule), project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, broadcasts, pushes };
-  // One route answers every provider request. Home and worker requests are told
-  // apart by the Home instruction head, so each script is independent of interleaving.
   faux.setResponses(Array.from({ length: 256 }, () => async (context: TranscriptContext) => {
-    // The provider's transcript carries the request's system prompt as its head message.
     const systemPrompt = getCurrentSystemPrompt(context.messages);
     const messages = context.messages as unknown as Array<Record<string, unknown>>;
     const home = systemPrompt.includes(HOME_MARKER);
@@ -276,8 +223,6 @@ export async function fixture(label: string): Promise<Fixture> {
   return state;
 }
 
-/** One Home activation driven by `steps`. Returns the first Home request it made
- * (the prompt it carried) and its last one (the transcript it closed with). */
 export async function homeActivation(f: Fixture, input: string, steps: Step[]): Promise<{ first: Captured; last: Captured }> {
   f.home.push(...steps);
   const before = f.captured.length;
@@ -294,14 +239,12 @@ export type ProfileDetails =
   | { status: "saved"; action: "learn" | "refine" | "supersede" | "retire"; id: string; revisionId: string; kind?: string; reason?: string }
   | { status: "refused"; action: string; reason: string };
 
-/** The `profile` tool results a request carries, oldest first. */
 export function profileResults(messages: Array<Record<string, unknown>>): ProfileDetails[] {
   return messages
     .filter((message) => message.role === "toolResult" && message.toolName === "profile")
     .map((message) => message.details as ProfileDetails);
 }
 
-/** A scripted Home reply that calls `profile` with `args`. */
 export function profileCall(args: Parameters<typeof fauxToolCall>[1], id: string): Step {
   return () => fauxAssistantMessage(fauxToolCall("profile", args, { id }), { stopReason: "toolUse" });
 }
@@ -324,13 +267,11 @@ export async function readProfilePage(f: Fixture, path = "inferred", cursor?: st
   return profileReadResult(turn.last.messages, callId);
 }
 
-/** The profile section of a system prompt, from its heading to the end. */
 export function profileSection(systemPrompt: string): string {
   const start = systemPrompt.indexOf(PROFILE_HEADING);
   return start < 0 ? "" : systemPrompt.slice(start);
 }
 
-/** The entry of the maintainer message that started the latest activation. */
 export function latestMaintainerEntryId(f: Fixture): string {
   const entries = f.slot.canonicalSessionEntries() as Array<{ id: string; type: string; message?: { role?: string } }>;
   const user = entries.filter((entry) => entry.type === "message" && entry.message?.role === "user").at(-1);
@@ -349,11 +290,8 @@ export async function noteAt(f: Fixture, id: string, revisionId?: string): Promi
   return record;
 }
 
-// ---- maintainer RPC ------------------------------------------------------------
-
 export const maintainer = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => false, isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
 let commandSeq = 0;
-/** A fresh command ID per request, so no replay is mistaken for a new change. */
 export function command(label: string): string {
   commandSeq += 1;
   return `home-profile-${label}-${String(commandSeq).padStart(4, "0")}`;
@@ -400,6 +338,4 @@ export function change(f: Fixture, changes: Array<Record<string, unknown>>, labe
 export function undo(f: Fixture, changeId: string, label: string): Promise<{ status: string; changes: ChangeAnswer["changes"] }> {
   return f.service.invoke(maintainer, "settings.undo", { commandId: command(label), changeId }) as unknown as Promise<{ status: string; changes: ChangeAnswer["changes"] }>;
 }
-
-// ---- cases ----------------------------------------------------------------------
 

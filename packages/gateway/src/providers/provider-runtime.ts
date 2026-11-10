@@ -5,7 +5,6 @@ import { installClaudeCodeIdentity } from "./claude-code-identity.js";
 import { installKimiK3Policy } from "./kimi-k3-policy.js";
 import { applyJevModelPricing } from "./jev-model-pricing.js";
 
-/** Canonical provider defaults and policy order for Gateway and session runtimes. */
 export async function createProviderModelRuntime(agentDir: string, create?: () => Promise<ModelRuntime>): Promise<ModelRuntime> {
   return applyJevModelPricing(installAnthropicFullContext(installClaudeCodeIdentity(installKimiK3Policy(await (create ?? (() => ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),

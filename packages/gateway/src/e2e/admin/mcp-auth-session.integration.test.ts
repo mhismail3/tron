@@ -51,11 +51,6 @@ describe("MCP auth through a live Gateway session", () => {
     await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
     let origin = "", authQuery: URLSearchParams | undefined, token = "", toolCalls = 0, registrationCount = 0, refreshCount = 0;
     const requests: string[] = [], rpcMethods: string[] = [];
-    // The challenge names its own resource-metadata URL, and the well-known root
-    // is not served. Sign-in succeeding would NOT prove the header was read --
-    // pi-mcp falls back to the server origin as the authorization server, which
-    // this fixture serves -- so the proof is the request log below: the only way
-    // to learn the challenge path is the header.
     const challengePath = "/challenge/resource-metadata";
     const fixture = createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", origin || "http://127.0.0.1");
@@ -88,8 +83,6 @@ describe("MCP auth through a live Gateway session", () => {
         const challenge = createHash("sha256").update(form.get("code_verifier") ?? "").digest("base64url");
         if (form.get("grant_type") !== "authorization_code" || challenge !== authQuery?.get("code_challenge")) return reply(res, 400, { error: "invalid_grant" });
         token = "fixture-access-token";
-        // One second: Pi refreshes a token this close to expiry, so the turn after sign-in
-        // exercises the refresh path on the credential the sign-in itself persisted.
         return reply(res, 200, { access_token: token, token_type: "Bearer", refresh_token: "fixture-refresh-token", expires_in: 1 });
       }
       if (url.pathname === "/mcp") {
@@ -173,8 +166,6 @@ describe("MCP auth through a live Gateway session", () => {
     expect(Object.keys(persisted)).toEqual([`mcp__fixture|${origin}/mcp`]);
     expect(registrationCount).toBe(1);
     expect(authQuery?.get("code_challenge_method")).toBe("S256");
-    // The fixture expires the sign-in token in one second, so Pi refreshes it and
-    // persists the rotation before the session's next turn.
     expect(persisted[`mcp__fixture|${origin}/mcp`].tokens.access_token).toBe("fixture-refreshed-token");
     expect(refreshCount).toBe(1);
 

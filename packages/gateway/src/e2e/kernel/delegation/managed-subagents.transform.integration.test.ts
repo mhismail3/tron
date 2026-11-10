@@ -11,16 +11,12 @@ import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../../../kernel/dele
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "../../../kernel/delegation/delegated-provider.js";
 import type { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 
-/** Real Gateway session starts from a fresh install root, so the closure's
- * TypeScript has never been transformed for this build. */
 it("starts managed-subagent sessions from a fresh build without transforming TypeScript on the Gateway thread", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-subagent-transform-"));
   const agentDir = join(root, "agent");
   const tronHome = join(root, "tron");
   const previous = { agentDir: process.env.PI_CODING_AGENT_DIR, providerRoot: process.env[DELEGATED_PROVIDER_ROOT_ENV] };
   let registry: RuntimeRegistry | undefined;
-  // The longest stretch this thread could not run a 10 ms timer, sampled across
-  // every session start. Reported, not asserted: the transform count below is the oracle.
   let last = performance.now();
   let longestStallMs = 0;
   const sampler = setInterval(() => { const now = performance.now(); longestStallMs = Math.max(longestStallMs, now - last - 10); last = now; }, 10);
@@ -31,8 +27,6 @@ it("starts managed-subagent sessions from a fresh build without transforming Typ
     process.env.PI_CODING_AGENT_DIR = agentDir;
     delegatedProviderEnvironment(delegatedArtifactRoot(tronHome));
     const managedSubagents = ManagedSubagents.activateForStartup(tronHome);
-    // jiti requires its Babel transform only for a module it has not cached.
-    // The closure's jiti and its transform belong to this fresh root alone.
     const closureRequire = createRequire(join(managedSubagents.root, "package.json"));
     const transform = join(dirname(await realpath(closureRequire.resolve("jiti/package.json"))), "dist", "babel.cjs");
     expect((await stat(transform)).isFile()).toBe(true);
@@ -50,7 +44,6 @@ it("starts managed-subagent sessions from a fresh build without transforming Typ
       expect(resources.tools.find(tool => tool.name === "subagent"), "the managed factory ran").toMatchObject({ source: MANAGED_SUBAGENTS_SOURCE });
       expect(closureRequire.cache[transform], "no Babel transform loaded on the Gateway thread").toBeUndefined();
     }
-    // The build's transforms persist privately outside the verified installs.
     const cache = await stat(join(tronHome, "internal", "pi-subagents-transform-cache", managedSubagents.root.split("/").at(-1)!));
     expect(cache.isDirectory() && (cache.mode & 0o777)).toBe(0o700);
   } finally {
@@ -76,12 +69,10 @@ it("refuses a managed load whose transforms could not be prepared instead of tra
     const closureRequire = createRequire(join(managedSubagents.root, "package.json"));
     const transform = join(dirname(await realpath(closureRequire.resolve("jiti/package.json"))), "dist", "babel.cjs");
     const buildCache = join(cache, managedSubagents.root.split("/").at(-1)!);
-    // A private cache this process cannot write: jiti would silently skip caching.
     await mkdir(buildCache, { recursive: true, mode: 0o700 });
     await chmod(buildCache, 0o500);
     await expect(managedSubagents.loadDiscovery()).rejects.toMatchObject({ code: "busy", retryable: true });
     expect(closureRequire.cache[transform], "no Babel transform loaded on the Gateway thread").toBeUndefined();
-    // The refusal is not remembered: the next load prepares again.
     await chmod(buildCache, 0o700);
     await expect(managedSubagents.loadDiscovery()).resolves.toMatchObject({ discoverAgentsAll: expect.any(Function) });
     expect(closureRequire.cache[transform]).toBeUndefined();
@@ -102,12 +93,10 @@ it("prepares only the catalog's own module graph for a discovery read, not the w
     const closureRequire = createRequire(join(managedSubagents.root, "package.json"));
     const transform = join(dirname(await realpath(closureRequire.resolve("jiti/package.json"))), "dist", "babel.cjs");
     const buildCache = join(tronHome, "internal", "pi-subagents-transform-cache", managedSubagents.root.split("/").at(-1)!);
-    // A catalog read (packages.list, session resources) waits only for its graph.
     await expect(managedSubagents.loadDiscovery()).resolves.toMatchObject({ discoverAgentsAll: expect.any(Function) });
     const discoveryTransforms = (await readdir(buildCache)).length;
     expect(discoveryTransforms).toBeGreaterThan(0);
     expect(closureRequire.cache[transform], "no Babel transform loaded on the Gateway thread").toBeUndefined();
-    // A session's managed load still prepares the rest of the build off-thread.
     const registration = await managedSubagents.requireChildExtensions("discovery-scope-session", []);
     registration.dispose();
     expect((await readdir(buildCache)).length, "the session load needed transforms discovery did not wait for").toBeGreaterThan(discoveryTransforms);

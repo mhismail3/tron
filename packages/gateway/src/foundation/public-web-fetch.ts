@@ -59,10 +59,8 @@ function assertSafeUrl(value: string): URL {
   let parsed: URL;
   try { parsed = new URL(value); } catch { throw invalid("Source URL is invalid"); }
   if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hostname.length === 0) throw invalid("Source URL must be an http(s) URL without credentials");
-  // Query credentials are credentials too. Reject them before the URL can be
-  // persisted, logged, fetched, or passed to an assessment model.
   for (const key of parsed.searchParams.keys()) {
-    if (key === "token" && isPublicXEmbedUrl(parsed)) continue; // Public deterministic embed ID, never an account token.
+    if (key === "token" && isPublicXEmbedUrl(parsed)) continue;
     if (isCredentialQueryKey(key)) throw invalid("Source URL contains a credential-bearing query parameter");
   }
   return parsed;
@@ -83,8 +81,6 @@ async function pinnedFetch(url: URL, address: string, init: RequestInit = {}): P
       try {
         const status = response.statusCode ?? 200;
         if (!Number.isInteger(status) || status < 200 || status > 599) throw new Error("Invalid HTTP response status");
-        // Node may invoke the callback for bodyless statuses. Do not attach a
-        // stream (or a body) for statuses whose wire contract forbids one.
         const body = [204, 205, 304].includes(status) ? null : new ReadableStream<Uint8Array>({ start(controller) { response.on("data", chunk => controller.enqueue(new Uint8Array(chunk))); response.on("end", () => controller.close()); response.on("error", error => controller.error(error)); }, cancel() { response.destroy(); } });
         const responseHeaders = Object.fromEntries(Object.entries(response.headers).map(([name, value]) => [name, Array.isArray(value) ? value.join(", ") : value ?? ""]));
         resolve(new Response(body, { status, ...(response.statusMessage ? { statusText: response.statusMessage } : {}), headers: responseHeaders }));
@@ -100,7 +96,6 @@ async function pinnedFetch(url: URL, address: string, init: RequestInit = {}): P
 async function assertPublicDestination(url: URL, resolveHost: ResolveHost, signal?: AbortSignal): Promise<string> {
   const hostname = url.hostname.toLowerCase();
   if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || (isIP(hostname) !== 0 && isPrivateAddress(hostname))) throw new SourceSafetyError(false);
-  // Resolve every hop, including the initial hostname, before issuing a request.
   const addresses = await Promise.race([
     resolveHost(url.hostname, signal),
     ...(signal ? [new Promise<string[]>((_, reject) => { if (signal.aborted) reject(new Error("Source destination resolution cancelled")); else signal.addEventListener("abort", () => reject(new Error("Source destination resolution cancelled")), { once: true }); })] : []),
@@ -147,11 +142,6 @@ function joinBytes(chunks: Uint8Array[], length: number): Uint8Array {
   return result;
 }
 
-/* --- Readable-text extraction -------------------------------------------------
- * The source owner, not a per-site rule, decides which text a saved page
- * contributes to summaries and search. Structural signals only: never a
- * hostname or class-name allowlist, which drifts and silently eats articles.
- */
 interface PublicUrlFetch {
   status?: number;
   bytes?: Uint8Array;
@@ -161,20 +151,12 @@ interface PublicUrlFetch {
   disposition?: "inaccessible" | "failed";
 }
 
-/** Validate a public destination before disclosing it to a remote reader. Uses
- * the same credential and DNS policy as every-hop direct source capture. */
 export async function validatePublicSourceUrl(url: string, options: Pick<PublicFetchOptions, "resolveHost" | "signal"> = {}): Promise<string> {
   const parsed = assertSafeUrl(url);
   await assertPublicDestination(parsed, options.resolveHost ?? defaultResolveHost, options.signal);
   return parsed.href;
 }
 
-/**
- * One bounded fetch of a public http(s) URL through capture's own transport:
- * credential-bearing URLs refused, every redirect hop DNS-resolved and refused
- * when private (SSRF), the response read to `limits.maxBytes` at most. It never
- * persists anything; the caller owns what becomes of the bytes.
- */
 export async function fetchPublicUrl(
   url: string,
   options: Pick<PublicFetchOptions, "fetcher" | "resolveHost" | "signal"> & { limits?: Partial<PublicFetchLimits> } = {},

@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Front door for Tron profiling. Each tool writes one tron.profile-report.v1
-# report; scripts/tron_profile_report.py owns the schema, noise bound, and
-# comparison verdicts so every agent reads measurements the same way.
-
+# Front door for Tron profiling.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

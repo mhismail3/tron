@@ -9,32 +9,12 @@ import { isManagedSubagentExtension, MANAGED_SUBAGENTS_VERSION } from "./managed
 import { attributedToolOwner } from "../host/extension-registration.js";
 import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
-/**
- * The delegated-work provider boundary.
- *
- * Tron projects an installed third-party delegated-work provider (currently
- * `pi-subagents`) without owning its execution: the provider keeps its own
- * lifecycle, child sessions, and terminal proof, while the Gateway admits only
- * observations it can prove belong to one installed provider. Every
- * provider-specific convention — the tool name, the artifact directory shape,
- * the lifecycle file names, and the identity used to authorize controls — lives
- * here so the session runtime depends on this narrow contract instead of
- * embedding package knowledge in its own owners.
- *
- * Nothing in this module grants authority by itself: callers must still prove
- * canonical tool/run ownership before projecting or controlling work.
- */
-
-/** The provider tool whose results can own delegated work. */
 export const DELEGATED_PROVIDER_TOOL_NAME = "subagent";
 
-/** Control receipts reference an existing run; they never own its lifecycle. */
 export const DELEGATED_SUPERVISOR_TOOL_NAME = "subagent_supervisor";
 
-/** Fallback source label used when no installed owner can be resolved. */
 const DELEGATED_PROVIDER_SOURCE = "pi-subagents";
 
-/** Lifecycle files the provider may publish inside one run directory. */
 const DELEGATED_ARTIFACT_FILES = [
   "status.json",
   "events.jsonl",
@@ -42,22 +22,14 @@ const DELEGATED_ARTIFACT_FILES = [
   "process-terminal.json",
 ] as const;
 
-/** One Gateway-admitted provider root per resolved Tron home. */
 export const DELEGATED_PROVIDER_ROOT_ENV = "PI_SUBAGENTS_TEMP_ROOT";
 
-// The pinned SDK exports dist/index.js. Resolve from this running payload once,
-// not from the reserved provider install (which deliberately has no SDK copy).
 const PI_HOST_PACKAGE_ROOT = piHostPackageRoot();
 
 export function delegatedArtifactRoot(tronHome: string): string {
   return tronHomePath(resolve(tronHome), "internal/subagents");
 }
 
-/**
- * Binds provider children to this process's artifact root and selected Pi host
- * before extension initialization. A payload restart selects a new host; neither
- * the user npm tree nor an inherited override can choose the detached runtime.
- */
 export function delegatedProviderEnvironment(root: string, environment: NodeJS.ProcessEnv = process.env): void {
   const canonicalRoot = resolve(root);
   if (!isAbsolute(canonicalRoot) || canonicalRoot === sep) throw new Error("delegated artifact root must be absolute");
@@ -65,7 +37,6 @@ export function delegatedProviderEnvironment(root: string, environment: NodeJS.P
   environment.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = PI_HOST_PACKAGE_ROOT;
 }
 
-/** Prepare the admission root before the provider can publish a run. */
 function rejectSymlinkPath(path: string): void {
   const canonicalPath = resolve(path);
   try {
@@ -97,13 +68,6 @@ function canonical(value: string): string {
   }
 }
 
-/**
- * Accepts only the provider's own run directory or one of its direct lifecycle
- * files under the explicitly admitted Tron-home root; production passes that
- * resolved root, so there is one writable authority. Lexical traversal
- * is rejected before canonicalization, and the canonical shape rejects symlinked
- * escapes.
- */
 export function delegatedArtifactPathAllowed(asyncPath: string, cwd: string, admittedRoot?: string): boolean {
   if (!isAbsolute(asyncPath)) return false;
   const lexicalParts = asyncPath.split(/[\\/]/u).filter(Boolean);
@@ -157,11 +121,6 @@ export function delegatedArtifactPathAllowed(asyncPath: string, cwd: string, adm
   }
 }
 
-/**
- * Resolves the installed provider's own origin. Identity comes from the
- * finalized extension owner of its tool, never from a path containing the
- * package name in an unrelated location.
- */
 export function delegatedProviderOrigin(extensions: readonly Extension[]): ExtensionToolOrigin {
   const extension = extensions.find(isManagedSubagentExtension);
   if (extension) {
@@ -171,14 +130,11 @@ export function delegatedProviderOrigin(extensions: readonly Extension[]): Exten
   return { source: DELEGATED_PROVIDER_SOURCE };
 }
 
-/** Version belongs to the verified managed closure, never a same-named user
- * package or project extension. Task policy fails closed for any other owner. */
 export function delegatedProviderToolVersion(extensions: readonly Extension[], toolName: string): string | undefined {
   const extension = extensions.find(candidate => isManagedSubagentExtension(candidate) && candidate.tools.has(toolName));
   return extension ? MANAGED_SUBAGENTS_VERSION : undefined;
 }
 
-/** True only for the exact installed provider owner, never a same-named tool. */
 export function isInstalledDelegatedTool(
   toolName: string,
   origin: ExtensionToolOrigin | undefined,
@@ -188,12 +144,6 @@ export function isInstalledDelegatedTool(
   return installedOwnerId !== undefined && installedOwnerId === origin.owner.id;
 }
 
-/**
- * Returns the installed provider's controller definition for one tool name, but
- * only when the caller observed the exact installed owner for that name. Pi can
- * reload a package through its resolved local path, so the opaque owner
- * identity — not the mutable source label — is the authority boundary.
- */
 export function trustedDelegatedController(input: {
   toolName: string;
   origin: ExtensionToolOrigin | undefined;

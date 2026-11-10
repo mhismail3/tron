@@ -20,9 +20,6 @@ import { stripTerminalControls } from "./terminal-sanitizer.js";
 import { isExtensionForm } from "../semantic-form.js";
 
 const EXTENSION_PRESENTATION_MAX_SURFACES = 64;
-// Gateway's complete WebSocket frame is capped at 1 MiB. Keeping presentation
-// below 700 KiB leaves room for session identity, actionable lifecycle state,
-// and a bounded transcript tail in authoritative snapshots.
 const EXTENSION_PRESENTATION_MAX_BYTES = 700 * 1_024;
 const MAX_DIAGNOSTICS = 64;
 const MAX_CAPABILITIES = 128;
@@ -169,7 +166,6 @@ const DEFAULT_SEMANTIC_STATE: ExtensionSemanticState = {
   editorText: "",
 };
 
-/** Sole aggregate epoch/revision owner for semantic and rendered extension presentation. */
 export class ExtensionPresentationStore implements ExtensionHostActivity {
   readonly hostEpoch = randomUUID();
   private revision = 0;
@@ -234,11 +230,8 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
     const before = this.draft();
     const callbackDraft = clone(before);
     change(callbackDraft);
-    // Callback code may retain its draft or inserted objects. Only a private
-    // post-callback clone can become committed state.
     const candidate = clone(callbackDraft);
     const nextRevision = this.revision + 1;
-    // Interaction response scope is the revision which first admitted it.
     for (const interaction of candidate.pendingInteractions) {
       if (interaction.hostEpoch.length === 0) interaction.hostEpoch = this.hostEpoch;
       if (interaction.presentationRevision === 0) interaction.presentationRevision = nextRevision;
@@ -265,11 +258,6 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
     return mutation;
   }
 
-  /**
-   * Record a rejected extension-owned void callback without allowing its
-   * presentation failure to escape into an unawaited timer/event callback.
-   * The previously committed state remains authoritative and valid.
-   */
   recordRejectedCallback(operation: string, error: unknown): void {
     if (!this.active) return;
     const raw = error instanceof Error ? error.message : "Extension presentation callback failed";
@@ -283,15 +271,10 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
         if (draft.diagnostics.length > MAX_DIAGNOSTICS) draft.diagnostics.splice(0, draft.diagnostics.length - MAX_DIAGNOSTICS);
       });
     } catch {
-      // Diagnostics are best effort. A rejected extension callback must never
-      // become a second process-level failure while reporting the first.
     }
   }
 
   retire(): void {
-    // Retirement is an internal ownership boundary. Clear disposable
-    // presentation state even when no broadcast can be delivered; stale
-    // callbacks are rejected by `active` and cannot repopulate this epoch.
     this.surfaces = [];
     this.pendingInteractions = [];
     this.pendingComponentFactories = 0;

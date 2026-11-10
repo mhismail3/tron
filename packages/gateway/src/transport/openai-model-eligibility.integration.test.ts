@@ -87,8 +87,6 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
   let upstreamSignals: Array<AbortSignal | undefined> = [];
   async function disposeFixture() {
     for (const service of services.splice(0)) service.dispose();
-    // Registration starts detached SDK refreshes; an awaited offline pass fences
-    // their config reads and file-store work before the fixture root is removed.
     await runtime?.refresh({ allowNetwork: false });
     runtime = undefined;
     if (root) await rm(root, { recursive: true, force: true });
@@ -323,8 +321,6 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
   it("keeps other providers' credential filters and owner admission across SDK recomposition", async () => {
     server = await fakeModelsServer((_request, response) => json(response, { models, has_more: false }));
     const { runtime, service } = await harness({ type: "oauth", access: "safe-test-token", refresh: "refresh", expires: Date.now() + 3_600_000 });
-    // An unrelated provider with its own credential filter (GitHub Copilot's shape):
-    // eligibility refreshes must not republish its unfiltered configured catalog.
     const faux = fauxProvider({ provider: "restricted-test", models: [{ id: "kept" }, { id: "withheld" }] });
     runtime.registerNativeProvider({ ...faux.provider, filterModels: (candidates) => candidates.filter(model => model.id !== "withheld") });
     await catalog(service);
@@ -334,8 +330,6 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
     expect(snapshot.filter(id => id.startsWith("openai/"))).toEqual(expect.arrayContaining(["openai/gpt-5.5", "openai/gpt-5.6-sol"]));
     expect(snapshot).not.toContain("openai/gpt-6-luna");
 
-    // A first-party metadata-only extension contribution replaces the SDK filter
-    // decoration; Gateway catalog admission must still come from the owner.
     runtime.registerProvider("openai", { name: "OpenAI (contributed)" });
     const offered = (await catalog(service)).filter(model => model.provider === "openai" && model.available).map(model => model.id);
     expect(offered).toEqual(["gpt-5.5", "gpt-5.6-sol"]);
@@ -434,8 +428,6 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
       const ordinal = /\/gateway-openai-eligibility-[^/]+\/models\.json$/u.test(path) ? ++reads : 0;
       const read = Reflect.apply(actualReadFile, fsPromises, args) as Promise<unknown>;
       if (ordinal !== 3) return read;
-      // create loads config twice; the next read is detached native-provider
-      // registration. Hold the real result before it can reach FileModelsStore.
       return read.then(async value => { entered.resolve(); await held.promise; return value; });
     }) as typeof fsPromises.readFile;
     fsPromises.rm = ((...args: Parameters<typeof fsPromises.rm>) => {
@@ -453,8 +445,6 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
       await entered.promise;
       expect(reads).toBe(3);
       const fixtureRoot = root;
-      // The filesystem guard rejects a removal dispatched while the real SDK
-      // continuation is held. No elapsed-time or scheduler-speed assertion.
       const removing = disposeFixture();
       const settled = removing.then(() => undefined, error => error);
       released = true;

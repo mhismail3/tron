@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Isolated integration fixture only. No production module imports this proxy.
-// The caller owns the loopback Gateway and supplies an ephemeral control token.
+// Isolated integration fixture only.
 import { createServer, Server, request as upstreamRequest } from "node:http";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -12,8 +11,6 @@ const { WebSocket, WebSocketServer } = createRequire(new URL("../../packages/gat
 const maximumBytes = 1_048_576;
 const maximumFrames = 16;
 
-// The exported unit-fixture API requires a live Server owned by this process,
-// not a caller-supplied port. External Gateways enter only through CLI proof.
 export async function startFaultProxyForServer(upstream, { token }) {
   if (!(upstream instanceof Server)) throw new Error("Fixture must own its upstream Server");
   const address = upstream.address();
@@ -29,7 +26,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     throw new Error("Fault proxy requires an owned loopback target and control token");
   }
   await verifyTarget();
-  // Proofs are coalesced by the verifier, so waiting requests cost no spawns.
   const checkTarget = () => verifyTarget();
   const bridges = new Set();
   const sockets = new Set();
@@ -37,9 +33,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
   let policy = { mode: "pass" };
   let intercepted = false;
   let closing = false;
-  // One fixture-wide FIFO carries both parsed HTTP streams and WebSocket
-  // messages/control frames. This is an application-payload schedule, not a
-  // claim about OS/TCP or compressed WebSocket wire-byte accounting.
   let shaper;
   let scheduleTail = Promise.resolve();
   const proxyStartedAt = process.hrtime.bigint();
@@ -54,8 +47,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     logsExportRequestBytes: null, logsExportResponseBytes: null,
   };
   const logsExportRequestIDs = new Set();
-  // Ping timelines keep the last 128 client pings across every bridge of this
-  // fixture, so a failing case's final pings are never the ones evicted.
   const outstandingClientPings = [];
   let clientPingSequence = 0;
   let bridgeSequence = 0;
@@ -92,12 +83,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     for (const response of waiters) answer(response, 200, { intercepted: true });
     waiters.clear();
   };
-  // Once shaped, this proxy, not the client, paces how fast a request body is
-  // read, so its listener bounds must measure client inactivity rather than
-  // the fixture's own pacing: there is no whole-request deadline, and the
-  // socket's idle bound (`server.timeout`) is disarmed while a body part waits
-  // in the shared schedule and re-armed once it is forwarded. Headers are read
-  // unpaced and keep their own deadline.
   const server = createServer({ requestTimeout: 0, headersTimeout: 5_000 }, async (request, response) => {
     if (request.url === "/_fixture/control") {
       if (request.headers["x-tron-fixture-token"] !== token) { answer(response, 403, {}); return; }
@@ -155,8 +140,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         }
         if (next.mode === "replace-held-open") {
           if (policy.mode !== "hold-open" || !intercepted) throw new Error("no held open to replace");
-          // Discard the old response and arm the same barrier for the new
-          // transport. await-intercepted now proves a replacement answered.
           intercepted = false;
           for (const bridge of [...bridges]) bridge.terminate();
           answer(response, 200, { mode: next.mode });
@@ -169,9 +152,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           return;
         }
         if (next.mode === "inject-frame") {
-          // Sends one app-bound event of an exact byte size on the newest
-          // bridge, so the app's decoded-size ceiling can be exercised with
-          // (compressed) frames just under and over it.
           if (!Number.isSafeInteger(next.bytes) || next.bytes < 64 || next.bytes > 2 * maximumBytes) throw new Error("invalid frame size");
           const bridge = [...bridges].at(-1);
           if (!bridge?.inject(next.bytes)) throw new Error("no open bridge");
@@ -180,7 +160,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         }
         if (next.mode === "restart-gateway" || next.mode === "respawn-exited-gateway") {
           if (!restartGateway) throw new Error("private Gateway restart is unavailable in this fixture");
-          // An exiting Gateway closes its own sockets with its own close code.
           if (next.mode === "restart-gateway") for (const bridge of [...bridges]) bridge.terminate();
           const pid = await restartGateway({ awaitOwnExit: next.mode === "respawn-exited-gateway" });
           answer(response, 200, { mode: next.mode, pid });
@@ -193,11 +172,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         if (intercepted && next.mode !== "pass") throw new Error("reset the owned fault before arming another");
         policy = { mode: next.mode, ...(next.commandId ? { commandId: next.commandId } : {}),
           ...(next.mode === "reject-upgrade" ? { status: next.status } : {}),
-          // A blackhole that covers plain HTTP as well as WebSocket frames lets
-          // a case prove a route came over the other lane: the proxied leg
-          // cannot answer it at all, so a success names the route. Off unless
-          // asked, because the other legs keep reading their fixture through
-          // this proxy while a socket is blackholed.
           ...(next.http === true ? { http: true } : {}) };
         if (next.mode === "pass") {
           intercepted = false;
@@ -212,8 +186,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
       } catch { answer(response, 400, { error: "invalid fixture control" }); }
       return;
     }
-    // Pairing/health/assets use the exact same owned upstream, never a target
-    // URL supplied by the HTTP client. The fixture exposes no general proxy.
     if (policy.mode === "blackhole" && policy.http) { request.destroy(); return; }
     try { await checkTarget(); } catch { answer(response, 503, { error: "owned fixture unavailable" }); return; }
     if (closing || response.destroyed || request.aborted) return;
@@ -284,10 +256,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     }).catch(() => { response.destroy(); });
   });
   server.timeout = 10_000;
-  // Name the fixture's own idle retirement in proxy.log, which CI retains, so a
-  // reset client is attributed in one step. The socket's armed bound tells a
-  // keep-alive expiry (5 s) from a stalled client (10 s). A listener replaces
-  // Node's implicit destroy, so it destroys the socket itself.
   server.on("timeout", socket => {
     console.log(JSON.stringify({ event: "proxy.client-idle-timeout", elapsedMs: elapsedMilliseconds(), idleTimeoutMs: socket.timeout, shaped: Boolean(shaper) }));
     socket.destroy();
@@ -296,10 +264,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     if (closing || sockets.size >= 12) { socket.destroy(); return; }
     sockets.add(socket); socket.once("close", () => sockets.delete(socket));
   });
-  // The proxy terminates WebSocket on both legs. It accepts the app's
-  // permessage-deflate offer and makes the same bare offer upstream only when
-  // the app negotiated it, so the Gateway's connection.opened record shows
-  // what the real app negotiated. maxPayload bounds inflated messages.
   const webSockets = new WebSocketServer({ noServer: true, maxPayload: maximumBytes, perMessageDeflate: true, autoPong: false });
   server.on("upgrade", async (request, socket, head) => {
     const retire = () => socket.destroy();
@@ -375,8 +339,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           frame = JSON.parse(data.toString());
           if (frame.type === "request" && typeof frame.method === "string") linkStats.dispatchedRPCs++;
           if (policy.mode === "reject-open" && frame.type === "request" && frame.method === "session.open") {
-            // Ask the real Gateway for an absent session: its own error travels
-            // through the unchanged response decoder, unlike a fabricated reply.
             frame.params = { sessionId: "00000000-0000-4000-8000-000000000393" };
             data = Buffer.from(JSON.stringify(frame));
             signalInterception();
@@ -407,8 +369,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         if (frame.type === "response") linkStats.settledRPCs++;
         if ((policy.mode === "invalid-physical-model-limit" || policy.mode === "invalid-virtual-model-limit")
           && frame.type === "response" && frame.id === targetID && frame.ok === true) {
-          // Corrupt one real catalog entry, not the envelope or unrelated RPCs.
-          // A physical zero and virtual negative must still fail client admission.
           const virtual = policy.mode === "invalid-virtual-model-limit";
           const model = frame.result?.models?.find(model => (model.virtual === true) === virtual);
           if (model) {
@@ -421,8 +381,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         if (frame.type === "response" && logsExportRequestIDs.delete(frame.id)) linkStats.logsExportResponseBytes = data.length;
         if (policy.mode === "drop-prompt-response" && frame.type === "response" && frame.id === targetID) {
           policy = { mode: "pass" };
-          // This fault specifically loses an accepted result. A definitive
-          // rejection must reach the test instead of masquerading as admission.
           if (frame.ok === true) { terminate(); return; }
         }
         if ((policy.mode === "hold-hello" && frame.type === "hello")
@@ -433,14 +391,9 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           signalInterception();
         } else void schedule("websocket-server-frame", data.length + 2 + (data.length < 126 ? 0 : data.length <= 65_535 ? 2 : 8), () => send(front, data, binary)).catch(terminate);
       });
-      // Auto-pong is disabled at both ends: a blackhole must not fabricate
-      // liveness. Other faults preserve ping/pong and ordered server data.
       for (const [source, destination, direction] of [[front, back, "client"], [back, front, "gateway"]]) {
         source.on("ping", data => {
           if (policy.mode === "blackhole") { signalInterception(); return; }
-          // Wall-clock stamps (`*At`) join these records to the phone's own
-          // liveness records on the one host clock; the `*Ms` offsets are
-          // proxy-relative and only order the proxy's events.
           const heartbeat = direction === "client" ? {
             payload: data.toString("hex"),
             timeline: {
@@ -516,8 +469,6 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
   };
 }
 
-// Exported for its owner test (ios-gateway-fault-proxy.test.mjs, beside it), which
-// substitutes the ps/lsof runner to produce timeouts and PID reuse on demand.
 export async function ownedGatewayVerifier(initialPid, port, { execute = promisify(execFile), proofIntervalMs = 1_000 } = {}) {
   if (!Number.isSafeInteger(initialPid) || initialPid <= 1 || process.ppid <= 1) throw new Error("Fixture owner PID is required");
   const entrypoint = realpathSync(fileURLToPath(new URL("../../packages/gateway/dist/index.js", import.meta.url)));
@@ -534,9 +485,6 @@ export async function ownedGatewayVerifier(initialPid, port, { execute = promisi
     }
     return { command: nextCommand, birth: await inspect(target, "lstart") };
   };
-  // A helper killed at its deadline proves nothing either way, so an unproven
-  // capture or proof retries it; five such kills in a row refuse (the same
-  // bound as the watcher's misses below). Any real mismatch refuses at once.
   const answered = async run => {
     for (let attempt = 1; ; attempt++) {
       try { return await run(); } catch (error) { if (!error?.killed || attempt >= 5) throw error; }
@@ -545,17 +493,7 @@ export async function ownedGatewayVerifier(initialPid, port, { execute = promisi
   const initial = await answered(() => capture(pid, process.ppid));
   command = initial.command;
   birth = initial.birth;
-  // The full proof (birth, command line, listener) is off the request path; a
-  // request checks only that the proven PID is alive. A Gateway is proven at
-  // proxy start and at the first request after a respawn is adopted. A watcher
-  // re-proves it every interval, so a PID that died and was reused, a zombie or
-  // a lost listener is unproven within one interval even when no request saw
-  // it die. Five killed watcher proofs in a row unprove the Gateway (Home
-  // decision on #2386), at the cost of refusals while they last. Residual: a
-  // PID reused and serving the port inside that window is trusted.
   let proven = false;
-  // Bumped by every adopt and exit, so a proof that started before either
-  // cannot prove what replaced it.
   let generation = 0;
   let missedProofs = 0;
   const prove = async target => {
@@ -577,7 +515,6 @@ export async function ownedGatewayVerifier(initialPid, port, { execute = promisi
     checking ??= (async () => {
       const started = generation;
       await answered(() => prove(pid));
-      // Nothing proven for an adopt or exit that came during the proof.
       if (generation !== started) throw new Error("Gateway changed during its ownership proof");
       proven = true;
       missedProofs = 0;
@@ -604,7 +541,6 @@ export async function ownedGatewayVerifier(initialPid, port, { execute = promisi
     command = next.command;
     birth = next.birth;
   };
-  // A respawned child is the proxy's own: its exit is known exactly.
   verifyTarget.exited = target => { if (pid === target) { generation += 1; proven = false; } };
   verifyTarget.pid = () => pid;
   return verifyTarget;
@@ -613,24 +549,15 @@ export async function ownedGatewayVerifier(initialPid, port, { execute = promisi
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const targetPort = Number(process.env.TRON_E2E_UPSTREAM_PORT);
   const verifyTarget = await ownedGatewayVerifier(Number(process.env.TRON_E2E_UPSTREAM_PID), targetPort);
-  // Keep the caller's launch spelling for its PID ownership proof (/var may
-  // resolve to /private/var). Canonical validation must not rewrite that contract.
   const entrypoint = process.env.TRON_E2E_GATEWAY_ENTRY;
   if (realpathSync(entrypoint) !== realpathSync(fileURLToPath(new URL("../../packages/gateway/dist/index.js", import.meta.url)))) throw new Error("Gateway restart entrypoint is not the repository fixture");
-  // The launchd-like allow-list and per-journey extras the harness started the
-  // first Gateway with, kept for every respawn (one KEY=VALUE per line).
   const extraEnvironment = Object.fromEntries((process.env.TRON_E2E_GATEWAY_ENVIRONMENT ?? "").split("\n")
     .filter(Boolean).map(line => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
-  // An exited child of the harness shell may linger as a zombie until it is reaped.
   const exited = async target => {
     try { process.kill(target, 0); } catch { return true; }
     try { return (await promisify(execFile)("/bin/ps", ["-p", String(target), "-o", "stat="], { timeout: 2_000 })).stdout.includes("Z"); }
-    // A ps that failed proved nothing: keep waiting, and fail at the deadline.
     catch { return false; }
   };
-  // restart-gateway stops the Gateway itself. respawn-exited-gateway plays the
-  // supervisor: the Gateway exits on its own after a remote restart's drain, and
-  // is started again only once it has.
   const restartGateway = async ({ awaitOwnExit }) => {
     if (!awaitOwnExit) await verifyTarget();
     const oldPid = verifyTarget.pid();
@@ -638,7 +565,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const stoppedAt = Date.now() + (awaitOwnExit ? 60_000 : 5_000);
     while (Date.now() < stoppedAt && !await exited(oldPid)) await new Promise(resolve => setTimeout(resolve, 50));
     if (!await exited(oldPid)) throw new Error("Private Gateway did not stop within its fixture deadline");
-    // A respawn appends to the first generation's process log.
     const log = openSync(process.env.TRON_E2E_GATEWAY_LOG, "a");
     const child = spawn(process.execPath, [entrypoint], {
       cwd: fileURLToPath(new URL("../..", import.meta.url)),
@@ -652,8 +578,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
         TRON_MACHINE_GROUP_ID: "tron-ios-e2e",
         TRON_GATEWAY_HOST: "127.0.0.1",
         TRON_GATEWAY_PORT: String(targetPort),
-        // A restarted fixture Gateway keeps the lane the caller asked for, or
-        // the phone would re-learn an advertisement this run dials.
         ...(process.env.TRON_E2E_LAN_ENDPOINT ? { TRON_GATEWAY_LAN_ENDPOINT: process.env.TRON_E2E_LAN_ENDPOINT } : {}),
       },
       stdio: ["ignore", log, log],

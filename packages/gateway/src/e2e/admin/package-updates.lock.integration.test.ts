@@ -4,9 +4,6 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../../test-support/gateway-lock-harness.js";
 
-// Real socket → PackageService → pinned Pi manager → owned version-query child.
-// Never install packages or contact a registry. The call log rejects a silent
-// empty success caused by offline mode, missing metadata or a broken child.
 it.each([256, 257])("packages.checkUpdates admits only a bounded %i-row SDK projection", async (count) => {
   const root = await mkdtemp(join(tmpdir(), "tron-package-updates-"));
   let gateway: LockGateway | undefined;

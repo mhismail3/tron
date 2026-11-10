@@ -30,18 +30,10 @@ export class GatewayError extends Error {
   }
 }
 
-/**
- * An operation whose effect may already have been applied. Owners raise this
- * when they cannot prove whether a durable or external effect landed, so the
- * idempotency receipt keeps its uncertainty fence instead of permitting the
- * identical command to be replayed. Reconcile authoritative state before a new
- * decision; a different commandId is not proof that repeating the effect is safe.
- */
 export function uncertainOutcome(message: string): GatewayError {
   return new GatewayError("conflict", message, false, { outcomeUnknown: true });
 }
 
-/** True only when an error explicitly reports that its effect outcome is unknown. */
 export function isUncertainOutcome(error: unknown): boolean {
   if (!(error instanceof GatewayError)) return false;
   const details = error.details;
@@ -49,11 +41,6 @@ export function isUncertainOutcome(error: unknown): boolean {
     && (details as Record<string, unknown>).outcomeUnknown === true;
 }
 
-/**
- * Preserve an existing rejection classification while recording that the effect
- * outcome is unknown. A failure that is not already a GatewayError cannot prove
- * its effect was rejected, so it is reported as an uncertain conflict.
- */
 export function asUncertainOutcome(error: unknown, message: string): GatewayError {
   if (isUncertainOutcome(error)) return error as GatewayError;
   if (error instanceof GatewayError) {
@@ -63,7 +50,6 @@ export function asUncertainOutcome(error: unknown, message: string): GatewayErro
     return new GatewayError(error.code, error.message, false, details);
   }
   const failure = new GatewayError("conflict", message, false, { outcomeUnknown: true });
-  // Uncertainty is public; the backend fault that caused it is diagnostic-only.
   failure.cause = error;
   return failure;
 }
@@ -82,8 +68,6 @@ export function publicError(error: unknown): {
       ...(error.details === undefined ? {} : { details: error.details }),
     };
   }
-  // Internal details belong to local diagnostics, including typed faults whose
-  // details may carry nested filesystem errors. Preserve only the retry hint.
   return { code: "internal", message: "Unexpected gateway failure", retryable: error instanceof GatewayError && error.retryable };
 }
 
@@ -97,8 +81,6 @@ type EpisodicErrorKind =
   | "invalid-request"
   | "already-open";
 
-/** Shared refusal identity for canonical source readers and Episodic consumers:
- * callers distinguish visible source/store refusals from blocked memory. */
 export class EpisodicMemoryError extends Error {
   constructor(readonly kind: EpisodicErrorKind, message: string) {
     super(message);

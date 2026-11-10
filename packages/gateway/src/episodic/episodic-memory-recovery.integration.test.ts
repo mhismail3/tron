@@ -16,13 +16,6 @@ import { EpisodicMemory } from "./episodic-memory.js";
 import { EpisodicStore } from "./episodic-store.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
-/*
- * Crash and store recovery: a child process is SIGKILLed while it is writing
- * nodes, and while it is inside the window between a catalog revision and the
- * invalidation that must follow it. The parent must be able to reopen the store,
- * prove it consistent, resume the pump and refold a valid view.
- */
-
 import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 const EPISODIC_MEMORY_MODULE = fileURLToPath(new URL("./episodic-memory.ts", import.meta.url));
 const WORKSPACE_MODULE = fileURLToPath(new URL("../workspace/tron-workspace.ts", import.meta.url));
@@ -37,7 +30,6 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-/** A deterministic compactor that never touches a model provider. */
 const stubSummarizer: EpisodicSummarizer = async (request) => {
   const last = request.turns.at(-1)!;
   return fauxAssistantMessage(last.text.replace(/\s+/gu, " ").trim().slice(-200));
@@ -97,8 +89,6 @@ async function openMemory(
   });
 }
 
-/** Complete lines only: a torn trailing line is exactly what the store may leave
- * behind, and the test's own reader has to tolerate it. */
 function records(text: string): Array<Record<string, unknown>> {
   const lines = text.split("\n");
   const complete = lines.slice(0, -1);
@@ -144,8 +134,6 @@ function assertConsistentStore(log: Array<Record<string, unknown>>, messages: nu
   const revisions = nodeRecords.map(record => record.revision as number);
   expect(new Set(revisions).size).toBe(revisions.length);
   const live = liveNodes(log);
-  // The live record for an address is the highest revision written for it, so a
-  // crash cannot leave two live records for one node.
   const highest = new Map<string, number>();
   for (const record of nodeRecords) {
     const key = `${(record.index as number) * 2 ** (record.level as number)}+${2 ** (record.level as number)}`;
@@ -192,9 +180,6 @@ async function waitForFileGrowth(path: string, lines: number, timeoutMs: number)
 
 describe("episodic memory crash recovery", () => {
   it("keeps the token spend a killed child had already recorded", async () => {
-    // Spend is the one piece of a memory that no restart may hand back: a crash
-    // must not reset the record of what was spent. The child is killed mid-pump,
-    // and the parent's reopen must restore the spend.
     const fx = await fixture("spend-crash", 12);
     const hook = join(fx.root, "hook.mjs");
     const program = join(fx.root, "spend-child.mjs");
@@ -225,7 +210,6 @@ describe("episodic memory crash recovery", () => {
     const past = new Date(Date.now() - 120_000);
     await utimes(lock, past, past);
 
-    // Reopened, the memory starts from what the child spent.
     const reopened = await EpisodicMemory.open({
       workspace: fx.workspace,
       sessionId: fx.sessionId,
@@ -238,8 +222,6 @@ describe("episodic memory crash recovery", () => {
     expect(reopenedUsed).toBeGreaterThanOrEqual(durableSpend);
     await reopened.dispose();
 
-    // #493: spend is reported, never a ceiling: a reopened memory keeps it and is
-    // not blocked by it.
     const again = await EpisodicMemory.open({
       workspace: fx.workspace,
       sessionId: fx.sessionId,
@@ -261,7 +243,6 @@ describe("episodic memory crash recovery", () => {
     let output = "";
     child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
     child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-    // Kill it once it is demonstrably writing nodes: the pump is mid-build.
     try {
       await waitForFileGrowth(fx.nodesPath, 8, 30_000);
     } catch (error) {
@@ -269,12 +250,8 @@ describe("episodic memory crash recovery", () => {
     }
     child.kill("SIGKILL");
     await new Promise(resolve => child.once("exit", resolve));
-    // The kill landed while the first commit was still writing nodes, so the
-    // child never reported completion.
     expect(output).not.toContain("done");
     expect(output).not.toContain("Error");
-    // The killed owner's workspace lock is only taken over once it is stale;
-    // age it instead of waiting out the 60 s staleness window.
     const lock = join(fx.home, "gateway", "workspace-state.lock");
     const past = new Date(Date.now() - 120_000);
     await utimes(lock, past, past);
@@ -284,8 +261,6 @@ describe("episodic memory crash recovery", () => {
     expect(messages).toBe(120);
     const liveBefore = assertConsistentStore(persistedBefore.nodes, messages);
 
-    // Reopen: the store loads, the torn tail (if the kill produced one) is gone,
-    // and the pump resumes to a complete tree.
     const memory = await openMemory(fx);
     await memory.entriesCommitted(fx.sessionId);
     const status = memory.status();
@@ -299,17 +274,12 @@ describe("episodic memory crash recovery", () => {
       cursor += part.messages;
     }
     expect(cursor).toBe(messages);
-    // Recovery preserves durable nodes and the complete view above, not unused paid ancestors.
     const liveAfter = assertConsistentStore((await readPersistedState(fx)).nodes, messages);
     expect(liveAfter.size).toBeGreaterThanOrEqual(liveBefore.size);
     await memory.dispose();
   }, 120_000);
 
   it("repairs a catalog revision whose invalidation a crash lost", async () => {
-    // Build once so the child reaches only the edit's invalidation. The exact
-    // append hook below, rather than tree size or a polling race, owns the crash.
-    // A handful of tree levels exercises the invalidation closure. The append
-    // barrier, not a large history or elapsed time, pins the crash cut.
     const fx = await fixture("window", 24);
     const prebuild = new TronWorkspace(fx.home);
     owners.push(prebuild);
@@ -323,8 +293,6 @@ describe("episodic memory crash recovery", () => {
     await prebuilt.entriesCommitted(fx.sessionId);
     expect(prebuilt.status().view.unbuilt).toBe(0);
     await prebuilt.dispose();
-    // Release the workspace lock the pre-build took: the child owns this
-    // installation while it runs.
     await prebuild.dispose();
 
     const marker = join(fx.root, "commit-marker");
@@ -343,8 +311,6 @@ describe("episodic memory crash recovery", () => {
     fx.manager.appendContextEdit(target.id, { content: editedText });
     await writeFile(marker, "go", "utf8");
     await waitForChildLine(child, "invalidation-window", () => output);
-    // Deliberately delay the observer: the child must remain parked, not exit
-    // naturally while the parent is descheduled after receiving its signal.
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(child.exitCode, "child exited before the parent could kill it").toBeNull();
     expect(readFileSync(fx.catalogPath, "utf8")).toContain(editedText);
@@ -353,8 +319,6 @@ describe("episodic memory crash recovery", () => {
     const exit = await awaitsWithin(exited, "crash-window child to exit after SIGKILL");
     expect(exit.signal).toBe("SIGKILL");
 
-    // The window really is the inconsistent state: the live leaf's recorded
-    // source digest no longer matches the catalog record it summarizes.
     const editedRecord = [...new Map(records(await readFile(fx.catalogPath, "utf8")).map(record => [record.index as number, record])).values()]
       .find(record => record.text === editedText)!;
     expect(editedRecord).toBeDefined();
@@ -367,8 +331,6 @@ describe("episodic memory crash recovery", () => {
     expect(leafBefore.kind).not.toBe("free");
 
     const memory = await openMemory(fx);
-    // open() repaired it: the generation moved and the stale leaf is revoked
-    // before the pump rebuilds it.
     expect(memory.status().generation).toBeGreaterThan(0);
     const liveMemoryNodes = (): Array<Record<string, unknown>> => [...(memory as unknown as { nodes: Map<string, Record<string, unknown>> }).nodes.values()];
     expect(liveNodes(liveMemoryNodes()).get(`${editedRecord.index}+1`)).toBeUndefined();

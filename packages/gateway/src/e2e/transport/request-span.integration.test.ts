@@ -27,31 +27,11 @@ import { GatewayServer } from "../../transport/server.js";
 import { RequestSpan, runInRequestSpan } from "../../util/request-span.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-/**
- * Proves the request span's breakdown reaches the real log writer: every
- * `session.open` below runs through a real `GatewayServer`, `GatewayService`,
- * `RuntimeRegistry` and `GatewayLogger`, and the assertions read that logger's
- * own records instead of a double. A failed open proves the persisted JSONL
- * line, which is where the earlier allowlist dropped `stages` and
- * `unaccountedMs`.
- *
- * The exact breakdown and its request attribution are retained at
- * `packages/gateway/test-results/request-span.integration.json`, gitignored and
- * regenerated with `node_modules/.bin/vitest run src/e2e/transport/request-span.integration.test.ts`.
- * This gating test proves the structural contract only. The >=95% accounted-share
- * benchmark is tracked by #157; host scheduling under load contributes to that
- * ratio, so it is not a timing gate here.
- */
-
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
 
-/** A 128-message, 2 MiB canonical transcript exercises the real cold-open path
- * without turning structural instrumentation coverage into a host benchmark. */
 const COLD_OPEN_MESSAGE_COUNT = 128;
 const COLD_OPEN_MESSAGE_TEXT_BYTES = 16 * 1_024;
-/** Retained, regenerable evidence for one run of this file, like the other
- * integration cases: a stable gitignored path an operator can inspect. */
 const REPORT_PATH = join(process.cwd(), "test-results", "request-span.integration.json");
 const SETTINGS_REPORT_PATH = join(process.cwd(), "test-results", "settings-request-span.integration.json");
 const execFileAsync = promisify(execFile);
@@ -87,8 +67,6 @@ function isSessionOpenCompletion(record: LogRecord): boolean {
   return record.event === "rpc.completed" && record.method === "session.open";
 }
 
-/** Debug detail is memory-only, a slow or failed completion is persisted; the
- * open's own record is in exactly one of the two. */
 function completedOpens(logger: GatewayLogger): LogRecord[] {
   return [...logger.debugTail(), ...logger.recent()].filter(isSessionOpenCompletion);
 }
@@ -135,20 +113,11 @@ describe("receipt-backed prompt request span", () => {
     expect(firstBreakdown?.stages).toContain("receipt.completed-persist");
     expect(secondBreakdown?.stages).toContain("receipt.command-lane=");
     const laneWaitMs = stagesOf(secondBreakdown!.stages).get("receipt.command-lane")!;
-    // The duplicate waits at least as long as the first command held its lane,
-    // and the lane stage is part of, never more than, its own request. The
-    // first command's completed-receipt fsync also holds the lane (F-5), so
-    // no fixed allowance on top of the held time can bound it on a busy disk.
     expect(laneWaitMs).toBeGreaterThanOrEqual(lockHeldMs - 1);
     expect(laneWaitMs).toBeLessThanOrEqual(secondElapsedMs);
   });
 });
 
-/** This case measures a 2 MiB cold `session.open` and reports its stages, so its
- * waits take a bound sized to the case's own budget (its test timeout below)
- * rather than the suite-wide hang bound: a loaded host must not report the
- * measurement's own fixture cost as a hang. Well below the 300 s timeout, and
- * well above the old 30 s speed budget this file used to carry. */
 const COLD_OPEN_WAIT_BOUND_MS = 120_000;
 
 describe("cold session.open request span", () => {
@@ -191,8 +160,6 @@ describe("cold session.open request span", () => {
     const logger = new GatewayLogger(logPath);
     const uploads = new UploadStore(root, 1_024);
     const auth = new AuthBroker(await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), () => {});
-    // Only the dependencies `session.open` never reaches are absent; the
-    // registry, receipts, uploads, auth and the logger are real.
     const service = new GatewayService({
       display: displayOwnerOf(registry),
       config: { tronHome: root },
@@ -210,8 +177,6 @@ describe("cold session.open request span", () => {
     gateway = new GatewayServer({ display: displayOwnerOf(registry),
       host: "127.0.0.1",
       port,
-      // The snapshot response of a large session is bounded by the page budget;
-      // keep frame admission well above it so the measurement is the open.
       maxFrameBytes: 4 * 1_048_576,
       devices,
       uploads,
@@ -242,8 +207,6 @@ describe("cold session.open request span", () => {
     await waitFor(() => frames.some((frame) => frame.id === requestId), "the request's response frame", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
     const response = frames.find((frame) => frame.id === requestId);
     expect(response?.ok, JSON.stringify(response)).toBe(true);
-    // By request ID, not by position: another RPC's record must not be read
-    // as this open's breakdown.
     await waitFor(() => completionOf() !== undefined, "the completion", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
 
     const completion = completionOf()!;
@@ -253,8 +216,6 @@ describe("cold session.open request span", () => {
     expect(stages, "the real logger must keep the span breakdown").toBeDefined();
     expect(unaccountedMs).toBeDefined();
     expect(completion.level).toBe(durationMs >= 1_000 ? "warning" : "debug");
-    // The named stage is attributed to this exact RPC; serialized stage
-    // durations plus uncovered time may differ by at most their rounding.
     expect(completion.requestID).toBe(requestId);
     const named = stagesOf(stages!);
     expect(named.get("session.open.manager")).toBeGreaterThan(0);
@@ -274,8 +235,6 @@ describe("cold session.open request span", () => {
       sessionFilesBytes: fileBytes,
     });
 
-    // A failed open is persisted, so it proves the writer keeps the breakdown in
-    // the JSONL file itself; the successful opens above are debug on this host.
     const failedRequestId = "missing-open";
     socket.send(JSON.stringify({
       type: "request",
@@ -297,8 +256,6 @@ describe("cold session.open request span", () => {
     expect(persisted.unaccountedMs as number).toBeGreaterThanOrEqual(0);
     expect(persisted.unaccountedMs as number).toBeLessThanOrEqual(persisted.durationMs as number);
 
-    // The retained artifact: the exact breakdown, attribution, and bytes the
-    // persisted line costs. Host-load ratios are reserved for the heavy run.
     const report = {
       coldOpens: reports.length,
       runs: reports,
@@ -337,8 +294,6 @@ describe("settings.resolve request span", () => {
     const trust = new TrustService(agentDir);
     const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     let mode: "success" | "failure" = "success";
-    // The concrete public store supports an owned directory. Override only its
-    // read boundary with a real process; do not erase the dependency's type.
     class FixtureMacTerminalService extends MacTerminalService {
       override async read(): Promise<Record<string, string>> {
         try {

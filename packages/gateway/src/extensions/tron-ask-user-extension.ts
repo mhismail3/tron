@@ -51,16 +51,10 @@ const parameters = Type.Object({
   }, { additionalProperties: false }), { minItems: 1, maxItems: 4 }),
 }, { additionalProperties: false });
 
-/**
- * Tron owns the default form capability. It uses the same broker request seam
- * as the narrowly supported foreign adapter, but has no marker protocol or
- * package-provided event/context behavior.
- */
 export function createTronAskUserExtension(): ExtensionFactory {
   return (pi) => {
     pi.registerTool({
       name: "ask_user",
-      // docs/settings-model.md 5.4: declares it reads no open-world content.
       annotations: { openWorldHint: false },
       label: "Ask User",
       description: "Ask the user one bounded set of questions and wait for one atomic answer in Tron.",
@@ -75,9 +69,6 @@ export function createTronAskUserExtension(): ExtensionFactory {
       execute: async (toolCallId, request: AskUserParameters, signal, _onUpdate, context) => {
         if (!context?.ui || !context.hasUI) throw new Error("ask_user requires an interactive Tron form host");
         const form = toForm(request);
-        // A stopped run leaves its unanswered question in the transcript (also when asked
-        // from inside codemode, whose nested result never reaches the transcript), so a
-        // resume in place can ask it again.
         const interrupted = () => {
           pi.appendEntry(TRON_ASK_USER_INTERRUPTED, { version: 1, toolCallId, title: form.title, questions: resultQuestions(form) });
           return cancelledResult(form, AGENT_ABORTED_TEXT);
@@ -189,9 +180,6 @@ function isAnswerValue(value: unknown): value is AskUserAnswerValue {
 }
 
 function resultQuestions(form: ExtensionFormDescriptor): AskUserResultQuestion[] {
-  // Result details are a public history shape, not the broker's ID-bearing
-  // wire form. Keep IDs out so old native readers can decode the result while
-  // preserving the descriptive fields needed to reconstruct the form.
   return form.questions.map((question) => ({
     ...(question.header === undefined ? {} : { header: question.header }),
     question: question.question,

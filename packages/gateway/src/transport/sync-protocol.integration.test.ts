@@ -110,9 +110,6 @@ describe("two-phase session synchronization protocol", () => {
     const waitStarted = async (sessionId: string, count: number): Promise<void> => {
       await waitFor(() => (startedCounts.get(sessionId) ?? 0) >= count, `the first ${count} opens of ${sessionId}`);
     };
-    // Frames on one socket are admitted in order, so a later frame's answer
-    // proves every frame before it was already admitted. The probe is a
-    // `session.sync` for a token no synchronization owns, which fails closed.
     const awaitAdmitted = async (id: string): Promise<void> => {
       request(id, "session.sync", "same", { syncToken: "not-a-token" });
       await waitFor(() => frames.some((frame) => frame.id === id), `the ${id} response frame`);
@@ -120,9 +117,6 @@ describe("two-phase session synchronization protocol", () => {
     };
     request("open-1", "session.open", "same");
     await waitStarted("same", 1);
-    // A retried open joins the attempt already in flight for this connection and
-    // session: one invocation answers both requests with the same result instead
-    // of failing the retry as a duplicate open (C-6).
     request("open-2", "session.open", "same");
     await awaitAdmitted("join-fence");
     openResolvers.get("same")?.();
@@ -135,10 +129,6 @@ describe("two-phase session synchronization protocol", () => {
     request("sync-1", "session.sync", "same", { syncToken: first.result.syncToken });
     await waitFor(() => frames.some((frame) => frame.id === "sync-1"), "the sync-1 response frame");
 
-    // A sequential re-open replaces the installed subscription instead of
-    // conflicting, so a reconnecting client always converges on one owner. The
-    // revoked token can no longer close the replacement, and the replacement
-    // synchronizes normally.
     request("open-3", "session.open", "same");
     await waitStarted("same", 2);
     openResolvers.get("same")?.();
@@ -191,9 +181,6 @@ describe("two-phase session synchronization protocol", () => {
     await waitFor(() => frames.some((frame) => frame.id === "open-after-large"), "the open-after-large response frame");
     expect(frames.filter((frame) => frame.id).map((frame) => frame.id).length).toBe(new Set(frames.filter((frame) => frame.id).map((frame) => frame.id)).size);
 
-    // Technical clients may keep independent subscriptions, but a mobile
-    // presentation connection is explicitly one-slot: A -> B -> C revokes
-    // every prior exact owner before installing the next one.
 const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     const mobileFrames: any[] = [];
     mobile.on("message", (raw) => mobileFrames.push(JSON.parse(raw.toString())));
@@ -311,7 +298,6 @@ describe("synchronization catch-up overflow recovery", () => {
             await new Promise<void>((resolve) => { releaseTimedOutOpen = resolve; });
           }
           if (sessionId === "ordered") {
-            // In-window events quarantine and flush exactly once after the ack.
             gateway.broadcastSession(sessionId, "session.progress", {
               runtimeGeneration: `generation-${sessionId}`,
               eventSequence: 2,
@@ -319,7 +305,6 @@ describe("synchronization catch-up overflow recovery", () => {
               data: { message: "buffered" },
             } as any);
           } else if (!(sessionId === "gone" && openCount > 1)) {
-            // One frame larger than the quarantine byte budget forces overflow.
             gateway.broadcastSession(sessionId, "session.progress", {
               runtimeGeneration: `generation-${sessionId}`,
               eventSequence: 2,
@@ -543,8 +528,6 @@ describe("connection-wide synchronization ownership", () => {
     await request("sync-a", "session.sync", "a", { syncToken: openedA.result.syncToken });
     await waitFor(() => frames.some((frame) => frame.topic === "session.progress" && frame.sessionId === "a"), "session a's progress frame");
 
-    // The first commit releases its exact admission, so a new same-sized
-    // quarantine succeeds instead of inheriting b's aggregate overflow.
     const openedC = await request("open-c", "session.open", "c");
     gateway.broadcastSession("c", "session.progress", event("c", 2) as any);
     await request("sync-c", "session.sync", "c", { syncToken: openedC.result.syncToken });
@@ -560,9 +543,6 @@ describe("connection-wide synchronization ownership", () => {
     await waitFor(() => frames.slice(afterEvents).some((frame) => frame.topic === "session.progress" && frame.sessionId === "after"), "the events after the marker");
     expect(frames.slice(afterEvents).filter((frame) => frame.topic === "session.progress").map((frame) => frame.sessionId)).toEqual(["after"]);
 
-    // A replacement open rotates the carried fork token. A late close from the
-    // retired parent view resolves through the alias but cannot revoke the
-    // child's newer exact token.
     const staleSource = await request("open-stale-source", "session.open", "stale-source");
     await request("sync-stale-source", "session.sync", "stale-source", { syncToken: staleSource.result.syncToken });
     const staleFork = await request("fork-stale-source", "session.fork", "stale-source", { commandId: "command-fork-stale-source" });
@@ -578,8 +558,6 @@ describe("connection-wide synchronization ownership", () => {
     await waitFor(() => frames.slice(staleCloseEvents).some((frame) =>
       frame.topic === "session.progress" && frame.sessionId === staleChildID), "the stale child's progress frame");
 
-    // Repeated forks retain only a bounded recent alias window. The immediate
-    // predecessor must still route close controls to the current runtime.
     let currentSessionId = "after";
     let previousSessionId = "before";
     for (let index = 0; index <= MAXIMUM_REKEYED_SESSION_IDS; index += 1) {
@@ -601,8 +579,6 @@ describe("connection-wide synchronization ownership", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(frames.slice(closedEvents).some((frame) => frame.sessionId === currentSessionId && frame.topic === "session.progress")).toBe(false);
 
-    // Forking between open and sync moves the in-flight barrier and token;
-    // the carried former ID still commits exactly once to the new session.
     const openedPending = await request("open-pending", "session.open", "pending");
     await request("fork-pending", "session.fork", "pending", { commandId: "command-fork-pending" });
     const pendingStart = frames.length;
@@ -692,8 +668,6 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
         synchronizationBytes: number;
       }>;
     }).clients.values()][0]!;
-    // Hold every application write, so the baseline response and its
-    // synchronization suffix stay in the queue the way a slow link leaves them.
     const held: Array<{ encoded: string; done: (error?: Error) => void }> = [];
     vi.spyOn(connection.socket, "send").mockImplementation(((encoded: string, done?: (error?: Error) => void) => {
       held.push({ encoded, done: done ?? (() => {}) });
@@ -706,8 +680,6 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
 
     socket.send(JSON.stringify({ type: "request", id: "barrier-open", method: "session.open", params: { sessionId: "barrier-session" } }));
     await openBegan;
-    // While the barrier is pending, this session's state is quarantined, not
-    // queued: only the hello frame has been accepted so far.
     gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(2));
     gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(3));
     gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(4));
@@ -721,19 +693,12 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     expect(opened.id).toBe("barrier-open");
     socket.send(JSON.stringify({ type: "request", id: "barrier-sync", method: "session.sync", params: { sessionId: "barrier-session", syncToken: opened.result.syncToken } }));
     await waitFor(() => !connection.synchronizations.has("barrier-session"), "the barrier session's synchronization to close");
-    // Three quarantined 24 KiB snapshots exceed this connection's 48 KiB queue
-    // once the responses ahead of them are counted; the suffix is released as
-    // the one frame that carries the sequences it covers, and a later snapshot
-    // then supersedes even that.
     gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(6));
     expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 3, acceptedFrames: 4, oldestTopic: "response" });
     expect(connection.synchronizationBytes).toBe(0);
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")).toBe(false);
     release();
 
-    // Both responses precede the synchronization suffix, and the suffix is the
-    // gap-tolerant form of the newest state: the phone installs it as fresh
-    // authority instead of resynchronizing across the superseded sequences.
     expect(held).toHaveLength(3);
     const delivered = held.map((write) => JSON.parse(write.encoded) as {
       id?: string;
@@ -763,8 +728,6 @@ describe("disposable read cancellation", () => {
     const port = address.port;
     await new Promise<void>((resolve) => probe.close(() => resolve()));
 
-    // The fixture's open is the slow work the incident hit: it stays in flight
-    // until its signal aborts, so the test can cancel it while it runs.
     const openStarts: string[] = [];
     const aborts: string[] = [];
     const promptStarts: string[] = [];
@@ -780,8 +743,6 @@ describe("disposable read cancellation", () => {
       invoke: async (context: any, method: string, params: any) => {
         const sessionId = params.sessionId as string;
         if (method === "session.sync") {
-          // A synchronization acknowledgement is the owner's, not a read: the
-          // fixture can hold one open to prove a cancel does not end it.
           if (params.syncToken === "gated") {
             await new Promise<void>((resolve) => { releaseGatedSync = resolve; });
             return { synchronized: true };
@@ -797,8 +758,6 @@ describe("disposable read cancellation", () => {
         if (method !== "session.open") throw new Error(`unexpected method ${method}`);
         const syncToken = context.beginSynchronization(sessionId);
         openStarts.push(sessionId);
-        // Only an abort while the attempt still computes is the shared work
-        // being abandoned: releasing a finished flight also aborts its signal.
         let settled = false;
         await new Promise<void>((resolve, reject) => {
           releaseOpen = () => { settled = true; resolve(); };
@@ -852,9 +811,6 @@ describe("disposable read cancellation", () => {
     };
     const cancel = (id: string): void => { socket.send(JSON.stringify({ type: "cancel", id })); };
     const cancelled = () => records.filter((record) => record.metadata.event === "rpc.cancelled");
-    // Frames on one socket are admitted in order, so a later frame's answer
-    // proves every frame before it was already admitted. The probe is a
-    // synchronization with a token this fixture refuses, which always answers.
     const awaitAdmitted = async (id: string): Promise<void> => {
       sync(id, "not-a-token");
       await waitFor(() => answered(id) !== undefined, `an answer to ${id}`);
@@ -862,15 +818,11 @@ describe("disposable read cancellation", () => {
 
     open("open-1", "slow");
     await waitFor(() => openStarts.length === 1, "the first open");
-    // The retry joins the attempt in flight before it is released.
     open("open-2", "slow");
     await awaitAdmitted("join-fence");
     expect(openStarts).toEqual(["slow"]);
     expect(answered("open-2")).toBeUndefined();
 
-    // A cancel for the first open leaves the retry's answer alone: the shared
-    // attempt keeps running for the request that still waits for it, and the
-    // synchronization it installed stays for the retry to deliver.
     cancel("open-1");
     await waitFor(() => cancelled().length === 1, "the first cancellation record");
     expect(answered("open-1")).toBeUndefined();
@@ -881,13 +833,10 @@ describe("disposable read cancellation", () => {
     await waitFor(() => answered("open-2") !== undefined, "the joined retry's answer");
     expect(answered("open-2").ok).toBe(true);
     expect(answered("open-2").result.subscriptionToken).toBeTruthy();
-    // The retry owns the barrier its answer installed: it can synchronize.
     sync("sync-1", answered("open-2").result.subscriptionToken);
     await waitFor(() => answered("sync-1") !== undefined, "the retry's synchronization");
     expect(answered("sync-1").ok).toBe(true);
 
-    // Cancelling the last waiter stops the shared work: nothing computes an
-    // answer nobody waits for, and the cancelled request is never answered.
     open("open-3", "slow");
     await waitFor(() => openStarts.length === 2, "the second attempt");
     open("open-4", "slow");
@@ -903,14 +852,10 @@ describe("disposable read cancellation", () => {
     expect(answered("open-4")).toBeUndefined();
     expect(cancelled()[2]!.metadata).toMatchObject({ method: "session.open", requestID: "open-4", stage: "session.open.join" });
 
-    // A cancel for an id this connection never admitted changes nothing.
     cancel("never-admitted");
     await tick();
     expect(cancelled()).toHaveLength(3);
 
-    // An accepted prompt and a synchronization acknowledgement are their
-    // owners', not disposable reads: a cancel for either changes nothing, and
-    // both are still answered.
     socket.send(JSON.stringify({ type: "request", id: "prompt-1", method: "session.prompt", params: { sessionId: "slow" } }));
     await waitFor(() => promptStarts.length === 1, "the admitted prompt");
     cancel("prompt-1");
@@ -928,8 +873,6 @@ describe("disposable read cancellation", () => {
     await waitFor(() => answered("sync-gated") !== undefined, "the synchronization's answer");
     expect(answered("sync-gated").ok).toBe(true);
 
-    // A cancel that crosses an answered open revokes the barrier that response
-    // delivered, so the retry in that window is not a duplicate.
     open("open-5", "slow");
     await waitFor(() => openStarts.length === 3, "an answered open");
     releaseOpen?.();
@@ -948,9 +891,6 @@ describe("disposable read cancellation", () => {
     expect(answered("sync-2").ok).toBe(true);
     expect(cancelled()).toHaveLength(3);
 
-    // Two delivered answers carry the barrier's token, so a cancel for only one
-    // of them leaves it: the phone may still accept the other. Once both are
-    // abandoned the barrier goes, and the next open is not a duplicate.
     open("open-7", "slow");
     await waitFor(() => openStarts.length === 5, "the joined attempt");
     open("open-8", "slow");
@@ -960,7 +900,6 @@ describe("disposable read cancellation", () => {
     await waitFor(() => answered("open-7") !== undefined && answered("open-8") !== undefined, "both joined answers");
     expect(answered("open-7").result.subscriptionToken).toBe(answered("open-8").result.subscriptionToken);
     cancel("open-7");
-    // A later answered frame proves the cancel was already processed.
     await awaitAdmitted("cancel-fence");
     expect(connection.synchronizations.has("slow")).toBe(true);
     cancel("open-8");
@@ -987,9 +926,6 @@ describe("mobile presentation slot", () => {
     const port = address.port;
     await new Promise<void>((resolve) => probe.close(() => resolve()));
 
-    // Each page's open is released one at a time, so the test decides exactly
-    // when a newer page retires the answered one before its synchronization -
-    // the interleaving the qualification driver's several pages in flight hit.
     const openStarts: string[] = [];
     const openGates = new Map<string, () => void>();
     const service = {
@@ -1010,8 +946,6 @@ describe("mobile presentation slot", () => {
           return { closed: context.unsubscribe(sessionId, params.subscriptionToken) };
         }
         if (method !== "session.open") throw new Error(`unexpected method ${method}`);
-        // Ownership is installed before the page is built, as the real open
-        // does, so the newer page's arrival retires this answer's barrier.
         const syncToken = context.beginSynchronization(sessionId);
         openStarts.push(sessionId);
         await new Promise<void>((resolve) => openGates.set(sessionId, resolve));
@@ -1062,16 +996,12 @@ describe("mobile presentation slot", () => {
       return openGates.get(sessionId)!;
     };
 
-    // The first page is answered and its client has not synchronized yet.
     const releaseFirst = await openPage("first", "page-a", 1);
     releaseFirst();
     await waitFor(() => answered("first-open") !== undefined, "the first page's answer");
     const firstPage = answered("first-open");
     expect(firstPage.ok).toBe(true);
 
-    // A newer page on the same mobile connection retires that answered open:
-    // this connection holds one presentation, and the phone that replaced its
-    // mounted chat never synchronizes the page it abandoned.
     const releaseSecond = await openPage("second", "page-b", 1);
     sync("abandoned", "page-a", firstPage.result.syncToken);
     await waitFor(() => answered("abandoned-sync") !== undefined, "the abandoned page's synchronization answer");
@@ -1080,8 +1010,6 @@ describe("mobile presentation slot", () => {
       message: "Session synchronization is no longer owned by this token",
     });
 
-    // The phone's own path for a page it stopped waiting for: a cancel for the
-    // answered open (`C-6`). It changes nothing about the newer owner.
     socket.send(JSON.stringify({ type: "cancel", id: "first-open" }));
     releaseSecond();
     await waitFor(() => answered("second-open") !== undefined, "the newer page's answer");
@@ -1089,8 +1017,6 @@ describe("mobile presentation slot", () => {
     await waitFor(() => answered("current-sync") !== undefined, "the newer page's synchronization answer");
     expect(answered("current-sync").result).toEqual({ synchronized: true });
 
-    // The abandoned page left no ownership behind: re-opening that session on
-    // the same connection synchronizes normally.
     const releaseAgain = await openPage("again", "page-a", 2);
     releaseAgain();
     await waitFor(() => answered("again-open") !== undefined, "the reopened page's answer");

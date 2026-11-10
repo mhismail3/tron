@@ -1,6 +1,3 @@
-// The patched pi-coding-agent declaration is accepted only as declared: the
-// checker runs as a process against a copy of the Gateway's real manifests,
-// lock, declaration and tarball, then against single-fault variants.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, chmodSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -70,10 +67,6 @@ test("the SDK updater installs only the cohort its patch declaration was rebuilt
   assert.deepEqual(readFileSync(join(root, "package.json")), before);
 });
 
-// A real npm stand-in process: it answers the registry preflight with the
-// declaration's own integrities and no gitHead (as Pi publishes since 1.1.0),
-// records every invocation, and fails the install, so the updater must restore
-// the manifests and run npm ci.
 test("a failed patched-cohort install restores the manifests and runs npm ci", (t) => {
   const root = fixture(t);
   execFileSync("git", ["init", "-q"], { cwd: root });

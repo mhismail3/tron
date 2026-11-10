@@ -24,7 +24,6 @@ export function successfulAssistantCompletion(
   return { id: entry.id, completedAt: entry.timestamp };
 }
 
-/** Recover only the canonical completion owned by durable run-marker evidence. */
 export function completionOwnedByMarker(
   manager: Pick<SessionManager, "getEntry">,
   marker: RunMarkerEvidence,

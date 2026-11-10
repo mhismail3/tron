@@ -7,7 +7,6 @@ import { TrustService } from "../../kernel/resources/trust-service.js";
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { ORDINARY_MODULE_NAMES } from "../../extensions/tron-modules.js";
 
-/** The registered module names of one real session, without the SDK's inline path form. */
 function inlineModuleNames(resources: Record<string, any>): string[] {
   return resources.extensions
     .filter((extension: any) => extension.source === "inline")
@@ -55,8 +54,6 @@ describe("RuntimeSlot Tron module registration", { concurrent: false }, () => {
     const registered = inlineModuleNames(await slot.resources() as Record<string, any>);
     const definitionNames = ORDINARY_MODULE_NAMES;
     const undefinedModules = registered.filter((name) => !definitionNames.includes(name));
-    // A module the runtime registers but the definition does not is exactly the drift
-    // `modules.list` would report wrongly; a name is the whole identity here.
     expect(undefinedModules).toEqual([]);
     const positions = registered.map((name) => definitionNames.indexOf(name));
     expect(positions).toEqual([...positions].sort((left, right) => left - right));
@@ -68,8 +65,6 @@ describe("RuntimeSlot Tron module registration", { concurrent: false }, () => {
       "tron-ask-user",
       "tron-display",
     ]));
-    // This host injects no live-view, automation or notification owner, so the
-    // definition's owner-gated modules stay out. tron-computer follows the host platform.
     for (const name of ["tron-native-capture", "tron-schedule", "tron-notify"]) {
       expect(registered).not.toContain(name);
     }

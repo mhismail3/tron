@@ -4,10 +4,6 @@ import { ModelQueueExhausted, type ModelQueueOwner } from "../providers/model-qu
 import { isUsageLimitError } from "../providers/model-queue-extension.js";
 import type { EpisodicCompactorRequest, EpisodicSummarizer } from "./episodic-contract.js";
 
-/*
- * One agent-first archival line per node, shared by leaf and merge calls.
- * Kinds describe canonical sources; prose carries the facts, not role tags.
- */
 export const EPISODIC_COMPACT_PROMPT = `Write one concise, information-dense memory line for Tron. It replaces one
 message or two adjacent lines in a binary summary tree and will be merged
 again. Agents must be able to recover what happened and find the source by
@@ -43,22 +39,10 @@ a plan into a result or erase an earlier blocker without evidence it ended.
 Keep each item at least findable by a specific anchor; non-ASCII costs 2–4
 bytes.`;
 
-/** A compactor reply is one line, but a reasoning model spends output tokens
- * thinking before it writes it: a 2,048-token ceiling let DeepSeek on OpenCode
- * Go reason through the whole budget and write nothing (#480). 8,192 leaves room
- * for bounded reasoning, the line and the overshoot the size loop trims, while
- * a runaway reply stays bounded. */
 export const COMPACTOR_MAX_TOKENS = 8_192;
 
-/** The reasoning asked of a model: off (maintainer decision on #485), clamped
- * to the least each model supports, so a model that cannot turn reasoning off
- * runs at its lowest level. Measured on #467: with reasoning off,
- * DeepSeek v4 Flash finished the size loop in 3-5 s, while v4.1 Flash, which
- * has no off, reasoned through its whole output at low. */
 const COMPACTOR_REASONING: ModelThinkingLevel = "off";
 
-/** Why a reply wrote no line: a reasoning model that stopped on the output
- * ceiling with only reasoning gets a reason that names it. */
 export function emptyReplyDetail(message: AssistantMessage): string {
   const reasoned = message.content.some((part) => part.type === "thinking");
   return message.stopReason === "length" && reasoned
@@ -66,8 +50,6 @@ export function emptyReplyDetail(message: AssistantMessage): string {
     : "the compactor returned no line";
 }
 
-/** Models count words, not bytes. Memory lines run about 7.5 UTF-8 bytes per
- * word, so a word budget at 8.5 bytes a word keeps the first reply near the limit. */
 function wordBudget(nodeBytes: number): number {
   return Math.floor(nodeBytes / 8.5);
 }
@@ -76,18 +58,15 @@ function words(line: string): number {
   return line.split(" ").filter(Boolean).length;
 }
 
-/** The step for a level-0 node (gist §4.2): the message whole, newlines kept. */
 export function leafStep(kind: string, text: string, nodeBytes: number): string {
   return `Compress this message into one line of content only, in at most ${nodeBytes} bytes (about ${wordBudget(nodeBytes)} words). Do not add a role label; Tron attaches the canonical kind:\n<stretch>\n${kind}: ${text}\n</stretch>\nContent only, no role label.`;
 }
 
-/** The step for a merge: the two lines written out again, newlines flattened. */
 export function mergeStep(childA: string, childB: string, nodeBytes: number): string {
   const flatten = (text: string) => text.replace(/\s*\n\s*/gu, " ");
   return `Merge these two lines into one, in at most ${nodeBytes} bytes (about ${wordBudget(nodeBytes)} words):\n<stretch>\n${flatten(childA)}\n${flatten(childB)}\n</stretch>\nContent only, no role labels.`;
 }
 
-/** The size loop's feedback, in the same conversation (gist §4.3). */
 export function sizeFeedback(line: string, nodeBytes: number): string {
   return `That line is ${Buffer.byteLength(line, "utf8")} bytes (${words(line)} words); the limit is ${nodeBytes} bytes (about ${wordBudget(nodeBytes)} words). Rewrite the whole line more concisely, aiming below ${Math.floor(nodeBytes * 0.9)} bytes. Keep exact identifiers, decisions and outcomes; compress tool chatter first. Finish complete words. Output only the revised line, not this feedback.`;
 }
@@ -96,9 +75,6 @@ const ZERO_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, to
 
 function turnToMessage(turn: EpisodicCompactorRequest["turns"][number], model: Model<Api>): Message {
   if (turn.role === "user") return { role: "user", content: turn.text, timestamp: 0 };
-  // The size loop's feedback needs the model's own previous line in the
-  // conversation; this is the same model answering its own turn, so it carries
-  // the request's identity and no usage of its own.
   const assistant: AssistantMessage = {
     role: "assistant",
     content: [{ type: "text", text: turn.text }],
@@ -112,40 +88,25 @@ function turnToMessage(turn: EpisodicCompactorRequest["turns"][number], model: M
   return assistant;
 }
 
-/** The default summarizer: one `completeSimple` call per compactor turn on the
- * background model queue (providers/model-queue.ts), which moves to the next
- * model on a usage-limit error and refuses loudly when none is left. */
 export function createQueueSummarizer(queue: Pick<ModelQueueOwner, "complete">): EpisodicSummarizer {
   return async (request) => (await queue.complete("background", model => summaryRequest(request, model), request.signal)).message;
 }
 
 function summaryRequest(request: EpisodicCompactorRequest, model: Model<Api>): { context: Context; options: SimpleStreamOptions } {
   const messages = request.turns.map(turn => turnToMessage(turn, model));
-  // pi-ai's `reasoning` option names a level; leaving it out is pi-ai's off,
-  // which its request builders send as the model's off value where the API can
-  // express one. GitHub Copilot's Responses API is the exception: pi-ai sends no
-  // effort there, so its default applies. A model that cannot turn reasoning off
-  // would otherwise reason at its default, which ran through the whole output on
-  // #467, so it gets its least level instead.
   const reasoning = model.reasoning ? clampThinkingLevel(model, COMPACTOR_REASONING) : "off";
   return { context: { systemPrompt: request.system, messages }, options: {
     maxTokens: COMPACTOR_MAX_TOKENS,
     ...(reasoning === "off" ? {} : { reasoning }),
     sessionId: request.cacheKey,
-    // Home's memory is extended on and off through a day; long retention keeps
-    // the shared system prompt and a size loop's step cached between calls.
     cacheRetention: "long",
   } };
 }
 
-/** One summary line; thinking and tool calls are never part of it. */
 export function summarizerText(message: AssistantMessage): string {
   return message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("").replace(/\s+/gu, " ").trim();
 }
 
-/** Last resort after size repairs: never manufacture a partial word or hide
- * lost detail. Whitespace-delimited tokens keep identifiers and emoji whole;
- * an unbroken oversized token leaves only the mark (the source remains zoomable). */
 export function boundedSummary(line: string, nodeBytes: number): string {
   if (Buffer.byteLength(line, "utf8") <= nodeBytes) return line;
   const mark = nodeBytes >= 3 ? "…" : ".";
@@ -158,31 +119,17 @@ export function boundedSummary(line: string, nodeBytes: number): string {
   return prefix + mark;
 }
 
-/** A failed call's class. A plan limit is its own class: it lapses by time, so the
- * memory blocks as `usage-limit` and re-arms on a later activation, where a
- * `permanent` cause (auth, configuration, refusal) waits for an operator. */
 type EpisodicFailureClass = "transient" | "permanent" | "usage-limit";
 type EpisodicReplyClass = "ok" | EpisodicFailureClass;
 
-/** A provider's prompt-safety flag on one summary request. It is intermittent
- * for the same input (#880), so it is retried within the compactor's bound
- * rather than stopping memory on its first occurrence. */
 const PROMPT_SAFETY_FLAG = /flagged as potentially violating|violat\w* (?:our|the) usage polic/i;
 
 function providerErrorClass(message: AssistantMessage): EpisodicFailureClass {
   if (message.errorMessage && PROMPT_SAFETY_FLAG.test(message.errorMessage)) return "transient";
-  // The pinned classifier decides first: a 429 or rate limit it calls retryable
-  // stays transient even though the usage-limit vocabulary also matches it.
   if (isRetryableAssistantError(message)) return "transient";
   return isUsageLimitError(message.errorMessage) ? "usage-limit" : "permanent";
 }
 
-/**
- * Classify one compactor reply. A provider error the pinned classifier calls
- * transient, or a prompt-safety flag, is retried; a plan limit is `usage-limit`;
- * anything else — an empty reply, a refusal, a permanent provider error — blocks
- * immediately.
- */
 export function classifyReply(message: AssistantMessage): EpisodicReplyClass {
   if (message.stopReason === "stop" || message.stopReason === "length") {
     return summarizerText(message) === "" ? "permanent" : "ok";
@@ -191,19 +138,12 @@ export function classifyReply(message: AssistantMessage): EpisodicReplyClass {
   return "permanent";
 }
 
-/** What one call actually cost. The provider's own total is authoritative when
- * it reports one; otherwise every billed bucket is summed. */
 export function usageTokens(usage: Usage | undefined): number {
   if (!usage) return 0;
   if (typeof usage.totalTokens === "number" && Number.isFinite(usage.totalTokens)) return Math.max(0, Math.round(usage.totalTokens));
   return Math.max(0, (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0));
 }
 
-/** Classify a thrown compactor failure with the pinned provider classifier: an
- * auth or configuration error is permanent, a transient provider or transport
- * error is retried. The classifier reads an assistant message, so the thrown
- * text is handed to it in that shape. An exhausted queue with a plan-limited
- * candidate is `usage-limit`: that candidate can recover without repairing other skips. */
 export function classifyThrown(error: unknown): EpisodicFailureClass {
   if (error instanceof ModelQueueExhausted && error.limited) return "usage-limit";
   const message = error instanceof Error ? error.message : String(error);
@@ -214,12 +154,10 @@ export function classifyThrown(error: unknown): EpisodicFailureClass {
   return providerErrorClass(synthetic);
 }
 
-/** A node's request: the step alone, so the line can only restate its stretch. */
 export function compactorRequest(system: string, step: string, signal: AbortSignal, cacheKey: string): EpisodicCompactorRequest {
   return { system, turns: [{ role: "user", text: step }], signal, cacheKey };
 }
 
-/** A request the size loop continues: the same conversation, one more turn. */
 export function withFeedback(request: EpisodicCompactorRequest, reply: string, feedback: string): EpisodicCompactorRequest {
   return { ...request, turns: [...request.turns, { role: "assistant", text: reply }, { role: "user", text: feedback }] };
 }

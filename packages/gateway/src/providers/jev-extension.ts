@@ -10,12 +10,10 @@ const parameters = Type.Object({
 }, { additionalProperties: false });
 type JevToolParameters = Static<typeof parameters>;
 
-/** First-party explicit Jev evaluation tool. It owns no workflow state or budget ledger. */
 export function createJevExtension(client: JevDecisionClient): ExtensionFactory {
   return (pi) => {
     pi.registerTool({
       name: "jev",
-      // docs/settings-model.md 5.4: declares it reads no open-world content.
       annotations: { openWorldHint: false },
       label: "Jev Evaluate",
       description: "Evaluate explicitly supplied bounded JSON with Pi's TypeSafe classifier (choice, bool, or score questions). Bool answers use a probability; score answers include no legend or probability breakdown. Jev is a decision adapter, not chat completion; callers must supply their own rubric, disclosure, and budget authority.",

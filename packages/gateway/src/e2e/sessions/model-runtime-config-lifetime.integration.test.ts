@@ -3,8 +3,6 @@ import { syncBuiltinESMExports } from "node:module";
 import { afterEach, expect, it } from "vitest";
 import { disposeFixtures, fixture } from "../../../test-support/home-task-fixture.js";
 
-// Gate the real filesystem continuation, not a fake ModelRuntime/store. The
-// Registry fixture registers its provider and then awaits offline readiness.
 const actualReadFile = fsPromises.readFile;
 let releaseRead: (() => void) | undefined;
 let pendingFixture: ReturnType<typeof fixture> | undefined;
@@ -35,8 +33,6 @@ it("keeps real Gateway readiness behind an older registration config read before
     const ordinal = path === modelPath ? ++reads : 0;
     const read = Reflect.apply(actualReadFile, fsPromises, args) as Promise<unknown>;
     const gate = async () => {
-      // First read belongs to ModelRuntime.create. The second is the detached
-      // registration refresh; hold its real result (normally ENOENT).
       if (ordinal !== 2) return;
       entered.resolve();
       await held.promise;
@@ -46,8 +42,6 @@ it("keeps real Gateway readiness behind an older registration config read before
   syncBuiltinESMExports();
   pendingFixture = fixture();
   await Promise.race([entered.promise, pendingFixture.then(() => { throw new Error("Fixture readiness overtook the config-read gate"); })]);
-  // Later registration/readiness calls must not even dispatch another config
-  // read while the older one can still start credential/model-store work.
   expect(reads).toBe(2);
   held.resolve();
   const ready = await pendingFixture;

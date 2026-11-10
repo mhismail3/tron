@@ -9,8 +9,6 @@ const ledgerType = "tron.home-obligation.v1";
 const call = (request: Record<string, unknown>, id: string) => fauxAssistantMessage([fauxToolCall("obligation", request, { id })], { stopReason: "toolUse" });
 afterEach(async () => { vi.restoreAllMocks(); await disposeFixtures(); });
 
-/** Real Gateway/Pi tool loop with a deterministic provider. The intentionally lossy
- * summarizer models the witnessed parent summary, not the ledger's implementation. */
 describe("canonical Home maintainer obligations", () => {
   it("does not relist reported-done actions from stale summaries after summary compaction, chapter rollover and cold restart", async () => {
     const f = await fixture(false, false, undefined, false, undefined, { queueSummarizer: true });
@@ -26,8 +24,6 @@ describe("canonical Home maintainer obligations", () => {
         return fauxAssistantMessage("Ad setup steps and key prerequisite are still unconfirmed; maintainer owes both.");
       }
       if (replies.length) return replies.shift()!;
-      // A scripted consumer lists from the Gateway result. Before the feature, the
-      // tool is unavailable and the only current-state candidate is the stale view.
       const result = context.messages.filter(message => message.role === "toolResult").at(-1);
       const text = JSON.stringify(result);
       sawStaleSummary ||= JSON.stringify(context.messages).includes("still unconfirmed");
@@ -51,7 +47,6 @@ describe("canonical Home maintainer obligations", () => {
     for (let n = 0; n < 4; n += 1) await turn(`Unrelated synthetic topic ${n}. ${"Long context to require summarization. ".repeat(60)}`, []);
     await waitFor(async () => (await homeOwnerOf(f.registry).memoryStatus()).episodic?.pump.busy === 0, "summary tree settled");
     expect(summaries).toBeGreaterThan(0);
-    // Home intentionally refuses native transcript compaction; preserve that contract.
     await expect(home.compact()).rejects.toMatchObject({ code: "conflict" });
     const owner = homeOwnerOf(f.registry);
     const metrics = vi.spyOn((owner as unknown as { options: { sessions: { chapterMetrics(): Promise<unknown> } } }).options.sessions, "chapterMetrics")
@@ -70,7 +65,6 @@ describe("canonical Home maintainer obligations", () => {
     await waitFor(() => home.snapshot().operation === undefined, "owed answer settled");
     expect(sawStaleSummary).toBe(true);
     expect(answer).toBe("Nothing owed");
-    // The source chapter still holds both completion receipts, not a seeded side store.
     const old = await f.registry.sessionFile(f.home.sessionId);
     expect(old).toBeTruthy();
     const { readFile } = await import("node:fs/promises");
@@ -96,8 +90,6 @@ describe("canonical Home maintainer obligations", () => {
     ]);
     const results = () => home.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "toolResult");
     expect(results().slice(-2).every(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.isError)).toBe(true);
-    // A real worker emits the unadvertised tool; it has no ledger authority. Its
-    // accepted report then wakes Home, where even a matching old quote is refused.
     let workerCalls = 0;
     let wakeCalls = 0;
     f.faux.setResponses(Array.from({ length: 10 }, () => context => {

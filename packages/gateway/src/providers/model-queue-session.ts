@@ -5,12 +5,8 @@ import { GatewayError } from "../errors.js";
 import type { ModelQueueOwner } from "./model-queue.js";
 import { createModelQueueExtension } from "./model-queue-extension.js";
 
-/** The child half, as its own module: every managed subagent child loads it. */
 const MODEL_QUEUE_CHILD_EXTENSION = fileURLToPath(new URL(`./model-queue-extension${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
 
-/** Queue registration stays after ordinary modules and before worker controls.
- * Canonical launch inputs outlive the active task runtime: a cold-opened completed
- * worker still owns its recorded child policy, never the current Home profile. */
 export function modelQueueSessionExtensions(queue: ModelQueueOwner | undefined, session: SessionContext,
   requireChildren: Parameters<ModelRuntimePolicy["extensions"]>[1],
 ): ReturnType<ModelRuntimePolicy["extensions"]> {
@@ -40,8 +36,6 @@ export function modelQueueSessionExtensions(queue: ModelQueueOwner | undefined, 
     });
     pi.on("tool_call", async (event, ctx) => {
       if (event.toolName !== "subagent") return;
-      // Admission may persist launch inputs after the initial session_start.
-      // Bind from the same canonical choice immediately before actual launch.
       try {
         const selected = selection("subagent");
         await queue.publishProjection(selected === undefined ? undefined : { sessionId: session.sessionId(), queue: selected });

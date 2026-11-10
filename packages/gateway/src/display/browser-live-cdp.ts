@@ -9,7 +9,6 @@ const COMMAND_TIMEOUT_MS = 5_000;
 const FRAME_INTERVAL_MS = 200;
 const MAXIMUM_TARGETS = 8;
 
-/** Frame credit pacing must use the same monotonic clock as lifetime fences. */
 function browserFrameDelay(now: number, lastCreditAt: number): number {
   return Math.max(0, FRAME_INTERVAL_MS - (now - lastCreditAt));
 }
@@ -32,8 +31,6 @@ function record(value: unknown): Record<string, unknown> | undefined {
     ? value as Record<string, unknown> : undefined;
 }
 
-/** Inspect the JPEG's own SOF, not CDP viewport metadata (which can describe the
- * unscaled viewport). ImageIO remains the final decoder/admission on iOS. */
 function admitBrowserJPEG(data: Buffer): CapturedBrowserFrame | undefined {
   if (data.length < 12 || data.length > MAXIMUM_FRAME_BYTES
     || data.readUInt16BE(0) !== 0xffd8 || data.readUInt16BE(data.length - 2) !== 0xffd9) return;
@@ -57,9 +54,6 @@ function admitBrowserJPEG(data: Buffer): CapturedBrowserFrame | undefined {
   }
 }
 
-/** One disposable, read-only CDP attachment. No browser launch/automation or
- * reconnect loop lives here. A failed attachment ends; only a new viewer open
- * can retry the exact original browser UUID endpoint. */
 export function observeBrowserCDP(input: {
   endpoint: string;
   connect: (endpoint: string, maximumPayload: number) => WebSocket;
@@ -74,7 +68,6 @@ export function observeBrowserCDP(input: {
   let activeSession: string | undefined;
   let stopped = false;
   let frameTimer: NodeJS.Timeout | undefined;
-  // Start with one available credit; subsequent pacing uses only monotonic time.
   let lastCreditAt = performance.now() - FRAME_INTERVAL_MS;
   let latestEncoded: string | undefined;
   let firstFrameDeadline: number | undefined;
@@ -186,8 +179,6 @@ export function observeBrowserCDP(input: {
         command.reject(new Error("Browser observer command failed"));
       } else {
         const result = message.result as Record<string, unknown>;
-        // Publish attachment ownership before resolving the await: a detach
-        // event in the same socket batch must invalidate that exact result.
         if (command.targetId && identifier(result.sessionId)) sessions.set(command.targetId, result.sessionId);
         command.resolve(result);
       }
@@ -202,8 +193,6 @@ export function observeBrowserCDP(input: {
     if (!params || !Number.isSafeInteger(params.sessionId) || (params.sessionId as number) < 0
       || typeof params.data !== "string" || params.data.length > Math.ceil(MAXIMUM_FRAME_BYTES * 4 / 3)
       || acknowledgements.length >= 4) { stop(); return; }
-    // Chrome has a small in-flight window. Release one credit per 200ms, not
-    // every incoming frame; replace encoded frames before allocating JPEG bytes.
     acknowledgements.push(params.sessionId as number);
     latestEncoded = params.data;
     if (!frameTimer) frameTimer = setTimeout(drainFrames, browserFrameDelay(performance.now(), lastCreditAt));
@@ -220,8 +209,6 @@ export function observeBrowserCDP(input: {
     try { return await request(method, params, session); }
     catch (error) {
       if (!stopped && (error instanceof DetachedBrowserTarget || !attached(session))) return;
-      // A CDP error may precede its detach notification. Confirm disappearance
-      // with the browser rather than guessing from error text or ending peers.
       if (!stopped && target && !await targetExists(target)) {
         detachSession(session);
         return;
@@ -264,8 +251,6 @@ export function observeBrowserCDP(input: {
     await ready;
     let lastVisibleAt = performance.now();
     while (!stopped) {
-      // Successful setup is not frame delivery. Bound only the first frame of
-      // each selected target; an already painted static page needs no heartbeat.
       if (firstFrameDeadline !== undefined && performance.now() >= firstFrameDeadline) {
         throw new Error("Browser did not produce its first frame");
       }

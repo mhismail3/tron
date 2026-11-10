@@ -4,8 +4,6 @@ import readline from "node:readline";
 
 const [transport, statePath, pidPath, childPidPath, startupDelayArgument, readyPath] = process.argv.slice(2);
 const state = () => JSON.parse(readFileSync(statePath, "utf8"));
-// Tests poll for these files and read them once they exist, so each appears whole:
-// a plain write is visible empty first, and an empty PID or port read as 0 under load.
 const publish = async (path, text) => {
   const { rename, writeFile } = await import("node:fs/promises");
   await writeFile(`${path}.tmp`, text);
@@ -66,7 +64,6 @@ if (transport === "stdio") {
     reply.end(JSON.stringify(result));
   });
   server.listen(Number(process.env.MCP_FIXTURE_PORT ?? 0), "127.0.0.1", async () => {
-    // The port file, published whole like the PID files (#406).
     await publish(pidPath, String(server.address().port));
   });
   process.on("SIGTERM", () => server.close(() => process.exit(0)));

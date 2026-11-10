@@ -5,9 +5,6 @@ import { disposeFixtures, dispatch, fixture, reportCall } from "../../../../test
 import { waitFor } from "../../../../test-support/wait-for.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
-/** A result that settles after Home's chapter rolled over wakes Home in the reserved
- * successor (#1518). Before the fix the wake was refused `unavailable` and the result
- * waited for the maintainer's next message while Home showed "Recovery needed". */
 afterEach(async () => { vi.restoreAllMocks(); await disposeFixtures(); });
 
 type Entry = { type: string; customType?: string; message?: { role: string } };
@@ -26,7 +23,6 @@ it("wakes Home in the reserved successor when a result settles after a chapter r
   f.faux.setResponses([async () => { await worker; return fauxAssistantMessage([reportCall("rv", "Rollover result")], { stopReason: "toolUse" }); },
     fauxAssistantMessage("Successor wake reply")]);
   const run = await dispatch(f, "task-rollover");
-  // The delegating turn crosses the soft limit at its quiescent boundary, as in production.
   const owner = homeOwnerOf(f.registry) as unknown as {
     options: { sessions: { chapterMetrics(sessionId: string): Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
     chapterQuiescent(sessionId: string): Promise<void>;

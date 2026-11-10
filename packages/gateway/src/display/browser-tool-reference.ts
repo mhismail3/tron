@@ -1,9 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { BROWSER_LIVE_VIEW_SCHEMA, type BrowserLiveViewDescriptor } from "../modules/display/contract.js";
 
-// A descriptor alone is not tool-result provenance. Bind the provider admission
-// to this canonical call/session without keeping a second per-call registry.
-// Restart loses browser registrations too; these receipts are deliberately ephemeral.
 const key = randomBytes(32);
 interface BrowserToolReference {
   sessionId: string;

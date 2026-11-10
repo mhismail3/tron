@@ -8,21 +8,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { durableAtomicWriteText, durablePublishBoundedJson, syncDurably } from "../../foundation/durable-json.js";
 import { tronHomePath } from "../../foundation/tron-home-layout.js";
 
-/**
- * The settings change record (docs/settings-model.md 5.2, foundation F2).
- *
- * Audit and undo only: it is never consulted to compute a value. It is kept
- * forever (decision 12), append-only, in closed segments of at most
- * `SEGMENT_ENTRIES` lines named in `index.json`, so `settings.history` reads one
- * bounded segment per page (plus the newer segments' settling references). A
- * later fact about an entry (approved, expired, committed, outside) is a new
- * entry that refers to it; no line is rewritten.
- */
-
 export type ActorKind = "ui" | "home" | "worker" | "agent" | "outside";
 export interface Actor {
   kind: ActorKind;
-  /** Paired device id, session id, or the file for an outside change. */
   id: string;
   sessionId?: string;
   toolCallId?: string;
@@ -42,13 +30,11 @@ export interface ChangeEntry {
   key: string;
   qualifiers?: Qualifiers;
   op: "set" | "unset";
-  /** Absent for redacted keys, which record only `changed`. */
   before?: unknown;
   after?: unknown;
   fixedAt?: FixedSetting;
   changed?: true;
   redacted?: true;
-  /** A record subject that did not exist before (an MCP server or model provider added outside Tron). */
   added?: true;
   reason?: string;
   status: ChangeStatus;
@@ -56,12 +42,8 @@ export interface ChangeEntry {
   git?: GitResult;
   undoOf?: string;
   applyAgainOf?: string;
-  /** A later fact about an earlier entry. */
   refersTo?: string;
-  /** A typed action fact: `key` names its subject, `after` its preview. Never undoable. */
   action?: true;
-  /** Entries one change wrote together and undo reverts together: both notes of a
-   * profile supersede, or every item of one multi-item profile change (doc 6.4). */
   group?: { id: string; size: number };
 }
 
@@ -83,8 +65,6 @@ function publication(entries: readonly ChangeEntry[]): { name: string; encoded: 
 }
 
 export class SettingsChangeRecord {
-  /** Writers replace a segment before publishing its index; readers share this
-   * mutex so every read observes one published index/segment cut. */
   private readonly mutex = new AsyncMutex();
   private readonly directory: string;
 
@@ -94,7 +74,6 @@ export class SettingsChangeRecord {
 
   get path(): string { return this.directory; }
 
-  /** Recover complete published bytes before effects, with no effect replay or new journal. */
   async recover(): Promise<void> {
     await this.mutex.run(async () => { await this.recoverIndex(); });
   }
@@ -122,8 +101,6 @@ export class SettingsChangeRecord {
         segment.count += 1;
         writes.set(segment.name, text);
       }
-      // Atomic replacement preserves the existing prefix byte-for-byte. A crash
-      // cannot leave a partially appended row; index visibility follows durable bytes.
       for (const [name, content] of writes) await durableAtomicWriteText(join(this.directory, name + ".jsonl"), content);
       await this.publishIndex(index);
     });
@@ -145,15 +122,10 @@ export class SettingsChangeRecord {
     const names = new Set(index.segments.map(segment => segment.name));
     const orphans = files.filter(file => file.name.endsWith(".jsonl") && !names.has(file.name.slice(0, -6)));
     if (orphans.some(file => !file.isFile() || !segmentName(file.name.slice(0, -6)))) throw new GatewayError("conflict", "The settings audit contains an unknown segment");
-    // An unindexed Home group is not ordinary append recovery. Only Home can
-    // prove its domain committed and that Forget did not invalidate its envelope.
-    // appendOnce publishes that exact group on the owner\'s explicit retry.
     const ordered = orphans.map(file => file.name.slice(0, -6)).filter(name => !name.startsWith("once-")).sort();
     const candidates: ChangeEntry[] = [];
     let changed = false;
     const tail = index.segments.at(-1);
-    // A non-tail segment is immutable. A valid JSON newline truncation must not
-    // turn a complete grouped Undo into a silently partial restoration.
     for (const segment of index.segments.slice(0, -1)) await this.indexedLines(segment);
     if (tail) {
       const rows = await this.segmentLines(tail.name);
@@ -180,7 +152,6 @@ export class SettingsChangeRecord {
       throw new GatewayError("conflict", "The settings audit recovery contains an incomplete group");
     }
     if (changed) {
-      // Re-prove durability even when recovering a previous rename's visible bytes.
       for (const name of new Set([...(tail ? [tail.name] : []), ...ordered])) {
         const file = await open(join(this.directory, name + ".jsonl"), "r");
         try { await syncDurably(file); } finally { await file.close(); }
@@ -192,11 +163,8 @@ export class SettingsChangeRecord {
     return index;
   }
 
-  /** Preflight before domain effects; publication enforces the same group/byte bound. */
   validateAppendOnce(entries: readonly ChangeEntry[]): void { publication(entries); }
 
-  /** One immutable group, one index visibility cut. The existing mutex also
-   * serializes ordinary writers; replay re-proves file and parent durability. */
   async appendOnce(entries: readonly ChangeEntry[]): Promise<void> {
     const intent = publication(entries);
     if (!intent) return;
@@ -226,13 +194,10 @@ export class SettingsChangeRecord {
       const indexed = index.segments.find(segment => segment.name === name);
       if (indexed && (indexed.count !== count || !indexed.closed)) throw new GatewayError("conflict", "The settings transfer index conflicts with its intent");
       if (!indexed) index.segments.push({ name, count, closed: true });
-      // Even an indexed retry must re-prove the publication's durability.
       await durablePublishBoundedJson(join(this.directory, "index.json"), index, 16 * 1024 * 1024);
     });
   }
 
-  /** Newest first. The cursor names a segment and how many of its lines remain.
-   * Audit keeps every fact; presentation never folds retired approval outcomes. */
   async page(input: { cursor?: string; limit?: number; filter?: (entry: ChangeEntry) => boolean }): Promise<{ entries: ChangeEntry[]; nextCursor?: string }> {
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
     return this.mutex.run(async () => {
@@ -241,8 +206,6 @@ export class SettingsChangeRecord {
       const entries: ChangeEntry[] = [];
       const segment = index.segments[segmentIndex];
       if (!segment) return { entries };
-      // Bound scanned work, not just returned matches: a sparse filter over the
-      // permanent audit must yield an empty page + cursor instead of a full scan.
       const lines = await this.indexedLines(segment);
       let end = Math.min(remaining, lines.length);
       while (end > 0 && entries.length < limit) {
@@ -255,7 +218,6 @@ export class SettingsChangeRecord {
     });
   }
 
-  /** An entry and every later fact that refers to it, oldest first. */
   async entry(changeId: string): Promise<{ entry: ChangeEntry; facts: ChangeEntry[]; undone?: true } | undefined> {
     return this.mutex.run(async () => {
       const index = await this.index();
@@ -274,7 +236,6 @@ export class SettingsChangeRecord {
     });
   }
 
-  /** Exact complete group, oldest first. Corrupt history never authorizes a partial Undo. */
   async group(groupId: string, size: number): Promise<ChangeEntry[]> {
     return this.mutex.run(async () => {
       const index = await this.index();
@@ -293,7 +254,6 @@ export class SettingsChangeRecord {
     });
   }
 
-  /** Any entry by its own id, a later fact included (an outside change refers to the value it replaced). */
   async find(changeId: string): Promise<ChangeEntry | undefined> {
     return this.mutex.run(async () => {
       const index = await this.index();

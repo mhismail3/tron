@@ -1,6 +1,5 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
 
-/** Synthetic 3×2 RGBA PNG. It contains no user or host data. */
 export const SYNTHETIC_NATIVE_IMAGE: ImageContent = {
   type: "image",
   data: "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAEUlEQVR4nGP4z8DwH4YZkDkAm34L9XKwuTwAAAAASUVORK5CYII=",
@@ -12,14 +11,12 @@ export interface ImageDimensions {
   height: number;
 }
 
-/** Decode only the PNG or JPEG metadata this fixture needs; no image pixels are written. */
 export function imageDimensions(image: ImageContent): ImageDimensions {
   const bytes = Buffer.from(image.data, "base64");
   if (bytes.length >= 24 && bytes.subarray(0, 8).toString("hex") === "89504e470d0a1a0a" && bytes.subarray(12, 16).toString("ascii") === "IHDR") {
     return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
   }
   if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
-    // JPEG: walk the marker segments to the first baseline/progressive start-of-frame.
     let offset = 2;
     while (offset + 9 <= bytes.length && bytes[offset] === 0xff) {
       const marker = bytes.readUInt8(offset + 1);

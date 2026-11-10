@@ -45,7 +45,6 @@ it.each(["replace", "dispose"] as const)("K1 display retirement revokes only the
     };
     const retiring = admit(target.id);
     const retained = admit(unrelated.id);
-    // Establish admission before retirement so a denied or pre-retired fixture cannot pass.
     for (const { registration: ref, descriptor } of [retiring, retained]) {
       expect(views.isLoadActive(ref.sessionId, ref.loadToken)).toBe(true);
       expect(views.describe(ref.sessionId, ref.viewId, ref.generation)).toEqual(descriptor);

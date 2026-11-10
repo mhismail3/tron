@@ -1,7 +1,5 @@
 import { redact, redactCredentials, redactCredentialField } from "./credential-redaction.js";
 
-/** Transport-independent classification of an upstream failure. Queue policy,
- * account-usage reads and transcript presentation consume these same facts. */
 export interface UpstreamErrorInfo {
   message: string;
   providerMessage: string;
@@ -20,9 +18,6 @@ function string(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-/** Preserve JSON syntax while masking secret-valued fields as well as known
- * credential shapes. Request IDs, model names and ordinary diagnostic fields
- * remain useful; the canonical SDK record is never rewritten. */
 export function redactedUpstreamError(raw: string): string {
   const start = raw.indexOf("{");
   if (start >= 0) {
@@ -30,13 +25,11 @@ export function redactedUpstreamError(raw: string): string {
       const value: unknown = JSON.parse(raw.slice(start));
       const clean = JSON.stringify(value, redactCredentialField);
       return redactCredentials(raw.slice(0, start)) + clean;
-    } catch { /* Non-JSON diagnostics keep their original layout. */ }
+    } catch { }
   }
   return redactCredentials(redact(raw));
 }
 
-/** Account endpoints may only infer credential/plan facts from these typed
- * refusals, never from general prose such as an edge page's "unauthorized". */
 export function upstreamAccountRefusal(body: unknown): "entitlement" | "credential" | undefined {
   const type = object(object(body)?.error)?.type;
   if (type === "EntitlementError") return "entitlement";
@@ -47,7 +40,7 @@ export function upstreamAccountRefusal(body: unknown): "entitlement" | "credenti
 export function upstreamErrorInfo(raw: string, provider: string): UpstreamErrorInfo {
   const safe = redactedUpstreamError(raw);
   let root: Record<string, unknown> | undefined;
-  try { root = object(JSON.parse(safe.slice(Math.max(0, safe.indexOf("{"))))); } catch { /* Text fallback below. */ }
+  try { root = object(JSON.parse(safe.slice(Math.max(0, safe.indexOf("{"))))); } catch { }
   const error = object(root?.error) ?? root;
   const type = string(error?.type) ?? string(error?.code);
   const message = string(error?.message) ?? string(root?.message) ?? string(root?.error) ?? safe;

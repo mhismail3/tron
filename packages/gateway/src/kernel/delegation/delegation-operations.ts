@@ -4,20 +4,15 @@ import { homeTaskSubagentRunsSettled } from "./task-subagents.js";
 import type { TaskWorkerControl } from "./worker-contract.js";
 import { interruptTaskWorker, stopTaskWorker, taskWorkerSteeringInput } from "./worker-control.js";
 
-/** Internal runaway ceiling for callers that explicitly opt into deadline ownership. */
 export const OWNED_OPERATION_DEADLINE_MS = 24 * 60 * 60 * 1_000;
 
 type OwnedLease<Session> = { slot: Session; release: () => void };
-/** Native session authority: retain its lease and rebind its worker under the
- * existing lane/rebuild operation, never through a second runtime or state copy. */
 type OwnedSession = {
   retainLease(): () => void;
   readonly ownedTurns: Pick<OwnedTurnOwner, "worker" | "bindWorker" | "releaseUnadmittedWorker">;
   prompt(...input: ReturnType<typeof taskWorkerSteeringInput>): Promise<unknown>;
 };
 type InterruptWorkerTools<Session> = (slot: Session, by: string, before?: () => Promise<void>) => Promise<string[]>;
-/** The session runtime's owned-session operations (RuntimeRegistry implements them). The
- * run owner imports delegation, so the session handle stays its type. */
 export interface OwnedSessions<Session extends OwnedSession> {
   acquire(sessionId: string): Promise<Session>;
   create(cwd: string, profile: "ordinary", report: HomeTaskReportOwner): Promise<Session>;
@@ -29,14 +24,9 @@ type OperationHandle<T> = {
   completion: Promise<T>;
   cancel: (reason?: string) => Promise<void>;
 };
-/** One armed deadline. Its signal aborts at the fixed ceiling; `disarm` releases the timer. */
 export interface OwnedOperationDeadline { readonly signal: AbortSignal; readonly armedAt: number; disarm: () => void }
 
-/** One kernel service owns worker lease/control/deadline orchestration. Native
- * session/run authorities keep their lane, canonical evidence and work tokens. */
 export class DelegationOperations<Session extends OwnedSession> {
-  /** Catalog attribution, not the live report-owner binding. A resumed task keeps
-   * the session\'s first attribution; native catalog/attention reads this owner. */
   private readonly workerAttribution = new Map<string, string>();
 
   hasWorkerAttribution(sessionId: string): boolean { return this.workerAttribution.has(sessionId); }
@@ -52,8 +42,6 @@ export class DelegationOperations<Session extends OwnedSession> {
     private readonly interruptTools: InterruptWorkerTools<Session>,
     private readonly resources: { readonly delegatedArtifactRoot?: string }) {}
 
-  /** Read the admitted resource root at recovery, not at service construction.
-   * The structural view is the actual native options object, never a copied root. */
   subagentRunsSettled(asyncDirs: readonly string[]): Promise<boolean> {
     const root = this.resources.delegatedArtifactRoot;
     return root === undefined ? Promise.resolve(asyncDirs.length === 0) : homeTaskSubagentRunsSettled(asyncDirs, root);
@@ -66,7 +54,6 @@ export class DelegationOperations<Session extends OwnedSession> {
 
   async interruptWorker(sessionId: string, control: TaskWorkerControl, by: string, text?: string): Promise<string[]> {
     const slot = await this.sessions.acquire(sessionId);
-    // K5 validates the exact operation before native I/O fixes its tool targets.
     return await interruptTaskWorker(slot.ownedTurns.worker, control,
       () => this.interruptTools(slot, by,
         text === undefined ? undefined : async () => { await slot.prompt(...taskWorkerSteeringInput(control, text)); }));
@@ -81,7 +68,6 @@ export class DelegationOperations<Session extends OwnedSession> {
     return { slot, release: slot.retainLease() };
   }
 
-  /** Rebinds an existing worker session to a resumed task's report owner (#929). */
   async resumeWorker(sessionId: string, report: HomeTaskReportOwner, exceptWorkToken?: string): Promise<OwnedLease<Session>> {
     const lease = await this.sessions.acquireOwnedSessionLease(sessionId);
     try {
@@ -90,8 +76,6 @@ export class DelegationOperations<Session extends OwnedSession> {
     } catch (error) { lease.release(); throw error; }
   }
 
-  /** An admission that never started a turn releases its binding/toolset too,
-   * not just its pin. A later binding is fenced by the actual K5 owner. */
   async abandonWorker(lease: OwnedLease<Session>, report: HomeTaskReportOwner): Promise<void> {
     try { await lease.slot.ownedTurns.releaseUnadmittedWorker(report); }
     finally { lease.release(); }
@@ -102,10 +86,6 @@ export class DelegationOperations<Session extends OwnedSession> {
     lease.release();
   }
 
-  /** Arms the fixed deadline of one opted-in operation. The caller disarms it only
-   * after settlement, so every bounded step of that operation (including the
-   * subagent join) shares the same 24-hour ceiling. The deadline is intentionally
-   * not configurable in production; tests advance the timer by the fixed value. */
   armDeadline(): OwnedOperationDeadline {
     const controller = new AbortController();
     const armedAt = Date.now();
@@ -117,9 +97,6 @@ export class DelegationOperations<Session extends OwnedSession> {
     };
   }
 
-  /** Applies the armed deadline to the opted-in task operation. `elapsedMs` is the
-   * wall time from arming to the stop's join or failure, so the caller reports the
-   * stop with the outcome it already holds. */
   async enforceDeadline<T>(handle: OperationHandle<T>, deadline: OwnedOperationDeadline): Promise<
     | { state: "terminal"; terminal: T }
     | { state: "deadline-stopped"; terminal: T; elapsedMs: number }

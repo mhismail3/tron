@@ -15,11 +15,6 @@ import { EpisodicMemory } from "./episodic-memory.js";
 import { EpisodicStore } from "./episodic-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
-// #480 B1-B4, found live: opencode-go's DeepSeek spent its whole output ceiling
-// on reasoning and the memory blocked. The production summarizer talks to a
-// local OpenAI-compatible endpoint through pi-ai's real request builder, and the
-// endpoint records every request body.
-
 import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
 type Reply = "line" | "reasoning-only" | "copy-example" | "limit";
 
@@ -27,9 +22,6 @@ async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
   const bodies: Array<Record<string, unknown>> = [];
   const server: Server = createServer((request, response) => {
     let raw = "";
-    // Decode the whole stream, not each chunk: a chunk may end inside a
-    // multi-byte character (the prompt's ’), which per-chunk decoding turns into
-    // U+FFFD and so changes the recorded prefix bytes (#2228).
     request.setEncoding("utf8");
     request.on("data", (chunk) => { raw += chunk; });
     request.on("end", () => {
@@ -47,8 +39,6 @@ async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
       const usage = { prompt_tokens: 40, completion_tokens: 20, total_tokens: 60 };
       response.writeHead(200, { "content-type": "text/event-stream" });
       if (selected === "copy-example") {
-        // A deterministic copy-prone provider, not a claim about live-model
-        // fidelity: any factual size demonstration competes with real sources.
         const messages = body.messages as Array<{ role: string; content: unknown }>;
         const input = JSON.stringify(messages.filter(message => message.role === "user").map(message => message.content));
         const source = input.slice(Math.max(input.lastIndexOf("Compress this message"), input.lastIndexOf("Merge these two lines")));
@@ -103,10 +93,8 @@ async function fixture(reply: (body: Record<string, unknown>) => Reply) {
     baseUrl: `http://127.0.0.1:${local.port}/v1`, api: "openai-completions", apiKey: "local-test-key",
     compat: { supportsReasoningEffort: true },
     models: [
-      // Can turn reasoning off, mapped to the wire value "none" (as OpenAI's models are).
       { id: "reasoner", name: "Reasoner", reasoning: true, input: ["text"], contextWindow: 1_000_000, maxTokens: 65_536,
         thinkingLevelMap: { off: "none", low: "low", high: "high" } },
-      // Cannot turn reasoning off (as DeepSeek v4.1 Flash on OpenCode Go): its lowest level is low.
       { id: "always-reasons", name: "Always reasons", reasoning: true, input: ["text"], contextWindow: 1_000_000, maxTokens: 65_536,
         thinkingLevelMap: { off: null, minimal: null, low: "low", high: "high" } },
       { id: "plain", name: "Plain", reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 65_536 },
@@ -144,9 +132,6 @@ describe("the episodic summarizer on a reasoning model", () => {
     await writeFile(join(GATEWAY_ROOT, "test-results/episodic-reasoning-model/fallback.json"), JSON.stringify({ models: f.bodies.map(body => body.model), status: memory.status() }, null, 2) + "\n");
   });
 
-  // B1, B2 and B4, and #485: reasoning off wherever a model supports it, else its
-  // least; no reasoning parameter for a plain model; a ceiling with room for any
-  // reasoning plus the line.
   it("asks each model for the least reasoning it supports, and a plain model for none", async () => {
     trackCase(0);
     const f = await fixture(() => "line");
@@ -185,7 +170,6 @@ describe("the episodic summarizer on a reasoning model", () => {
     const memory = await EpisodicMemory.open({
       workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!),
       summarizer: singleModelSummarizer(f.runtime, { provider: "local-openai", id: "plain" }),
-      // Exercise actual view-needed merges, not speculative summaries.
       limits: { nodeBytes: 256, viewBytes: 128, jobs: 1 },
     });
     cleanups.push(async () => { await memory.dispose(); });
@@ -212,7 +196,6 @@ describe("the episodic summarizer on a reasoning model", () => {
     expect(memory.status().blocked).toBeNull();
   });
 
-  // B3: a reply that spent its whole ceiling on reasoning blocks with a reason that says so.
   it("blocks with an explicit reason when the whole output went to reasoning", async () => {
     trackCase(1);
     const f = await fixture(() => "reasoning-only");

@@ -25,8 +25,6 @@ async function fixture() {
   await store.initialize();
   const notifications = new NotificationService(store, { available: false } as PushRelayClient);
   const reads = vi.spyOn(notifications, "markSessionInboxRead");
-  // No agent runtime is opened: this exercises the real admitted-subscription,
-  // presence and notification owners without a provider or delivery service.
   const registry = await createTestRegistry({
     agentDir: join(root, "agent"), tronHome: root, idleRuntimeMs: 60_000,
     trust: new TrustService(join(root, "agent")), broadcast() {}, sessionSummaryChanged() {}, sessionListChanged() {},
@@ -65,13 +63,13 @@ describe("visible session notification read admission", () => {
       .toEqual([["notification-a", true], ["notification-b", false]]);
 
     await append("notification-later");
-    present(2); // duplicate
-    present(1); // delayed request
-    present(3); // normal 15-second renewal
+    present(2);
+    present(1);
+    present(3);
     expect(reads).toHaveBeenCalledTimes(1);
     expect((await store.snapshot()).inbox![2]!.readAt).toBeUndefined();
     present(4, false);
-    present(3); // old visible request must not resurrect the hidden owner
+    present(3);
     expect(reads).toHaveBeenCalledTimes(1);
     present(5);
     await reads.mock.results[1]!.value;

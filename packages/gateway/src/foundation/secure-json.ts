@@ -14,11 +14,6 @@ export class SecureJsonFileError extends Error {
   }
 }
 
-/**
- * Read one Gateway-owned JSON file without admitting symlinks or permissive
- * ownership. Missing is represented separately; every other boundary failure
- * is an exception so callers cannot silently replace unsafe state.
- */
 export async function readSecureJson<T>(path: string, maximumBytes: number): Promise<SecureJsonRead<T>> {
   const read = await readSecureText(path, maximumBytes);
   if (!read.present) return read;
@@ -29,8 +24,6 @@ export async function readSecureJson<T>(path: string, maximumBytes: number): Pro
   }
 }
 
-/** The same owner-only, symlink-free bounded read for a Gateway-owned text
- * file (a Swift app's source, for example). Content is returned as UTF-8. */
 export async function readSecureText(path: string, maximumBytes: number): Promise<SecureJsonRead<string>> {
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes <= 0 || maximumBytes > MAX_SECURE_JSON_BYTES) {
     throw new RangeError(`maximumBytes must be an integer from 1 through ${MAX_SECURE_JSON_BYTES}`);
@@ -55,7 +48,6 @@ export async function readSecureText(path: string, maximumBytes: number): Promis
 
   let handle;
   try {
-    // O_NOFOLLOW closes the lstat/open symlink race for the final path entry.
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const metadata = await handle.stat();
     if (!metadata.isFile() || metadata.uid !== ownerUid || (metadata.mode & 0o077) !== 0
@@ -83,7 +75,6 @@ export async function readSecureText(path: string, maximumBytes: number): Promis
     return { present: true, value: buffer.subarray(0, metadata.size).toString("utf8") };
   } catch (error) {
     if (error instanceof SecureJsonFileError) throw error;
-    // A path that disappeared after lstat was present is not an absent file.
     if ((error as NodeJS.ErrnoException).code) {
       throw new SecureJsonFileError("unsafe", "JSON file could not be securely read");
     }

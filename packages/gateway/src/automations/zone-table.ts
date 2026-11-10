@@ -1,21 +1,8 @@
-/**
- * The UTC offsets of an IANA timezone around an instant, as data for proof block schedule/calendar
- * (packages/core/laws/schedule/Calendar.dfy): the offset before the first change and each change (instant, new
- * offset), in milliseconds. The block is integer arithmetic over this table; the table is its one trusted input
- * (block Assumption A1), read from Intl.
- *
- * Offsets are read at whole minutes, floored to the whole minute the local wall clock shows (a historical offset in
- * seconds, such as a zone's local mean time, shows its wall clock to the minute), so every offset and change
- * instant is a whole minute. Changes are found by sampling every SAMPLE_MS and bisecting a sampled difference to
- * the minute; two changes closer together than SAMPLE_MS that cancel out are not seen (no IANA zone has one in
- * the years automations use).
- */
 export interface ZoneTable {
   readonly base: number;
   readonly changes: readonly { readonly at: number; readonly offset: number }[];
 }
 
-/** The table covers at least this long before and after the instant asked about (block Assumption A1). */
 const ZONE_TABLE_REACH_MS = 19 * 24 * 60 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 const MINUTE_MS = 60_000;
@@ -35,7 +22,6 @@ function formatter(timezone: string): Intl.DateTimeFormat {
   return existing;
 }
 
-/** The offset (local wall time minus UTC) at a whole-minute instant, to the whole minute the local wall clock shows. */
 function offsetAt(timezone: string, minute: number): number {
   const text = formatter(timezone).format(minute);
   const offset = /GMT(?:([+-])(\d\d):(\d\d)(?::(\d\d))?)?$/u.exec(text);
@@ -45,7 +31,6 @@ function offsetAt(timezone: string, minute: number): number {
   return Math.floor(ms / MINUTE_MS) * MINUTE_MS;
 }
 
-/** The zone of `timezone` from ZONE_TABLE_REACH_MS before the UTC day of `at` to ZONE_TABLE_REACH_MS after it. */
 export function zoneTable(timezone: string, at: number): ZoneTable {
   if (!Number.isFinite(at)) throw new Error("Zone table instant is invalid");
   const day = Math.floor(at / DAY_MS);
@@ -70,7 +55,6 @@ function build(timezone: string, start: number, end: number): ZoneTable {
       known = probe;
       continue;
     }
-    // The first minute in (known, probe] whose offset differs from the one in effect at `known`.
     let low = known;
     let high = probe;
     while (high - low > MINUTE_MS) {

@@ -18,13 +18,10 @@ const watchers = (root: string) => execFileSync("/bin/sh", ["-c", `pgrep -f "${r
 
 it("records the parent, the stalled child's stdin and host load when a native exec outlives its threshold", async () => {
   const root = await directory();
-  // A child that holds its stdin unread until the stall record exists, then echoes it:
-  // the capture is taken while the child is exactly as stalled as #2226's was.
   const child = join(root, "stalled-child");
   const script = `while [ -z "$(ls ${root}/records/*.log 2>/dev/null)" ]; do sleep 0.05; done; cat`;
   const output = execFileSyncWithStallCapture("/bin/sh", ["-c", script, child], { input: "delivered", encoding: "utf8", timeout: 10_000 },
     { label: "stalled", thresholdMs: 200, directory: join(root, "records") });
-  // The call itself is unchanged: same input, same output.
   expect(output).toBe("delivered");
   const [name] = await readdir(join(root, "records"));
   const record = await readFile(join(root, "records", name!), "utf8");

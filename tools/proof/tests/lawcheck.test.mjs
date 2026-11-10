@@ -1,10 +1,3 @@
-// Integration test for `scripts/tron proof check` (tools/proof/README.md "Check"): the real CLI with the
-// pinned toolchain on a copy of two fixture blocks, sched/next (laws proven from arith/divide's laws only)
-// above arith/divide, with a disposable cache:
-// cold check runs both; a warm run is all cached; a proof-only edit re-checks only that block; a law edit
-// re-checks it and the block above; a deliberately false law fails (exit 1) and the block above never runs;
-// an include of a dep's implementation (also behind a comment, or from a laws file that a dependent follows)
-// is refused (exit 2).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -56,7 +49,6 @@ test("proof check is scoped, cached, and fails a false law", (t) => {
   assert.match(failed.output, /Divide\.dfy\(\d+,\d+\): Related location: this is the postcondition that could not be proved/);
   assert.match(failed.output, /finished with \d+ verified, 1 error/);
   falseLaw();
-  // The cache keeps one passing key per block (the law edit's), so the restored laws re-check both.
   assert.deepEqual(check().statuses, { "arith/divide": "checked", "sched/next": "checked" });
 
   const refused = (file, from, to, message) => {

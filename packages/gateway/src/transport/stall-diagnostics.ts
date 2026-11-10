@@ -5,27 +5,12 @@ import { getHeapStatistics } from "node:v8";
 import { drainDurableWriteStats } from "../foundation/durable-json.js";
 import type { ResourceRecorder, ResourceRuntimeEntry } from "../util/resource-recorder.js";
 
-/** The `monitorEventLoopDelay` histogram; @types/node renamed its interface across majors. */
 type EventLoopDelayHistogram = ReturnType<typeof monitorEventLoopDelay>;
-
-/*
- * Evidence for why the event loop stalled, attached to
- * `gateway.event-loop-delay`. Each heartbeat closes one window: garbage
- * collection pauses and event-loop utilization are measured over exactly the
- * delayed interval. Reading them: GC pause time close to the delay points at
- * garbage collection; utilization near 1 with little GC points at the
- * Gateway's own synchronous work; a delay with low utilization and heavy swap
- * or memory pressure points at the host not running the process. `swapTotalBytes`
- * and `hostMemoryAvailablePercent` are what make `swapUsedBytes` and `freeBytes`
- * readable, and `hostSampleAgeMs` says whether the sample is the one at the drop.
- * These are observations, not attribution.
- */
 
 interface StallWindow {
   gcCount: number;
   gcPauseMs: number;
   gcMaxPauseMs: number;
-  /** Event-loop utilization over the window, 0–1. */
   utilization: number;
 }
 
@@ -34,41 +19,25 @@ export interface HostMemory {
   totalBytes: number;
   swapUsedBytes?: number;
   swapTotalBytes?: number;
-  /** macOS `kern.memorystatus_vm_pressure_level`. */
   pressure?: "normal" | "warn" | "critical";
-  /**
-   * macOS `kern.memorystatus_level`: percent of memory available, the number
-   * `memory_pressure` prints as its free percentage. `freeBytes` alone reads as
-   * pressure on a healthy Mac, because `os.freemem` counts free pages only.
-   */
   memoryAvailablePercent?: number;
 }
 
-/** What one kernel probe adds to Node's process-memory facts. */
 type HostKernelFacts = Omit<HostMemory, "freeBytes" | "totalBytes">;
 
-/** The latest host sample together with the age of the cache it came from. */
 interface HostSample {
   memory: HostMemory;
-  /** Age of the cached sample when it was read; 0 for a probe taken for this record. */
   ageMs: number;
 }
 
 interface StallSamplerDependencies {
-  /** `performance.eventLoopUtilization`: with two marks, the delta between them. */
   eventLoopUtilization?: (current?: EventLoopUtilization, previous?: EventLoopUtilization) => EventLoopUtilization;
-  /** Installs a GC observer; returns its disposer. */
   observeGc?: (onPause: (durationMs: number) => void) => () => void;
   sampleHost?: () => Promise<HostMemory>;
 }
 
-/** Bounds the host probe; a record is never held longer than this for it. */
 const HOST_SAMPLE_TIMEOUT_MS = 1_000;
 
-/**
- * Every kernel fact this module logs, read by one `sysctl -n` per probe, so a
- * heartbeat's probe count does not grow with the field list.
- */
 const HOST_SYSCTL_NAMES = ["vm.swapusage", "kern.memorystatus_vm_pressure_level", "kern.memorystatus_level"] as const;
 
 function observeGcPauses(onPause: (durationMs: number) => void): () => void {
@@ -81,7 +50,6 @@ function observeGcPauses(onPause: (durationMs: number) => void): () => void {
 
 const SIZE_SCALE = { K: 1_024, M: 1_024 ** 2, G: 1_024 ** 3, T: 1_024 ** 4 } as const;
 
-/** Reads one `label = 12.34M` field of `sysctl -n vm.swapusage`. */
 function parseSize(text: string, label: string): number | undefined {
   const match = new RegExp(`${label} = ([\\d.]+)([KMGT])`, "u").exec(text);
   if (!match) return undefined;
@@ -98,21 +66,12 @@ function parseMemoryPressure(text: string): HostMemory["pressure"] {
   }
 }
 
-/** `kern.memorystatus_level`, a percentage of memory available. */
 function parseMemoryAvailablePercent(text: string): number | undefined {
   if (!/^\d+$/u.test(text.trim())) return undefined;
   const value = Number(text.trim());
   return value <= 100 ? value : undefined;
 }
 
-/**
- * One `sysctl -n vm.swapusage kern.memorystatus_vm_pressure_level
- * kern.memorystatus_level` output. `sysctl -n` prints one line per requested
- * name in argument order and nothing at all for a name the kernel does not
- * know, so the swap line is recognized by its `total =` text and the pressure
- * level and available percentage follow it. Each value is validated against
- * its own domain rather than trusted by its position.
- */
 function parseHostSysctl(text: string): HostKernelFacts {
   const lines = text.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
   const swapIndex = lines.findIndex((line) => line.includes("total ="));
@@ -133,18 +92,11 @@ function parseHostSysctl(text: string): HostKernelFacts {
 function sysctl(names: readonly string[]): Promise<string | undefined> {
   return new Promise((resolve) => {
     execFile("/usr/sbin/sysctl", ["-n", ...names], { timeout: HOST_SAMPLE_TIMEOUT_MS, maxBuffer: 4_096 }, (error, stdout) => {
-      // An unknown name exits non-zero while still printing the names it knows;
-      // one missing key must not blank the whole sample. Parsing validates each
-      // value against its own domain.
       resolve(error && stdout.length === 0 ? undefined : stdout);
     });
   });
 }
 
-/**
- * The kernel half of one host probe. The runner is injectable so a test can pin
- * the probe count: one invocation carries every name.
- */
 async function probeHostKernel(
   run: (names: readonly string[]) => Promise<string | undefined> = sysctl,
 ): Promise<HostKernelFacts> {
@@ -158,57 +110,26 @@ async function sampleHostMemory(): Promise<HostMemory> {
   return { ...base, ...await probeHostKernel() };
 }
 
-/** One resource record a minute. A faster timer would only add wakeups on a
- * shared Mac without adding evidence to a minute's picture. */
 export const RESOURCE_SAMPLE_INTERVAL_MS = 60_000;
 
-/** `monitorEventLoopDelay` samples at this period and records the whole interval
- * between its own ticks, so every reading carries this period as its floor. */
 const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
 
-/** The exit target for event-loop delay p99. A window that moves to another
- * band of this size is a change the day's records have to show. */
 const EVENT_LOOP_P99_INFO_STEP_MS = 20;
 
-/** The exit criterion's bound for one stalled turn. A window whose max moves to
- * another band of this size is a change the day's records have to show whatever
- * its p99 was, so the day's `max ≤ 250 ms` check has a persisted value to read. */
 const EVENT_LOOP_MAX_INFO_STEP_MS = 250;
 
-/** Heap above this share of the V8 heap limit is the pressure the shedding work
- * has to bound. */
 const HEAP_WARNING_SHARE = 0.7;
 
-/** Heap used moved this many absolute bytes from the last window written at
- * info or above: a growth step no share of a multi-gigabyte limit would round
- * away, measured from an anchor so a heap that swings tens of megabytes between
- * garbage collections does not write a record every minute. */
 const HEAP_USED_INFO_STEP_BYTES = 256 * 1_024 * 1_024;
 
-/** RSS moved this share away from the last window written at info or above,
- * which is the memory-growth criterion's own resolution. A slower growth has to
- * accumulate across the debug-only minutes between records, so it still reaches
- * disk eventually instead of never. */
 const RSS_INFO_STEP_SHARE = 0.1;
 
-/** An event-loop p99 over this bound in one minute misses the exit criterion. */
 const EVENT_LOOP_P99_WARNING_MS = 100;
 
-/** A window that recorded a snapshot built although no ready socket held a
- * subscription token for its session. The slot builds one only for a session
- * with a subscriber, so such a build means an audience check was lost (a
- * regressed slot guard, or a registry and transport subscription record that
- * diverged) rather than an expected condition, which is why it is the one
- * threshold here that has no value to compare against. */
 const UNAUDIENCED_SNAPSHOT_WARNING = 0;
 
-/** Named entries in the message's topic and runtime detail; the rest are
- * counted, so the record stays one readable line. */
 const MAX_RESOURCE_DETAIL = 8;
 
-/** One topic's traffic over the sample window. `subscribers` is the highest
- * recipient count a frame on that topic had; a topic whose recipients left is
- * still visible by its frames and bytes. */
 interface ResourceTopicTraffic {
   frames: number;
   bytes: number;
@@ -216,14 +137,10 @@ interface ResourceTopicTraffic {
 }
 
 interface ResourceSample {
-  /** The closed window's length; an in-flight sample that skipped a tick makes
-   * it longer than `RESOURCE_SAMPLE_INTERVAL_MS`, and a rate reader has to know
-   * that. */
   windowMs: number;
   heapUsedBytes: number;
   heapLimitBytes: number;
   rssBytes: number;
-  /** `monitorEventLoopDelay` percentiles over the closed window, in ms. */
   eventLoopDelayP50Ms: number;
   eventLoopDelayP99Ms: number;
   eventLoopDelayMaxMs: number;
@@ -232,25 +149,16 @@ interface ResourceSample {
   runtimeBytes: number;
   runtimesLoaded: number;
   runtimesEvicted: number;
-  /** Snapshot projections broadcast for a session, and the part of them built
-   * while no ready recipient could receive them (`UNAUDIENCED_SNAPSHOT_WARNING`).
-   * Topic frames count only frames that had a recipient, so this pair is where a
-   * projection that reached nobody stays visible. */
   snapshotBuilds: number;
   unaudiencedSnapshotBuilds: number;
   topics: ReadonlyMap<string, ResourceTopicTraffic>;
   catalogWalks: number;
-  /** The part of `catalogWalks` a request was waiting on; the request path's
-   * criterion is zero of them. */
   requestPathCatalogWalks: number;
   catalogWalkMs: number;
   catalogWalkFiles: number;
-  /** Durable fsyncs completed in the window and the time they took. */
   durableWrites: number;
   durableWriteMs: number;
   outboundBytes: number;
-  /** Frames a newer frame's own state superseded before they were written, and
-   * the bytes they would have cost: the state G-4 kept off a slow link. */
   outboundCoalescedFrames: number;
   outboundCoalescedBytes: number;
 }
@@ -264,19 +172,12 @@ interface ResourceSamplerDependencies {
   eventLoopUtilization?: (current?: EventLoopUtilization, previous?: EventLoopUtilization) => EventLoopUtilization;
 }
 
-/** Convert a Node delay-histogram reading to lateness beyond the configured
- * sampling period. The exit criterion bounds lateness, not the period itself. */
 function eventLoopDelayLatenessMs(valueNs: number): number {
   return Number.isFinite(valueNs)
     ? Math.max(0, valueNs / 1e6 - EVENT_LOOP_DELAY_RESOLUTION_MS)
     : 0;
 }
 
-/** The event-loop delay histogram, read once per sample and reset with it, so a
- * percentile covers one minute and a momentary stall is not a permanent max.
- * Every reading carries the sampling period (see
- * `EVENT_LOOP_DELAY_RESOLUTION_MS`); subtracting it leaves the lateness the
- * exit criterion bounds, so an idle loop reads 0 instead of the period. */
 function eventLoopDelayReader(): { read: () => { p50Ms: number; p99Ms: number; maxMs: number }; dispose: () => void } {
   const histogram: EventLoopDelayHistogram = monitorEventLoopDelay({ resolution: EVENT_LOOP_DELAY_RESOLUTION_MS });
   histogram.enable();
@@ -294,12 +195,6 @@ function eventLoopDelayReader(): { read: () => { p50Ms: number; p99Ms: number; m
   };
 }
 
-/**
- * Owns the `gateway.resources` picture: what the Gateway spends memory, CPU and
- * I/O on, one window at a time. Owners report their own work (see
- * `ResourceRecorder`); this class only closes windows, states thresholds and
- * places values in named steps (`level`).
- */
 export class ResourceSampler implements ResourceRecorder {
   private readonly readRuntimes: () => Promise<readonly ResourceRuntimeEntry[]>;
   private readonly readDurableWrites: () => { count: number; ms: number };
@@ -320,19 +215,9 @@ export class ResourceSampler implements ResourceRecorder {
   private outboundCoalescedBytes = 0;
   private loadedRuntimes = 0;
   private evictedRuntimes = 0;
-  /** The steps of the previous window; a step counts as a change only against
-   * the window before it, so a value that repeats does not reach disk. */
   private steps?: ResourceSteps;
-  /** The RSS of the last window written at info or above, or of the first window
-   * this sampler closed; the memory-growth step is measured against it, so slow
-   * drift over many debug-only minutes still promotes one record. */
   private anchoredRssBytes?: number;
-  /** The heap used by the last window written at info or above, or by the first
-   * window this sampler closed; the heap step is measured against it, the same
-   * way the RSS step is, so a heap oscillating around a band edge writes
-   * nothing while a real step of `HEAP_USED_INFO_STEP_BYTES` does. */
   private anchoredHeapUsedBytes?: number;
-  /** When the current window opened; the closed window reports its length. */
   private windowStartedAt = performance.now();
 
   constructor(dependencies: ResourceSamplerDependencies = {}) {
@@ -348,12 +233,6 @@ export class ResourceSampler implements ResourceRecorder {
     this.utilizationMark = this.eventLoopUtilization();
   }
 
-  /** One snapshot projection handed to the transport for a session, with the
-   * ready recipients it could reach. Deliberately not part of
-   * `ResourceRecorder`: only the transport knows the recipients, so only it
-   * calls this, and a build with none is a tripwire (a lost slot guard, or a
-   * divergence between the registry's subscriber record and the transport's)
-   * rather than an ordinary minute. */
   recordSnapshotBuild(subscribers: number): void {
     this.snapshotBuilds += 1;
     if (!(subscribers > 0)) this.unaudiencedSnapshotBuilds += 1;
@@ -391,10 +270,6 @@ export class ResourceSampler implements ResourceRecorder {
     this.evictedRuntimes += 1;
   }
 
-  /** The level this window is recorded at, and why. The band comparison is
-   * against the previous window, so a step change is written once, where it
-   * happens; the memory anchors move only when the window is written at info or
-   * above (and the first window starts them). */
   level(sample: ResourceSample): { level: "debug" | "info" | "warning"; reason?: string } {
     const previous = this.steps;
     this.steps = resourceSteps(sample);
@@ -406,8 +281,6 @@ export class ResourceSampler implements ResourceRecorder {
     return decision;
   }
 
-  /** Closes the window and starts the next. Counters are drained, not re-read,
-   * so one occurrence is reported exactly once. */
   async sample(): Promise<ResourceSample> {
     const closedAt = performance.now();
     const windowMs = Math.max(0, closedAt - this.windowStartedAt);
@@ -417,16 +290,7 @@ export class ResourceSampler implements ResourceRecorder {
     const current = this.eventLoopUtilization();
     const utilization = this.eventLoopUtilization(current, this.utilizationMark).utilization;
     this.utilizationMark = current;
-    // Every counter closes at `closedAt`, before the runtime inventory is
-    // awaited: a hung inventory read would otherwise report the work done while
-    // it hung inside this window, whose `windowMs` was already fixed here, and
-    // a rate read from that pair would be wrong exactly then. A sample that
-    // fails after this point has already consumed its counters, so the window it
-    // would have reported is dropped rather than folded into the next one — the
-    // same rule the histogram and `windowStartedAt` already follow.
     const counters = this.drainWindowCounters();
-    // The runtime set is a current value, not a counter: it is read after the
-    // window closed, while every counter above covers the closed window.
     const runtimes = [...await this.readRuntimes()];
     return {
       windowMs,
@@ -443,8 +307,6 @@ export class ResourceSampler implements ResourceRecorder {
     };
   }
 
-  /** The closed window's counters, taken and cleared together so every value in
-   * one record covers the same span of time. */
   private drainWindowCounters() {
     const durable = this.readDurableWrites();
     const counters = {
@@ -483,17 +345,11 @@ export class ResourceSampler implements ResourceRecorder {
   }
 }
 
-/** Where one window's values sit, compared with the window before it. Info is
- * written when a step moves, so a minute that repeats the same steps never
- * reaches disk. */
 interface ResourceSteps {
-  /** Event-loop p99 in bands of `EVENT_LOOP_P99_INFO_STEP_MS`. */
   eventLoopP99Band: number;
-  /** Event-loop max in bands of `EVENT_LOOP_MAX_INFO_STEP_MS`. */
   eventLoopMaxBand: number;
 }
 
-/** The named steps a sample's values are placed in. */
 function resourceSteps(sample: ResourceSample): ResourceSteps {
   return {
     eventLoopP99Band: Math.floor(sample.eventLoopDelayP99Ms / EVENT_LOOP_P99_INFO_STEP_MS),
@@ -501,19 +357,6 @@ function resourceSteps(sample: ResourceSample): ResourceSteps {
   };
 }
 
-/**
- * The level a sample is recorded at and why. Warning is a broken bound — the
- * heap share, the event-loop p99, or a snapshot built while no ready recipient
- * could receive it (`UNAUDIENCED_SNAPSHOT_WARNING`); info is
- * a named step that moved since `previous` (the window before this one), heap
- * used moved `HEAP_USED_INFO_STEP_BYTES` or RSS moved `RSS_INFO_STEP_SHARE` from
- * the last window written at info or above (`anchoredHeapUsedBytes`,
- * `anchoredRssBytes`; the first window starts both anchors), or a runtime
- * load/eviction in this window. That is what makes
- * a minute readable without writing every minute to disk; debug otherwise.
- * `undefined` `previous` is the first window, which is never a band change, and
- * an undefined anchor has no memory-growth baseline yet, which is never a step.
- */
 function resourceSampleLevel(
   sample: ResourceSample,
   previous?: ResourceSteps,
@@ -561,8 +404,6 @@ function heapShareOf(sample: ResourceSample): number {
   return sample.heapLimitBytes > 0 ? sample.heapUsedBytes / sample.heapLimitBytes : 0;
 }
 
-/** One `gateway.resources` line: every number, then the per-topic and
- * per-runtime detail, most expensive first and bounded. */
 export function formatResourceSample(sample: ResourceSample): string {
   const heapShare = heapShareOf(sample);
   const fields = [
@@ -620,12 +461,6 @@ function nonNegative(value: number): number {
   return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
 }
 
-/**
- * Host memory as one bounded field list, shared by the stall and connection
- * records so an operator reads the same names in both. `hostSampleAgeMs` is the
- * age of the cache the other fields came from: a probe that loses its race is
- * discarded, so the heartbeat tick bounds the probe rate, not the staleness.
- */
 export function formatHostEvidence(sample: HostSample | undefined): string {
   if (!sample) return "host=unavailable";
   const host = sample.memory;
@@ -672,7 +507,6 @@ export class StallSampler {
     });
   }
 
-  /** Closes the current window and starts the next. Called every heartbeat. */
   closeWindow(): StallWindow {
     const current = this.eventLoopUtilization();
     const window = {
@@ -688,12 +522,6 @@ export class StallSampler {
     return window;
   }
 
-  /**
-   * Host memory for one stall record, bounded by HOST_SAMPLE_TIMEOUT_MS, and
-   * the latest sample the connection records read. Only one probe runs at a
-   * time; an overlapping caller reports it unavailable. The returned sample is
-   * the one taken for this record, so its age is 0.
-   */
   async hostMemory(): Promise<HostSample | undefined> {
     if (this.hostSampleInFlight) return undefined;
     this.hostSampleInFlight = true;
@@ -715,19 +543,10 @@ export class StallSampler {
     }
   }
 
-  /**
-   * Keeps the connection records' host sample current. The transport calls
-   * this on every heartbeat, so the 25 s tick is the probe rate: a phone drop
-   * or reconnect reads {@link hostSample} synchronously and never waits on, or
-   * adds, a `sysctl` of its own. A probe that loses its 1 s race is discarded
-   * and the previous sample stays, so the tick does not bound staleness — the
-   * record's `hostSampleAgeMs` does.
-   */
   refreshHostSample(): void {
     void this.hostMemory();
   }
 
-  /** Latest host sample with its age; undefined until a probe lands. */
   hostSample(): HostSample | undefined {
     if (this.cachedHost === undefined || this.cachedHostAt === undefined) return undefined;
     return { memory: this.cachedHost, ageMs: Math.max(0, Math.round(performance.now() - this.cachedHostAt)) };

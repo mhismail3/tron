@@ -20,16 +20,12 @@ class GatewayTestHomeIsolation(unittest.TestCase):
     def run_gateway(self, root: Path, arguments: list[str]) -> subprocess.CompletedProcess:
         caller_home = root / "caller-home"
         caller_home.mkdir()
-        # A long caller TMPDIR, like a Home task worker's (#2260): the suite's scratch must not live under it.
         scratch = root / "scratch" / ("caller-tmpdir-" * 5)
         scratch.mkdir(parents=True)
         node = subprocess.check_output([str(ROOT / "scripts/tron-node")], text=True).strip()
         env = {**os.environ, "HOME": str(caller_home), "TMPDIR": str(scratch),
                "TRON_NODE_BIN": node, "ISOLATION_CALLER_HOME": str(caller_home),
                "ISOLATION_CALLER_TMPDIR": str(scratch)}
-        # The runner waits for the host's full-Gateway lock without a bound; take it here first
-        # through the runner's own owner (waiting likewise, recording this holder) so the bound
-        # below covers only this run, which then holds it.
         lock = GATEWAY.hold_full_gateway_lock()
         try:
             result = subprocess.run([str(ROOT / "scripts/tron"), "test", "gateway", *arguments],
@@ -88,7 +84,7 @@ class GatewayTestScratchCleanup(unittest.TestCase):
             lock = (ROOT / "tools/verify/host_lock.py").read_text()
             self.assertIn("'/tmp/tron-full-gateway.lock'", lock)
             (verify / "host_lock.py").write_text(lock.replace("'/tmp/tron-full-gateway.lock'", repr(str(base / "full.lock"))))
-            node = base / "scripts/tron-node"  # a stand-in Node, then a Vitest that records HOME and waits
+            node = base / "scripts/tron-node"
             node.parent.mkdir()
             node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
             vitest = base / "packages/gateway/node_modules/.bin/vitest"
@@ -126,7 +122,7 @@ class GatewayTestConfigRouting(unittest.TestCase):
             verify.mkdir(parents=True)
             for source in (ROOT / "tools/verify").glob("*.py"):
                 (verify / source.name).write_text(source.read_text())
-            node = base / "scripts/tron-node"  # a stand-in Node, then a Vitest that records its arguments
+            node = base / "scripts/tron-node"
             node.parent.mkdir()
             node.write_text('#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
             gateway = base / "packages/gateway"
@@ -150,7 +146,6 @@ class GatewayTestConfigRouting(unittest.TestCase):
                     result, argv = self.run_files(base, *words)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertEqual(argv, " ".join(["run", *config, *words]) + "\n")
-            # A list spanning configs, including a Vitest substring filter that matches files of two, runs nothing.
             for words in (["src/a/nested.e2e.test.ts", "src/a/plain.test.ts"], ["src/a/"], ["SRC/A/"]):
                 with self.subTest(words=words):
                     result, argv = self.run_files(base, *words, "-t", "x")

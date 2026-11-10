@@ -54,10 +54,6 @@ function blockedIPv6(host: string): boolean {
   return false;
 }
 
-/** Canonical public-URL admission shared by tool creation and projection.
- * Remote content is gesture-gated in Safari, but persisted descriptors still
- * reject local/reserved literals, local DNS suffixes, query credentials, and
- * fragments. */
 export function normalizePublicDisplayURL(input: string): string | undefined {
   if (Buffer.byteLength(input) < 1 || Buffer.byteLength(input) > 8_192) return undefined;
   let url: URL;
@@ -93,14 +89,9 @@ export function eligibleDisplaySurfaces(kind: DisplayKind, artifactSize?: number
   }
 }
 
-/** Both tool entrypoints consume an admitted projection; browser receipts are
- * bound to the canonical call, not inferred from neighboring display results. */
 export function admitToolDisplayProjection(
   toolName: string | undefined, value: unknown, toolCallId: unknown, sessionId?: string,
 ): DisplayProjection | undefined {
-  // The owned swift_app offer is the second explicit producer of a file
-  // display. Its sibling review metadata is not a new DisplayProjection field;
-  // Apps rechecks the canonical artifact grant and exact config on approval.
   if (toolName === "swift_app" && value && typeof value === "object" && !Array.isArray(value)) {
     const details = value as Record<string, unknown>;
     if (hasOnlyKeys(details, ["offer", "display"]) && details.offer && typeof details.offer === "object") {
@@ -124,9 +115,6 @@ export function admitToolDisplayProjection(
   } });
 }
 
-/** Strictly promotes the reserved display tool's canonical details into the
- * typed mobile contract. Unknown or malformed details remain ordinary tool
- * output and cannot select an active renderer. */
 function admitDisplayProjection(toolName: string | undefined, value: unknown): DisplayProjection | undefined {
   if (toolName !== "display" || !value || typeof value !== "object") return undefined;
   const root = value as Record<string, unknown>;
@@ -203,7 +191,6 @@ function admitDisplayProjection(toolName: string | undefined, value: unknown): D
   if (item.liveView !== undefined) {
     if (!item.liveView || typeof item.liveView !== "object") return undefined;
     const source = item.liveView as Record<string, unknown>;
-    // The display kind pins the one admitted live-view schema.
     const liveSchema = item.kind === "native_live" ? NATIVE_LIVE_VIEW_SCHEMA : BROWSER_LIVE_VIEW_SCHEMA;
     if (!hasOnlyKeys(source, ["schema", "viewId", "generation", "title", "fallbackText"])
       || source.schema !== liveSchema

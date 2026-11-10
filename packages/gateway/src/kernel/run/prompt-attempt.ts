@@ -15,7 +15,6 @@ interface PromptAttemptInput {
   resolveQueueDisposition: ((disposition: QueueAdmissionDisposition) => void) | undefined;
 }
 
-/** Owns one admitted SDK promise and its exact completion/finalization lifetime. */
 export class PromptAttempt {
   runSettled = false;
   commandSettled = false;
@@ -54,9 +53,6 @@ export class PromptAttempt {
         if (this.admissionAccepted) await this.settleWithoutAgent();
       },
       async (error) => {
-        // Before queue/user disposition, rejection is definitive and wakes
-        // that exact admission below. After disposition, canonical/runtime
-        // lifecycle remains authoritative for already accepted work.
         if (!this.operations.runAbort.abortedOperations.has(operationId)) this.operations.emit("session.diagnostic", safeJson({
           code: "runtime-prompt-failed",
           operationId,
@@ -91,9 +87,6 @@ export class PromptAttempt {
     if (this.operations.pendingPrompt?.id === operationId) {
       this.operations.clearPendingPrompt();
     }
-    // A handled input creates no canonical user/assistant entry. Persist its
-    // terminal outcome for every invocation, not only Automation callers.
-    // A rejected Pi call uses the same no-agent cleanup but remains failed.
     await this.operations.runInvocations.terminalizeInvocation(
       operationId,
       terminalLifecycle,
@@ -103,8 +96,6 @@ export class PromptAttempt {
     if (!operationId.startsWith("automation:") && operationId !== this.operations.ownedTurns.worker?.identity.operationId) {
       await this.operations.clearMarkerOwnership(operationId);
     }
-    // Marker I/O may suspend behind a newer run. Clear only this run's live
-    // projection; conditional marker deletion already protects its successor.
     if (this.operations.activeOperationId === operationId) (this.operations.activeOperationId = undefined);
     if (this.operations.activeOperationId === undefined) this.operations.homeRequestPolicy?.settle(operationId);
     if (this.operations.operation?.id === operationId) (this.operations.operation = undefined);
@@ -131,10 +122,6 @@ export class PromptAttempt {
   async finishCommand(): Promise<void> {
     const { operationId, invocationId, invocationSource, invocationName, invocation } = this.input;
     if (this.operations.pendingExtensionCommand?.id !== operationId) return;
-    // Latch the terminal fact before marker transfer or attention
-    // settlement. Those branches may return early while a continuation
-    // owns the assistant completion; the invocation must already be
-    // durably terminal in that overlap window.
     if (!this.terminalReceiptPersisted) {
       const terminalLifecycle = this.operations.runInvocations.invocationFailures.delete(invocationId)
         ? "failed"
@@ -157,15 +144,10 @@ export class PromptAttempt {
       this.operations.runInvocations.invocations.delete(invocationId);
     }
     if (this.operations.hasActiveAgentRun && this.operations.activeOperationId !== undefined) {
-      // Transfer marker ownership back to the foreground/new agent run:
-      // commit its record before retiring the command's provisional one.
       await this.operations.enqueueMarkerOwnership(this.operations.activeOperationId!);
       await this.operations.clearMarkerOwnership(operationId);
     } else if (this.operations.activeOperationId === undefined) {
       if (this.operations.runAttention.pendingAssistantCompletion) {
-        // No continuation claimed the final assistant entry. Retire the
-        // command owner, then let the same durable attention barrier own
-        // marker cleanup and truthful settlement.
         (this.operations.pendingExtensionCommand = undefined);
         await this.operations.runAttention.beginAttentionSettlement(this.operations.runAttention.pendingAssistantCompletion!);
         this.operations.maybePerformExtensionShutdown();

@@ -30,7 +30,6 @@ type BlobValue = MemoryBlobValue | FileBlobValue;
 
 export interface BlobLease {
   mimeType: string;
-  /** Bytes exposed by this lease (the full item when rangeStart is zero). */
   size: number;
   totalSize: number;
   rangeStart: number;
@@ -343,8 +342,6 @@ export class BlobStore {
       this.activeReaders -= 1;
       const missing = isConfirmedMissingBlob(error);
       if (missing) value.retired = true;
-      // Prune/dispose may have retired this reservation during open/stat.
-      // No lease will exist to perform its final release after a failed acquire.
       if (value.retired && value.activeReaders === 0) await this.cleanup(id, value);
       if (missing) throw new GatewayError("not_found", "Blob is not available; refresh the session snapshot");
       throw error;
@@ -384,9 +381,6 @@ export class BlobStore {
     const task = this.finishDispose();
     let tracked!: Promise<void>;
     tracked = task.catch((error) => {
-      // A failed retirement must not poison the memoized operation: the
-      // registry owns retry admission and needs the next attempt to rerun the
-      // actual cleanup rather than observe the same rejected promise forever.
       if (this.disposeTask === tracked) this.disposeTask = undefined;
       throw error;
     });
@@ -467,8 +461,6 @@ export class BlobStore {
         try {
           await rm(value.path, { force: true });
         } catch {
-          // Retain the retired entry and its physical capacity accounting so
-          // cleanup failure cannot admit more disk usage or break a completed download.
           return;
         }
       }

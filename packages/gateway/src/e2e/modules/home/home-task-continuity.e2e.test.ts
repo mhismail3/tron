@@ -1,7 +1,3 @@
-/**
- * Stopped or restarted Home workers never block the maintainer (#929). Real RuntimeRegistry,
- * GatewayService and GatewayServer with a faux model.
- */
 import { displayOwnerOf, homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -34,7 +30,6 @@ afterAll(async () => {
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
-/** A provider turn that holds until the task's Stop aborts it. */
 const holding = (entered: { count: number }) => (_context: Context, options?: { signal?: AbortSignal }) => {
   entered.count += 1;
   return new Promise<never>((_resolve, reject) => {
@@ -47,7 +42,6 @@ async function listen(f: Fixture) {
   await devices.initialize();
   const uploads = {
     acquire: async () => ({ release: () => {} }), removeSession: async () => {},
-    // One fixture screenshot upload; the real store's validation is not this journey's boundary.
     materialize: async (ids: string[]) => ids.includes("screenshot-upload")
       ? { envelope: "[Attached image: screenshot.png]", images: [{ type: "image", data: PIXEL, mimeType: "image/png" }], attachments: [], photoCount: 1, fileAttachmentCount: 0 }
       : { envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 },
@@ -64,13 +58,11 @@ async function listen(f: Fixture) {
 }
 
 const APPROVAL = { title: "Approval", questions: [{ question: "Move the claim to the active worker?", options: [{ label: "Move it" }, { label: "Keep it" }] }] };
-/** The text of the newest user message the provider saw. */
 const lastUser = (context: Context) => {
   const message = context.messages.findLast(candidate => candidate.role === "user");
   const content = message?.content;
   return typeof content === "string" ? content : (content ?? []).map(part => part.type === "text" ? part.text : "").join("");
 };
-/** The maintainer's app over the Gateway's real socket: open (subscribe) a chat, then send to it. */
 async function maintainerClient(f: Fixture, port: number) {
   const client = new GatewayProtocolClient(`ws://127.0.0.1:${port}/v1/socket`, await readLocalCredential(f.tronHome));
   await client.connect(5_000);
@@ -82,12 +74,10 @@ async function maintainerClient(f: Fixture, port: number) {
     },
     send: async (sessionId: string, text: string, behavior?: "followUp" | "steer", uploadIds: string[] = []) => await client.request("session.prompt",
       { sessionId, text, uploadIds, commandId: randomUUID(), ...(behavior ? { behavior } : {}) }) as { operationId: string },
-    /** The composer's Stop control. */
     stop: async (sessionId: string, operationId: string) => await client.request("session.abort", { sessionId, kind: "agent", operationId, commandId: randomUUID() }),
   };
 }
 
-/** The worker re-asks, as the resume brief tells it, the exact question it restates. */
 const reAsk = (seen: string[]) => (context: Context) => {
   const brief = lastUser(context);
   seen.push(brief);
@@ -101,8 +91,6 @@ describe("resuming a stopped Home worker in place", () => {
     const f = await fixture();
     const { port } = await listen(f);
     const app = await maintainerClient(f, port);
-    // Delay only the real completion stamp, never its result. This puts the
-    // later reply's marker collision after agent_settled, as on the live worker.
     const markers = (f.registry as unknown as { markers: import("../../../kernel/run/run-markers.js").RunMarkerStore }).markers;
     const stamp = markers.reassertAssistantCompletion.bind(markers);
     let releaseStamp!: () => void;
@@ -153,7 +141,6 @@ describe("resuming a stopped Home worker in place", () => {
     await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("reported-worker.resume-1")).lifecycle === "terminal", "reported worker continuation settles");
     expect(await homeOwnerOf(f.registry).taskStatus("reported-worker.resume-1")).toMatchObject({ sessionId: run.sessionId, operationId: resumed.operationId,
       terminalEvidence: { outcome: "final", reason: "explicit-report" } });
-    // Settings application is informational; every other diagnostic remains a failure.
     expect(diagnostics().filter(event => (event.payload as { data?: { code?: string } }).data?.code !== "settings-run-applied")).toEqual([]);
   }, 60_000);
   it("keeps bounded worker check-ins through stop, cold reads and resume with exact operation attribution", async () => {
@@ -285,8 +272,6 @@ describe("resuming a stopped Home worker in place", () => {
     expect((await owner.taskStatus(first.taskId)).checkins).toHaveLength(1);
     const retro = await owner.taskTool(f.home.sessionId, { action: "metrics", taskId: resumed.taskId }) as
       import("../../../modules/home/home-task-metrics.js").HomeTaskMetrics;
-    // The resumed record copies the earlier check-in. Count its attributed ID
-    // once, retain the blocker verbatim, and never call an active cohort complete.
     expect(retro.tasks[0]).toMatchObject({ taskId: first.taskId, resumes: 1,
       needsAttention: { status: "partial", retainedCount: 1, retained: [{ taskId: first.taskId, blocker: "Old approval", attention: "requested" }] },
       parks: { status: "partial", recordedCount: 1, recorded: [{ taskId: first.taskId, reason: "explicit-report" }] },
@@ -461,7 +446,6 @@ describe("resuming a stopped Home worker in place", () => {
   it("continues the same session and worktree from Home's task tool and re-asks the question the stop interrupted inside codemode", async () => {
     const f = await fixture(false, true);
     const seen: string[] = [];
-    // After the Stop the provider may or may not be asked again; each turn answers by what it sees.
     const turn = (context: Context) => {
       const last = context.messages.at(-1);
       if (last?.role === "toolResult" && last.toolName === "ask_user") {
@@ -482,7 +466,6 @@ describe("resuming a stopped Home worker in place", () => {
     const interrupted = slot.canonicalSessionEntries().filter(entry => entry.type === "custom" && entry.customType === TRON_ASK_USER_INTERRUPTED);
     expect(interrupted).toHaveLength(1);
 
-    // Home continues it through its real task tool: no new worker, session or worktree.
     const sessionsBefore = (await f.registry.list("all")).length;
     const resumed = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "resume", taskId: stopped.taskId, operationId: stopped.operationId }) as
       { taskId: string; sessionId: string; operationId: string };
@@ -504,7 +487,6 @@ describe("resuming a stopped Home worker in place", () => {
       terminalEvidence: { outcome: "final", reason: "explicit-report" } });
     expect(seen[1]).toContain("Move it");
     expect((await f.registry.list("all")).length).toBe(sessionsBefore);
-    // The stopped task stays immutable and has exactly one successor.
     expect(await homeOwnerOf(f.registry).taskStatus(stopped.taskId)).toMatchObject({ terminalEvidence: { outcome: "interrupted" } });
     await expect(homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "resume", taskId: stopped.taskId, operationId: stopped.operationId }))
       .rejects.toThrow(/operationId guard .* does not match "ios-worker\.resume-1"/u);
@@ -529,7 +511,6 @@ describe("resuming a stopped Home worker in place", () => {
     await homeOwnerOf(f.registry).stopTask({ taskId: stopped.taskId, operationId: stopped.operationId });
     await stopped.completion;
     await app.open(stopped.sessionId);
-    // The maintainer continues it with the screenshots it was waiting for.
     const accepted = await app.send(stopped.sessionId, "continue with these screenshots", undefined, ["screenshot-upload"]);
     const resumed = await homeOwnerOf(f.registry).taskStatus("stopped-worker.resume-1");
     expect(resumed).toMatchObject({ sessionId: stopped.sessionId, operationId: accepted.operationId });
@@ -552,10 +533,8 @@ describe("workers stopped by a Mac app replacement (#984)", () => {
     }]);
     const running = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "replace-worker", intent: "Long work", target: f.cwd });
     await waitFor(() => entered.count === 1, "worker turn");
-    // The real orchestrator code (scripts/tron_mac_replace.py) drains workers over this Gateway's socket.
     const operation = randomUUID();
     const store = join(f.root, ".tron-maintenance", "replace");
-    // Asynchronous: this test process also hosts the Gateway the script talks to.
     const drain = await promisify(execFile)("/usr/bin/python3", ["-c", `
 import json, sys
 sys.path.insert(0, sys.argv[1])
@@ -585,11 +564,9 @@ journal.settle('succeeded')
       String((await import("../../../version.js")).PROTOCOL_VERSION), operation, String(process.pid)], { encoding: "utf8" });
     expect(drain.stderr).toBe("");
     expect(await running.completion).toMatchObject({ terminalEvidence: { outcome: "interrupted", reason: "task-stop" } });
-    // The dispatch handle can return before the worker session binds; the task record names it.
     const sessionId = (await homeOwnerOf(f.registry).taskStatus("replace-worker")).sessionId!;
     expect(sessionId).toBeTruthy();
 
-    // The journal lists the stopped worker; the Gateway projects it as resumable.
     const app = new GatewayProtocolClient(`ws://127.0.0.1:${port}/v1/socket`, await readLocalCredential(f.tronHome));
     await app.connect(5_000);
     cleanups.push(async () => app.close());
@@ -627,7 +604,6 @@ describe("one ordered message lane per Home worker", () => {
     await waitFor(() => slot.isBusy, "worker running");
     await app.open(run.sessionId);
     await homeOwnerOf(f.registry).steerTask(f.home.sessionId, { taskId: run.taskId, operationId: run.operationId, text: "Home first" });
-    // The app's composer sends a follow-up while the chat runs; it joins Home's steering lane.
     await app.send(run.sessionId, "Maintainer second", "followUp");
     release();
     const result = await run.completion;
@@ -640,7 +616,6 @@ describe("one ordered message lane per Home worker", () => {
   }, 60_000);
 });
 
-/** A worker turn that records the newest user text it saw, then reports. */
 const reporting = (seen: string[], id = "report-one") => (context: Context) => {
   seen.push(lastUser(context));
   return fauxAssistantMessage([reportCall(id)], { stopReason: "toolUse" });
@@ -662,7 +637,6 @@ describe("maintainer messages to Home workers (#959)", () => {
     const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => slot.isBusy, "worker running");
     await app.open(run.sessionId);
-    // The app's composer sends while the worker runs (no explicit behavior, as when Pi cannot queue).
     const accepted = await app.send(run.sessionId, "I did a vertical stroke");
     expect(accepted.operationId).toBeTruthy();
     expect(await homeOwnerOf(f.registry).taskStatus(run.taskId)).toMatchObject({ lifecycle: "active", operationId: run.operationId, stopIntent: null });
@@ -686,7 +660,6 @@ describe("maintainer messages to Home workers (#959)", () => {
     await app.open(stopped.sessionId);
     await app.stop(stopped.sessionId, stopped.operationId);
     await stopped.completion;
-    // Other live work in the worker session (an export) genuinely refuses the rebind.
     const registry = f.registry.administrativeWorkRegistry;
     const work = registry.begin({ kind: "compaction-export", sessionId: stopped.sessionId, hostEpoch: registry.runtimeEpoch });
     await expect(app.send(stopped.sessionId, "I did a vertical stroke")).rejects.toThrow(/worker session is busy \(compaction-export\)/u);
@@ -694,7 +667,6 @@ describe("maintainer messages to Home workers (#959)", () => {
     expect(refused).toMatchObject({ lifecycle: "terminal", sessionId: null, operationId: null,
       terminalEvidence: { outcome: "unknown", reason: "admission-refused", detail: expect.stringMatching(/busy \(compaction-export\)/u) } });
     work.settle();
-    // The stopped task is still resumable; the refused message reaches the worker with the new one.
     const resumed = await homeOwnerOf(f.registry).taskTool(f.home.sessionId, { action: "resume", taskId: stopped.taskId, operationId: stopped.operationId, text: "Then a horizontal one" }) as
       { taskId: string; sessionId: string; operationId: string };
     expect(resumed).toMatchObject({ taskId: "refused-worker.resume-2", sessionId: stopped.sessionId });

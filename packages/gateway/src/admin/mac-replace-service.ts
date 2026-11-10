@@ -6,14 +6,6 @@ import { promisify } from "node:util";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 
-/**
- * Gateway projection of the one-tap Mac app replacement (#984).
- *
- * The orchestrator (`scripts/tron_mac_replace.py`) runs as its own launchd job
- * and is the single writer of its journal under `<tronHome>/../.tron-maintenance/replace`.
- * This service only reads that journal, asks the orchestrator for its plan,
- * starts it, pushes its result, and resumes the workers it stopped in place.
- */
 export const MAC_REPLACE_CAPABILITY = "mac-replace.v1";
 const MAX_JOURNAL_BYTES = 512 * 1_024;
 const OPERATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -26,13 +18,9 @@ type MacReplaceWorkerState = "resumable" | "resumed" | "stopping" | "unavailable
 interface MacReplaceDependencies {
   tronHome: string;
   channel: "stable" | "dev";
-  /** The configured source repository whose scripts plan and start a replacement. */
   sourceRoot: () => Promise<string | undefined>;
-  /** Push one bounded result notification; returns the admission state. */
   notify?: (input: { sourceId: string; message: string }) => Promise<string>;
-  /** The newest task on a worker session (its in-place continuation, if any). */
   latestWorkerTask?: (sessionId: string) => Promise<{ taskId: string; lifecycle: string; operationId: string | null } | undefined>;
-  /** Resume a settled task in place on its own worker session. */
   resumeTask?: (input: { taskId: string; operationId: string; text: string }) => Promise<JsonValue>;
   environment?: NodeJS.ProcessEnv;
 }
@@ -44,8 +32,6 @@ export class MacReplaceService {
 
   private get store(): string { return join(dirname(this.dependencies.tronHome), ".tron-maintenance", "replace"); }
 
-  /** Only the supervised Stable Gateway of this account's own `~/.tron` may start a replacement:
-   * the orchestrator acts on /Applications/Tron.app, so any other Gateway reads status only. */
   get startable(): boolean {
     const environment = this.dependencies.environment ?? process.env;
     return environment.TRON_GATEWAY_SUPERVISED === "1" && this.dependencies.channel === "stable"
@@ -115,7 +101,6 @@ export class MacReplaceService {
     return (await this.script(["--start", "--json", "--client-protocol", String(clientProtocol)], 120_000)) as JsonValue;
   }
 
-  /** Push the result the journal records, once per attempt (the notification store dedupes on sourceId). */
   async complete(operationId: string): Promise<JsonValue> {
     const journal = await this.journal();
     if (!journal || journal.id !== operationId) throw new GatewayError("not_found", "No such Mac replacement");

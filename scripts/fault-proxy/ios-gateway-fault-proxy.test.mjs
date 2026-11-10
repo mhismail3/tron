@@ -1,8 +1,3 @@
-// The fault proxy's Gateway ownership proof (#2386). The real proxy script runs
-// from a temporary copy whose repository layout puts a stand-in Gateway at
-// packages/gateway/dist/index.js, so the CLI cases exercise its own process,
-// ps/lsof proof and refusals; the verifier cases substitute only its ps/lsof
-// runner to produce timeouts and PID reuse on demand.
 import assert from "node:assert/strict";
 import { test, after } from "node:test";
 import { copyFile, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
@@ -72,8 +67,6 @@ function track(child) {
   return child;
 }
 
-// One Gateway and its proxy, both children of this process as the harness
-// makes them siblings: the proxy proves the Gateway's parent is its own.
 async function startFixture() {
   const dir = await mkdtemp(join(root, "fixture-"));
   const upstreamPort = await freePort();
@@ -107,8 +100,6 @@ async function startFixture() {
   return { port, upstreamPort, gatewayProcess, proxy, control };
 }
 
-// The proxy's listener holds at most 12 client sockets at once (its own bound,
-// unrelated to ownership), so 40 requests go in waves of 10 concurrent.
 async function burst(port, count = 40) {
   const statuses = [];
   for (let sent = 0; sent < count; sent += 10) {
@@ -176,8 +167,6 @@ test("a respawned Gateway is adopted and proven before it serves", async () => {
   await until(async () => refused(await get(fixture.port)), "refusal of the exited respawn");
 });
 
-// The verifier with its ps/lsof runner substituted. Each call either answers from
-// the process table or, when `held`, waits for the case to settle it by hand.
 async function verifierCase() {
   const proxyModule = await import(pathToFileURL(proxyScript).href);
   const port = 4321;
@@ -243,7 +232,6 @@ test("a Gateway whose listener is not its own is refused", async () => {
     { execute: fixture.execute, proofIntervalMs: 5 });
   fixture.table.get(process.pid).listening = false;
   await assert.rejects(verify(), /does not own the fixture listener/);
-  // A proven Gateway that loses its listener is unproven by the watcher.
   fixture.table.get(process.pid).listening = true;
   await verify();
   fixture.table.get(process.pid).listening = false;
@@ -259,8 +247,6 @@ test("a proof that started before a respawn never proves the respawn", async () 
     { execute: fixture.execute, proofIntervalMs: 60_000 });
   fixture.hold(true);
   const stale = verify();
-  // The old Gateway's identity checks pass; its listener check is still running
-  // when the respawn is adopted, and then passes too.
   let call = await fixture.nextCall();
   while (!call.file.endsWith("lsof")) {
     assert.equal(call.pid, process.pid);
@@ -272,7 +258,6 @@ test("a proof that started before a respawn never proves the respawn", async () 
   fixture.hold(true);
   call.pass();
   await assert.rejects(stale, /changed during its ownership proof/);
-  // The respawn is unproven: verifying it starts its own proof.
   const fresh = verify();
   call = await Promise.race([fixture.nextCall(), fresh.then(() => undefined)]);
   assert.ok(call, "the old Gateway's proof proved the respawn");
@@ -296,19 +281,15 @@ test("five straight helper timeouts unprove the Gateway; a success resets the co
       await new Promise(resolve => setImmediate(resolve));
     }
   };
-  // Four misses keep the proven Gateway trusted: requests make no helper calls.
   await missWatcherProofs(4);
   assert.equal(await settles(verify()), "resolved");
-  // One full watcher proof succeeds and resets the count.
   for (let step = 0; step < 3; step++) (await fixture.nextCall()).pass();
   await missWatcherProofs(4);
   assert.equal(await settles(verify()), "resolved", "a success must reset the miss count");
-  // The fifth straight miss unproves it: a request now needs a full proof.
   await missWatcherProofs(1);
   const unproven = verify();
   for (let miss = 0; miss < 5; miss++) (await fixture.nextCall()).timeOut();
   await assert.rejects(unproven, /timed out/);
-  // A real mismatch is not a timeout: a reused PID is refused on the first watcher proof.
   fixture.hold(false);
   await verify();
   fixture.table.get(process.pid).lstart = "start-reused";
@@ -319,25 +300,21 @@ test("a helper killed at its deadline proves nothing: an unproven capture or pro
   const fixture = await verifierCase();
   fixture.row(process.pid, process.ppid, "start-a");
   fixture.hold(true);
-  // The identity capture at construction retries a killed ps.
   let helperCalls = 0;
   const constructing = fixture.proxyModule.ownedGatewayVerifier(process.pid, fixture.port,
     { execute: (...args) => { helperCalls++; return fixture.execute(...args); }, proofIntervalMs: 60_000 });
   (await fixture.nextCall()).timeOut();
   for (let step = 0; step < 3; step++) (await fixture.nextCall()).pass();
   const verify = await constructing;
-  // The first proof (the proxy's startup proof) survives four killed helpers.
   const first = verify();
   for (let miss = 0; miss < 4; miss++) (await fixture.nextCall()).timeOut();
   assert.equal(await settles(first), "pending", "a killed helper must not refuse an unproven Gateway");
   for (let step = 0; step < 3; step++) (await fixture.nextCall()).pass();
   await first;
-  // Unproven again (its child exited); the fifth killed helper refuses.
   verify.exited(process.pid);
   const bounded = verify();
   for (let miss = 0; miss < 5; miss++) (await fixture.nextCall()).timeOut();
   await assert.rejects(bounded, /timed out/);
-  // A real mismatch is never retried: one proof (2 ps, 1 lsof) refuses.
   fixture.hold(false);
   fixture.table.get(process.pid).listening = false;
   verify.exited(process.pid);

@@ -5,25 +5,18 @@ import { adaptedExtensionEventHandler, adaptedToolDefinition, adaptMcpAuthComman
 import type { ExtensionOwner } from "../../protocol/types.js";
 import type { BrowserResultObservation } from "../projection/tool-result.js";
 
-/** The managed producer supplies its actual load admission, not a mirrored provider. */
 export interface ManagedExtensionAdmission { admit(extensions: readonly Extension[]): void }
 
-/** Runtime product policy is supplied by the module, including its reserved capabilities. */
 export type ExtensionAdmission = (base: LoadExtensionsResult, browserLiveView?: BrowserResultObservation,
   managed?: ManagedExtensionAdmission) => LoadExtensionsResult;
 
 type ExtensionHandlerList = Parameters<Extension["handlers"]["set"]>[1];
-/** Pi keys shortcuts by its `KeyId` union, not an arbitrary string. */
 type ExtensionShortcutKey = Parameters<Extension["shortcuts"]["set"]>[0];
 type ExtensionShortcut = Parameters<Extension["shortcuts"]["set"]>[1];
 
 const attributedCommandOwners = new WeakMap<RegisteredCommand["handler"], () => ExtensionOwner>();
 const builtinMcpCommandHandlers = new WeakSet<RegisteredCommand["handler"]>();
 const attributedToolOwners = new WeakMap<ToolDefinition["execute"], () => ExtensionOwner>();
-/** Every callback admitted at this boundary, keyed by its owning extension, so
- * repeat registration of the same function by one extension cannot double-wrap
- * it while a different extension still receives its own correctly attributed
- * wrapper. */
 const admittedCallbackOwners = new WeakMap<Function, Extension>();
 
 export function isBuiltinMcpCommand(command: RegisteredCommand | undefined): boolean {
@@ -43,14 +36,6 @@ export function producerIdentity(source: string, path: string, title: string, ki
   return { id, title, source, kind };
 }
 
-/**
- * Wraps one callback in its owning extension context. The owner is
- * resolved at invocation time, not admission time: the pinned SDK finalizes
- * package `SourceInfo` after `extensionsOverride` returns. Admission is
- * idempotent per extension, so re-setting an already-admitted handler list
- * keeps one wrapper while a different extension sharing the same function
- * object still gets its own attributed wrapper.
- */
 function ownCallback<T extends (...args: any[]) => any>(callback: T, state: RegistrationAdmission): T {
   if (admittedCallbackOwners.get(callback) === state.extension) return callback;
   const wrapper = ((...args: Parameters<T>) => withExtensionOwner(state.owner(), () => callback(...args))) as T;
@@ -58,7 +43,6 @@ function ownCallback<T extends (...args: any[]) => any>(callback: T, state: Regi
   return wrapper;
 }
 
-/** One live extension reference; policy and owner are resolved by its actual supplier. */
 interface RegistrationAdmission {
   extension: Extension;
   owner: () => ExtensionOwner;
@@ -66,18 +50,6 @@ interface RegistrationAdmission {
   browserLiveView?: BrowserResultObservation;
 }
 
-/**
- * The single registration admission boundary.
- *
- * Pi permits an already-loaded extension to register tools, commands,
- * handlers, shortcuts, and renderers at any time, not only during load. A
- * one-shot pass over the loader result therefore cannot own attribution or
- * reserved-name policy: a later `registerTool` would replace the admitted entry
- * with an unwrapped definition, losing producer identity and bypassing the
- * first-party name checks. Making the registration maps themselves the
- * admission boundary means load-time and late registration share exactly one
- * policy path, with no polling or post-hoc repair pass.
- */
 class RegistrationMap<K, V> extends Map<K, V> {
   constructor(
     private readonly admit: (key: K, value: V) => V,
@@ -92,9 +64,6 @@ class RegistrationMap<K, V> extends Map<K, V> {
 }
 
 function admitTool(state: RegistrationAdmission, name: string, registered: RegisteredTool): RegisteredTool {
-  // A tool that already carries this extension's host wrapper is admitted;
-  // re-setting it (for example during a normalizing pass) must not wrap it a
-  // second time.
   if (admittedCallbackOwners.get(registered.definition.execute) === state.extension) return registered;
   state.assertToolName(name);
   const definition = adaptedToolDefinition(state.extension, name, registered.definition);
@@ -102,8 +71,6 @@ function admitTool(state: RegistrationAdmission, name: string, registered: Regis
     const result = await definition.execute(...args);
     if (!state.browserLiveView) return result;
     return state.browserLiveView.observeResult({
-      // The SDK finalizes public package provenance after extensionsOverride.
-      // Read it at execution, never authorize from the provisional owner.
       owner: state.owner(),
       toolName: name,
       toolCallId: args[0],
@@ -128,8 +95,6 @@ function admitTool(state: RegistrationAdmission, name: string, registered: Regis
 }
 
 function admitHandlers(state: RegistrationAdmission, _event: string, handlers: ExtensionHandlerList): ExtensionHandlerList {
-  // `on()` re-sets the whole list each time, so already-admitted handlers must
-  // keep their existing wrapper identity instead of being adapted twice.
   return handlers.map((handler) => admittedCallbackOwners.get(handler) === state.extension
     ? handler
     : ownCallback(adaptedExtensionEventHandler(state.extension, handler), state));
@@ -137,7 +102,6 @@ function admitHandlers(state: RegistrationAdmission, _event: string, handlers: E
 
 function admitCommand(state: RegistrationAdmission, name: string, command: RegisteredCommand): RegisteredCommand {
   if (admittedCallbackOwners.get(command.handler) === state.extension) return command;
-  // Pi separates a synthetic built-in's source (`builtin`) from its path (`builtin:mcp`).
   const callback = state.extension.sourceInfo.path === "builtin:mcp" && name === "mcp"
     ? adaptMcpAuthCommandHandler(command.handler)
     : command.handler;
@@ -162,12 +126,6 @@ function admitMarkdownTransformer(state: RegistrationAdmission, registration: Ma
   return { ...registration, transformer: ownCallback(registration.transformer, state) };
 }
 
-/**
- * Installs the admission boundary on one loaded extension. Registered entries
- * are admitted through the same functions that later registrations use, so a
- * reload (which yields fresh extension objects) re-establishes exactly one
- * wrapper per callback.
- */
 export function installExtensionRegistration(extension: Extension, owner: () => ExtensionOwner,
   assertToolName: (name: string) => void, browserLiveView?: BrowserResultObservation): void {
   const state: RegistrationAdmission = { extension, owner, assertToolName, ...(browserLiveView ? { browserLiveView } : {}) };

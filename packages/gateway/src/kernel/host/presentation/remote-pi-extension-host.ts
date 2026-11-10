@@ -23,13 +23,6 @@ interface WidgetMeta {
   placement: "aboveEditor" | "belowEditor";
 }
 
-/**
- * Per-presentation-epoch Pi host. RuntimeSlot binds this context in RPC mode so
- * retained component widgets can publish bounded read-only frames while every
- * semantic API continues through SemanticUIBroker and the same presentation
- * store. RPC mode has no native path for blocking custom or overlay UI, so
- * `custom()` is refused with a diagnostic and never invokes its factory.
- */
 export class RemotePiExtensionHost {
   private readonly baseContext: ExtensionUIContext;
   private terminal?: InMemoryTerminal;
@@ -52,7 +45,6 @@ export class RemotePiExtensionHost {
   get presentation(): ExtensionPresentationStore { return this.semantic.presentation; }
   get hostEpoch(): string { return this.presentation.hostEpoch; }
 
-  /** Re-render retained component surfaces after a native semantic UI mutation. */
   rerender(): void { if (!this.retired) this.requestRender(true); }
 
   context(): ExtensionUIContext {
@@ -77,8 +69,6 @@ export class RemotePiExtensionHost {
         const previous = host.widgets.get(key);
         const owner = currentExtensionOwner();
         host.widgets.set(key, { placement: options?.placement === "belowEditor" ? "belowEditor" : "aboveEditor", ...(owner ? { owner } : {}) });
-        // Registry admission may reject a replacement while a bounded factory
-        // is pending. Restore metadata when that admission does not commit.
         if (!host.mountComponent(key, content as RemoteComponentFactory)) {
           if (previous === undefined) host.widgets.delete(key); else host.widgets.set(key, previous);
         }

@@ -1,6 +1,3 @@
-/** Builds a `settings.change` request for one Session-scope key of a session, the
- * way the iPhone sends it: the key, its value and the fence the client read
- * (docs/settings-model.md 5.2). */
 export type SessionSetting = "model" | "thinking" | "contextWindow" | "tools";
 
 export function sessionSettingChange(setting: SessionSetting, params: Record<string, unknown>): Record<string, unknown> {
@@ -27,14 +24,10 @@ export function sessionSettingChange(setting: SessionSetting, params: Record<str
   };
 }
 
-/** The applied revision a Session-scope `settings.change` returned. */
 export function changedRevision(result: unknown): number | undefined {
   return (result as { changes?: Array<{ revision?: number }> } | undefined)?.changes?.[0]?.revision;
 }
 
-/** Builds the `settings.change` that sets Home's memory models: the background
- * model queue (a Profile key, docs/settings-model.md 6.3). Other fields pass
- * through so a fixture can prove the request shape is refused. */
 export function homeMemoryChange(params: Record<string, unknown>): Record<string, unknown> {
   const { commandId, model, ...rest } = params;
   const ref = model as { provider: string; id: string } | undefined;

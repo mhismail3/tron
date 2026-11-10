@@ -2,14 +2,8 @@ import { readFileSync } from "node:fs";
 import { crc32, deflateSync } from "node:zlib";
 
 const BASE_JPEG = readFileSync(new URL("./browser-live.jpg", import.meta.url));
-// A JPEG comment segment carries at most 65,533 payload bytes after its marker and length.
 const COMMENT_SEGMENT_PAYLOAD_BYTES = 65_533;
 
-/**
- * Synthetic PNG bytes for image-bound tests. The encoder writes only a
- * gradient RGB raster, so the fixture stays small while remaining a real PNG
- * the pinned image backend can decode. It contains no user or host data.
- */
 export function syntheticPng(width: number, height: number): Buffer {
   const stride = width * 3 + 1;
   const raster = Buffer.alloc(stride * height);
@@ -26,8 +20,8 @@ export function syntheticPng(width: number, height: number): Buffer {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
-  header[8] = 8; // bit depth
-  header[9] = 2; // color type: truecolor
+  header[8] = 8;
+  header[9] = 2;
   return Buffer.concat([
     Buffer.from("89504e470d0a1a0a", "hex"),
     pngChunk("IHDR", header),
@@ -36,12 +30,6 @@ export function syntheticPng(width: number, height: number): Buffer {
   ]);
 }
 
-/**
- * A JPEG of at least `minimumBytes` for size-bound tests. It is the 1x1 baseline
- * JPEG from `browser-live.jpg` with COM segments inserted after SOI, so the pinned
- * image backend decodes it like any photo while its encoded size exceeds an inline
- * provider limit. It contains no user or host data.
- */
 export function syntheticOversizedJpeg(minimumBytes: number): Buffer {
   const segments: Buffer[] = [];
   let length = BASE_JPEG.length;

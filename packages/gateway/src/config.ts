@@ -29,14 +29,10 @@ export interface GatewayConfig {
   readonly maxLiveRuntimes: number;
   readonly maxOutboundBytes: number;
   readonly maxSynchronizationBytes: number;
-  /** The second, TLS-only listener for the private LAN (E-3a). On by default
-   * for a Gateway that is not bound to loopback; the setting is the kill
-   * switch in both directions (E-3d). */
   readonly lanEndpoint: {
     readonly enabled: boolean;
     readonly stateDirectory: string;
   };
-  /** Maintainer-owned product endpoint. It is never accepted from mobile or tool input. */
   readonly pushServiceOrigin?: string;
 }
 
@@ -57,7 +53,6 @@ function valueAfter(args: string[], name: string): string | undefined {
 }
 
 export const DEFAULT_MAX_LIVE_RUNTIMES = 128;
-/** The upload bytes one prompt may carry in total; Home's source bound is derived from it. */
 export const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1_048_576;
 
 function parseRuntimeCapacity(raw: string | undefined): number {
@@ -77,9 +72,6 @@ function parsePort(raw: string | undefined): number {
   return port;
 }
 
-/** Every spelling of a loopback-only bind. A Gateway reachable from this Mac
- * alone has no home network for the lane to serve, so E-3d does not turn the
- * LAN endpoint on for one. */
 function isLoopbackHost(host: string): boolean {
   if (host === "localhost") return true;
   const family = isIP(host);
@@ -87,15 +79,10 @@ function isLoopbackHost(host: string): boolean {
   if (family !== 6) return false;
   const bytes = ipv6Bytes(host);
   if (bytes === null || bytes.slice(0, 10).some((byte) => byte !== 0)) return false;
-  // `::1`, and the IPv4-mapped `::ffff:127.0.0.0/8` form Node also accepts.
   if (bytes[10] === 0xff && bytes[11] === 0xff) return bytes[12] === 127;
   return bytes.slice(10, 15).every((byte) => byte === 0) && bytes[15] === 1;
 }
 
-/** The LAN endpoint's kill switch. E-3d turned the release default on for a
- * Gateway that serves a network the phone can reach and left it off for a
- * loopback bind; `on` and `off` override either default in that order
- * (R-4 reviews its use). */
 function parseLanEndpointEnabled(raw: string | undefined, host: string): boolean {
   if (raw === "on") return true;
   if (raw === "off") return false;
@@ -166,17 +153,11 @@ export function resolveBindHost(raw: string | undefined, interfaces = networkInt
 }
 
 
-/** One address the LAN listener may bind: RFC 1918 and IPv6 ULA only, so an
- * endpoint is never a wildcard, a link-local address or Tailscale's own
- * interface. */
 export interface LanAddress {
   readonly address: string;
   readonly family: "IPv4" | "IPv6";
 }
 
-// Tailscale's IPv6 range (fd7a:115c:a1e0::/48) is inside the ULA range, so the
-// Tailscale test has to come first: binding it as a LAN address would advertise
-// the virtual interface as the home network path.
 function isPrivateLanAddress(address: string): boolean {
   if (typeof address !== "string") return false;
   const family = isIP(address);
@@ -203,10 +184,6 @@ function interfaceFamily(family: string | number): LanAddress["family"] {
   return family === "IPv4" || family === 4 ? "IPv4" : "IPv6";
 }
 
-/** The private LAN addresses the endpoint may bind, most preferred first. The
- * order is deterministic so a Mac with two private interfaces (Wi-Fi and a
- * wired or virtual one) always exposes the same one: IPv4 before IPv6, then
- * the lowest IPv4 address, then the interface name. */
 export function resolveLanAddresses(interfaces = networkInterfaces()): LanAddress[] {
   const candidates = Object.entries(interfaces).flatMap(([name, addresses]) => (addresses ?? [])
     .filter((candidate) => !candidate.internal && isPrivateLanAddress(candidate.address))
@@ -342,9 +319,7 @@ async function loadMachineGroupID(environment: NodeJS.ProcessEnv): Promise<strin
 
 async function loadProductPushOrigin(): Promise<string | undefined> {
   const candidates = [
-    // Signed Mac payload: app/dist/config.js + app/PushService.xcconfig.
     join(dirname(fileURLToPath(import.meta.url)), "..", "PushService.xcconfig"),
-    // Source/development checkout. Empty means safely unavailable.
     fileURLToPath(new URL("../../../config/PushService.xcconfig", import.meta.url)),
   ];
   for (const path of candidates) {
@@ -378,8 +353,6 @@ export async function loadConfig(
     throw new GatewayError("invalid_request", "PI_CODING_AGENT_DIR must be absolute");
   }
   const agentDir = resolve(explicitAgentDir ?? tronHomePath(tronHome, "agent"));
-  // The LAN default reads the resolved host, so a loopback-bound Gateway is
-  // left exactly as it was before E-3a: one loopback listener.
   const host = resolveBindHost(valueAfter(args, "--host") ?? environment.TRON_GATEWAY_HOST);
   return {
     host,
@@ -400,8 +373,6 @@ export async function loadConfig(
     maxSynchronizationBytes: 2 * 1_048_576,
     lanEndpoint: {
       enabled: parseLanEndpointEnabled(valueAfter(args, "--lan-endpoint") ?? environment.TRON_GATEWAY_LAN_ENDPOINT, host),
-      // The Gateway's private state directory. The key and certificate are 0600
-      // inside it and are never regenerated under an existing pin (E-3b).
       stateDirectory: tronHomePath(tronHome, "gateway/lan-endpoint"),
     },
     ...(pushServiceOrigin ? { pushServiceOrigin } : {}),

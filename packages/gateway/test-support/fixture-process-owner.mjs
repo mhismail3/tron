@@ -1,13 +1,6 @@
 import { ChildProcess, spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
-// Test-only preload. The leg owns spawn handles, never producer artifacts. Each
-// Node descendant inherits the preload and joins its own children before exit,
-// so detached groups cannot escape when an intermediate runner is retired.
-// TRON_TEST_PROCESS_OWNER enables this only for one isolated leg. Its fixture
-// parent supplies TRON_TEST_PROCESS_OWNER_FAILURE, an exclusive JSONL failure
-// record path outside disposable leg roots; that parent must preserve its
-// staging owner if any join failure is recorded there.
 const enabled = Boolean(process.env.TRON_TEST_PROCESS_OWNER);
 const children = [];
 const nativeSpawn = ChildProcess.prototype.spawn;
@@ -18,8 +11,6 @@ const ownedPids = new Set();
 const ownedGroups = new Set();
 
 function processes() {
-  // No timeout: one ps snapshot always terminates, and on a loaded host it can
-  // take seconds. A deadline here failed correct legs under concurrent verify.
   const result = spawnSync("ps", ["-axo", "pid=,ppid=,pgid=,stat="], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
   if (result.status !== 0) {
     throw new Error(`fixture process owner could not inspect process trees: status ${result.status}, `
@@ -31,8 +22,6 @@ function processes() {
   });
 }
 
-// A zombie has terminated and cannot write; its reaping belongs to its parent
-// or the OS. Handle exit events still have to settle before this owner exits.
 const live = row => !row.state.startsWith("Z");
 
 function signal(pid, value, group = false) {
@@ -40,9 +29,6 @@ function signal(pid, value, group = false) {
   catch (error) {
     if (error.code === "ESRCH") return;
     if (error.code === "EPERM") {
-      // macOS rejects signals to zombie-only groups. Reinspect after the
-      // signal: members may have terminated or been reaped since the send
-      // snapshot. An absent or zombie-only target cannot write.
       const target = processes().filter(row => group ? row.group === pid : row.pid === pid);
       if (!target.some(live)) return;
     }
@@ -56,8 +42,6 @@ export function disposeFixtureProcesses() {
     const table = processes();
     const owned = ownedPids;
     for (const child of children) if (!child.exited) owned.add(child.pid);
-    // One ancestry cut while direct owners are still live. Descendant Node
-    // owners also join on SIGTERM; detached groups stay explicitly owned here.
     for (let pass = 0; pass < table.length; pass++) {
       let changed = false;
       for (const row of table) if (owned.has(row.parent) && !owned.has(row.pid)) { owned.add(row.pid); changed = true; }
@@ -84,9 +68,6 @@ export function disposeFixtureProcesses() {
         try { send("SIGKILL"); }
         catch (error) {
           if (error.code !== "EPERM") throw error;
-          // Another inherited owner may be finishing the same tree. A live
-          // post-signal snapshot is not terminal evidence: join without
-          // resending, and retain the denial if any writer stays live.
           escalationError = error;
         }
       }
@@ -94,8 +75,6 @@ export function disposeFixtureProcesses() {
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   })().catch(error => {
-    // The outer fixture must not delete roots if any descendant could still
-    // write. Preserve the failed owner and its exact PID diagnostic instead.
     let pids = children.filter(child => !child.exited).map(child => child.pid);
     try { pids = processes().filter(row => live(row) && (ownedPids.has(row.pid) || ownedGroups.has(row.group))).map(row => row.pid); } catch {}
     appendFileSync(process.env.TRON_TEST_PROCESS_OWNER_FAILURE, `${JSON.stringify({ pids, attemptedSignals, error: error.message })}\n`);

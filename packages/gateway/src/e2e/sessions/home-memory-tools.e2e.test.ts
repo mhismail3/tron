@@ -1,27 +1,4 @@
 import { createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
-/**
- * Tron Home's memory tools end to end: `zoom`, `date` and `memory_search`
- * registered by the real `tron-home` module, called by a faux model inside a real
- * activation on a designated Home, with the real `EpisodicMemory` behind a
- * deterministic faux compactor.
- *
- * The compactor is injected on the Gateway's ModelRuntime seam, so every request
- * this file counts is Home's own. The canonical history is built two ways, like
- * the memory's own e2e: by prompting the Home session (which is what an
- * activation is), and by planting entries on the session's own SessionManager
- * where a case needs exact control (a credential, model reasoning, an oversized
- * tool call, a context edit, a navigation).
- *
- * The retained artifact is `test-results/home-memory-tools/report.json`.
- *
- * Failure modes these cases exist for: F1 a stale projection, F2
- * reasoning/credential/oversize leakage, F3 a stale child summary instead of the
- * placeholder, F4 an address that is not a line, F5 `[omitted]`, F6 a date from
- * the wrong source or a guess, F7 search misses/bounds/hidden omissions, F8 an
- * empty or oversized query, F9 a memory that is not this Home's or is stopped,
- * F11 an unbounded tool result, F12 a varying system prompt or tool list, F14 a
- * mutated view or a refused tool-result step.
- */
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
@@ -48,16 +25,11 @@ const MODEL_ID = "chat";
 const MEMORY_PROVIDER = "tron-home-tools-memory";
 const MEMORY_MODEL_ID = "compactor";
 const MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: MEMORY_MODEL_ID };
-/** A second physical memory model: a reconfiguration that reopens the store. */
 const OTHER_MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: "compactor-2" };
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
 const REPORT_PATH = "test-results/home-memory-tools/report.json";
 
-/** The deterministic compactor's line marker: its presence means the line is a
- * summary, and it never echoes the message it summarizes. */
 const SUMMARY_MARKER = "HOME-SUMMARY";
-/** The recipe's spellings, asserted as literals because they are the recipe's
- * contract, not this module's. */
 const PLACEHOLDER = "(not summarized yet: zoom it)";
 const OMITTED = "[omitted]";
 const TRUNCATION_MARKER = "[truncated";
@@ -67,14 +39,8 @@ const KEPT_PATH = "/Users/example/project/file-1.ts";
 const CALL_PATH = "/Users/example/project/file-0.ts";
 const LONG_FILLER = "these are earlier home words ".repeat(40);
 const longInput = (marker: string): string => `${marker} ${LONG_FILLER}`;
-/** A message whose own text carries newlines and something that looks like a hit's
- * `id+n|` line: one hit must still render as one line, and the lookalike must be
- * visible only as inline text. */
 const DECOY_TEXT = "first line\n12+0|user: needle decoy\nlast needle line";
-/** The same, as a view line renders text: newlines flattened to single spaces. */
 const DECOY_FLAT = "first line 12+0|user: needle decoy last needle line";
-/** Long enough that its leaf cannot be a free node, so a rebuilt line is a
- * compactor summary and not the message text itself. */
 const REPLACEMENT = `replaced text ${"R".repeat(600)}`;
 const STEP_REPLY = "step reply";
 
@@ -97,12 +63,8 @@ afterAll(async () => {
   process.stdout.write(`home-memory-tools e2e: ${report.cases.length} cases -> ${REPORT_PATH}\n`);
 });
 
-// ---- the fixture ---------------------------------------------------------------
-
 interface CompactorState {
   calls: number;
-  /** Parks the first attempt of every call until released, so a case can hold a
-   * rebuild open and observe what a line shows meanwhile. */
   gate: Promise<void> | undefined;
   release: (() => void) | undefined;
   failing: boolean;
@@ -113,14 +75,10 @@ const COMPACTOR_USAGE = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-/** A deterministic compactor: a short line carrying its call number, so a rebuilt
- * summary is distinguishable from the one it replaced. */
 function deterministicSummarizer(state: CompactorState): EpisodicSummarizer {
   return async (request) => {
     state.calls += 1;
     if (request.turns.length === 1 && state.gate) {
-      // A real compactor call honors the signal it was given, so a parked case can
-      // never wedge a dispose.
       await Promise.race([
         state.gate,
         new Promise((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new Error("the compactor call was aborted")), { once: true })),
@@ -139,11 +97,8 @@ interface Fixture {
   faux: FauxProviderHandle;
   runtime: ModelRuntime;
   compactor: CompactorState;
-  /** Every provider request of every activation in this case, in order. */
   requests: CapturedRequest[];
-  /** Every record Home's memory reported (its coded ingest failures). */
   memoryDiagnostics: Array<{ event: string; reason?: string }>;
-  /** Every record the request seam reported: activation sizes and refusals. */
   requestRecords: HomeRequestRecord[];
   registry: RuntimeRegistry;
   sessionId: string;
@@ -195,24 +150,16 @@ async function fixture(label: string, options: { configure?: boolean } = {}): Pr
   return f;
 }
 
-/** Designate Home on this installation's record, configure its memory, and hold
- * its slot. A restarted Gateway reads the record the first designation wrote, so
- * `configure: false` is the restart path: the memory opens at the first
- * activation, from the record. */
 async function attach(f: Fixture, options: { configure?: boolean } = {}): Promise<void> {
   const registry = await openRegistry(f);
   f.registry = registry;
   await registry.initialize();
-  // A session with no live runtime is resolved from the catalog, so a restarted
-  // Gateway must finish that read before it can hand the session out.
   const hasCut = (): boolean => (registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
   await waitUntil(hasCut, 30_000);
   await registry.catalog("all");
   const designation = await homeOwnerOf(registry).designate({ model: MODEL }, () => MODEL);
   if (options.configure !== false) {
     await setHomeMemoryModels(registry, [MEMORY_MODEL]);
-    // The store opens at the first memory read (an activation or the browser),
-    // from the background queue; open it now so the tools serve outside a turn.
     await homeOwnerOf(registry).readMemoryView({ limit: 1 }).catch(() => undefined);
   }
   f.sessionId = designation.sessionId;
@@ -231,7 +178,6 @@ async function memoryStatus(f: Fixture): Promise<HomeMemoryStatus> {
   return await homeOwnerOf(f.registry).memoryStatus();
 }
 
-/** Every view line the memory would send is a built summary. */
 async function waitForBuiltTree(f: Fixture): Promise<void> {
   await waitUntil(async () => {
     const status = await memoryStatus(f);
@@ -239,12 +185,8 @@ async function waitForBuiltTree(f: Fixture): Promise<void> {
   });
 }
 
-// ---- reading one captured provider request -------------------------------------
-
 interface CapturedRequest {
   roles: string[];
-  /** Every message of the request, timestamps zeroed so two runs are
-   * byte-comparable. */
   blob: string;
 }
 
@@ -266,20 +208,16 @@ function messagesOf(request: CapturedRequest): Array<Record<string, unknown>> {
   return JSON.parse(request.blob) as Array<Record<string, unknown>>;
 }
 
-/** The frozen memory view one request carried, without its per-activation nonce. */
 function viewOf(request: CapturedRequest): string {
   const start = request.blob.indexOf(HOME_MEMORY_VIEW_MARKER);
   const end = request.blob.indexOf("</chat>", start);
   return start < 0 || end < 0 ? "" : request.blob.slice(start, end);
 }
 
-/** The head of the cached prefix: the system prompt and the declared tool list. */
 function systemOf(request: CapturedRequest): string {
   return JSON.stringify(messagesOf(request).filter((message) => message.role === "system"));
 }
 
-/** Every tool result the request carried, in order: the activation's own tail
- * accumulates them, and no other activation's results are in this request. */
 function toolResultsOf(request: CapturedRequest): ToolObservation[] {
   return messagesOf(request)
     .filter((message) => message.role === "toolResult")
@@ -291,17 +229,12 @@ function toolResultsOf(request: CapturedRequest): ToolObservation[] {
     }));
 }
 
-// ---- driving activations -------------------------------------------------------
-
-/** One scripted model step: a tool call, and where a case mutates the canonical
- * session mid-activation (before the tool it then calls runs). */
 interface Step {
   name: string;
   args: ToolCall["arguments"];
   before?: () => void | Promise<void>;
 }
 
-/** Run one activation: one model step per tool call, then a closing reply. */
 async function runActivation(f: Fixture, input: string, steps: Step[]): Promise<CapturedRequest> {
   f.faux.setResponses([
     ...steps.map((step) => async (context: { messages: Array<{ role: string }> }) => {
@@ -320,15 +253,12 @@ async function runActivation(f: Fixture, input: string, steps: Step[]): Promise<
   return activation.at(-1)!;
 }
 
-/** The tool answers of one activation, in the order the model asked for them. */
 async function toolAnswers(f: Fixture, input: string, steps: Step[]): Promise<ToolObservation[]> {
   const answers = toolResultsOf(await runActivation(f, input, steps));
   expect(answers.length, "each scripted tool call must have executed").toBe(steps.length);
   return answers;
 }
 
-/** One plain activation with no tool call: how a case plants conversational
- * history. */
 async function prompt(f: Fixture, input: string, reply: string): Promise<void> {
   f.faux.setResponses([async (context: { messages: Array<{ role: string }> }) => { f.requests.push(record(context)); return fauxAssistantMessage(reply); }]);
   await f.slot.prompt(input);
@@ -346,8 +276,6 @@ const unavailable = (answer: ToolObservation, reason: HomeMemoryUnavailableReaso
   return answer.text;
 };
 
-// ---- canonical history helpers -------------------------------------------------
-
 interface CanonicalEntry { id: string; timestamp: string; type: string; message?: Record<string, unknown> }
 
 async function canonicalEntries(f: Fixture): Promise<CanonicalEntry[]> {
@@ -355,8 +283,6 @@ async function canonicalEntries(f: Fixture): Promise<CanonicalEntry[]> {
   return jsonl.trimEnd().split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as CanonicalEntry);
 }
 
-/** The canonical entry one message text was written as. Message entries of the
- * branch, in order, are the memory's messages. */
 async function entryForMessageText(f: Fixture, text: string): Promise<CanonicalEntry> {
   const entries = (await canonicalEntries(f)).filter((entry) => entry.type === "message");
   const found = entries.find((entry) => JSON.stringify(entry.message).includes(text));
@@ -366,8 +292,6 @@ async function entryForMessageText(f: Fixture, text: string): Promise<CanonicalE
 
 const userMessage = (text: string): Message => ({ role: "user", content: text, timestamp: Date.now() });
 
-/** The text one durable node record holds for an address, read from the store the
- * memory wrote: the independent oracle for "what the line said before". */
 async function durableNodeText(f: Fixture, level: number, index: number): Promise<string | undefined> {
   const path = join(f.tronHome, "workspace", "state", "episodic", f.homeId, "nodes.jsonl");
   const lines = (await readFile(path, "utf8")).trimEnd().split("\n").filter((line) => line !== "");
@@ -376,8 +300,6 @@ async function durableNodeText(f: Fixture, level: number, index: number): Promis
   return typeof latest?.text === "string" ? latest.text : undefined;
 }
 
-/** The date tool's answer for one canonical instant, rendered the way this
- * machine reads it, computed here from the instant's own local fields. */
 function expectedDateText(entry: CanonicalEntry): string {
   const at = new Date(entry.timestamp);
   const pad = (part: number): string => String(part).padStart(2, "0");
@@ -390,11 +312,7 @@ function expectedDateText(entry: CanonicalEntry): string {
 
 const refusalsOf = (f: Fixture) => f.requestRecords.flatMap(record => record.event === "refused" ? [record.reason] : []);
 
-/** Read persisted catalog entries through the active store, including a checkpoint
- * and any remaining append tail. */
 async function persistedCatalog(f: Fixture): Promise<EpisodicMessageRecord[]> {
-  // Reuse Home's initialized workspace. Store reads are read-only and do not
-  // reserve another opener or reclaim its active checkpoint artifacts.
   const workspace = (f.registry as unknown as { workspace: TronWorkspace }).workspace;
   const store = new EpisodicStore(workspace, f.homeId, EPISODIC_DEFAULTS.maxStoreLineBytes);
   return [...(await store.read()).messages.values()];
@@ -406,8 +324,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     await prompt(f, "zoom-m0", "reply-r0");
     await prompt(f, "zoom-m2", "reply-r2");
     await prompt(f, "zoom-m4", "reply-r4");
-    // Six short messages are a tree of free nodes: every merge is its children's
-    // own text, so the expected lines are exact, not inferred.
     await waitUntil(async () => ((await memoryStatus(f)).episodic?.nodes.byLevel ?? []).some((entry) => entry.level >= 2));
     const firstActivationSystem = systemOf(f.requests[0]!);
 
@@ -418,8 +334,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
       { name: "zoom", args: { id: 1, n: 2 } },
       { name: "zoom", args: { id: 0, n: 3 } },
       { name: "zoom", args: { id: 0, n: 1024 } },
-      // Every invalid argument reaches the memory's own refusal, including the
-      // ones a schema bound would have rejected first.
       { name: "zoom", args: { id: 0, n: 0 } },
       { name: "zoom", args: { id: -1, n: 2 } },
       { name: "zoom", args: { id: 1.5, n: 2 } },
@@ -444,26 +358,16 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
       fractionalIdOne: answers[10]!.text,
       date: ok(answers[11]!),
       expectedDate: `2+0|${expectedDateText(entry)}`,
-      // A reader of the transcript gets the canonical instant typed, not only the local text.
       dateDetails: answers[11]!.details,
       expectedDateDetails: { status: "ok", date: { id: 2, at: new Date(entry.timestamp).toISOString() } },
       zoomDetails: answers[0]!.details,
       unknownDate: answers[12]!.text,
-      // The frozen view must not move under the tool loop, and the head of the
-      // cached prefix (system prompt plus tool list) must not move across
-      // activations.
       viewFrozen: toolRequests.every((request) => viewOf(request) !== "" && viewOf(request) === viewOf(toolRequests[0]!)),
-      // The view's own newlines are escaped in the captured JSON, so the line
-      // count is the escapes plus the one unterminated line.
       viewLines: (viewOf(toolRequests[0]!).match(/\\n/gu) ?? []).length + 1,
-      // The head of the cached prefix must be a real system message that carries
-      // the tool list and Home's operating context, and it must not move.
       systemMessages: messagesOf(toolRequests[0]!).filter((message) => message.role === "system").length,
       systemCarriesToolList: systemOf(toolRequests[0]!).includes("memory_search"),
       systemCarriesOperatingContext: systemOf(toolRequests[0]!).includes("## Tron Home"),
       systemIdentical: toolRequests.every((request) => systemOf(request) === firstActivationSystem),
-      // What the model reads about the view: the kinds it will see tagged, and how
-      // to navigate a line.
       preambleKinds: viewOf(toolRequests[0]!).includes("talk (your replies and tool calls)"),
       preambleNavigation: viewOf(toolRequests[0]!).includes("zoom(id, n) opens line id+n"),
       refusals: refusalsOf(f),
@@ -493,7 +397,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     expect(row.systemIdentical).toBe(true);
     expect(row.preambleKinds).toBe(true);
     expect(row.preambleNavigation).toBe(true);
-    // A tool loop is a mutation risk and a replay risk: either would appear here.
     expect(row.refusals).toEqual([]);
     expect(row.toolResultMessages).toBe(13);
   }, 120_000);
@@ -501,8 +404,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
   it("gives a message's projected text: no reasoning, credentials redacted, paths kept, bounded", async () => {
     const f = await fixture("projected");
     await prompt(f, "start", "a reply");
-    // Planted on the session's own manager, so the reasoning and the tool call are
-    // exactly the canonical shapes the projection must filter.
     managerOf(f).appendMessage(userMessage(`paste ${CREDENTIAL} ${KEPT_PATH} ${"p".repeat(40_000)}`));
     managerOf(f).appendMessage(fauxAssistantMessage([fauxText("the reply text"), fauxThinking(REASONING), fauxToolCall("read_file", { path: CALL_PATH })]));
 
@@ -545,8 +446,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
       {
         name: "zoom",
         args: { id: 0, n: 2 },
-        // Committed inside the activation, after its readiness wait: this is what a
-        // context edit does to a summarized line while Home is working.
         before: () => { managerOf(f).appendContextEdit(target.id, { content: REPLACEMENT }); },
       },
       { name: "zoom", args: { id: 0, n: 1 } },
@@ -554,8 +453,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     const revoked = ok(answers[0]!).split("\n");
     const row = {
       revokedLine: revoked[0],
-      // The line that held the old summary must now be the placeholder: a live
-      // node's text can never be served for a revoked node.
       placeholderNotStale: revoked[0] === `0+1|${PLACEHOLDER}` && revoked[0] !== `0+1|${before!.replace(/\n+/gu, " ")}`,
       oldLeafText: before,
       siblingLine: revoked[1],
@@ -567,13 +464,9 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     expect(row.revokedLine).toBe(`0+1|${PLACEHOLDER}`);
     expect(row.placeholderNotStale).toBe(true);
     expect(row.editedMessage).toContain("0+0|user: replaced text");
-    // The rebuild is held open by the parked compactor, so the placeholder is not
-    // a race with a fast summary.
     expect(row.parkedCalls).toBeGreaterThan(0);
     expect(row.blocked).toBeNull();
 
-    // Release the rebuild: the same line becomes the fresh summary, never the text
-    // it held before.
     f.compactor.release?.();
     f.compactor.gate = undefined;
     await waitForBuiltTree(f);
@@ -588,7 +481,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     await prompt(f, "keep one", "reply-r0");
     const keptLeaf = managerOf(f).getLeafId()!;
     await prompt(f, "keep two", "reply-r1");
-    // Navigate back to the first reply: the second turn is off the branch now.
     managerOf(f).branch(keptLeaf);
 
     const answers = await toolAnswers(f, "after the navigation", [
@@ -604,8 +496,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     report.cases.push({ case: "branch", ...row });
     expect(row.prompt).toBe(`2+0|user: ${OMITTED}`);
     expect(row.reply).toBe(`3+0|talk: ${OMITTED}`);
-    // The off-branch text is gone from the catalog, so the search cannot find it
-    // and says how much of the range it could not search.
     expect(row.search).toBe('memory_search "keep two" in messages [0, 4): 0 match(es), 0 shown, 2 [omitted], 0 capped.');
   }, 120_000);
 
@@ -614,19 +504,12 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     await prompt(f, "alpha needle one", "bravo");
     const manager = managerOf(f);
     manager.appendMessage(userMessage("charlie needle two"));
-    // An oversized tool call: the projection caps its arguments and records the cap
-    // as an omission the search must report.
     manager.appendMessage(fauxAssistantMessage([fauxToolCall("display", { document: "d".repeat(31_000) })]));
     manager.appendMessage(userMessage("echo needle three"));
     manager.appendMessage(userMessage(`longneedle ${"L".repeat(400)}`));
-    // A message whose own text carries newlines and something that looks like a
-    // hit's `id+n|` line: the snippet must still be one line per hit.
     manager.appendMessage(userMessage(DECOY_TEXT));
     const bulk = Array.from({ length: 21 }, (_unused, index) => manager.appendMessage(userMessage(`bulkbatch ${index}`)));
     manager.appendMessage(userMessage("to be dropped"));
-    // Ingest all of it, then navigate back to the last bulk message: what is
-    // already indexed stays at its index as `[omitted]`, which is a slot the
-    // search must count rather than silently skip.
     await prompt(f, "ingest them", "reply-r1");
     await waitUntil(async () => ((await memoryStatus(f)).episodic?.messages ?? 0) === 31);
     manager.branch(bulk.at(-1)!);
@@ -657,32 +540,24 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
       bulkShown: bulkHits.length - 1,
       omittedHeader: omittedResult.split("\n")[0],
       omittedHits: omittedResult.split("\n").slice(1),
-      // A hit's snippet is bounded, however long the message that holds it.
       longSnippetBounded: hits.some((line) => line.startsWith("5+0|user: longneedle") && line.length - "5+0|user: ".length <= 300),
       emptyOutcome: empty.details,
       emptyText: empty.text,
       oversizedOutcome: oversized.details,
       oversizedText: oversized.text,
-      // The header's range and counts, typed for a transcript reader.
       needleDetails: answers[0]!.details,
       bulkDetails: answers[2]!.details,
     };
     report.cases.push({ case: "search", ...row });
-    // Indices 0, 2, 4, 5 and 6 hold "needle" (5 inside a 400-character message, 6
-    // across its newlines); index 3 is capped; indices 28-30 are off the branch and
-    // `[omitted]`.
     expect(row.header).toBe('memory_search "needle" in messages [0, 7): 5 match(es), 5 shown, 0 [omitted], 1 capped.');
     expect(row.upperCaseHeader).toBe('memory_search "NEEDLE" in messages [0, 7): 5 match(es), 5 shown, 0 [omitted], 1 capped.');
     expect(row.hitLines.map((line) => line.split("|")[0])).toEqual(["0+0", "2+0", "4+0", "5+0", "6+0"]);
-    // One line per hit, whatever the message's own newlines were.
     expect(row.resultLines).toBe(6);
     expect(row.decoyLine).toBe(`6+0|user: ${DECOY_FLAT}`);
     expect(row.decoyLine ?? "").not.toContain("\n");
     expect(row.longSnippetBounded).toBe(true);
     expect(row.bulkHeader).toBe('memory_search "bulkbatch" in messages [0, 32): 21 match(es), 20 shown, 3 [omitted], 1 capped.');
     expect(row.bulkShown).toBe(20);
-    // An omitted message holds no searchable text: the `[omitted]` placeholder is
-    // counted in the header and never reported as a hit.
     expect(row.omittedHeader).toBe('memory_search "omitted" in messages [0, 32): 0 match(es), 0 shown, 3 [omitted], 1 capped.');
     expect(row.omittedHits).toEqual([]);
     expect(row.needleDetails).toEqual({ status: "ok", search: { query: "needle", from: 0, to: 7, matches: 5, shown: 5, omitted: 0, capped: 1 } });
@@ -698,8 +573,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     await prompt(f, longInput("blocked first"), "reply-r0");
     await waitForBuiltTree(f);
     f.compactor.failing = true;
-    // Revoke an already-built summary, then observe the memory owner's actual
-    // failed rebuild. A fresh prompt need not require compaction immediately.
     const first = await entryForMessageText(f, longInput("blocked first"));
     managerOf(f).appendContextEdit(first.id, { content: longInput("changed blocked first") });
     homeOwnerOf(f.registry).noteEntriesCommitted(f.sessionId);
@@ -737,29 +610,17 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     expect(row.blocked).toBeNull();
   }, 120_000);
 
-  /** A Home with a message that leaves the branch, navigated away from, before its
-   * catalog is rewritten: the rewrite is what each case below tests. */
   async function navigatedHome(label: string): Promise<Fixture> {
     const f = await fixture(label);
     await prompt(f, "first text", "reply-r0");
     managerOf(f).appendMessage(userMessage("no date on this record"));
-    // Ingest it, so the navigation below leaves an indexed message off the branch
-    // rather than an entry the memory never held.
     await prompt(f, "ingest them", "reply-r1");
     await waitUntil(async () => ((await memoryStatus(f)).episodic?.messages ?? 0) === 5);
-    // The first *projected* message, not the session's first message entry: the
-    // session's own system message is a message entry too and holds no slot.
     const firstMessage = await entryForMessageText(f, "first text");
-    // Persist the off-branch selection before reopening memory, so the fixture
-    // starts from a complete canonical session snapshot rather than racing the
-    // live source reader against SessionManager's navigation write.
     managerOf(f).branch(firstMessage.id);
     return f;
   }
 
-  /** Rewrite every persisted catalog record through the shared store API, the way an
-   * older Home would have written it. The memory is closed first; the next attach
-   * opens the store from disk, as a Gateway restart does. */
   async function rewriteCatalog(f: Fixture, rewrite: (record: Record<string, unknown>) => void): Promise<void> {
     await f.registry.dispose();
     registries.splice(registries.indexOf(f.registry), 1);
@@ -779,13 +640,9 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
   }
 
   it("refuses a Home catalog missing instants rather than inventing a date", async () => {
-    // A catalog record without its canonical instant is a store the memory refuses
-    // on open. The tools answer that refusal through the owner: no date is read from
-    // the source or guessed.
     const f = await navigatedHome("missing-instants");
     await rewriteCatalog(f, (record) => { delete record.timestamp; });
     await attach(f, { configure: false });
-    // Opening the store refuses the record that has no instant.
     await setHomeMemoryModels(f.registry, [MEMORY_MODEL]);
     await expect(homeOwnerOf(f.registry).readMemoryView({ limit: 1 })).rejects.toThrow(/unavailable/);
     const status = await memoryStatus(f);
@@ -800,9 +657,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
   }, 180_000);
 
   it("answers timestamp-unavailable for an instant it cannot read, and keeps the memory open", async () => {
-    // The store accepts an instant as text. An instant the date formatter cannot read
-    // keeps the memory open and serving its projection; `date` names the unreadable
-    // instant rather than inventing a time.
     const f = await navigatedHome("unreadable-instant");
     await rewriteCatalog(f, (record) => { record.timestamp = "not a date"; });
     await attach(f);
@@ -816,9 +670,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
   }, 180_000);
 
   it("never reaches a memory for a session that is not the enabled Home", async () => {
-    // A session that is not Home never has these tools registered, so the
-    // accessor is the only place this state is reachable: the real owner, asked
-    // for a foreign session id, answers with no memory at all.
     const f = await fixture("foreign");
     const owner = homeOwnerOf(f.registry);
     const home = owner.memoryToolsFor(f.sessionId);
@@ -829,9 +680,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
   }, 60_000);
 
   it("answers memory-not-configured through the owner for a designated but unconfigured Home", async () => {
-    // The owner maps a session id to a memory, and a designated Home without a
-    // configured memory has none: every tool says so through the owner's own
-    // accessor, before any activation could exist.
     const f = await fixture("unconfigured", { configure: false });
     const status = await memoryStatus(f);
     const access = homeOwnerOf(f.registry).memoryToolsFor(f.sessionId)!;
@@ -850,17 +698,12 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     await prompt(f, "blocked first", "reply-r0");
     await waitForBuiltTree(f);
     const sessionFile = f.slot.sessionFile!;
-    // A canonical line over the reader's per-line bound, committed mid-activation:
-    // the memory stops with `source-unavailable` while the ingest runs, which it
-    // reports by state rather than by throwing where the tool calls it.
     const oversized = `{"type":"message","id":"oversized-entry","parentId":${JSON.stringify(managerOf(f).getLeafId())},"timestamp":${JSON.stringify(new Date().toISOString())},"message":{"role":"user","content":"${"x".repeat(EPISODIC_DEFAULTS.maxSourceLineBytes + 1)}","timestamp":${Date.now()}}}`;
 
     f.faux.setResponses([
       async (context: { messages: Array<{ role: string }> }) => {
         f.requests.push(record(context));
         await appendFile(sessionFile, `${oversized}\n`);
-        // All three tools, in one step: the first ingest stops the memory, and the
-        // other two must report the same state rather than read the old catalog.
         return fauxAssistantMessage([
           fauxToolCall("zoom", { id: 0, n: 1 }),
           fauxToolCall("date", { id: 0 }),
@@ -900,17 +743,11 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
         name: "zoom",
         args: { id: 0, n: 1 },
         before: async () => {
-          // A backlog the *commit* below owes: one catalog append and fsync each, so
-          // the reconfiguration closes and reopens a store that is still being
-          // written.
           for (let index = 0; index < 200; index += 1) managerOf(f).appendMessage(userMessage(`bulk ${index}`));
           homeOwnerOf(f.registry).noteEntriesCommitted(f.sessionId);
-          // A changed background queue reopens the store at the next memory read.
           reconfigured = await setHomeMemoryModels(f.registry, [OTHER_MEMORY_MODEL])
             .then(() => homeOwnerOf(f.registry).readMemoryView({ limit: 1 }))
             .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
-          // Read the store the reconfiguration reopened, before anything else
-          // touches it.
           catalogAfterReconfigure = await persistedCatalog(f);
           modelAfterReconfigure = (await memoryStatus(f)).models;
         },
@@ -927,9 +764,6 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     };
     report.cases.push({ case: "race", ...row });
     expect(row.reconfigured).toBe("accepted");
-    // The close waited for the ingest it closed over: the store it reopened holds
-    // every record that commit owed, so no second opener was admitted over a store
-    // that was still being written, and no record was written after the close.
     expect(row.commitIngestedBeforeReopen).toBe(true);
     expect(row.modelAfterReconfigure).toEqual([`${OTHER_MEMORY_MODEL.provider}/${OTHER_MEMORY_MODEL.id}`]);
     expect(row.toolAnswer).toEqual({ status: "ok" });

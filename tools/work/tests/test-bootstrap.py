@@ -28,7 +28,7 @@ def fixture_gh() -> None:
     if args[:2] == ["repo", "view"]:
         response = {"id": "repo", "nameWithOwner": "fixture/project", "owner": {"login": "fixture"}}
     elif args[:3] == ["api", "--paginate", "--slurp"]:
-        response = [state["labels"]] if "/labels" in args[3] else [[]]  # labels, then rulesets
+        response = [state["labels"]] if "/labels" in args[3] else [[]]
     elif args[:3] == ["api", "-X", "DELETE"]:
         name = args[3].rsplit("/", 1)[1]
         state["labels"] = [label for label in state["labels"] if label["name"] != name]
@@ -85,7 +85,6 @@ def run() -> None:
             (repo / "tools/work").mkdir(parents=True)
             (repo / "tools/work/work.json").write_text(json.dumps({**config, "rulesets": []}))
 
-            # GitHub as the declaration left it before the cut: every declared item, plus drift.
             labels = [{"name": l["name"], "color": l["color"], "description": l["description"]} for l in config["labels"]]
             labels += [{"name": "task", "color": "1d76db", "description": "old"},
                        {"name": "needs-triage", "color": "ededed", "description": ""}]
@@ -137,7 +136,6 @@ def run() -> None:
             assert not any("needs-triage" in w for w in state["writes"])
             assert "needs-triage" in result.stdout and "Needs you" in result.stdout
 
-            # Once the last open issue and Project item are migrated, prune converges.
             state["open_label_holders"] = {}
             state["item_values"]["Status"] = [{"optionId": "Status-Ready"}]
             state["writes"] = []

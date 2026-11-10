@@ -7,25 +7,7 @@ import {
 import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceValue } from "../../../test-support/scenario-lock.js";
 import { sessionSettingChange } from "../../../test-support/session-settings-change.js";
 
-/**
- * Client event schemas (#2279): every client event topic the phone decodes, with
- * the union of the payload paths it carries (`clientEventTrace`), across the lock
- * scenarios that together reach every payload shape. `protocol-wire` pins the
- * handshake and each method's request and response; this lock pins the events,
- * so the behavior locks need not each record them.
- *
- * Scenarios (shared with their behavior locks, `test-support/lock-scenarios.ts`):
- * notifications-push (presentation, extension asks, a failed and a stopped run, a
- * task worker), run-compaction, project-root-trust (trust, resources and settings
- * changes), automation-owned-run, run-prompt-stream (thinking), run-queue-control
- * (queue edits and diagnostics), and a Session-scope settings change.
- * `session.toolProgress` from project-root-trust is excluded: whether an instant
- * tool emits a progress frame before its result is host timing; the other
- * scenarios reach that topic deterministically.
- */
-
 const MODULE = "gateway/e2e";
-/** Every release in creation order; each Gateway restores the agent-dir environment it found, so they run newest first. */
 const owned: Array<() => Promise<void>> = [];
 const own = (gateway: LockGateway) => { owned.push(() => gateway.dispose()); };
 afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });

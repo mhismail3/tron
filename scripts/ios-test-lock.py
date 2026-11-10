@@ -63,25 +63,12 @@ import time
 from typing import Callable, IO
 
 LOCKED_EXIT = 73
-# The runner's own failure status: a command refused for the lease it inherited
-# fails as the runner does, whichever lane tool it is.
 INHERITED_LEASE_EXIT = 74
-# Reading the lane's state and releasing it are bounded, so a wedged simulator
-# can never keep the holder - and the lease - alive.
 SIMULATOR_TIMEOUT_SECONDS = 120.0
-# A signalled command must end before the holder releases the simulator. The
-# owner below the shell bounds and kills its own xcodebuild session, so waiting
-# for the whole process group covers everything the command started; the bound
-# keeps a wedged tree from holding the simulator - and the lease - forever.
 COMMAND_TREE_GRACE_SECONDS = 30.0
 SIMULATOR = Path(__file__).resolve().parent / "ios-test-simulator.py"
-# The host-wide cap on simulator-heavy jobs: the one place the number lives.
 HOST_SLOTS = 3
-# The slots sit beside the Development simulator's lease, in the host-wide run
-# state directory (outside every worktree), by the same override the helper uses.
 HOST_SLOT_DIRECTORY_NAME = "ios-host-slots"
-# A waiting job looks for a free slot this often, and says who holds them, and
-# how long it has waited, on its first look and then this often.
 HOST_SLOT_POLL_SECONDS = 0.25
 HOST_SLOT_REPORT_SECONDS = 30.0
 HOST_SLOT_COMMAND_CHARACTERS = 160
@@ -119,8 +106,6 @@ def describe_holder(text: str) -> str:
         parts.append(f"worktree {worktree}")
     pid = metadata.get("pid")
     if isinstance(pid, int):
-        # A holder killed outright leaves its command tree holding the lease
-        # (it inherits the descriptor); say so rather than name a dead PID alone.
         parts.append(f"PID {pid}" if process_exists(pid) else f"PID {pid}, which has exited while the command it started still runs")
     started = metadata.get("started_at_epoch_seconds")
     if isinstance(started, int):
@@ -383,7 +368,6 @@ def remove_empty_lane(lock: Path, handle: IO[str]) -> None:
         lock.unlink()
         directory.rmdir()
     except OSError:
-        # Raced by a command starting in this lane: the lane is its now.
         return
 
 
@@ -436,9 +420,6 @@ def main() -> int:
         os.chmod(arguments.lock.parent, 0o700)
         lease = arguments.lock.open("a+", encoding="utf-8")
     except FileNotFoundError:
-        # Another holder's `clean` or the sweep removed this emptied lane between
-        # the mkdir and the open. Recreating it here would race that remover
-        # again, so the take fails as contended, never as a traceback.
         return lease_file_lost(arguments.resource, arguments.lock)
     with lease as handle:
         process: subprocess.Popen[bytes] | None = None
@@ -452,18 +433,10 @@ def main() -> int:
             interrupted = signum
             if process is not None and process.poll() is None:
                 try:
-                    # The whole command tree, not just the direct child: the shell
-                    # dies at once on a signal, and the process owner below it is
-                    # what stops the xcodebuild it runs in its own session.
                     os.killpg(process.pid, signum)
                 except (ProcessLookupError, PermissionError):
-                    # The command exited after the poll: macOS answers EPERM while its
-                    # leader awaits reaping (ESRCH once reaped); it is ours, so no other cause.
                     pass
 
-        # The handlers cover taking the lease and starting the command too: a
-        # signal delivered in that window would otherwise kill the holder and
-        # leave its command and its simulator behind.
         previous = {
             signum: signal.signal(signum, forward)
             for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
@@ -492,15 +465,8 @@ def main() -> int:
             }
             if arguments.worktree is not None:
                 metadata["worktree"] = arguments.worktree
-            # The holder's own identity goes in first: `lanes` and `status --all`
-            # read it instead of taking the lease, so it has to be readable as
-            # soon as the lease is held, before the simulator below is probed.
             write_metadata(handle, metadata)
             if arguments.host_slot:
-                # After the lane's own lease (a busy lane failed above, at once),
-                # and shown in its metadata while waiting, so `lanes` names a job
-                # that is queued for a slot rather than showing a holder with no
-                # command.
                 metadata["waiting_for_host_slot"] = True
                 write_metadata(handle, metadata)
                 taken = take_host_slot(lambda: interrupted is not None, arguments.resource, arguments.host_slot_wait_seconds)
@@ -516,7 +482,6 @@ def main() -> int:
                                         for index, part in enumerate(arguments.command))[:HOST_SLOT_COMMAND_CHARACTERS],
                     "lock_path": str(arguments.lock.resolve()),
                     "uid": os.getuid(),
-                    # The lane tools name no worktree; the checkout this script lives in is theirs.
                     "worktree": arguments.worktree or str(Path(__file__).resolve().parent.parent),
                 })
                 del metadata["waiting_for_host_slot"]
@@ -534,17 +499,9 @@ def main() -> int:
 
             environment = os.environ.copy()
             environment["TRON_IOS_TEST_LOCK_HELD"] = "1"
-            # The command tree can hand the lease on, and a process it detaches on
-            # purpose - the Gateway fixture of scripts/ios-gateway-e2e-test -
-            # must not inherit it, so both the descriptor and its number are
-            # named where a child needs them. The lock the descriptor holds is
-            # named too, so a child that re-derives its own lane can prove the
-            # lease it inherited is that lane's (T-3).
             environment["TRON_IOS_TEST_LEASE_FD"] = str(handle.fileno())
             environment["TRON_IOS_TEST_LEASE_LOCK"] = str(arguments.lock)
             if slot is not None:
-                # Named like the lease's so a process the command detaches on
-                # purpose can drop it too.
                 environment["TRON_IOS_TEST_SLOT_FD"] = str(slot.fileno())
             rebuild_fds = ()
             if arguments.rebuild_lock is not None:
@@ -563,16 +520,10 @@ def main() -> int:
             process = subprocess.Popen(
                 arguments.command,
                 env=environment,
-                # Its own process group, so one signal reaches the whole tree.
                 start_new_session=True,
-                # The lease's own descriptor: the flock then lives exactly as
-                # long as the command tree, so a sweep cannot release the
-                # simulator while a command a killed holder started still runs.
                 pass_fds=((handle.fileno(),) if slot is None else (handle.fileno(), slot.fileno())) + rebuild_fds,
             )
             if interrupted is not None:
-                # A signal that arrived while the command was starting is still
-                # the command's to receive; never lose it.
                 forward(interrupted, None)
             return_code = process.wait()
             status = 128 + interrupted if interrupted is not None else return_code
@@ -588,11 +539,7 @@ def main() -> int:
                 rebuild_owner.__exit__(None, None, None)
             for signum, handler in previous.items():
                 signal.signal(signum, handler)
-            # Another holder owns this lane; its metadata is not ours to clear.
             if held:
-                # Release while the lease is still held: the next command in
-                # this lane then cannot adopt a simulator that is being shut
-                # down here. A command that never started released nothing.
                 if process is not None and arguments.marker is not None and not arguments.keep_booted:
                     release_simulator(arguments.marker, arguments.development_state)
                 handle.seek(0)
@@ -600,8 +547,6 @@ def main() -> int:
                 if arguments.remove_empty_lane:
                     remove_empty_lane(arguments.lock, handle)
             if slot is not None:
-                # Last: the slot admits the whole job, including the simulator
-                # release above and the lane's removal.
                 slot.seek(0)
                 slot.truncate()
                 slot.close()

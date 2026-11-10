@@ -1,30 +1,5 @@
 #!/usr/bin/env node
 // Workload and recording clients for scripts/tron-profile-gateway.
-//
-//   node scripts/tron-profile-gateway-driver.mjs seed CONFIG.json
-//   node scripts/tron-profile-gateway-driver.mjs run CONFIG.json
-//   node scripts/tron-profile-gateway-driver.mjs catalog CONFIG.json
-//   node scripts/tron-profile-gateway-driver.mjs multi CONFIG.json
-//
-// `seed` writes deterministic canonical Pi session JSONL into the isolated
-// fixture before its Gateway starts. `run` pairs like the phone, connects the
-// recording clients, drives one scenario for N iterations and writes per-window
-// counts plus a per-frame timeline. `catalog` generates the multi-session
-// scenario's seeded catalog (sessions, forks, subagent runs) in the fixture's
-// private agent directory; `multi` drives one multi-session phase against a
-// freshly started fixture: the no-subscriber window, the mixed window, then the
-// impairment cases the orchestrator selected (blackhole, bandwidth cap,
-// restart). The orchestrator owns metric naming, the fixture process, the
-// restart and the report; this file only measures.
-//
-// Phone fidelity (packages/ios-app): GatewayClient.establishConnection sends
-// hello {protocolVersion, clientId, clientRole: "mobile"}; GatewayConnectionPolicy
-// pings every 10 s with an 8 s pong deadline; URLSessionWebSocketTask offers
-// `permessage-deflate` without parameters and answers server pings; the
-// dashboard loads `session.list` (limit 500, scope user); a mounted chat runs
-// SessionPresentationStore's session.open -> session.sync ->
-// session.presentation.set(visible) and renews that lease every 15 s.
-
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import {
@@ -36,8 +11,6 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-/** The Chat-layer change that selects the profile model for one session, fenced
- * to the runtime it opened (packages/gateway/docs/settings-model.md 5.2). */
 function profileModelChange(sessionId, session) {
   return {
     target: { kind: "session", sessionId },
@@ -49,8 +22,6 @@ function profileModelChange(sessionId, session) {
 const PRESENTATION_LEASE_RENEWAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const PROTOCOL_VERSION = 8;
-// The phone's reconnect backoff (ReconnectDelayPolicy.standard): a failed
-// attempt is followed by 2 s x 1.7, capped at 15 s, with ±20% jitter.
 const PHONE_RETRY_INITIAL_SECONDS = 2;
 const PHONE_RETRY_MULTIPLIER = 1.7;
 const PHONE_RETRY_MAXIMUM_SECONDS = 15;
@@ -62,10 +33,6 @@ if (!["seed", "run", "catalog", "multi"].includes(command) || !configPath) {
   process.exit(2);
 }
 const config = JSON.parse(readFileSync(configPath, "utf8"));
-// The phone's wire deadlines are read from packages/protocol-fixtures/
-// gateway-connection-contract.json itself: this file holds no copy of them, so
-// C-3/C-4 cannot leave a stale literal here. A driver invoked by hand reads the
-// same file; there is no fallback to drift.
 const CONNECTION_CONTRACT = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)),
   "..", "packages", "protocol-fixtures", "gateway-connection-contract.json"), "utf8"));
 const CONNECTION = {
@@ -73,9 +40,6 @@ const CONNECTION = {
   pongDeadlineMs: CONNECTION_CONTRACT.clientPongDeadline.milliseconds,
   transportOpenDeadlineMs: CONNECTION_CONTRACT.clientTransportOpenDeadline.milliseconds,
   helloDeadlineMs: CONNECTION_CONTRACT.clientHelloDeadline.milliseconds,
-  // `config.connection` is the same three values the profiler read from the
-  // contract; the profiler's stub tests override them to drive a leg in
-  // seconds. It is never a second source of the contract's numbers.
   ...(config.connection ?? {}),
 };
 const gatewayRequire = createRequire(join(config.gatewayDir, "package.json"));
@@ -99,16 +63,12 @@ async function withDeadline(promise, ms, what) {
   }
 }
 
-/** A sleep whose timer can be cancelled. An un-cleared `setTimeout` keeps the
- * whole driver process alive for its full delay, so every bounded wait cancels
- * its timer as soon as the wait ends. */
 function cancellableSleep(ms) {
   let timer;
   const done = new Promise((resolveSleep) => { timer = setTimeout(resolveSleep, ms); });
   return { done, cancel: () => clearTimeout(timer) };
 }
 
-// Deterministic text for seeded history; independent of the faux model text.
 function generator(seed) {
   let state = seed >>> 0;
   return () => {
@@ -136,7 +96,6 @@ async function seed() {
     "node_modules/@earendil-works/pi-coding-agent/dist/index.js")).href);
   const { SessionManager } = agentModule;
   const cwd = resolve(config.workspace);
-  // Same directory rule as RuntimeRegistry.sessionDirectoryFor.
   const sessionDir = join(config.agentDir, "sessions", `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`);
   const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -170,24 +129,13 @@ async function seed() {
   writeFileSync(config.output, `${JSON.stringify({ sessions }, null, 2)}\n`);
 }
 
-// --- Multi-session catalog -------------------------------------------------
-//
-// Shape of the catalog measured on 2026-09-27 (2,995 JSONL files: 225
-// sessions, 460 forks, the rest subagent runs), scaled to `files` and `bytes`.
-// Every byte derives from `seed`, so one seed always yields the same tree and
-// digest. Layout follows the Gateway's delegated-session contract
-// (RuntimeRegistry.delegatedTopologyParentPath):
-// <parent-stem>/forks/<fork>.jsonl and <parent-stem>/<producer>/run-N/session.jsonl.
-
 const MIB = 1024 * 1024;
 const CATALOG_SCHEMA = "tron.profile-gateway-catalog.v1";
 const CATALOG_SESSION_SHARE = 225 / 3000;
 const CATALOG_FORK_SHARE = 460 / 3000;
 const CATALOG_REFERENCE_BYTES = 2048 * MIB;
-// Five large sessions at the reference size, as the largest measured ones.
 const LARGE_SESSION_MIB = [100, 125, 150, 175, 200];
 const MINIMUM_FILE_BYTES = 4 * 1024;
-// Cold-open targets share one size so every iteration opens the same load.
 const COLD_SESSION_BYTES = MIB;
 const CATALOG_PROJECTS = 12;
 const SUBAGENT_PRODUCERS = ["worker", "reviewer", "scout", "planner"];
@@ -211,7 +159,6 @@ function gaussian(random) {
   return Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
 }
 
-/** JSON-encoded text pools; transcripts pick from them so generation stays I/O bound. */
 function textPools(seed) {
   const random = generator(seed);
   const pool = (count, min, max) => Array.from({ length: count },
@@ -226,8 +173,6 @@ function textPools(seed) {
 }
 
 class TranscriptWriter {
-  /** `portable` rewrites fixture-specific paths so the digest names the
-   * catalog, not the temporary directory it was generated in. */
   constructor(root, path, header, random, digest, portable) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.fd = openSync(path, "wx", 0o600);
@@ -246,7 +191,7 @@ class TranscriptWriter {
 
   line(text) {
     this.chunks.push(text, "\n");
-    this.bytes += text.length + 1; // pools and envelopes are ASCII
+    this.bytes += text.length + 1;
     this.pending += text.length + 1;
     if (this.pending >= 4 * MIB) this.flush();
   }
@@ -275,7 +220,6 @@ class TranscriptWriter {
     if (name) this.entry("session_info", () => `"name":${JSON.stringify(name)}`);
   }
 
-  /** One user prompt, a tool call, its result, and a final answer. */
   turn(pools) {
     const pick = (list) => list[Math.floor(this.random() * list.length)];
     const assistant = (content, stopReason, timestamp) => `"message":{"role":"assistant","content":[${content}],`
@@ -310,8 +254,6 @@ function catalogPlan() {
   if (subagents < config.appendTargets) fail(`${files} files cannot hold ${sessions} sessions, ${forks} forks and ${config.appendTargets} subagent runs`);
   const largeBytes = LARGE_SESSION_MIB.map((mib) => Math.round(mib * MIB * scale));
   const coldBytes = config.coldSessions * COLD_SESSION_BYTES;
-  // Run-pool sessions hold 160 seeded turns (about 350 KB), enough to fill the
-  // snapshot transcript page like the tool-loop scenario's seeded sessions.
   const runBytes = config.runSessions * 350 * 1024;
   const others = sessions - LARGE_SESSION_MIB.length - pools + forks + subagents;
   const remaining = config.bytes - largeBytes.reduce((sum, value) => sum + value, 0) - coldBytes - runBytes;
@@ -370,8 +312,6 @@ function generateCatalog() {
   const coldPool = Array.from({ length: config.coldSessions }, (_, position) => topLevel(`Cold session ${position + 1}`,
     (writer) => { do writer.turn(pools); while (writer.bytes < COLD_SESSION_BYTES); }));
 
-  // Remaining files share the remaining bytes by class weight and a seeded
-  // log-normal spread: sessions are larger than forks, subagent runs smaller.
   const others = [
     ...Array.from({ length: plan.sessions - large.length - runPool.length - coldPool.length }, () => ({ kind: "session", weight: 3 })),
     ...Array.from({ length: plan.forks }, () => ({ kind: "fork", weight: 2 })),
@@ -443,81 +383,41 @@ class RecordingClient {
     this.lastFrameAt = 0;
     this.closedUnexpectedly = null;
     this.lastInboundAt = 0;
-    // Counted for the impairment legs, which measure liveness and socket
-    // capacity rather than only the frames inside a window.
     this.pongDeadlineMisses = 0;
     this.unexpectedCloses = 0;
-    // The mobile's own liveness measurement: the time from sending a ping to
-    // receiving its pong, and the decoded payload it received. The bandwidth
-    // leg reads both: the round trip is what a pong deadline is set against,
-    // and the payload says how much the workload asked the Gateway to send.
-    // The pings still unanswered, oldest first: a pong answers the oldest one,
-    // so a late pong is charged to the ping it answers rather than to the
-    // newest (`awaitingPong` is only the deadline's single outstanding ping).
     this.pingsOutstanding = [];
     this.pongRoundTripMsMax = 0;
     this.pongsCounted = 0;
-    // The page one `session.open` hands back, for the bandwidth leg's offered
-    // load: attributed to the method, never to whatever else the connection
-    // streams at the same time.
     this.openResponseBytes = 0;
-    // Everything this client decoded, for the streaming leg's payload rate.
     this.inboundDecodedBytes = 0;
-    // Set when this client's path is a shaped loopback relay instead of a
-    // direct connection (the impairment legs).
     this.relay = null;
-    // An array while this client is a restart case's measured client: every
-    // request it makes is recorded, the ready sequence's included, so the storm
-    // is measured from the restart rather than after it.
     this.requestTally = null;
-    // Set by close(): permanent, so a reconnect still in flight cannot leave a
-    // socket open behind a finished run.
     this.retired = false;
-    // Stable across reconnects, as the phone's client identity is.
     this.clientId = randomUUID();
-    // A mobile connection has one presentation slot: the newest `session.open`
-    // sent on this socket retires the one before it, so an attempt a newer one
-    // superseded cannot synchronize. Reset with the socket, like the Gateway's
-    // own per-connection slot (`openPresentation`).
     this.presentationOpenSerial = 0;
   }
 
   async connect() {
     const WebSocket = gatewayRequire("ws");
-    // connect() is the start of a fresh socket: whatever ended the previous one
-    // (a deliberate abandon included) must not keep muting its closes.
     this.closing = false;
     this.awaitingPong = null;
-    // The Gateway's presentation slot belongs to the connection, so a rebuilt
-    // socket starts with none.
     this.presentationOpenSerial = 0;
     this.pingsOutstanding.length = 0;
-    // Two bounds, not one shared deadline (contract `clientTransportOpenDeadline`
-    // then `clientHelloDeadline`): a socket that never opens gives up first, and
-    // only a socket that opened spends the hello budget (C-3).
     const transportOpenDeadlineAt = now() + CONNECTION.transportOpenDeadlineMs;
     const remainingTransportOpenMs = () => Math.max(0, transportOpenDeadlineAt - now());
     const socket = new WebSocket(`ws://127.0.0.1:${this.relay ? this.relay.port : config.port}/v1/socket`, {
       headers: { Authorization: `Bearer ${this.token}` },
-      // URLSessionWebSocketTask's offer is exactly `permessage-deflate`; this
-      // option set makes ws send the same parameterless offer.
       perMessageDeflate: { clientMaxWindowBits: false },
       autoPong: false,
-      // A backstop past the phone's own bound: the model's `withDeadline` below
-      // must be what ends an unopened attempt, so the `abandon()` that follows
-      // it (and excuses that socket's close) always runs first. The library's
-      // timer destroying the socket instead is reported as an unexpected close.
       handshakeTimeout: CONNECTION.transportOpenDeadlineMs + 1_000,
       maxPayload: 64 * 1024 * 1024,
     });
     this.socket = socket;
     socket.on("upgrade", (response) => {
       this.tcp = response.socket;
-      // ws still holds the sent request here; record the exact offer.
       this.offeredExtensions = socket._req?.getHeader("sec-websocket-extensions") ?? null;
       this.negotiatedExtensions = response.headers["sec-websocket-extensions"] ?? "";
     });
-    // Answer like URLSession, and count both directions.
     socket.on("ping", (data) => {
       this.note("in", "control:ping", data.length);
       if (socket.readyState === 1) socket.pong(data);
@@ -535,7 +435,6 @@ class RecordingClient {
     });
     socket.on("message", (data, isBinary) => this.onMessage(data, isBinary));
     socket.on("close", (code, reason) => {
-      // A socket retired by reconnect() may finish closing after its successor opened.
       if (socket !== this.socket) return;
       clearInterval(this.pingTimer);
       this.pingTimer = null;
@@ -543,8 +442,6 @@ class RecordingClient {
         this.closedUnexpectedly = `closed ${code} ${reason.toString()}`;
         this.unexpectedCloses += 1;
       }
-      // A close during hello is the answer: fail the attempt now instead of
-      // waiting out the transport-open deadline for an hello that cannot come.
       if (this.helloReject) {
         const rejectHello = this.helloReject;
         this.helloWaiter = null;
@@ -574,8 +471,6 @@ class RecordingClient {
 
   clientPing() {
     if (this.socket?.readyState !== 1) return;
-    // The phone would reconnect here; this recorder keeps measuring and the
-    // orchestrator reports the miss (usually a stalled fixture on a busy host).
     if (this.awaitingPong && now() - this.awaitingPong > CONNECTION.pongDeadlineMs) {
       this.pongDeadlineMisses += 1;
       if (this.window) this.window.pongDeadlineMisses += 1;
@@ -587,12 +482,6 @@ class RecordingClient {
     this.timeline.write({ t: now(), client: this.name, label: this.label, dir: "out", topic: "control:ping", bytes: 0 });
   }
 
-  /** Start a leg's own round-trip sample.
-   *
-   * The maximum and the outstanding pings must belong to this leg: a leg that
-   * inherited another window's maximum would report that window's backlog as
-   * its own, and a ping sent before the leg would charge its whole wait inside
-   * the leg's first sample. */
   beginPongWindow() {
     this.pongRoundTripMsMax = 0;
     this.pingsOutstanding.length = 0;
@@ -639,7 +528,6 @@ class RecordingClient {
       entry.largest = Math.max(entry.largest, bytes);
     }
     if (topic === "session.diagnostic" || topic === "session.operationFailed") {
-      // Runtime failure detail is the evidence for a rejected workload.
       process.stderr.write(`${this.name} ${this.label} ${topic}: ${JSON.stringify(frame.payload).slice(0, 2_000)}\n`);
     }
     if (topic === "response:session.open") this.openResponseBytes += bytes;
@@ -664,7 +552,6 @@ class RecordingClient {
   }
 
   request(method, params = {}, deadlineMs = REQUEST_TIMEOUT_MS, requestID = randomUUID()) {
-    // A lease renewal can fire while reconnect() has no open socket.
     if (this.socket?.readyState !== 1) return Promise.reject(new Error(`${this.name} ${method}: socket not open`));
     const id = requestID;
     const promise = new Promise((resolveRequest, rejectRequest) => {
@@ -681,17 +568,6 @@ class RecordingClient {
     return withDeadline(promise, deadlineMs, `${this.name} ${method}`);
   }
 
-  /** One `session.open` as a presentation attempt, reporting whether a newer
-   * attempt on this socket retired it before it synchronized.
-   *
-   * A mobile connection holds one presentation: the Gateway retires the
-   * previous open when a newer one begins, synchronized or not, so the earlier
-   * answer's `syncToken` can no longer commit. That is the phone's own model -
-   * replacing its mounted chat cancels the read it stopped waiting for (`C-6`)
-   * - so a superseded attempt abandons its page here, and the page's bytes stay
-   * this connection's carried load instead of failing the lane that delivered
-   * them. Without it, several pages in flight on one mobile connection (the
-   * bandwidth leg) answer every open and then refuse every synchronization. */
   async openPresentation(sessionId, deadlineMs = REQUEST_TIMEOUT_MS) {
     const serial = (this.presentationOpenSerial += 1);
     const id = randomUUID();
@@ -701,15 +577,9 @@ class RecordingClient {
     return { opened, superseded: true };
   }
 
-  /** Close and reopen the socket like a phone reconnect; the open window,
-   * listeners and client identity carry over. */
   async reconnect() {
     await this.disconnect();
-    // A client retired by close() while this reconnect was in flight must not
-    // open another socket: an abandoned lane would keep the driver alive.
     if (this.retired) throw new Error(`${this.name} reconnected after it was closed`);
-    // disconnect() gives up waiting after 3 s and terminates; retire the old
-    // socket and its unanswered requests now rather than when its close event lands.
     this.socket = null;
     for (const { reject } of this.pending.values()) reject(new Error(`${this.name} reconnected`));
     this.pending.clear();
@@ -755,11 +625,6 @@ class RecordingClient {
     return window;
   }
 
-  /** Drop the open socket now, whatever state it is in.
-   *
-   * A path that drops frames never answers a close handshake, so an attempt
-   * loop that waited for one would stall for the close timeout instead of
-   * retrying. */
   async abandon() {
     this.closing = true;
     clearInterval(this.pingTimer);
@@ -775,20 +640,15 @@ class RecordingClient {
     this.pending.clear();
   }
 
-  /** Move this client's path onto a loopback relay the profile can shape. The
-   * socket is dropped here and rebuilt on the relay by the caller, as the phone
-   * rebuilds it after a path change. */
   async attachRelay(relay) {
     await this.abandon();
     this.relay = relay;
   }
 
-  /** This socket is expected to close: the Gateway is being restarted. */
   expectClosure() {
     this.closedUnexpectedly = null;
   }
 
-  /** Drop the open socket, whatever state it is in, and stop the pings. */
   async disconnect() {
     this.closing = true;
     clearInterval(this.pingTimer);
@@ -800,21 +660,16 @@ class RecordingClient {
       await withDeadline(new Promise((resolveClose) => socket.once("close", resolveClose)), 3_000, `${this.name} close`)
         .catch(() => socket.terminate());
     } else {
-      // Connecting, closing or already closed: terminate so no socket handle is
-      // left behind (an abandoned lane can leave the client in any state).
       socket.terminate();
     }
   }
 
-  /** Close for good. Retired is permanent, so a lane's reconnect can no longer
-   * open a socket and the driver process can exit while it unwinds. */
   async close() {
     this.retired = true;
     await this.disconnect();
   }
 }
 
-/** Mounted-chat presentation owner mirroring SessionPresentationStore. */
 class MountedChat {
   constructor(client, sessionId) {
     this.client = client;
@@ -831,9 +686,6 @@ class MountedChat {
     this.latest = opened.session;
     this.cursor = { generation: opened.session.runtimeGeneration, sequence: opened.session.eventSequence };
     this.sequenceGaps = 0;
-    // Cursor rule of the phone and terminal chat: a snapshot installs the
-    // cursor; every other sequenced event must be exactly the next one. A gap
-    // would make the phone resynchronize, which this profile must not hide.
     this.listener = (frame) => {
       const payload = frame.payload;
       if (frame.type !== "event" || !payload || typeof payload !== "object") return;
@@ -852,11 +704,6 @@ class MountedChat {
     };
     this.client.listeners.add(this.listener);
     if (attempt.superseded) {
-      // A newer page on this connection retired this mount before its
-      // synchronization: the page arrived - it is the load this lane offered -
-      // but the connection's one presentation belongs to the newer attempt, and
-      // a phone that replaced its mounted chat this fast never synchronizes the
-      // page it abandoned.
       this.client.listeners.delete(this.listener);
       return opened;
     }
@@ -874,19 +721,17 @@ class MountedChat {
     }, deadlineMs);
   }
 
-  /** Restore the mounted chat on a new socket, as the phone does after a reconnect. */
   remount(deadlineMs) {
     clearInterval(this.renewal);
     this.client.listeners.delete(this.listener);
     const gaps = this.sequenceGaps ?? 0;
     return this.open(deadlineMs).then((opened) => {
       this.sequenceGaps += gaps;
-      this.renewalError = null; // a renewal cut off by the reconnect is not a failure
+      this.renewalError = null;
       return opened;
     });
   }
 
-  /** Canonical outcome of the latest installed snapshot, for workload checks. */
   outcome() {
     const transcript = this.latest?.transcript ?? [];
     let lastUser = -1;
@@ -918,13 +763,11 @@ function readEnrollmentCode() {
   try {
     return JSON.parse(readFileSync(join(config.tronHome, "gateway", "enrollment.json"), "utf8")).code ?? null;
   } catch {
-    return null; // Absent or mid-replacement: the Gateway republishes it.
+    return null;
   }
 }
 
 async function pair(deviceName, previousCode) {
-  // Pairing consumes the one-use invitation; the Gateway regenerates it
-  // asynchronously, so wait for a new code rather than reusing the old one.
   const deadline = now() + 10_000;
   let code = readEnrollmentCode();
   while (code === null || code === previousCode) {
@@ -959,8 +802,6 @@ function usageDelta(before, after) {
   return delta;
 }
 
-/** Resolves when `sessionId` reports idle after having run, then after `quietMs`
- * without inbound frames on any recorded client. */
 function settled(observer, recorders, sessionId, deadlineMs) {
   return withDeadline(new Promise((resolveSettled) => {
     let ran = false;
@@ -985,33 +826,11 @@ function settled(observer, recorders, sessionId, deadlineMs) {
   }), deadlineMs, `session ${sessionId} to settle`);
 }
 
-// --- Multi-session phase -------------------------------------------------------
-//
-// One phase per fixture Gateway process: `prime` pairs the three devices and
-// lets the first catalog load build the durable index; each `iteration` then
-// starts eight long tool loops, measures a window with no session subscriber,
-// mounts the mobile chat, and measures a mixed window while the dashboard
-// lists, the prober opens warm, cold and large sessions and prompts cold ones,
-// both recorded clients reconnect on schedule, and subagent-like writers append
-// to child transcripts.
-
 const APPENDED_TEXT = prose(generator(11), 900);
-// The prober's warm and large lanes and the dashboard's reconnect lane use
-// their own devices: the Gateway admits one session.open per connection, so a
-// minutes-long large cold open must not starve the warm and cold samples, and a
-// minutes-long list must not starve the reconnect sample.
 const MULTI_DEVICES = ["mobile", "dashboard", "dashboard-reconnect", "driver", "warm", "large"];
-// A retryable Gateway error (for example `busy` when the catalog changed while
-// a session opened) would surface on the phone as a failed open; the profile
-// retries after a short pause, counts it, and times the operation to success.
 const BUSY_RETRY_DELAY_MS = 250;
 const BUSY_RETRY_LIMIT = 40;
 
-// A fresh fixture refuses reads with `catalog_not_ready` until its catalog
-// owner publishes the first cut: a startup phase, not a measured operation.
-// Over a 3,000-file, 2 GB fixture that phase is ~9 s idle and has taken 14 s
-// on a busy host, past the 40 x 250 ms budget measured retries get, so the
-// prime's first list waits on its own named deadline instead (T-7).
 const CATALOG_READY_DEADLINE_MS = 90_000;
 
 async function retryingBusy(retries, method, operation, deadlineMs = null) {
@@ -1042,7 +861,6 @@ function lastEntryId(path) {
   }
 }
 
-/** Subagent-like external writers: one entry per target every interval. */
 function startAppender(paths, intervalMs, label) {
   const targets = paths.map((path) => ({ path, leaf: lastEntryId(path), next: 0 }));
   const prefix = label.replace(/[^A-Za-z0-9]/g, "");
@@ -1077,11 +895,9 @@ function readProbe() {
   try { return JSON.parse(readFileSync(config.probeOutput, "utf8")); } catch { return null; }
 }
 
-/** Ask the fixture's probe for a snapshot; it answers once its event loop runs. */
 async function probeSnapshot() {
   const previous = readProbe()?.sequence ?? 0;
   process.kill(config.gatewayPid, "SIGUSR2");
-  // A blocked Gateway event loop answers late; that delay is the measurement.
   const deadline = now() + config.measuredDeadlineMs;
   for (;;) {
     const snapshot = readProbe();
@@ -1091,17 +907,6 @@ async function probeSnapshot() {
   }
 }
 
-/**
- * One measured window. `body(start)` starts the workload; when `fixedSeconds`
- * is set it must only start the lanes and return, and the window closes at
- * `start + fixedSeconds` whether or not their operations have finished.
- * In-flight operations then get `tailGraceSeconds` to finish outside the
- * window: their latency still counts, and whatever is left is censored by
- * `abandonInflight` so one slow operation can neither stretch the window nor
- * the run. A lane that fails inside the window is thrown here at once, so the
- * caller's `finally` still stops the appender, closes the clients and flushes
- * the timeline.
- */
 async function measuredWindow(label, connected, recorded, body, options = {}) {
   const { fixedSeconds = null, tailGraceSeconds = null, abandonInflight = null } = options;
   for (const client of connected) client.beginWindow(label);
@@ -1113,17 +918,11 @@ async function measuredWindow(label, connected, recorded, body, options = {}) {
     await body(start);
   } else {
     lanes = body(start);
-    // The handler is attached with the lanes, not after the deadline: a lane
-    // that rejects inside the window must surface as this function's failure
-    // instead of as an unhandled rejection that kills the process before any
-    // cleanup runs.
     const laneFailure = lanes.then(() => null, (error) => ({ error }));
     const settled = await Promise.race([
       sleep(Math.max(0, start + fixedSeconds * 1000 - now())).then(() => null), laneFailure]);
     if (settled !== null) throw settled.error;
   }
-  // The window closes before any sample is read: frames, bytes, CPU time and
-  // catalog walks of work that outlives the deadline belong to the tail.
   const end = now();
   const clients = {};
   for (const client of connected) {
@@ -1144,14 +943,9 @@ async function measuredWindow(label, connected, recorded, body, options = {}) {
   };
   if (lanes !== null) {
     const tailStart = now();
-    // Cancelled in `finally`: the timer must not outlive the tail, or the
-    // driver would idle (and keep its parent waiting) for the full grace
-    // period after every iteration.
     const tail = cancellableSleep(tailGraceSeconds * 1000);
     let expired = false;
     try {
-      // A lane that fails after the deadline is still fatal: its rejection
-      // ends the race and reaches the caller's `finally` like any other.
       await Promise.race([lanes, tail.done.then(() => { expired = true; })]);
     } finally {
       tail.cancel();
@@ -1164,51 +958,12 @@ async function measuredWindow(label, connected, recorded, body, options = {}) {
   return window;
 }
 
-// --- Impairment legs -----------------------------------------------------------
-//
-// The mixed window measures throughput; these legs measure recovery, on the same
-// fixture and the clients that are already connected. Each writes its own
-// section of the iteration's result:
-//
-//   blackhole: the mobile's path (a shaped loopback relay, so the Gateway's own
-//     socket buffers are the ones that fill) delivers nothing for
-//     `blackholeSeconds`. The client keeps its socket until a pong deadline
-//     passes with no inbound frame, abandons it and retries on the phone's
-//     backoff; the leg times the recovery to a ready mounted chat from the
-//     moment the path returned, whatever attempt was in flight then.
-//   bandwidth: the mobile's path is capped at `bandwidthMbps` for
-//     `bandwidthLegSeconds`, with `bandwidthInFlight` full bounded transcript
-//     pages in flight at once on their own sessions, so the cap (not the
-//     workload) bounds the leg and the Gateway's outbound queue holds many
-//     pages rather than one. Liveness and socket capacity are observed (a pong
-//     queued behind data, no close for capacity) and the leg reports its own
-//     link use, the peak page load it offered and the mobile's longest
-//     ping-to-pong round trip.
-//   bandwidth-stream: the same mobile path, capped slower than the streams it
-//     holds. Several mounted chats on running sessions receive superseding
-//     snapshots and keyed events, so the Gateway's queue holds replaced state:
-//     on code without G-4's coalescing it reaches its backstop, and on code
-//     without C-4 a pong queued behind it misses its deadline. Reports the
-//     streams held, the cap use, the payload rate, the longest ping-to-pong
-//     round trip, pong misses and unexpected closes.
-//   restart: the profiler stops and restarts the fixture Gateway on the same
-//     port while these clients are connected. The driver asks for the restart
-//     (the fixture is the profiler's process), each client retries from the
-//     moment its own socket closes, and every request a measured client makes
-//     from the restart on — its ready sequence included — is timestamped
-//     against the moment the new Gateway was healthy.
-
 function messageOf(error) {
   return String(error instanceof Error ? error.message : error);
 }
 
-// The restart case's clients that the exit criterion counts: a mounted phone, a
-// listing dashboard and one more pair. Every other connected client reconnects
-// too (reported ready below), so a run cannot pass with half its clients dead.
 const RESTART_MEASURED_CLIENTS = ["mobile", "dashboard", "driver"];
 
-/** The phone's reconnect delay after `failures` consecutive failures
- * (ReconnectDelayPolicy.standard: 2 s x 1.7 up to 15 s, ±20% jitter). */
 function phoneRetryDelayMs(failures) {
   let nominal = PHONE_RETRY_INITIAL_SECONDS;
   for (let index = 1; index < Math.max(1, failures); index += 1) {
@@ -1232,11 +987,6 @@ async function waitForJson(path, deadlineMs, what) {
   }
 }
 
-/** Resolve after this client's socket has closed and its close was accounted
- * for, with the epoch millisecond it went: the moment the phone starts
- * retrying. The close event is what is waited for, because the client's own
- * close handler runs before this listener and the caller can then decide
- * whether that close was expected. */
 function waitForClosure(client, timeoutMs) {
   return withDeadline(new Promise((resolveClosed) => {
     const socket = client.socket;
@@ -1245,12 +995,6 @@ function waitForClosure(client, timeoutMs) {
   }), timeoutMs, `${client.name} socket close`);
 }
 
-/** The phone's wait after a failed attempt. `signal` is the leg's path-return
- * promise while the model has not raised a change yet, and `null` once it has:
- * a path change cancels the phone's pending backoff wait and starts an attempt
- * at once (C-3), so a wait that spans the return ends there instead of running
- * out first. Returns true when the wait ended at the return rather than on its
- * own timer. */
 async function phoneBackoffWait(ms, signal = null) {
   if (!signal) { await sleep(ms); return false; }
   const wait = cancellableSleep(ms);
@@ -1261,25 +1005,12 @@ async function phoneBackoffWait(ms, signal = null) {
   }
 }
 
-/** Connect, then run this client's ready sequence, until it succeeds. Each
- * failed attempt is recorded with the error that ended it and the wait that
- * preceded it, so the report shows what the outage cost — the phone's own
- * backoff included — rather than only how long recovery took. `pathChange` is
- * the leg's path return when the case has one, shaped like the phone's own path
- * signal: it restarts the curve, ends a pending wait at once, and a change that
- * arrives while an attempt is on the wire is consumed when that attempt fails
- * (`GatewayLifecycleCoordinator.notePathHint(satisfied:signature:)`). */
 async function connectUntilReady(client, ready, deadlineMs, annotate = () => ({}), pathChange = null) {
   const attempts = [];
-  // The phone's curve: `failures` is the run of failures since the last path
-  // change, 1 being the base interval. A path change restarts it (C-3).
   let failures = 1;
   let waitMs = null;
   for (;;) {
     const startedAt = now();
-    // Annotated when the attempt starts: an attempt that began during the
-    // outage is an attempt the outage cost, even if it ends after the path
-    // returned.
     const annotations = annotate();
     try {
       await client.connect();
@@ -1292,16 +1023,10 @@ async function connectUntilReady(client, ready, deadlineMs, annotate = () => ({}
       if (now() > deadlineMs) fail(`${client.name} did not recover within ${Math.round(deadlineMs - startedAt)} ms: ${messageOf(error)}`);
       const returnedAt = pathChange === null ? null : pathChange.returnedAt();
       if (returnedAt !== null && returnedAt >= startedAt) {
-        // The path returned while this attempt was on the wire: the phone
-        // consumes that change and attempts at once, with the curve restarted,
-        // instead of waiting out the curve the closed path had grown.
         failures = 1;
         waitMs = 0;
         continue;
       }
-      // Still blackholed while the wait runs, so the return cancels it; a path
-      // that returned before this attempt leaves the wait alone, and that wait
-      // is the fresh base interval the change restarted the curve at.
       const waitStartedAt = now();
       const cancelled = returnedAt === null
         && await phoneBackoffWait(phoneRetryDelayMs(failures), pathChange?.signal ?? null);
@@ -1311,10 +1036,6 @@ async function connectUntilReady(client, ready, deadlineMs, annotate = () => ({}
   }
 }
 
-/** The shaped path this client is on, attaching and connecting one if it is
- * still on a direct socket. The blackhole and bandwidth legs share it, so the
- * relay is built once and the mobile's socket is rebuilt on it only when it
- * must be. */
 async function relayFor(config, mobile) {
   if (mobile.relay) return mobile.relay;
   const relay = new PathRelay(config.port, now);
@@ -1328,21 +1049,11 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
   const leg = { seconds: config.blackholeSeconds, settleMs: config.blackholeSettleMs, abandonedOnMiss: null,
     silenceMs: null, pathReturnedAtMs: null, recoveryReadyMs: null, attempts: [] };
   const relay = await relayFor(config, mobile);
-  // Mount the chat on the shaped path and let it settle for more than one ping
-  // interval before the outage. A socket rebuilt just before it would have its
-  // first countable pong miss past the outage, and a chat that never mounted on
-  // the relay socket gives the Gateway nothing to send toward the silent one.
   await retry("mount", () => chat.remount(config.measuredDeadlineMs));
   await sleep(config.blackholeSettleMs);
   const missesBefore = mobile.pongDeadlineMisses;
   const outageStart = now();
   const outageEnd = outageStart + config.blackholeSeconds * 1000;
-  // The path returns on its own clock, not when the attempt loop next looks:
-  // an attempt still in flight when it returns waits out its own deadline, and
-  // that wait is part of the recovery this leg measures. The return is the path
-  // change this case hands the phone (C-3), so it cancels a pending backoff
-  // wait and restarts the curve; a relay blackhole raises no path callback on a
-  // real phone, which is the model's premise, not the phone's behaviour.
   let returnedAt = null;
   let signalPathReturn;
   const pathReturned = new Promise((resolvePathReturn) => { signalPathReturn = resolvePathReturn; });
@@ -1355,16 +1066,10 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
   returnTimer.unref?.();
   try {
     relay.blackhole(true);
-    // The phone trusts the link until one liveness window (ping interval plus
-    // pong deadline) passes with no inbound frame, and that miss is only
-    // counted at its next ping tick. The wait therefore allows two ticks and a
-    // deadline on top of the settle, and stops with the outage either way.
     const quietUntil = Math.min(outageEnd, outageStart
       + CONNECTION.pingIntervalMs * 2 + CONNECTION.pongDeadlineMs + config.blackholeSettleMs);
     while (mobile.pongDeadlineMisses === missesBefore && now() < quietUntil) await sleep(25);
     leg.abandonedOnMiss = mobile.pongDeadlineMisses > missesBefore;
-    // Silence is what the Gateway saw: from the last frame this client got, not
-    // from the moment the leg happened to stop forwarding.
     leg.silenceMs = now() - mobile.lastInboundAt;
     await mobile.abandon();
     leg.attempts = await connectUntilReady(mobile,
@@ -1381,10 +1086,6 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
   return leg;
 }
 
-/** The running sessions the streaming leg subscribes to: their transcripts are
- * being written, so each subscription is sent superseding snapshots and keyed
- * events. The mounted chat's own session is excluded (the Gateway admits one
- * `session.open` per session per connection). */
 function streamTargets(config, mountedSessionId) {
   const targets = [];
   for (const entry of config.running ?? []) {
@@ -1395,16 +1096,8 @@ function streamTargets(config, mountedSessionId) {
   return targets;
 }
 
-/** The sessions the bandwidth leg mounts concurrently. Its own chat's session
- * is excluded: the Gateway admits one session.open per session per connection,
- * so a second mount on it would be refused with a conflict. */
 function pageTargets(config, mountedSessionId) {
   const targets = [];
-  // Idle sessions first: a *running* session's open waits for its runtime to
-  // reconcile, and its synchronization token is the one that rotates while the
-  // prompt streams, so concurrent page reads on several running sessions are
-  // what the Gateway refuses. Running sessions are the fallback when a run has
-  // no idle ones (the stub tests).
   const pool = [...(config.cold ?? []), ...(config.large ?? []), ...(config.running ?? [])];
   for (const entry of pool) {
     const sessionId = entry?.sessionId;
@@ -1414,25 +1107,8 @@ function pageTargets(config, mountedSessionId) {
   return targets;
 }
 
-/** The second capped leg: the mobile holds several mounted chats whose
- * transcripts are being written, so the Gateway streams superseding snapshots
- * and keyed events for them. The cap sits below what those streams produce on
- * the wire, so the Gateway's outbound queue holds state a newer frame has
- * already replaced — the state G-4 coalesces — and whatever waits behind it. On
- * code without G-4 the queue reaches its 8 MiB backstop and the socket closes
- * for capacity; on code without C-4 the phone tears the link down over a pong a
- * busy path delayed. Both are reachable here where the page leg's 2 Mbit/s cap
- * cannot reach them (see `bandwidthStreamMbps`).
- *
- * The streams are attached before the cap is applied: the phone mounts its
- * chats on a working path, and the path then slows to the cap for the leg. The
- * mounted chat is re-mounted on the relay first, so every stream the leg counts
- * is really mounted on the shaped socket. */
 async function bandwidthStreamLeg(config, { mobile, chat, retry }) {
   const relay = await relayFor(config, mobile);
-  // `relayFor` rebuilt this client's socket on the relay: the chat mounted on
-  // the socket it abandoned is not subscribed on the new one, and the leg would
-  // count it as a stream the Gateway is streaming for nobody.
   await retry("mount", () => chat.remount(config.measuredDeadlineMs));
   const missesBefore = mobile.pongDeadlineMisses;
   const closesBefore = mobile.unexpectedCloses;
@@ -1445,10 +1121,6 @@ async function bandwidthStreamLeg(config, { mobile, chat, retry }) {
       await retry("mount", () => streamChat.open(config.bandwidthStreamAttachDeadlineMs));
       streams.push(streamChat);
     } catch (error) {
-      // A session that will not mount is not this case's finding: the leg
-      // measures the streams it holds. The close event can still be in flight
-      // when the request fails. Await its accounting rather than guessing how
-      // quickly the shaped connection will finish its close handshake.
       if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) {
         await waitForClosure(mobile, config.measuredDeadlineMs);
       }
@@ -1459,9 +1131,6 @@ async function bandwidthStreamLeg(config, { mobile, chat, retry }) {
   }
   const capBitsPerSecond = Math.round(config.bandwidthStreamMbps * 1_000_000);
   const startedAtMs = Date.now();
-  // The round trip this leg reports is the capped window's own, against the
-  // same run's uncapped round trip (`uncappedPingToPongMs`). `pongsBefore` is
-  // read after the reset, so it counts the pongs this window matched.
   mobile.beginPongWindow();
   const pongsBefore = mobile.pongsCounted;
   relay.cap(capBitsPerSecond);
@@ -1474,18 +1143,11 @@ async function bandwidthStreamLeg(config, { mobile, chat, retry }) {
   relay.cap(0);
   for (const streamChat of streams) await streamChat.close().catch(() => {});
   return {
-    // The mounted chat is a stream too: it is subscribed to a running session
-    // (and re-mounted on the relay socket above).
     capBitsPerSecond, seconds, startedAtMs, endedAtMs: Date.now(), streams: streams.length + 1,
     deliveredBytes, deliveredBytesPerSecond: deliveredBytes / seconds,
     payloadBytes: decodedBytes, payloadBytesPerSecond: decodedBytes / seconds,
-    // Delivered wire bytes over what the cap allows: the cap has to bind for
-    // the queue to grow at all, so this is a validity gate (near 1), not a
-    // reading of how much of the workload the cap carried.
     linkUse: (deliveredBytes / seconds) / (capBitsPerSecond / 8),
     maxPingToPongMs: mobile.pongsCounted > pongsBefore ? mobile.pongRoundTripMsMax : null,
-    // The same run's uncapped round trip, from before any cap was applied: a
-    // fixed constant cannot separate a backed-up path from a slow host.
     uncappedPingToPongMs: config.uncappedPingToPongMs ?? null,
     pongDeadlineMisses: mobile.pongDeadlineMisses - missesBefore,
     unexpectedCloses: mobile.unexpectedCloses - closesBefore,
@@ -1511,15 +1173,7 @@ async function bandwidthLeg(config, { mobile, chat, retry }) {
   let failure = null;
   let inFlight = 0;
   let maxInFlight = 0;
-  // A fixed duration, several ping intervals long, with the link kept loaded.
   const legEnd = startedAt + config.bandwidthLegSeconds * 1000;
-  // Several pages are in flight at once, each mounted on its own session (the
-  // Gateway admits one session.open per session per connection), so the
-  // Gateway's outbound queue holds many pages rather than one. That is the
-  // load this leg can offer, and the leg reports the peak it held and what that
-  // peak asked the Gateway to send; it is not a guarantee that a pong is
-  // delayed (at the default 2 Mbit/s even six pages' wire is a fraction of one
-  // pong deadline of the cap — see `bandwidthInFlight`).
   const extras = pageTargets(config, chat.sessionId).slice(0, Math.max(1, config.bandwidthInFlight))
     .map((sessionId) => new MountedChat(mobile, sessionId));
   const lanes = extras.length > 0 ? extras : [chat];
@@ -1532,12 +1186,6 @@ async function bandwidthLeg(config, { mobile, chat, retry }) {
         try {
           await retry("mount", () => laneChat.remount(config.measuredDeadlineMs));
         } catch (error) {
-          // A socket the Gateway closed under the cap is this case's own finding
-          // (counted as an unexpected close), not a failure of the profile: the leg
-          // ends with the operations it measured and the metric that says why. The
-          // close event can still be in flight while the socket is only closing, so
-          // await the same close/accounting boundary used by restart measurement.
-          // A socket that is gone without a counted close is a measurement bug.
           if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) {
             await waitForClosure(mobile, config.measuredDeadlineMs);
           }
@@ -1552,8 +1200,6 @@ async function bandwidthLeg(config, { mobile, chat, retry }) {
         operations.push(now() - operationStart);
       }
     } catch (error) {
-      // Every lane stops at the first failure; the leg reports that failure
-      // after the lanes have unwound, so no lane keeps mounting past it.
       stopped = true;
       failure ??= error;
     }
@@ -1562,8 +1208,6 @@ async function bandwidthLeg(config, { mobile, chat, retry }) {
   const seconds = (now() - startedAt) / 1000;
   const deliveredBytes = relay.downBytes - downBefore;
   const pageBytes = mobile.openResponseBytes - openBytesBefore;
-  // Stop metering. The next chunk is forwarded without waiting: the path is not
-  // shaped any more.
   relay.cap(0);
   for (const extra of extras) await extra.close().catch(() => {});
   if (failure !== null) throw failure;
@@ -1573,41 +1217,20 @@ async function bandwidthLeg(config, { mobile, chat, retry }) {
     capBitsPerSecond, seconds, operations, closedEarly, startedAtMs, endedAtMs: Date.now(),
     deliveredBytes, deliveredBytesPerSecond: deliveredBytes / seconds,
     sentBytes: relay.upBytes - upBefore,
-    // Delivered wire bytes over what the cap allows: near 0 the cap shaped
-    // nothing, near 1 the link was full for the whole leg.
     linkUse: (deliveredBytes / seconds) / (capBitsPerSecond / 8),
-    // The peak page load the workload had outstanding, in the decoder's bytes
-    // (which is what the Gateway's own outbound queue counts) and in wire bytes.
     maxInFlight,
     offeredInFlightBytes: maxInFlight * meanPageDecodedBytes,
     offeredInFlightWireBytes: maxInFlight * meanPageWireBytes,
-    // The mobile's own ping-to-pong round trip, the delay a pong deadline is
-    // set against. Null when no pong came back inside the leg.
     maxPingToPongMs: mobile.pongsCounted > pongsBefore ? mobile.pongRoundTripMsMax : null,
     pongDeadlineMisses: mobile.pongDeadlineMisses - missesBefore,
     unexpectedCloses: mobile.unexpectedCloses - closesBefore,
   };
 }
 
-/** Restart the fixture Gateway while every client is connected, and time what
- * each one did about it.
- *
- * Every client retries from the moment its own socket closes (the profiler's
- * answer only reports when the new Gateway was healthy), so the failed
- * attempts and the reconnect time include the downtime. The three clients the
- * exit criterion counts are the measured ones; the rest reconnect too and are
- * reported as ready, so a run cannot pass with half its clients dead.
- *
- * The storm is everything a measured client requests that the new Gateway
- * served, the ready sequence's own requests included: each is timestamped
- * against the moment the new Gateway was healthy, and each client's loop starts
- * when that client is ready, so the storm is never anchored to the slowest one.
- * A request that failed (refused while the Gateway was down, or on the socket
- * it closed) is the downtime's, not the storm's. */
 async function restartLeg(config, clients, retryMethod, measuredNames) {
   const requestPath = join(config.outputDir, `restart-request-${config.label}.json`);
   const donePath = join(config.outputDir, `restart-done-${config.label}.json`);
-  rmSync(donePath, { force: true }); // a stale answer from an earlier phase would be read as this one's
+  rmSync(donePath, { force: true });
   const requestedAtMs = Date.now();
   const closedAt = new Map();
   const closures = clients.map(({ client }) => waitForClosure(client, config.restartDeadlineMs)
@@ -1618,13 +1241,9 @@ async function restartLeg(config, clients, retryMethod, measuredNames) {
   writeFileSync(requestPath, `${JSON.stringify({ requestedAtMs, gatewayPid: config.gatewayPid })}\n`);
   const ready = Promise.all(clients.map(async ({ name, client, ready: prepare }, index) => {
     await closures[index];
-    // The Gateway is going away: this close is the case, not a failure. The
-    // retry starts here, not when the profiler says the new Gateway is up.
     client.expectClosure();
     const attempts = await connectUntilReady(client, prepare, now() + config.restartDeadlineMs);
     const readyAtMs = Date.now();
-    // This client's own storm, from its own ready moment: a client that came
-    // back early is measured while the others are still out.
     const stormEnd = now() + config.restartStormSeconds * 1000;
     while (measuredNames.includes(name) && now() < stormEnd) {
       const cycleStart = now();
@@ -1633,21 +1252,10 @@ async function restartLeg(config, clients, retryMethod, measuredNames) {
     }
     return { name, readyAtMs, attempts, closedAtMs: closedAt.get(name), reconnectMs: readyAtMs - closedAt.get(name) };
   }));
-  // Both settle together: a client that cannot come back must not leave the
-  // profiler's answer an unhandled rejection when it never arrives, and vice
-  // versa.
   const [results, restored] = await Promise.all([
     ready, waitForJson(donePath, config.restartDeadlineMs, "the profiler's Gateway restart"),
   ]);
   const measured = results.filter((entry) => measuredNames.includes(entry.name));
-  // Every request a measured client made is kept. The profiler stamps
-  // `restoredAtMs` only after the new Gateway answered health, some seconds
-  // after it already served requests, so classifying by that stamp would move
-  // the first and most contended requests of the storm into the downtime and
-  // report nothing of them. The outcome decides instead: a request the new
-  // Gateway served is the storm's (its `sinceRestoreMs` may still be negative),
-  // and one that failed — refused while the Gateway was down, or on the socket
-  // it closed — is the downtime's.
   const requests = [];
   for (const { name, client } of clients) {
     if (!measuredNames.includes(name)) continue;
@@ -1663,25 +1271,13 @@ async function restartLeg(config, clients, retryMethod, measuredNames) {
   return {
     requestedAtMs, restoredAtMs: restored.restoredAtMs, restoredPid: restored.pid,
     downtimeMs: restored.restoredAtMs - requestedAtMs,
-    // The restart's start, read by the profiler from the fixture's log: the new
-    // Gateway's own process start to listening, and the clients' socket close to
-    // that listening; null when the log held no complete start.
     startup: restored.startup ?? null,
     clients: measured, clientsAll: results, requests,
   };
 }
 
-/** Run the selected impairment cases in order, on the clients already
- * connected, mutating `context.legs` as each one reports and persisting after
- * every case, so a case that fails later cannot discard the legs that already
- * ran. */
 async function impairmentLegs(config, context) {
   const legs = context.legs;
-  /** A capped leg's counted close is that leg's own finding (G-4's target is
-   * zero closes): it must not discard the legs already measured or skip the
-   * cases after it. The client is put back on a live socket, with its chat
-   * re-mounted, and the close is carried to the run's verdict separately. A
-   * close no case counted is a failure of its own. */
   const recoverCountedCloses = async (nextCase) => {
     const closed = context.all.filter((client) => client.closedUnexpectedly);
     if (closed.length === 0) return;
@@ -1706,7 +1302,6 @@ async function impairmentLegs(config, context) {
     else if (name === "bandwidth-stream") legs["bandwidth-stream"] = await bandwidthStreamLeg(config, context);
     else if (name === "restart") {
       legs.restart = await restartLeg(config, context.clients, context.retry, RESTART_MEASURED_CLIENTS);
-      // Every remaining socket dies with the old Gateway process.
       for (const client of context.all) client.expectClosure();
     } else fail(`unknown impairment case ${name}`);
     context.persist();
@@ -1744,10 +1339,6 @@ async function multi() {
       writeFileSync(config.devicesPath, JSON.stringify(tokens), { mode: 0o600 });
       const dashboard = await connect("dashboard", tokens.dashboard);
       result.gateway = { version: dashboard.info.gatewayVersion, protocolVersion: dashboard.info.protocolVersion };
-      // The phone's dashboard list (user scope) builds the durable index. A
-      // fresh fixture answers it with a retryable `busy` until the catalog
-      // owner has published its first cut, so this first read retries like the
-      // phone does; `ms` is the attempt that succeeded.
       const primeRetries = {};
       let started = now();
       const listed = await retryingBusy(primeRetries, "session.list", async () => {
@@ -1765,13 +1356,7 @@ async function multi() {
       sessionList: [], sessionOpenWarm: [], sessionOpenCold: [], sessionOpenColdLarge: [], promptAdmission: [],
       reconnectReadyMobile: [], reconnectReadyDashboard: [],
     };
-    // Operations a lane is still waiting on. The mixed window's tail expires
-    // with one of them in flight on a slow fixture, so each one is censored
-    // (its elapsed time is the sample) instead of holding the run open.
     const inflight = new Set();
-    // Set once the mixed window's tail has ended: an operation a lane finishes
-    // after that is no longer measured, so the sample set cannot change while
-    // the run winds down (and cannot gain a post-window sample).
     let measuring = true;
     const timed = async (kind, operation) => {
       const entry = { kind, startedAt: now(), censored: false };
@@ -1806,14 +1391,12 @@ async function multi() {
     await dashboard.request("session.list", { limit: 500, scope: "user" }, measured);
     result.startupListMs = now() - started;
 
-    // Eight long tool loops; the driver unsubscribes after each prompt, so the
-    // runs continue with no session subscriber (accepted prompts outlive them).
     result.setupPromptMs = [];
     const retries = {};
     result.busyRetries = retries;
     const retrying = (client, method, params) => retryingBusy(retries, method, () => client.request(method, params, measured));
     const mutation = (client, method, params) => {
-      const commandId = randomUUID(); // one command, however often admission is retried
+      const commandId = randomUUID();
       return retrying(client, method, { ...params, commandId });
     };
     for (const { sessionId } of config.running) {
@@ -1826,10 +1409,6 @@ async function multi() {
     }
     await sleep(config.settleBeforeMs);
 
-    // The subagent-like writers start with the measured windows, not with the
-    // setup: on `main` every append re-scans the whole catalog, and the eight
-    // cold opens that bring the steady state up must not queue behind that
-    // backlog (they are a precondition, not a measurement).
     appender = startAppender(config.appendTargets, config.appendIntervalMs, config.label);
 
     result.noSubscriber = await measuredWindow("no-subscriber", [driver, dashboard], ["dashboard"],
@@ -1842,17 +1421,8 @@ async function multi() {
     await sleep(config.settleBeforeMs);
 
     const reconnectMs = config.reconnectIntervalSeconds * 1000;
-    // The dashboard's offset is clamped so its first reconnect lands inside the
-    // window whatever `--mixed-seconds` is; the mobile keeps its own offset,
-    // which is earlier than the dashboard's for a window of 40 s or more. A
-    // `--mixed-seconds` too short for the mobile to reconnect at all (20 s or
-    // less) is rejected by the orchestrator's validation, not hidden here.
     const dashboardReconnectOffsetMs = Math.min(config.dashboardReconnectOffsetSeconds, config.mixedSeconds / 2) * 1000;
     const pause = (intervalMs, cycleStart, deadline) => sleep(Math.max(0, Math.min(intervalMs - (now() - cycleStart), deadline - now())));
-    // Lists and reconnects run on separate devices. The Gateway admits one
-    // session.open per connection, so the open lanes already work this way; a
-    // single `session.list` can also outlast the whole mixed window on `main`,
-    // and the dashboard's scheduled reconnect must not be starved by it.
     const dashboardLoop = async (start, deadline) => {
       while (now() < deadline) {
         const cycleStart = now();
@@ -1885,7 +1455,6 @@ async function multi() {
       const opened = await timed(kind, () => retrying(client, "session.open", { sessionId }));
       await client.request("session.close", { sessionId, subscriptionToken: opened.subscriptionToken }, measured);
     };
-    // Largest first, so the 200 MiB worst case is measured however few fit.
     const largeLane = async (start, deadline) => {
       for (const { sessionId } of [...config.large].reverse()) {
         if (now() >= deadline) break;
@@ -1904,10 +1473,6 @@ async function multi() {
         if (now() >= deadline) break;
         const cycleStart = now();
         const opened = await timed("sessionOpenCold", () => retrying(driver, "session.open", { sessionId }));
-        // The model selection and the prompt admission are measured workload
-        // too: started after the deadline the prompt would be timed while every
-        // other lane has stopped (biased low) and censored with an elapsed time
-        // under the tail, not the tail's own length.
         if (now() < deadline) {
           await mutation(driver, "settings.change", profileModelChange(sessionId, opened.session));
           if (now() < deadline) {
@@ -1918,43 +1483,26 @@ async function multi() {
         await pause(config.proberIntervalMs, cycleStart, deadline);
       }
     };
-    // The mixed window is fixed-length: it closes at `mixedSeconds` even when a
-    // lane is mid-operation, so window totals (frames, bytes, CPU time, catalog
-    // walks) do not scale with the fixture's latency and two runs can agree.
     result.mixed = await measuredWindow("mixed", [driver, dashboard, mobile, warm, large, reconnecting],
       ["mobile", "dashboard"],
       async (start) => {
         const deadline = start + config.mixedSeconds * 1000;
-        // Every lane starts at once; operations still in flight at the deadline
-        // finish in the window's bounded tail.
         await Promise.all([dashboardLoop(start, deadline), dashboardReconnectLane(start, deadline),
           mobileLoop(start, deadline), largeLane(start, deadline), warmLane(start, deadline),
           coldLane(start, deadline)]);
       }, { fixedSeconds: config.mixedSeconds, tailGraceSeconds: config.tailGraceMs / 1000, abandonInflight });
-    // The tail is the last moment an operation may be censored into the
-    // samples: from here on a lane that settles late is no longer measured, and
-    // the copy below fixes the set the result reports.
     measuring = false;
     result.samples = Object.fromEntries(Object.entries(samples).map(([kind, values]) => [kind, [...values]]));
     result.runningPhases = config.running.map(({ sessionId }) => phases.get(sessionId) ?? null);
     result.mobileOutcome = chat.outcome();
     result.appendedEntries = await appender.stop();
     appender = null;
-    // Closes a capped leg counted: they are that leg's finding, and the run is
-    // still rejected for them, but every remaining case must run first.
     const closedByCases = [];
-    // The reference the streaming leg's own round trip is compared against:
-    // this run's uncapped maximum, from the mixed window, before any cap was
-    // applied (a fixed constant cannot separate a backed-up path from a slow
-    // host).
     result.uncappedPingToPongMs = mobile.pongRoundTripMsMax;
     if (config.cases.length > 0) {
       const ready = (client) => (client === mobile
         ? () => retryingBusy(retries, "mount", () => chat.remount(measured))
         : () => retryingBusy(retries, "list", () => client.request("session.list", { limit: 500, scope: "user" }, measured)));
-      // The restart case's clients: the exit criterion's three first, then
-      // every other connected client, because a restart must not leave half the
-      // clients dead even though only three are measured.
       const byName = new Map(clients.map((client) => [client.name, client]));
       const restartNames = [...RESTART_MEASURED_CLIENTS,
         ...clients.map((client) => client.name).filter((name) => !RESTART_MEASURED_CLIENTS.includes(name))];
@@ -1967,8 +1515,6 @@ async function multi() {
         clients: restartNames.map((name) => ({ name, client: byName.get(name), ready: ready(byName.get(name)) })),
       });
     }
-    // Written before the run is judged: a run rejected for an unexpected close
-    // still has its impairment legs as evidence.
     writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
     if (closedByCases.length > 0) fail(`a capped leg closed ${closedByCases.join("; ")}`);
     for (const client of clients) {
@@ -1978,13 +1524,7 @@ async function multi() {
     for (const chat of chats) clearInterval(chat.renewal);
     if (appender) await appender.stop().catch(() => {});
     for (const client of clients) await client.close();
-    // The shaped path owns a listening socket and any half-open upstream socket
-    // a blackhole left; closing the clients first keeps its teardown out of
-    // their unexpected-close accounting.
     for (const client of clients) client.relay?.close();
-    // A lane abandoned by the mixed window's tail can restore a mounted chat
-    // while its socket closes; nothing may keep the driver process alive after
-    // every client is closed.
     for (const chat of chats) clearInterval(chat.renewal);
     await new Promise((resolveFlush) => timelineStream.end(resolveFlush));
   }
@@ -2014,7 +1554,6 @@ async function main() {
       clients.push(client);
       byName[name] = client;
       if (name !== "driver") recorders.push(client);
-      // Dashboard catalog load, as DashboardStateOwners does after connecting.
       await client.request("session.list", { limit: 500, scope: "user" });
       result.clients[name] = {
         offeredExtensions: client.offeredExtensions,
@@ -2025,8 +1564,6 @@ async function main() {
     result.gateway = { version: byName[wants[0]].info.gatewayVersion, protocolVersion: byName[wants[0]].info.protocolVersion };
     await sleep(config.settleBeforeMs);
 
-    // Warm-up iterations run the identical workload unmeasured, so first-use
-    // effects (JIT, model recents, catalog materialization) stay out of samples.
     result.warmups = [];
     for (let iteration = 0; iteration < config.warmup + config.iterations; iteration += 1) {
       const warmup = iteration < config.warmup;
@@ -2044,8 +1581,6 @@ async function main() {
       const opened = await chat.open();
       const openedModel = opened.session.model ?? null;
       process.stderr.write(`${label} ${sessionId} opened with model ${JSON.stringify(openedModel)}\n`);
-      // Select the fixture model explicitly before every measured window so each
-      // workload uses the same provider/model, independently of cold-open defaults.
       await actor.request("settings.change", { ...profileModelChange(sessionId, opened.session), commandId: randomUUID() });
       await sleep(config.settleBeforeMs);
 

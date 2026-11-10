@@ -15,7 +15,6 @@ interface ProviderRegistration {
   register: () => void;
 }
 
-/** Owns user-scope Pi provider registrations for Gateway administration. */
 export class GlobalProviderResources {
   private readonly mutex = new AsyncMutex();
   private providerContributions: ProviderRegistration[] = [];
@@ -62,12 +61,10 @@ export class GlobalProviderResources {
     return resources;
   }
 
-  /** Serialize catalog reads against extension replacement so paged snapshots stay coherent. */
   withStableSnapshot<T>(read: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.mutex.run(read, signal);
   }
 
-  /** Reload only user/global resources. Project settings are deliberately untrusted. */
   requestReload(): void {
     this.requestedRevision += 1;
     this.auth.requestGlobalProviderRefresh(async () => {
@@ -128,10 +125,6 @@ export class GlobalProviderResources {
     const failedPaths = new Set(loaded.errors.map(({ path }) => path));
     const failures: string[] = [];
 
-    // ModelRuntime.registerProvider deliberately merges re-registrations. Remove each
-    // prior global extension layer, then replay every current contribution in the same
-    // provider-then-native order used by createAgentSessionServices. This makes removal
-    // and reorder equivalent to a fresh SDK load without disturbing built-in providers.
     const previousProviderIds = new Set(previous.filter(({ kind }) => kind !== "virtual").map(({ providerId }) => providerId));
     for (const providerId of previousProviderIds) this.modelRuntime.unregisterProvider(providerId);
     for (const { providerId, kind } of previous) {
@@ -139,9 +132,6 @@ export class GlobalProviderResources {
       const separator = providerId.indexOf("/");
       this.modelRuntime.unregisterVirtualModel(providerId.slice(0, separator), providerId.slice(separator + 1));
     }
-    // DefaultResourceLoader does not expose the combined package/local resource path
-    // order. Resolve the same authoritative set through the SDK's public package API;
-    // skip missing packages here because loader.reload already owns installation policy.
     const resolved = await this.packageManager.resolve(async () => "skip");
     const extensionOrder = resolved.extensions.filter(({ enabled }) => enabled).map(({ path }) => path);
     for (const path of [...loaded.errors.map(({ path }) => path), ...freshProviders.map(({ extensionPath }) => extensionPath), ...freshNativeProviders.map(({ extensionPath }) => extensionPath), ...freshVirtualModels.map(({ extensionPath }) => extensionPath), ...previous.map(({ extensionPath }) => extensionPath)]) {
@@ -164,8 +154,6 @@ export class GlobalProviderResources {
       if (!retainedRuntimes.has(priorRuntime)) priorRuntime.invalidate("Global provider extension resources were reloaded");
     }
 
-    // Provider registration itself updates the synchronous catalog. Always notify after
-    // that commit, even if the SDK's subsequent availability refresh rejects.
     try {
       const result = await this.modelRuntime.refresh({ allowNetwork: false });
       for (const failure of failures) this.log("error", failure);

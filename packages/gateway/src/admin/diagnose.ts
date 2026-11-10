@@ -8,40 +8,23 @@ import { classifyPeer, readTailscaleStatus, runBoundedCommand, type TailscalePee
 import { resolveTronHome } from "../tron-home.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
 
-/**
- * Read-only diagnostic bundle for one incident. It collects the log streams in
- * the window, the newest device exports, payload selection and progress,
- * launchd's records for `com.tron.server`, `/health`, Tron processes with their
- * payload versions, `scripts/tron mac verify` and Tailscale's view of each
- * paired peer. It writes exactly one file, at `--out`, and never writes to the
- * Tron home, launchd or the Gateway.
- */
-
-/** `--since` default: covers a failure the user noticed earlier today. */
 const DEFAULT_SINCE = "2h";
-/** `<count><unit>`; the same text is handed to `log show --last`. */
 const DURATION_PATTERN = /^([1-9][0-9]{0,3})([smhd])$/u;
 const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
-/** One shareable artifact: per-stream, per-section and total caps keep it bounded. */
 const MAX_STREAM_BYTES = 1_024 * 1_024;
 const MAX_LOGS_SECTION_BYTES = 4 * 1_024 * 1_024;
 const MAX_SECTION_BYTES = 256 * 1_024;
 const MAX_DEVICE_EXPORT_BYTES = 512 * 1_024;
 const MAX_DEVICE_EXPORTS = 3;
-/** A two-hour `log show` measured about 20 s on a busy Mac. */
 const LOG_SHOW_TIMEOUT_MS = 90_000;
 const MAC_VERIFY_TIMEOUT_MS = 180_000;
 const TAILSCALE_TIMEOUT_MS = 15_000;
 const PROCESS_LIST_TIMEOUT_MS = 10_000;
 const HEALTH_TIMEOUT_MS = 3_000;
-/** `/usr/bin/log` explicitly: a shell's `log` builtin shadows the command. */
 const LOG_TOOL = "/usr/bin/log";
 const PROCESS_LIST_TOOL = "/bin/ps";
-/** The macsys network extension owns Tailscale's endpoint decisions. */
 const TAILSCALE_EXTENSION_PROCESS = "io.tailscale.ipn.macsys.network-extension";
-/** Path-change evidence: magicsock lines name the endpoint a peer now uses. */
 const TAILSCALE_PATH_LINE = /magicsock/iu;
-/** Files written by the payload store, per channel. */
 const PAYLOAD_DOCUMENTS = ["current.json", "previous.json", "deployment-state.json", "update-progress.json"] as const;
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -54,13 +37,10 @@ export interface HealthResult {
 type HealthReader = (url: string) => Promise<HealthResult>;
 
 export interface DiagnosticBundleOptions {
-  /** `<count><s|m|h|d>`; defaults to `2h`. */
   since?: string;
-  /** Bundle path; defaults to a new file in the system temp directory. */
   out?: string;
   now?: Date;
   tronHome?: string;
-  /** Injected so a test can run against a fixture home without external tools. */
   runCommand?: BoundedCommand;
   readHealth?: HealthReader;
 }
@@ -90,7 +70,6 @@ async function readHealthBounded(url: string): Promise<HealthResult> {
   }
 }
 
-/** Keeps the newest bytes: a bundle is read for what just happened. */
 function boundedTail(text: string, maximum: number): { text: string; truncated: boolean } {
   const bytes = Buffer.from(text, "utf8");
   if (bytes.byteLength <= maximum) return { text, truncated: false };
@@ -176,8 +155,6 @@ async function logsSection(logsDirectory: string, windowStartMs: number): Promis
     if (content.length === 0) {
       lines.push(heading, "(empty)");
     } else if (timestamped.length === 0) {
-      // A stream without record timestamps (launcher or stderr text) is bounded
-      // by the file's own modification time instead.
       if (file.mtimeMs >= windowStartMs) lines.push(heading, ...content);
       else lines.push(heading, "(not modified in the window)");
     } else {
@@ -239,9 +216,6 @@ async function payloadSelectionSection(payloadsDirectory: string): Promise<Secti
   return { name: "payload-selection", lines };
 }
 
-/** Gateway payload processes, the installed app and the native host. Other
- * processes under the Tron home (agents) are excluded: their arguments can
- * carry prompt text. */
 function isTronProcess(command: string, tronHome: string): boolean {
   return command.includes(`${tronHomePath(tronHome, "gateway/payloads")}/`) || command.includes("/Applications/Tron.app") || command.includes("TronNativeHost");
 }
@@ -320,8 +294,6 @@ async function pairedDevices(tronHome: string): Promise<PairedDevice[]> {
 
 async function tailscaleSection(tronHome: string, since: string, runCommand: BoundedCommand): Promise<{ section: Section; selfAddress: string | undefined }> {
   const lines: string[] = [];
-  // One shared status read and one shared path classifier: the bundle and the
-  // transport's silence records must not describe the same peer differently.
   const read = await readTailscaleStatus(runCommand, TAILSCALE_TIMEOUT_MS);
   if (!read.ok) {
     return { section: { name: "tailscale", lines: [`no usable Tailscale CLI (${read.failures.join("; ")})`] }, selfAddress: undefined };

@@ -37,9 +37,6 @@ export interface SessionSearchResult {
   lexicalScore: number;
   semanticScore?: number;
   anchorRevision: SessionSearchAnchorRevision;
-  /** Gateway-owned display state read when the response is built. It is never
-   * part of the index, so archiving or unarchiving a session needs no reindex
-   * and the session stays searchable either way. */
   archived: boolean;
 }
 

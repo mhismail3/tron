@@ -13,8 +13,6 @@ import { closeSubagentFixtures, launchResults } from "../../../../test-support/h
 import { modelQueueProjectionPath } from "../../../providers/model-queue.js";
 import { homeOwnerOf, queueOwnerOf } from "../../../../test-support/gateway-registry.js";
 
-/** A scripted OpenAI-compatible provider with two models: `limited` answers every
- * request with OpenCode Go's plan-limit 429, `fallback` answers `CHILD-DONE`. */
 async function queueProvider(): Promise<{ port: number; requests: Record<string, number>; close: () => Promise<void> }> {
   const requests: Record<string, number> = {};
   const server: Server = createServer(async (request, response) => {
@@ -61,7 +59,6 @@ describe("Home task subagents: the subagent model queue", () => {
     servers.push(provider);
     const model = (id: string) => ({ id, name: id, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
-    // Registered before any runtime starts, so the Gateway's queue sees both models.
     const f = await fixture(false, false, undefined, true, { providers: { "queue-child": {
       baseUrl: `http://127.0.0.1:${provider.port}/v1`, api: "openai-completions", apiKey: "fixture-only",
       models: [model("limited"), model("fallback"), model("mac")] } } });
@@ -77,8 +74,6 @@ describe("Home task subagents: the subagent model queue", () => {
     const projectionDirectory = join(f.tronHome, "gateway", "model-queue-sessions");
     f.faux.setResponses([
       async () => {
-        // The worker launch snapshot already exists. A subsequent Home edit must
-        // neither retarget its child nor change ordinary Mac-derived subagents.
         const profile = JSON.parse(readFileSync(settings.settingsModel.owner.profilePath, "utf8"));
         profile.modelQueue.subagent = ["queue-child/mac"];
         writeFileSync(settings.settingsModel.owner.profilePath, JSON.stringify(profile));
@@ -87,7 +82,7 @@ describe("Home task subagents: the subagent model queue", () => {
           if (!task.sessionId) throw new Error("Worker must be admitted before its first request");
           blockedProjection = join(projectionDirectory, `${createHash("sha256").update(task.sessionId).digest("hex")}.json`);
           blockedProjections.push(blockedProjection);
-          mkdirSync(blockedProjection, { recursive: true }); // force the real atomic rename to fail
+          mkdirSync(blockedProjection, { recursive: true });
         }
         return fauxAssistantMessage([fauxToolCall("subagent", { agent: "queue-child", task: "queue search", async: detached, ...(explicit ? { model: "queue-child/fallback" } : {}) }, { id: "queue-launch" })], { stopReason: "toolUse" });
       },
@@ -99,14 +94,12 @@ describe("Home task subagents: the subagent model queue", () => {
     const providerErrors = (await f.registry.readTaskEvidence(run.sessionId)).flatMap(entry => entry.type === "message"
       && entry.message.role === "assistant" && entry.message.errorMessage ? [entry.message.errorMessage] : []);
     expect(result.terminalEvidence?.outcome, JSON.stringify({ result, providerErrors })).toBe("final");
-    // Explicit physical selection never touches the first queue model. Without
-    // it, the virtual selection retries the failed request on the fallback.
     const launch = (await launchResults(f.registry, run.sessionId)).find(item => item.toolCallId === "queue-launch");
     if (blocked) {
       try {
         expect(launch?.isError).toBe(true);
         expect(JSON.stringify(launch)).toContain("Cannot publish this session");
-        expect(provider.requests).toEqual({}); // no stale/default child was launched
+        expect(provider.requests).toEqual({});
         expect(f.queueDiagnostics).toContainEqual(expect.objectContaining({ event: "model-queue.projection",
           scope: "task-launch", sessionId: run.sessionId, status: "failed", reason: "EISDIR" }));
         expect((await readdir(projectionDirectory)).filter(name => name.endsWith(".tmp"))).toEqual([]);
@@ -125,8 +118,6 @@ describe("Home task subagents: the subagent model queue", () => {
     expect(resolution.keys[0]).toMatchObject({ value: ["queue-child/limited", "queue-child/fallback"], layer: "session", fixedAt: { from: "delegate", via: "home-profile" } });
     expect(f.queueDiagnostics).toContainEqual({ event: "model-queue.projection", role: "subagent",
       scope: "task-launch", sessionId: run.sessionId, status: "published", models: ["queue-child/limited", "queue-child/fallback"] });
-    // A generic import must not transfer Home task identity into a different
-    // canonical session. Refusal leaves the existing worker and queues intact.
     await expect(f.registry.importFromJsonl(worker.sessionFile!, f.cwd)).rejects.toThrow("Invalid task marker");
     let activeRegistry = f.registry;
     if (!explicit && !detached) {
@@ -146,8 +137,6 @@ describe("Home task subagents: the subagent model queue", () => {
       expect(provider.requests.mac, "cold-opened launch evidence must still control actual child requests").toBeUndefined();
       expect(provider.requests.fallback).toBe(2);
     }
-    // Shared usage failures remain useful, but a Mac child must not receive
-    // unrelated model identities from Home/worker queue failure history.
     const unrelated = `${f.model.provider}/${f.model.id}`;
     queueOwnerOf(activeRegistry)!.recordUsageLimit("worker", unrelated, "fixture plan limit");
     await queueOwnerOf(activeRegistry)!.publishProjection();

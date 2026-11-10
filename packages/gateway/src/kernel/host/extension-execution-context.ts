@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ExtensionOwner } from "../../protocol/types.js";
 
-/** Call-time identity shared by extension callbacks and host presentation across awaits. */
 const ownerStorage = new AsyncLocalStorage<ExtensionOwner>();
 interface InvocationExecutionContext {
   invocationId: string;

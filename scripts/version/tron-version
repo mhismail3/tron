@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 # tron-version - centralized version helper
-#
-# VERSION.env is the only hand-edited product identity file. Every
-# platform-specific version field is a generated mirror for a tool that
-# cannot read VERSION.env directly.
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -193,9 +188,6 @@ check_grep_count() {
     fi
 }
 
-# Every occurrence of a build setting must carry the canonical value. The Mac
-# project versions two bundles (Tron.app and TronNativeHost), and the sync step
-# rewrites every occurrence, so a count of exactly one would reject a correct file.
 check_every_setting() {
     local label="$1"
     local key="$2"
@@ -214,7 +206,6 @@ check_versions() {
     derive_version_fields
 
     local canonical_build_setting gateway_package_version gateway_lock_version
-    # This is an Xcode build-setting token, not shell interpolation.
     # shellcheck disable=SC2016
     canonical_build_setting='$(TRON_CANONICAL_VERSION)'
     gateway_package_version=$(cd "$PROJECT_DIR" && node -p "require('./packages/gateway/package.json').version")

@@ -10,8 +10,6 @@ import { MAXIMUM_RECENT_MODELS, type RecentModelUsage } from "../../providers/re
 import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-/** Wait for the catalog owner's first published cut: a read that lands before
- * it refuses retryably, and no reader walks the folder (G-1c). */
 async function awaitCatalogCut(registry: RuntimeRegistry): Promise<void> {
   await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } })
     .sessionCatalog.whenPublished();
@@ -27,8 +25,6 @@ describe("recent model usage", { concurrent: false }, () => {
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
 
-  /** One user session with two models, a delegated fork child, and a faux
-   * provider so a real admitted `agent_start` drives the recording path. */
   async function fixture(label: string, seed?: RecentModelUsage[]) {
     const root = await mkdtemp(join(tmpdir(), `tron-recent-models-${label}-`));
     const agentDir = join(root, "agent");
@@ -99,8 +95,6 @@ describe("recent model usage", { concurrent: false }, () => {
       await run(slot, modelA, "first");
       await firstRecorded;
       expect(recentModelsOf(fixture_.registry).entries()[0]).toMatchObject({ id: "recent-a" });
-      // The seeded list is already at the bound, so the newest run displaces the
-      // oldest entry instead of growing the document.
       expect(recentModelsOf(fixture_.registry).entries()).toHaveLength(MAXIMUM_RECENT_MODELS);
       expect(recentModelsOf(fixture_.registry).entries().map((model) => model.id).slice(0, 3)).toEqual(["recent-a", "model-00", "model-01"]);
       expect(recentModelsOf(fixture_.registry).entries().some((model) => model.id === "model-11")).toBe(false);
@@ -110,7 +104,6 @@ describe("recent model usage", { concurrent: false }, () => {
       await secondRecorded;
       expect(recentModelsOf(fixture_.registry).entries().map((model) => model.id).slice(0, 3)).toEqual(["recent-b", "recent-a", "model-00"]);
 
-      // Reusing a model moves it to the front instead of adding a second row.
       const thirdRecorded = fixture_.nextRecentChange();
       await run(slot, modelA, "third");
       await thirdRecorded;
@@ -120,8 +113,6 @@ describe("recent model usage", { concurrent: false }, () => {
       expect(usage.every((model) => Number.isFinite(Date.parse(model.lastUsedAt)))).toBe(true);
       expect(fixture_.changes.length).toBeGreaterThan(0);
 
-      // A delegated session never owns a Gateway runtime, so it can never
-      // report a model as recently used by the user.
       await expect(fixture_.registry.acquire(fixture_.childId)).rejects.toMatchObject({
         code: "conflict",
         message: expect.stringContaining("Subagent sessions are informational"),
@@ -133,10 +124,6 @@ describe("recent model usage", { concurrent: false }, () => {
   });
 
   it("settles the recorded preference before disposal releases the state directory", async () => {
-    // The recording path is fire-and-forget from an admitted run, so its write
-    // can still be in flight when the registry reports disposal. Disposal must
-    // make that write this owner's last, or a temp file and its rename can land
-    // after the state directory was released.
     const fixture_ = await fixture("disposal");
     const model = fixture_.faux.getModel("recent-a")!;
     try {
@@ -146,8 +133,6 @@ describe("recent model usage", { concurrent: false }, () => {
       await fixture_.registry.dispose();
       const document = JSON.parse(await readFile(path, "utf8")) as { models: Array<{ id: string }> };
       expect(document.models.map((entry) => entry.id)).toContain("recent-a");
-      // The owner is closed: a later admission cannot publish into the
-      // directory this disposal released.
       const store = recentModelsOf(fixture_.registry);
       expect(await store.record("session-archive-fixture", "faux-1")).toBe(false);
       expect(JSON.parse(await readFile(path, "utf8"))).toEqual(document);

@@ -9,14 +9,9 @@ import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../src/transport/gateway-service.js";
 import { durableAtomicWriteJson } from "../src/foundation/durable-json.js";
 
-// Test-only crash cuts around real writes. No process suspension, synthetic
-// app/receipt files or production test hooks: the parent owns and joins SIGKILL.
 const [root, cut, marker] = process.argv.slice(2) as [string, string, string];
 const request = JSON.parse(await fs.readFile(join(root, "request.json"), "utf8"));
 async function barrier(): Promise<never> {
-  // Release the fixture RuntimeRegistry/workspace lease, not the held Apps
-  // mutation or its receipt. This isolates Apps durability from the separate
-  // workspace lock's 60-second stale-owner policy after an ungraceful death.
   await registry.dispose();
   process.stdin.resume(); writeFileSync(marker, cut);
   return new Promise<never>(() => {});

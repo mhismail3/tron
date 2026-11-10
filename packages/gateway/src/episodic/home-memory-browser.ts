@@ -7,7 +7,6 @@ import type { EpisodicViewPart } from "./episodic-tree.js";
 import type { HomeMemoryEvidence, HomeMemoryItem, HomeMemoryViewLine } from "../protocol/types.js";
 
 export const HOME_MEMORY_PAGE_BYTES = 128 * 1024;
-/** Two 100-character strings even at JSON's worst-case escaping, plus field names. */
 export const HOME_MEMORY_DISPLAY_BYTES = 1536;
 const TEXT_CHARS = 4096;
 
@@ -80,9 +79,6 @@ export function homeMemoryRevisionChanged(): GatewayError {
     { reason: "home-memory-revision-changed" }, "home-memory-revision-changed");
 }
 
-/** `cause` is a coded name for the failure the public refusal stands for (its class and
- * kind or reason), never a path or message: one recorded refusal then names which of
- * the mapped failures occurred (#968). */
 export function homeMemorySourceUnavailable(cause: string): GatewayError {
   return new GatewayError("busy", "Home memory canonical sources are unavailable", true,
     { reason: "home-memory-source-unavailable", cause }, "home-memory-source-unavailable");
@@ -93,8 +89,6 @@ function boundedText(text: string): string {
   return text.slice(0, end);
 }
 
-/** Copy from the live catalog, with explicit browser-only omissions. Never turn
- * the model-facing zoom string into an alleged exact evidence response. */
 function homeMemoryItem(message: EpisodicMessageRecord, node: EpisodicNodeRecord | undefined): HomeMemoryItem {
   const text = boundedText(message.text);
   const summary = node ? boundedText(node.text) : undefined;
@@ -109,12 +103,8 @@ function homeMemoryItem(message: EpisodicMessageRecord, node: EpisodicNodeRecord
   };
 }
 
-/** Display facts are disposable: keep persisted/model-facing memory unchanged.
- * Never use a result's first line as a preview; it can be arbitrary source code. */
 export function homeMemoryToolDisplay(entry: EpisodicCanonicalEntry, item: HomeMemoryItem): HomeMemoryItem["display"] {
   if (item.projection.omitted) return undefined;
-  // Canonical roles distinguish a plain reply from a call even after an edit.
-  // Edited calls/results retain only that kind, not the original target/status.
   const edited = item.projection.omissions.includes("context-edit");
   const message = entry.raw.message as Record<string, unknown> | undefined;
   if (!message || typeof message !== "object") return undefined;

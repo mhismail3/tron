@@ -26,8 +26,6 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
   const eventId = (await homeOwnerOf(f.registry).taskResult(run.taskId)).wake!.eventId;
   const entries = async () => {
     const text = await readFile(home.sessionFile!, "utf8");
-    // A threadpool read may overlap Pi's append: only complete JSONL entries
-    // are published. Malformed complete records still fail instead of retrying.
     const end = text.lastIndexOf("\n");
     return end < 0 ? [] : text.slice(0, end).split("\n").map(line => JSON.parse(line) as SessionEntry);
   };
@@ -37,7 +35,6 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
   const refusalSettled = async () => invocationReceipts(await entries(), f.home.sessionId)
     .some(receipt => receipt.receiptKind === "terminal" && receipt.source === "homeWake" && receipt.errorCode === "preflight-rejected");
   const calls = f.faux.state.callCount;
-  // Inject refusal at Pi's send boundary, before it appends the admitted trigger.
   const session = (home as unknown as { runtime: { session: AgentSession } }).runtime.session;
   const send = session.sendCustomMessage.bind(session);
   let refused = false;
@@ -46,8 +43,6 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
   let triggerSendAttemptsBeforeResume: number | undefined;
   const fault = vi.spyOn(session, "sendCustomMessage").mockImplementation(async (message, options) => {
     if (!refused && options?.triggerTurn && message.customType === HOME_TASK_RESULT_MESSAGE) {
-      // Refuse only the first send, without pausing Home. A premature retry
-      // reaches the real canonical/provider boundary and violates the checks below.
       refused = true;
       throw new Error("controlled pre-persistence trigger refusal");
     }
@@ -57,8 +52,6 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
     options?.triggerTurn && message.customType === HOME_TASK_RESULT_MESSAGE);
   try {
     await homeOwnerOf(f.registry).resumeMemory();
-    // Idle alone can precede a queued retry's claim. Wait for the canonical
-    // refusal receipt or a second real SDK send, then require exactly one attempt.
     await waitFor(async () => triggerSends().length > 1 || await refusalSettled(), "wake refusal settled or retried");
     triggerSendAttemptsBeforeResume = triggerSends().length;
     expect(triggerSends()).toHaveLength(1);
@@ -73,7 +66,6 @@ it("returns an unpersisted wake trigger to pending before terminal settlement, t
     expect(f.faux.state.callCount).toBe(calls);
   } finally { fault.mockRestore(); }
 
-  // Pause only after proving refusal stayed pending without an automatic retry.
   await homeOwnerOf(f.registry).pauseMemory();
   f.faux.setResponses([fauxAssistantMessage("Read the retained result")]);
   await homeOwnerOf(f.registry).resumeMemory();

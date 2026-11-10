@@ -6,8 +6,6 @@ import { hasSessionSettingsApplier, type SettingsSchema } from "../kernel/settin
 
 export const SESSION_SETTINGS_ENTRY = "tron.settings.v1";
 
-/** A choice after the last system frame wins; otherwise that frame is the
- * actual declared loadout, including changes made through the SDK itself. */
 export function readSessionToolChoice(entries: readonly SessionEntry[]): { tools: string[]; fixed?: FixedSetting } | undefined {
   const fixed = readSessionFixedSettings(entries)["tools.active"];
   const fixedIndex = fixed ? entries.findIndex(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY
@@ -20,8 +18,6 @@ export function readSessionToolChoice(entries: readonly SessionEntry[]): { tools
   return { tools, ...(fixed && JSON.stringify(fixed.value) === JSON.stringify(tools) ? { fixed } : {}) };
 }
 
-/** Branch-local truth. Fork/resume follows Pi's canonical branch; the audit
- * ledger is never used to restore a runtime override. */
 export function readSessionSettings(entries: readonly SessionEntry[]): Record<string, unknown> {
   const entry = entries.findLast(entry => entry.type === "custom" && entry.customType === SESSION_SETTINGS_ENTRY);
   if (!entry || entry.type !== "custom") return {};
@@ -32,8 +28,6 @@ export function readSessionSettings(entries: readonly SessionEntry[]): Record<st
   return structuredClone(data.settings) as Record<string, unknown>;
 }
 
-/** Directional request values are branch-local timing snapshots, not explicit
- * overrides. A lower layer can narrow them live but cannot silently widen them. */
 export function readSessionRequestPins(entries: readonly SessionEntry[]): Record<string, FixedSetting> {
   return readChatSnapshots(entries, "requestPins");
 }
@@ -60,8 +54,6 @@ function readChatSnapshots(entries: readonly SessionEntry[], field: "fixed" | "r
   return structuredClone(snapshots) as Record<string, FixedSetting>;
 }
 
-/** The schema owns paths; callers cannot name an arbitrary SDK field. Undefined
- * deletes a Session override, so the next request follows the resolver again. */
 export function changeSessionSetting(schema: SettingsSchema, settings: Record<string, unknown>, id: string, value: unknown): Record<string, unknown> {
   const key = schema.schemaKey(id);
   const binding = key.layers.session;

@@ -51,8 +51,6 @@ install_node_locked() {
   fi
   [[ "$entry" == "$archive_sha" ]] || { echo "Node SHASUMS256 entry disagrees with pinned checksum: $archive_name" >&2; return 1; }
 
-  # Publish only fully downloaded inputs; interrupted curl runs leave no cache
-  # entry that could be mistaken for a completed archive on the next attempt.
   if [[ -n "$sums_tmp" ]]; then mv "$sums_tmp" "$sums"; sums_tmp=""; fi
   if [[ -n "$archive_tmp" ]]; then mv "$archive_tmp" "$archive"; archive_tmp=""; fi
   if [[ ! -e "$node_root" ]]; then

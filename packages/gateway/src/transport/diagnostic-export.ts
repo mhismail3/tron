@@ -8,13 +8,9 @@ import type { LogRecord } from "./logger.js";
 
 const MAX_EXPORT_BYTES = 512 * 1024;
 const MAX_RETAINED_EXPORTS = 10;
-/** Newest Gateway debug records appended to an export, bounded separately
- * from the client's own content. */
 const MAX_DEBUG_SECTION_BYTES = 1_024 * 1_024;
 const diagnosticExportMutex = new AsyncMutex();
 
-/** Writes an explicitly requested, bounded diagnostic snapshot outside the
- * canonical data directory. The path is server-owned and never client input. */
 export function exportDiagnosticSnapshot(
   content: string,
   debugRecords: readonly LogRecord[],
@@ -25,8 +21,6 @@ export function exportDiagnosticSnapshot(
   return diagnosticExportMutex.run(() => exportDiagnosticSnapshotImpl(content, debugRecords, now, directory, deviceIdentity));
 }
 
-/** The Gateway's debug buffer never reaches its persisted log; exports are
- * the one place it is kept. Newest records win when the section is full. */
 function debugSection(records: readonly LogRecord[]): string {
   if (records.length === 0) return "";
   const lines: string[] = [];
@@ -78,15 +72,13 @@ async function exportDiagnosticSnapshotImpl(
     await pruneDiagnosticSnapshots(path, directory);
     return { path, exportedAt: now.toISOString() };
   } catch {
-    // Never unlink a replacement symlink or a file not owned by this process
-    // if exclusive creation or pruning races with another actor.
     try {
       const candidate = await lstat(path);
       if (candidate.isFile() && !candidate.isSymbolicLink()
         && (ownerUID === undefined || candidate.uid === ownerUID)) {
         await rm(path, { force: true });
       }
-    } catch { /* the failed write may not have created a candidate */ }
+    } catch { }
     throw new GatewayError("conflict", "Diagnostic snapshot could not be written", true);
   }
 }

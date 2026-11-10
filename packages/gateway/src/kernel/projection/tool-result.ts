@@ -5,7 +5,6 @@ export interface ToolReferences {
   readonly liveViews: ReadonlySet<string>;
 }
 
-/** Module policy over canonical tool details and their retained resources, resolved at each call site. */
 export interface ToolResultProjection {
   beginBrowserLoad(sessionId: string, runtimeGeneration: string): BrowserResultObservation | undefined;
   references(entries: readonly unknown[], sessionId: string): ToolReferences;

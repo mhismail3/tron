@@ -21,9 +21,6 @@ import type { RuntimeRegistry } from "../../../kernel/session/runtime-registry.j
 import { CommandReceiptStore } from "../../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../../transport/gateway-service.js";
 
-// Real RuntimeRegistry + faux model + GatewayService + durable Apps/receipt stores.
-// No direct store calls: a source offer is produced by a real Pi tool turn and
-// every installation/update/removal crosses the authenticated Gateway boundary.
 const roots: string[] = [];
 const live: RuntimeRegistry[] = [];
 const results: string[] = [];
@@ -40,16 +37,11 @@ beforeAll(async () => {
   const engine = fileURLToPath(new URL("../../../../../ios-app/SwiftAppEngine/", import.meta.url));
   const probe = fileURLToPath(new URL("../../../modules/apps/fixtures/FeedsBoundaryMain.swift", import.meta.url));
   const swift = (await readdir(engine)).filter(name => name.endsWith(".swift")).map(name => join(engine, name));
-  // Build preparation has its own bounded child lifetime. It must not consume
-  // either journey's 15-second behavior budget or block Vitest's timeout owner.
   await promisify(execFile)("/usr/bin/xcrun", ["swiftc", "-swift-version", "6", "-package-name", "TronIOSApp", "-parse-as-library", "-D", "SWIFT_APP_FEEDS_BOUNDARY", "-o", feedBoundary, ...swift, probe], {
     timeout: 240_000, env: { ...process.env, CLANG_MODULE_CACHE_PATH: join(nativeRoot, "clang-cache") },
   });
 }, 240_000);
 afterEach(async () => {
-  // Vitest's deadline reports failure without cancelling the async body. Join
-  // this storage-heavy journey before releasing its registry and fixture bytes;
-  // otherwise its accepted apps.list maintenance can keep writing during rm.
   await retainedOffersJourney?.catch(() => {});
   retainedOffersJourney = undefined;
   await Promise.all(live.splice(0).map(registry => registry.dispose()));
@@ -83,8 +75,6 @@ async function fixture() {
   await mkdir(join(root, "agent")); await mkdir(join(root, "project"));
   vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent")); vi.stubEnv("HOME", root); vi.stubEnv("PI_OFFLINE", "1");
   await writeFile(join(root, "agent/settings.json"), JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false } }));
-  // These are storage/lifecycle journeys, not streamed-token pacing tests.
-  // Even a very high positive rate schedules one timer per tiny faux chunk.
   const faux = fauxProvider({ provider: "apps-install-fixture", tokensPerSecond: 0 });
   return { root, faux, displayReference: null as null | { sessionId: string; artifactId: string }, ...await start(root, faux) };
 }
@@ -105,8 +95,6 @@ async function tool(f: Fixture, args: Record<string, unknown>, contents = source
   return details;
 }
 async function rpc(f: Pick<Fixture, "service" | "registry"> & Partial<Pick<Fixture, "displayReference">>, method: string, params: Record<string, unknown> = {}) {
-  // Listing prunes offers only on a complete membership cut; a file the last reconcile could not
-  // prove leaves the cut incomplete (retryable busy) until the owner reads again. Read again now.
   if (method === "apps.pending" || method === "apps.list") await settleCatalog(f.registry);
   const admitted = method === "apps.review" && params.sourceSha256 ? f.displayReference ?? params : params;
   return await f.service.invoke(phone, method, admitted) as Record<string, any>;
@@ -118,7 +106,6 @@ function installParams(review: Record<string, any>, commandId: string, upgradeTo
 }
 
 async function legacyFixture(f: Fixture, name = "Builds"): Promise<void> {
-  // Seed a historical persisted consumer from committed bytes, never a retired tool writer.
   const directory = join(f.root, "tron/workspace/state/apps/builds");
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await cp(fileURLToPath(new URL("../../../../test-fixtures/tron-corpus/home/workspace/state/apps/corpus-counter/data.sqlite", import.meta.url)), join(directory, "data.sqlite"));
@@ -146,7 +133,7 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     const transient = join(sessions, (await readdir(sessions))[0]!, "2026-01-01T00-00-00-000Z_00000000-0000-4000-8000-000000000000.jsonl");
     await writeFile(transient, "{}\n");
     await chmod(transient, 0o000);
-    await catalogOwner(f.registry).reconcile(); // unknown membership: an incomplete cut
+    await catalogOwner(f.registry).reconcile();
     await rm(transient);
     expect((await rpc(f, "apps.pending")).offers).toHaveLength(1);
   });
@@ -168,7 +155,6 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     for (const directory of await readdir(offersRoot)) {
       const offer = JSON.parse(await readFile(join(offersRoot, directory, "offer.json"), "utf8"));
       if (offer.appId === "invalid-source") {
-        // Replace this offer's link; never mutate the shared immutable display inode.
         const replacement = join(offersRoot, directory, "changed-source.tmp");
         await writeFile(replacement, "changed source");
         await rename(replacement, join(offersRoot, directory, "App.swift"));
@@ -197,9 +183,6 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
   });
   describe("retained offer capacity", () => {
     let prepared: Awaited<ReturnType<typeof prepareOffers>>;
-    // Filling the real store requires 199 separately acknowledged durable offers;
-    // it is preparation for the reclamation boundary, not a 199-offer latency SLA.
-    // Keep setup bounded and joined even when its hook reports failure.
     beforeEach(() => {
       retainedOffersJourney = prepareOffers().then(value => { prepared = value; });
       return retainedOffersJourney;
@@ -230,8 +213,6 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
       },
     ]);
     await producer.prompt("prepare the requested app offers");
-    // Join the actual owner, not a scheduling deadline. The normal Vitest hang
-    // guard remains; elapsed host I/O time is not the capacity/work oracle.
     while (!context || producer.isBusy) await producer.waitForStateChange();
     return { f, producer, keptReference, keptReview, context, durableSyncs };
   }
@@ -240,19 +221,12 @@ describe("reviewed Swift app lifecycle through the Gateway", () => {
     const offered = (context!.messages as unknown as Array<Record<string, any>>)
       .filter(row => row.role === "toolResult" && row.toolName === "swift_app");
     expect(offered).toHaveLength(199);
-    // The two metadata publishers need four syncs per offer. Allow 16 fixed
-    // turn/store syncs (803 observed in this window: seven above 4 * 199), a
-    // nine-sync margin that cannot hide even one redundant sync per offer.
-    // The lower bound proves the real counter is active. No resource sampler
-    // drains this isolated fixture's counter between the two faux steps.
     expect(durableSyncs).toBeGreaterThanOrEqual(4 * 199);
     expect(durableSyncs).toBeLessThanOrEqual(4 * 199 + 16);
     for (const result of offered) expect(result.isError, JSON.stringify(result.content)).not.toBe(true);
     const offersRoot = join(f.root, "tron/workspace/state/apps/.offers");
     const before = await readdir(offersRoot);
     expect(before).toHaveLength(200);
-    // Canonical deletion is the authority, even before the transport's artifact
-    // cleanup. Apps must reconcile via DisplayOwner rather than a second catalog.
     await f.registry.delete(producer.id);
     expect((await rpc(f, "apps.list")).apps).toMatchObject([{ id: "kept-app" }]);
     const retained = await readdir(offersRoot);
@@ -463,8 +437,6 @@ struct ContentView: View {
   });
   it("lists retained timestamp/commit publications alongside UUID publications without relaxing safe reads", async () => {
     const f = await fixture(); publish(f, "Retained build");
-    // The publisher retains pre-UUID releases in place. Recreate that committed
-    // on-disk shape, including its exact manifest path, using only fixture data.
     const publisher = join(f.root, "tron/ios-builds/builds");
     const retainedId = "20261024T013208Z-aaaaaaaaa";
     execFileSync("/usr/bin/python3", ["-c", `import json, pathlib, plistlib, sys
@@ -506,8 +478,6 @@ struct ContentView: View {
     const retained = join(publisher, retainedId);
     const originals = new Map(await Promise.all(["build.json", "manifest.plist", "TronMobile.ipa"].map(async name => [name, await readFile(join(retained, name))] as const)));
     const unavailable = async () => expect((await rpc(f, "apps.open", { appId: "builds" })).feeds["ios-builds"]).toMatchObject({ status: "unavailable", builds: [] });
-    // Accepting a retained name must not admit a linked file/directory, a
-    // mismatched record, a wrong manifest path or an inconsistent IPA size.
     for (const name of originals.keys()) {
       const file = join(retained, name), target = join(f.root, `outside-${name}`);
       await rename(file, target); await symlink(target, file);
@@ -527,7 +497,6 @@ struct ContentView: View {
     await writeFile(join(retained, "manifest.plist"), originals.get("manifest.plist")!);
     for (const name of ["20261024T013208Z-aaaaaaaaaa", "20261024T013208Z-" + "b".repeat(31) + "-aaaaaaaaa", "20261024T013208Z-%2faaaaaaaaa"]) {
       const invalid = join(publisher, name);
-      // Keep record/path identity consistent so only name admission can refuse.
       await writeFile(join(retained, "build.json"), JSON.stringify({ ...record, id: name }));
       await writeFile(join(retained, "manifest.plist"), originals.get("manifest.plist")!.toString().replace(`/builds/${retainedId}/`, `/builds/${name}/`));
       await rename(retained, invalid); await unavailable(); await rename(invalid, retained);
@@ -552,11 +521,9 @@ struct ContentView: View {
     expect(next.app.revision).toBe(2);
     expect(next.app.instanceId).toBe(installed.app.instanceId);
     expect(next.feeds["ios-builds"].builds.map((build: Record<string, unknown>) => build.title)).toEqual(["Second build", "First build"]);
-    // Publisher staging is never a feed record, even if it contains malformed metadata.
     await mkdir(join(f.root, "tron/ios-builds/builds/.staging-incomplete"));
     await writeFile(join(f.root, "tron/ios-builds/builds/.staging-incomplete/build.json"), "broken");
     expect((await rpc(f, "apps.open", { appId: "builds" })).feeds["ios-builds"].builds).toHaveLength(2);
-    // Committed malformed records are an explicit failure, never an empty-success feed.
     const ids = (await readdir(join(f.root, "tron/ios-builds/builds"))).filter(id => !id.startsWith("."));
     await writeFile(join(f.root, "tron/ios-builds/builds", ids[0]!, "build.json"), "broken");
     expect((await rpc(f, "apps.open", { appId: "builds" })).feeds["ios-builds"]).toMatchObject({ status: "unavailable", builds: [] });

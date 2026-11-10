@@ -66,8 +66,6 @@ describe("stable gateway protocol client", () => {
     sockets.on("connection", (socket) => {
       socket.on("message", (raw) => {
         const frame = JSON.parse(raw.toString()) as any;
-        // Exactly what the Gateway's own refusal sends: application close 4006
-        // and a JSON reason carrying the Gateway's protocol range.
         if (frame.type === "hello") {
           socket.close(PROTOCOL_MISMATCH_CLOSE_CODE, JSON.stringify({
             code: "protocol_mismatch", gatewayProtocol: PROTOCOL_VERSION, minProtocol: MIN_PROTOCOL_VERSION,
@@ -76,8 +74,6 @@ describe("stable gateway protocol client", () => {
       });
     });
     const client = new GatewayProtocolClient(url, "local-token");
-    // A version pair is permanent: reporting the raw reason as a retryable
-    // transport error keeps this client reconnecting forever.
     const failure = await client.connect().then(
       () => undefined,
       (error: unknown) => error as GatewayClientError,
@@ -111,7 +107,6 @@ describe("stable gateway protocol client", () => {
     await client.connect();
     const disconnect = vi.fn();
     client.onDisconnect(disconnect);
-    // Exercise callbacks after the new socket is authoritative.
     staleClientSocket.emit("error", new Error("stale error"));
     staleClientSocket.emit("close", 1006, Buffer.from("stale close"));
     await expect(client.request("system.info", {})).resolves.toEqual({ replacement: true });

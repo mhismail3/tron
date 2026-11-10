@@ -40,48 +40,19 @@ import xml.etree.ElementTree as ElementTree
 
 SCHEMA = "tron.profile-attribution.v1"
 APP_SUBSYSTEM = "com.tron.mobile"
-# Images whose frames name Tron's own owners. Inclusive main-thread time is
-# also ranked over these alone, because the harness and run-loop frames above
-# them hold ~100% and would otherwise fill the ranking.
 APP_IMAGES = ("TronMobile",)
 TOP_SYMBOLS = 25
 TOP_THREADS = 15
 TOP_VIEWS = 30
 EXPORT_TIMEOUT_SECONDS = 900
-# The profiler's memory budget for one host-wide traced scenario: the whole
-# process tree (`xctrace export` plus this parser) must stay under it. xctrace's
-# export child cannot be bounded -- it builds the whole table in memory even
-# when `--xpath` selects few rows (a row predicate did not lower its 1.2 GiB
-# peak on a 75 MiB trace) and macOS caps no child address space (`ulimit -v`
-# and `ulimit -d` are rejected, and `resource.setrlimit(RLIMIT_AS)` fails) -- so
-# a trace too large to export inside this budget is refused instead of
-# exported, which is the only guarantee this profiler can give.
 EXPORT_PEAK_BUDGET_BYTES = 2 * 1024 ** 3
-# Peak bytes of that tree per trace byte, sampled with `files/hardening/e-2/peak.py`
-# over host-wide `--all-processes` Time Profiler recordings: 17.4-18.2 on four
-# runs of a 75.3 MiB trace, 18.5 on a 131.7 MiB one, 18.0 on a 55.5 MiB one and
-# 13.7 on a 338.7 MiB one; the parser's peak never overlapped the export's, so
-# the tree peak is the number to project. The observed ratio has not exceeded
-# 18.5, and 20 rounds that up with headroom for the next host. Only such a
-# recording has been measured: a `tron-profile device` capture records one
-# attached process and its ratio is unknown, so it is not held to this budget
-# (see `attribute`'s `host_wide`).
 EXPORT_PEAK_BYTES_PER_TRACE_BYTE = 20
 
-# Scenario template name -> (recording target, xctrace --template or None for
-# the blank template, extra --instrument names).
-#   host: `--all-processes` on this Mac, filtered to the test host's pid. The
-#     host kernel samples simulator processes and symbolicates their images;
-#     it cannot read the simulator's logd, so it carries no app signposts.
-#   simulator: `--device <simulator> --attach <pid>`; carries signposts and
-#     SwiftUI data. In the environment where this was built, simulator-device
-#     recording never started (see packages/ios-app/docs/development.md).
 TEMPLATES: dict[str, tuple[str, str | None, tuple[str, ...]]] = {
     "time-profiler": ("host", "Time Profiler", ()),
     "swiftui": ("simulator", "SwiftUI", ("os_signpost",)),
     "points-of-interest": ("simulator", None, ("os_signpost", "Points of Interest")),
 }
-# `scripts/tron-profile device --attach` templates: (xctrace --template, extra instruments).
 DEVICE_TEMPLATES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "time-profiler": ("Time Profiler", ("os_signpost",)),
     "power-profiler": ("Power Profiler", ("os_signpost",)),
@@ -99,8 +70,6 @@ UNRESOLVED_ADDRESS = re.compile(r"^0x[0-9a-fA-F]+$")
 class AttributionError(Exception):
     pass
 
-
-# ------------------------------------------------------------------ export ---
 
 class Table:
     """One exported xctrace table: the column mnemonics, indexed by position.
@@ -292,8 +261,6 @@ def toc_start_epoch(toc: ElementTree.Element) -> float:
         raise AttributionError(f"unreadable trace start date {value!r}") from error
 
 
-# ----------------------------------------------------------------- windows ---
-
 def signpost_intervals(rows: Rows) -> list[dict[str, Any]]:
     """Rows of `os-signpost-interval` tables as plain dictionaries (ns)."""
     intervals = []
@@ -305,7 +272,7 @@ def signpost_intervals(rows: Rows) -> list[dict[str, Any]]:
             )
         start, duration = number(table.cell(row, "start")), number(table.cell(row, "duration"))
         if start is None or duration is None:
-            continue  # an interval still open when the recording stopped
+            continue
         intervals.append({
             "start": start,
             "duration": duration,
@@ -343,8 +310,6 @@ def inside(time: float, windows: list[tuple[float, float]] | None) -> bool:
     return any(start <= time < end for start, end in windows)
 
 
-# ------------------------------------------------------------ time profile ---
-
 def frame_symbol(frame: ElementTree.Element, table: Table) -> tuple[str, str, bool]:
     """(symbol, image, resolved) for one backtrace frame.
 
@@ -371,7 +336,7 @@ def summarize_time_profile(rows: Rows, windows: list[tuple[float, float]] | None
     total_main: Counter[tuple[str, str]] = Counter()
     threads: Counter[str] = Counter()
     outside_self: Counter[tuple[str, str]] = Counter()
-    images: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])  # image -> [resolved, unresolved] weight
+    images: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])
     weight_all = weight_main = 0.0
     samples = outside = foreign = in_discarded = 0
     main_names: set[str] = set()
@@ -388,7 +353,7 @@ def summarize_time_profile(rows: Rows, windows: list[tuple[float, float]] | None
             continue
         weight = number(table.cell(row, "weight")) or 0.0
         if discarded and inside(time, discarded):
-            in_discarded += 1  # XCTest's warm-up iteration: measured by nobody
+            in_discarded += 1
             continue
         if not inside(time, windows):
             outside += 1
@@ -442,8 +407,6 @@ def summarize_time_profile(rows: Rows, windows: list[tuple[float, float]] | None
         "samples_outside_windows": outside,
         "samples_in_discarded_windows": in_discarded,
         "samples_other_processes": foreign,
-        # This process's leaf symbols just outside the windows (setup,
-        # readiness, teardown): excluded from every ranking below.
         "outside_windows_self": ranked(outside_self, sum(outside_self.values()))[:10],
         "cpu_ms": round(weight_all / 1e6, 3),
         "main_thread_cpu_ms": round(weight_main / 1e6, 3),
@@ -459,8 +422,6 @@ def summarize_time_profile(rows: Rows, windows: list[tuple[float, float]] | None
             "app_total": ranked(Counter({key: value for key, value in total_main.items() if key[1] in APP_IMAGES}),
                                 weight_main),
         },
-        # Weight in frames of each image; an unresolved share in the app or
-        # test image means symbols are missing for the profiled build.
         "symbolication": {
             image: {"resolved_ms": round(values[0] / 1e6, 3), "unresolved_ms": round(values[1] / 1e6, 3)}
             for image, values in sorted(images.items(), key=lambda item: -sum(item[1]))[:TOP_THREADS]
@@ -477,8 +438,6 @@ def _frames(table: Table, stack: ElementTree.Element | None) -> list[ElementTree
         return []
     return [frame for frame in (table.value(child) for child in backtrace.findall("frame")) if frame is not None]
 
-
-# -------------------------------------------------------------- signposts ---
 
 def summarize_signposts(intervals: list[dict[str, Any]], windows: list[tuple[float, float]] | None,
                         pid: int | None) -> dict[str, Any]:
@@ -502,12 +461,6 @@ def summarize_signposts(intervals: list[dict[str, Any]], windows: list[tuple[flo
     return {"subsystem": APP_SUBSYSTEM, "intervals": rows}
 
 
-# ---------------------------------------------------------------- swiftui ---
-
-# Columns that name the view (or attribute graph node) in SwiftUI tables and
-# the columns that carry a duration; the SwiftUI instrument's export schema was
-# not observable where this was written (simulator recording never started),
-# so the summary names what it found instead of assuming one layout.
 SWIFTUI_NAME_COLUMNS = ("view-name", "view", "description", "name", "type", "view-type")
 SWIFTUI_DURATION_COLUMNS = ("duration", "time-duration")
 
@@ -540,8 +493,6 @@ def summarize_swiftui(rows_by_schema: dict[str, Rows], windows: list[tuple[float
     return tables
 
 
-# ------------------------------------------------------------------ power ---
-
 POWER_SCHEMA = re.compile(r"power|energy|thermal", re.IGNORECASE)
 
 
@@ -569,8 +520,6 @@ def summarize_numeric_tables(rows_by_schema: dict[str, Rows]) -> dict[str, Any]:
         }
     return summary
 
-
-# ------------------------------------------------------------------ driver ---
 
 def attribute(trace: Path, template: str, pid: int | None, windows_epoch: list[tuple[float, float]] | None,
               top: int = TOP_SYMBOLS, discarded_epoch: list[tuple[float, float]] | None = None,

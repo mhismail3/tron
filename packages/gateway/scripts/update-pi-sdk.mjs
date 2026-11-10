@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-/**
- * Prepare one atomic Pi SDK cohort update. This command changes only the
- * Gateway manifests/lockfile and disposable installed tree; it never publishes,
- * deploys, or starts Tron.
- */
+// Prepare one atomic Pi SDK cohort update.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -18,16 +14,12 @@ export function exactVersion(value) {
   return typeof value === "string" && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(value);
 }
 
-/** The install for one cohort. A patched pi-coding-agent installs from its
- * declared tarball, which npm records as `file:<artifact path>`; the rest of the
- * family comes from the registry at the same version. */
 function updateCommand(version, patchedArtifact) {
   if (!exactVersion(version)) throw new Error(`Pi SDK version must be one exact semver (received ${version ?? "missing"})`);
   const spec = (name) => (patchedArtifact && name === CODING_AGENT ? `./${patchedArtifact}` : `${name}@${version}`);
   return ["install", "--package-lock-only", "--save-exact", "--engine-strict", ...REGISTRY_ARGS, ...DIRECT_PI_PACKAGES.map(spec)];
 }
 
-// Resolve the lock separately; npm ci is the one reproducible cohort install.
 function installCommand() {
   return ["ci", "--engine-strict", ...REGISTRY_ARGS];
 }
@@ -46,14 +38,6 @@ function commandFailure(label, result) {
   return `${label} (exit ${result.status ?? "unknown"})${result.signal ? ` after ${result.signal}` : ""}: ${(result.stderr || result.stdout || "").trim()}`;
 }
 
-/**
- * Registry metadata for the direct family. Release provenance is the published
- * `gitHead`, which must be one commit across the family. Pi stopped publishing
- * `gitHead` with 1.1.0; a patched cohort then supplies its own provenance: the
- * declaration's tag commit, from which `reproduce:pi-coding-agent` packed the
- * unpatched pi-coding-agent byte for byte as the registry's, so the registry
- * integrities here must be the ones the declaration recorded.
- */
 export function readMetadata(version, gatewayDir, npmBin = "npm", spawn = spawnSync, patch = undefined) {
   const records = DIRECT_PI_PACKAGES.map((name) => {
     const result = spawn(npmBin, metadataCommand(name, version), {
@@ -82,7 +66,6 @@ export function readMetadata(version, gatewayDir, npmBin = "npm", spawn = spawnS
         throw new Error(`${record.package}@${version} registry integrity ${record.integrity} differs from ${PATCH_PIN_FILE}'s ${declared[record.package]}`);
       }
     }
-    // A declared gitHead is the release tag commit the family shares, not registry metadata.
     return records.map((record) => record.gitHead !== undefined ? record : { ...record, gitHead: patch.upstream.tagCommit, gitHeadSource: "declared tag commit" });
   }
   const gitHeads = new Set(records.map(({ gitHead }) => gitHead));
@@ -96,9 +79,6 @@ function manifestsDirty(gatewayDir, spawn = spawnSync) {
     || check(["diff", "--cached", "--quiet", "--", "package.json", "package-lock.json", BASELINE_FILE]);
 }
 
-/** Release order of two exact semvers, by semver precedence: numeric cores,
- * then prerelease identifiers, which order numerically when both are numeric and
- * outrank nothing when the other side is a release. */
 function compareVersions(left, right) {
   const parse = (value) => {
     const separator = value.indexOf("-");
@@ -129,12 +109,6 @@ function compareVersions(left, right) {
   return 0;
 }
 
-/**
- * The released CHANGELOG.md sections strictly after `from` and at most `to`,
- * newest first, byte-for-byte as the installed coding-agent package publishes
- * them. This is what makes the per-seam inventory mechanical: the upgrade task
- * reads the upstream release notes instead of a hand-read changelog.
- */
 function extractChangelogDelta(changelog, from, to) {
   if (!exactVersion(from) || !exactVersion(to)) throw new Error(`changelog delta needs exact semver bounds (received ${from ?? "missing"} -> ${to ?? "missing"})`);
   const sections = [];
@@ -158,12 +132,6 @@ function gitOutput(gatewayDir, args, spawn) {
   return result.status === 0 ? (result.stdout ?? "").trim() : undefined;
 }
 
-/**
- * Where this run's changelog evidence goes: the work item's directory under the
- * git directory, beside the rest of the run's evidence. It is never committed,
- * so it cannot mark the checkout dirty, and a run outside a task branch still
- * keeps its extract under `work/pi-sdk-update/`.
- */
 function changelogEvidencePath(gatewayDir, from, to, spawn = spawnSync) {
   const gitDir = gitOutput(gatewayDir, ["rev-parse", "--absolute-git-dir"], spawn);
   if (!gitDir) throw new Error("cannot locate the git directory that holds this Pi SDK update's evidence");
@@ -171,7 +139,6 @@ function changelogEvidencePath(gatewayDir, from, to, spawn = spawnSync) {
   return join(gitDir, "work", issue ? `issue-${issue}` : "pi-sdk-update", `pi-sdk-changelog-${from}-to-${to}.md`);
 }
 
-/** Read the installed coding-agent changelog and write this run's extract. */
 function writeChangelogEvidence({ gatewayDir, from, to, spawn = spawnSync } = {}) {
   const path = changelogEvidencePath(gatewayDir, from, to, spawn);
   const changelogPath = join(gatewayDir, "node_modules", CODING_AGENT, CHANGELOG_FILE);
@@ -192,7 +159,6 @@ function compareLockIntegrities(gatewayDir, metadata, patched) {
   const lock = JSON.parse(readFileSync(resolve(gatewayDir, "package-lock.json"), "utf8"));
   const mismatches = [];
   for (const record of metadata) {
-    // The patched package's lock entry is its tarball's, which validatePiSdk checks.
     if (patched && record.package === CODING_AGENT) continue;
     const entry = lock.packages?.[`node_modules/${record.package}`];
     if (entry?.integrity !== undefined && entry.integrity !== record.integrity) {
@@ -202,8 +168,6 @@ function compareLockIntegrities(gatewayDir, metadata, patched) {
   if (mismatches.length > 0) throw new Error(`preflight integrity disagrees with top-level lock entries:\n- ${mismatches.join("\n- ")}`);
 }
 
-/** The cohort being replaced. A rebuilt patch declaration already names the
- * target, so the installed version is then the manifest's registry family. */
 function currentCohort(root, original, patch) {
   if (!patch) {
     const current = validatePiSdk({ gatewayDir: root, checkInstalled: false });
@@ -217,8 +181,6 @@ function currentCohort(root, original, patch) {
   return { version };
 }
 
-/** After success, the tarball the previous cohort installed is no longer
- * referenced; until then it stays, so a failed update can restore with npm ci. */
 function removeSupersededTarball(root, original, patch) {
   const previous = JSON.parse(original.package.toString("utf8")).dependencies?.[CODING_AGENT];
   const path = typeof previous === "string" && previous.startsWith("file:") ? previous.slice("file:".length) : undefined;
@@ -250,10 +212,6 @@ function restoreOwnedState(root, original, npmBin, spawn) {
 export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), ".."), version, npmBin = "npm", spawn = spawnSync } = {}) {
   if (!exactVersion(version)) throw new Error(`Pi SDK version must be one exact semver (received ${version ?? "missing"})`);
   const root = resolve(gatewayDir);
-  // The patched pi-coding-agent has one owner. A registry install would
-  // silently drop it, so the patch is first rebased onto the target release and
-  // its tarball rebuilt (`reproduce:pi-coding-agent -- --write`), or deleted once
-  // upstream ships the API (see its removeWhen); the cohort then installs it.
   const patch = readPiCodingAgentPatch(root, { requireSources: true });
   if (patch.present && !patch.value) throw new Error(`refusing update: ${PATCH_PIN_FILE} is not valid: ${patch.issues.join("; ")}`);
   if (patch.value && patch.value.version !== version) {
@@ -274,10 +232,7 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
     const current = currentCohort(root, original, patch.value);
     const baseline = readPiSdkBaseline(root);
     if (baseline.issues.length > 0) throw new Error(`cannot snapshot Pi SDK rollback metadata: ${baseline.issues.join("; ")}`);
-    // Accepted one-way deltas are keyed by the version range they were accepted
-    // for, so they are carried forward rather than erased by this rewrite.
     const knownOneWayDeltas = baseline.value.knownOneWayDeltas ?? [];
-    // From the baseline write on, a failure restores the owned manifests.
     installStarted = true;
     writeFileSync(baselinePath, `${JSON.stringify({ schema: 1, rollbackVersion: current.version, ...(knownOneWayDeltas.length > 0 ? { knownOneWayDeltas } : {}) }, null, 2)}\n`);
     const command = updateCommand(version, patch.value?.artifact.path);

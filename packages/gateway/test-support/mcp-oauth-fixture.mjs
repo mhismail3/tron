@@ -1,27 +1,3 @@
-/**
- * Streamable-HTTP MCP fixture that authenticates with OAuth 2.0 + PKCE.
- *
- * Pi's built-in MCP client connects to this server exactly as it would to a
- * real one: it discovers the protected-resource and authorization-server
- * metadata, registers a public client, completes the loopback authorization
- * code exchange, and then presents the issued bearer token on every MCP
- * request. `/mcp` answers 401 without that exact token, so a caller can prove
- * "this server is authenticated" rather than "this server is configured" — the
- * persisted credential really was used.
- *
- * Everything here is synthetic: the token, the client id and the single `echo`
- * tool contain no user or host data. The token's lifetime is deliberately far
- * in the future so a corpus recorded once stays signed in across later runs;
- * `refresh_token` is still issued so a client that refreshes does not fail.
- *
- * It is a standalone process rather than an inline server because the corpus's
- * `mcp.json` names a command Pi spawns; the inline OAuth servers in
- * `mcp-auth.integration.test.ts` and `mcp-auth-session.integration.test.ts` are
- * bound to their own tests' transports and cannot be configured as a server.
- *
- * Usage: node mcp-oauth-fixture.mjs <port-file>
- * Writes the bound port to <port-file> once listening; exits on SIGTERM.
- */
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { createServer } from "node:http";

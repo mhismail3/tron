@@ -1,8 +1,7 @@
 #!/usr/bin/env node
+// Activation supplies its exact isolated home.
 import { ManagedSubagents } from "../dist/kernel/delegation/managed-subagents.js";
 
-// Activation supplies its exact isolated home. There is deliberately no default
-// home, registry operation, or user package-manager fallback.
 if (process.argv.length !== 3 || !process.argv[2]?.trim()) {
   console.error("Usage: npm run install:pi-subagents -- <gateway-home> (requires npm run build)");
   process.exitCode = 1;

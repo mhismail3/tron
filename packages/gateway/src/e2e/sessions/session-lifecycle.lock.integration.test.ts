@@ -5,27 +5,6 @@ import { normalizeTraceValue } from "../../../test-support/scenario-lock.js";
 import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
-/**
- * Session lifecycle locks (packages/gateway/docs/scenario-locks.md#locks; K-0 §7 E0d) guarding the
- * heap, eviction, cold load and drain owners that kernel slices E5 (`run/`) and
- * E7 (`session/`) move out of `RuntimeRegistry`. Each runs the real Gateway over
- * a loopback WebSocket (`gateway-lock-harness.ts`) with the faux provider.
- *
- * - `run-cold-load-eviction`: under a one-runtime cap, an open session is never
- *   reclaimed (a second create is refused); once its client closed it, the
- *   settled session is evicted for capacity by the next create, stays in the
- *   catalog with its attention state while cold, and is cold-loaded back by
- *   `session.open` with its canonical JSONL, transcript and context intact.
- * - `run-drain-snapshot`: the administrative drain (`waitUntilIdle`, what the
- *   restart and stop drains run) observed through `gateway.drain.status`: idle,
- *   a live run with a queued follow-up named as the blocker while waiting (an
- *   idle session is not), new work refused, and completion only after the
- *   follow-up ran.
- *
- * Each scenario asserts its effects by name: lifecycle records, live runtimes, catalog
- * and attention state, refusals, drain snapshots and the provider requests it caused.
- */
-
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -44,7 +23,6 @@ async function open(client: LockClient, sessionId: string): Promise<Opened> {
   return { sessionId, subscriptionToken: opened.result.subscriptionToken as string, open: opened };
 }
 
-/** A gate a scripted provider step holds until the test opens it. */
 function gate(): { opened: Promise<void>; open(): void; reached: Promise<void>; reach(): void } {
   let open = (): void => {};
   let reach = (): void => {};
@@ -53,7 +31,6 @@ function gate(): { opened: Promise<void>; open(): void; reached: Promise<void>; 
   return { opened, open: () => open(), reached, reach: () => reach() };
 }
 
-/** The live runtimes by role, as the registry's own load and eviction records leave them. */
 function liveRoles(gateway: LockGateway, roles: ReadonlyMap<string, string>): string[] {
   const live = new Set<string>();
   for (const entry of gateway.runtimeLifecycle) {
@@ -77,25 +54,20 @@ describe("session lifecycle kernel locks", () => {
       () => fauxAssistantMessage("Answer after the cold load."),
     ]);
 
-    // A: one settled turn that completes while no client presents it (unread), then closed.
     const first = await createAndOpen(gateway, phone);
     const roles = new Map([[first.sessionId, "A"]]);
     expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId: first.sessionId, text: "remember the word lantern" })).ok).toBe(true);
     await gateway.settled(first.sessionId);
     const canonicalBefore = await gateway.canonical(first.sessionId);
     const listLive = await phone.request("session.list", {});
-    // An open (subscribed) runtime is never reclaimed: the cap refuses a second one.
     const refusedWhileOpen = await phone.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
     expect((await phone.request("session.close", { sessionId: first.sessionId, subscriptionToken: first.subscriptionToken })).ok).toBe(true);
 
-    // B: the next create needs A's runtime slot; A is reloadable and unobserved.
     const second = await createAndOpen(gateway, phone);
     roles.set(second.sessionId, "B");
     const liveAfterEviction = liveRoles(gateway, roles);
     const listCold = await phone.request("session.list", {});
 
-    // A again: B is persisted by its own turn, so once closed it is the one evicted
-    // for capacity, and session.open cold-loads A from its file.
     expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId: second.sessionId, text: "a second session turn" })).ok).toBe(true);
     await gateway.settled(second.sessionId);
     expect((await phone.request("session.close", { sessionId: second.sessionId, subscriptionToken: second.subscriptionToken })).ok).toBe(true);
@@ -105,14 +77,12 @@ describe("session lifecycle kernel locks", () => {
     const read = await phone.request("session.attention.read", {
       sessionId: first.sessionId, throughCompletionRevision: reopened.open.result.completionRevision,
     });
-    // The reloaded runtime carries the earlier turn into the next provider request.
     expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId: first.sessionId, text: "which word?" })).ok).toBe(true);
     await gateway.settled(first.sessionId);
     const transcript = await phone.request("session.transcript", { sessionId: first.sessionId });
     const listFinal = await phone.request("session.list", {});
 
     const recorded = gateway.record();
-    // A is evicted for B, B for A's cold load on open.
     expect(gateway.runtimeLifecycle.map((entry) => `${entry.event} ${roles.get(entry.sessionId)} ${entry.reason}`)).toEqual([
       "runtime.loaded A create", "runtime.evicted A capacity", "runtime.loaded B create", "runtime.evicted B capacity", "runtime.loaded A open",
     ]);
@@ -122,19 +92,16 @@ describe("session lifecycle kernel locks", () => {
     expect(JSON.stringify(canonicalReloaded)).toBe(JSON.stringify(canonicalBefore));
     expectSystemShapes(normalizeTraceValue(await gateway.canonical(first.sessionId), gateway.normalization) as unknown[], ["chat#0"]);
     const row = (list: { result?: any }, sessionId: string) => list.result.sessions.find((session: { id: string }) => session.id === sessionId);
-    // A's completion arrived while no client presented it: unread while open, and still while cold.
     expect(row(listLive, first.sessionId)).toMatchObject({ isUnread: true, completionRevision: 1, attentionRevision: 1 });
     expect(row(listCold, first.sessionId)).toMatchObject({ isUnread: true, completionRevision: 1, attentionRevision: 1, messageCount: 2,
       firstMessage: "remember the word lantern", phase: "idle" });
     expect(row(listCold, second.sessionId)).toMatchObject({ isUnread: false, messageCount: 0 });
-    // Reading A's attention acknowledges its one completion.
     expect(read.result).toEqual({ attentionRevision: 2, completionRevision: 1, isUnread: false });
     expect(row(listFinal, first.sessionId)).toMatchObject({ isUnread: true, completionRevision: 2, attentionRevision: 3, messageCount: 4 });
     expect(row(listFinal, second.sessionId)).toMatchObject({ isUnread: true, completionRevision: 1, messageCount: 2, firstMessage: "a second session turn" });
     expect(transcript.ok, JSON.stringify(transcript)).toBe(true);
     expect(JSON.stringify(transcript.result)).toContain("First answer before eviction.");
     expect(JSON.stringify(transcript.result)).toContain("Answer after the cold load.");
-    // Each turn reached the provider once; the reloaded runtime sent the earlier turn.
     expectRequestShapes(recorded.providerRequests, ["chat", "chat", "chat"]);
     const last = recorded.providerRequests.at(-1)!;
     expect(JSON.stringify(last.messages)).toContain("remember the word lantern");
@@ -158,17 +125,12 @@ describe("session lifecycle kernel locks", () => {
     const admitted = await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId: running.sessionId, text: "hold this run open" });
     expect(admitted.ok, JSON.stringify(admitted)).toBe(true);
     await awaitsWithin(held.reached, "the held provider request");
-    // Accepted queued work stays authoritative: the drain waits for it, never clears it.
     const queued = await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId: running.sessionId, text: "queued before the drain", behavior: "followUp" });
-    // A prompt RPC's own work settles just after its response frame; wait for that
-    // exact work, so each status names only the run and its queue.
     const rpcSettled = () => waitFor(() => !gateway.registry.administrativeDrainSnapshot().blockers
       .some((blocker) => blocker.category === "rpc-mutation"), "the prompt RPCs' own work to settle");
     await rpcSettled();
     const statusRunning = await phone.request("gateway.drain.status", {});
 
-    // gateway.restart and gateway.stop begin the drain in their RPC turn and answer
-    // with this snapshot; gateway-main's runRestartDrain/runStopDrain then wait.
     const begun = gateway.registry.beginAdministrativeDrain();
     const drained = gateway.registry.waitUntilIdle();
     await waitFor(() => gateway.registry.administrativeDrainSnapshot().phase === "waiting", "the drain to wait on the live run");
@@ -191,18 +153,15 @@ describe("session lifecycle kernel locks", () => {
     expect(JSON.stringify(runningJsonl)).toContain("Queued follow-up answered.");
     expectSystemShapes(normalizeTraceValue(runningJsonl, gateway.normalization) as unknown[], ["chat#0"]);
     expect(statusIdle.result).toMatchObject({ phase: "idle", blockerCount: 0, blockerCounts: {} });
-    // The live run and its queued follow-up are the blockers; the idle session never is.
     expect(statusRunning.result).toMatchObject({ phase: "idle", blockerCount: 2, blockerCounts: runAndQueue });
     expect(blockers(statusRunning.result)).toEqual(["running:foreground-agent-operation", "running:queued-mutation"]);
     expect(begun).toMatchObject({ phase: "preparing", blockerCount: 2, blockerCounts: runAndQueue });
     expect(statusWaiting.result).toMatchObject({ phase: "waiting", blockerCount: 2, blockerCounts: runAndQueue });
     expect(blockers(statusWaiting.result)).toEqual(["running:foreground-agent-operation", "running:queued-mutation"]);
-    // New work is refused with the drain's retryable busy error.
     const draining = { code: "busy", message: "The Gateway is draining accepted work", retryable: true };
     expect(refusedPrompt.error).toEqual(draining);
     expect(refusedCreate.error).toEqual(draining);
     expect(statusComplete.result).toMatchObject({ phase: "complete", blockerCount: 0, blockerCounts: {} });
-    // The accepted follow-up ran exactly once, after the held turn.
     expectRequestShapes(recorded.providerRequests, ["chat", "chat"]);
     const followUp = JSON.stringify(recorded.providerRequests[1]!.messages);
     expect(followUp.indexOf("Held run settled.")).toBeGreaterThan(-1);

@@ -10,32 +10,6 @@ import { NotificationService } from "../../../notifications/notification-service
 import { PushRelayClient } from "../../../notifications/relay-client.js";
 import { homeOwnerOf } from "../../../../test-support/gateway-registry.js";
 
-/**
- * `gateway/home` scenario lock (packages/gateway/docs/kernel.md §7): through the
- * real Gateway (`gateway-lock-harness.ts`, Home wired as gateway-main wires it) the
- * phone designates Home, sets its memory queue, opens the new chapter (its first
- * runtime) and sends one activation that delegates a task; the worker reports,
- * and the result wakes Home into a second activation.
- *
- * Named checks: every client answer in order (status before and after designation
- * and after the wake, the settings change and its review, the prompt's admission,
- * the task's status, list and context breakdown), both chapter snapshots and the
- * transcript rows, the events the outbound queue never drops, each caller's
- * requests and stream options, both canonical files (entry order, invocation
- * receipts, messages, the result notice and its delivery, the task binding and
- * report, settings provenance and values), each runtime's loaded extensions, both
- * finished pushes at the relay boundary (the production push owner) and the Home
- * store's files, designation and task record.
- *
- * The narrowed golden `locks/home-activation-wake.golden.json` keeps the
- * model-visible text: every provider request (tools, prompt sections and hash,
- * messages) and both runtimes' system entries with their full tool declarations,
- * the canonical copy of the shared tool schemas the other locks strip
- * (`withoutSharedToolSchemas`). The tools each runtime's first request sent are
- * checked equal to those declarations. Home's and the worker's requests
- * interleave by host timing, so each stream keeps its own order.
- */
-
 const MODULE = "gateway/e2e";
 const LOCK = "home-activation-wake";
 const LOCK_PROVIDER = `tron-lock-${LOCK}`;
@@ -51,26 +25,10 @@ interface HomeLockTrace {
   readonly systemEntries: { readonly home: TraceValue; readonly worker: TraceValue };
 }
 
-/**
- * Topics a newer snapshot re-states, which the outbound queue may drop while a
- * socket lags (`SNAPSHOT_STATED_TOPICS`, transport/ordered-outbound-queue.ts):
- * which of them a client receives is host timing. Their state is recorded by the
- * settled reopen snapshot and the transcript instead.
- */
 const SNAPSHOT_STATED_TOPICS = new Set(["session.snapshot", "session.rebaseline", "session.progress", "session.configuration",
   "session.toolProgress", "session.processActivity", "session.extensionActivity", "session.compaction"]);
-/** Sizes that include the result notice's measured duration, and token counts the
- * faux provider derives from text holding the host's temp and checkout paths. */
 const SIZE_KEYS = new Set(["bytes", "currentBytes", "viewBytes", "effectiveTokens", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "tokens"]);
-/** Pi's 8-hex entry ids, which every reference to a canonical entry repeats. */
 const ENTRY_ID = /^[0-9a-f]{8}$/;
-/**
- * Home's per-run values the shared normalization does not cover: entry ids under
- * Home's own keys (`entryId`, `activationStartEntryId`, …), the host's load in
- * `hostPressure` (structure only), byte and token counts (zero or not), which
- * move with the result notice's measured duration and the host's paths, and that
- * duration itself.
- */
 function stabilize(value: TraceValue, key = ""): TraceValue {
   if (typeof value === "string") {
     if (ENTRY_ID.test(value)) return "<entry>";
@@ -87,8 +45,6 @@ function stabilize(value: TraceValue, key = ""): TraceValue {
 
 type Caller = "home-input" | "home-delegated" | "home-wake" | "worker";
 
-/** Each loaded extension of a live runtime, in load order, as `path | tools … | on handler×count … | commands …`.
- * This is the profile a slot was built with (kernel.md §8 B1), which no request carries. */
 async function loadedExtensions(gateway: LockGateway, sessionId: string): Promise<string[]> {
   const slot = await gateway.registry.acquire(sessionId) as unknown as { runtime: { session: { resourceLoader: { getExtensions(): { extensions: Array<{
     path: string; tools: Map<string, unknown>; handlers: Map<string, unknown[]>; commands: Map<string, unknown>;
@@ -135,7 +91,6 @@ function textOf(content: unknown): string {
   return Array.isArray(content) ? content.map((part) => (part as { text?: unknown }).text ?? "").join("") : "";
 }
 
-/** Faux serves one queue to every runtime, so each step decides its caller from its context. */
 function callerOf(context: TranscriptContext): Caller {
   const messages = context.messages as Array<{ role: string; content?: unknown; toolName?: string }>;
   if (messages.some((message) => (message.role === "user" || message.role === "system") && textOf(message.content).includes(WORKER_MARKER))) return "worker";
@@ -147,12 +102,10 @@ function callerOf(context: TranscriptContext): Caller {
 
 describe("gateway/home scenario lock", () => {
   it("home-activation-wake: designation, first runtime, an activation that delegates, the worker's report and the wake", async () => {
-    // The production push owner, as in the push lock: only the relay's HTTP fetcher is replaced.
     const relayRequests: Array<{ method: string; path: string; envelope: unknown }> = [];
     let notifications!: NotificationService;
     let gateway!: LockGateway;
     gateway = await startLockGateway(LOCK, {
-      // Workspace text participates in the unchanged 512-byte free-node boundary.
       root: await mkdtemp("/tmp/tron-home-lock-"),
       home: { memorySummarizer: () => async () => fauxAssistantMessage("Lock memory summary.") },
       notifications: async (tronHome) => {
@@ -171,15 +124,11 @@ describe("gateway/home scenario lock", () => {
     const settings = JSON.parse(await readFile(join(gateway.agentDir, "settings.json"), "utf8")) as { defaultProvider: string; defaultModel: string };
     const model = { provider: settings.defaultProvider, id: settings.defaultModel };
 
-    // The worker reports only after Home's delegating activation settles, so the
-    // wake is a separate activation rather than a delivery into the running one.
     let releaseWorker = (): void => {};
     const workerReleased = new Promise<void>((resolve) => { releaseWorker = resolve; });
     const callers: Caller[] = [];
     const homeHeadings: Array<[Caller, string[]]> = [];
-    // Model-visible tool text: each tool's description and parameter schema, as the first request of each runtime sent them.
     const requestTools: { home?: unknown; worker?: unknown } = {};
-    // The stream options each request reached the provider with (cache retention, reasoning, …), minus callbacks and signals.
     const requestOptions: Array<{ caller: Caller; options: Record<string, unknown> }> = [];
     const route = async (context: TranscriptContext, options: SimpleStreamOptions | undefined) => {
       const caller = callerOf(context);
@@ -223,7 +172,6 @@ describe("gateway/home scenario lock", () => {
     const opened = await phone.request("home.open", {});
     expect(opened.ok, JSON.stringify(opened)).toBe(true);
     const homeSessionId = opened.result.sessionId as string;
-    // The phone opens the chapter as iOS does: the new Home session's first runtime.
     const session = await phone.request("session.open", { sessionId: homeSessionId });
     expect(session.ok, JSON.stringify(session)).toBe(true);
     expect((await phone.request("session.sync", { sessionId: homeSessionId, syncToken: session.result.syncToken })).ok).toBe(true);
@@ -249,9 +197,7 @@ describe("gateway/home scenario lock", () => {
     expect(context.ok, JSON.stringify(context)).toBe(true);
     expect((await phone.request("session.transcript", { sessionId: homeSessionId })).ok).toBe(true);
 
-    // Each Home activation's end pushes "finished" (the phone does not present the chapter); the worker's end pushes nothing.
     await waitFor(() => relayRequests.length >= 2, "both Home activations' finished pushes to reach the relay");
-    // A second device opens the settled chapter: the snapshot every dropped frame converges to.
     const reopen = await gateway.connect("reopen");
     const reopened = await reopen.request("session.open", { sessionId: homeSessionId });
     expect(reopened.ok, JSON.stringify(reopened)).toBe(true);
@@ -296,7 +242,6 @@ describe("gateway/home scenario lock", () => {
     const EVENT_ID = "task-result-d7f1ec6b5d880e396a4f3a69702854c5c99bb2cf41b996fac1975b340ada6091";
     const TERMINAL = { entryIds: ["<entry>"], outcome: "final", reason: "explicit-report", sessionId: "<id>" };
     const REPORT_REF = { digest: "<base64:64>", entryId: "<entry>", resultId: "lock-result", sessionId: "<id>" };
-    // The task record as the store persists it; taskStatus adds the read-only projections.
     const TASK = { createdAt: "<timestamp>", generation: 1, grantRef: null, homeId: "<id>", intent: { text: INTENT }, intentDigest: "<base64:64>",
       lifecycle: "terminal", operationId: "<id>", reportRef: REPORT_REF, revision: "<n>", routeGeneration: 1, scopeRef: "<id>", sessionId: "<id>",
       spend: SPEND, stopIntent: null, target: "<tmp>/workspace", taskId: TASK_ID, terminalEvidence: TERMINAL, updatedAt: "<timestamp>", version: 1,
@@ -308,7 +253,6 @@ describe("gateway/home scenario lock", () => {
     expect(answers[10], "the task list").toEqual({ error: null, ok: true, result: { counts: { active: 0, finished: 1 }, items: [{
       attention: false, checkins: [], createdAt: "<timestamp>", lifecycle: "terminal", outcome: "final", pendingGrant: false, project: "workspace", sessionId: "<id>",
       spend: SPEND, target: "<tmp>/workspace", taskId: TASK_ID, title: "Lock task", updatedAt: "<timestamp>" }] } });
-    // The settled wake activation's context: instructions, profile, memory (4 lines), chapter, results, input.
     const CONTEXT = { activationOpen: false, activationStartEntryId: "<entry>", available: true, contextWindow: 128000, effectiveTokens: "<size>", viewBytes: "<size>", viewLines: 11,
       breakdown: { activation: { kind: "wake", startedAt: "<timestamp>", state: "settled" }, contextWindow: 128000, effectiveTokens: "<size>", sections: [
         { id: "<id>", tokens: "<size>" }, { count: 0, id: "<id>", tokens: "<size>" }, { count: 4, id: "<id>", tokens: "<size>" },
@@ -325,11 +269,9 @@ describe("gateway/home scenario lock", () => {
       openSessionId: "<id>", phase: "ready", readiness: { gaps: [], ready: true }, recovery: { action: "none" }, routeGeneration: 1, sessionId: "<id>",
       sessionPresent: true, taskRecovery: { available: true }, waitingForUser: false, workers: { running: 0 } } });
     expect(answers[12], "home.context").toEqual({ error: null, ok: true, result: CONTEXT });
-    // The exchange normalizes section `id`s as identities; their names are the breakdown's contract.
     expect((context.result.breakdown.sections as Array<{ id: string; count?: number }>).map(({ id, count }) => `${id}${count === undefined ? "" : `:${count}`}`),
       "the context sections").toEqual(["instructions", "profile:0", "memory:4", "chapter:0", "results:0", "input"]);
 
-    // The chapter's snapshot when the phone opened it (its first runtime, unsaved) and when a second device reopened it settled.
     const MODEL_REF = { id: "<id>", provider: LOCK_PROVIDER };
     const STATS = { assistantMessages: "<value>", cost: "<value>", toolCalls: "<value>", toolResults: "<value>", totalMessages: "<value>", userMessages: "<value>",
       tokens: { cacheRead: "<value>", cacheWrite: "<value>", input: "<value>", output: "<value>", total: "<value>" } };
@@ -366,7 +308,6 @@ describe("gateway/home scenario lock", () => {
     expect(answers[13].ok, JSON.stringify(answers[13])).toBe(true);
     const { items: transcriptRows, ...transcriptPage } = answers[13].result;
     expect(transcriptPage, "the transcript page").toEqual({ end: 9, leafEntryId: "<id>", runtimeGeneration: "<id>", start: 0, total: 9 });
-    // `head | semantic kind | direction | context effect | lifecycle | origin | content`.
     const row = (item: any) => [item.kind === "message" ? item.role : item.kind, item.semantic.kind, item.semantic.direction, item.semantic.contextEffect,
       item.semantic.lifecycle ?? "", `${item.semantic.origin.kind}${item.semantic.origin.ownerId === undefined ? "" : `:${item.semantic.origin.ownerId}`}`,
       ...(item.content ?? []).map((part: any) => part.type === "toolCall" ? `${part.name}(${JSON.stringify(part.arguments)})` : part.text)].join(" | ");
@@ -400,7 +341,6 @@ describe("gateway/home scenario lock", () => {
         "target.sessionId:string", "target:object"] },
     ]);
 
-    // Model-side: three Home requests (input, after delegate, the wake) and the worker's, each stream in its own order.
     expect(callers.filter((caller) => caller !== "worker"), "Home's activations' requests").toEqual(["home-input", "home-delegated", "home-wake"]);
     expect(callers.filter((caller) => caller === "worker"), "the worker reports in one request").toEqual(["worker"]);
     expect(homeHeadings, "every Home request carries Home's prompt and the learned profile").toEqual([
@@ -470,7 +410,6 @@ describe("gateway/home scenario lock", () => {
       data: { generation: 1, homeId: "<id>", operationId: "<id>", receiptId: "<id>", sessionId: "<id>", taskId: TASK_ID, version: 1 } }]);
     expect(custom(workerSessionJsonl, "tron-home-task-report"), "the accepted report").toEqual([{ type: "custom", customType: "tron-home-task-report",
       data: { ...REPORT, acceptedAt: "<timestamp>", generation: 1, homeId: "<id>", operationId: "<id>", receiptId: "<id>", sessionId: "<id>", taskId: TASK_ID, version: 1 } }]);
-    // Each settings entry as `key<-from[/via]` (with `pin:` for request pins), then the last entry's values.
     const provenance = (jsonl: any[]) => custom(jsonl, "tron.settings.v1").map(({ data }) => {
       expect(data.settings, "no session-stored settings").toEqual({});
       return [...Object.entries(data.fixed).map(([key, value]: [string, any]) => `${key}<-${value.from}${value.via === undefined ? "" : `/${value.via}`}`),
@@ -508,7 +447,6 @@ describe("gateway/home scenario lock", () => {
     expect(custom(homeSessionJsonl, "tron.context-window.v1").concat(custom(workerSessionJsonl, "tron.context-window.v1")).map(({ data }) => data),
       "both sessions' context window").toEqual([1, 2].map(() => ({ contextWindow: 128000, modelId: "faux-1", provider: LOCK_PROVIDER, version: 1 })));
 
-    // The model-visible tool text each runtime's first request sent is the text its system entry persists.
     const systemEntry = (jsonl: any[]) => jsonl.find((entry) => entry.message?.role === "system").message;
     const homeSystem = systemEntry(homeSessionJsonl);
     const workerSystem = systemEntry(workerSessionJsonl);
@@ -533,8 +471,6 @@ describe("gateway/home scenario lock", () => {
       generation: 1, homeId: "<id>", policyRevision: 3, routeGeneration: 1, updatedAt: "<timestamp>", version: 2 });
     expect(stable(await gateway.file(join(homeRoot, "tasks", taskFile!))), "the persisted task").toEqual(TASK);
 
-    // Model-visible text stays in the narrowed golden: every provider request (tools, prompt sections and hash, messages)
-    // and both system entries (prompt sections and the full tool declarations, which no other lock keeps).
     const requests = recorded.providerRequests as unknown as Array<{ messages: readonly TraceValue[] }>;
     const isWorker = (request: { messages: readonly TraceValue[] }) => JSON.stringify(request.messages).includes(WORKER_MARKER);
     const trace = stabilize({

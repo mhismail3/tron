@@ -21,11 +21,6 @@ import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
 
-// Home's cached view and the summarizer's stretch-only calls, proved on the
-// wire (#491, #2228): Home turns and the episodic summarizer's calls go through pi-ai's real Anthropic
-// request builder to a local Anthropic-compatible endpoint that records every
-// request body and header. Nothing here calls a real provider.
-
 const PROVIDER = "local-anthropic";
 const MODEL_ID = "opus-local";
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
@@ -53,17 +48,12 @@ afterAll(async () => {
   process.stdout.write(`home-cache-layout e2e: ${report.cases.length} cases -> ${REPORT_PATH}\n`);
 });
 
-/** A minimal Anthropic Messages endpoint: records each request, then streams one
- * text block, or the next scripted tool call for a Home turn. */
 async function endpoint(responses = false): Promise<{ server: Server; port: number; requests: Captured[]; toolCalls: Array<{ name: string; input: unknown }> }> {
   const requests: Captured[] = [];
   const toolCalls: Array<{ name: string; input: unknown }> = [];
   let summaries = 0;
   const server = createServer((request, response) => {
     let raw = "";
-    // Decode the whole stream, not each chunk: a chunk may end inside a
-    // multi-byte character (the prompt's ’), which per-chunk decoding turns into
-    // U+FFFD and so changes the recorded prefix bytes (#2228).
     request.setEncoding("utf8");
     request.on("data", (chunk) => { raw += chunk; });
     request.on("end", () => {
@@ -75,8 +65,6 @@ async function endpoint(responses = false): Promise<{ server: Server; port: numb
       const tool = kind === "home" ? toolCalls.shift() : undefined;
       const text = kind === "summarizer" ? SUMMARY(++summaries) : `reply ${requests.length} ${"r".repeat(900)}`;
       const event = (type: string, data: Record<string, unknown>) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
-      // Summarizer calls report a fixed cache read, so the test can follow the
-      // provider's own usage field through to Home's memory status.
       const usage = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: kind === "summarizer" ? CACHE_READ : 0,
         cache_creation_input_tokens: 0 };
       if (responses) {
@@ -122,14 +110,11 @@ async function fixture(responses = false) {
   const tronHome = join(root, "tron");
   await mkdir(agentDir, { recursive: true });
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: PROVIDER, defaultModel: MODEL_ID }));
-  // A models.json provider, as a maintainer configures a compatible endpoint;
-  // session affinity puts each request's cache key on the wire.
   await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { [PROVIDER]: {
     baseUrl: `http://127.0.0.1:${local.port}`, api: responses ? "openai-responses" : "anthropic-messages", apiKey: "local-test-key",
     compat: { sendSessionAffinityHeaders: true },
     models: [
       { id: MODEL_ID, name: "Opus (local)", reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 4_096 },
-      // Too small for Home's request: an activation on it is refused before dispatch.
       { id: SMALL_MODEL_ID, name: "Small (local)", reasoning: false, input: ["text"], contextWindow: 4_096, maxTokens: 1_024 },
     ],
   } } }));
@@ -145,7 +130,6 @@ async function fixture(responses = false) {
       if (topic === "session.configuration") configurations.push({ sessionId, blocker: (payload as { data: { configurationBlocker: unknown } }).data.configurationBlocker });
     },
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    // The production summarizer: the background model queue on the Gateway's runtime, as gateway-main wires it.
     gatewayModelRuntime: runtime,
     homeRequestDiagnostic: (record) => records.push(record),
   });
@@ -162,11 +146,6 @@ async function fixture(responses = false) {
   return { ...local, registry, service, records, root, configurations };
 }
 
-/** Prompts one turn and waits for the slot's own settlement signal: the configuration
- * it publishes leaves a blocker and returns to none. Polling `snapshot()` instead built
- * the whole transcript projection every few milliseconds on the thread the turn needed;
- * that was most of this file's CPU, so under host load the poll starved the turns it
- * waited for (#1051). */
 async function settledTurn(f: { configurations: Array<{ sessionId: string; blocker: unknown }> },
   slot: { id: string; prompt(text: string): Promise<unknown> }, text: string, label: string): Promise<void> {
   const cut = f.configurations.length;
@@ -199,10 +178,8 @@ function blocks(message: WireMessage): Block[] {
 
 const memoryOf = (request: Captured) => blocks(messagesOf(request)[0]!);
 
-/** The view blocks of one Home request: every memory block but the footer and the nonce. */
 const viewBlocksOf = (request: Captured) => memoryOf(request).slice(0, -2).map((block) => block.text ?? "");
 
-/** Every `cache_control.ttl` in one request; pi-ai writes "1h" only for long retention. */
 function markTtls(captured: Captured): Set<string> {
   const ttls = new Set<string>();
   const visit = (value: unknown) => {
@@ -218,8 +195,6 @@ function markTtls(captured: Captured): Set<string> {
   return ttls;
 }
 
-/** The header, the lines in groups of `VIEW_BLOCK_LINES` (only the last may be
- * shorter), the footer. */
 function expectViewLayout(pieces: string[]): void {
   expect(pieces[0]!.startsWith(HOME_MEMORY_VIEW_MARKER)).toBe(true);
   expect(pieces[0]!.endsWith("<chat>\n")).toBe(true);
@@ -233,8 +208,6 @@ function expectViewLayout(pieces: string[]): void {
   });
 }
 
-/** Every block of one request in Anthropic's prefix order (tools, system, then
- * each message's content), without its mark, and whether it carried one. */
 function wireBlocks(captured: Captured): Array<{ path: string; json: string; marked: boolean }> {
   const out: Array<{ path: string; json: string; marked: boolean }> = [];
   const add = (path: string, block: unknown) => {
@@ -249,20 +222,11 @@ function wireBlocks(captured: Captured): Array<{ path: string; json: string; mar
   return out;
 }
 
-/** The cumulative hash of every block up to and including each block. */
 function prefixHashes(list: ReadonlyArray<{ json: string }>): string[] {
   const hash = createHash("sha256");
   return list.map(({ json }) => { hash.update(json); return hash.copy().digest("hex"); });
 }
 
-/**
- * Anthropic's documented cache rule (prompt-caching "How automatic prefix checking
- * works"): a mark writes one entry keyed by the cumulative hash of every block up
- * to it, and a request reads the deepest prior entry found walking back at most
- * 20 blocks, the mark itself first, from each of its marks. The same text cut into
- * other blocks is another key. Returns the path of the block whose entry `next`
- * re-reads from `previous`, or undefined.
- */
 function reread(previous: Captured, next: Captured): string | undefined {
   const before = wireBlocks(previous), after = wireBlocks(next);
   const written = new Set(prefixHashes(before).filter((_hash, index) => before[index]!.marked));
@@ -277,13 +241,10 @@ function reread(previous: Captured, next: Captured): string | undefined {
   return deepest < 0 ? undefined : after[deepest]!.path;
 }
 
-/** The memory message's marks in one request. */
 function viewMarks(captured: Captured): string[] {
   return wireBlocks(captured).filter((block) => block.marked && block.path.startsWith(".messages[0].")).map((block) => block.path);
 }
 
-/** "extend" when the next request re-reads the entry the previous request wrote at
- * its view mark; "partial" for an earlier memory block, "rewrite" for none. */
 function transition(previous: Captured, next: Captured): "extend" | "partial" | "rewrite" {
   const mark = viewMarks(previous).at(-1);
   const read = reread(previous, next);
@@ -291,7 +252,6 @@ function transition(previous: Captured, next: Captured): "extend" | "partial" | 
   return read?.startsWith(".messages[0].") ? "partial" : "rewrite";
 }
 
-/** Leading view blocks two requests share, byte for byte. */
 function sharedViewBlocks(previous: Captured, next: Captured): number {
   const a = viewBlocksOf(previous), b = viewBlocksOf(next);
   let index = 0;
@@ -299,7 +259,6 @@ function sharedViewBlocks(previous: Captured, next: Captured): number {
   return index;
 }
 
-/** Bytes of the view text the next request shares with the previous one, from its start. */
 function sharedViewBytes(previous: Captured, next: Captured): { shared: number; previous: number } {
   const a = viewBlocksOf(previous).join(""), b = viewBlocksOf(next).join("");
   let index = 0;
@@ -360,51 +319,35 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
 
-    // Each turn adds two summarized messages (~490 bytes each), so the view passes
-    // the recipe's first 50,000-character mark after about 55 turns.
     const TURNS = 62;
     for (let turn = 0; turn < TURNS; turn += 1) {
       await settledTurn(f, home, `input ${turn} ${"i".repeat(900)}`, `Home turn ${turn}`);
     }
-    // A last turn with a tool step: the step must reuse the frozen view and keep the end mark.
     f.toolCalls.push({ name: "memory_search", input: { query: "reply" } });
     await settledTurn(f, home, `input ${TURNS} ${"i".repeat(900)}`, "the tool turn");
 
     const homeRequests = f.requests.filter((request) => request.kind === "home");
     const summarizer = f.requests.filter((request) => request.kind === "summarizer");
-    // The turn before the tool turn, then the tool turn's two steps.
     const [previous, last, toolStep] = homeRequests.slice(-3);
     const lastMemory = memoryOf(last!);
     const viewPieces = lastMemory.slice(0, -1).map((block) => block.text ?? "");
     const view = viewPieces.join("");
     const lastMarks = cacheMarks(last!);
 
-    // The nonce is the memory message's last block, and appears nowhere else.
     expect(lastMemory.length).toBeGreaterThanOrEqual(2);
     expect(lastMemory.at(-1)!.text).toMatch(new RegExp(`^${HOME_NONCE_MARKER.replace(".", "\\.")}[0-9a-f-]{36}$`, "u"));
     expect(JSON.stringify(last!.body).split(HOME_NONCE_MARKER).length - 1).toBe(1);
-    // Consecutive turns: the next request's blocks up to the previous request's
-    // view mark are the same blocks, byte for byte, and its own mark finds that
-    // entry within Anthropic's lookback.
     const previousBlocks = wireBlocks(previous!), lastBlocks = wireBlocks(last!);
     const previousMark = previousBlocks.findIndex((block) => block.path === viewMarks(previous!).at(-1));
     expect(previousMark).toBeGreaterThanOrEqual(0);
     expect(lastBlocks.slice(0, previousMark + 1).map((block) => block.json)).toEqual(previousBlocks.slice(0, previousMark + 1).map((block) => block.json));
     expect(transition(previous!, last!)).toBe("extend");
-    // The header, the lines in fixed groups, then the footer: they rejoin to the
-    // view text exactly as the model reads it.
     expect(view.length).toBeGreaterThan(50_000);
     expectViewLayout(viewPieces);
-    // One view mark, on the last whole group (never the partial group, the footer
-    // or the nonce), the request end marked, the limit kept, every mark long-lived.
     const lastGroup = lastMemory.length - 3;
     const viewMarkAt = (lastMemory[lastGroup]!.text ?? "").split("\n").length - 1 === VIEW_BLOCK_LINES ? lastGroup : lastGroup - 1;
     expect(viewMarks(last!)).toEqual([`.messages[0].content[${viewMarkAt}]`]);
-    // Before the first whole group the header is marked: the empty first view, then
-    // a two-line partial group; the first whole group takes the mark from there.
     expect(homeRequests.slice(0, 3).map(viewMarks)).toEqual([[".messages[0].content[0]"], [".messages[0].content[0]"], [".messages[0].content[1]"]]);
-    // A block a provider places ahead of the memory view moves the mark with the
-    // view: the mark is found from the end.
     const prepended = structuredClone(last!.body) as { messages: Array<{ content: Block[] }> };
     for (const block of prepended.messages[0]!.content) delete block.cache_control;
     prepended.messages[0]!.content.unshift({ type: "text", text: "provider prompt block", cache_control: { type: "ephemeral", ttl: "1h" } });
@@ -416,7 +359,6 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(markTtls(last!)).toEqual(new Set(["1h"]));
     expect(JSON.stringify(previous!.body.system)).toBe(JSON.stringify(last!.body.system));
     expect(JSON.stringify(previous!.body.tools)).toBe(JSON.stringify(last!.body.tools));
-    // The tool step reuses the frozen view and marks its own end.
     expect(memoryOf(toolStep!).map((block) => block.text)).toEqual(lastMemory.map((block) => block.text));
     expect(messagesOf(toolStep!).length).toBeGreaterThan(messagesOf(last!).length);
     const stepLast = messagesOf(toolStep!).length - 1;
@@ -424,8 +366,6 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(viewMarks(toolStep!)).toEqual(viewMarks(last!));
     expect(cacheMarks(toolStep!)).toContain(`.messages[${stepLast}].content[${blocks(messagesOf(toolStep!)[stepLast]!).length - 1}]`);
 
-    // A summarizer call sends its step alone, never the view, and every call
-    // carries the memory's stable cache key.
     expect(summarizer.length).toBeGreaterThan(0);
     for (const request of summarizer) {
       const first = blocks(messagesOf(request)[0]!);
@@ -436,12 +376,9 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const sample = summarizer.at(-1)!;
     const sampleMarks = cacheMarks(sample);
     expect(sampleMarks.length).toBeLessThanOrEqual(ANTHROPIC_MAX_CACHE_BREAKPOINTS);
-    // The summarizer's calls ask for long retention too.
     expect(markTtls(sample)).toEqual(new Set(["1h"]));
     expect(new Set(summarizer.map((request) => request.headers["x-session-affinity"]))).toEqual(new Set([`tron-episodic:${status.homeId}`]));
     expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
-    // Demand builds a complete view, not every ancestor. Pause admission after
-    // coverage, then join accepted calls before comparing exact provider usage.
     const statusOf = async () => (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).memory.episodic!;
     await waitFor(async () => (await statusOf()).view.unbuilt === 0, "the memory view to complete");
     await f.service.invoke(client, "home.pauseMemory", { commandId: "cache-freeze-usage" });
@@ -452,7 +389,6 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const settledCalls = f.requests.filter((request) => request.kind === "summarizer").length;
     expect(settled.tokens.sinceOpen.cacheRead).toBe(CACHE_READ * settledCalls);
 
-    // An ordinary session on the same endpoint keeps pi-ai's own layout.
     const ordinary = await f.registry.create(f.root);
     await ordinary.setModel(PROVIDER, MODEL_ID);
     await ordinary.prompt("an ordinary message");
@@ -462,7 +398,6 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(plainMarks.every((path) => path.startsWith(".system") || path.startsWith(".tools")
       || path.startsWith(`.messages[${messagesOf(plain).length - 1}]`))).toBe(true);
     expect(JSON.stringify(plain.body)).not.toContain(HOME_MEMORY_VIEW_MARKER);
-    // Only Home asks for long retention; an ordinary session keeps pi-ai's default.
     expect(markTtls(plain)).toEqual(new Set(["5m"]));
 
     report.cases.push({
@@ -473,15 +408,12 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     });
   }, 300_000);
 
-  // At scale: past the view budget, the view's head changes only once
-  // per batch, and every other turn extends the previous turn's cached view.
   it("keeps Home's cached view across turns past the view budget", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "budget-designate", model: MODEL });
     await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "budget-memory", model: MODEL }));
     const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const home = await f.registry.acquire(status.sessionId!);
-    // About 1 KB of summaries per turn: the 128,000-byte view fills near turn 125.
     const TURNS = 210;
     for (let turn = 0; turn < TURNS; turn += 1) {
       await settledTurn(f, home, `input ${turn} ${"i".repeat(900)}`, `Home turn ${turn}`);
@@ -491,8 +423,6 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const steps = turns.slice(1).map((next, index) => {
       const previous = turns[index]!;
       const { shared, previous: size } = sharedViewBytes(previous, next);
-      // A rewrite is any change before the previous view's end: a rebalance,
-      // wherever its merges landed. Everything else only appended.
       const linesOf = (request: Captured) => viewBlocksOf(request).slice(1).join("").split("\n").slice(0, -1);
       const before = linesOf(previous), after = linesOf(next);
       let sharedLines = 0;
@@ -500,24 +430,17 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
       return { turn: index + 1, kind: transition(previous, next), shared, size, rewrite: shared < size,
         sharedBlocks: sharedViewBlocks(previous, next), sharedLines };
     });
-    // The budget was passed: a view at least half the budget was rebalanced.
     const firstRewrite = steps.find((step) => step.rewrite && step.size >= EPISODIC_DEFAULTS.viewBytes / 2);
     expect(firstRewrite, "the view never reached its budget").toBeDefined();
     const past = steps.filter((step) => step.turn >= firstRewrite!.turn);
     const rewrites = past.filter((step) => step.rewrite);
-    // One rewrite per rebalance, and a rebalance leaves room for many turns.
     expect(past.length).toBeGreaterThanOrEqual(60);
     expect(rewrites.length, JSON.stringify(rewrites.map((step) => ({ turn: step.turn, shared: step.shared, size: step.size }))))
       .toBeLessThanOrEqual(Math.ceil(past.length / 8));
-    // Every turn that is not a rebalance extends the previous turn's blocks
-    // within Anthropic's lookback, so its marked end is found again.
     for (const step of past) if (!step.rewrite) expect(step.kind, `turn ${step.turn}`).toBe("extend");
-    // A rebalance keeps every block before its first merged line: the header and
-    // each whole group of unchanged lines are the same blocks as before.
     for (const step of rewrites) {
       expect(step.sharedBlocks, `rebalance at turn ${step.turn}`).toBeGreaterThanOrEqual(1 + Math.floor(step.sharedLines / VIEW_BLOCK_LINES));
     }
-    // The layout holds at every size.
     for (const request of turns.slice(-3)) expectViewLayout(memoryOf(request).slice(0, -1).map((block) => block.text ?? ""));
     report.cases.push({
       case: "past-budget", turns: turns.length, firstRewrite: firstRewrite!.turn, turnsPast: past.length,
@@ -527,8 +450,6 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     });
   }, 900_000);
 
-  // A refused activation sends nothing, so it must not move the
-  // view the next request continues from.
   it("keeps the cached view's end across an activation refused before dispatch", async () => {
     const f = await fixture();
     await f.service.invoke(client, "home.designate", { commandId: "refused-designate", model: MODEL });
@@ -551,8 +472,6 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
       await home.prompt(`input 0 ${"i".repeat(900)}`);
       await waitFor(() => held && !home.isBusy, "post-terminal Home quiescence");
       expect(home.snapshot().configurationBlocker).toBe("running");
-      // Terminal receipt and actionable-work retirement precede configuration
-      // readiness while Home's chapter owner is still unwinding.
       readiness = waitFor(() => home.snapshot().configurationBlocker === null, "Home configuration readiness").then(() => { ready = true; });
       await awaitsWithin(new Promise<void>(resolve => setImmediate(resolve)), "readiness observation turn");
       expect(ready, "actionable work retirement is not configuration readiness").toBe(false);

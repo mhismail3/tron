@@ -1,5 +1,3 @@
-/* Shared static-page language. Canonical source and usage: tools/web/README.md.
-   Scoped to .tron-page so a generated document can opt in without a reset. */
 .tron-page {
   color-scheme: light dark;
   --tron-bg: #f7f8fa;
@@ -72,7 +70,6 @@
 .tron-intro > * + * { margin-block-start: var(--tron-space-2); }
 .tron-footer { margin-block-start: var(--tron-space-6); }
 
-/* Cards stay opaque: long notes should not pay for a live backdrop filter. */
 .tron-card {
   padding: var(--tron-space-6);
   border: 1px solid var(--tron-border);
@@ -99,7 +96,6 @@
 }
 .tron-badge--accent { color: var(--tron-accent); background: var(--tron-accent-soft); border-color: var(--tron-accent-border); }
 
-/* Use actual buttons for actions, anchors for navigation; never a clickable div. */
 .tron-page .tron-button {
   display: inline-flex;
   align-items: center;
@@ -126,7 +122,6 @@
   .tron-button:hover { border-color: var(--tron-accent); text-decoration: underline; }
 }
 
-/* Optional bounded chrome, not a page-wide material or a dependency on blur. */
 .tron-toolbar { padding: var(--tron-space-3) var(--tron-space-4); border: 1px solid var(--tron-border); border-radius: var(--tron-radius); background: var(--tron-surface); }
 @supports (backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px)) {
   .tron-toolbar { background: var(--tron-chrome); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }

@@ -11,9 +11,6 @@ import { EpisodicMemory } from "./episodic-memory.js";
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
-// Home's memory tools (`memory_search`, `zoom`, `date`) ingest under the memory's
-// lock before reading. An ingest or checkpoint holding that lock kept a stopped
-// `memory_search` running for minutes; the tool's Stop must end its wait.
 it("a tool read's ingest wait ends when its signal aborts while the memory's lock is held", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-episodic-cancel-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

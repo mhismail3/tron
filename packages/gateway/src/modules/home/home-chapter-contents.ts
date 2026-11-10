@@ -2,23 +2,14 @@ import { createHash } from "node:crypto";
 import { open, stat } from "node:fs/promises";
 import type { HomeChapterContents } from "../../protocol/types.js";
 
-/** Bounds of a chapter's topics (`home.chapterList`). A topic is a whole memory
- * summary the phone previews in a row and opens in full, so it keeps its lines. */
 export const HOME_CHAPTER_TOPIC_COUNT = 8;
 const HOME_CHAPTER_TOPIC_CHARACTERS = 1000;
-/** Topic characters one chapter list carries, newest chapters first: whole topics
- * keep the list a bounded frame however many chapters the ledger holds. */
 export const HOME_CHAPTER_TOPIC_LIST_CHARACTERS = 96_000;
 
-/** Bytes read per chunk while a chapter's canonical file is scanned. */
 const CHUNK_BYTES = 1024 * 1024;
-/** The bytes before a scan's end that identify the file's prefix on the next read. */
 const PREFIX_WINDOW_BYTES = 4096;
 const NEWLINE = 0x0a;
 
-/** One memory summary as a topic: its user and Home lines without kind prefixes
- * (tool and event lines are noise), in their own lines so markdown survives, and
- * past the bound ended only at a word boundary. */
 export function homeChapterTopic(summary: string): string {
   const text = summary.split("\n")
     .filter(line => !/^(?:echo|event):/u.test(line.trim()))
@@ -31,7 +22,6 @@ export function homeChapterTopic(summary: string): string {
   return boundary > 0 ? `${prefix.slice(0, boundary).replace(/[\s,;:.–-]+$/u, "")}…` : "";
 }
 
-/** The counts one canonical chapter file holds, before topics are attached. */
 type HomeChapterCounts = Omit<HomeChapterContents, "topics">;
 
 interface CachedChapter {
@@ -40,9 +30,7 @@ interface CachedChapter {
   ino: number;
   size: number;
   mtimeMs: number;
-  /** The byte offset the counts cover: always just after a newline. */
   offset: number;
-  /** SHA-256 of the bytes ending at `offset`: proof the prefix was not rewritten. */
   prefixDigest: string;
   counts: HomeChapterCounts;
 }
@@ -57,26 +45,9 @@ function digestPrefix(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-/**
- * Derives each chapter's counts from its canonical JSONL, kept as a cache of the last
- * scan per chapter. The cache is memory only: it is never persisted and never replaces
- * the canonical file. A scan extends the cached counts by the bytes appended since, when
- * the prefix it covered is unchanged; a changed, replaced or shrunken file is scanned
- * again from its start. Unchanged files cost one `stat`.
- *
- * Cost: an unchanged chapter costs one stat; an appended chapter parses only its new
- * bytes; the first scan after a Gateway start parses the whole chapter once. Parsing is
- * bounded by the chapter's own size, which the rollover limits bound.
- */
 export class HomeChapterContentsReader {
   private readonly chapters = new Map<string, CachedChapter>();
 
-  /**
-   * The counts of one chapter's canonical file. A missing file is zero counts only for a
-   * `reserved` chapter, which has no file until it materializes; for any other state a
-   * missing file, or one that cannot be read or parsed, is `undefined`: unmeasured, never
-   * an empty chapter.
-   */
   async counts(sessionId: string, path: string | undefined, reserved: boolean): Promise<HomeChapterCounts | undefined> {
     if (path === undefined) return reserved ? emptyCounts() : undefined;
     let before;
@@ -97,8 +68,6 @@ export class HomeChapterContentsReader {
       }
       return await this.remember(sessionId, path, before, emptyCounts(), 0, before.size);
     } catch {
-      // Any read or parse failure, including a file that changed or vanished during the scan, leaves
-      // this chapter unmeasured and drops its cache entry: the list still answers for every other chapter.
       this.chapters.delete(sessionId);
       return undefined;
     }
@@ -109,7 +78,6 @@ export class HomeChapterContentsReader {
     return digestPrefix(window) === cached.prefixDigest;
   }
 
-  /** Scans `[from, size)` and caches the counts through the last complete line. */
   private async remember(sessionId: string, path: string, identity: { dev: number; ino: number; size: number; mtimeMs: number },
     counts: HomeChapterCounts, from: number, size: number): Promise<HomeChapterCounts> {
     const scanned = await scanLines(path, from, size, counts);
@@ -120,7 +88,6 @@ export class HomeChapterContentsReader {
   }
 }
 
-/** Reads `[start, end)` of a file. Callers pass bounds the file has, so a short read is a change. */
 async function readRange(path: string, start: number, end: number): Promise<Buffer> {
   const handle = await open(path, "r");
   try {
@@ -133,18 +100,11 @@ async function readRange(path: string, start: number, end: number): Promise<Buff
   }
 }
 
-/**
- * Streams `[from, size)` in chunks and applies every complete line. The returned offset is
- * just after the last newline; a trailing partial line is left for the next scan, so an
- * entry being appended is never counted half-written. A long line is joined once, at its
- * newline, so its cost is linear in its length.
- */
 async function scanLines(path: string, from: number, size: number, start: HomeChapterCounts): Promise<{ counts: HomeChapterCounts; offset: number }> {
   const counts: HomeChapterCounts = { ...start };
   const handle = await open(path, "r");
   try {
     const chunk = Buffer.alloc(CHUNK_BYTES);
-    // The absolute offset of the next byte to read, and of the first byte of the pending line.
     let position = from;
     let lineStart = from;
     let pending: Buffer[] = [];
@@ -161,7 +121,6 @@ async function scanLines(path: string, from: number, size: number, start: HomeCh
         cursor = at + 1;
         lineStart = position + cursor;
       }
-      // The chunk is reused by the next read, so a pending remainder is copied.
       if (cursor < piece.length) pending.push(Buffer.from(piece.subarray(cursor)));
       position += bytesRead;
     }
@@ -175,8 +134,6 @@ function hasToolCall(content: unknown): boolean {
   return Array.isArray(content) && content.some(block => (block as { type?: unknown } | null)?.type === "toolCall");
 }
 
-/** Applies one canonical JSONL line. The header (`session`) is not an entry; a malformed
- * line makes the whole chapter unreadable rather than a miscounted one. */
 function applyLine(counts: HomeChapterCounts, line: string): void {
   if (line.trim() === "") return;
   let entry: { type?: unknown; timestamp?: unknown; message?: { role?: unknown; content?: unknown; toolName?: unknown; isError?: unknown } };
@@ -193,7 +150,6 @@ function applyLine(counts: HomeChapterCounts, line: string): void {
   if (entry.type !== "message" || !entry.message) return;
   const message = entry.message;
   if (message.role === "user") counts.userMessages += 1;
-  // A reply is an assistant message without a tool call: a tool-calling message is part of the work, not an answer.
   else if (message.role === "assistant" && !hasToolCall(message.content)) counts.homeReplies += 1;
   else if (message.role === "toolResult" && message.toolName === "delegate" && message.isError !== true) counts.tasksDelegated += 1;
 }

@@ -85,18 +85,14 @@ class FixturePlatform(MacPlatform):
         return self.launchd_state(self.gateway_label) == 'running'
 
     def quit_app(self, log):
-        # The fixture "app" is its Gateway job: the same authenticated
-        # supervised stop the menu-bar Quit sends. A crash-looping Gateway has
-        # nothing to drain, so its job is unloaded instead.
         try:
             self.mutation('gateway.stop', timeout=30)
         except replace.RpcError:
             capture(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{self.gateway_label}'], timeout=30)
 
     def launch_app(self, log):
-        # Reload the stopped (or crash-looping) job so RunAtLoad starts the installed bundle.
         capture(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{self.gateway_label}'], timeout=30)
-        for _ in range(100):  # bootout completes asynchronously
+        for _ in range(100):
             if self.launchd_state(self.gateway_label) == 'absent':
                 break
             time.sleep(0.2)
@@ -133,8 +129,6 @@ class FixturePlatform(MacPlatform):
         self.codesign_identity(self.installed, log)
 
     def refresh_guard(self, root, revision, log):
-        # Host LaunchAgents are outside this fixture Gateway's boundary; the
-        # guard suite covers the real refresh with its own private launchd label.
         pass
 
     def replace_app_bytes(self, candidate, destination, log):
@@ -185,21 +179,14 @@ class Fixture:
         self.home = self.root / 'home'
         self.label = f'com.tron.e2e.mac-replace.{os.getpid()}'
         self.node = Path(subprocess.run([REPO / 'scripts/tron-node'], check=True, capture_output=True, text=True).stdout.strip())
-        # The fixture Gateway binds IPv6 loopback, not 127.0.0.1: like live Stable
-        # (bound to its Tailscale address, #1059), the runner must reach the
-        # listener the Gateway job actually holds rather than an assumed one.
         self.host = '::1'
         with socket.socket(socket.AF_INET6) as probe:
             probe.bind((self.host, 0))
             self.port = probe.getsockname()[1]
-        # Isolate Git state as well as files: a worktree would inherit the real
-        # checkout and could redirect this fixture's source revision.
         self.source = self.root / 'source'
         self.revision = capture(['git', '-C', REPO, 'rev-parse', 'HEAD'])[1].strip()
         subprocess.run(['git', 'clone', '--shared', '--no-checkout', '--quiet', REPO, self.source], check=True)
         subprocess.run(['git', '-C', self.source, 'checkout', '--quiet', '-b', 'fixture-source', self.revision], check=True)
-        # Own the remote main too: concurrent workers may advance the real repo.
-        # Planning must choose this main, not the caller's unpublished/dirty bytes.
         remote = self.root / 'remote.git'
         subprocess.run(['git', 'init', '--bare', '--quiet', remote], check=True)
         subprocess.run(['git', '-C', self.source, 'remote', 'set-url', 'origin', remote], check=True)
@@ -218,7 +205,6 @@ class Fixture:
         self.config = {'root': str(self.root), 'home': str(self.home), 'installed': str(self.installed), 'label': self.label,
                        'port': self.port, 'node': str(self.node), 'repo': str(REPO), 'plist': str(self.root / 'gateway.plist')}
         self.config_path.write_text(json.dumps(self.config))
-        # The installed "old" app: an older revision with a different lock, so the plan is a full replacement.
         make_app(self.installed, self.old_revision, b'{"lockfileVersion": 3, "fixture": "old"}\n', self.config)
         plist = self.root / 'gateway.plist'
         with plist.open('wb') as stream:
@@ -294,7 +280,6 @@ def journeys():
     started = time.time()
     try:
         platform = fixture.platform
-        # 1. Failing preflight: a manual reinstall operation is active.
         (platform.maintenance).mkdir(mode=0o700, parents=True, exist_ok=True)
         (platform.maintenance / 'active.json').write_text('{"schema":1,"id":"x"}')
         operation, outcome = fixture.start()
@@ -311,7 +296,6 @@ def journeys():
         check(data['notification']['state'] == 'requested', 'the failure was pushed through the running Gateway', evidence)
         (platform.maintenance / 'active.json').unlink()
 
-        # Partial-copy failure restores the old app and cleans only owned staging.
         (fixture.root / 'fail-copy').write_text('')
         (fixture.root / 'hold-after-stop').write_text('')
         retry_operation, outcome = fixture.start()
@@ -343,7 +327,6 @@ def journeys():
               'partial-copy rollback restores the previous Gateway', evidence)
         (fixture.root / 'fail-copy').unlink()
 
-        # 2. Failure after the swap: the new Gateway refuses to start; automatic rollback.
         (fixture.root / f'fail-start-{fixture.revision}').write_text('')
         retry_operation, outcome = fixture.start()
         check(retry_operation == operation and outcome == 'retrying', 'a retry reuses the failed operation', evidence)
@@ -358,8 +341,6 @@ def journeys():
         check('rolled-back' in status and 'logs/start.log' in status, 'terminal status shows the failure and its log', evidence)
         check((fixture.root / 'build-count').read_text() == '1', 'built once', evidence)
 
-        # 3. The runner dies after the swap (crash or reboot); the resumed retry first restores
-        # the previous app, then reuses the verified build and succeeds.
         retry_operation, outcome = fixture.start()
         check(retry_operation == operation and outcome == 'retrying', 'the second retry reuses the operation', evidence)
         journal = replace.Journal(platform.store / operation)
@@ -392,7 +373,6 @@ def journeys():
         status = platform.rpc('mac.replace.status')
         check(status['operation']['id'] == operation and status['operation']['state'] == 'succeeded', 'the new Gateway projects the full journal', evidence)
 
-        # 4. Nothing left to do.
         check(replace.plan(platform, fixture.source)['path'] == 'none', 'the plan then reports nothing to do', evidence)
         passed = True
     except Exception as error:  # noqa: BLE001
@@ -452,7 +432,6 @@ def quit_journey():
                 time.sleep(0.05)
             check('application-ready' in output.read_text(), 'isolated AppKit app launched', evidence)
             check(platform.app_identity()['pid'] == process.pid, 'runner pins the actual AppKit wrapper identity', evidence)
-            # A stale result cannot fail or satisfy a new request.
             platform.quit_app(root / 'quit.log')
             first = platform.quit_request()
             deadline = time.monotonic() + 5
@@ -468,8 +447,6 @@ def quit_journey():
             check(process.poll() is None and 'ordinary-modal-would-open' not in output.read_text(),
                   'replacement failure cancels AppKit termination without opening ordinary-Quit modal', evidence)
             check(platform.offline_blocker() is not None, 'live captured app forbids replacement', evidence)
-            # Retry the same live app. This is a new nonce; the failed predecessor
-            # result must not poison it. No app restart or manual Quit is involved.
             platform.quit_app(root / 'quit.log')
             check(platform.quit_request()['id'] != first['id'], 'retry gets a fresh exact-app request', evidence)
             platform.quit_progress()
@@ -501,8 +478,6 @@ def quit_journey():
             platform.quit_app(root / 'quit.log')
             check(not (platform.quit_directory / 'request.json').exists() and not (platform.quit_directory / 'result.json').exists(),
                   'explicit retry after late retirement clears stale failure only after independent offline proof', evidence)
-            # An interrupted/restarted runner must join the pending Quit rather
-            # than invalidate the nonce whose receipt AppKit will eventually send.
             with output.open('w') as stream:
                 process = subprocess.Popen([binary, 'replacement', platform.quit_directory], stdout=stream, stderr=stream,
                                            env=dict(os.environ, HOME=str(platform.home), TMPDIR=str(root)))
@@ -518,7 +493,6 @@ def quit_journey():
             check(process.returncode == 0 and platform.quit_progress() == 'Gateway and native helper retired; app exiting',
                   'joined replacement receives eventual success with no manual Quit', evidence)
             platform.clear_quit_request()
-            # Old app adoption is explicit, not a legacy ordinary-Quit fallback.
             info.write_bytes(plistlib.dumps({'CFBundleIdentifier': platform.bundle_id}))
             try:
                 platform.require_replacement_quit()
@@ -536,7 +510,6 @@ def quit_journey():
                 print(quit_log.read_text(), file=sys.stderr)
         finally:
             if process is not None and process.poll() is None:
-                # Only this test-created AppKit subprocess, never a live Tron app.
                 process.kill(); process.wait()
     report.parent.mkdir(exist_ok=True)
     report.write_text(json.dumps({'passed': passed, 'seconds': round(time.monotonic() - started, 1), 'checks': evidence}, indent=1) + '\n')
@@ -612,7 +585,7 @@ def rpc_journey():
                             return 'fixture-token'
 
                         def protocol(self):
-                            return 8  # The installed Gateway's contract, not current-source handlers.
+                            return 8
 
                         def endpoints(self):
                             return [f'ws://127.0.0.1:{port}/v1/socket']
@@ -693,7 +666,6 @@ def drain_blocker_journey(base, home, root, calls, evidence):
     def operation(name, blocker_snapshot):
         snapshot.write_text(json.dumps(blocker_snapshot))
         journal = replace.Journal.create(root / name, name, 'full', 'drain fixture', {'root': str(REPO)})
-        # The build and preflight boundaries have their own journeys; start at the first live step.
         journal.data['steps'] = [step for step in journal.data['steps']
                                  if step['name'] not in ('preflight', 'build', 'verify-signature')]
         journal.save()
@@ -732,7 +704,6 @@ def drain_blocker_journey(base, home, root, calls, evidence):
           f'an idle Gateway proceeds to Quit as before: {data.get("error")} {lifecycle}', evidence)
     check(sent[:2] == ['home.taskList', 'gateway.drain.status'], f'idle drain status is read before Quit: {sent}', evidence)
 
-    # Work that settles inside the window (a worker this run just stopped) is waited for, then Quit proceeds.
     import threading
     platform.drain_settle_timeout = 30
     settle = threading.Timer(3, lambda: snapshot.write_text(json.dumps(idle)))
@@ -806,11 +777,11 @@ def launch_services_journey():
         candidate = root / 'build/Tron.app'
         bundle(candidate, 'candidate')
         previous_cdhash = platform.codesign_identity(platform.installed)['cdhash']
-        register(platform.installed)  # as /Applications/Tron.app always is
+        register(platform.installed)
         check(launch_services_urls(bundle_id) == {str(platform.installed)},
               'Launch Services resolves the installed fixture app before the swap', evidence)
 
-        for directory in (platform.maintenance, platform.store):  # as `start` creates them
+        for directory in (platform.maintenance, platform.store):
             replace.private_mkdir(directory)
         journal = replace.Journal.create(platform.store / 'fixture', 'fixture', 'full', 'Launch Services fixture', {'revision': 'fixture'})
         journal.begin_attempt({'pid': os.getpid()})
@@ -818,8 +789,8 @@ def launch_services_journey():
         replace.Runner(platform, journal).step_swap_app()
         kept = Path(journal.data['swap']['previousApp'])
         check((platform.installed / 'Contents/marker').read_text() == 'candidate', 'the swap installed the candidate', evidence)
-        register(kept)  # Finder or Spotlight discovering the kept copy
-        register(platform.installed)  # the new app at the installed path
+        register(kept)
+        register(platform.installed)
         resolved = launch_services_urls(bundle_id)
         check(resolved == {str(platform.installed)},
               f'Launch Services opens only the installed app, never the kept copy at {kept}: {sorted(resolved)}', evidence)
@@ -872,7 +843,6 @@ def checkout_journey():
             root = Path(directory)
             home, source = root / 'home', root / 'source'
             home.mkdir()
-            # Setup only: the fixture commit itself needs git-lfs, as `git lfs install --local` repositories do.
             setup = {'PATH': '/usr/bin:/bin:/opt/homebrew/bin', 'HOME': str(home), 'GIT_CONFIG_NOSYSTEM': '1'}
             git = ['git', '-C', source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid']
             subprocess.run(['git', 'init', '--quiet', source], check=True, env=setup)
@@ -883,7 +853,6 @@ def checkout_journey():
             subprocess.run(git + ['add', '.'], check=True, env=setup)
             subprocess.run(git + ['commit', '--quiet', '-m', 'fixture'], check=True, env=setup)
             revision = capture(['git', '-C', source, 'rev-parse', 'HEAD'], env=setup)[1].strip()
-            # Exactly the runner's launchd EnvironmentVariables (`runner.plist`).
             runner = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(home)}
 
             def record(condition, message):
@@ -893,7 +862,6 @@ def checkout_journey():
                 return subprocess.run(['/usr/bin/python3', '-c', CHECKOUT_CHILD, HERE, home, source, target],
                                       env=runner, capture_output=True, text=True, timeout=300)
 
-            # A stat-dirty LFS file (as after a pull) makes `git status` run the LFS clean filter.
             os.utime(source / 'golden.png', (time.time() + 60, time.time() + 60))
             result = subprocess.run(['/usr/bin/python3', '-c', STATUS_CHILD, HERE, source],
                                     env=runner, capture_output=True, text=True, timeout=60)
@@ -935,7 +903,7 @@ def retention_journey():
             subprocess.run(git + ['add', '.'], check=True)
             subprocess.run(git + ['commit', '--quiet', '-m', 'fixture'], check=True)
 
-            def sealed(path):  # a payload tree after bundle-gateway.sh's `chmod -R a-w`
+            def sealed(path):
                 (path / 'app/dist').mkdir(parents=True)
                 (path / 'app/dist/index.js').write_text('payload')
                 subprocess.run(['chmod', '-R', 'a-w', path], check=True)
@@ -982,7 +950,6 @@ def retention_journey():
             record(detail.endswith('could not prune 1 superseded path(s), see journal.log')
                    and 'prune: ' in notes and 'failed-app-2' in notes,
                    f'an undeletable path is reported in the finish step and journal, not swallowed: {detail}')
-            # A store it cannot even list (an unreadable builds/) is reported; finish does not raise into a rollback.
             (store / 'builds').chmod(0)
             try:
                 detail = runner.step_finish()
@@ -1032,8 +999,6 @@ if __name__ == '__main__':
         sys.exit(1)
     if quit_journey():
         sys.exit(1)
-    # The fixture launches dist/index.js. A fresh worktree has no dist, and a
-    # warm one may have another source revision; never test that ambient build.
     print('Mac replacement E2E: verifying dependencies and building the current-source Gateway', flush=True)
     node = Path(subprocess.run([REPO / 'scripts/tron-node'], check=True, capture_output=True, text=True).stdout.strip())
     subprocess.run([node, REPO / 'scripts/gateway-install-inputs.mjs', 'ensure',

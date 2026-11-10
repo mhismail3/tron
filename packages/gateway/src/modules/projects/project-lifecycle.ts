@@ -29,7 +29,6 @@ interface ProjectRow {
 interface ProjectPage { workspace: string; projects: ProjectRow[]; nextCursor: string | null }
 const eligibilityActions = ["trust", "untrust"] as const;
 
-/** Live occupancy as of one read: runtime slots are consulted live, Home work as of `occupancy()`. */
 export interface ProjectOccupancy { assertIdle(path: string): void }
 export interface ProjectRuntimePort {
   occupancy(signal?: AbortSignal): Promise<ProjectOccupancy>;
@@ -38,8 +37,6 @@ export interface ProjectRuntimePort {
   abort(path: string): Promise<void>;
 }
 
-/** Filesystem/Git effects have one owner; settings owns approval, execution claims,
- * expiry and outcomes. Failed/uncertain effects are inspected, never replayed. */
 export class ProjectLifecycle {
   private readonly mutex = new AsyncMutex();
   private changes: SettingsChangePath | undefined;
@@ -55,7 +52,6 @@ export class ProjectLifecycle {
     this.changes = changes;
   }
 
-  /** Disposable projections, never a reservation or permission to execute. */
   async list(options: { limit: number; after?: string }, signal?: AbortSignal): Promise<ProjectPage> {
     signal?.throwIfAborted();
     await this.root();
@@ -70,8 +66,6 @@ export class ProjectLifecycle {
     const remaining = names.filter(name => options.after === undefined || name > options.after);
     const selected = remaining.slice(0, options.limit);
     const projects: ProjectRow[] = [];
-    // One read of Home work serves every row: these are disposable projections, and the
-    // effects revalidate (#2072: a read of the task history per row took 40-90 s).
     const occupancy = selected.length > 0 ? await this.runtimes.occupancy(signal) : undefined;
     for (const name of selected) projects.push(await this.read(join(this.workspace, name), signal, occupancy));
     signal?.throwIfAborted();
@@ -108,7 +102,6 @@ export class ProjectLifecycle {
     return row;
   }
 
-  /** A disposable exact review, or an authenticated native execution. No pending store or outbox. */
   async request(input: ProjectRequest, actor: Actor, commandId: string,
     options: { confirmation?: { digest: string; intent: unknown }; confirm?: ConfirmChange } = {}): Promise<ProjectChangeResult> {
     const changes = this.changes;
@@ -174,8 +167,6 @@ export class ProjectLifecycle {
     if (Object.keys(p).some(key => !["operation", "name", "identity"].includes(key))
       || !["create", "trust", "untrust"].includes(String(p.operation))
       || typeof p.identity !== "string" || !/^\d+:\d+$/.test(p.identity)) throw new GatewayError("invalid_request", "Invalid project action");
-    // JSON object order is not intent. Rebuild the same typed identity used by
-    // planning before hashing it; native encoders may reorder the echoed keys.
     return { operation: p.operation as Operation, name: this.name(p.name), identity: p.identity };
   }
   private async root(): Promise<void> {
@@ -198,7 +189,6 @@ export class ProjectLifecycle {
     throw new GatewayError("conflict", "Destination already exists; project lifecycle never overwrites a path");
   }
   private async command(executable: string, args: string[], cwd: string, signal?: AbortSignal): Promise<string> {
-    // Do not inherit Git redirection into another checkout or executable hooks.
     const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
     for (const key of Object.keys(env)) if (key.startsWith("GIT_") && key !== "GIT_TERMINAL_PROMPT") delete env[key];
     try { return (await exec(executable, args, { cwd, env, timeout: 60_000, maxBuffer: 1024 * 1024, ...(signal ? { signal } : {}) })).stdout.trim(); }
@@ -211,7 +201,7 @@ export class ProjectLifecycle {
     signal?.throwIfAborted();
     const path = join(this.workspace, action.name);
     await this.same(path, action.identity);
-    const gitIdentity = await this.directory(join(path, ".git")); // linked worktrees/submodules are not project roots
+    const gitIdentity = await this.directory(join(path, ".git"));
     const root = await this.git(path, ["rev-parse", "--show-toplevel"], signal);
     if (root !== path) throw new GatewayError("invalid_request", "Lifecycle requires a standalone project repository");
     const worktrees = await this.git(path, ["worktree", "list", "--porcelain"], signal);

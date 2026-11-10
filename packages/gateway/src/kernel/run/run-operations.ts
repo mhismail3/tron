@@ -31,7 +31,6 @@ import { RunRuntime } from "./run-runtime.js";
 
 const MAXIMUM_PENDING_PROMPT_BYTES = MAXIMUM_QUEUED_MESSAGE_BYTES;
 
-/** Run authority; the concrete frame supplies native SDK and publication I/O. */
 export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
   readonly runAbort = new RunAbortOwner(this);
   readonly runWork = new RunWorkOwner(this);
@@ -42,8 +41,6 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
   readonly runTerminal = new RunTerminalOwner(this);
   readonly ownedTurns = new OwnedTurnOwner(this);
   readonly runAttention = new RunAttentionOwner(this);
-  /** Gateway-owned causal graph. Canonical receipts remain the durable source;
-   * these bounded maps are only the live projection used by snapshots. */
   readonly runInvocations = new RunInvocations(this);
   readonly manualCompaction = new ManualCompactionOwner(this);
   readonly runEvents = new RunEventsOwner(this);
@@ -54,19 +51,12 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
   pendingExtensionCommand: SessionOperationState | undefined;
   retry: RetryState | undefined;
   pendingPrompt: PendingPromptState | undefined;
-  /** Exact Pi message object claimed by the foreground pending prompt. */
   pendingPromptMessage: AgentMessage | undefined;
   operationWasHomeWake = false;
   compactionBaselineEntryId: string | undefined;
-  /** Exact operation installed at compaction_start. A hook may launch a
-   * successor before compaction_end, so the current operation is not reliable
-   * completion ownership. */
   compactionOperation: SessionOperationState | undefined;
 
-  /** Join live settlement and reconcile bounded canonical evidence before open. */
   async reconcileAttention(): Promise<void> {
-    // Marker evidence and any pending settlement are disk work on the open path;
-    // the request span names them instead of leaving them unaccounted.
     return stage("attention.reconcile", () => this.runAttention.reconcileAttentionBody());
   }
 
@@ -85,9 +75,6 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
     if (expectation) this.assertConfigurationExpectation(expectation);
     const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
     if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
-    // The live runtime’s profile admits the choice, not a later designation
-    // record. Ordinary sessions carry no extra model constraint and retain
-    // their existing choice.
     this.liveProfile().modelSelection?.assertAllowed(model);
     const previousThinking = this.runtime.session.thinkingLevel;
     await this.runtime.session.setModel(model as Model<never>);
@@ -112,8 +99,6 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
         policy.set({ provider, id: modelId }, contextWindow);
         await this.recordFixedSetting("model.contextWindow", policy.snapshot()?.effective, fixedAt);
       } finally {
-        // Pi may have staged the entry even when its disk append failed. Always
-        // project the exact runtime outcome rather than leaving clients stale.
         this.revision += 1;
         this.emit("session.contextChanged", {});
         this.publishSnapshot();
@@ -164,20 +149,13 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
     try {
       return await this.lane.run(async () => {
         this.assertIdle(false, initiatingWorkToken);
-        // Bash is Gateway-admitted agent work, so it clears retained archive
-        // state on the same lane turn that admits it.
         await this.dependencies.beforeRunAdmission(this.id);
-        // Admission and the first canonical Bash call are in one lane turn with
-        // no suspension between them. The new token therefore cannot make its
-        // own idle check fail and no competing session mutation can enter.
         work = this.dependencies.workRegistry.begin({
           kind: "foreground-agent-operation",
           sessionId: this.id,
           hostEpoch: this.ui.hostEpoch,
         });
         const operationId = randomUUID();
-        // The marker is written before dispatch: a failure here is definitive
-        // (the shell command never started) and stays retryable.
         await this.runPersistence.trackOwnershipWrite(
           () => this.runPersistence.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
           work,
@@ -202,9 +180,6 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
             !previousEntryIDs.has(entry.id)
               && entry.type === "message"
               && entry.message.role === "bashExecution");
-          // Pi currently appends exactly one Bash entry. Match by branch delta
-          // rather than leaf position so a future post-execution hook cannot
-          // silently detach timing by appending another canonical entry.
           if (bashEntries.length === 1) {
             this.rememberProjectionMetadata(this.bashMetadata, bashEntries[0]!.id, {
               startedAt,
@@ -216,9 +191,6 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
           }
           return safeJson(result);
         } catch (error) {
-          // The shell command may already have run: a duplicate replay is worse
-          // than an explicit uncertainty, so the idempotency receipt must keep
-          // its fence instead of reporting a definitive rejection.
           throw asUncertainOutcome(error, "Bash execution was dispatched but its outcome could not be confirmed; refresh session state instead of replaying");
         } finally {
           let cleanupFailure: unknown;
@@ -251,13 +223,9 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
     onAdmitted?: (result: { operationId: string }) => void,
     ownership?: PromptOwnership<{ taskId: string; operationId: string }>,
   ): Promise<{ operationId: string }> {
-    // Once Stop closes Pi's queue, new client work stays Gateway-owned until
-    // the stopped originals are admitted as one serialized continuation.
     if (!ownership && this.runAbort.stopRecoveryQueueClosed) {
       return this.heldQueue.holdPrompt(text, images, behavior, queueDisplay, true);
     }
-    // Automation owns its own dispatch and terminal observers, so only client
-    // prompts join the Gateway-owned compaction queue.
     this.assertHomePromptAdmission();
     if (!ownership && !this.ownedTurns.worker && this.heldQueue.holdsPromptsForCompaction(text, queueDisplay)) {
       const result = this.heldQueue.holdPrompt(text, images, behavior, queueDisplay);
@@ -303,8 +271,6 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
       id: operationId,
       ...(semantic ? { semantic } : {}),
       createdAt: new Date().toISOString(),
-      // Requested queue behavior is advisory until Pi actually enqueues.
-      // A prompt admitted after the run settles remains ordinary.
       text: boundedSummaryText(
         queueDisplay?.text ?? text,
         MAXIMUM_PENDING_PROMPT_BYTES
@@ -370,8 +336,6 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
   }
 
 
-  /** A running task worker takes configuration between provider requests (#1336): Pi reads model
-   * and thinking per turn and request, so the in-flight request never changes. Compaction refuses. */
   protected liveTaskConfiguration(): boolean {
     const worker = this.ownedTurns.worker;
     if (!worker?.acceptsSteering || this.disposed || this.shuttingDown || this.trustReloadPending || this.runPersistence.hasBlockedOwnershipWrite) return false;
@@ -382,14 +346,11 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
       && this.activeOperationId === undefined && this.operation === undefined;
   }
 
-  /** A running worker's context window and tool loadout have no supported mid-run
-   * boundary here: say so instead of the generic busy refusal (#1336). */
   protected assertNoLiveTaskConfiguration(what: string): void {
     if (!this.liveTaskConfiguration()) return;
     throw new GatewayError("busy", `A running task worker's ${what} change only between runs: change it after task ${this.ownedTurns.worker!.identity.taskId} settles (it applies on resume). Model, thinking and Run settings apply from the worker's next model request.`, true);
   }
 
-  /** Idle configuration, or a running Home task worker's live configuration (#1336). */
   protected assertConfigurationAdmissible(initiatingWorkToken?: string): void {
     if (this.liveTaskConfiguration()) {
       this.assertUsable();
@@ -431,9 +392,6 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
     }
   }
 
-  /** `exceptWorkToken` is the initiating request's own work entry, which is not
-   * the session running. Every other entry, including a different request's,
-   * still makes this busy. */
   protected assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {
     this.assertUsable(allowTrustReload);
     this.assertChapterWritable();
@@ -444,13 +402,7 @@ export abstract class RunOperations<FixedAt> extends RunRuntime<FixedAt> {
     return this.runtime.session.isStreaming || this.drainBusyExcept(exceptWorkToken);
   }
 
-  /** Pi can clear isStreaming before its agent_settled choreography has
-   * reached this runtime. Keep ordinary admission behind the existing Gateway
-   * operation owner until the sequenced state transition is published. */
   public get isAgentAdmissionSettling(): boolean {
-    // Compaction has its own Pi abort controller and cannot accept Agent input,
-    // even when the SDK's broad streaming flag remains true. Wait until the
-    // continuation or idle transition, then re-evaluate steer/follow-up.
     if (this.phase === "compacting") return true;
     if (this.hasActiveAgentRun) return false;
     return this.phase === "running"

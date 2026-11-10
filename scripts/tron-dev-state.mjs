@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Bounded, atomic state/identity helper for the developer-owned Debug Gateway. */
+// Bounded, atomic state/identity helper for the developer-owned Debug Gateway.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { networkInterfaces } from "node:os";
@@ -14,9 +14,6 @@ const STATE_LOCK_RETRY_MS = 25;
 const STATE_LOCK_STALE_MS = 30_000;
 const MAX_CANDIDATE_SOURCES = 8;
 const STATES = new Set(["starting", "ready", "stopping", "restarting", "failed", "stopped"]);
-// Lifecycle writes are deliberately transitions, not arbitrary patches. A
-// failed supervisor may be recovered by a new start; a stopped/ready state may
-// never be skipped or regressed into readiness.
 const LEGAL_TRANSITIONS = Object.freeze({
   stopped: new Set(["stopped", "starting", "stopping"]),
   starting: new Set(["starting", "ready", "stopping", "failed"]),
@@ -211,9 +208,6 @@ function parseFields(argumentsList) {
 
 function startAdmission({ lifecycle = "stopped", supervisorLive = false, childLive = false, listenerPresent = false }) {
   if (supervisorLive) return "supervised";
-  // A live child with the exact recorded start identity is ours even when its
-  // supervisor disappeared.  This decision intentionally precedes listener
-  // refusal; the caller may terminate only that exact recorded child.
   if (childLive) return "recover-orphan";
   if (listenerPresent) return "foreign-listener";
   if (["starting", "ready", "restarting"].includes(lifecycle)) return "mark-failed";
@@ -257,11 +251,6 @@ function currentBranch(worktree) {
   } catch { return null; }
 }
 
-// The payload manifest requires the full commit (gateway-payload-deploy.mjs
-// `payloadManifest`), so uncommitted work never alters the revision: it is
-// measured apart, as any non-ignored change including untracked files the
-// build may compile in. `--no-optional-locks` keeps `git status` from
-// rewriting (and locking) the index of a checkout other sessions may be using.
 function measureSource(root) {
   const gitOutput = (...argumentsList) => execFileSync("git", ["-C", root, ...argumentsList], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 16 * 1024 * 1024 });
   const revision = gitOutput("rev-parse", "--verify", "HEAD").trim();
@@ -269,9 +258,6 @@ function measureSource(root) {
   return { revision, dirty };
 }
 
-// The stage arguments `scripts/tron dev` builds a candidate with, measured
-// before the build. The version label is free-form and only reflects this
-// pre-build measurement; the recorded source flag is authoritative.
 function candidateSource(worktree) {
   const root = text(worktree, "");
   if (!isAbsolute(root)) throw new Error("candidate source worktree must be absolute");
@@ -280,16 +266,6 @@ function candidateSource(worktree) {
   return { revision, dirty, version: `debug-${revision.slice(0, 12)}${dirty ? "-dirty" : ""}-${stamp}` };
 }
 
-// Only the command that built a candidate knows its source, and only the
-// supervisor's ready transition knows which candidate runs. The builder
-// records source by the staged manifest's runtime epoch (fresh per stage;
-// the payload fingerprint is shared by Gateway-identical checkouts); status
-// resolves it from the ready epoch, so a failed restart never relabels the
-// running Gateway. Trimming keeps the running record.
-// Recording runs after the build, so it re-measures the tree here (#140): the
-// candidate is dirty if it was dirty before the build, is dirty now, or HEAD
-// moved away from the revision the payload was staged with, since the build may
-// have compiled any of those changes in.
 async function recordCandidateSource(path, runtimeEpoch, worktree, builtRevision, dirtyBeforeBuild) {
   if (typeof runtimeEpoch !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(runtimeEpoch)) throw new Error("candidate source requires a runtime epoch");
   const root = text(worktree, "");
@@ -333,13 +309,6 @@ async function selectedDevManifest(devHome) {
   return manifest;
 }
 
-// Stable must always be a known commit (#124). Handoff copies the selected dev
-// payload and proves the running Gateway is exactly it, so admission reads the
-// source record of that payload's runtime epoch - not the latest build or a
-// build sharing its fingerprint. Only an explicit clean record is admitted;
-// dirty and unknown dirtiness both fail closed. The admitted version and
-// fingerprint are printed so `handoff-debug` can refuse, under its operation
-// lock, a selection that changed after this unlocked read.
 async function handoffAdmission(statePath, devHome) {
   const manifest = await selectedDevManifest(devHome);
   const state = await readState(statePath);

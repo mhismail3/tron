@@ -5,8 +5,6 @@ import type { AutomationService } from "./automation-service.js";
 import type { ScheduleToolOperations, ScheduleToolRequest, ScheduleToolResult } from "./tron-schedule-extension.js";
 import type { AutomationAction, AutomationRecord, AutomationTrigger } from "./types.js";
 
-/** The existing receipt operation required by assistant schedule mutations.
- * Composition supplies the canonical owner; this consumer owns no receipt state. */
 interface ScheduleMutationReceipts {
   execute(identity: string, method: string, commandId: string, operation: () => Promise<JsonValue>): Promise<JsonValue>;
 }
@@ -59,7 +57,7 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
   private belongsToSession(automation: AutomationRecord, sessionId: string): boolean {
     if (automation.target.kind === "home") {
       try { const route = this.service.homeRoute(); if (route.sessionId === sessionId && route.homeId === automation.target.homeId && route.routeGeneration === automation.target.routeGeneration) return true; }
-      catch { /* An unavailable Home does not widen this session's inventory. */ }
+      catch { }
     }
     return (automation.target.kind === "existingSession" && automation.target.sessionId === sessionId)
       || (automation.provenance.kind === "assistant" && automation.provenance.sessionId === sessionId);

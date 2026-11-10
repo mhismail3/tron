@@ -2,13 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SCRIPTED_MODEL, SCRIPTED_PROVIDER, startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
-/**
- * A settings change reaches the next operation at the real Gateway-process
- * boundary (#2233): a source Gateway process, the production loopback WebSocket
- * and local credential, and a scripted HTTP provider as the only scripted party.
- * The provider request's model id is what the next prompt actually ran with.
- */
-
 const gateways: GatewayProcess[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -41,7 +34,6 @@ describe("a settings change reaches the next operation of a real Gateway process
     const changed = await create("changed");
     const other = await create("other");
     let turn = 0;
-    /** One prompt; returns the model id its provider request carried. */
     const prompt = async (sessionId: string): Promise<string> => {
       const before = gateway.provider.requests.length;
       const reply = `Reply ${++turn}.`;
@@ -68,7 +60,6 @@ describe("a settings change reaches the next operation of a real Gateway process
     expect(await prompt(other)).toBe(SCRIPTED_MODEL);
     expect(await resolved(other)).toMatchObject({ value: DEFAULT, layer: "global" });
 
-    // A change that read a stale value is refused and has no effect.
     const historyBefore = (await ok(phone, "settings.history", { key: KEY })).entries;
     const stale = await phone.request("settings.change", { commandId: "settings-stale-change", target: { kind: "session", sessionId: changed },
       fence: await fence(changed), changes: [{ key: KEY, layer: "session", op: "set", value: DEFAULT, expected: { provider: SCRIPTED_PROVIDER, id: "a-value-never-read" } }] });
@@ -79,7 +70,6 @@ describe("a settings change reaches the next operation of a real Gateway process
     expect((await ok(phone, "settings.history", { key: KEY })).entries).toEqual(historyBefore);
     expect(await prompt(changed)).toBe(ALTERNATE.id);
 
-    // Undo through the recorded change restores Global for the next prompt.
     expect(change).toMatchObject({ status: "applied", changes: [{ key: KEY, layer: "session", status: "applied", before: null, after: ALTERNATE }] });
     const changeId = change.changes[0].changeId as string;
     expect(await ok(phone, "settings.undo", { commandId: "settings-undo", changeId, fence: await fence(changed) })).toMatchObject({ status: "applied" });

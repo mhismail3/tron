@@ -12,35 +12,20 @@ import { readLocalCredential } from "../src/client/local-credential.js";
 import { PROTOCOL_VERSION } from "../src/version.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
 
-/**
- * One real source Gateway *process* (`src/index.ts`, the same entrypoint and
- * environment shape the iOS E2E fixture launches) on an isolated root, with a
- * scripted OpenAI-compatible HTTP provider as the only scripted party. Clients
- * cross the production loopback WebSocket with the root's local credential.
- * `restart()` is the fixture restart the iOS fault proxy performs: SIGTERM, join
- * the exit, then spawn the same entrypoint over the same root and port.
- * Nothing inside the Gateway is replaced or imported into the test process.
- */
-
 const gatewayRoot = fileURLToPath(new URL("..", import.meta.url));
-// The source resolver, and the inert-unless-enabled attention recovery hold.
 const preloads = ["home-ledger-crash-preload.mjs", "attention-recovery-hold-preload.mjs"]
   .map((name) => join(gatewayRoot, "test-support", name));
 
 export const SCRIPTED_PROVIDER = "scripted";
 export const SCRIPTED_MODEL = "scripted-model";
-/** A model for background roles (Home memory), answered outside the ordered script. */
 export const BACKGROUND_MODEL = "scripted-background";
 
-/** One OpenAI chat-completions request the Gateway's Pi made. */
 export interface ScriptedRequest {
   readonly model: string;
   readonly messages: ReadonlyArray<{ role: string; content?: unknown; tool_calls?: unknown; tool_call_id?: string }>;
   readonly body: string;
 }
 
-/** One reply: streamed text chunks and/or tool calls. `chunks` are written in
- * order; a function chunk is awaited between writes, so a step can hold mid-stream. */
 export interface ScriptedReply {
   readonly chunks?: ReadonlyArray<string | (() => Promise<void>)>;
   readonly toolCalls?: ReadonlyArray<{ id: string; name: string; arguments: Record<string, unknown> }>;
@@ -51,12 +36,8 @@ export type ScriptedStep = (request: ScriptedRequest, signal: AbortSignal) => Sc
 export interface ScriptedProvider {
   readonly port: number;
   readonly requests: ReadonlyArray<ScriptedRequest>;
-  /** Fixture faults: an unparsable request or a step that threw. A test asserts it empty. */
   readonly errors: ReadonlyArray<string>;
-  /** Steps answer requests in order; an unscripted request is answered with HTTP 500. */
   script(steps: readonly ScriptedStep[]): void;
-  /** Answer every request for `model` with `step`, outside the ordered script: a
-   * background role (Home memory) pointed at that model then never consumes a scripted turn. */
   answerModel(model: string, step: ScriptedStep): void;
   close(): Promise<void>;
 }
@@ -111,8 +92,6 @@ export async function startScriptedProvider(): Promise<ScriptedProvider> {
       sse(response, record.model, {}, reply.toolCalls?.length ? "tool_calls" : "stop");
       response.end("data: [DONE]\n\n");
     } catch (error) {
-      // A step rejects when its held request is aborted by the Gateway (the
-      // socket closed under it); any other rejection is a fixture fault.
       if (!aborted.signal.aborted) errors.push(`provider step failed: ${String(error)}`);
       response.destroy();
     }
@@ -143,17 +122,10 @@ export interface GatewayProcess {
   readonly agentDir: string;
   readonly cwd: string;
   readonly provider: ScriptedProvider;
-  /** The live child's PID; changes on `restart()`. */
   pid(): number;
-  /** Connect with the Mac's local credential, or with a paired device token from `pair()`. */
   connect(options?: { token?: string }): Promise<ProcessClient>;
-  /** Pair a device as the phone does: `POST /v1/pair` with the current invitation code. */
   pair(deviceName: string): Promise<{ deviceId: string; token: string }>;
-  /** Every `gateway.jsonl` record written so far, across restarts. */
   log(): Promise<Array<Record<string, any>>>;
-  /** Stop this process and start the same entrypoint over the same root and port.
-   * `environment` adds variables to the new process only (test preload switches);
-   * `whileStopped` runs between the old process's exit and the new start. */
   restart(options?: { environment?: Record<string, string>; whileStopped?: () => Promise<void> }): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -177,9 +149,6 @@ async function joinExit(child: ChildProcess, label: string, boundMs?: number): P
   await exited.catch(() => undefined);
 }
 
-/** Disposal runs in an `afterEach` hook (10 s `hookTimeout`): a SIGTERM join
- * within the hook bound, then a SIGKILL join, so a shutdown hang is reported by
- * its label and the process is still removed. */
 const KILL_JOIN_BOUND_MS = 3_000;
 
 export async function startGatewayProcess(options: { settings?: Record<string, unknown> } = {}): Promise<GatewayProcess> {
@@ -187,12 +156,10 @@ export async function startGatewayProcess(options: { settings?: Record<string, u
   let root: string | undefined;
   let child: ChildProcess | undefined;
   try {
-    // Canonical: the Tron workspace refuses a root reached through a symlink (macOS /var).
     root = await mkdtemp(join(tmpdir(), "tron-gateway-process-"));
     root = await realpath(root);
     return await launchGatewayProcess(options, provider, root, (spawned) => { child = spawned; });
   } catch (error) {
-    // A failed start never reaches the caller's disposal list: remove what it made.
     let joined = true;
     if (child && child.exitCode === null && child.signalCode === null) {
       child.kill("SIGKILL");
@@ -200,7 +167,6 @@ export async function startGatewayProcess(options: { settings?: Record<string, u
         .then(() => true, () => false);
     }
     await provider.close();
-    // A process that may still write keeps its root; the start error names the failure.
     if (root && joined) await rm(root, { recursive: true, force: true });
     throw error;
   }
@@ -215,7 +181,6 @@ async function launchGatewayProcess(
   const tronHome = join(root, "tron");
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
-  // Owner-only, as the Mac app creates its Tron home: the internal workspace refuses any other mode.
   for (const directory of [tronHome, agentDir, cwd, join(root, "home"), join(root, "tmp")]) await mkdir(directory, { recursive: true, mode: 0o700 });
   const model = (id: string) => ({ id, name: id, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
@@ -334,7 +299,6 @@ async function launchGatewayProcess(
           .catch((killFailure: unknown) => { failures.push(killFailure); });
       }
       await provider.close();
-      // A process that may still write keeps its root for inspection.
       if (failures.length < 2) await rm(root, { recursive: true, force: true });
       if (failures.length > 0) throw new AggregateError(failures, `Gateway process disposal failed (pid ${child.pid}, root ${root})`);
     },

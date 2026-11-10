@@ -13,8 +13,6 @@ import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 import type { RuntimeSlot } from "../../../kernel/run/runtime-slot.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 
-// Failure modes: managed loader/admission leaks into Home, or its resource read
-// still discovers external agents. Exercise real profile owners and SDK reloads.
 it("keeps managed subagents ordinary-only across Home profile replacement and restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-home-managed-profile-"));
   const agentDir = join(root, "agent");
@@ -65,8 +63,6 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
           "ask_user", "bash", "date", "delegate", "display", "edit", "find", "grep", "ls", "memory_search", "obligation", "profile",
           "projects", "read", "session_read", "session_search", "settings", "task", "web_search", "write", "zoom",
         ]);
-        // The executable allowlist alone can hide tools from a loaded provider;
-        // Home must exclude the extension itself, not merely hide its tools.
         expect(context.extensions.map(extension => extension.name.replace(/^<inline:/, "").replace(/>$/, "")).sort())
           .toEqual(["tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-projects", "tron-settings", "tron-web-research"]);
         expect(resources.subagents).toEqual([]);

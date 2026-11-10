@@ -238,9 +238,6 @@ describe("typed changes and exact native acceptance", () => {
       }, `native response durable ${cut} cut`, { boundMs: 15_000 });
       child.kill("SIGKILL");
       expect((await exited)[1]).toBe("SIGKILL");
-      // The kill may land inside the SDK's synchronous trust/settings lock while
-      // the accepted run continues. A restart honors proper-lockfile's own 10 s
-      // stale window; the fixture neither erases nor shortens that owner's lock.
       const agentDir = join(root, "agent");
       for (const name of (await readdir(agentDir)).filter(entry => entry.endsWith(".lock"))) {
         const age = Date.now() - (await stat(join(agentDir, name))).mtimeMs;
@@ -351,7 +348,6 @@ describe("typed changes and exact native acceptance", () => {
       expect((await f.settings.settingsChanges.history({ key: "tools.shell.path" })).entries).toHaveLength(1);
       expect(f.home.snapshot().transcript.find(item => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "native-change"))
         .toMatchObject({ isError: false, details: { status: "applied" } });
-      // The tapped change is logged once and the maintainer can undo it.
       await expect(f.service.invoke(phone, "settings.undo", { commandId: `undo-tapped-${++sequence}`, changeId: history[0]!.changeId }))
         .resolves.toMatchObject({ status: "applied" });
       expect(JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8")).shellPath).toBeUndefined();
@@ -375,7 +371,6 @@ describe("typed changes and exact native acceptance", () => {
   it("replans the actual store after the human wait and refuses a stale exact review", async () => {
     const f = await nativeChange();
     try {
-      // The maintainer's own paired tap applies directly while the card waits.
       await expect(f.service.invoke(phone, "settings.change", { commandId: "other-shell-accepted", target: { kind: "global" }, changes: [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/bash" }] }))
         .resolves.toMatchObject({ status: "applied", review: { requiresTap: true } });
       await expect(f.answer(true)).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("stale") });
@@ -500,7 +495,6 @@ describe("typed changes and exact native acceptance", () => {
 
   it("reads pre-retirement audit rows, including approval facts, as immutable history without an Undo", async () => {
     const f = await fixture(), directory = join(f.root, "stable-home", "gateway", "settings", "changes");
-    // Exact rows a Stable Gateway wrote before typed writes: a pending approval and its decline.
     const rows = [
       "{\"changeId\":\"00000005-0000-4000-8000-000000000000\",\"at\":\"2026-01-01T00:00:00.000Z\",\"actor\":{\"kind\":\"agent\",\"id\":\"01a00000-0000-7000-8000-00000000c0a1\",\"sessionId\":\"01a00000-0000-7000-8000-00000000c0a1\"},\"target\":{\"kind\":\"global\"},\"layer\":\"global\",\"key\":\"run.retry.maxRetries\",\"op\":\"set\",\"before\":6,\"after\":2,\"reason\":\"Corpus: an agent asks to retry less\",\"tier\":\"approve\",\"tierBasis\":{\"direction\":\"widen\",\"floor\":\"approve\",\"floorSource\":\"override\",\"web\":false,\"risk\":null},\"status\":\"pending\",\"requestId\":\"00000006-0000-4000-8000-000000000000\"}",
       "{\"changeId\":\"00000007-0000-4000-8000-000000000000\",\"at\":\"2026-01-01T00:00:00.000Z\",\"actor\":{\"kind\":\"agent\",\"id\":\"01a00000-0000-7000-8000-00000000c0a1\",\"sessionId\":\"01a00000-0000-7000-8000-00000000c0a1\"},\"target\":{\"kind\":\"global\"},\"layer\":\"global\",\"key\":\"context.images.block\",\"op\":\"set\",\"before\":true,\"after\":false,\"reason\":\"Corpus: an agent asks to allow images\",\"tier\":\"approve\",\"tierBasis\":{\"direction\":\"widen\",\"floor\":\"approve\",\"floorSource\":\"code\",\"web\":false,\"risk\":null},\"status\":\"pending\",\"requestId\":\"00000008-0000-4000-8000-000000000000\"}",

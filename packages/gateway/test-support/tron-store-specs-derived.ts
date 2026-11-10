@@ -9,13 +9,6 @@ import { SessionSearchIndex } from "../src/sessions/session-search-index.js";
 import { CORPUS_EPOCH } from "./fixed-recording.js";
 import { CORPUS_IDS, type StoreSpec } from "./tron-store-specs.js";
 
-/**
- * Derived and rebuildable stores in the persisted-store corpus
- * (packages/gateway/docs/scenario-locks.md#persisted-stores-v4): the Gateway can regenerate them, but a build still reads what an earlier one
- * wrote (the search index, the release-date cache) or a child process reads what the
- * Gateway wrote (the model-queue projection), so their bytes are a contract too.
- */
-
 const SEARCH_INDEX = "gateway/session-search.sqlite";
 
 function searchDocument(sessionId: string, title: string, texts: readonly string[]) {
@@ -30,7 +23,6 @@ function searchDocument(sessionId: string, title: string, texts: readonly string
   };
 }
 
-/** The model registry and credentials the corpus queue sees: two providers, one without credentials. */
 const queueRuntime = {
   getModel: (provider: string, id: string) => provider.startsWith("corpus-") && id !== "corpus-unregistered"
     ? { provider, id, api: "openai-completions" } : undefined,
@@ -38,7 +30,6 @@ const queueRuntime = {
   checkAuth: async () => undefined,
 } as unknown as ModelRuntime;
 
-/** A fresh usage read that puts `corpus-full` at its weekly limit. */
 async function queueUsage(_runtime: ModelRuntime, provider: string | undefined): Promise<ProviderUsageResponse> {
   return { providers: provider === "corpus-full" ? [{
     providerId: provider, status: "available", source: "corpus", scope: "account", updatedAt: null, retryAt: null, stale: false, message: null,
@@ -51,7 +42,6 @@ const SUBAGENT_QUEUE = ["corpus-provider/corpus-a", "corpus-limited/corpus-b", "
   "corpus-nocreds/corpus-d", "corpus-provider/corpus-unregistered"];
 const TASK_QUEUE = ["corpus-limited/corpus-b", "corpus-provider/corpus-a"];
 
-/** Where a task's projection lives: `model-queue.ts` names it by the session id's digest. */
 function taskProjectionPath(home: string): string {
   return join(dirname(modelQueueProjectionPath(home)), "model-queue-sessions",
     `${createHash("sha256").update(CORPUS_IDS.session).digest("hex")}.json`);
@@ -73,8 +63,6 @@ export const DERIVED_STORES: readonly StoreSpec[] = [
     async record(home) {
       const index = await SessionSearchIndex.open(join(home, SEARCH_INDEX));
       try {
-        // One row stamped with catalog facts (reused on the next start), one unstamped
-        // (re-derived), and one removed again.
         await index.replace(searchDocument(CORPUS_IDS.session, "Corpus planning", [
           "Plan the corpus garden layout", "Tomatoes along the south fence", "And basil beside them"]),
         { fileIdentity: "corpus-file-c0a1", size: 2_048, mtimeMs: CORPUS_EPOCH });
@@ -106,8 +94,6 @@ export const DERIVED_STORES: readonly StoreSpec[] = [
       await owner.publishProjection({ sessionId: CORPUS_IDS.session, queue: TASK_QUEUE });
     },
     async read(home) {
-      // A child reads its projection as of its own clock: a skip ends exactly at its expiry
-      // (ten minutes for a projected read, fifteen for a recorded usage limit).
       const at = async (path: string, ms: number) => projectionSource(path, () => CORPUS_EPOCH + ms).availability("subagent");
       return {
         mac: { now: await at(modelQueueProjectionPath(home), 0), at10Minutes: await at(modelQueueProjectionPath(home), 10 * 60_000),
@@ -124,7 +110,6 @@ export const DERIVED_STORES: readonly StoreSpec[] = [
       const catalog = releaseCatalog(home);
       const fetch = globalThis.fetch;
       const offline = process.env.PI_OFFLINE;
-      // models.dev is the only party replaced: the catalog fetches, validates and persists.
       globalThis.fetch = async () => new Response(JSON.stringify({ "corpus-provider": { models: {
         "corpus-a": { release_date: "2025-03-04" }, "corpus-fetched": { release_date: "2025-05-06" } } } }),
       { headers: { etag: "\"corpus-etag\"", "last-modified": "Wed, 31 Dec 2025 00:00:00 GMT" } });

@@ -92,7 +92,7 @@ class OwnershipScopeTests(ScopeCase):
     def test_unknown_ignored_data_or_no_lsof_keeps_a_worktrees_scratch(self) -> None:
         f = self.f
         parked = f.worktree("parked-work", merged=False, idle_days=0)
-        f.write("junk/data.bin", root=parked)  # ignored, no named writer: someone's local data
+        f.write("junk/data.bin", root=parked)
         age(f.write(".scratch/old.js", root=parked), 10)
         self.report("--prune")
         self.assertTrue((parked / ".scratch/old.js").exists())
@@ -115,7 +115,7 @@ class OwnershipScopeTests(ScopeCase):
         old = f.write(".pi/2248-review.js", "// workflow\n")
         age(old, 10)
         new = f.write(".pi/2276-review.js", "// workflow\n")
-        runs = f.write(".pi/subagents/artifacts/run.jsonl").parent.parent  # a directory is not a workflow script
+        runs = f.write(".pi/subagents/artifacts/run.jsonl").parent.parent
         age(runs / "artifacts/run.jsonl", 60)
         result = self.report()
         self.assertIn(str(runs), result["residue"])

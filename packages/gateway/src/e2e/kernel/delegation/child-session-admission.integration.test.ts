@@ -100,8 +100,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const childProducerId = "step:0";
     const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), runId, "run-0");
     await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
-    // Match the current producer: the root run reserves the fresh session
-    // directory while the stable artifact step owns the child process row.
     const childManager = SessionManager.create(fixture.cwd, childDirectory, {
       id: "validated-child-session",
     });
@@ -142,9 +140,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lifecycle: { state: "running" },
     });
 
-    // Pi reloads configured npm packages through their resolved local path in
-    // production. Controller authority follows the exact installed owner ID,
-    // not the mutable `source` display label.
     const localOwner = {
       id: "extension:installed-subagent", title: "Pi Subagents", source: "local",
     };
@@ -202,9 +197,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(page.revision).toMatch(/^[a-f0-9]{32}$/u);
     expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
 
-    // Ownership reads only the immutable session header, so an in-progress
-    // canonical append cannot transiently become an identity change. Page
-    // projection still waits for that JSONL entry's terminating newline.
     const existingLines = (await readFile(childFile, "utf8")).trimEnd().split("\n");
     const parentId = (JSON.parse(existingLines.at(-1)!) as { id: string }).id;
     const appendedEntry = JSON.stringify({
@@ -234,8 +226,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await waitFor(() => slot.processHistory(undefined, 25, { kind: "subagent" }).activities.length === 1, "the subagent history entry");
     expect(slot.processHistory(undefined, 25, { kind: "subagent" }).activities[0])
       .toMatchObject({ childSessionRef: "validated-child-session" });
-    // Historical opening must derive its exact binding from the canonical
-    // receipt rather than an unbounded runtime cache.
     (slot as unknown as { childSessionBindings: Map<string, unknown> }).childSessionBindings.clear();
     expect(slot.processChildSessionBinding(process!.processId)).toMatchObject({
       ref: "validated-child-session", producerId: childProducerId, sessionOwnerId: runId, runId,
@@ -284,8 +274,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       startedAt: started,
       lastUpdate: started + 500,
       mode: "single",
-      // A raw status field cannot nominate the fresh path owner; only the
-      // matching private descriptor may produce Gateway-attested evidence.
       steps: [{ agent: "worker", status: "running", sessionFile: childFile, sessionOwnerId: rootRunId }],
     }));
     await writeFile(descriptorPath, JSON.stringify({
@@ -300,8 +288,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(unbound).not.toHaveProperty("childSessionRef");
     expect(slot.processChildSessionBinding(unbound!.processId)).toBeUndefined();
 
-    // The descriptor is private producer evidence: its exact source run,
-    // session file, and fan-out root must agree before the path owner is used.
     await writeFile(descriptorPath, JSON.stringify({
       version: 1,
       sourceRunId: asyncRunId,

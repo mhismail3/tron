@@ -28,9 +28,7 @@ import {
 import { json } from "./response";
 import { isOpaqueId, validateNotification, validateRegistration } from "./validation";
 
-/** A registration that lost to concurrent or replayed authority: a spent challenge, an attested key, a stale assertion. */
 class RegistrationConflict extends Error {}
-/** The registry is at its installation or grant bound. */
 class RegistrationCapacity extends Error {}
 
 const CHALLENGE_TTL_SECONDS = 5 * 60;
@@ -40,15 +38,11 @@ const MAX_CHALLENGE_ATTEMPTS = 3;
 const MAX_INSTALLATIONS = 50_000;
 const MAX_GRANTS = 100_000;
 const MAX_GRANTS_PER_INSTALLATION = 8;
-// Per-device runaway backstop; routine use is not throttled below this ceiling.
 const HOURLY_LIMIT = 120;
 const DAILY_LIMIT = 1_000;
 const INSTALLATION_HOURLY_LIMIT = 120;
 const INSTALLATION_DAILY_LIMIT = 1_000;
 const RECEIPT_RETENTION_SECONDS = 7 * 24 * 60 * 60;
-// APNs owns a 15-second timeout. A second request inside this wider bound can
-// safely poll the exact in-flight provider attempt; beyond it, a crashed Worker
-// may have left outcome ownership permanently unknowable.
 const ACTIVE_PROVIDER_ATTEMPT_SECONDS = 30;
 const DISABLED_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 
@@ -197,7 +191,6 @@ export class PushRegistry {
       }
     } catch (error) {
       if (error instanceof AttestationRejected) return json({ error: "invalid_attestation" }, 401);
-      // Anything else is a server fault: it propagates, and the Worker answers 503 temporarily_unavailable.
       throw error;
     }
 
@@ -233,8 +226,6 @@ export class PushRegistry {
           );
           installation = this.installationByKey(registration.keyId);
         } else {
-          // Proof verification yields. An assertion cannot revive authority
-          // disabled by a token rejection or replacement attestation meanwhile.
           if (!installation || installation.enabled !== 1 || installation.route !== registration.route
             || Number(installation.assertion_counter) >= counter) {
             throw new RegistrationConflict("assertion_replayed");
@@ -267,9 +258,6 @@ export class PushRegistry {
           );
           grant = this.grant(grantId);
         } else if (grant.enabled !== 1) {
-          // A disabled endpoint capability may already have crossed a remote
-          // revocation boundary. Re-admission rotates both opaque authority
-          // values so an old signed tombstone can never disable the new grant.
           const previousGrantId = grant.grant_id;
           const grantId = randomOpaqueId();
           const secret = randomOpaqueId(32);
@@ -294,7 +282,6 @@ export class PushRegistry {
     } catch (error) {
       if (error instanceof RegistrationCapacity) return json({ error: "temporarily_unavailable" }, 503);
       if (error instanceof RegistrationConflict) return json({ error: "registration_conflict" }, 409);
-      // Anything else is a server fault: the transaction rolled back, and the Worker answers 503 temporarily_unavailable.
       throw error;
     }
   }
@@ -347,8 +334,6 @@ export class PushRegistry {
     }
     const grant = this.grant(grantId);
     const body = new Uint8Array();
-    // Opaque missing grants are an idempotent terminal revoke, including after
-    // bounded disabled-record pruning.
     if (!grant) return json({ error: "not_found" }, 404);
     const authentication = await verifyGrantSignature({
       secret: grant.secret, method: "DELETE", path, timestamp, requestId, body, provided: signature,
@@ -380,7 +365,6 @@ export class PushRegistry {
       const row = this.challenge(registration.challengeId);
       const now = epochSeconds();
       if (!row || row.consumed_at !== null || row.expires_at < now || row.attempt_count >= MAX_CHALLENGE_ATTEMPTS) return undefined;
-      // Reserve an attempt before expensive certificate/assertion verification.
       this.state.storage.sql.exec("UPDATE challenges SET attempt_count = attempt_count + 1 WHERE challenge_id = ?", registration.challengeId);
       const actual = decodeHex(row.challenge_hash);
       return constantTimeEqual(expected, actual) ? row : undefined;
@@ -389,8 +373,6 @@ export class PushRegistry {
 
   private async beginDispatch(requestId: string, grantId: string, bodyHash: string, notification: NotificationRequest): Promise<Response | StoredInstallation> {
     return this.state.storage.transaction(async () => {
-      // Capture authority, current token and quota together after async crypto.
-      // A pre-admission token snapshot can already belong to a retired registration.
       const grant = this.grant(grantId);
       if (!grant || grant.enabled !== 1) return json({ error: "invalid_signature" }, 401);
       const installation = this.installation(grant.installation_id);
@@ -473,8 +455,6 @@ export class PushRegistry {
       if (result.status === "invalid_token") {
         const current = this.installation(installation.installation_id);
         if (current?.enabled === 1 && current.apns_token !== installation.apns_token) {
-          // APNs proved non-delivery only for the retired token. Returning
-          // invalid_token would also disable the healthy grant in the Gateway.
           outcome = { status: "retryable", reason: "apns_token_changed", retryAfterSeconds: 30 };
         } else {
           this.state.storage.sql.exec("UPDATE installations SET enabled = 0, updated_at = ? WHERE installation_id = ?", now, installation.installation_id);

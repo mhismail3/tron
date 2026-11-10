@@ -42,75 +42,25 @@ import {
 } from "./scenario-lock.js";
 import { waitFor } from "./wait-for.js";
 
-/**
- * One real Gateway for a kernel scenario lock (packages/gateway/docs/scenario-locks.md#framework): the
- * production `RuntimeRegistry`, `GatewayService` and `GatewayServer` on a
- * loopback WebSocket with a paired device, the settings model and its change
- * path, and the faux provider as the only scripted party. Nothing inside the
- * kernel is replaced. The boundaries a scenario does not cross (uploads, PTY
- * terminals, provider auth) get inert owners that throw if a scenario reaches
- * them, so a lock can never pass through a fake.
- *
- * The harness records what the plan's V3 lock compares:
- * - every request a client makes, with its normalized response values;
- * - every client-visible event topic with the union of its payload structure
- *   (in-flight subtrees pruned, as the SDK boundary trace does);
- * - each provider request's tools, prompt sections, prompt hash and messages;
- * - canonical JSONL, and files under the stores a lock names;
- * - notifications enqueued at the relay boundary.
- */
-
 type Step = (context: TranscriptContext, options: SimpleStreamOptions | undefined) => AssistantMessage | Promise<AssistantMessage>;
 
 export interface LockGatewayOptions {
-  /** Real diagnostic owner for journeys that exercise system.logs. */
   readonly logger?: import("../src/transport/logger.js").GatewayLogger;
-  /** Extension sources written to `<agentDir>/extensions/<name>`. */
   readonly extensions?: ReadonlyArray<{ name: string; source: string }>;
-  /** Extra `settings.json` keys; the default model is always the faux model. */
   readonly settings?: Record<string, unknown>;
-  /**
-   * The production notification owner, built under the Gateway's Tron home. When
-   * given, it is wired as `gateway-main` wires it: the registry (with the machine
-   * id automatic pushes route by) and the service both receive it, replacing the
-   * recording relay-boundary stub. The lock owns its relay and its disposal.
-   */
   readonly notifications?: (tronHome: string) => NotificationService | Promise<NotificationService>;
-  /**
-   * Wire the production automation owners as `gateway-main` does: the store under
-   * the Tron home (its changes broadcast `automation.changed`), the executor over
-   * the registry's work registry, the scheduler, the service the RPCs reach, the
-   * registry's session-removal observers and the sessions' `schedule` tool.
-   */
   readonly automations?: boolean;
-  /** Real Knowledge and profile approval owners for authority-boundary journeys. */
   readonly knowledge?: boolean;
-  /** Wire Tron Home as gateway-main does: the Home workspace is a standalone trust
-   * directory, the registry runs Home on the Gateway's model runtime, and the
-   * service serves `home.*`. `memorySummarizer` answers Home memory's compactor
-   * calls in place of the background queue, so they never interleave with the
-   * scripted provider requests. */
   readonly home?: { readonly memorySummarizer: () => EpisodicSummarizer };
-  /** The registry's live-runtime cap; unset, as in production, there is none. */
   readonly maximumLiveRuntimes?: number;
-  /** Serve `gateway.restart` and `gateway.stop` as a supervised `gateway-main`
-   * does, with the real terminal owner and the restart's auth cancellation, but
-   * record each process exit request instead of exiting; the lock runs the drain. */
   readonly lifecycleRequests?: boolean;
-  /** Serve `packages.list` and `hooks.list` with the production package and hook
-   * owners `gateway-main` builds (without managed subagents, which no lock installs). */
   readonly administrativeResources?: boolean;
-  /** Start over the root a previous Gateway of this lock left with
-   * `dispose({ keepRoot: true })`: the same Tron home, sessions and workspace, as a
-   * process restart finds them. Pass the same `name`, which names the faux model. */
   readonly root?: string;
 }
 
-/** One process exit request `gateway-main` would act on, or the auth cancellation a restart makes. */
 export type LockLifecycleRequest = { readonly kind: "restart"; readonly restartNow: boolean } | { readonly kind: "stop" | "auth.cancelWaitingForRestart" };
 
 export interface LockConnectOptions {
-  /** `mobile` is the phone's presentation role: it may publish chat visibility. */
   readonly clientRole?: "mobile";
 }
 
@@ -118,18 +68,13 @@ export interface ProviderRequestRecord {
   readonly tools: readonly string[];
   readonly promptSections: readonly string[];
   readonly promptHash: string;
-  /** Each message after the system prompt: role, text and tool calls, normalized. */
   readonly messages: readonly TraceValue[];
 }
 
 export interface LockClient {
-  /** Send one request and wait for its response frame; the exchange is recorded. */
   request(method: string, params: Record<string, unknown>): Promise<{ ok: boolean; result?: any; error?: any }>;
-  /** Send without waiting; await the returned promise for the response. */
   send(method: string, params: Record<string, unknown>): Promise<{ ok: boolean; result?: any; error?: any }>;
-  /** Every event frame this connection received, in arrival order. */
   readonly events: ReadonlyArray<{ topic: string; sessionId?: string; payload: unknown }>;
-  /** Hold real server socket writes until released (also released on close). */
   holdWrites(): () => void;
   close(): Promise<void>;
 }
@@ -141,35 +86,23 @@ export interface LockGateway {
   readonly cwd: string;
   readonly registry: RuntimeRegistry;
   readonly normalization: TraceNormalization;
-  /** The loopback socket URL and the paired device's bearer token, for a raw handshake. */
   readonly socketUrl: string;
   readonly token: string;
-  /** Script the provider: each step answers one request and is recorded. */
   script(steps: readonly Step[]): void;
   connect(label: string, options?: LockConnectOptions): Promise<LockClient>;
-  /** A deterministic command id, unique within the lock. */
   commandId(): string;
-  /** Wait until the session's run, queue and maintenance have settled. */
   settled(sessionId: string): Promise<void>;
-  /** Observe this live operation through the real socket before releasing its provider. */
   observeLiveOperation(client: LockClient, sessionId: string): Promise<void>;
   canonical(sessionId: string): Promise<TraceValue[]>;
-  /** A normalized JSON file under the Gateway's roots, or `null` if absent. */
   file(path: string): Promise<TraceValue>;
-  /** Relative paths of every file below a directory, sorted. */
   tree(path: string): Promise<string[]>;
   readonly notifications: ReadonlyArray<TraceValue>;
-  /** Every runtime load and eviction the registry recorded, in order. */
   readonly runtimeLifecycle: ReadonlyArray<RuntimeLifecycleRecord>;
-  /** Process exit requests, when `lifecycleRequests` is set. */
   readonly lifecycleRequests: ReadonlyArray<LockLifecycleRequest>;
-  /** The recorded client and provider facts, normalized. */
   record(): { exchanges: TraceValue[]; events: TraceValue[]; providerRequests: ProviderRequestRecord[] };
-  /** Stop everything; `keepRoot` leaves the root for a restarted Gateway, which then owns its removal. */
   dispose(options?: { keepRoot?: boolean }): Promise<void>;
 }
 
-/** An owner the scenario must never reach: reaching it fails the lock loudly. */
 function unreachable(name: string, provided: Record<string, unknown> = {}): unknown {
   return new Proxy(provided, { get: (target, property) => {
     if (property === "then") return undefined;
@@ -206,7 +139,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const cwd = join(root, "workspace");
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
   await writeFile(join(cwd, "notes.txt"), "lock notes\n");
-  // Home's memory lives in the internal workspace, which opens only under an owner-only Tron home.
   if (options.home) await chmod(tronHome, 0o700);
   const normalization: TraceNormalization = { roots: [root, await realpath(root)] };
 
@@ -268,7 +200,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     } satisfies Partial<Parameters<typeof createTestRegistry>[0]> : {}),
     ...(options.maximumLiveRuntimes === undefined ? {} : { maximumLiveRuntimes: options.maximumLiveRuntimes }),
     runtimeLifecycleRecord: (entry) => { runtimeLifecycle.push(entry); },
-    // Mirrors gateway-main: slot events reach subscribed sockets.
     broadcast: (sessionId, topic, payload) => server?.broadcastSession(sessionId, topic, payload as never),
     sessionSummaryChanged: () => {},
     sessionListChanged: () => server?.notifySessionListChanged(),
@@ -279,7 +210,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } }).sessionCatalog.whenPublished();
 
   if (options.knowledge) knowledge = new ProfileStore(registry.moduleHost.contract(workspaceModule));
-  // Production settings wiring (gateway-main.ts): every read reconciles outside changes.
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: new MacTerminalService(tronHome, { launchAgentDirectory: join(root, "agents") }) }));
   const settingsRecord = new SettingsChangeRecord(tronHome);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, settingsRecord, settingsModel.owner.observedReaders);
@@ -295,7 +225,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   }
   registry.setSettings(settingsModel, settingsChanges);
 
-  // The relay boundary: what would be pushed to the maintainer's iPhone.
   const notifications: TraceValue[] = [];
   const receipts = new CommandReceiptStore(tronHome);
   let automations: AutomationService | undefined;
@@ -316,7 +245,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     scheduleTool = new GatewayScheduleToolOperations(automations, receipts);
   }
   const lifecycleRequests: LockLifecycleRequest[] = [];
-  // The real upload owner: a prompt materializes its (empty) attachment list through it.
   const uploads = new UploadStore(tronHome, 1_048_576);
   const service = new GatewayService({
     config: { machineId: "lock-machine", machineGroupID: "lock-group", machineName: "Lock Mac", tronHome, agentDir },
@@ -355,7 +283,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   });
   await server.listen();
   await automations?.initialize();
-  // gateway-main recovers Home tasks once serving; until then task reads and dispatch refuse.
   if (options.home) await homeOwnerOf(registry).recoverTasks();
   const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
 
@@ -369,8 +296,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     root, agentDir, tronHome, cwd, registry, normalization, notifications, runtimeLifecycle, lifecycleRequests,
     socketUrl: `ws://127.0.0.1:${port}/v1/socket`, token: paired.token,
     script(steps) {
-      // An unscripted request is itself a delta: it is recorded rather than crashing
-      // the run, and the repeated tail keeps later requests from desynchronizing.
       faux.setResponses([
         ...steps.map((step): Step => async (context, requestOptions) => { record(context); return step(context, requestOptions); }),
         ...Array.from({ length: 8 }, (): Step => (context) => {
@@ -416,8 +341,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
           if (!peer) throw new Error(`The ${label} server socket is closed`);
           const send = peer.send;
           const held: Parameters<WebSocket["send"]>[] = [];
-          // The real ordered queue admits only one write at a time. Holding its
-          // socket boundary makes supersession independent of compression speed.
           peer.send = ((...args: Parameters<WebSocket["send"]>) => { held.push(args); }) as WebSocket["send"];
           let released = false;
           const release = () => {
@@ -439,9 +362,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     commandId: () => `lock-command-${String(++commandCounter).padStart(4, "0")}`,
     async settled(sessionId) {
       const slot = await registry.acquire(sessionId);
-      // Admission installs the operation before its response is sent, so "no
-      // operation and not busy" after an admitted request is a settled run, never
-      // a run that has not started yet.
       await waitFor(() => !slot.isBusy && !slot.snapshot().operation, `session ${sessionId} to settle`);
     },
     async observeLiveOperation(client, sessionId) {
@@ -476,8 +396,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
         .map((entry) => normalizeTraceValue(relative(path, join(entry.parentPath, entry.name)), normalization) as string)
         .sort();
     },
-    // Events are read after the caller's last response: each socket's frames are
-    // ordered, so every broadcast the Gateway emitted before answering it is here.
     record() {
       const sorted = clientEventTrace(events).sort((left, right) => left.topic.localeCompare(right.topic));
       return {
@@ -497,8 +415,6 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
       if (!disposeOptions.keepRoot) {
-        // Join work the Gateway already admitted before removing the root it writes
-        // under: a request whose caller stopped waiting can still be running.
         await registry.administrativeWorkRegistry.waitUntilSettled();
         await rm(root, { recursive: true, force: true });
       }

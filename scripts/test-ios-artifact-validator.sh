@@ -1,12 +1,8 @@
 #!/usr/bin/env bash
-# Deterministic fixture test for signed-artifact metadata validation.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/tron-ios-artifact.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
-# The fixture app declares the canonical protocol. A literal went stale at each
-# lockstep bump (#113): the positive case then failed, and every negative case
-# below passed on the protocol mismatch instead of the defect it names.
 protocol="$(PYTHONPATH="$root/scripts" python3 -c 'from gateway_protocol_contract import load_contract; print(load_contract().protocol_version)')"
 app="$tmp/TronMobile.app"
 ext="$app/PlugIns/com.tron.mobile.ShareExtension.appex"

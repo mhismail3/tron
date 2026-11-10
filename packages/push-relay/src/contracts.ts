@@ -1,4 +1,3 @@
-/** Worker bindings are declared once in worker-configuration.d.ts. */
 export type Env = Cloudflare.Env;
 
 export type PushRoute = "beta" | "production-sandbox" | "production";

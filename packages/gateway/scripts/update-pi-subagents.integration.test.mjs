@@ -26,8 +26,6 @@ function fixture(run, usable = false) {
     for (const path of ["src", "test-support", "vitest.config.ts", "vitest.nested.config.ts"]) cpSync(join(gateway, path), join(target, path), { recursive: true });
     symlinkSync(join(gateway, "node_modules"), join(target, "node_modules"));
     for (const file of ["check-pi-subagents.mjs", "build-pi-subagents-closure.py"]) copyFileSync(join(gateway, "scripts", file), join(target, "scripts", file));
-    // Ambient-env calls merge onto this base, so npm's compile cache (written under TMPDIR) must be disabled here.
-    // Detached auto-GC or maintenance started by a fixture commit can still write into .git while the fixture is removed.
     const env = { PATH: process.env.PATH, HOME: join(root, "home"), TMPDIR: join(root, "tmp"), npm_config_registry: usable ? "https://registry.npmjs.org/" : "http://127.0.0.1:1", npm_config_fetch_retries: "0", npm_config_fetch_timeout: "1000", PYTHONDONTWRITEBYTECODE: "1", NODE_DISABLE_COMPILE_CACHE: "1", GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_0: "gc.auto", GIT_CONFIG_VALUE_0: "0", GIT_CONFIG_KEY_1: "maintenance.auto", GIT_CONFIG_VALUE_1: "false" };
     const git = (cwd, ...args) => command("git", ["-C", cwd, ...args], { env });
     for (const repo of [target, fork]) {
@@ -58,8 +56,6 @@ function fixture(run, usable = false) {
     }
     git(fork, "add", "."); git(fork, "commit", "-qm", "candidate");
     const commit = git(fork, "rev-parse", "HEAD");
-    // Network is the only fake boundary; source-object export, npm packing,
-    // closure construction, offline checks and repository mutations are real.
     const spawn = (bin, args, options) => {
       if (bin === "git" && args[0] === "ls-remote") return { status: 0, stdout: `${ancestor}\trefs/tags/v0.76.1\n`, stderr: "" };
       if (bin === "npm" && args[0] === "view") return { status: 0, stdout: JSON.stringify(args[1] === "pi-subagents" ? "0.77.0" : { version: "0.76.1", gitHead: ancestor, "dist.integrity": `sha512-${Buffer.alloc(64).toString("base64")}` }), stderr: "" };
@@ -73,7 +69,6 @@ function snapshot(root) {
 }
 
 test("packs committed objects, builds a closure and retains current as previous", async () => {
-  // fixture must outlive this async import.
   const { runUpdate } = await import(updater);
   fixture(({ target, fork, commit, pin, spawn, env, git }) => {
     writeFileSync(join(fork, "package.json"), "dirty working tree must not be read");
@@ -96,7 +91,6 @@ test("packs committed objects, builds a closure and retains current as previous"
     assert.equal(candidate.version, "0.76.1-tron.99");
     assert.deepEqual(candidate.fork, { repository: null, commit });
     const { previous: _olderPin, ...retainedPin } = pin;
-    // A rollback selection is the original build, not just a version/digest pair.
     assert.deepEqual(candidate.previous, retainedPin);
     assert.equal(result.latestUpstream, "0.77.0");
     assert.equal(readFileSync(unrelated, "utf8"), "keep");
@@ -161,8 +155,6 @@ for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-c
       const originalPin = readFileSync(join(target, "pi-subagents-pin.json")); const originalArtifacts = snapshot(target);
       if (failure === "rollback") {
         const probe = join(target, "src/e2e/kernel/delegation/managed-subagents.rollback.integration.test.ts");
-        // A real producer refusal on return, after candidate execution. No gate
-        // result or provider implementation is mocked.
         const source = readFileSync(probe, "utf8");
         const altered = source.replace('id: candidateTarget, message: "Return CHILD_ROLLBACK_RESUMED"', 'id: "missing-resume-target", message: "Return CHILD_ROLLBACK_RESUMED"');
         assert.notEqual(altered, source);
@@ -175,8 +167,6 @@ for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-c
           const pidFile = join(root, "writer.pid");
           const writer = `const fs=require('node:fs'); process.removeAllListeners('SIGTERM'); process.on('SIGTERM',()=>{});
             fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid)); setInterval(()=>fs.writeFileSync(${JSON.stringify(join(root, "live"))},'writing'),1);`;
-          // Permission-denied KILL is the unjoinable OS boundary. A process
-          // cannot literally refuse SIGKILL; never make this a runtime hook.
           const program = `const fs=require('node:fs'); const child=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(writer)}],{detached:true,stdio:'ignore'});
             const kill=process.kill.bind(process); process.kill=(pid,signal)=>{ if(signal==='SIGKILL') { const error=new Error('fixture termination denied'); error.code='EPERM'; throw error; } return kill(pid,signal); };
             const timer=setInterval(()=>{if(!fs.existsSync(${JSON.stringify(pidFile)})) return; clearInterval(timer); process.exit(0);},10);`;
@@ -211,8 +201,6 @@ for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-c
         } else assert.equal(readdirSync(target).some((name) => name.startsWith(".pi-subagents-update-")), false);
         assert.equal(existsSync(join(target, "pi-subagents-pin.json.tmp")), false);
       } finally {
-        // The denied OS boundary is injected only in the probe. The test owner
-        // still kills and joins the actual writer before fixture retirement.
         if (writerPid) {
           try { process.kill(-writerPid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
           const deadline = Date.now() + 5_000;
@@ -227,8 +215,6 @@ for (const failure of ["ancestor", "version", "missing-source", "dirty", "late-c
   });
 }
 
-// Git's auto-GC threshold counts loose objects in one objects/NN directory; two of them
-// make gc.auto=1 eligible.
 function writeLooseBlobs(gitDir, prefix, count) {
   const dir = join(gitDir, "objects", prefix);
   mkdirSync(dir, { recursive: true });
@@ -242,10 +228,6 @@ function writeLooseBlobs(gitDir, prefix, count) {
   }
 }
 
-// The Git subcommands an invocation started, its own included, read from its trace2
-// events. Every Git child inherits the event target, so automatic maintenance shows
-// up whatever its strategy: Git 2.54 made "geometric" the default, which repacks
-// without running gc or its pre-auto-gc hook, so a hook cannot observe it.
 function startedGitCommands(trace) {
   if (!existsSync(trace)) return [];
   return readFileSync(trace, "utf8").trim().split("\n").map((line) => JSON.parse(line))
@@ -254,14 +236,12 @@ function startedGitCommands(trace) {
 
 test("fixture Git children never start automatic maintenance", () => {
   fixture(({ target, env, git, root }) => {
-    // Foreground maintenance (autoDetach=false) finishes before git commit returns, so each trace is complete.
     git(target, "config", "gc.auto", "1"); git(target, "config", "gc.autoDetach", "false");
     writeLooseBlobs(join(target, ".git"), "17", 2);
     const guarded = join(root, "guarded.trace");
     command("git", ["-C", target, "commit", "--allow-empty", "-qm", "guarded"], { env: { ...env, GIT_TRACE2_EVENT: guarded } });
     assert.ok(existsSync(guarded), "the guarded commit wrote no trace2 events");
     assert.deepEqual(startedGitCommands(guarded).filter((name) => ["maintenance", "gc", "repack"].includes(name)), [], "fixture commit started automatic maintenance");
-    // Negative control: the same eligible repository, without the fixture configuration, repacks.
     const unguarded = join(root, "unguarded.trace");
     command("git", ["-C", target, "commit", "--allow-empty", "-qm", "unguarded"], { env: { PATH: env.PATH, HOME: env.HOME, TMPDIR: env.TMPDIR, GIT_TRACE2_EVENT: unguarded } });
     assert.ok(startedGitCommands(unguarded).includes("repack"), `eligible automatic maintenance did not repack: ${startedGitCommands(unguarded).join(" ")}`);

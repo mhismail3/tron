@@ -47,7 +47,6 @@ FRONT_DOOR = ROOT / "scripts/tron-profile"
 GATEWAY_PROFILER = ROOT / "scripts/tron-profile-gateway"
 DRIVER = ROOT / "scripts/tron-profile-gateway-driver.mjs"
 PROBE = ROOT / "scripts/tron-profile-gateway-probe.mjs"
-# The generator and probe tests need Node (CI provides it); they fail without it.
 NODE = shutil.which("node") or "node"
 
 
@@ -115,12 +114,9 @@ class ComparisonVerdicts(ReportFixture):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         verdicts = json.loads(result.stdout)["metrics"]
         self.assertEqual(verdicts["cpu.instructions"]["verdict"], "improvement")
-        # A 10% move inside a wide spread is noise, not a regression.
         self.assertEqual(verdicts["wall.time"]["verdict"], "unchanged")
 
     def test_single_unit_count_change_is_noise(self) -> None:
-        # A run that sends one extra frame on every iteration has zero spread;
-        # 28 vs 27 frames is 3.7% but must not fail a change.
         base = self.write("base", samples({"wire.mobile.session.snapshot.frames": ("count", "lower", [27, 27, 27])}))
         extra = self.write("extra", samples({"wire.mobile.session.snapshot.frames": ("count", "lower", [28, 28, 28])}))
         result = self.compare(base, extra)
@@ -200,7 +196,6 @@ class InputAdmission(ReportFixture):
         other.mkdir()
         self.write("first", samples({"cpu.time": ("ns", "lower", [1, 1, 1])}))
         second = self.write("second", samples({"cpu.time": ("ns", "lower", [2, 2, 2])}))
-        # Written last, by another worktree sharing the profiles root.
         foreign = self.write("foreign", samples({"cpu.time": ("ns", "lower", [3, 3, 3])}), worktree=other)
         result = subprocess.run([str(FRONT_DOOR), "status"], capture_output=True, text=True, env=self.environment, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -214,7 +209,6 @@ class InputAdmission(ReportFixture):
 
 class DeviceCapture(unittest.TestCase):
     def test_the_device_capture_refuses_without_an_explicit_attached_device(self) -> None:
-        # Attach-only: without --attach and --device, nothing is recorded.
         result = subprocess.run([str(FRONT_DOOR), "device"], capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn("scripts/tron-profile device: error: the following arguments are required: --attach, --device",
@@ -240,8 +234,6 @@ TIME_PROFILE = """<?xml version="1.0"?>
 <backtrace><frame name="elsewhere"><binary name="Other"/></frame></backtrace></row>
 </node></trace-query-result>
 """
-# xctrace stand-in: `export --toc` prints the table of contents; `export --xpath <query> --output F`
-# writes the one table the query names.
 FAKE_XCRUN = """#!/usr/bin/env python3
 import os, re, sys
 argv = sys.argv[1:]
@@ -368,7 +360,6 @@ class MultiSessionCatalog(unittest.TestCase):
 
     def test_same_seed_generates_the_same_tree_and_another_seed_does_not(self) -> None:
         first, second, other = self.generate("first"), self.generate("second"), self.generate("other", seed=7)
-        # Headers carry absolute paths under each fixture, so compare with the fixture prefix removed.
         self.assertEqual(tree_digest(Path(first["root"]), self.root / "first"),
                          tree_digest(Path(second["root"]), self.root / "second"))
         self.assertEqual(first["digest"], second["digest"])
@@ -400,7 +391,6 @@ class MultiSessionCatalog(unittest.TestCase):
                 self.assertEqual(header["parentSession"], str(path.parent.parent.parent) + ".jsonl")
             if "parentSession" in header:
                 self.assertTrue(Path(header["parentSession"]).is_file(), header["parentSession"])
-            # Pi's session tree: every entry's parent is the entry before it.
             previous = None
             for line in lines[1:]:
                 entry = json.loads(line)
@@ -569,11 +559,6 @@ class MultiSessionCleanup(unittest.TestCase):
         self.assertEqual(len(list((self.root / "results").glob("*/failure.json"))), 1)
 
 
-# A stand-in for the fixture Gateway's WebSocket surface, used by the
-# multi-session driver tests: it answers the driver's requests, journals how
-# every connection closed, and can fail the dashboard's list, hold one session
-# open past the window's deadline, or bind a fixed port (so a restart can reuse
-# it) on demand.
 STUB_GATEWAY = """
 import { createRequire } from "node:module";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
@@ -695,7 +680,6 @@ class StubGatewayHarness:
 
     def start_stub(self, fail_list_after: int | None, delay_open_session_id: str | None = None,
                    delay_ms: int = 0, port: int | None = None, **extra: object) -> subprocess.Popen[str]:
-        # A stale port file from a predecessor would be read as this one's.
         (self.root / "port").unlink(missing_ok=True)
         config = {"journal": str(self.root / "closes.jsonl"), "portFile": str(self.root / "port"),
                   "probeOutput": str(self.root / "probe.json"), "failListAfter": fail_list_after,
@@ -860,9 +844,6 @@ class MultiDriverWindows(StubGatewayHarness, unittest.TestCase):
                                      "tail; the tail's timer was not cleared")
 
     def test_an_operation_that_cannot_start_inside_the_window_is_not_measured(self) -> None:
-        # The cold lane's open finishes only after the 10 s window has closed:
-        # its prompt must not be timed then (the other lanes have stopped), and
-        # the result must hold the sample set the window's tail froze.
         status, output, _ = self.run_driver(seconds=10, cold=("stub-cold-1",), delay_open_ms=12_000)
         self.assertEqual(status, 0, output)
         result = json.loads((self.root / "run/result-stub.json").read_text())
@@ -894,17 +875,10 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
     unexpected close after an impairment leg going uncounted.
     """
 
-    # A connection fast enough for a pong miss to be counted inside a short
-    # leg; the phone's own contract values are exercised by the default runs.
     FAST_CONNECTION = {"pingIntervalMs": 300, "pongDeadlineMs": 200,
                       "transportOpenDeadlineMs": 8_000, "helloDeadlineMs": 8_000}
 
     def test_the_blackhole_counts_its_attempts_and_recovers_to_a_ready_chat(self) -> None:
-        # The path returns 5 s into an 8 s transport-open attempt: the recovery
-        # must include the rest of that attempt, not only the connect that
-        # follows it. The path's return cancels a pending backoff *wait* (C-3),
-        # never an attempt already on the wire, so this attempt still times out,
-        # and its change is consumed by the attempt that follows it.
         status, output, result = self.run_impairment(["blackhole"], {
             "blackholeSeconds": 5, "blackholeSettleMs": 400,
             "connection": dict(self.FAST_CONNECTION),
@@ -931,11 +905,6 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                         "the socket is abandoned one liveness window after the last inbound frame")
 
     def test_the_blackhole_waits_the_phone_backoff_and_consumes_its_path_change(self) -> None:
-        # A blackhole long enough for the model to pay the phone's backoff: the
-        # return 6 s in lands inside the second transport-open attempt, so the
-        # recovery is that attempt's remainder plus an immediate retry, and the
-        # attempts behind it are spaced by the phone's own curve instead of
-        # running back to back (zero-gap retries would fit twice as many).
         connection = dict(self.FAST_CONNECTION, transportOpenDeadlineMs=2_000, helloDeadlineMs=2_000)
         status, output, result = self.run_impairment(["blackhole"], {
             "blackholeSeconds": 6, "blackholeSettleMs": 400,
@@ -959,14 +928,9 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                              "recovery from the path's return stays inside the attempt that was in flight")
 
     def test_the_bandwidth_cap_meters_the_path_without_losing_the_socket(self) -> None:
-        # Three sessions, so the leg has three page mounts in flight at once:
-        # one at a time it can put at most one page ahead of a queued pong, and
-        # "zero pong misses" would then say nothing about the cap.
         status, output, result = self.run_impairment(["bandwidth"], {
             "bandwidthMbps": 0.2, "bandwidthLegSeconds": 5, "bandwidthInFlight": 3,
             "running": [{"sessionId": "stub-run-1"}, {"sessionId": "stub-run-2"}, {"sessionId": "stub-run-3"}],
-            # Frequent pings with room for a pong despite the cap, so the leg's
-            # round-trip metric has samples and the deadline is not the test.
             "connection": {"pingIntervalMs": 300, "pongDeadlineMs": 2_000,
                                      "transportOpenDeadlineMs": 8_000, "helloDeadlineMs": 8_000},
         })
@@ -987,10 +951,6 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         self.assertEqual(leg["unexpectedCloses"], 0, "the Gateway closed a socket on the capped path")
 
     def test_the_restart_case_counts_the_storm_from_the_restore(self) -> None:
-        # The mobile's first open after the restart is delayed past the request
-        # deadline's 1 s boundary. That request is the storm: a case that started
-        # measuring once every client was ready would report a fast storm and
-        # leave the slow one out.
         status, output, result = self.run_impairment(["restart"], {
             "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
             "connection": dict(self.FAST_CONNECTION, transportOpenDeadlineMs=2_000),
@@ -1004,8 +964,6 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
             self.assertLess(-2_000, entry["reconnectMs"], f"{entry['name']} was ready before its socket closed")
             self.assertLess(entry["reconnectMs"], 10_000, f"{entry['name']} did not reconnect within 10 s")
             self.assertTrue(any(attempt.get("connected") for attempt in entry["attempts"]))
-        # The clients retry from their own socket's close, so the downtime's
-        # refused connects are measured, not skipped by waiting for the answer.
         self.assertGreaterEqual(sum(1 for entry in leg["clientsAll"] for attempt in entry["attempts"]
                                     if not attempt.get("connected")), 1,
                                 "no client tried while the Gateway was down")
@@ -1019,11 +977,6 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                         f"the slow request made while the clients came back is missing: {storm}")
 
     def test_a_request_served_before_the_health_stamp_is_counted_as_the_storm(self) -> None:
-        # The profiler stamps `restoredAtMs` only after the new Gateway answered
-        # health: polling, `ps` and writing the answer take seconds, and the new
-        # Gateway serves requests in that gap. Those requests are the first and
-        # most contended ones, so they must be the storm's — classified by
-        # outcome, not left out because their start precedes the stamp.
         status, output, result = self.run_impairment(["restart"], {
             "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
             "connection": dict(self.FAST_CONNECTION, transportOpenDeadlineMs=2_000),
@@ -1043,10 +996,6 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         self.assertTrue(all(request["ms"] is not None for request in leg["requests"]))
 
     def test_the_restart_case_reports_the_new_startups_budget(self) -> None:
-        # The driver drops nothing of the profiler's answer: the budget the
-        # profiler read from the new process reaches the result the qualification
-        # run judges. Negative control: with `startup` not forwarded the leg
-        # reports None and restart_criterion_warnings says the budget is missing.
         budget = {"listeningMs": 1_200.0, "budgetMs": 5_000.0, "closeToListeningMs": 2_400.0,
                   "slowestStep": "modules", "slowestStepMs": 1_000.0}
         status, output, result = self.run_impairment(["restart"], {
@@ -1060,9 +1009,6 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
             {"label": "impaired", "impairment": {"restart": leg}}]), [])
 
     def test_the_streaming_case_holds_its_streams_and_reports_the_cap(self) -> None:
-        # The streaming case is only meaningful if it holds mounted chats whose
-        # transcripts stream: the stub's sessions never stream, so this proves
-        # the leg holds the streams and reports what it saw, not a backlog.
         status, output, result = self.run_impairment(["bandwidth-stream"], {
             "bandwidthStreamMbps": 0.5, "bandwidthStreamSeconds": 5, "bandwidthStreamSessions": 3,
             "running": [{"sessionId": f"stub-run-{index}"} for index in range(4)],
@@ -1079,11 +1025,6 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         self.assertEqual(leg["unexpectedCloses"], 0, "the stub closed a socket on the capped path")
 
     def test_a_leg_reports_its_own_round_trip_not_the_window_before_it(self) -> None:
-        # The mobile's first connection — the mixed window's — answers every pong
-        # 1.5 s late; the bandwidth leg then rebuilds its socket on the relay and
-        # its own pongs come back at once. A leg that reports the client's
-        # lifetime maximum hands the mixed window's delay to the leg and calls it
-        # this leg's backlog.
         status, output, result = self.run_impairment(["bandwidth"], {
             "bandwidthMbps": 0.05, "bandwidthLegSeconds": 3, "measuredDeadlineMs": 30_000,
             "connection": dict(self.FAST_CONNECTION),
@@ -1097,9 +1038,6 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                         f"the leg reported the delayed window's round trip as its own: {leg['maxPingToPongMs']}")
 
     def test_a_late_pong_is_charged_to_the_ping_it_answers(self) -> None:
-        # Every pong answers 1.5 s late, five ping intervals after its own ping:
-        # charging the pong to the newest outstanding ping instead reports ~300 ms
-        # for a path whose round trip is 1.5 s.
         status, output, result = self.run_impairment(["bandwidth"], {
             "bandwidthMbps": 0.05, "bandwidthLegSeconds": 5, "measuredDeadlineMs": 30_000,
             "connection": dict(self.FAST_CONNECTION),
@@ -1111,12 +1049,6 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                                 f"the pong's own delay was not reported: {leg['maxPingToPongMs']}")
 
     def test_a_capped_legs_close_keeps_every_other_leg_and_the_restart(self) -> None:
-        # The stub closes the mobile's socket when it opens the first streamed
-        # session, so the close happens inside the bandwidth-stream leg. A close
-        # under the cap is that case's own finding (G-4's target is zero), not a
-        # broken client: the leg records it, the restart case then still runs on
-        # a reconnected client, and only then is the run rejected. It must not
-        # throw away the legs already measured or skip the restart.
         status, output, result = self.run_impairment(["bandwidth-stream", "restart"], {
             "bandwidthStreamMbps": 0.5, "bandwidthStreamSeconds": 3, "bandwidthStreamSessions": 3,
             "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
@@ -1135,10 +1067,6 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                         f"the restart left a client down: {restart['clientsAll']}")
 
     def test_an_unexpected_close_after_a_blackhole_is_not_excused(self) -> None:
-        # The stub closes the mobile's socket on its fourth open: the mount that
-        # opens the bandwidth leg, after the blackhole's settle and recovery.
-        # A close the client did not ask for must be counted and must fail the
-        # run: `closing` left set by the blackhole's abandon would excuse it.
         status, output, result = self.run_impairment(["blackhole", "bandwidth"], {
             "blackholeSeconds": 2, "blackholeSettleMs": 400,
             "connection": dict(self.FAST_CONNECTION, transportOpenDeadlineMs=2_000),

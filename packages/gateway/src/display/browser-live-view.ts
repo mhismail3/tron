@@ -44,12 +44,9 @@ interface BrowserLiveViewRegistration {
   generation: string;
   title?: string;
   fallbackText?: string;
-  /** The concrete extension load, not the longer-lived RuntimeSlot identity. */
   loadToken: string;
   cdpUrl: string;
 }
-// Demand/diagnostic lifetimes use monotonic time; wall-clock correction must
-// not extend an abandoned viewer or manufacture expiry during a live read.
 interface Viewer { leaseId: string; viewerId: string; lastSeenAt: number; delivery?: { cancel: () => void } }
 interface View {
   registration: Registration;
@@ -72,17 +69,10 @@ function bounded(value: unknown, maximum: number): value is string {
     && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
-/** Shared disposable viewer ownership. The browser provider owns automation;
- * the Native Host owns selected windows and native stream retirement. Registering
- * a view starts neither producer. Pixels are latest-only and never journaled. */
 export class BrowserLiveViewRegistry {
   private readonly views = new Map<string, View>();
-  // Start can fail after POST admission succeeded. Keep only a bounded reason
-  // for the exact ended reference so the next frame GET can explain it.
   private readonly nativeFailures = new Map<string, { generation: string; reason: NativeLiveFailure; expiresAt: number }>();
   private readonly leases = new Map<string, View>();
-  // Admission reserves a retirement receipt. Never forget a closed generation
-  // merely to admit another: late producer results must not resurrect it.
   private readonly observedGenerations = new Map<string, BrowserLiveViewDescriptor>();
   private readonly activeLoadTokens = new Map<string, string>();
   private expiryTimer: NodeJS.Timeout | undefined;
@@ -101,8 +91,6 @@ export class BrowserLiveViewRegistry {
     const previous = this.nativeCatalogs.get(sessionId);
     if (previous) { this.nativeCatalogs.delete(sessionId); this.joinNative(previous.close()); }
     if (this.nativeCatalogs.size >= 4) throw new GatewayError("busy", "Native catalog capacity reached", true);
-    // Repeated catalog reads replace only unused handles. Wait for their local
-    // connection retirement before opening another of the four native clients.
     const client = Promise.resolve(previous?.close()).then(() => {
       if (this.nativeCatalogs.get(sessionId) !== entry || !this.isLoadActive(sessionId, loadToken)) {
         throw new GatewayError("conflict", "Native catalog load ended before opening");
@@ -114,7 +102,7 @@ export class BrowserLiveViewRegistry {
       close: () => closing ??= client.then(async (value) => {
         const result = await value.close();
         if (result.diagnostic) throw new Error("Native capture joined with a retirement diagnostic");
-      }, () => { /* Failed open already joined its local transport cleanup. */ }) };
+      }, () => { }) };
     this.nativeCatalogs.set(sessionId, entry);
     const cancel = (): void => {
       if (this.nativeCatalogs.get(sessionId) === entry) this.nativeCatalogs.delete(sessionId);
@@ -142,8 +130,6 @@ export class BrowserLiveViewRegistry {
     if (!source || !current()) throw new GatewayError("not_found", "Native source handle is unavailable");
     if (region && (source.kind !== "display" || region.x > source.width || region.y > source.height
       || region.width > source.width - region.x || region.height > source.height - region.y)) throw new GatewayError("invalid_request", "Region must stay inside its selected display");
-    // Selecting a new source replaces only this session's native view, never
-    // another session's stream or a browser provider's execution.
     const prior: Promise<void>[] = [];
     for (const view of this.views.values()) if (view.registration.sessionId === sessionId && "native" in view.registration) {
       prior.push(view.registration.native.close());
@@ -156,7 +142,7 @@ export class BrowserLiveViewRegistry {
     const registration: NativeLiveViewRegistration = { sessionId, loadToken: entry.loadToken,
       viewId: randomUUID(), generation: randomUUID(), title: `${(source.title || source.applicationName).replace(/[\u0000-\u001f\u007f]/g, " ").trim() || "Mac view"}${region ? " (area)" : ""}`.slice(0, 256),
       handle, region, native: entry };
-    this.nativeCatalogs.delete(sessionId); // The view now owns the exact retained target.
+    this.nativeCatalogs.delete(sessionId);
     this.views.set(key(sessionId, registration.viewId), { registration, viewers: new Map(), latest: undefined,
       observer: undefined, epoch: 0, sequence: 0 });
     return this.descriptor(registration);
@@ -180,8 +166,6 @@ export class BrowserLiveViewRegistry {
       this.nativeRetirements.delete(work); this.nativeFailure();
     });
   }
-  /** Local requests remain owned until they settle. A failed remote Stop is
-   * reported, not turned into proof that the Host released its resources. */
   async joinRetirements(): Promise<void> { await Promise.allSettled([...this.nativeRetirements]); }
 
   beginSessionLoad(sessionId: string): string {
@@ -198,8 +182,6 @@ export class BrowserLiveViewRegistry {
     if (!this.isLoadActive(registration.sessionId, registration.loadToken)) {
       throw new GatewayError("conflict", "Browser extension load is no longer active");
     }
-    // Public explicit-get and native-bound actions can name their scope
-    // differently. Exact endpoint/generation owns the viewer, not that alias.
     for (const view of this.views.values()) {
       const old = view.registration;
       if ("cdpUrl" in old && old.sessionId === registration.sessionId && old.generation === registration.generation
@@ -226,8 +208,6 @@ export class BrowserLiveViewRegistry {
   describe(sessionId: string, viewId: string, generation: string): LiveViewDescriptor {
     return this.descriptor(this.requireView(sessionId, viewId, generation).registration);
   }
-  /** Synchronous admission lets the transport couple auth/branch fences and
-   * lease creation without a revocation window across an await. */
   open(sessionId: string, viewId: string, generation: string, viewerId: string): { leaseId: string; descriptor: LiveViewDescriptor } {
     if (!bounded(viewerId, 256)) throw new GatewayError("invalid_request", "Live view viewer identity is invalid");
     this.expire();
@@ -250,8 +230,6 @@ export class BrowserLiveViewRegistry {
     }
     return { leaseId, descriptor: this.descriptor(view.registration) };
   }
-  /** A viewer owns at most one unfinished response, including backpressure.
-   * Retirement cancels that write; completed reads release without closing it. */
   acquireFrame(sessionId: string, viewId: string, generation: string, leaseId: string, viewerId: string, cancel: () => void, after = 0): { frame: BrowserLiveViewFrameResult; release: () => void } {
     if (!Number.isSafeInteger(after) || after < 0) throw new GatewayError("invalid_request", "Frame sequence is invalid");
     const view = this.requireView(sessionId, viewId, generation);
@@ -287,8 +265,7 @@ export class BrowserLiveViewRegistry {
     view.viewers.delete(leaseId);
     const delivery = viewer.delivery;
     delete viewer.delivery;
-    // A failed transport cancellation must not retain other viewers or capture.
-    try { delivery?.cancel(); } catch { /* the lease has already been fenced */ }
+    try { delivery?.cancel(); } catch { }
     if (view.viewers.size === 0) this.stop(view);
     if (this.leases.size === 0 && this.expiryTimer) {
       clearInterval(this.expiryTimer);
@@ -326,8 +303,6 @@ export class BrowserLiveViewRegistry {
     if (!known && this.observedGenerations.size >= MAXIMUM_OBSERVED_GENERATIONS) {
       throw new GatewayError("busy", "The Gateway has reached its browser generation capacity", true);
     }
-    // Keep the same bounded receipt after retirement, including close-first
-    // observations. Repeated closed aliases must not invent another window.
     const descriptor = known ?? this.descriptor(registration);
     this.observedGenerations.set(observed, descriptor);
     for (const view of this.views.values()) {
@@ -410,8 +385,6 @@ export class BrowserLiveViewRegistry {
     view.observer = observer;
     void observer.done.then(() => {
       if (!current()) return;
-      // An observer failure is terminal for every attached viewer, not a
-      // renewable waiting state. The descriptor may still reopen this UUID.
       for (const leaseId of view.viewers.keys()) this.close(leaseId);
     });
   }
@@ -421,7 +394,6 @@ export class BrowserLiveViewRegistry {
     this.nativeFailures.set(key(registration.sessionId, registration.viewId), {
       generation: registration.generation, reason, expiresAt: performance.now() + 60_000,
     });
-    // This requests Stop; neither the deadline nor the diagnostic proves join.
     this.retire(view);
   }
   private stop(view: View): void {
@@ -431,8 +403,6 @@ export class BrowserLiveViewRegistry {
     if ("native" in view.registration && view.observer) {
       this.joinNative(view.observer.done);
       void view.observer.done.catch(() => {
-        // An uncertain suspend cannot leave a resumable target, even if a new
-        // viewer has already arrived while the old stream was joining.
         if (this.views.get(key(view.registration.sessionId, view.registration.viewId)) === view) this.retire(view);
       });
     }

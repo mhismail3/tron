@@ -252,16 +252,10 @@ function safeLink(uri: string): string | undefined {
 
 function encodedBytes(value: unknown): number { return Buffer.byteLength(JSON.stringify(value), "utf8"); }
 
-/**
- * Converts one diagnostic/display string into a single bounded frame. This is
- * intentionally built on the parser's grapheme and display-cell accounting;
- * callers must not use JavaScript string slicing to fit terminal columns.
- */
 export function boundedExtensionFrame(source: string, maxColumns = EXTENSION_FRAME_MAX_COLUMNS): ExtensionFrame {
   return parseExtensionFrame([source], { maxColumns, maxLines: 1 }).frame;
 }
 
-/** Converts logical component lines into a bounded, terminal-independent frame. */
 export function parseExtensionFrame(sourceLines: readonly string[], limits: ExtensionFrameLimits = {}): ParseExtensionFrameResult {
   const resolved = resolveLimits(limits);
   const diagnosticCodes = new Set<FrameDiagnosticCode>();
@@ -295,8 +289,6 @@ export function parseExtensionFrame(sourceLines: readonly string[], limits: Exte
       let index = 0;
       let cursorSourceOffset: number | undefined;
 
-      // First tokenize printable spans with style. Cell accounting happens only
-      // after controls are removed so a style boundary cannot split a grapheme.
       const append = (text: string) => {
         if (text.length === 0) return;
         const last = runs.at(-1);
@@ -354,7 +346,6 @@ export function parseExtensionFrame(sourceLines: readonly string[], limits: Exte
         }
 
         if (code === 0x09) {
-          // Tabs are expanded after the current visible prefix is known.
           const prefixColumns = visibleWidth(plainText);
           append(" ".repeat(TAB_WIDTH - (prefixColumns % TAB_WIDTH)));
           index += 1;

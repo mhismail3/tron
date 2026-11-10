@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { once } from "node:events";
 import { test } from "node:test";
 
-/** The fixture Node answers the repository pin, which scripts/tron-node requires. */
 const PINNED_NODE = readFileSync(new URL("../.node-version", import.meta.url), "utf8").trim();
 
 const run = (state, command, ...argumentsList) => execFileSync(process.execPath, [helper, command, state, ...argumentsList], { encoding: "utf8" });
@@ -87,21 +86,6 @@ test("Debug start admission recovers only an exact owned orphan", () => {
   assert.equal(admission("failed", false, false, false), "start");
 });
 
-// Running-candidate source (worktree + branch) failure modes:
-// 1. A restart staged from another worktree fails before readiness, and status
-//    names that worktree although the previous candidate is still running -
-//    including when both checkouts build the same payload fingerprint (the
-//    fingerprint covers only app/runtime files, so a docs- or iOS-only branch
-//    matches main); records are keyed by the per-stage runtime epoch.
-// 2. Status reads the worktree's branch live, so a later checkout there
-//    rewrites which branch the running Gateway claims to come from.
-// 3. A running epoch with no recorded source (pre-existing state or evicted
-//    record) is reported as the latest build instead of unknown.
-// 4. Source records grow with every restart until the bounded lifecycle state
-//    becomes unwritable, or a re-recorded epoch leaves a stale duplicate.
-// 5. A detached checkout is reported with an invented branch such as `HEAD`.
-// 6. Consecutive builds that never reach readiness evict the running
-//    candidate's record, so status loses the source of the live Gateway.
 const git = (cwd, ...argumentsList) => execFileSync("git", ["-C", cwd, ...argumentsList], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 const sourceFixture = (root, name, branch) => {
   const worktree = join(root, name);
@@ -110,13 +94,10 @@ const sourceFixture = (root, name, branch) => {
   git(worktree, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "--allow-empty", "-m", "fixture");
   return worktree;
 };
-// Records a build of the worktree's current HEAD with the given pre-build
-// dirty flag, as `scripts/tron dev start` does after `build_candidate`.
 const recordSource = (state, epoch, worktree, dirtyBeforeBuild) => run(
   state, "record-source", epoch, worktree, git(worktree, "rev-parse", "HEAD").trim(), dirtyBeforeBuild,
 );
 const epochFor = (index) => `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
-// Every candidate in these fixtures shares one payload fingerprint.
 const sharedFingerprint = "f".repeat(64);
 const markRunning = (state, epoch) => {
   const value = JSON.parse(run(state, "read"));
@@ -136,13 +117,10 @@ test("Debug status names the worktree and branch of the running candidate, not t
     const second = sourceFixture(root, "second", "feat/second");
     recordSource(state, epochFor(1), first, "false");
     recordSource(state, epochFor(2), second, "false");
-    // Failure mode 1: the second build (same fingerprint) was recorded but never became ready.
     assert.deepEqual(runningSource(state, epochFor(1)), { worktree: first, branch: "feat/first" });
     assert.deepEqual(runningSource(state, epochFor(2)), { worktree: second, branch: "feat/second" });
-    // Failure mode 2: a later checkout in the source worktree does not rewrite history.
     git(second, "checkout", "-q", "-b", "feat/later");
     assert.deepEqual(runningSource(state, epochFor(2)), { worktree: second, branch: "feat/second" });
-    // Failure mode 3: an unrecorded running epoch is unknown, not the latest build.
     assert.deepEqual(runningSource(state, epochFor(3)), { worktree: null, branch: null });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -190,19 +168,6 @@ test("Debug source records keep the running candidate while later builds never r
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// Dirty-tree candidate failure modes (#107; the stage-validator tie lives in
-// gateway-payload-deploy.test.mjs):
-// 7. A tree with uncommitted changes is refused, or its revision carries a
-//    suffix, instead of staging the full HEAD with dirtiness recorded apart.
-// 8. Uncommitted work is reported clean: a tracked edit, or an untracked new
-//    file the build compiles in (also when the repository hides untracked
-//    files from `git status` by configuration).
-// 9. Ignored build outputs mark every candidate dirty.
-// 10. Status reports the dirtiness of the latest build rather than of the
-//     running candidate, or reports an unrecorded one as clean.
-// 11. A malformed dirty value is recorded instead of failing closed.
-// 12. Measuring dirtiness rewrites the source checkout's index (taking its
-//     index.lock), so a concurrent git command there fails.
 const candidateSource = (worktree) => {
   const [revision, dirty, version, ...rest] = execFileSync(process.execPath, [helper, "candidate-source", worktree], { encoding: "utf8" }).trim().split(" ");
   assert.deepEqual(rest, []);
@@ -218,22 +183,18 @@ test("Debug candidate source is the full HEAD with dirtiness measured apart", ()
     git(worktree, "add", ".");
     git(worktree, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "tracked");
     const head = git(worktree, "rev-parse", "HEAD").trim();
-    // Failure mode 9: ignored build outputs are not uncommitted work.
     mkdirSync(join(worktree, "dist"));
     writeFileSync(join(worktree, "dist", "index.js"), "built\n");
     const clean = candidateSource(worktree);
     assert.equal(clean.revision, head);
     assert.equal(clean.dirty, "false");
     assert.match(clean.version, new RegExp(`^debug-${head.slice(0, 12)}-\\d{14}$`, "u"));
-    // Failure modes 7 and 8: a tracked edit keeps the full HEAD and is dirty.
     writeFileSync(join(worktree, "tracked.ts"), "export const edited = true;\n");
     const edited = candidateSource(worktree);
     assert.equal(edited.revision, head);
     assert.equal(edited.dirty, "true");
     assert.match(edited.version, new RegExp(`^debug-${head.slice(0, 12)}-dirty-\\d{14}$`, "u"));
     git(worktree, "checkout", "-q", "--", "tracked.ts");
-    // Failure mode 8: an untracked source file is uncommitted work, even when
-    // configuration hides untracked files from plain `git status`.
     writeFileSync(join(worktree, "new-module.ts"), "export {};\n");
     git(worktree, "config", "status.showUntrackedFiles", "no");
     assert.deepEqual(candidateSource(worktree).dirty, "true");
@@ -247,8 +208,6 @@ test("Debug candidate source leaves the source checkout's index untouched", () =
     writeFileSync(join(worktree, "tracked.ts"), "export {};\n");
     git(worktree, "add", ".");
     git(worktree, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "tracked");
-    // Failure mode 12: stale cached stat data is what a refreshing `git status`
-    // would write back; the measurement must not.
     const later = new Date(Date.now() + 60_000);
     utimesSync(join(worktree, "tracked.ts"), later, later);
     const index = join(worktree, ".git", "index");
@@ -269,15 +228,12 @@ test("Debug status reports the dirtiness recorded for the running candidate", ()
     };
     recordSource(state, epochFor(1), worktree, "true");
     recordSource(state, epochFor(2), worktree, "false");
-    // Failure mode 10: each epoch keeps its own flag; unknown is null, not clean.
     assert.equal(runningDirty(epochFor(1)), true);
     assert.equal(runningDirty(epochFor(2)), false);
     assert.equal(runningDirty(epochFor(3)), null);
     const value = JSON.parse(run(state, "read"));
     writeFileSync(state, `${JSON.stringify({ ...value, candidateSources: [{ runtimeEpoch: epochFor(4), worktree, branch: "feat/source" }] })}\n`);
     assert.equal(runningDirty(epochFor(4)), null);
-    // Failure modes 11 and 21: only the full built revision and an explicit
-    // true/false pre-build flag are recorded.
     const head = git(worktree, "rev-parse", "HEAD").trim();
     for (const malformed of [[head], [head, "yes"], [head, ""], ["false"], [head.slice(0, 12), "false"], ["", "false"]]) {
       assert.throws(() => execFileSync(process.execPath, [helper, "record-source", state, epochFor(5), worktree, ...malformed], { stdio: "ignore" }));
@@ -286,14 +242,6 @@ test("Debug status reports the dirtiness recorded for the running candidate", ()
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// Post-build dirtiness failure modes (#140): `start`/`restart` measure the
-// source before `build_candidate` and record it after, so the record must also
-// reflect what changed while the build ran.
-// 18. A tracked or untracked edit made during the build is recorded clean.
-// 19. A commit made during the build (clean before and after, HEAD moved) is
-//     recorded clean against the pre-build revision the payload carries.
-// 20. A tree dirty before the build and cleaned during it is recorded clean.
-// (21, a malformed pre-build measurement, is covered above.)
 test("Debug source record is dirty when the tree changed while the candidate built", () => {
   const root = mkdtempSync(join(tmpdir(), "tron-dev-source-"));
   try {
@@ -303,8 +251,6 @@ test("Debug source record is dirty when the tree changed while the candidate bui
     git(worktree, "add", ".");
     git(worktree, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "tracked");
     const recordedDirty = (epoch) => JSON.parse(run(state, "read")).candidateSources.find((entry) => entry.runtimeEpoch === epoch)?.dirty;
-    // Each build: measure before (candidate-source), mutate the tree as an
-    // edit during the build would, then record as `scripts/tron dev` does.
     const build = (epoch, duringBuild) => {
       const before = candidateSource(worktree);
       duringBuild();
@@ -312,35 +258,19 @@ test("Debug source record is dirty when the tree changed while the candidate bui
       return recordedDirty(epoch);
     };
     assert.equal(build(epochFor(1), () => {}), false);
-    // Failure mode 18: a tracked edit, then an untracked file.
     assert.equal(build(epochFor(2), () => writeFileSync(join(worktree, "tracked.ts"), "export const edited = true;\n")), true);
     git(worktree, "checkout", "-q", "--", "tracked.ts");
     assert.equal(build(epochFor(3), () => writeFileSync(join(worktree, "new-module.ts"), "export {};\n")), true);
-    // Failure mode 19: the edit is committed before the build finishes.
     assert.equal(build(epochFor(4), () => {
       git(worktree, "add", "new-module.ts");
       git(worktree, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "during build");
     }), true);
-    // Failure mode 20: dirty when measured, reverted before the record.
     writeFileSync(join(worktree, "tracked.ts"), "export const edited = true;\n");
     assert.equal(build(epochFor(5), () => git(worktree, "checkout", "-q", "--", "tracked.ts")), true);
     assert.equal(build(epochFor(6), () => {}), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// Handoff source admission failure modes (#124: Stable is always a known commit):
-// 13. A candidate recorded as built from a dirty tree is copied into Stable.
-// 14. A candidate whose dirtiness is unknown - no record for its epoch
-//     (evicted or never recorded) or a record written before dirtiness was
-//     recorded - is treated as clean instead of refused.
-// 15. The decision reads another candidate's record than the payload handoff
-//     copies (the latest build, or a clean build sharing its fingerprint), so
-//     a dirty selected candidate passes or a clean one is refused.
-// 16. A refusal does not tell the maintainer how to produce an admissible
-//     candidate (commit, then restart).
-// 17. Admission does not hand `handoff-debug` the exact identity it admitted,
-//     so the copy cannot pin that candidate against a later selection change
-//     (the handoff test below covers the pinned copy).
 const selectDevPayload = (home, epoch) => {
   const version = `debug-${epoch.slice(-12)}`;
   const root = join(home, "gateway", "payloads", "dev");
@@ -372,24 +302,17 @@ test("Debug handoff admits only a selected candidate recorded as built from a cl
     recordSource(state, epochFor(3), worktree, "false");
 
     const cleanVersion = selectDevPayload(home, epochFor(1));
-    // Failure mode 17: stdout is exactly the admitted version and fingerprint.
     assert.deepEqual(handoffAdmission(state, home), { admitted: true, stdout: `${cleanVersion} ${sharedFingerprint}\n`, stderr: "" });
 
-    // Failure modes 13 and 15: the selected candidate is dirty although the
-    // latest record (epoch 3) and the running epoch are clean builds with the
-    // same payload fingerprint.
     const dirtyVersion = selectDevPayload(home, epochFor(2));
     markRunning(state, epochFor(3));
     const dirty = handoffAdmission(state, home);
     assert.equal(dirty.admitted, false);
     assert.equal(dirty.stdout, "");
     assert.match(dirty.stderr, new RegExp(dirtyVersion, "u"));
-    // Failure mode 16: the refusal names the way to an admissible candidate.
     assert.match(dirty.stderr, /commit/u);
     assert.match(dirty.stderr, /scripts\/tron dev restart/u);
 
-    // Failure mode 15: a clean selected candidate is not refused because a
-    // later build (epoch 2 re-selected away from) was dirty.
     selectDevPayload(home, epochFor(1));
     markRunning(state, epochFor(2));
     assert.equal(handoffAdmission(state, home).admitted, true);
@@ -402,16 +325,13 @@ test("Debug handoff refuses a candidate whose source dirtiness is unknown", () =
     const state = join(root, "lifecycle.json");
     const home = join(root, "home");
     const worktree = sourceFixture(root, "source", "feat/source");
-    // Failure mode 14: no lifecycle state at all.
     selectDevPayload(home, epochFor(1));
     const missingState = handoffAdmission(state, home);
     assert.equal(missingState.admitted, false);
     assert.match(missingState.stderr, /scripts\/tron dev restart/u);
-    // Failure mode 14: other epochs are recorded clean, the selected one is not.
     recordSource(state, epochFor(2), worktree, "false");
     markRunning(state, epochFor(1));
     assert.equal(handoffAdmission(state, home).admitted, false);
-    // Failure mode 14: a record written before dirtiness was recorded.
     const value = JSON.parse(run(state, "read"));
     writeFileSync(state, `${JSON.stringify({ ...value, candidateSources: [{ runtimeEpoch: epochFor(1), worktree, branch: "feat/source" }] })}\n`);
     const unrecorded = handoffAdmission(state, home);
@@ -420,22 +340,6 @@ test("Debug handoff refuses a candidate whose source dirtiness is unknown", () =
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// `scripts/tron-dev handoff` wiring failure modes (#140). The real script runs
-// with a Node stand-in that passes every state-helper command to real Node
-// (host resolution, supervisor liveness against a real process, admission),
-// answers only `status` (it would probe port 9848) and records what the deploy
-// helper is asked to do. No signed launcher is involved: handoff never runs it.
-// 22. The admission output is not captured or `read` splits it wrongly, so
-//     handoff-debug gets an empty, swapped or different --version/--fingerprint.
-// 23. A refused admission (dirty candidate) still reaches handoff-debug.
-// 24. Handoff without a live, ready supervisor (none recorded, the recorded PID
-//     now has another start identity, or not ready) reaches admission or
-//     handoff-debug instead of refusing.
-// 25. handoff-debug gets the wrong Debug or Stable home, or a host other than
-//     the live supervisor's recorded one.
-// 26. An agent runs handoff (no terminal, or an agent shell's PI_SESSION_ID): it must be
-//     refused before any state is read. The maintainer's terminal is a pseudo-terminal
-//     from /usr/bin/script, which merges the script's stderr into its output.
 const handoffWiring = ({ supervisorPid, supervisorIdentity, dirty = false, ready = true, terminal = true, agentSession }) => {
   const root = mkdtempSync(join(tmpdir(), "tron-dev-handoff-wiring-"));
   const home = join(root, "home");
@@ -482,7 +386,6 @@ test("Debug handoff passes exactly the admitted candidate to handoff-debug witho
   try {
     const supervisorPid = String(supervisor.pid);
     const supervisorIdentity = execFileSync(process.execPath, [helper, "pid-start", supervisorPid], { encoding: "utf8" }).trim();
-    // Failure modes 22 and 25.
     const admitted = handoffWiring({ supervisorPid, supervisorIdentity });
     assert.equal(admitted.status, 0, admitted.output);
     assert.deepEqual(admitted.deploy, [
@@ -491,12 +394,10 @@ test("Debug handoff passes exactly the admitted candidate to handoff-debug witho
       "--stable-bundled-root", "/Applications/Tron.app/Contents/Resources/Gateway",
       "--version", admitted.version, "--fingerprint", sharedFingerprint,
     ]);
-    // Failure mode 23.
     const dirty = handoffWiring({ supervisorPid, supervisorIdentity, dirty: true });
     assert.notEqual(dirty.status, 0);
     assert.match(dirty.output, /Debug handoff refused/u);
     assert.equal(dirty.deploy, null);
-    // Failure mode 24: no recorded supervisor, a reused PID, and not ready.
     for (const unsupervised of [{}, { supervisorPid, supervisorIdentity: "replaced" }]) {
       const refused = handoffWiring(unsupervised);
       assert.notEqual(refused.status, 0);
@@ -509,7 +410,6 @@ test("Debug handoff passes exactly the admitted candidate to handoff-debug witho
     assert.match(notReady.output, /not ready/u);
     assert.equal(notReady.calls.includes("handoff-admission"), false);
     assert.equal(notReady.deploy, null);
-    // Failure mode 26: an agent, with no terminal or with its session id, never reaches state.
     for (const agent of [{ terminal: false }, { agentSession: "agent-session" }]) {
       const refused = handoffWiring({ supervisorPid, supervisorIdentity, ...agent });
       assert.equal(refused.status, 77, refused.output);
@@ -594,9 +494,6 @@ test("Debug stop terminates and reaps an exactly owned child", async () => {
   }
 });
 
-// A lifecycle file the helper cannot transition must fail the stop loudly and
-// name the transition that failed, while the owned child is still signalled.
-// The real helper runs here (the fake Node only answers --version and execs it).
 test("Debug stop reports a stopping transition it cannot record and still signals the child", async () => {
   const root = mkdtempSync(join(tmpdir(), "tron-dev-stop-state-"));
   const home = join(root, "home");
@@ -630,13 +527,6 @@ test("Debug stop reports a stopping transition it cannot record and still signal
   }
 });
 
-// Issue #144. Failure modes:
-// 1. An agent shell inherits the Stable Gateway's environment, and a Stable
-//    value (PI_SUBAGENTS_TEMP_ROOT pointing at Stable's subagent store,
-//    TRON_GATEWAY_CHANNEL=stable, another TRON_GATEWAY_* or PI_* value)
-//    reaches a process the Debug lifecycle starts.
-// 2. The scrub drops what the lifecycle needs: HOME, the pinned Node selection
-//    (TRON_NODE_BIN, NVM_DIR) or the CI tools cache (TRON_CI_TOOLS_DIR).
 test("Debug lifecycle commands never see the caller's Stable Gateway environment", () => {
   const root = mkdtempSync(join(tmpdir(), "tron-dev-env-"));
   const home = join(root, "home");

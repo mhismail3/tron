@@ -6,23 +6,15 @@ import { RECOVERY_SESSION_OWNER } from "./child-session-admission.js";
 import type { OwnedTurnOwner } from "./owned-turn-owner.js";
 
 
-// A lifecycle header is trusted only after this K5 reader has parsed and schema-
-// admitted the first property from the exact-owned status file. A payload key
-// named `lifecycleProjection` is presentation data until this private marker is
-// attached, so tool results cannot nominate a fresh child-session owner.
 const EMBEDDED_LIFECYCLE_ARTIFACT = Symbol("embedded-lifecycle-artifact");
 
 type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE_ARTIFACT]?: true };
 
-// Disposable exact child subscriptions travel with the admitted read, never
-// with canonical activity data or a separate slot-wide child registry.
 export const WORKFLOW_CHILD_ARTIFACT_DIRECTORIES = Symbol("workflow-child-artifact-directories");
 
 const WORKFLOW_CHILD_PROCESS_SETTLED = Symbol("workflow-child-process-settled");
 
 
-/** Exact run IDs behind runner-backed workflow keys. Settled paused executions
- * stay in presentation history but cannot hold a task open or become Stop targets. */
 export function detachedWorkflowChildKeys(status: Record<string, unknown>): ReadonlyMap<string, string> {
   const keys = new Map<string, string>();
   const steps = Array.isArray(status.steps) ? status.steps.slice(0, MAX_EXTENSION_RUN_CHILDREN) : [];
@@ -83,18 +75,11 @@ export function extensionArtifactReadFailureReason(error: unknown): ExtensionArt
   return "artifact-replacement-in-progress";
 }
 
-/** A producer replaces status.json by an atomic rename, so a read can open the
- * old inode and stat the new one. The discovery lane owns no watcher for that
- * directory, and a workflow child's read has no retry of its own inside its root's
- * frame, so both re-read a bounded number of times before reporting the
- * replacement; the producer's next replace is a whole status-update cadence
- * away, so an immediate retry lands in a settled window. */
 const EXTENSION_ARTIFACT_DISCOVERY_READ_RETRIES = 3;
 
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
 
 const MAX_EXTENSION_EVENT_LINES = 256;
-/** Bounded file/directory/header proofs for the actual K5 owner. No second artifact index. */
 export class SubagentArtifactStatus {
   constructor(readonly turns: OwnedTurnOwner) {}
 
@@ -114,9 +99,6 @@ export class SubagentArtifactStatus {
     try {
       canonicalPath = realpathSync(lexicalPath);
     } catch (error) {
-      // Status artifacts are atomically replaced. A bounded watcher retry owns
-      // the brief unlink/rename window; do not turn it into an unretried read
-      // failure that can strand the previous running projection.
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
     }
@@ -141,9 +123,6 @@ export class SubagentArtifactStatus {
   }
 
 
-  /** Released workflows keep execution details in their detached children's
-   * status, not the workflow edge. Join only exact reciprocal producer edges;
-   * root identity/order remains authoritative and every read is disposable. */
   async readWorkflowChildDetails(asyncDir: string, status: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (status.mode !== "workflow" || typeof status.runId !== "string" || !Array.isArray(status.steps)) return status;
     const directories: string[] = [];
@@ -159,13 +138,8 @@ export class SubagentArtifactStatus {
         || typeof edge.sessionFile !== "string") continue;
       const directory = join(dirname(asyncDir), edge.runId);
       if (dirname(directory) !== dirname(asyncDir) || directory === asyncDir) continue;
-      // Observation follows the root edge, never the optional read result.
-      // Even an absent directory must remain subscribed for its first status.
       directories.push(directory);
       unavailableChildren += 1;
-      // A child read that loses the producer's atomic replace is a reader race, not
-      // an unavailable child. Both lanes retry it here, so no root frame drops the
-      // child's published model, counters or output for a rename it observed.
       const child = await this.readExtensionStatusArtifactWithReplacementRetry(directory, false).catch(() => undefined);
       if (!child || child.runId !== edge.runId || child.parentWorkflowRunId !== status.runId
         || child.workflowKey !== edge.workflowKey || child.sessionOwnerId !== edge.sessionOwnerId || child.sessionId !== status.sessionId
@@ -176,25 +150,15 @@ export class SubagentArtifactStatus {
       if (source.sessionFile !== edge.sessionFile || source.agent !== edge.agent
         || !this.turns.operations.childSessionAdmission.admit(edge.sessionFile, status.runId, edge.workflowKey, edge.sessionOwnerId)) continue;
       unavailableChildren -= 1;
-      // Do not copy child identity, declarations or control authority. Only
-      // provider-authored display facts cross this already verified edge.
       const projected = { ...edge };
       for (const key of ["model", "thinking", "currentTool", "currentPath", "lastActivityAt", "currentToolStartedAt",
         "toolCount", "turnCount", "recentOutput", "output", "error", "attention", "attentionState", "startedAt", "endedAt", "durationMs", "status"] as const) {
         if (source[key] !== undefined) projected[key] = source[key];
       }
-      // The child run's own state is the authority for whether it is still live. Its runner
-      // records the step's terminal status first and persists the run's terminal state only
-      // after finishing its result, so a terminal step under a running run is still live work
-      // that settlement must join (#1021).
       if (typeof child.state === "string") projected.state = child.state;
-      // A paused child remains resumable history, not running work, once its own
-      // runner's exit proof is admitted. Keep that fact private to this exact read.
       if (observedPausedProcessTerminalAt(child, edge.runId) !== undefined) {
         Object.assign(projected, { [WORKFLOW_CHILD_PROCESS_SETTLED]: true });
       }
-      // The released single-child snapshot omits a zero total until its first
-      // tool event; an explicitly empty recent-tools list proves that zero.
       if (source.toolCount === undefined && Array.isArray(source.recentTools) && source.recentTools.length === 0) projected.toolCount = 0;
       steps[steps.length - 1] = projected;
     }
@@ -215,9 +179,6 @@ export class SubagentArtifactStatus {
     const opened = await this.openOwnedExtensionArtifact(asyncDir, "status.json");
     if (!opened) return undefined;
     try {
-      // The compact header admits parent/run ownership. Native children and
-      // details come from the full bounded status, not the widget's eight-row
-      // summary. Keep the header as bounded lifecycle evidence on overflow.
       const headerBuffer = Buffer.alloc(MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
       const { bytesRead: headerBytesRead } = await opened.handle.read(headerBuffer, 0, headerBuffer.length, 0);
       const headerBytes = headerBuffer.subarray(0, headerBytesRead);
@@ -225,8 +186,6 @@ export class SubagentArtifactStatus {
       if (lifecycleHeader !== undefined) {
         const projection = inspectExtensionLifecycleProjection(lifecycleHeader);
         if (!projection) throw new SyntaxError("Invalid extension lifecycle projection header");
-        // The producer retains the original parent session identity across resumes.
-        // Exact run/tool/path ownership does not authorize a header copied from another session.
         const parentIdentity = this.turns.operations.sessionFile ? resolve(this.turns.operations.sessionFile) : this.turns.operations.id;
         if (projection.sessionId !== undefined && projection.sessionId !== parentIdentity) {
           throw new ForeignExtensionArtifactSessionError();
@@ -245,8 +204,6 @@ export class SubagentArtifactStatus {
         const withProof = await this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
         return markEmbeddedLifecycleArtifact(withProof);
       }
-      // A first lifecycleProjection key marks a modern artifact even when its
-      // value is truncated or malformed; do not fall back to report parsing.
       if (hasExtensionLifecycleProjectionProperty(headerBytes)) {
         throw new SyntaxError("Incomplete extension lifecycle projection header");
       }
@@ -272,9 +229,6 @@ export class SubagentArtifactStatus {
   }
 
 
-  /** The producer persists process-terminal.json before best-effort status
-   * overlay. Read that exact-owned sidecar so an interrupted overlay cannot
-   * leave an exited paused runner blocking restart forever. */
   async attachProcessTerminalProof(
     asyncDir: string,
     status: Record<string, unknown>,
@@ -308,11 +262,6 @@ export class SubagentArtifactStatus {
   }
 
 
-  /** Async single-run status steps intentionally keep the stable child producer
-   * positional, while their fresh session directory is reserved by the root
-   * fan-out run. The exact-owned recovery descriptor is the producer's
-   * canonical bridge between those identities; neither the path segment nor a
-   * presentation field may nominate the owner. */
   private async attachRecoverySessionOwner(
     asyncDir: string,
     status: Record<string, unknown>,
@@ -359,10 +308,6 @@ export class SubagentArtifactStatus {
   }
 
 
-  /** A workflow status can exceed the projection byte cap because producer
-   * step details are retained after completion. For an exact directory, admit
-   * only its small top-level header plus a matching terminal event from the
-   * bounded events tail; never parse or project the oversized step payload. */
   async readOversizedTerminalExtensionArtifact(
     asyncDir: string,
     headerBytes: Buffer,
@@ -428,11 +373,6 @@ export class SubagentArtifactStatus {
   }
 
 
-  /** The discovery lane's read of one owned artifact, and every lane's read of a
-   * workflow child. A racing replacement is retried here rather than warned (G-8a);
-   * the watcher lane keeps its own per-directory retry budget for root reads, and
-   * the 60 s per-(owner, reason) dedup in `warnExtensionArtifact` still collapses
-   * a genuine replacement. */
   async readExtensionStatusArtifactWithReplacementRetry(
     asyncDir: string,
     includeWorkflowChildren = true,

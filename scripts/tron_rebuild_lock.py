@@ -26,7 +26,6 @@ def inherited_fd():
     info, named = os.fstat(fd), path.lstat()
     if (info.st_dev, info.st_ino) != (named.st_dev, named.st_ino) or path.is_symlink():
         raise RebuildBusy('inherited Mac/iOS rebuild lease does not match its file')
-    # A pathname/environment value alone is not inherited ownership.
     probe = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
     try:
         try:

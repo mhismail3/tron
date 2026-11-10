@@ -5,8 +5,6 @@ import type { AgentPipelineStages } from "../pi/adapters.js";
 import type { HomeTaskReportOwner } from "./task-report.js";
 import type { TaskWorkerDiagnostic } from "./worker-contract.js";
 
-/** The actual native frame, not a copied context: run state and canonical I/O
- * stay native. The optional sink is read only when a reminder was sent. */
 interface WorkerTurnRuntime {
   readonly runQueue: { readonly queuedMessages: { readonly length: number } };
   readonly dependencies: { homeTaskDiagnostic?: (record: TaskWorkerDiagnostic) => void };
@@ -15,19 +13,12 @@ interface WorkerTurnRuntime {
   abort(kind: "agent", operationId: string, reason: "task-report" | "task-budget"): Promise<void>;
 }
 
-/** SDK boundary handling runs first. A sealed report/budget ends the exact task;
- * queued input takes Stop instead of being stranded by a quiet end. The created
- * runtime object and report owner are the same ones captured at installation. */
 export function workerFinishTurn(worker: WorkerTurnRuntime, created: { readonly session: AgentSession },
   taskWorker: HomeTaskReportOwner): NonNullable<AgentPipelineStages["finishTurn"]> {
   return (finishTurn) => async (turn, signal): Promise<AgentTurnDecision | undefined> => {
     const decision = await finishTurn?.(turn, signal);
-    // A task that reached its budget ends here the same way (settings-model.md 6.1).
     const ending = taskWorker.reportSealed || await taskWorker.exceedsBudget(worker.canonicalSessionEntries());
     if (!ending) {
-      // A plain reply is not an immutable task result. Repair that omission
-      // once inside the same invocation, before any terminal receipt. Live
-      // children/queued input retain their own continuation and Stop wins.
       if (!decision && turn.message.stopReason === "stop" && !signal?.aborted
         && !created.session.agent.hasQueuedMessages() && !worker.hasDetachedDashboardWork()
         && taskWorker.takeReportReminder()) {
@@ -41,9 +32,6 @@ export function workerFinishTurn(worker: WorkerTurnRuntime, created: { readonly 
       }
       return decision ?? undefined;
     }
-    // Pi continues a run that ends with queued messages. A producer's notice steered into this
-    // turn (a run that stopped while it streamed) is context the task's evidence keeps, not a
-    // reason for another turn (#1698): it is appended when the run ends. Queued input takes Stop.
     if (worker.runQueue.queuedMessages.length > 0 || !(await keepQueuedNoticesAsContext(created.session))) {
       taskWorker.requestStop(() => worker.abort("agent", taskWorker.identity.operationId, taskWorker.reportSealed ? "task-report" : "task-budget"));
     }
@@ -51,13 +39,9 @@ export function workerFinishTurn(worker: WorkerTurnRuntime, created: { readonly 
   };
 }
 
-/** Moves every message queued in the agent into the session as context that starts no turn.
- * Only producer notices (`custom` messages) qualify. With any other queued input it returns false
- * and leaves both queues as they were, so the caller stops the run. */
 async function keepQueuedNoticesAsContext(session: AgentSession): Promise<boolean> {
   const agent = session.agent;
   if (!agent.hasQueuedMessages()) return true;
-  // A queue exposes all its messages only in "all" mode, and steering hides follow-up.
   const modes = { steering: agent.steeringMode, followUp: agent.followUpMode };
   agent.steeringMode = "all"; agent.followUpMode = "all";
   let queued: AgentMessage[];

@@ -21,7 +21,6 @@ async function activeTools(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>
   return [...context.activeTools].sort();
 }
 
-/** The loadout the canonical transcript declares, replayed the way Pi replays it. */
 async function transcriptTools(sessionDir: string): Promise<string[]> {
   const files: string[] = [];
   for (const entry of await readdir(sessionDir, { recursive: true })) {
@@ -36,11 +35,6 @@ async function transcriptTools(sessionDir: string): Promise<string[]> {
 
 describe("per-chat tool loadout", () => {
   it("survives the chat's runtime being recreated, and the next prompt keeps it", async () => {
-    // Failure modes: a tool the chat enabled (codemode) or a default it
-    // disabled (write) is reset to the configured defaults when the runtime is
-    // recreated (idle eviction or Gateway restart both rebuild it from the
-    // transcript), and the next prompt then persists the defaults, making the
-    // loss permanent. A new chat must still start with the defaults.
     const root = await mkdtemp(join(tmpdir(), "tron-tool-loadout-"));
     roots.push(root);
     const agentDir = join(root, "agent");

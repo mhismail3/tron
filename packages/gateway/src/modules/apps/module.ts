@@ -9,9 +9,6 @@ import { workspaceModule } from "../../workspace/workspace-module.js";
 import { SWIFT_APPS_CAPABILITY, SwiftAppStore, admitSwiftAppId, type SwiftAppCommit } from "./swift-app-store.js";
 import { createTronSwiftAppExtension } from "./tron-swift-app-extension.js";
 
-/** Installed Swift apps (docs/swift-apps.md): the store over the internal
- * workspace, the `swift_app` tool for each ordinary runtime, the `apps.*` RPCs
- * and `swift-apps.v1`. */
 export function createAppsModule(display: () => DisplayOwner): ModuleDescriptor { return {
   name: "tron-swift-apps",
   purpose: "Installs the user's single-file SwiftUI apps and reads or seeds their stored data.",
@@ -20,7 +17,6 @@ export function createAppsModule(display: () => DisplayOwner): ModuleDescriptor 
   dependsOn: [workspaceModule],
   start: (host) => {
     const workspace = host.contract(workspaceModule);
-    // The only writer of `state/apps/`, shared by the tool and the RPCs.
     const store = new SwiftAppStore(workspace, display);
     return {
       extension: (session) => createTronSwiftAppExtension({ store, artifacts: display().artifacts, cwd: () => session.cwd(), sessionId: () => session.sessionId(), internalFilesRoot: () => workspace.filesRoot() }),
@@ -34,8 +30,6 @@ export function createAppsModule(display: () => DisplayOwner): ModuleDescriptor 
           rejectUnknownFields(params, [], "apps.pending");
           return { offers: await store.pending() } as unknown as JsonValue;
         } },
-        // Source and state are exact data the runner executes and restores, so
-        // they skip safeJson's presentation clipping; the store bounds them.
         "apps.get": { kind: "read", handle: async (params) => {
           rejectUnknownFields(params, ["appId"], "apps.get");
           return await store.get(admitSwiftAppId(params.appId)) as unknown as JsonValue;
@@ -67,8 +61,6 @@ export function createAppsModule(display: () => DisplayOwner): ModuleDescriptor 
           rejectUnknownFields(params, ["appId"], "apps.state");
           return await store.state(admitSwiftAppId(params.appId)) as unknown as JsonValue;
         } },
-        // Phone-side management. Each is a receipt-backed mutation; replay returns
-        // the original result, including a remove after the app is already gone.
         "apps.rename": { kind: "mutation", handle: async (params) => {
           rejectUnknownFields(params, ["commandId", "appId", "name"], "apps.rename");
           return await store.rename(admitSwiftAppId(params.appId), params.name) as unknown as JsonValue;

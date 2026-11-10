@@ -9,15 +9,6 @@ import type { HomeTaskCheckin } from "../../protocol/types.js";
 import { HomeTaskStore, taskIntentDigest, type HomeTaskRecord, type HomeTaskWrite } from "./home-task-store.js";
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
 
-/**
- * `gateway/home` Home task store write paths (packages/gateway/docs/scenario-locks.md#persisted-stores-v4):
- * setup, authority saves, task put/update/wake publication, record admission, paging and
- * temporary recovery. Each step asserts its exact result or refusal, and the whole
- * `gateway/home/tasks` directory (literal file names, exact documents) is asserted after
- * every write and after each run of refusals, under a
- * fixed clock, so a changed write, name or refusal fails here. `store-home-tasks` pins
- * reading the committed format back.
- */
 it("home-task-store-paths: initialize, authority, put, update, wake, page and admission", async () => {
   const home = await mkdtemp(join(tmpdir(), "tron-home-task-store-"));
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -55,13 +46,11 @@ function wake(eventId: string): HomeWakeEvent {
 }
 
 
-/** What a store call was told: its result, or its refusal's message. */
 async function outcome(work: () => unknown): Promise<{ result: unknown } | { refused: string }> {
   try { return { result: await work() }; } catch (error) { return { refused: error instanceof Error ? error.message : String(error) }; }
 }
 const refused = (code: string) => ({ refused: `Home task namespace refused: ${code}` });
 
-/** A task record exactly as the store writes it: the write plus its creation and last publication times. */
 const stored = (write: HomeTaskWrite, createdAt: number, updatedAt: number): HomeTaskRecord =>
   ({ ...write, createdAt: EPOCH + createdAt, updatedAt: EPOCH + updatedAt }) as HomeTaskRecord;
 
@@ -73,7 +62,6 @@ async function drive(home: string, store: HomeTaskStore): Promise<void> {
     const { nextCursor, ...rest } = await store.page(input);
     return { ...rest, nextCursor: nextCursor !== undefined };
   };
-  /** The files the store must hold, by literal name; a write updates it, then the directory must equal it at each checkpoint. */
   const expected: Record<string, unknown> = {};
   const holds = async (label: string) => {
     const names = await readdir(tasks).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
@@ -146,7 +134,6 @@ async function drive(home: string, store: HomeTaskStore): Promise<void> {
   expect(await outcome(() => store.put(task("task-3", { revision: 2 }), null)), "put a new task at revision 2").toEqual(refused("revision-conflict"));
   expect(await outcome(() => store.put(task("task-1", { revision: 3 }), 2)), "put task-1 from a stale revision").toEqual(refused("revision-conflict"));
   await holds("conflicting puts publish nothing");
-  // Each invalid record is refused before it is published.
   const invalidRecords: Array<[string, HomeTaskWrite]> = [
     ["generation 0", task("task-x", { generation: 0 })],
     ["an invalid home id", task("task-x", { homeId: "bad id!" })],
@@ -176,7 +163,6 @@ async function drive(home: string, store: HomeTaskStore): Promise<void> {
     "moving task-1 to another reference").toEqual(refused("invalid-record"));
   await holds("the refused move");
 
-  /** Apply `change` through the store; when it publishes, task-1 must hold `next` at the next revision, stamped now. */
   const published = async (label: string, change: (current: HomeTaskRecord) => HomeTaskRecord, next: (current: HomeTaskRecord) => HomeTaskRecord, writes: number) => {
     one = { ...next(one), revision: one.revision + 1, updatedAt: Date.now() };
     expect(await store.update("task-1", change), label).toEqual(one);
@@ -222,7 +208,6 @@ async function drive(home: string, store: HomeTaskStore): Promise<void> {
   await refusedUpdate("a terminal task is final", "task-1", (current) => ({ ...current, queuedAt: "2026-01-01T00:00:00.000Z" }), "invalid-record");
 
   const delivery = { sessionId: "home-sess", operationId: "home-op", generation: 1, routeGeneration: 1, messageDigest: hex("message") };
-  /** Apply a wake change; when it publishes, task-1 must hold `next` at the next revision. */
   const wakePublished = async (label: string, change: (current: HomeWakeEvent) => HomeWakeEvent, next: (current: HomeTaskRecord) => HomeTaskRecord, eventId?: string) => {
     one = { ...next(one), revision: one.revision + 1, updatedAt: Date.now() };
     expect(await store.updateWake("task-1", change, eventId), label).toEqual(one);

@@ -7,8 +7,6 @@ import { clampThinkingLevel, type Model, type ThinkingLevel } from "../pi/ai.js"
 import { GatewayError } from "../../errors.js";
 import type { SettingsReadOwner } from "./settings-model.js";
 
-/** The compaction owner supplies its boundary snapshot; settings owns all
- * precedence/qualification, including the operation's model instance. */
 export function compactionAdmission(schema: SettingsSchema, settings: SettingsManager, session: Record<string, unknown>, model?: string): CompactionConfiguration {
   const slash = model?.indexOf("/") ?? -1;
   const ref = model && slash > 0 ? { provider: model.slice(0, slash), id: model.slice(slash + 1) } : undefined;
@@ -34,16 +32,11 @@ export function compactionAdmission(schema: SettingsSchema, settings: SettingsMa
   return { ...configuration, source } as unknown as CompactionConfiguration;
 }
 
-/** An admitted effective selection is not an edit to the stored override. The
- * SDK records the operational model; canonical fixed choice evidence continues
- * to own the inactive Session/delegated choice while Project masks it. */
 export async function applyModelAdmission(session: AgentSession, rows: Resolution["keys"], physical: boolean,
   admitModelChoice: SettingsReadOwner["admitModelChoice"]): Promise<void> {
   const row = rows.find(row => row.key === "model.ref[role=chat]");
   const ref = row?.value as { provider: string; id: string } | undefined;
   const model = ref && (physical ? session.modelRuntime.getPhysicalModel(ref.provider, ref.id) : session.modelRuntime.getModel(ref.provider, ref.id));
-  // A Session choice this runtime cannot serve stays the SDK's; a required
-  // physical (Home, worker) or Project selection refuses rather than substitute.
   if (ref && !model && (physical || row?.layer === "project")) {
     throw new GatewayError("conflict", `${row?.layer === "project" ? "Project" : "Selected"} model ${ref.provider}/${ref.id} is unavailable for this session`);
   }

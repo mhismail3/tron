@@ -2,7 +2,6 @@ import { Type, StringEnum } from "../../kernel/pi/ai.js";
 import type { SessionEntry, ToolDefinition } from "../../kernel/pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
 
-/** Canonical Home entries are the ledger. Summaries and Profile never write it. */
 export const HOME_OBLIGATION = "tron.home-obligation.v1";
 const ACTIONS = ["list", "request", "reported-done", "verified", "reopened"] as const;
 type State = Exclude<typeof ACTIONS[number], "list">;
@@ -35,7 +34,6 @@ export interface ObligationRequest {
 }
 const refuse = (message: string): never => { throw new GatewayError("invalid_request", `obligation: ${message}`); };
 
-/** Fail closed on corrupt/contradictory events, never turn an unreadable ledger into empty. */
 export function replayObligations(entries: readonly SessionEntry[], sessionId: string, items = new Map<string, ObligationItem>()): Map<string, ObligationItem> {
   const prior = new Map<string, SessionEntry>();
   for (const entry of entries) {

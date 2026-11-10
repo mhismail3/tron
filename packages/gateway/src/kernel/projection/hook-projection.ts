@@ -25,7 +25,6 @@ const MAX_HOOK_STRING_CHARACTERS = 16 * 1_024;
 const MAX_HOOK_PROJECTION_BYTES = 256 * 1_024;
 const GENERIC_RESOURCE_ARRAY_LIMIT = 1_000;
 
-/** The bounded hook projection `session.resources` and `hooks.list` both return. */
 export interface HookRegistrationProjection {
   extensions: Array<Record<string, unknown>>;
   extensionLoadErrors: Array<{ path: string; error: string }>;
@@ -41,10 +40,6 @@ export interface HookRegistrationProjection {
   };
 }
 
-/** Reserve identities before optional inventories. Byte accounting only adds
- * the serialized new item and its comma: never re-encode the growing envelope
- * for each handler/tool. Input rows retain their original source association
- * even when an oversized identity is skipped. */
 export function projectHookRegistrations(
   extensions: readonly HookProjectionExtension[],
   loadErrors: readonly HookProjectionLoadError[],
@@ -78,8 +73,6 @@ export function projectHookRegistrations(
       scope: boundedText(source.scope), source: boundedText(source.source), origin: boundedText(source.origin),
       tools: [], commands: [], handlers: [],
     };
-    // An impossible identity has no claim on the remaining budget. Continue so
-    // it cannot hide an unrelated, small extension later in loader order.
     if (admit(rows, row)) admitted.push({ source, row });
   }
   for (const { source, row } of admitted) {

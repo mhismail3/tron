@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Temporary fixture for the C launcher's selection and fingerprint boundary.
-# It builds no app and writes only under mktemp; run on macOS with clang.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
@@ -10,8 +8,6 @@ APP_ROOT="$TMP/Contents"
 BUNDLE="$APP_ROOT/Resources/Gateway"
 HELPER="$APP_ROOT/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
 HASH="$SCRIPT_DIR/hash-gateway-payload.sh"
-# The launcher's literal key sets, kinds, schema and coverage must equal the
-# shared payload contract that the deploy and bundle tests also assert.
 python3 - "$SCRIPT_DIR" <<'PY'
 import json, re, sys
 from pathlib import Path
@@ -65,8 +61,6 @@ make_payload() {
   chmod 755 "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   ln -s ../@earendil-works/pi-coding-agent/dist/cli.js "$root/app/node_modules/.bin/pi"
   printf '%s\n' '#!/bin/sh' '[ "$1" = "--max-old-space-size=4096" ] || exit 13' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' '[ "$(command -v npm)" = "$TRON_GATEWAY_PAYLOAD_ROOT/runtime/bin-arm64/npm" ] || exit 11' "[ \"\$TRON_GATEWAY_SEARCH_EMBEDDING_HELPER\" = \"$SEARCH_HELPER\" ] || { printf 'search helper mismatch: %s\\n' \"\$TRON_GATEWAY_SEARCH_EMBEDDING_HELPER\" >&2; exit 12; }" '[ "${TRON_FIXTURE_WRITE_STDERR:-0}" != 1 ] || printf "fixture Gateway stderr\\n" >&2' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
-  # Keep each fake runtime over the canonical minimum size without embedding
-  # NUL bytes that would make the shell fixture itself invalid.
   dd if=/dev/zero bs=1024 count=1025 2>/dev/null | tr '\\0' '#' >> "$root/runtime/node-arm64"
   cp "$root/runtime/node-arm64" "$root/runtime/node-x64"
   chmod 755 "$root/runtime/node-arm64" "$root/runtime/node-x64"
@@ -139,8 +133,6 @@ fi
 OVERSIZED_PACKAGE="$TMP/invalid-oversized-package"
 cp -R "$BUNDLE" "$OVERSIZED_PACKAGE"
 chmod -R u+w "$OVERSIZED_PACKAGE"
-# The manifest records the fingerprint of these bytes, so recompute it and bind
-# the oversized document to the fixture before the size rule is exercised.
 {
   printf '{"name":"fixture","padding":"'
   dd if=/dev/zero bs=65536 count=1 2>/dev/null | tr '\\0' 'p'
@@ -151,21 +143,14 @@ sed "s/\"payloadFingerprint\":\"[^\"]*\"/\"payloadFingerprint\":\"$oversized_fin
   "$OVERSIZED_PACKAGE/manifest.json" > "$OVERSIZED_PACKAGE/manifest.tmp"
 mv "$OVERSIZED_PACKAGE/manifest.tmp" "$OVERSIZED_PACKAGE/manifest.json"
 chmod -R a-w "$OVERSIZED_PACKAGE"
-# 64 KiB is the bound the Swift validator applies to app/package.json.
 if "$HELPER" --verify-payload "$OVERSIZED_PACKAGE" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then
   echo "launcher payload validation admitted an oversized package document" >&2; exit 1
 fi
-# One refused fixture per identity rule the launcher enforces. The manifest is
-# not fingerprinted, so only the field under test changes while the payload
-# bytes stay valid. Values are test literals evaluated by the fixture helper.
 IDENTITY="$TMP/invalid-identity"
 cp -R "$BUNDLE" "$IDENTITY"
 chmod -R u+w "$IDENTITY"
 cp "$BUNDLE/manifest.json" "$TMP/pristine-manifest.json"
 chmod 644 "$TMP/pristine-manifest.json"
-# Each case starts from the pristine manifest so only the rule under test can
-# reject it, and passes the field's own value as the expected one, so a
-# rejection can never come from the expected-identity comparison instead.
 identity_rule() {
   local field="$1" expression="$2" value
   local node_argument=fixture gateway_argument=fixture revision_argument=0123456789abcdef0123456789abcdef01234567
@@ -212,7 +197,6 @@ identity_rule runtimeEpoch '"epoch"'
 identity_rule runtimeEpoch '"e" * 36'
 identity_rule runtimeEpoch '"01234567-89AB-CDEF-0123-456789ABCDEF"'
 identity_rule channel '"preview"'
-# Codable and JSON.parse both hide these; the launcher's exact key set does not.
 identity_key_rule() {
   local label="$1" pair="$2"
   chmod u+w "$IDENTITY/manifest.json"
@@ -333,8 +317,6 @@ EXTERNAL="$TMP/home/.tron/gateway/payloads/stable/versions/v2"
 make_payload "$EXTERNAL" v2 external
 mkdir -p "$(dirname "$EXTERNAL")"
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v2","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$EXTERNAL/manifest.json")" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
-# The launcher appends its own records to the deploy timeline the helper owns.
-# This fixture keeps that file writable while the payload store stays read-only.
 LAUNCHER_LOG="$TMP/home/.tron/logs/deploy.jsonl"
 mkdir -p "$(dirname "$LAUNCHER_LOG")"
 : > "$LAUNCHER_LOG"
@@ -369,9 +351,6 @@ chmod 700 "$TMP/home/.tron/logs"
 grep -q '^fixture Gateway stderr$' "$TMP/unwritable-logs.stderr" || { echo "failed stderr capture did not preserve inherited stderr" >&2; exit 1; }
 chmod a-w "$TMP/home/.tron/logs"
 BUNDLE_REAL="$(cd "$BUNDLE" && pwd -P)"
-# A previously selected, internally valid payload from another wire generation
-# must be ignored after a Mac app replacement so the bundled lockstep Gateway
-# becomes the migration bootstrap instead of relaunching the old protocol.
 chmod -R u+w "$TMP/home"
 INCOMPATIBLE="$TMP/home/.tron/gateway/payloads/stable/versions/v3-protocol"
 cp -R "$EXTERNAL" "$INCOMPATIBLE"
@@ -410,8 +389,6 @@ PY
 chmod -R u+w "$TMP/home"
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v2","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$EXTERNAL/manifest.json")" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
 chmod -R a-w "$TMP/home"
-# Channel names are exact selectors, stable/dev, and the empty-value default.
-# Invalid values must be rejected before recovery can touch a sibling marker or lock.
 for supported_channel in stable dev; do
   supported_result="$(TRON_GATEWAY_CHANNEL="$supported_channel" HOME="$TMP/home" "$HELPER" --version)"
   [[ "$supported_result" == "$BUNDLE_REAL" || "$supported_result" == "$EXTERNAL_REAL" ]] || { echo "supported channel failed: $supported_channel" >&2; exit 1; }
@@ -426,8 +403,6 @@ for invalid_channel in debug ../ a/b "$(printf 'x%.0s' {1..65})"; do
   [[ "$INVALID_STATUS" -eq 78 ]] || { echo "invalid channel was not rejected: $invalid_channel ($INVALID_STATUS)" >&2; exit 1; }
   [[ ! -e "$TMP/home/.tron/gateway/pending-attempt.json" && ! -e "$TMP/home/.tron/gateway/pending-attempt.json.lock" ]] || { echo "invalid channel touched an outside marker or lock: $invalid_channel" >&2; exit 1; }
 done
-# An existing channel root symlink is unsafe: no marker or selection access may
-# escape into its target, and bundled fallback is not allowed to hide it.
 chmod -R u+w "$TMP/home"
 mkdir -p "$TMP/outside"
 ln -s "$TMP/outside" "$TMP/home/.tron/gateway/payloads/dev"
@@ -448,9 +423,6 @@ tampered_status=$?
 set -e
 [[ "$tampered_status" -eq 0 ]] || { echo "tampered existing external payload did not use bundled fallback: $tampered_status" >&2; exit 1; }
 [[ "$tampered_result" == "$BUNDLE_REAL" ]] || { echo "tampered external payload did not fall back to bundled payload: $tampered_result" >&2; exit 1; }
-# A payload from before the runtime alias contract can still be present at
-# rollout. Even with a self-consistent legacy fingerprint it must be rejected
-# as the selected external payload and use the trusted new bundled fallback.
 chmod -R u+w "$TMP/home"
 LEGACY="$TMP/home/.tron/gateway/payloads/stable/versions/legacy"
 make_payload "$LEGACY" legacy legacy
@@ -471,8 +443,6 @@ printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version"
 chmod -R a-w "$TMP/home"
 legacy_result="$(HOME="$TMP/home" "$HELPER" --version 2> "$TMP/legacy-error")"
 [[ "$legacy_result" == "$BUNDLE_REAL" ]] || { echo "legacy external payload without aliases did not use bundled fallback: $legacy_result" >&2; exit 1; }
-# A published candidate gets one launch attempt. A second launch with the
-# still-pending marker must restore the validated previous selection atomically.
 chmod -R u+w "$TMP/home"
 PREVIOUS="$TMP/home/.tron/gateway/payloads/stable/versions/v1"
 CANDIDATE="$TMP/home/.tron/gateway/payloads/stable/versions/v3"
@@ -508,7 +478,6 @@ assert rolled_back["payloadVersion"] == "v3" and rolled_back["runtimeEpoch"] == 
 assert "v3" in rolled_back["message"] and "v1" in rolled_back["message"], rolled_back
 assert rolled_back["timestamp"].endswith("Z") and "T" in rolled_back["timestamp"], rolled_back
 PY
-# The deploy helper looks this real record up to name the failed candidate.
 cat > "$TMP/launcher-cause-check.mjs" <<'JS'
 const { candidateStartupFailure } = await import(process.argv[2]);
 const [home, epoch] = process.argv.slice(3);
@@ -531,8 +500,6 @@ for key in ("byVersion", "byEpoch"):
     assert "v3" in cause and "v1" in cause, result
 assert result["unrelated"] is None, result
 PY
-# Once the authenticated helper atomically commits under the shared attempt
-# lock, a concurrent/subsequent launcher must preserve the candidate.
 chmod -R u+w "$TMP/home"
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
 printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
@@ -551,8 +518,6 @@ committed_attempt="$(cat "$TMP/committed-result")"
 [[ "$committed_attempt" == "$CANDIDATE_REAL" ]] || { echo "committed candidate was incorrectly rolled back: $committed_attempt" >&2; exit 1; }
 [[ ! -e "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json" ]] || { echo "committed candidate marker was not consumed" >&2; exit 1; }
 
-# A fresh lock that remains held through the bounded wait must fail closed:
-# neither the candidate nor the bundled fallback may execute.
 chmod -R u+w "$TMP/home"
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
 printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
@@ -568,15 +533,11 @@ set -e
 [[ ! -s "$TMP/held-lock-result" ]] || { echo "held attempt lock executed a payload" >&2; exit 1; }
 grep -q 'candidate attempt is locked' "$TMP/held-lock-error" || { echo "held attempt lock failure was not diagnostic" >&2; exit 1; }
 
-# A crash-stale lock is removed under the existing policy; the launched marker
-# then rolls back before any candidate execution.
 touch -t 200001010000 "$LOCK"
 stale_recovery="$(HOME="$TMP/home" "$HELPER" --version)"
 [[ "$stale_recovery" == "$PREVIOUS_REAL" ]] || { echo "stale lock recovery did not roll back before launch: $stale_recovery" >&2; exit 1; }
 [[ ! -e "$LOCK" ]] || { echo "stale attempt lock was not removed" >&2; exit 1; }
 
-# Once a marker exists, malformed recovery metadata is never a safe no-op. The
-# launcher must fail closed rather than execute the currently selected candidate.
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
 printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched"}\n' > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
 reset_launcher_log
@@ -599,8 +560,6 @@ assert "payloadVersion" not in record and "runtimeEpoch" not in record, record
 assert "malformed" in record["message"], record
 PY
 
-# An attempt marker naming a candidate the store no longer selects refuses the
-# pending selection with the version that marker claimed.
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v1","payloadFingerprint":"%s"}\n' "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
 printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
 reset_launcher_log

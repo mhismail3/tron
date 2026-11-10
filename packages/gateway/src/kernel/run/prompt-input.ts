@@ -18,17 +18,14 @@ interface AutomationPromptOwnership<TaskFence> {
   kind?: never;
   operationId: string;
   taskFence?: TaskFence;
-  /** Exact scheduler admission cancellation, fenced again at SDK preflight. */
   signal?: AbortSignal;
   origin: ChatOrigin;
   onAdmitted?: (invocationId: string) => void;
   onTerminal: (terminal: OwnedOperationTerminal) => Promise<void> | void;
 }
 
-/** A Home wake: Gateway-authored, with no user input. The inbox's trigger result starts the run. */
 interface HomeWakeOwnership {
   kind: "homeWake";
-  /** Actual logical lifetime and immutable epoch captured before asynchronous selection. */
   inputCancellation: RequestPolicy["inputCancellation"];
   cancellationEpoch: number;
   operationId: string;
@@ -64,7 +61,6 @@ export function preparePromptInput<TaskFence>(
     throw new GatewayError("invalid_request", "Prompt attachment descriptors do not match the bounded attachment count");
   }
   const resources = queueDisplay?.resourceInvocations;
-  // Skills and prompts the runtime expands itself; an extension command is Pi's literal command text.
   const composedResources = resources?.[0]?.source === "extension" ? undefined : resources;
   if (resources !== undefined) {
     admitResourceInvocations(resources, queueDisplay!.text);
@@ -73,23 +69,14 @@ export function preparePromptInput<TaskFence>(
     }
     operations.assertInvocableResources(resources);
   }
-  // Every caller passes the visible prompt; the expansions are composed
-  // here, in the lane, against the catalog just validated.
   if (composedResources !== undefined) {
     text = composeResourcePrompt(composedResources, text, operations.resourceExpansionCatalog());
   }
-  // Pi uses the first literal ASCII space as its command
-  // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
-  // part of the command name and therefore remain ordinary prompt text.
-  // A composed message is never a command, whatever its text begins with.
   const parsedCommand = ownership?.kind === "subagentWake" || ownership?.kind === "homeWake" || composedResources !== undefined
     ? undefined : parsePiLiteralCommand(text);
   const extensionCommandName = parsedCommand?.name;
   const isExactExtensionCommand = extensionCommandName !== undefined
     && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
-  // Scheduled plain text can resolve to a command even without a typed
-  // resource. Gate the actual capability in the serialized runtime owner,
-  // before effects, markers or automation completion observers are admitted.
   if (ownership && isExactExtensionCommand) {
     throw new GatewayError("invalid_request", "Extension commands cannot be scheduled");
   }
@@ -117,7 +104,6 @@ export function preparePromptIntent<TaskFence>(
     : resources?.[0]?.name);
   const invokedResources = invocationResources(composedResources);
   const extensionArguments = composedResources === undefined ? resources?.[0]?.arguments : undefined;
-  // A composed message's canonical text is its expansions followed by this text.
   const submittedText = images.length > 0 || composedResources !== undefined ? queueDisplay?.text ?? text : undefined;
   const invocation: InvocationProjection = existingInvocation ?? {
     version: 1,

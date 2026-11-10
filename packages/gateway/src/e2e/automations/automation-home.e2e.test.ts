@@ -37,8 +37,6 @@ it("real Gateway: retains each Home automation firing while paused, batches on r
   expect(designated.ok, JSON.stringify(designated)).toBe(true);
   const queue = await phone.request("settings.change", { commandId: gateway.commandId(), target: { kind: "home" }, changes: [{ key: "model.queue[role=background]", layer: "session", op: "set", value: [`${modelSettings.defaultProvider}/${modelSettings.defaultModel}`] }] });
   expect(queue.ok, JSON.stringify(queue)).toBe(true);
-  // Persist an actual Home conversation before testing paused-delivery recovery;
-  // a never-started missing chapter correctly requires explicit designation.
   gateway.script([() => fauxAssistantMessage("Home is ready.")]);
   const bootstrap = await phone.request("home.prompt", { commandId: gateway.commandId(), text: "Initialize this Home conversation." });
   if (!bootstrap.ok) throw new Error(JSON.stringify(bootstrap));
@@ -289,8 +287,6 @@ it("real Gateway: restart releases every claimed-but-unappended firing even whil
   const recordPath = join(gateway.tronHome, "gateway", "automations", `${automation.id}.json`);
   const root = gateway.root;
   await stopForCrashCut(gateway);
-  // Durable crash image: all three claims were persisted, but no canonical
-  // append happened. Only the stopped fixture's outbox is changed.
   const record = JSON.parse(await readFile(recordPath, "utf8"));
   const operationId = randomUUID();
   for (const run of [record.currentRun, ...record.pendingHomeRuns]) {
@@ -341,9 +337,6 @@ it("real Gateway: an old-route message-without-receipt cut cannot block or redir
   const homePath = join(gateway.tronHome, "gateway", "home", "home.json");
   const root = gateway.root;
   await stopForCrashCut(gateway);
-  // The Gateway is stopped: Pi is the only canonical writer. Append a real
-  // custom message without its next attribution write, leaving memory's already
-  // committed source prefix intact. Payload shape comes from the real producer.
   const details = template.details as { eventId: string; trigger: { kind: "automation"; sourceId: string; eventId: string; title: string } };
   SessionManager.open(oldFile).appendCustomMessageEntry(template.customType,
     template.content.split(coolingAutomation.name).join(automation.name), template.display,
@@ -359,8 +352,6 @@ it("real Gateway: an old-route message-without-receipt cut cannot block or redir
   const record = JSON.parse(await readFile(recordPath, "utf8"));
   Object.assign(record.currentRun, { state: "admitting", homeDelivery: "wake", executionSessionId: oldSessionId, operationId: randomUUID() });
   await writeFile(recordPath, JSON.stringify(record));
-  // Persist the valid result of a replacement designation while offline; the
-  // old file stays addressable so repair sees its actual partial evidence.
   const home = JSON.parse(await readFile(homePath, "utf8"));
   const now = new Date().toISOString();
   home.chapters = [...home.chapters.map((chapter: Record<string, unknown>) => ({ ...chapter, state: "sealed", sealedAt: now })),
@@ -448,8 +439,6 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
       invocationId, operationId, sessionId, source: "homeWake", lifecycle: "staged", origin: { kind: "gateway", confidence: "boundary" }, sequence: 1, createdAt: new Date().toISOString() }));
     for (const run of [record.currentRun, ...record.pendingHomeRuns]) Object.assign(run, { state: "admitting", executionSessionId: sessionId, operationId, homeDelivery: "wake" });
     record.stateRevision += 1;
-    // Coherent cut: all producer claims, then one actual Pi append; its
-    // delivery receipt and every subsequent write have not happened yet.
     await writeFile(ledgerPath, JSON.stringify(record));
     const partial = record.pendingHomeRuns[0];
     manager.appendCustomMessageEntry("tron.home-trigger.v1",
@@ -477,8 +466,6 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
     expect(gateway.record().providerRequests).toHaveLength(1);
     const notificationBefore = JSON.parse(await readFile(`${gateway.tronHome}/gateway/notifications.json`, "utf8"));
     await gateway.dispose({ keepRoot: true }); owned.pop(); notifications.at(-1)!.dispose(); live = undefined;
-    // A normal restart must preserve the completed canonical delivery and
-    // notification receipts. Never rewind an earlier durable acknowledgement.
     gateway = live = await startLockGateway("automation-home-gates", { ...pushOptions, root }); owned.push(gateway);
     phone = await gateway.connect("ack-restarted-phone");
     const recovered = (await phone.request("automation.get", { automationId: automation.id })).result;
@@ -572,8 +559,6 @@ it("real Gateway: an image-sized canonical line within the prompt bound cannot b
   const operationId = randomUUID();
   Object.assign(record.currentRun, { state: "admitting", homeDelivery: "wake", operationId, executionSessionId: sessionId });
   await writeFile(recordPath, JSON.stringify(record));
-  // A prompt carrying two inline images writes one line above 8 MiB; the
-  // prompt producer's bound admits it, so the delivery proof must read it.
   const manager = SessionManager.open(sessionFile);
   manager.appendCustomEntry("test.large-line", { data: "x".repeat(9 * 1_024 * 1_024) });
   const handle = await open(sessionFile, "r+"); try { await handle.sync(); } finally { await handle.close(); }
@@ -590,9 +575,6 @@ it("real Gateway: an image-sized canonical line within the prompt bound cannot b
 
 it("real Gateway: a Home-created automation wake cannot approve settings, trust, grants or sensitive profile decisions", async () => {
   const { gateway, phone, fire, sessionId } = await preparedGateway({ knowledge: true });
-  // Materialize and retire the ordinary trusted-project scope through real
-  // delegation, then revoke it through the maintainer RPC. Otherwise this
-  // project is already authorized and no grant should be requested.
   gateway.script(Array.from({ length: 8 }, () => context => {
     if (context.messages.some(message => message.role === "user" && JSON.stringify(message.content).includes("This is a finite Home task"))) {
       return fauxAssistantMessage([fauxToolCall("report", { resultId: "scope-setup-result", outcome: "final", text: "Scope setup completed.", evidence: ["Fixture report completed"] })], { stopReason: "toolUse" });
@@ -617,8 +599,6 @@ it("real Gateway: a Home-created automation wake cannot approve settings, trust,
   const trustKey = "permissions.projectTrust";
   const untrusted = join(gateway.root, "untrusted");
   await mkdir(untrusted);
-  // A known exact preview is not authority. Even its digest cannot be supplied
-  // through an agent tool or turned into a native tap by trigger text.
   const seed = await phone.request("settings.change", { commandId: gateway.commandId(), target: { kind: "global" }, dryRun: true,
     reason: "Exact native trust preview", changes: [{ key: trustKey, qualifiers: { project: untrusted }, layer: "global", op: "set", value: true }] });
   expect(seed.ok, JSON.stringify(seed)).toBe(true);
@@ -656,8 +636,6 @@ it("real Gateway: a Home-created automation wake cannot approve settings, trust,
     () => fauxAssistantMessage("No maintainer decision was supplied."),
   ]);
   const runId = await fire(automation);
-  // The wake's delegate can only present the exact grant card and wait; it cannot
-  // answer it. The maintainer declines.
   const home = await gateway.registry.acquire(sessionId);
   const grantCard = await waitFor(() => home.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "change"), "the wake's grant card");
   expect(grantCard.review!.title).toBe("Allow Home task unapproved-trigger-task once");
@@ -703,8 +681,6 @@ async function claimCancellationRace(position: "before" | "after") {
   const held = new Promise<void>(resolve => { release = resolve; });
   const mutate = AutomationStore.prototype.mutateState;
   let coordinated = false;
-  // Coordinate only timing. The original owner still performs every real
-  // durable mutation; no result, cancellation response or append is mocked.
   const barrier = vi.spyOn(AutomationStore.prototype, "mutateState").mockImplementation(async function (id, update) {
     if (id !== automation.id || coordinated) return mutate.call(this, id, update);
     coordinated = true;

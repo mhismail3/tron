@@ -86,8 +86,6 @@ export class PackageService {
     private readonly broadcast: (topic: string, payload: JsonValue) => void,
     private readonly workRegistry?: GatewayWorkRegistry,
     private readonly managedSubagents?: ManagedSubagents,
-    /** Package entries are written by this owner, not the settings change path;
-     * bracketing them keeps them from reading as outside changes (settings-model.md 5.6). */
     private readonly outside?: OutsideChanges,
   ) {}
 
@@ -98,9 +96,6 @@ export class PackageService {
       ? await this.trust.requireResolved(cwdInput)
       : await this.trust.inspect(cwdInput).then((inspection) => ({ cwd: inspection.cwd, projectDir: inspection.projectDir, trusted: inspection.effectiveDecision === true }));
     const settings = SettingsManager.create(trust.projectDir, this.agentDir, { projectTrusted: trust.trusted });
-    // The SDK deliberately exposes load failures through drainErrors rather than
-    // throwing from getters. Never let a malformed settings file look like an
-    // empty package inventory or authorize a mutation against that false view.
     if (settings.drainErrors().length > 0) {
       throw new GatewayError("conflict", "Canonical package settings could not be loaded");
     }
@@ -146,8 +141,6 @@ export class PackageService {
         : manager;
       const resources = await resolver.resolve(async () => "skip");
       validatePackageInventory(packages, resources);
-      // `provides` is additive and fails soft inside its own loader (extension
-      // tools/commands and subagent attribution), so it cannot fail this read.
       const provides = await loadPackageProvides({
         agentDir: this.agentDir,
         ...(this.managedSubagents ? { managedSubagents: this.managedSubagents } : {}),
@@ -181,10 +174,6 @@ export class PackageService {
       }
       const operationId = randomUUID();
       let manager: DefaultPackageManager | undefined;
-      // Set at mutation admission, before invoking the SDK. The pinned SDK has
-      // no atomicity receipt: install/remove/update can apply an earlier item
-      // and then throw. Once admitted, every failure is therefore fenced as
-      // unknown rather than permitting a replay that duplicates side effects.
       let mutationAdmitted = false;
       try {
         const managed = await this.manager(cwd, local);
@@ -204,20 +193,14 @@ export class PackageService {
           await manager.removeAndPersist(source, { local });
           await this.flushSettings(settings);
         } else if (source === undefined) {
-          // An omitted source retains Pi's existing "update all" command.
           mutationAdmitted = true;
           await manager.update();
         } else {
-          // Pi's public update(source) intentionally updates every matching
-          // scope. The RPC identifies one row, so use the public scoped install
-          // seam to refresh only that row's user/project installation while
-          // leaving its existing settings entry untouched.
           this.ensureConfiguredSource(manager, source, local);
           mutationAdmitted = true;
           await manager.install(source, { local });
         }
         } finally {
-          // Unrecorded writes are adopted as observed, never as outside changes.
           await this.outside?.end(writes, new Map());
         }
         this.broadcast("packages.completed", { operationId, success: true });
@@ -228,7 +211,7 @@ export class PackageService {
             success: false,
             error: error instanceof Error ? error.message : String(error),
           });
-        } catch { /* An advisory observer cannot erase mutation uncertainty. */ }
+        } catch { }
         throw mutationAdmitted
           ? asUncertainOutcome(error, "The admitted package operation has an unproven outcome; reconcile package state before issuing another command")
           : error;

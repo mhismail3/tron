@@ -17,8 +17,6 @@ KIND = 'tron-mac-replace'
 FULL_STEPS = ('preflight', 'build', 'verify-signature', 'drain-workers', 'stop-gateway',
               'swap-app', 'start', 'verify', 'finish')
 QUICK_STEPS = ('preflight', 'drain-workers', 'rebuild', 'verify', 'finish')
-# Steps whose verified product survives a failed attempt. Every other step
-# observes or changes live state, so a retry always runs it again.
 REUSABLE_STEPS = ('build', 'verify-signature')
 TERMINAL_STATES = ('succeeded', 'failed', 'rolled-back', 'rollback-failed')
 STEP_TITLES = {

@@ -75,24 +75,18 @@ describe("automation cancellation ownership", () => {
       scheduler.start();
       const run = await scheduler.runNow(definition.id, definition.revision);
       await scheduler.scan();
-      // The public scan joins selection, not the asynchronous durable claim.
-      // This is the owned-but-still-queued window, without a private delay hook.
       expect(scheduler.hasSessionRun(slot.id)).toBe(true);
       expect(store.get(definition.id).currentRun).toMatchObject({ runId: run.runId, state: "queued" });
       await expect(scheduler.cancel(definition.id, run.runId)).resolves.toMatchObject({ state: "cancelled", reason: "user-cancelled" });
       await waitFor(() => !scheduler!.hasSessionRun(slot.id), "the cancelled claim owner to retire");
       expect(await userMessages()).toEqual(["baseline control"]);
 
-      // The same real executor must still publish a fresh successful occurrence;
-      // preventing every automation would not be a cancellation fix.
       const successful = await scheduler.runNow(definition.id, definition.revision);
       await waitFor(() => store.get(definition.id).lastRun?.runId === successful.runId
         && store.get(definition.id).lastRun?.state === "succeeded", "the normal automation's durable terminal");
       await waitFor(() => !scheduler!.hasSessionRun(slot.id), "the successful execution owner to retire");
       expect(await userMessages()).toEqual(["baseline control", text]);
 
-      // A command accepted just before drain really is unreserved. Keep its
-      // immediate queued cancellation rather than waiting for a nonexistent owner.
       const queued = await scheduler.runNow(definition.id, definition.revision);
       scheduler.beginDrain();
       expect(scheduler.hasSessionRun(slot.id)).toBe(false);
@@ -158,8 +152,6 @@ describe("automation failure attribution", () => {
         triggerSnapshot: record.trigger, actionSnapshot: record.action, targetSnapshot: record.target,
         executionSessionId: `fixture-session-${index}`, state: "queued", preAdmissionAttemptCount: 0,
       } }));
-      // A real filesystem failure at the durable claim boundary, not a mocked
-      // diagnostic call: neither run may reach the executor without its claim.
       const recordPath = join(root, "gateway", "automations", `${record.id}.json`);
       await rm(recordPath);
       await mkdir(recordPath);

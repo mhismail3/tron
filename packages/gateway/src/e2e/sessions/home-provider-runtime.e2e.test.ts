@@ -18,12 +18,6 @@ import { waitFor } from "../../../test-support/wait-for.js";
 
 import { OpenAIModelEligibility, openAIModelEligibility } from "../../providers/openai-model-eligibility.js";
 
-// #480 A1-A4, found live: Home's chat reached Pi's built-in provider instead of
-// the one a user package registered over it. A user package registers its provider
-// into the Gateway-wide runtime (GlobalProviderResources); here a faux provider
-// registered only there stands in for it, and every per-session runtime the
-// registry builds lacks it, as a session that loads no packages would.
-
 const PACKAGE = { provider: "user-package", id: "chat" };
 const BUILTIN = { provider: "builtin", id: "chat" };
 const client = { id: "terminal", identity: "device:home-provider", isLocal: false, unsubscribe: () => {} } as unknown as ClientContext;
@@ -72,7 +66,6 @@ async function fixture(options: { shareGatewayRuntime: boolean }) {
     runtime.registerNativeProvider(builtin.provider);
     return runtime;
   };
-  // The Gateway-wide runtime: built-ins plus the user's package provider.
   const gateway = await create();
   gateway.registerNativeProvider(packaged.provider);
   let settings: ReturnType<typeof settingsDependencies> | undefined;
@@ -113,7 +106,6 @@ async function homeTurn(f: Awaited<ReturnType<typeof fixture>>, text: string): P
 }
 
 describe("Home's chat runtime", { concurrent: false }, () => {
-  // A1, A2, A3.
   it("reaches a provider only the Gateway-wide runtime has, through every Home lifecycle step", async () => {
     trackCase(0);
     const f = await fixture({ shareGatewayRuntime: true });
@@ -124,11 +116,9 @@ describe("Home's chat runtime", { concurrent: false }, () => {
     expect(first?.stopReason).toBe("stop");
     expect(first?.provider).toBe(PACKAGE.provider);
 
-    // Disable and re-enable replace Home's runtime in place; the shared runtime stays usable.
     await f.service.invoke(client, "home.disable", { commandId: "provider-disable" });
     await f.service.invoke(client, "home.designate", { commandId: "provider-redesignate", model: PACKAGE });
     const second = await homeTurn(f, "second");
-    // An ordinary session keeps a runtime of its own.
     const ordinary = await f.registry.create(f.root);
     const ordinaryHasPackage = sessionOf(ordinary).modelRuntime.getModel(PACKAGE.provider, PACKAGE.id) !== undefined;
     report.cases[0]!.observations = {
@@ -143,10 +133,6 @@ describe("Home's chat runtime", { concurrent: false }, () => {
     expect(ordinaryHasPackage).toBe(false);
   });
 
-  // Home's session-local context-window override must stay session-local.
-  // SessionContextWindowPolicy replaces `getModel` on the runtime it is given, so a
-  // shared runtime would leak the override into Gateway-wide lookups and stack each
-  // replaced runtime's lookup under the next.
   it("keeps a Home context-window override out of the shared runtime, across runtime replacement", async () => {
     trackCase(1);
     const f = await fixture({ shareGatewayRuntime: true });
@@ -203,7 +189,6 @@ describe("Home's chat runtime", { concurrent: false }, () => {
     report.cases[3]!.observations = { rebuilds: 3, sharedProviderUnchanged: true, sharedEligibilitySurvived: true, ordinaryDetached: true };
   });
 
-  // A1's negative control: the same Home on a runtime without the package provider cannot reach it.
   it("cannot reach that provider from a runtime the package never registered in", async () => {
     trackCase(2);
     const f = await fixture({ shareGatewayRuntime: false });

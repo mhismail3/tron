@@ -25,8 +25,6 @@ def main():
         git(root, "clone", str(remote), str(repo))
         (repo / "scripts").mkdir()
         script = repo / "scripts/tron-ios-device"
-        # The fetched leaf stands in for signing/build/publish only. The caller
-        # below runs the real device entry point and real source/cleanup owner.
         script.write_text('''#!/bin/sh
 set -eu
 git rev-parse HEAD > "$SOURCE_REPORT"
@@ -48,8 +46,6 @@ exit "${BUILD_STATUS:-0}"
         git(repo, "checkout", "-b", "worker")
         shutil.copy2(ROOT / "scripts/tron-ios-device", script)
         (repo / "untracked").write_text("keep")
-        # An existing caller-owned nested checkout is not this invocation's
-        # generated output, even under the same ignored DerivedData path.
         user = repo / "packages/ios-app/build/DerivedData-fast-debug/SourcePackages/checkouts/user"
         user.mkdir(parents=True)
         git(user, "init", "-q")
@@ -72,9 +68,6 @@ exit "${BUILD_STATUS:-0}"
                 assert (user / "dirty").read_text() == "keep caller draft"
                 registrations = git(repo, "worktree", "list", "--porcelain")
                 assert len(registrations.split("worktree ")) == 2, registrations
-        # #2401: macOS answers killpg on a group whose members all exited but whose leader is not
-        # yet reaped with EPERM. A signal in that window still ends the run with the build's own
-        # status and removes the checkout; the spy only holds the window open, then calls the real wait.
         driver = (
             "import importlib.util, os, signal, subprocess, sys, time\n"
             "spec = importlib.util.spec_from_file_location('source', sys.argv[1])\n"

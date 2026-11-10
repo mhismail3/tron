@@ -6,9 +6,6 @@ import {
   type ExtensionFactory,
 } from "../pi/coding-agent.js";
 
-/** Pi's MCP loader reads mcp.json from getAgentDir() and only reads project
- * configuration after the resource loader's TrustService-owned trust gate. The
- * Gateway pins PI_CODING_AGENT_DIR to its agent directory at startup. */
 export function piBuiltinExtensions(
   agentDir: string,
   openMcpUrl?: (url: string) => void,
@@ -20,7 +17,6 @@ export function piBuiltinExtensions(
       name: "mcp",
       factory: createMcpExtension({
         logPath: join(agentDir, "mcp.log"),
-        // A missing session operation fails closed; it can never reach the Mac browser.
         openUrl: openMcpUrl ?? (() => { throw new Error("MCP sign-in requires an active Tron authorization operation"); }),
       }),
       builtin: true,

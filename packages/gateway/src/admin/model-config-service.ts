@@ -113,8 +113,6 @@ export class ModelConfigService {
       if (Array.isArray(provider.models) && provider.models.length > 500) throw new GatewayError("invalid_request", `provider ${providerId} has too many models`);
     }
 
-    // Let Tron's pinned runtime validate the complete native schema rather
-    // than maintaining a second, inevitably drifting models.json schema.
     const root = await mkdtemp(join(tmpdir(), "tron-model-validation-"));
     const candidate = join(root, "models.json");
     try {

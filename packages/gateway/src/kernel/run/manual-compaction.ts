@@ -22,8 +22,6 @@ export class ManualCompactionOwner {
 
   async compact(instructions?: string): Promise<{ queued: boolean }> {
     this.operations.assertUsable();
-    // Refused at admission: Home keeps its own history, and the SDK would only
-    // refuse this later, after the command was already accepted.
     if (this.operations.liveProfile().compaction === "disabled") {
       throw new GatewayError("conflict", "Tron Home keeps its own history; manual compaction is unavailable");
     }
@@ -53,13 +51,7 @@ export class ManualCompactionOwner {
           throw new GatewayError("conflict", "Manual compaction ownership changed", true);
         }
         if (this.operations.hasActiveAgentRun) {
-          // A run is live, so this hands off behind it rather than starting now.
-          // Clears retained archive state only after the ownership rejection
-          // above: a compaction that cannot be admitted must not unarchive the
-          // session.
           await this.operations.dependencies.beforeRunAdmission(this.operations.id);
-          // Accepted maintenance owns its own durable marker, never a prior
-          // prompt's. A handoff can be deferred behind more than one run.
           await this.operations.runPersistence.trackOwnershipWrite(
             () => this.operations.runPersistence.retryDurableWrite(`marker:mark:${operationId}`, () => this.operations.dependencies.markers.mark(this.operations.id, operationId)),
             work,
@@ -76,23 +68,16 @@ export class ManualCompactionOwner {
           });
           this.operations.revision += 1;
           this.operations.publishSnapshot();
-          // The preceding run may have settled while the marker write awaited.
           this.startPendingManualCompaction();
           return true;
         }
 
         this.assertIdleForManualCompaction(claim);
-        // Only after every rejection above is retained archive state cleared, so
-        // a compaction refused here (an export in flight, Bash running) leaves
-        // the session archived.
         await this.operations.dependencies.beforeRunAdmission(this.operations.id);
         await this.performManualCompaction(instructions, false, operationId, work);
         return false;
       });
 
-      // Keep the command receipt pending until the exact queued mutation has
-      // completed. A disconnected client therefore cannot turn accepted work
-      // into an acknowledged-but-unperformed compaction.
       if (queuedCompletion) await queuedCompletion;
       return { queued };
     } finally {
@@ -106,8 +91,6 @@ export class ManualCompactionOwner {
     if (!pending || this.operations.shuttingDown) return;
     void this.operations.lane.run(async () => {
       if (this.pendingManualCompaction !== pending || this.operations.shuttingDown) return;
-      // Another prompt can enter SDK preflight before this lane handoff runs.
-      // Leave the exact compaction pending for that newer run's final settlement.
       if (this.operations.hasActiveAgentRun || this.operations.runAttention.pendingAssistantCompletion || this.operations.runAttention.completionOwnershipQueue.length > 0) return;
       this.pendingManualCompaction = undefined;
       this.queuedManualCompactionInFlight = true;
@@ -163,8 +146,6 @@ export class ManualCompactionOwner {
       this.operations.hooks.settled(this.operations.id);
     }
 
-    // Stop and a successor can arrive during marker I/O too. Retire the exact
-    // cancellation intent after that await, then re-check presentation ownership.
     this.operations.runAbort.abortedOperations.delete(operationId);
     const ownerStillCurrent = this.operations.operationMatches(compactionOwner);
     if (ownerStillCurrent) {
@@ -216,9 +197,6 @@ export class ManualCompactionOwner {
       void (async () => {
         try {
           await this.operations.clearMarkerOwnership(adoptedManual.operationId, adoptedManual.work);
-          // The accepted command owns the first compaction after it queued;
-          // if that compaction fails or is cancelled, settle it as failed
-          // rather than launching a second manual compaction.
           if (outcome === "success") adoptedManual.resolve();
           else adoptedManual.reject(new GatewayError(
             outcome === "cancelled" ? "conflict" : "internal",

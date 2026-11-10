@@ -5,10 +5,7 @@ import {
 } from "../../kernel/run/task-command-scope.js";
 import { busyShare, readCpuTicks, type CpuTicks } from "./host-pressure.js";
 
-/** Cheap: one `ps` plus one `lsof` per scope. */
 const TASK_COMMAND_SWEEP_INTERVAL_MS = 60_000;
-/** Busy share of all CPUs over one sweep window at which the sweep attributes host CPU. Load
- * average does not track busy CPUs on this Mac (host-load.md), so it is not used. */
 const RUNAWAY_CPU_BUSY = 0.9;
 const LOAD_FLAG_INTERVAL_MS = 10 * 60_000;
 const LOAD_TOP_PROCESSES = 5;
@@ -19,18 +16,8 @@ export type TaskCommandDiagnostic =
   | { event: "home.task.command-reap"; taskHash: string; action: "settle" | "sweep"; outcome: TaskScopeReap["outcome"];
     reason?: string; counts: { processes: number; survivors: number } }
   | { event: "home.task.command-scope-refused"; reason: "unbound-scope" | "unknown-task" | "bind-failed" }
-  /** `stages` names the busiest processes outside every task scope as
-   * `name pid=… ppid=… cpu=…%`; `ppid=1` marks an orphan or a launchd job. */
   | { event: "host.load.non-task"; counts: { cpuBusyPercent: number; taskCpuPercent: number; nonTaskCpuPercent: number; orphanCpuPercent: number }; stages: string };
 
-/**
- * Owns Home task command scopes (kernel/run/task-command-scope.ts) for the dispatcher: binds a
- * scope when a task binds its worker, settles and reaps it when the task settles, and every
- * sweep reaps scopes whose task settled without a completed reap (a refused reap, a failed
- * settlement or a Gateway restart) and flags host CPU that task scopes do not explain. It
- * refuses and logs rather than guess: a scope whose task this Home's store does not record
- * for that same worker session is left alone.
- */
 export class TaskCommandSweep {
   private timer: NodeJS.Timeout | undefined;
   private sweeping: Promise<void> | undefined;
@@ -40,7 +27,6 @@ export class TaskCommandSweep {
 
   constructor(private readonly tasks: {
     running: (taskId: string) => boolean;
-    /** The task's lifecycle and worker session, undefined when the store has no such task. */
     record: (taskId: string) => Promise<{ terminal: boolean; sessionId: string | null } | undefined>;
   }, private readonly diagnostic: ((record: TaskCommandDiagnostic) => void) | undefined) {}
 
@@ -56,14 +42,12 @@ export class TaskCommandSweep {
     await this.sweeping;
   }
 
-  /** A failed bind leaves the worker's commands unscoped, logged; it never refuses the task. */
   bind(sessionId: string, taskId: string): void {
     if (process.platform === "win32") return;
     try { bindTaskCommandScope(sessionId, taskId); }
     catch { this.diagnostic?.({ event: "home.task.command-scope-refused", reason: "bind-failed" }); }
   }
 
-  /** The settling task's own reap. Never throws; a refused reap leaves the settled scope to the sweep. */
   async settle(sessionId: string, taskId: string): Promise<void> {
     const scope = taskCommandScopeOf(sessionId);
     if (!scope || !settleTaskCommandScope(scope, taskId)) return;
@@ -92,7 +76,6 @@ export class TaskCommandSweep {
       if (!taskId) { this.refuse(sessionId, "unbound-scope"); continue; }
       if (!this.tasks.running(taskId)) {
         const record = await this.tasks.record(taskId).catch(() => undefined);
-        // Scopes of another Gateway sharing this temp root name tasks this store lacks.
         if (!record || record.sessionId !== sessionId) { this.refuse(sessionId, "unknown-task"); continue; }
         if (record.terminal) {
           if (bound) settleTaskCommandScope(scope, taskId);

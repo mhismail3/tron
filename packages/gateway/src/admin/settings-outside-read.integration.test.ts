@@ -9,10 +9,6 @@ import { OutsideChanges } from "./settings-outside.js";
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 
-// Every settings read (`settings.resolve`, `home.status`) reconciles outside changes
-// first. An unchanged comparison must not durably rewrite `observed.json`: under
-// fsync pressure that write held the comparison mutex, and every queued read behind
-// it, for tens of seconds.
 it("persists observed state only when a comparison changed it", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-settings-outside-"));
   roots.push(root);

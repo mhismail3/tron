@@ -9,40 +9,7 @@ import { NotificationGrantStore } from "../../notifications/grant-store.js";
 import { NotificationService } from "../../notifications/notification-service.js";
 import { PushRelayClient } from "../../notifications/relay-client.js";
 
-/**
- * Push delivery locks (restructure E0b follow-up, K-0 §2.1 `runTerminal`;
- * guarding E5's notification hook) for `gateway/notifications`, beside
- * `notifications.push.lock`. The real Gateway (`gateway-lock-harness.ts`) runs
- * the production `NotificationService` and grant store; only the relay's HTTP
- * fetcher is replaced, and its answers are scripted per phase.
- *
- * - `notifications-waiting`: a turn that ends while its detached extension run
- *   is live pushes `waiting`; the next turn in the same waiting episode pushes
- *   nothing; once the run ends, a turn pushes `agent_finished`.
- * - `notifications-queued-restart`: with the relay unavailable a finished and a
- *   stopped push stay queued after one retryable attempt each; a restarted
- *   notification owner over the same Tron home delivers both, in order, under
- *   the same relay request ids.
- * - `notifications-queued-cancel`: a queued push is cancelled when the phone
- *   removes its registration (never sent again; receipt and inbox failed), and
- *   the grant's revocation reaches the relay once it is available.
- *
- * Plain integration regressions additionally cover overlapping waiting admissions
- * and controlled admission rejection.
- *
- * `notifications-waiting` checks its provider requests' `session-shapes` shape
- * (`chatWithNotificationsBackground`: the tool list and prompt of a session with
- * notifications and an extension tool) and their messages.
- *
- * Each check asserts the relay requests (method, path, status and the exact
- * envelope the relay reads) and the store's receipts, queue, revocations and inbox.
- * Dedupe keys, session keys and relay request ids are digests of per-run session
- * ids, so they are checked by shape and by identity: a retry reuses its request id,
- * and a push's receipt, queued intent and inbox entry share one dedupe key.
- */
 const RELAY_ORIGIN = "https://relay.lock.invalid";
-/** An extension tool that starts a declared asynchronous run: its status artifact
- * lives under the project's async run root, and the tool returns at once. */
 const DETACHED_RUN = `
   import { mkdirSync, writeFileSync } from "node:fs";
   import { join } from "node:path";
@@ -61,8 +28,6 @@ const DETACHED_RUN = `
   }
 `;
 
-/** `requestDigest` is the relay request id; it is not named `requestId`, which the
- * shared normalization would blind, so a retry's identity stays visible. */
 interface RelayRequest { method: string; path: string; requestDigest: string; status: number; envelope: unknown }
 interface PushDocument {
   receipts: Array<{ result: string; kind?: string; dedupeKey: string; sessionKey: string }>;
@@ -74,7 +39,6 @@ interface PushDocument {
 const owned: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const release of owned.splice(0).reverse()) await release(); });
 
-/** The relay boundary: a scripted availability, every request recorded. */
 class Relay {
   available = true;
   readonly requests: RelayRequest[] = [];
@@ -92,17 +56,14 @@ class Relay {
 }
 
 const ISO = expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u);
-/** A per-run digest (`notificationHash`: base64url SHA-256). */
 const DIGEST = expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u);
 const GRANT = "lock-grant-0001";
 const SECRET = Buffer.alloc(32, 7).toString("base64url");
 
-/** The relay envelope of one push, exactly: the cross-component format the relay reads. */
 function envelope(sessionId: string, title: string, notificationKind: string, message: string) {
   return { version: 1, kind: "agent_alert", notificationKind, machineId: "lock-machine", sessionId, title, message, requestId: DIGEST, expiresAt: ISO };
 }
 
-/** The POSTs the relay received: status and envelope, with each request's id. */
 function posts(relay: Relay) {
   return relay.requests.filter((request) => request.method === "POST").map((request) => {
     expect(request.path).toBe("/v3/notifications");
@@ -111,11 +72,6 @@ function posts(relay: Relay) {
   });
 }
 
-/**
- * One delivered or queued push as the store holds it: its receipt, its inbox entry
- * and (while queued) its pending intent, joined by one dedupe key and naming the
- * relay request the push went out under.
- */
 function push(input: { sessionKey: unknown; requestId: string; envelope: unknown; result: string; title: string; kind: string; message: string; sessionId: string }) {
   const dedupeKey = DIGEST;
   return {
@@ -128,7 +84,6 @@ function push(input: { sessionKey: unknown; requestId: string; envelope: unknown
   };
 }
 
-/** The store's receipts, queue, revocations and inbox (the parts the push contract owns), each queued target's relay envelope parsed. */
 function parsed(document: PushDocument) {
   return { receipts: document.receipts, revocations: document.revocations, inbox: document.inbox, pending: document.pending.map((intent) => ({ ...intent, targets: intent.targets.map((target) => {
     const stored = (target as { relayEnvelope?: unknown }).relayEnvelope;
@@ -136,7 +91,6 @@ function parsed(document: PushDocument) {
   }) })) };
 }
 
-/** Each entry of one dedupe key shares it, and different pushes do not. */
 function dedupeKeysJoin(document: PushDocument): void {
   const keys = document.receipts.map((receipt) => receipt.dedupeKey);
   expect(new Set(keys).size, "one dedupe key per push").toBe(keys.length);
@@ -144,10 +98,8 @@ function dedupeKeysJoin(document: PushDocument): void {
   for (const intent of document.pending as unknown as Array<{ dedupeKey: string }>) expect(keys, "each queued intent has its receipt").toContain(intent.dedupeKey);
 }
 
-/** A response frame as the phone reads it. */
 const answer = (frame: { ok: boolean; result?: unknown; error?: unknown }) => ({ ok: frame.ok, result: frame.result ?? null, error: frame.error ?? null });
 
-/** The registration the phone made, as the Gateway reported it. */
 const REGISTERED = { available: true, deviceRegistered: true, enabledDeviceCount: 1, notifyWhenAskPresented: true, notifyWhenFinished: true,
   notifyWhenWaiting: true, pendingCount: 0, registered: true, relayOrigin: RELAY_ORIGIN, requiresGrantRotation: false };
 
@@ -156,10 +108,8 @@ interface PushLock {
   readonly phone: LockClient;
   readonly relay: Relay;
   readonly sessionId: string;
-  /** The owner `gateway-main` builds, on a clock the lock may move forward. */
   readonly service: () => NotificationService;
   build(): Promise<NotificationService>;
-  /** Stop the owner's clock, so no retry comes due unless the lock advances it. */
   freeze(): void;
   advance(milliseconds: number): void;
   document(): Promise<PushDocument>;
@@ -203,7 +153,6 @@ async function pushLock(name: string, extensions: Array<{ name: string; source: 
   };
 }
 
-/** Envelope summaries: kind, title and message of each push the relay was asked to send. */
 function pushes(relay: Relay): string[] {
   return relay.requests.filter((request) => request.method === "POST").map((request) => {
     const envelope = request.envelope as { notificationKind?: string; title?: string; message?: string };
@@ -216,10 +165,6 @@ describe("gateway/notifications delivery locks", () => {
     const lock = await pushLock("notifications-waiting", [{ name: "lock-background.ts", source: DETACHED_RUN }]);
     const { gateway, relay, sessionId } = lock;
     const slot = await gateway.registry.acquire(sessionId);
-    // The slot stays busy while it owns the run, so a turn has ended once its
-    // terminal work (receipt, then its push decision) has left the drain's
-    // blockers and only the detached run remains. Prompting earlier races that
-    // push decision (#1567).
     const turnEnded = (requests: number, label: string) => waitFor(() => !slot.snapshot().operation
       && gateway.record().providerRequests.length === requests
       && gateway.registry.administrativeDrainSnapshot().blockers.every((blocker) => blocker.category === "detached-extension-run"), label);
@@ -235,7 +180,6 @@ describe("gateway/notifications delivery locks", () => {
     await waitFor(() => pushes(relay).length === 1, "the waiting push");
     expect((await lock.prompt("is it still running")).ok).toBe(true);
     await turnEnded(3, "the second turn to end");
-    // The second turn's terminal has been decided once its receipt is written.
     await waitFor(async () => (await lock.document()).pending.length === 0, "the pushes to settle");
     const afterSecondTurn = pushes(relay);
 
@@ -268,7 +212,6 @@ describe("gateway/notifications delivery locks", () => {
       receipts: [waiting.receipt, finished.receipt], pending: [], revocations: [], inbox: [waiting.inbox, finished.inbox] });
     expect(sessionKey).toEqual(DIGEST);
     dedupeKeysJoin(document);
-    // The turns ran as scripted: four provider requests, each the conversation so far, with this session's shape.
     const providerRequests = gateway.record().providerRequests;
     expectRequestShapes(providerRequests, Array.from({ length: 4 }, () => "chatWithNotificationsBackground"));
     const conversation = [
@@ -312,8 +255,6 @@ describe("gateway/notifications delivery locks", () => {
     let successorSettled!: () => void;
     const successorTerminal = new Promise<void>(resolve => { successorSettled = resolve; });
     const notify = slot.runTerminal.notifyAgentTerminal.bind(slot.runTerminal);
-    // Observe the real successor's terminal return, whether its policy enqueues
-    // or suppresses. The predecessor is already held inside the real service.
     slot.runTerminal.notifyAgentTerminal = async (...args) => {
       await notify(...args);
       successorSettled();
@@ -371,7 +312,6 @@ describe("gateway/notifications delivery locks", () => {
     }, label);
     relay.available = false;
 
-    // A finished run, then a stopped one, while the relay answers 503.
     let reached!: () => void;
     const held = new Promise<void>((resolve) => { reached = resolve; });
     gateway.script([
@@ -389,7 +329,6 @@ describe("gateway/notifications delivery locks", () => {
     expect((await lock.prompt("finish while the relay is down")).ok).toBe(true);
     await gateway.settled(sessionId);
     await attempted(1, "the finished push's first attempt");
-    // The frozen clock moves one second, so the two pushes keep their creation order.
     lock.advance(1_000);
     const stoppable = await lock.prompt("start a run to stop");
     await awaitsWithin(held, "the abortable provider request");
@@ -397,7 +336,6 @@ describe("gateway/notifications delivery locks", () => {
     await gateway.settled(sessionId);
     const queued = await attempted(2, "the stopped push's first attempt");
 
-    // The owner restarts over the same Tron home after the retry delay; the relay is back.
     lock.service().dispose();
     relay.available = true;
     lock.advance(6_000);
@@ -462,7 +400,6 @@ describe("gateway/notifications delivery locks", () => {
 
     const removed = await phone.request("push.registration.remove", { commandId: gateway.commandId() });
     expect(removed.ok, JSON.stringify(removed)).toBe(true);
-    // The revocation's first attempt meets the unavailable relay too.
     const cancelled = await waitFor(async () => {
       const document = await lock.document();
       return (document.revocations[0] as { attempts?: number } | undefined)?.attempts === 1 ? document : undefined;

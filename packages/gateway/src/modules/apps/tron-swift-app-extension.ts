@@ -45,7 +45,6 @@ function required<T>(value: T | undefined, field: string, action: string): T {
   return value;
 }
 
-/** The agent's interface to installed Swift apps; the store is the only writer. */
 export function createTronSwiftAppExtension(input: {
   store: SwiftAppStore;
   artifacts: DisplayArtifactStore;

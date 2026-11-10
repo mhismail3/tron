@@ -3,26 +3,6 @@ import { type LockGateway } from "../../../test-support/gateway-lock-harness.js"
 import { expectRequestShapes, expectSystemShapes } from "../../../test-support/lock-projections.js";
 import { openLockSession, queueControlScenario } from "../../../test-support/lock-scenarios.js";
 
-/**
- * Queue lock (packages/gateway/docs/scenario-locks.md#locks; K-0 §7, guarding E5 `kernel/run`'s
- * admission, queue and abort) for the `gateway/run` module, through the real
- * Gateway over a loopback WebSocket (`gateway-lock-harness.ts`).
- *
- * `run-queue-control`: while one run is held open, three follow-ups queue in
- * order and a retried `commandId` replays its receipt instead of queueing
- * again. `session.queue.replace` refuses a stale revision and an unknown item,
- * then reorders two follow-ups and drops the third; `session.abort` refuses an
- * operation that is not the live one. The run and the follow-ups then reach the
- * model in the edited order. A second held run's follow-ups are cleared by
- * `session.clearQueue`, and stopping a third run with a queued steer delivers
- * that steer as the next turn. Canonical JSONL records each queued item's
- * terminal receipt (`queue-replaced`, `queue-cleared`).
- *
- * Effects are asserted by name: queue revisions and contents, exact refusals,
- * the replayed retry, every persisted invocation receipt in order, the transcript
- * rows, each provider request's messages and the `session-shapes` shapes.
- */
-
 const gateways: LockGateway[] = [];
 afterEach(async () => { await Promise.all(gateways.splice(0).map((gateway) => gateway.dispose())); });
 
@@ -55,7 +35,6 @@ describe("gateway/run queue lock", () => {
     expect(finalQueue.queuedItems).toEqual([]);
     expect(userTexts.map((text) => ["hold the first run open", "third follow-up", "first follow-up", "hold the second run open",
       "hold a run to stop", "steer queued at stop"].findIndex((needle) => text.includes(needle)))).toEqual([0, 1, 2, 3, 4, 5]);
-    // Every invocation receipt in file order: the replaced item, the two cleared ones and the stopped run end interrupted.
     const receipts = canonicalJsonl.flatMap((entry) => {
       const record = entry as { customType?: string; data?: { receiptKind?: string; lifecycle?: string; errorCode?: string } };
       return record.customType === "tron.chat-invocation.v1" ? [`${record.data?.receiptKind}:${record.data?.lifecycle ?? ""}:${record.data?.errorCode ?? ""}`] : [];
@@ -70,7 +49,6 @@ describe("gateway/run queue lock", () => {
     ]);
     expectSystemShapes(canonicalJsonl, ["chat#0"]);
     expect(transcript.result).toMatchObject({ end: 14, total: 14 });
-    // The transcript the client reads: each row's head, prompt lifecycle and text (or the abort reason).
     expect(transcript.result.items.map((item: { kind: string; role?: string; stopReason?: string; errorMessage?: string; semantic?: { lifecycle?: string };
       content?: Array<{ text?: string }> }) => [item.kind === "message" ? `${item.role}${item.stopReason ? `:${item.stopReason}` : ""}` : item.kind,
       item.semantic?.lifecycle ?? "", ...(item.content ?? []).map((part) => part.text), ...(item.errorMessage ? [item.errorMessage] : [])].join(" | "))).toEqual([
@@ -82,7 +60,6 @@ describe("gateway/run queue lock", () => {
       "user | interrupted | hold a run to stop", "assistant:aborted |  | Request was aborted",
       "user | completed | steer queued at stop", "assistant:stop |  | Stopped steer answered.",
     ]);
-    // Each request's result: every admitted prompt names its operation; the edit returns the new queue; clear and stop succeed.
     const results = (method: string) => (recorded.exchanges as Array<{ method: string; response: { ok: boolean; result: unknown } }>)
       .filter((exchange) => exchange.method === method).map((exchange) => exchange.response.ok ? exchange.response.result : "refused");
     expect(results("session.prompt")).toEqual(Array.from({ length: 10 }, () => ({ operationId: "<id>" })));
@@ -96,7 +73,6 @@ describe("gateway/run queue lock", () => {
         receipt, receipt, "message", "message", ...Array(8).fill(receipt), "message", receipt, "message", receipt, "message", receipt, "message", receipt,
         "message", receipt, receipt, receipt, "message", ...Array(7).fill(receipt), "message", receipt, receipt, receipt, "message", receipt, receipt, receipt,
         "message", receipt, "message", receipt, "message", receipt]);
-    // The edited order reaches the model, the cleared items never do, and the steer is the turn after the stop.
     const conversation = ["user:hold the first run open", "assistant:Held run settled.", "user:third follow-up", "assistant:Third follow-up answered.",
       "user:first follow-up", "assistant:First follow-up answered.", "user:hold the second run open", "assistant:Second held run settled.",
       "user:hold a run to stop", "assistant:", "user:steer queued at stop"];
