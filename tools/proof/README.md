@@ -169,4 +169,3 @@ that is not a linked list are each refused, naming the function or type, with no
 without fields is one shared value found by its own name only; and a compiled method gets a fresh work array on
 each call, sized by its precondition, and is refused when an array is unsized or a precondition is one the façade
 cannot establish.
-
