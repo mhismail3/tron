@@ -5123,7 +5123,7 @@ extension AppModel: SessionPresentationStoreDelegate {
                 }
                 guard isCurrent() else { return }
             }
-            await read.remove(sessionIDs: sessions)
+            read.remove(sessionIDs: sessions)
         }
     }
 
