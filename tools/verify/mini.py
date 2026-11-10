@@ -15,7 +15,7 @@ mini's. No result means a failure (exit 2), never a local fallback.
 Mini side (`remote`): one job at a time under ~/tron-ci/jobs/gateway.lock, check out the commit in
 ~/tron-ci/jobs/gateway, refuse a Node or npm that differs from the commit's pins, `npm ci` only when the
 commit's Gateway dependency inputs changed (Python tests import Gateway packages too), then run the commit's own
-gateway.py or the Python command. Closing the ssh session
+gateway.py or, once the pinned Dafny passes `proof doctor`, the Python command. Closing the ssh session
 (the local side stopped) sends that lane SIGTERM. The mini host is `git config tron.verify.mini` (an ssh
 destination) and `tron.verify.miniIdentity` (an optional key file). Runs on the mini's /usr/bin/python3.
 """
@@ -379,6 +379,12 @@ def remote_main(job: dict) -> int:
                 return refuse('stopped before the lane started')
 
             if job['lane'] == 'python':
+                # Python tests check proof blocks with the commit's pinned Dafny (tools/proof/dafny.pin); a mini
+                # without it refuses with the install command, as for Node, rather than failing those tests.
+                doctor = run('/bin/bash', str(checkout / 'tools/proof/bootstrap.sh'), 'doctor', cwd=checkout)
+                if doctor.returncode != 0:
+                    return refuse(f'no pinned Dafny on the mini: {(doctor.stderr or doctor.stdout).strip()}\n'
+                                  f'    install it there with: cd {checkout} && scripts/tron proof bootstrap')
                 # One stream, so each file's unittest summary (stderr) stays after its marker (stdout).
                 # The pinned Node first on PATH: Python tests that start `node` get the commit's own.
                 env = {**clean, 'PATH': f'{node.parent}:{clean["PATH"]}'}
