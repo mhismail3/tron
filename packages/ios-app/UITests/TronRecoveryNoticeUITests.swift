@@ -37,8 +37,8 @@ final class TronRecoveryNoticeUITests: XCTestCase {
     }
 
     /// #2296 item 15: a launch whose Keychain cannot be read yet (before the
-    /// first unlock) keeps its paired Mac. Setup is not offered, and the next
-    /// foreground reads the token again.
+    /// first unlock) keeps its paired Mac offline with the reason instead of
+    /// offering setup, and the next foreground reads the token and reconnects.
     @MainActor
     func testUnreadableKeychainAtLaunchStaysPairedAndRetriesOnForeground() {
         let app = XCUIApplication()
@@ -46,22 +46,25 @@ final class TronRecoveryNoticeUITests: XCTestCase {
                                "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
         defer { app.terminate() }
-        let reads = app.staticTexts["keychain-locked-reads"]
-        XCTAssertTrue(reads.waitForExistence(timeout: 15), app.debugDescription)
+        let state = app.staticTexts["keychain-locked-state"]
+        let unreadable = "offline: This iPhone's Keychain cannot be read yet. Unlock it to reconnect."
+        XCTAssertTrue(state.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label != %@", "Keychain reads 0"), object: reads)], timeout: 15) == .completed,
-                      "the launch never read the token: \(reads.label)")
+            predicate: NSPredicate(format: "label == %@", unreadable), object: state)], timeout: 15) == .completed,
+                      "an unreadable Keychain did not leave the paired Mac offline: \(state.label)")
         XCTAssertFalse(app.staticTexts["Welcome to Tron"].waitForExistence(timeout: 5),
                        "an unreadable Keychain presented setup for a paired Mac: \(app.debugDescription)")
         keep(app.screenshot(), "2296-keychain-unreadable-launch")
-        let launchReads = reads.label
 
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(app.wait(for: .runningBackgroundSuspended, timeout: 10) || app.state == .runningBackground)
         app.activate()
+        // The fixture Mac never resolves, so a read token starts a reconnect
+        // that fails for a network reason, never the Keychain one.
         XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label != %@", launchReads), object: reads)], timeout: 20) == .completed,
-                      "the foreground did not read the token again: \(reads.label)")
+            predicate: NSPredicate(format: "label != %@ AND label != %@", unreadable, "unpaired"), object: state)],
+                                       timeout: 20) == .completed,
+                      "the foreground did not read the token and reconnect: \(state.label)")
         XCTAssertFalse(app.staticTexts["Welcome to Tron"].exists, app.debugDescription)
         keep(app.screenshot(), "2296-keychain-readable-after-foreground")
     }
