@@ -153,7 +153,6 @@ struct ChatNotificationView: View {
 
 }
 
-
 /// The full text of one transcript event, in the standard sheet chrome. It is
 /// rendered by the transcript's sheet host from the route a pill presented.
 struct ChatNotificationDetailSheet: View {
@@ -271,54 +270,5 @@ private struct ChatPreparedMarkdownDetail: View {
 
     private func record(_ message: String) {
         model.lifecycleRecordDiagnostic(event: "detail.preparation", message: "detailID=\(detailID) \(message)")
-    }
-}
-
-struct TranscriptNotice: View {
-    let title: String
-    var value: String? = nil
-    var detailBody: String? = nil
-    let icon: String
-    let tone: ChatNotificationTone
-    var expandsOnTruncation = false
-    var animatesEntrance = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var revealed: Bool
-
-    init(
-        title: String,
-        value: String? = nil,
-        detailBody: String? = nil,
-        icon: String,
-        tone: ChatNotificationTone,
-        expandsOnTruncation: Bool = false,
-        animatesEntrance: Bool = false
-    ) {
-        self.title = title
-        self.value = value
-        self.detailBody = detailBody
-        self.icon = icon
-        self.tone = tone
-        self.expandsOnTruncation = expandsOnTruncation
-        self.animatesEntrance = animatesEntrance
-        _revealed = State(initialValue: !animatesEntrance)
-    }
-
-    var body: some View {
-        ChatNotificationView(presentation: .init(
-            id: "embedded-notice", semanticID: nil, icon: icon, title: title,
-            detail: value, body: detailBody, tone: tone,
-            material: .flat, expandsOnTruncation: expandsOnTruncation
-        ))
-        .opacity(revealed ? 1 : 0)
-        .scaleEffect(revealed || reduceMotion ? 1 : 0.98)
-        .offset(y: revealed || reduceMotion ? 0 : 3)
-        .onAppear {
-            guard animatesEntrance, !revealed else { return }
-            if reduceMotion { revealed = true }
-            else {
-                withAnimation(ChatMotion.eventArrive(reduceMotion: false)) { revealed = true }
-            }
-        }
     }
 }

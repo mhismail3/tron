@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { ChangeReview } from "../../protocol/types.js";
 import { splitModelRef, type LayerId, type FixedSetting } from "./tool-contract.js";
 import { GatewayError } from "../../errors.js";
-import { recordSeam, seamsRecorded } from "../../proof/traffic-recorder.js";
+import { core as toolSelection, type BelowList, type Entry } from "../../core/settings/tool-selection/facade.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from "../../util/validation.js";
 
 
@@ -283,7 +283,9 @@ function isToolModifier(entry: string) {
 
 /** pi's `defaultTools`: plain names replace the selection below; a list of only
  * `+name`/`-name` entries modifies it (pi `settings-manager.js` mergeDefaultTools
- * and resolveDefaultTools). The resolver composes; it never re-implements merge. */
+ * and resolveDefaultTools). How entries compose, and the form a chosen selection is
+ * stored in, are decided by proof block settings/tool-selection (packages/core):
+ * this file names each tool with a token and writes the block's answer back as names. */
 export function toolSelectionType(): ValueType {
   return {
     kind: "toolSelection",
@@ -300,25 +302,38 @@ export function toolSelectionType(): ValueType {
       if (list.length === 0) return "No tools";
       return list.length <= 4 ? list.join(", ") : `${list.slice(0, 4).join(", ")} +${list.length - 4}`;
     },
-    compose: (below, value) => {
-      const result = composeToolSelection(below, value);
-      if (seamsRecorded()) recordToolSelection("compose", { below, entries: value }, result);
-      return result;
-    },
-    encode: (value, below, current) => {
-      const result = encodeToolSelection(value, below, current);
-      if (seamsRecorded()) recordToolSelection("encode", { chosen: value, below, current }, result);
-      return result;
-    },
+    compose: composeToolSelection,
+    encode: encodeToolSelection,
+  };
+}
+
+/** The tool names of one call as the block reads them: a token per distinct name, 0 the empty name. */
+function toolTokens() {
+  const names: unknown[] = [""];
+  const tokens = new Map<unknown, number>([["", 0]]);
+  const token = (name: unknown): number => {
+    let found = tokens.get(name);
+    if (found === undefined) {
+      tokens.set(name, found = names.length);
+      names.push(name);
+    }
+    return found;
+  };
+  return {
+    token,
+    name: (found: number) => names[found] as string,
+    entry: (text: string): Entry => isToolModifier(text)
+      ? { $: text.startsWith("+") ? "Plus" : "Minus", n: token(text.slice(1)) } : { $: "Plain", n: token(text) },
+    text: (entry: Entry) => entry.$ === "Plain" ? names[entry.n] as string : `${entry.$ === "Plus" ? "+" : "-"}${names[entry.n] as string}`,
+    below: (below: unknown): BelowList => Array.isArray(below) ? { $: "NamesList", names: below.map(name => token(name)) } : { $: "NoBelowList" },
+    defaults: () => DEFAULT_TOOL_NAMES.map(name => token(name)),
   };
 }
 
 function composeToolSelection(below: unknown, value: unknown): string[] {
-  const entries = value as string[];
-  const base = Array.isArray(below) ? below as string[] : undefined;
-  if (base && entries.length > 0 && entries.every(isToolModifier)) return applyToolModifiers([...base], entries);
-  return applyToolModifiers(entries.filter(entry => !isToolModifier(entry)).length > 0 || entries.length === 0
-    ? entries.filter(entry => !isToolModifier(entry)) : [...DEFAULT_TOOL_NAMES], entries);
+  const names = toolTokens();
+  const entries = (value as string[]).map(text => names.entry(text));
+  return toolSelection.ComposeList(names.below(below), entries, names.defaults()).map(names.name);
 }
 
 // A chosen selection keeps the layer's form: a layer of `+name`/`-name`
@@ -327,63 +342,21 @@ function composeToolSelection(below: unknown, value: unknown): string[] {
 // A chosen order that modifiers cannot reproduce over the base is stored as
 // a plain list, since the user's order outranks following later changes.
 function encodeToolSelection(value: unknown, below: unknown, current: unknown): string[] | undefined {
-  const chosen = value as string[];
-  if (chosen.some(isToolModifier)) return chosen;
-  const stored = Array.isArray(current) ? current as string[] : [];
-  if (stored.length > 0 && !stored.every(isToolModifier)) return chosen;
-  const base = Array.isArray(below) ? below as string[] : DEFAULT_TOOL_NAMES;
-  const entries = [...chosen.filter(name => !base.includes(name)).map(name => `+${name}`),
-    ...base.filter(name => !chosen.includes(name)).map(name => `-${name}`)];
-  const composed = applyToolModifiers([...base], entries);
-  if (composed.length !== chosen.length || composed.some((name, index) => name !== chosen[index])) return chosen;
-  return entries.length > 0 ? entries : undefined;
-}
-
-const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === "string");
-
-/** The typed facts proof block settings/tool-selection (packages/core) decides from, for its shadow: tool names
- * enter as tokens (the empty name 0, every other name of one call numbered in order of appearance), entries as
- * plain/plus/minus. A `below` or `current` that is not a list counts as none, as compose and encode treat it;
- * undefined when a list holds a non-string (outside the block's domain). */
-export function toolSelectionFacts(seam: "compose" | "encode", input: { below: unknown; entries?: unknown; chosen?: unknown; current?: unknown }) {
-  if (!strings(seam === "compose" ? input.entries : input.chosen) || (Array.isArray(input.below) && !strings(input.below))
-    || (Array.isArray(input.current) && !strings(input.current))) return undefined;
-  const tokens = new Map<string, number>([["", 0]]);
-  const token = (name: string): number => {
-    let found = tokens.get(name);
-    if (found === undefined) tokens.set(name, found = tokens.size);
-    return found;
-  };
-  const entries = (list: readonly string[]) => list.map(entry => isToolModifier(entry)
-    ? { kind: entry.startsWith("+") ? "plus" : "minus", name: token(entry.slice(1)) } : { kind: "plain", name: token(entry) });
-  const below = strings(input.below) ? input.below.map(token) : null;
-  const facts = seam === "compose"
-    ? { below, entries: entries(input.entries as string[]), defaults: DEFAULT_TOOL_NAMES.map(token) }
-    : { chosen: entries(input.chosen as string[]), below, current: strings(input.current) ? entries(input.current) : [], defaults: DEFAULT_TOOL_NAMES.map(token) };
-  return { facts, names: (list: readonly string[]) => list.map(token), entries };
-}
-
-/** The seams of proof block settings/tool-selection: recorded on an opted-in Debug Gateway, never changing the result. */
-function recordToolSelection(seam: "compose" | "encode", input: Parameters<typeof toolSelectionFacts>[1], output: string[] | undefined): void {
-  try {
-    const known = toolSelectionFacts(seam, input);
-    if (!known) return;
-    recordSeam("settings/tool-selection", seam, known.facts,
-      seam === "compose" ? known.names(output ?? []) : output === undefined ? null : known.entries(output));
-  } catch {
-    // Recording is diagnostic: a value the record cannot be built from must not change the selection.
+  const names = toolTokens();
+  const chosen = (value as string[]).map(text => names.entry(text));
+  // The block asks of the layer's stored entries only whether one is a plain name, and only for a choice of plain
+  // names. They are read just that far, so a stored value that is not a list of strings stops a change exactly
+  // where the block needs it and nowhere else.
+  const held: Entry[] = [];
+  if (Array.isArray(current) && chosen.every(entry => entry.$ === "Plain")) {
+    for (const text of current as string[]) {
+      const entry = names.entry(text);
+      held.push(entry);
+      if (entry.$ === "Plain") break;
+    }
   }
-}
-
-function applyToolModifiers(tools: string[], entries: string[]): string[] {
-  for (const entry of entries) {
-    if (!isToolModifier(entry)) continue;
-    const name = entry.slice(1);
-    const index = tools.indexOf(name);
-    if (entry.startsWith("+") && index === -1 && name) tools.push(name);
-    else if (entry.startsWith("-") && index !== -1) tools.splice(index, 1);
-  }
-  return tools;
+  const stored = toolSelection.EncodeList(chosen, names.below(below), held, names.defaults());
+  return stored.$ === "NothingList" ? undefined : stored.entries.map(names.text);
 }
 
 /** A free-form, statically validated object (thinking budgets, packages). */

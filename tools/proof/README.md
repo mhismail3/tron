@@ -64,7 +64,9 @@ of the core root (so relative includes hold) with the pinned wrapper after `doct
 1. **Baseline.** The unmutated block must verify, pass every oracle, and show a Passed row for every law; else exit 2.
 2. **Mutants** of the `symbols` bodies only (ghost code and proofs are never mutated): `relational`, `boundary`,
    `arith`, `drop-operand`, `off-by-one`, `constant`, `branch`, `constructor`, `swap-args`, `logic`. Identical
-   sources are deduplicated; ids are stable (`<function>/<op>/<from>-><to>#<n>`).
+   sources are deduplicated; ids are stable (`<function>/<op>/<from>-><to>#<n>`). A compiled method is
+   never mutated (its loops carry proof annotations the tool cannot tell from code): it goes in `excludeSymbols`,
+   and its contract must fix what it returns.
 3. **Verdicts.** `killed`: a lemma listed in `laws` failed, or a compiled function's own well-formedness check did.
    Never a kill: `unknown-timeout` (timed out, out of resource or inconclusive; retried once alone), `unmapped`
    (only a lemma not in `laws` failed, so it cannot mask a vacuous law), `verifier-error`, `law-gap` (only an
@@ -93,7 +95,7 @@ directory.
 
 `packet/packet.mjs` (`proof packet`) renders a block's law review packet, `blocks/<block>/LAWS.md` with `--write`,
 from the sources, so it cannot drift from what is proven. Per law: its plain-English comment and Dafny statement
-from the block's laws file, supporting lemmas, mutation kills and the reviewer's verdict. Per block: the
+from the block's laws file (a lemma, or a compiled method whose contract is the law), supporting lemmas, mutation kills and the reviewer's verdict. Per block: the
 implementation under test, the definitions the laws use, `// Assumption A<n>:` world-model assumptions, the
 law-kind table and five gates, each bound to the block hash:
 
@@ -125,8 +127,6 @@ one). Seams (shell files under `packages/gateway/src/`), with the oracle each bl
 | Block | Seam | Recorded | Oracle's generated inputs |
 |---|---|---|---|
 | `schedule/calendar` | `next/first/classifyDueOccurrence` (`automations/schedule.ts`) | calendar triggers only (once and interval triggers are decided by block `schedule/occurrence`, which its shell runs); nested calls are not seams | core fed `automations/zone-table.ts`'s Intl table (also on replay); TS throws (a skipped civil date) counted as `tsRefused` |
-| `settings/tool-selection` | `toolSelectionType().compose/encode` (`kernel/settings/settings-types.ts`) | `toolSelectionFacts` (empty name 0); a non-list below/current is none; a list holding a non-string is not recorded | plain names, modifiers, repeats and the empty name over every kind of selection below |
-| `receipts/invocation-lifecycle` | `invocationProjection` (`kernel/receipts/invocation-receipts.ts`) | `invocationLifecycleFacts` and the projections or refusal reason; not above 64 receipts, once per history (snapshots refold branches) | legal moves with duplicate/contradictory terminals, orphans, foreign owners, renames, origin changes, rebinds; 1 in 10 with tokens shifted sparse or past the core's array limit (its fallback) |
 
 - **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
   `TRON_PROOF_TRAFFIC=1` for that launch; a running supervisor keeps its setting across promotions, so the
@@ -208,7 +208,9 @@ its exit status (`tests/fixtures/mutate-variants/shadow-stub.mjs`). The oracle a
 change under either runs it: `proof check` passes on a fresh cache, and for each block with a `mutate.json` the
 regenerated packet equals the committed `LAWS.md` and shows proof PASS, a current mutation PASS and a
 `REVIEW.json` for the current block hash with every law ACCEPT, and `proof facade --check` finds the generated
-core and façade fresh; a shadowed block also shows a current shadow match and still matches today's TypeScript.
+core and façade fresh; a shadowed block also shows a current shadow match and still matches today's TypeScript;
+and each change listed in a block's `method-mutants.json` (to a compiled method, which `proof mutate` does not
+mutate) makes `proof check` fail on a copy of the block with a verification error.
 An edit that skips any gate fails it.
 
 `scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: `--protocol --check`
@@ -226,10 +228,7 @@ TypeScript rejects each at its path and Swift rejects or reads each as stated.
 outside an opted-in Debug Gateway (Stable channel, no channel, other values, the Stable home), that a
 seeded schedule journey through the real seams writes one record per calendar call under `schedule/calendar` (none for
 nested calls or for once and interval triggers, which their block decides), that replays through the same TypeScript to the recorded outputs,
-that tool-selection compose and encode calls (direct and through a real resolution) record name tokens, never names,
-and nothing for a value outside the block's domain, that invocation receipt folds record tokens and refusal
-reasons, once per history and not above the receipt bound, and
-that the daily cap and retention hold.
+and that the daily cap and retention hold.
 
 `scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the shadowed
 fixture block `demo/counter` (`tests/fixtures/facade`): it exposes exactly the compiled declarations (a multi-line datatype in
@@ -239,10 +238,14 @@ either file; and `function method`, an uncheckable precondition and an unsupport
 fixture block `demo/meter`, which names a shell: its `core.mjs` lands in the shell's directory, imports nothing,
 holds the compiler's module output byte for byte and exactly one copied helper, and loads with no
 `node_modules` above it; numbers cross only as integers of their newtype's range and preconditions are checked;
+a linked list crosses as an array in order, 200,000 items long without touching the call stack;
 `--check` fails on a hand edit of either file; the copied helper stands alone and a helper that names anything
 but its parameters, locals and `Math` does not; and datatype equality, building a sequence, a function named
-like a runtime member that uses the runtime, an `int` and a newtype whose range is not literal are each refused,
-naming the function, with nothing written.
+like a runtime member that uses the runtime, an `int`, a newtype whose range is not literal and a generic datatype
+that is not a linked list are each refused, naming the function or type, with nothing written; a constructor
+without fields is one shared value found by its own name only; and a compiled method gets a fresh work array on
+each call, sized by its precondition, and is refused when an array is unsized or a precondition is one the façade
+cannot establish.
 
 `scripts/tron-node exec node --test tools/proof/tests/replay.test.mjs` replays a corpus of recorder-format
 calendar calls of the shipped schedule functions through the real block `schedule/calendar`: two faithful days are a real-traffic match

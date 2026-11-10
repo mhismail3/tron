@@ -4,13 +4,19 @@
   "tierReason": "decides which tools the model may call (bash, write, edit: authority over the Mac); \"when unsure, high-stakes\"",
   "impl": "blocks/settings/tool-selection/Block.dfy",
   "symbols": [
-    "Without",
-    "Mods",
-    "PlainNames",
-    "AllModifiers",
-    "Compose",
-    "Missing",
-    "Encode"
+    "RevOnto",
+    "Has",
+    "WithoutFrom",
+    "Step",
+    "ModsList",
+    "PlainsFrom",
+    "ComposeList",
+    "HasModifier",
+    "HasPlain",
+    "MarksFrom",
+    "Same",
+    "DeltaList",
+    "EncodeList"
   ],
   "excludeSymbols": {
     "IsModifier": "defined in the laws file (what a modifier is), not implementation"
@@ -19,9 +25,25 @@
     "blocks/settings/tool-selection/Block.dfy"
   ],
   "laws": {
+    "L1 compose-computed": [
+      "SettingsToolSelection.L1ComposeComputed",
+      "SettingsToolSelection.PlainsFromSpec",
+      "SettingsToolSelection.ModsListSpec",
+      "SettingsToolSelection.StepSpec",
+      "SettingsToolSelection.HasSpec",
+      "SettingsToolSelection.WithoutFromSpec",
+      "SettingsToolSelection.RevOntoElems"
+    ],
+    "L2 encode-computed": [
+      "SettingsToolSelection.L2EncodeComputed",
+      "SettingsToolSelection.EncodeListDecides",
+      "SettingsToolSelection.HasSpecs",
+      "SettingsToolSelection.MarksFromSpec",
+      "SettingsToolSelection.DeltaListSpec",
+      "SettingsToolSelection.SameSpec"
+    ],
     "M1 modifier-steps": [
-      "SettingsToolSelection.M1ModifierSteps",
-      "SettingsToolSelection.WithoutSpec"
+      "SettingsToolSelection.M1ModifierSteps"
     ],
     "M2 modifier-sequence": [
       "SettingsToolSelection.M2ModifierSequence",
@@ -32,8 +54,7 @@
     ],
     "C2 plain-list": [
       "SettingsToolSelection.C2PlainList",
-      "SettingsToolSelection.PlainNamesEmpty",
-      "SettingsToolSelection.PlainNamesSpec"
+      "SettingsToolSelection.PlainsCount"
     ],
     "C3 modifiers-over-defaults": [
       "SettingsToolSelection.C3ModifiersOverDefaults"
@@ -44,7 +65,7 @@
     "B1 no-duplicates": [
       "SettingsToolSelection.B1NoDuplicates",
       "SettingsToolSelection.ModsNodup",
-      "SettingsToolSelection.WithoutSubset"
+      "SettingsToolSelection.RemoveFirstSubset"
     ],
     "E1 modifiers-kept": [
       "SettingsToolSelection.E1ModifiersKept"
@@ -55,9 +76,7 @@
     "E3 round-trip": [
       "SettingsToolSelection.E3RoundTrip",
       "SettingsToolSelection.ComposeChosen",
-      "SettingsToolSelection.ModsPlainId",
-      "SettingsToolSelection.EncodeEntries",
-      "SettingsToolSelection.MissingSpec"
+      "SettingsToolSelection.ModsPlainId"
     ],
     "E4 relative-when-reproducible": [
       "SettingsToolSelection.E4RelativeWhenReproducible"
@@ -68,42 +87,9 @@
   },
   "helpers": [],
   "translate": "blocks/settings/tool-selection/Block.dfy",
-  "oracles": [
-    {
-      "name": "diff-vs-gateway-settings-types.ts(3000)",
-      "cmd": [
-        "node",
-        "tools/proof/oracles/settings-tool-selection.mjs",
-        "{dir}/out/core.js",
-        "3000"
-      ],
-      "jsonEq": [
-        "agree",
-        "requests"
-      ]
-    }
-  ],
+  "oracles": [],
   "accepted": {},
   "report": "blocks/settings/tool-selection/MUTATION.json",
-  "shadow": {
-    "cmd": [
-      "node",
-      "tools/proof/oracles/settings-tool-selection.mjs",
-      "{core}",
-      "20000"
-    ],
-    "source": "compiled core vs packages/gateway/src/kernel/settings/settings-types.ts (toolSelectionType().compose and .encode) on 20,000 generated inputs (not real traffic)"
-  },
-  "replay": {
-    "cmd": [
-      "node",
-      "tools/proof/oracles/settings-tool-selection.mjs",
-      "{core}",
-      "--replay",
-      "{corpus}"
-    ],
-    "source": "compiled core vs the compose and encode seams' recorded Debug-Gateway calls (packages/gateway/src/kernel/settings/settings-types.ts)"
-  },
   "kinds": {
     "safety": [
       "B1 no-duplicates",
@@ -113,6 +99,8 @@
     "recovery": "n/a: stateless",
     "stale-inputs": "n/a: encode is given what the layer holds now and the selection below now (the change path's fence owns staleness)",
     "exact-results": [
+      "L1 compose-computed",
+      "L2 encode-computed",
       "M1 modifier-steps",
       "M2 modifier-sequence",
       "C1 modifiers-over-below",

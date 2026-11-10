@@ -667,7 +667,7 @@ echo '{"lifecycle":"stopped"}'
       const index = line.indexOf("=");
       return [line.slice(0, index), line.slice(index + 1)];
     }));
-    const leaked = Object.keys(environment).filter(name => /^(PI_|TRON_GATEWAY_|TRON_DATA_DIR$|TRON_AGENT_DIR_NAME$)/u.test(name));
+    const leaked = Object.keys(environment).filter(name => /^(PI_|TRON_GATEWAY_|TRON_DATA_DIR$)/u.test(name));
     assert.deepEqual(leaked, []);
     assert.equal(environment.HOME, home);
     assert.equal(environment.TRON_NODE_BIN, fakeNode);

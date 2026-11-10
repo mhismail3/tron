@@ -1,27 +1,26 @@
 #!/usr/bin/env python3
-"""The host's one full-Gateway run at a time: the lock `scripts/tron test gateway` and `verify --batch` share."""
+"""The host's one full-Gateway run at a time: the lock local Gateway Vitest runs (`gateway.py`) and `mutate` share."""
 from pathlib import Path
 import fcntl
 import json
 import os
 import time
 
-# A Gateway Vitest run waits its turn for this lock instead of overlapping a batch Gateway lane;
-# such a lane holds it and says so in its environment, so the run inside it does not wait again.
+# A Gateway Vitest run waits its turn for this lock instead of overlapping another; a caller that
+# holds it (mutate) says so in its environment, so the run inside it does not wait again.
 FULL_GATEWAY_LOCK = '/tmp/tron-full-gateway.lock'
 HELD_BY_CALLER = 'TRON_FULL_GATEWAY_LOCK_HELD'
 
 
-def wait_for_full_gateway_lock(record, wait_seconds, announce, cancelled=None):
+def wait_for_full_gateway_lock(record, announce):
     """The open full-Gateway lock file, exclusively locked once every earlier live waiter has had it.
 
     Waiters take the lock in arrival order: each queues a numbered ticket beside the lock and
     holds that ticket's flock while it waits, so a waiter that dies (even by SIGKILL) gives up
     its place and the next look at the queue deletes its ticket. Only the earliest live ticket
     tries the lock, whose own flock the kernel likewise drops for a dead holder. The queue
-    directory's flock serializes numbering and pruning. Never interrupts the holder; raises
-    TimeoutError naming it after `wait_seconds` (None waits indefinitely), and InterruptedError
-    once `cancelled()` is true, giving up its place.
+    directory's flock serializes numbering and pruning. Never interrupts the holder, and waits
+    indefinitely.
     """
     queue = Path(FULL_GATEWAY_LOCK + '.queue')
     queue.mkdir(exist_ok=True)
@@ -57,7 +56,6 @@ def wait_for_full_gateway_lock(record, wait_seconds, announce, cancelled=None):
     ticket = guarded(enqueue)
     mine = Path(ticket.name)
     handle = open(FULL_GATEWAY_LOCK, 'a+')
-    started = time.monotonic()
     announced = False
     try:
         try:
@@ -71,11 +69,6 @@ def wait_for_full_gateway_lock(record, wait_seconds, announce, cancelled=None):
                         pass
                 handle.seek(0)
                 line = f"holder: {handle.read(512).strip() or 'unrecorded'}; earlier waiters: [{', '.join(earlier)}]"
-                waited = time.monotonic() - started
-                if cancelled is not None and cancelled():
-                    raise InterruptedError(f'cancelled after {round(waited)}s waiting ({line})')
-                if wait_seconds is not None and waited >= wait_seconds:
-                    raise TimeoutError(f'{line}; waited {round(waited)}s')
                 if not announced:
                     announce(f'waiting for {FULL_GATEWAY_LOCK} ({line})')
                     announced = True

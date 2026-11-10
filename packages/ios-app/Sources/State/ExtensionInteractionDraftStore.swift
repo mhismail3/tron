@@ -45,9 +45,21 @@ final class ExtensionInteractionDraftStore {
         var primitive: StoredPrimitiveInteractionDraft?
     }
 
-    private struct Document: Codable, Sendable {
+    private struct Document: Encodable, Sendable {
         let version: Int
         let entries: [Entry]
+    }
+
+    /// Reads each stored record on its own, so one unreadable record is
+    /// dropped without discarding its neighbours.
+    private struct StoredDocument: Decodable {
+        let version: Int
+        let entries: [StoredEntry]
+    }
+
+    private struct StoredEntry: Decodable {
+        let entry: Entry?
+        init(from decoder: Decoder) throws { entry = try? Entry(from: decoder) }
     }
 
     private let defaults: UserDefaults
@@ -131,22 +143,19 @@ final class ExtensionInteractionDraftStore {
     private func load() {
         guard let data = defaults.data(forKey: Self.documentKey) else { return }
         guard data.count <= Self.maximumDocumentBytes,
-              let document = try? JSONDecoder().decode(Document.self, from: data),
-              document.version == Self.version,
-              document.entries.count <= Self.maximumEntries else {
+              let document = try? JSONDecoder().decode(StoredDocument.self, from: data),
+              document.version == Self.version else {
             defaults.removeObject(forKey: Self.documentKey)
             return
         }
-        var admitted: [StoredExtensionInteractionScope: Entry] = [:]
-        for entry in document.entries where admits(entry.scope) && admits(entry) {
-            guard admitted[entry.scope] == nil else {
-                defaults.removeObject(forKey: Self.documentKey)
-                entries = [:]
-                return
-            }
-            admitted[entry.scope] = entry
+        // A bad record costs only itself: unreadable or invalid records are
+        // skipped, a duplicated scope keeps its newest record, and an
+        // oversized list keeps its newest records up to the bound.
+        for entry in document.entries.compactMap(\.entry) where admits(entry.scope) && admits(entry) {
+            if let kept = entries[entry.scope], kept.updatedAt >= entry.updatedAt { continue }
+            entries[entry.scope] = entry
         }
-        entries = admitted
+        trimToCount(retaining: nil)
     }
 
     private func persist(retaining retained: StoredExtensionInteractionScope? = nil) {

@@ -9,7 +9,6 @@
   "dependsOn": [
     "gateway/receipts",
     "gateway/pi",
-    "gateway/proof",
     "gateway/core"
   ],
   "verify": [

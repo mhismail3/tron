@@ -412,7 +412,7 @@ class GatewayFailureTests(VerifyCase):
                     self.assertTrue((r.path / "packages/gateway/test-results/executed").exists())
 
 
-    def test_an_unreachable_mini_fails_the_gateway_lane_without_running_it_here(self):
+    def test_an_unreachable_mini_leaves_the_gateway_lane_without_a_result_and_never_runs_it_here(self):
         r = self.repo
         self.fixture()
         r.git("config", "tron.verify.mini", "nobody@mini.invalid")
@@ -427,7 +427,10 @@ class GatewayFailureTests(VerifyCase):
         self.assertIn("gateway and python lanes: on the Mac mini", result.stdout)
         report = r.report()
         step = next(step for step in report["steps"] if step["name"] == "tests: gateway")
-        self.assertEqual((report["verdict"], step["status"], step["exit"]), ("failed", "failed", 2))
+        # No result is not a test outcome (#2446): the run is incomplete, never failed, so a batch reads it as uncovered.
+        self.assertEqual((report["verdict"], step["status"], step["exit"]), ("incomplete", "no result", 75))
+        self.assertIn("the mini gave no result: could not push", report["message"])
+        self.assertIn("Connection refused", step["reason"])
         self.assertIn("could not push", (r.path / step["log"]).read_text())
         self.assertIn("Connection refused", (r.path / step["log"]).read_text())
         self.assertFalse((r.path / "packages/gateway/test-results/executed").exists(), "the local lane never ran")
@@ -1464,23 +1467,6 @@ class MutateTests(VerifyCase):
         self.assertIn(f'"purpose": "mutate packages/gateway/src/store/store.ts"', self.repo.lock.read_text())
         with self.repo.lock.open() as lock:  # released when mutate exits
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-    def test_inside_a_holder_mutate_runs_without_waiting_for_the_lock(self) -> None:
-        import fcntl
-        # A batch lane holds the host lock and marks its children; mutate inside it must not wait
-        # for that lock, which its own ancestor holds until it exits.
-        with self.repo.lock.open("a") as held:
-            fcntl.flock(held, fcntl.LOCK_EX)
-            process = self.mutate("--count", "1", "--timeout", "60", env={"TRON_FULL_GATEWAY_LOCK_HELD": "1"})
-            try:
-                output, _ = process.communicate(timeout=60)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                output, _ = process.communicate()
-                self.fail(f"mutate waited for a lock its caller holds:\n{output}")
-        self.assertEqual(process.returncode, 0, output)
-        runs = [json.loads(line) for line in (self.repo.path / "packages/gateway/runs.jsonl").read_text().splitlines()]
-        self.assertEqual([run["held"] for run in runs], ["1", "1"], output)
 
 
 if __name__ == "__main__":

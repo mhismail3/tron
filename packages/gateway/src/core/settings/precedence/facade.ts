@@ -39,10 +39,12 @@ export function bind(M: any): Core {
   const toEntry = (v: Entry): unknown => { if (typeof v !== "object" || v === null) return unknown("Entry", v); return M.Entry.create_Entry(bool(v.inTarget), bool(v.bound), toOpt(v.qualified), toOpt(v.unqualified), bool(v.applied)); };
   const fromEntry = (v: any): Entry => ({ inTarget: v.dtor_inTarget, bound: v.dtor_bound, qualified: fromOpt(v.dtor_qualified), unqualified: fromOpt(v.dtor_unqualified), applied: v.dtor_applied });
   const toKey = (v: Key): unknown => { if (typeof v !== "object" || v === null) return unknown("Key", v); return M.Key.create_Key(bool(v.projectSettable), bool(v.sessionOverridable), bool(v.composes)); };
-  const toLayer = (v: Layer): unknown => { switch (v) { case "Global": return M.Layer.create_Global(); case "Home": return M.Layer.create_Home(); case "Session": return M.Layer.create_Session(); case "Project": return M.Layer.create_Project(); default: return unknown("Layer", v); } };
+  const theLayer: Record<string, unknown> = Object.assign(Object.create(null), { Global: M.Layer.create_Global(), Home: M.Layer.create_Home(), Session: M.Layer.create_Session(), Project: M.Layer.create_Project() });
+  const toLayer = (v: Layer): unknown => theLayer[v] ?? unknown("Layer", v);
   const fromLayer = (v: any): Layer => v.is_Global ? "Global" : v.is_Home ? "Home" : v.is_Session ? "Session" : v.is_Project ? "Project" : bad("Layer");
   const toLayers = (v: Layers): unknown => { if (typeof v !== "object" || v === null) return unknown("Layers", v); return M.Layers.create_Layers(toEntry(v.global), toEntry(v.home), toEntry(v.session), toEntry(v.project)); };
-  const toOpt = (v: Opt): unknown => { switch (v?.$) { case "None": return M.Opt.create_None(); case "Some": return M.Opt.create_Some(inToken(v.v)); default: return unknown("Opt", v); } };
+  const theOpt: Record<string, unknown> = Object.assign(Object.create(null), { None: M.Opt.create_None() });
+  const toOpt = (v: Opt): unknown => { switch (v?.$) { case "None": return theOpt.None; case "Some": return M.Opt.create_Some(inToken(v.v)); default: return unknown("Opt", v); } };
   const fromOpt = (v: any): Opt => v.is_None ? { $: "None" } : v.is_Some ? { $: "Some", v: inToken(v.dtor_v) } : bad("Opt");
   const fromOrigin = (v: any): Origin => v.is_FromDefault ? { $: "FromDefault" } : v.is_FromLayer ? { $: "FromLayer", l: fromLayer(v.dtor_l) } : bad("Origin");
   const fromResolution = (v: any): Resolution => ({ value: fromValue(v.dtor_value), layer: fromOrigin(v.dtor_layer), notApplied: fromUnapplied(v.dtor_notApplied), shown: fromShows(v.dtor_shown) });

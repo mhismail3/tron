@@ -32,7 +32,6 @@ extension Color {
 
     static let tronEmerald = Color(lightHex: "#059669", darkHex: "#10B981")
     @MainActor static var tronAccentText: Color { .tronPrimary }
-    static let tronMint = Color(lightHex: "#10B981", darkHex: "#34D399")
     static let tronSuccess = Color(lightHex: "#15803D", darkHex: "#22C55E")
     static let tronError = Color(lightHex: "#DC2626", darkHex: "#EF4444")
     static let tronInfo = Color(lightHex: "#0EA5E9", darkHex: "#38BDF8")

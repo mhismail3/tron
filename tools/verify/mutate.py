@@ -69,10 +69,9 @@ def main(argv: list[str]) -> int:
     # full-Gateway lock for the whole sampling, so no mutant's time is spent waiting for it.
     command = ["python3", str(verify.ROOT / "tools/verify/gateway.py"), "--reporter=json",
                f"--outputFile={report_path}", *[test[len(verify.GATEWAY) + 1:] for test in tests]]
-    # Inside a run that already holds the lock (a batch lane), waiting would wait on our own ancestor.
-    if os.environ.get(HELD_BY_CALLER) != "1":
-        held = wait_for_full_gateway_lock({"pid": os.getpid(), "worktree": str(verify.ROOT), "purpose": f"mutate {args.file}"},
-                                          None, lambda line: print(f"mutate: {line}", file=sys.stderr, flush=True))
+    # Held until this process exits: the open handle keeps its flock.
+    held = wait_for_full_gateway_lock({"pid": os.getpid(), "worktree": str(verify.ROOT), "purpose": f"mutate {args.file}"},
+                                      lambda line: print(f"mutate: {line}", file=sys.stderr, flush=True))
 
     def run_locks(timeout: float | None) -> dict | str | None:
         """The run's vitest summary, "timeout", or None when no readable report proves the tests ran."""

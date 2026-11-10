@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
 import type { SessionEntry } from "../pi/coding-agent.js";
 import { SETTINGS_OUTCOME_MESSAGE, INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "./delivery-tags.js";
 import type { ChatOrigin, InvocationLifecycle, JsonValue, ResourceInvocation } from "../../protocol/types.js";
 import { GatewayError } from "../../errors.js";
 import { MAXIMUM_RESOURCE_INVOCATIONS, RESOURCE_ARGUMENTS_MAX_BYTES } from "../resources/resource-invocation.js";
 import { MAX_ID_BYTES, MAX_NAME_BYTES, validOrigin, validText, validTimestamp } from "./receipt-fields.js";
-import { recordSeam, seamsRecorded } from "../../proof/traffic-recorder.js";
+import { core as lifecycle, type Fact, type Kind, type Life, type Mark, type Refusal } from "../../core/receipts/invocation-lifecycle/facade.js";
 
 /** Internal folded lifecycle derived from canonical invocation receipts. */
 export interface InvocationProjection {
@@ -250,181 +249,108 @@ export function invocationReceipts(entries: readonly SessionEntry[], sessionId?:
   return values;
 }
 
-function legalTransition(from: InvocationLifecycle, to: InvocationLifecycle, terminal: boolean): boolean {
-  if (TERMINAL_LIFECYCLES.has(from)) return false;
-  // A terminal observation is authoritative even if the accepted transition
-  // could not be persisted after Pi admitted execution.
-  if (terminal) return TERMINAL_LIFECYCLES.has(to);
-  const transitions: Record<string, InvocationLifecycle[]> = {
-    staged: ["accepted", "queued", "running", "waitingForInput", "retrying", "settling"],
-    accepted: ["queued", "running", "waitingForInput", "retrying", "settling"],
-    queued: ["running", "settling"],
-    running: ["waitingForInput", "retrying", "settling"],
-    waitingForInput: ["running", "settling"],
-    retrying: ["running", "settling"],
-    settling: [],
-  };
-  return transitions[from]?.includes(to) === true;
+const KINDS_AS_FACTS: Record<ReceiptKind, Kind> = { start: "Start", transition: "Transition", terminal: "Terminal", binding: "Binding" };
+const LIVES_AS_FACTS: Record<InvocationLifecycle, Life> = {
+  staged: "Staged", accepted: "Accepted", queued: "Queued", running: "Running", waitingForInput: "WaitingForInput", retrying: "Retrying",
+  settling: "Settling", completed: "Completed", failed: "Failed", interrupted: "Interrupted", outcomeUnknown: "OutcomeUnknown",
+};
+const LIFECYCLES_OF_FACTS = Object.fromEntries(Object.entries(LIVES_AS_FACTS).map(([lifecycle, life]) => [life, lifecycle])) as Record<Life, InvocationLifecycle>;
+const LIFE_FACTS = Object.fromEntries(Object.entries(LIVES_AS_FACTS).map(([lifecycle, life]) => [lifecycle, { $: "LifeOf", l: life }])) as Record<InvocationLifecycle, Fact["life"]>;
+const REFUSALS: Record<Refusal, string> = {
+  DuplicateStart: "invocation has more than one start receipt",
+  OwnershipChanged: "invocation receipt ownership changed",
+  NoStart: "invocation receipt has no start receipt",
+  EntryBound: "canonical entry has more than one invocation binding",
+  InvocationBound: "invocation has more than one canonical binding",
+  NameChanged: "invocation receipt resource name changed",
+  OriginChanged: "invocation receipt origin changed",
+  ContradictoryTerminal: "contradictory terminal invocation receipt",
+  IllegalTerminal: "illegal terminal invocation transition",
+  IllegalTransition: "illegal invocation transition",
+};
+const NO_LIFE = { $: "NoLife" } as const;
+const NO_INDEX = { $: "NoIndex" } as const;
+const NO_FLAG = { $: "NoFlag" } as const;
+
+function startOrigin(start: InvocationReceiptCommon): ChatOrigin {
+  return ("origin" in start ? start.origin as ChatOrigin | undefined : undefined) ?? { kind: start.source === "extension" ? "extension" : "user", confidence: "receipt" };
 }
 
+/**
+ * Fold a session's receipts into each invocation's lifecycle, or throw for the first receipt that contradicts
+ * the ones before it. Proof block receipts/invocation-lifecycle (packages/core) decides the fold: which receipt
+ * is refused and why, each invocation's lifecycle, and which receipts its canonical entry, retryable flag and
+ * time come from. This function states each receipt to the block as a fact (numbers for the invocation and the
+ * canonical entry; whether its operation, source, name and origin are those of its invocation's first start
+ * receipt) and writes the block's answer back from the receipts it names.
+ */
 export function invocationProjection(receipts: readonly InvocationReceiptData[]): InvocationProjection[] {
-  let projections: InvocationProjection[];
-  try {
-    projections = projectInvocations(receipts);
-  } catch (error) {
-    if (seamsRecorded()) recordInvocationLifecycle(receipts, { refused: invocationRefusalCode(error) });
-    throw error;
-  }
-  if (seamsRecorded()) recordInvocationLifecycle(receipts, { projections });
-  return projections;
-}
-
-function projectInvocations(receipts: readonly InvocationReceiptData[]): InvocationProjection[] {
-  const grouped = new Map<string, InvocationProjection>();
-  const terminal = new Set<string>();
-  const boundEntries = new Set<string>();
-  const boundInvocations = new Set<string>();
-  for (const receipt of receipts) {
-    const previous = grouped.get(receipt.invocationId);
-    if (receipt.receiptKind === "start" && previous) {
-      throw new Error("invocation has more than one start receipt");
+  const invocations = new Map<string, number>();
+  const entries = new Map<string, number>();
+  // Per invocation number: its first start receipt, and the position of its first receipt with a retryable flag.
+  const starts: Array<InvocationReceiptData | undefined> = [];
+  const firstFlagAt: number[] = [];
+  const facts = receipts.map((receipt, position): Fact => {
+    let inv = invocations.get(receipt.invocationId);
+    if (inv === undefined) invocations.set(receipt.invocationId, inv = invocations.size);
+    const start = starts[inv];
+    const isStart = receipt.receiptKind === "start";
+    if (isStart && start === undefined) starts[inv] = receipt;
+    let entry: Fact["entry"] = NO_INDEX;
+    if ("canonicalEntryId" in receipt && receipt.canonicalEntryId !== undefined) {
+      let number = entries.get(receipt.canonicalEntryId);
+      if (number === undefined) entries.set(receipt.canonicalEntryId, number = entries.size);
+      entry = { $: "IndexOf", i: number };
     }
-    if (previous && (previous.operationId !== receipt.operationId || previous.source !== receipt.source)) {
-      throw new Error("invocation receipt ownership changed");
+    const flagged = "retryable" in receipt && receipt.retryable !== undefined;
+    if (flagged && firstFlagAt[inv] === undefined) firstFlagAt[inv] = position;
+    const carried = "lifecycle" in receipt ? receipt.lifecycle : undefined;
+    let name: Mark = "Absent";
+    let origin: Mark = "Absent";
+    if (isStart || start === undefined) {
+      if (isStart && receipt.name) name = "Same";
+      if (isStart) origin = "Same";
+    } else {
+      if ("name" in receipt && receipt.name !== undefined) name = receipt.name === (("name" in start && start.name) || undefined) ? "Same" : "Differs";
+      if ("origin" in receipt) origin = canonicalJSON(receipt.origin) === canonicalJSON(startOrigin(start)) ? "Same" : "Differs";
     }
-    if (receipt.receiptKind === "start" && !previous) {
-      grouped.set(receipt.invocationId, {
-        version: 1, invocationId: receipt.invocationId, operationId: receipt.operationId,
-        source: receipt.source, ...(receipt.name ? { name: receipt.name } : {}),
-        ...(receipt.arguments ? { arguments: receipt.arguments } : {}),
-        ...(receipt.submittedText === undefined ? {} : { submittedText: receipt.submittedText }),
-        ...(receipt.resources !== undefined
-          ? { resourceInvocations: receipt.resources.map(resource => ({ ...resource, arguments: "" })) }
-          : ["skill", "prompt", "extension"].includes(receipt.source) && receipt.name !== undefined
-            ? { resourceInvocations: [{ source: receipt.source as "skill" | "prompt" | "extension", name: receipt.name, arguments: receipt.arguments ?? "" }] }
-            : {}),
-        lifecycle: receipt.lifecycle ?? "accepted",
-        origin: receipt.origin ?? { kind: receipt.source === "extension" ? "extension" : "user", confidence: "receipt" },
-        sequence: receipt.sequence, updatedAt: receipt.createdAt,
-      });
-      continue;
-    }
-    if (!previous) throw new Error("invocation receipt has no start receipt");
-    if (receipt.receiptKind === "binding") {
-      if (boundEntries.has(receipt.canonicalEntryId)) throw new Error("canonical entry has more than one invocation binding");
-      if (boundInvocations.has(receipt.invocationId)) throw new Error("invocation has more than one canonical binding");
-      boundEntries.add(receipt.canonicalEntryId);
-      boundInvocations.add(receipt.invocationId);
-    }
-    if ("name" in receipt && receipt.name !== undefined && receipt.name !== previous.name) {
-      throw new Error("invocation receipt resource name changed");
-    }
-    if ("origin" in receipt && canonicalJSON(receipt.origin) !== canonicalJSON(previous.origin)) {
-      throw new Error("invocation receipt origin changed");
-    }
-    if (receipt.receiptKind === "terminal") {
-      if (terminal.has(receipt.invocationId)) {
-        const current = previous.lifecycle;
-        if (current !== receipt.lifecycle) throw new Error("contradictory terminal invocation receipt");
-      } else if (!legalTransition(previous.lifecycle, receipt.lifecycle!, true)) {
-        throw new Error("illegal terminal invocation transition");
-      }
-      terminal.add(receipt.invocationId);
-    } else if (receipt.receiptKind === "transition") {
-      if (!legalTransition(previous.lifecycle, receipt.lifecycle!, false)) {
-        throw new Error("illegal invocation transition");
-      }
-    } else if (terminal.has(receipt.invocationId)) {
-      // Only canonical binding may arrive after terminal settlement.
-      if (receipt.receiptKind !== "binding") {
-        throw new Error("invocation changed after terminal receipt");
-      }
-    }
-    const next: InvocationProjection = { ...previous, updatedAt: receipt.createdAt };
-    if ("lifecycle" in receipt && receipt.lifecycle && !terminal.has(receipt.invocationId)) next.lifecycle = receipt.lifecycle;
-    if (receipt.receiptKind === "terminal") next.lifecycle = receipt.lifecycle;
-    if ("canonicalEntryId" in receipt && receipt.canonicalEntryId) next.canonicalEntryId = receipt.canonicalEntryId;
-    if ("retryable" in receipt && receipt.retryable !== undefined) next.retryable = receipt.retryable;
-    grouped.set(receipt.invocationId, next);
-  }
-  return [...grouped.values()].sort((a, b) => a.sequence - b.sequence);
+    return {
+      inv, kind: KINDS_AS_FACTS[receipt.receiptKind], life: carried ? LIFE_FACTS[carried] : NO_LIFE,
+      owned: isStart || start === undefined || (start.operationId === receipt.operationId && start.source === receipt.source),
+      name, origin, entry, retryable: flagged ? { $: "FlagOf", b: receipt.retryable! } : NO_FLAG,
+    };
+  });
+  const folded = lifecycle.Fold(facts);
+  if (folded.$ === "Stopped") throw new Error(REFUSALS[folded.why]);
+  // The numbers above count distinct ids from 0, so each is below the number of facts and the block never
+  // answers Unfit; if the numbering ever broke, the fold stops here rather than project a wrong history.
+  if (folded.$ === "Unfit") throw new Error("invocation receipts are not numbered for the fold");
+  return folded.cells.map((cell): InvocationProjection => {
+    const start = receipts[cell.start] as InvocationStartReceipt;
+    const projection: InvocationProjection = {
+      version: 1, invocationId: start.invocationId, operationId: start.operationId,
+      source: start.source, ...(start.name ? { name: start.name } : {}),
+      ...(start.arguments ? { arguments: start.arguments } : {}),
+      ...(start.submittedText === undefined ? {} : { submittedText: start.submittedText }),
+      ...(start.resources !== undefined
+        ? { resourceInvocations: start.resources.map(resource => ({ ...resource, arguments: "" })) }
+        : ["skill", "prompt", "extension"].includes(start.source) && start.name !== undefined
+          ? { resourceInvocations: [{ source: start.source as "skill" | "prompt" | "extension", name: start.name, arguments: start.arguments ?? "" }] }
+          : {}),
+      lifecycle: LIFECYCLES_OF_FACTS[cell.life],
+      origin: startOrigin(start),
+      sequence: start.sequence, updatedAt: receipts[cell.updated]!.createdAt,
+    };
+    // The canonical entry and the retryable flag are written in the order their receipts came.
+    const bound = cell.entryAt < 0 ? undefined : (receipts[cell.entryAt] as InvocationBindingReceipt).canonicalEntryId;
+    const flagAt = cell.retryable.$ === "FlagOf" ? firstFlagAt[facts[cell.start]!.inv]! : -1;
+    if (bound && (flagAt < 0 || cell.entryAt < flagAt)) projection.canonicalEntryId = bound;
+    if (cell.retryable.$ === "FlagOf") projection.retryable = cell.retryable.b;
+    if (bound && flagAt >= 0 && cell.entryAt > flagAt) projection.canonicalEntryId = bound;
+    return projection;
+  }).sort((a, b) => a.sequence - b.sequence);
 }
 
 export function receiptJSON(data: InvocationReceiptData): JsonValue {
   return data as unknown as JsonValue;
-}
-
-// The seam of proof block receipts/invocation-lifecycle (packages/core), recorded on an opted-in Debug Gateway for
-// its shadow. Identities, names, origins, entries and times enter as per-call tokens (equal values share one), so no
-// id or text is recorded. Snapshots fold whole branches again and again: a history of more than
-// MAXIMUM_RECORDED_RECEIPTS is not recorded, and a tokenized history this process already recorded (by digest,
-// since the set of up to RECORDED_HISTORIES digests was last cleared) is not recorded again.
-const MAXIMUM_RECORDED_RECEIPTS = 64;
-const RECORDED_HISTORIES = 1_024;
-const recordedHistories = new Set<string>();
-const REFUSALS: Record<string, string> = {
-  "invocation has more than one start receipt": "DuplicateStart",
-  "invocation receipt ownership changed": "OwnershipChanged",
-  "invocation receipt has no start receipt": "NoStart",
-  "canonical entry has more than one invocation binding": "EntryBound",
-  "invocation has more than one canonical binding": "InvocationBound",
-  "invocation receipt resource name changed": "NameChanged",
-  "invocation receipt origin changed": "OriginChanged",
-  "contradictory terminal invocation receipt": "ContradictoryTerminal",
-  "illegal terminal invocation transition": "IllegalTerminal",
-  "illegal invocation transition": "IllegalTransition",
-  "invocation changed after terminal receipt": "ChangedAfterTerminal",
-};
-
-/** The refusal a fold's error names, as proof block receipts/invocation-lifecycle names it. */
-export function invocationRefusalCode(error: unknown): string {
-  return error instanceof Error && Object.hasOwn(REFUSALS, error.message) ? REFUSALS[error.message]! : "Other";
-}
-
-/** The typed facts and result of one fold, as proof block receipts/invocation-lifecycle sees them. */
-export function invocationLifecycleFacts(receipts: readonly InvocationReceiptData[],
-  result: { refused: string } | { projections: readonly InvocationProjection[] }) {
-  const spaces = new Map<string, Map<string, number>>();
-  const token = (space: string, value: unknown): number | null => {
-    if (value === undefined) return null;
-    let tokens = spaces.get(space);
-    if (!tokens) spaces.set(space, tokens = new Map());
-    const key = space === "origin" ? canonicalJSON(value) : String(value);
-    let found = tokens.get(key);
-    if (found === undefined) tokens.set(key, found = tokens.size);
-    return found;
-  };
-  const input = receipts.map(receipt => ({
-    inv: token("id", receipt.invocationId), op: token("id", receipt.operationId), src: receipt.source, kind: receipt.receiptKind,
-    life: "lifecycle" in receipt ? receipt.lifecycle ?? null : null,
-    name: "name" in receipt ? token("name", receipt.name) : null,
-    origin: "origin" in receipt ? token("origin", receipt.origin) : null,
-    entry: "canonicalEntryId" in receipt ? token("entry", receipt.canonicalEntryId) : null,
-    retryable: "retryable" in receipt && receipt.retryable !== undefined ? receipt.retryable : null,
-    sequence: receipt.sequence, at: token("at", receipt.createdAt),
-  }));
-  const output = "refused" in result ? result : {
-    projections: result.projections.map(projection => ({
-      inv: token("id", projection.invocationId), op: token("id", projection.operationId), src: projection.source,
-      name: token("name", projection.name), origin: token("origin", projection.origin), life: projection.lifecycle,
-      entry: token("entry", projection.canonicalEntryId), retryable: projection.retryable ?? null,
-      sequence: projection.sequence, updated: token("at", projection.updatedAt),
-    })),
-  };
-  return { input, output };
-}
-
-function recordInvocationLifecycle(receipts: readonly InvocationReceiptData[],
-  result: { refused: string } | { projections: readonly InvocationProjection[] }): void {
-  try {
-    if (receipts.length > MAXIMUM_RECORDED_RECEIPTS) return;
-    const facts = invocationLifecycleFacts(receipts, result);
-    const digest = createHash("sha256").update(JSON.stringify(facts)).digest("hex");
-    if (recordedHistories.has(digest)) return;
-    if (recordedHistories.size >= RECORDED_HISTORIES) recordedHistories.clear();
-    recordedHistories.add(digest);
-    recordSeam("receipts/invocation-lifecycle", "project", facts.input, facts.output);
-  } catch {
-    // Recording is diagnostic: a history the record cannot be built from must not change the projection.
-  }
 }

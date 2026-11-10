@@ -19,8 +19,11 @@
 // a newtype over a literal integer range within the JavaScript safe integers -> number (checked to be an
 // integer in that range, both ways), bool -> boolean, a datatype whose constructors all take no arguments ->
 // a string union of their names, a one-constructor datatype named like its type -> a plain object, any other
-// datatype -> an object tagged by `$` (the constructor name), seq<T> -> a readonly array of T. Other Dafny
-// types (int and nat among them) are refused.
+// datatype -> an object tagged by `$` (the constructor name), seq<T> -> a readonly array of T, and in a block a
+// shell runs a linked list `datatype L<T> = Nil | Cons(head: T, tail: L<T>)` -> a readonly array of T. Other
+// Dafny types (int and nat among them) are refused. Such a block may also declare a compiled method that works in
+// arrays: the façade lends each array, fresh and as long as the sequence parameter its precondition names
+// (`a.Length == |s|`), and the method's TypeScript signature has the other parameters only.
 // Exit 0: written or fresh. 1: --check found a difference. 2: usage, unsupported type or toolchain error.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -44,6 +47,7 @@ export function readLaws(text) {
   const starts = [...code.matchAll(/^[ \t]*((?:(?:ghost|opaque|static|function|predicate|method|lemma|datatype|codatatype|newtype|type|const|import|module|abstract)\b[ \t]*)+)/gm)];
   const datatypes = new Map();
   const newtypes = new Map();
+  const lists = new Map();
   const functions = [];
   // A literal bound: exact up to 2^53 either way, so an exclusive bound of the widest range is read exactly.
   const literal = (text) => { const digits = text.replace(/_/g, "").replace(/^-\s*/, ""); const n = Number(digits); return /^(0x[0-9a-fA-F]+|[0-9]+)$/.test(digits) && n <= 2 ** 53 ? (text.startsWith("-") ? -n : n) : NaN; };
@@ -53,11 +57,19 @@ export function readLaws(text) {
     if (words.includes("datatype") || words.includes("codatatype")) {
       const d = /^(?:co)?datatype\s+(\w+)\s*(<[^>]*>)?\s*=\s*([\s\S]+)$/.exec(text);
       if (!d) throw new UsageError(`cannot read datatype: ${text.slice(0, 80)}`);
-      if (d[2]) return; // generic datatypes are refused where a signature uses them (no shape is known)
       const ctors = splitTop(d[3].replace(/\s+/g, " ").trim().replace(/^\|/, ""), "|").map((c) => {
         const p = c.indexOf("(");
-        return { name: (p < 0 ? c : c.slice(0, p)).trim(), fields: p < 0 ? [] : splitTop(c.slice(p + 1, c.lastIndexOf(")")), ",").map(param) };
+        return { name: (p < 0 ? c : c.slice(0, p)).trim().replace(/^ghost\s+/, ""), fields: p < 0 ? [] : splitTop(c.slice(p + 1, c.lastIndexOf(")")), ",").map(param) };
       });
+      if (d[2]) {
+        // A linked list, `datatype L<T> = Nil | Cons(head: T, tail: L<T>)` under any names, crosses as an array.
+        // Any other generic datatype is refused where a signature uses it (no shape is known).
+        const t = /^<\s*(\w+)\s*>$/.exec(d[2])?.[1];
+        const [nil, cons] = ctors;
+        if (t && ctors.length === 2 && nil.fields.length === 0 && cons.fields.length === 2 && cons.fields[0].type === t
+          && cons.fields[1].type.replace(/\s+/g, "") === `${d[1]}<${t}>`) lists.set(d[1], { nil: nil.name, cons: cons.name, head: cons.fields[0].name, tail: cons.fields[1].name });
+        return;
+      }
       datatypes.set(d[1], ctors);
       return;
     }
@@ -68,6 +80,33 @@ export function readLaws(text) {
       const hi = n ? literal(n[6]) - (n[5] === "<" ? 1 : 0) : NaN;
       if (!n || !Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)) throw new UsageError(`cannot read newtype as a literal integer range within the safe integers: ${text.slice(0, 80)}`);
       newtypes.set(n[1], { lo, hi });
+      return;
+    }
+    if (words.includes("method") && !words.includes("function") && !words.includes("lemma")) {
+      if (words.includes("ghost")) return;
+      // A compiled method: sequences and plain values in, one value out, and arrays it works in. The façade lends
+      // the arrays, so each must be sized by a sequence parameter, and every precondition must be one it can
+      // establish or check: `a.Length == |s|`, `|s| < literal`, or a call of a compiled predicate on parameters.
+      const m = /^method\s+(\w+)\s*\(([^)]*)\)\s*returns\s*\(\s*\w+\s*:\s*([^)]+?)\s*\)([\s\S]*)$/.exec(text);
+      if (!m) throw new UsageError(`cannot read method signature: ${text.slice(0, 80)}`);
+      const all = splitTop(m[2], ",").map(param);
+      const arrays = all.filter((p) => /^array<.+>$/.test(p.type));
+      const params = all.filter((p) => !arrays.includes(p));
+      const requires = [...m[4].split("{")[0].matchAll(/\brequires\b([\s\S]*?)(?=\brequires\b|\bensures\b|\bdecreases\b|\bmodifies\b|\breads\b|$)/g)].map((r) => r[1].trim());
+      const sized = new Map(), bounds = [], checks = [];
+      for (const clause of requires.flatMap((r) => r.split("&&")).map((c) => c.trim()).filter(Boolean)) {
+        const length = /^(\w+)\.Length\s*==\s*\|(\w+)\|$/.exec(clause);
+        const bound = /^\|(\w+)\|\s*<\s*([\w]+)$/.exec(clause);
+        const call = /^(\w+)\(([^()]*)\)$/.exec(clause);
+        const isSeq = (name) => params.some((p) => p.name === name && /^seq<.+>$/.test(p.type));
+        if (length && arrays.some((a) => a.name === length[1]) && isSeq(length[2]) && !sized.has(length[1])) sized.set(length[1], length[2]);
+        else if (bound && isSeq(bound[1]) && Number.isSafeInteger(literal(bound[2]))) bounds.push({ seq: bound[1], limit: literal(bound[2]) });
+        else if (call) checks.push({ predicate: call[1], args: splitTop(call[2], ",") });
+        else throw new UsageError(`${m[1]}: precondition '${clause}' cannot be checked by the façade`);
+      }
+      const unsized = arrays.find((a) => !sized.has(a.name));
+      if (unsized) throw new UsageError(`${m[1]}: array ${unsized.name} needs a precondition ${unsized.name}.Length == |<a sequence parameter>|`);
+      functions.push({ name: m[1], params, returns: m[3], checks, method: { order: all.map((p) => p.name), sized, bounds } });
       return;
     }
     if (!words.includes("function") && !words.includes("predicate")) return;
@@ -95,10 +134,10 @@ export function readLaws(text) {
     if (!functions.some((g) => g.name === c.predicate && g.returns === "bool")) throw new UsageError(`${fn.name}: precondition ${c.predicate} is not a compiled predicate of the laws`);
     if (c.args.some((a) => !fn.params.some((p) => p.name === a))) throw new UsageError(`${fn.name}: precondition ${c.predicate}(${c.args.join(", ")}) must take parameters only`);
   }
-  return { datatypes, newtypes, functions };
+  return { datatypes, newtypes, lists, functions };
 }
 
-export function emitFacade({ datatypes, newtypes, functions }, module, source) {
+export function emitFacade({ datatypes, newtypes, lists, functions }, module, source) {
   const shape = (name) => {
     const ctors = datatypes.get(name);
     if (!ctors) return null;
@@ -107,29 +146,39 @@ export function emitFacade({ datatypes, newtypes, functions }, module, source) {
     return "union";
   };
   const elem = (t) => /^seq<(.+)>$/.exec(t)?.[1];
+  // A linked list of the block: [its datatype, its item type].
+  const list = (t) => { const m = /^(\w+)<(.+)>$/.exec(t); return m && lists.has(m[1]) ? [m[1], m[2]] : null; };
+  const item = (t) => elem(t) ?? list(t)?.[1];
   const tsType = (t) => {
-    if (elem(t)) return elem(elem(t)) ? `readonly (${tsType(elem(t))})[]` : `readonly ${tsType(elem(t))}[]`;
+    if (item(t)) return item(item(t)) ? `readonly (${tsType(item(t))})[]` : `readonly ${tsType(item(t))}[]`;
     if (newtypes.has(t)) return "number";
     if (t === "bool") return "boolean";
     if (shape(t)) return t;
     throw new UsageError(`façade: unsupported Dafny type ${t}`);
   };
-  const toCore = (t, v) => (elem(t) ? `seq(${v}, (x: ${tsType(elem(t))}) => ${toCore(elem(t), "x")})` : newtypes.has(t) ? `in${t}(${v})` : t === "bool" ? `bool(${v})` : `to${t}(${v})`);
-  const fromCore = (t, v) => (elem(t) ? `Array.from(${v} as unknown[], (x: any) => ${fromCore(elem(t), "x")})` : newtypes.has(t) ? `in${t}(${v})` : t === "bool" ? v : `from${t}(${v})`);
+  const toCore = (t, v) => (elem(t) ? `seq(${v}, (x: ${tsType(elem(t))}) => ${toCore(elem(t), "x")})`
+    : list(t) ? `to${list(t)[0]}(${v}, (x: ${tsType(list(t)[1])}) => ${toCore(list(t)[1], "x")})`
+    : newtypes.has(t) ? `in${t}(${v})` : t === "bool" ? `bool(${v})` : `to${t}(${v})`);
+  const fromCore = (t, v) => (elem(t) ? `Array.from(${v} as unknown[], (x: any) => ${fromCore(elem(t), "x")})`
+    : list(t) ? `from${list(t)[0]}(${v}, (x: any) => ${fromCore(list(t)[1], "x")})`
+    : newtypes.has(t) ? `in${t}(${v})` : t === "bool" ? v : `from${t}(${v})`);
   // What crosses in each direction (the Gateway compiles with noUnusedLocals, so only converters in use are emitted).
   const used = new Set();
   const numbers = new Set();
   const into = new Set();
   const outOf = new Set();
+  const listsIn = new Set();
+  const listsOut = new Set();
   const visit = (t, way) => {
     if (elem(t)) { if (way === into) into.add("seq"); return visit(elem(t), way); }
+    if (list(t)) { (way === into ? listsIn : listsOut).add(list(t)[0]); return visit(list(t)[1], way); }
     if (newtypes.has(t)) numbers.add(t);
     if (t === "bool" && way === into) into.add("bool");
     if (shape(t) && !way.has(t)) { way.add(t); used.add(t); for (const c of datatypes.get(t)) for (const f of c.fields) visit(f.type, way); }
   };
   for (const f of functions) { f.params.forEach((p) => { tsType(p.type); visit(p.type, into); }); tsType(f.returns); visit(f.returns, outOf); }
   // The wrapper's own names; a parameter with one of them would shadow it inside the wrapper.
-  const own = new Set(["M", "seq", "bool", ...[...numbers].map((t) => `in${t}`), ...[...used].flatMap((t) => [`to${t}`, `from${t}`])]);
+  const own = new Set(["M", "seq", "bool", ...[...numbers].map((t) => `in${t}`), ...[...used, ...lists.keys()].flatMap((t) => [`to${t}`, `from${t}`, `the${t}`])]);
   const taken = functions.flatMap((f) => f.params.map((p) => [f.name, p.name])).find(([, name]) => own.has(name));
   if (taken) throw new UsageError(`${taken[0]}: parameter name ${taken[1]} is reserved by the façade`);
   const out = [
@@ -157,31 +206,43 @@ export function emitFacade({ datatypes, newtypes, functions }, module, source) {
     const { lo, hi } = newtypes.get(t);
     out.push(`  const in${t} = (n: number): number => { if (!Number.isSafeInteger(n) || n < ${lo} || n > ${hi}) throw new RangeError(\`not a ${t}: \${n}\`); return n; };`);
   }
+  // A linked list crosses as an array, built and read in a loop, so its length is bounded by memory alone.
+  for (const t of [...lists.keys()].sort()) {
+    const { nil, cons, head, tail } = lists.get(t);
+    if (listsIn.has(t)) out.push(`  const to${t} = <T>(v: readonly T[], each: (x: T) => unknown): unknown => { if (!Array.isArray(v)) throw new TypeError(\`not an array: \${JSON.stringify(v)}\`); let list = M.${t}.create_${nil}(); for (let i = v.length - 1; i >= 0; i--) list = M.${t}.create_${cons}(each(v[i] as T), list); return list; };`);
+    if (listsOut.has(t)) out.push(`  const from${t} = <T>(v: any, each: (x: any) => T): T[] => { const items: T[] = []; let rest = v; while (rest.is_${cons}) { items.push(each(rest.dtor_${head})); rest = rest.dtor_${tail}; } return rest.is_${nil} ? items : bad("${t}"); };`);
+  }
   for (const t of [...used].sort()) {
     const ctors = datatypes.get(t);
     const kind = shape(t);
     const args = (c, src) => c.fields.map((f) => toCore(f.type, `${src}.${f.name}`)).join(", ");
     const fields = (c, src) => c.fields.map((f) => `${f.name}: ${fromCore(f.type, `${src}.dtor_${f.name}`)}`).join(", ");
+    // A constructor without fields is built once: compiled datatype values are never changed, so one can be shared.
+    const shared = ctors.filter((c) => c.fields.length === 0);
+    if (into.has(t) && shared.length) out.push(`  const the${t}: Record<string, unknown> = Object.assign(Object.create(null), { ${shared.map((c) => `${c.name}: M.${t}.create_${c.name}()`).join(", ")} });`);
     if (kind === "enum") {
-      if (into.has(t)) out.push(`  const to${t} = (v: ${t}): unknown => { switch (v) { ${ctors.map((c) => `case ${JSON.stringify(c.name)}: return M.${t}.create_${c.name}();`).join(" ")} default: return unknown("${t}", v); } };`);
+      if (into.has(t)) out.push(`  const to${t} = (v: ${t}): unknown => the${t}[v] ?? unknown("${t}", v);`);
       if (outOf.has(t)) out.push(`  const from${t} = (v: any): ${t} => ${ctors.map((c) => `v.is_${c.name} ? ${JSON.stringify(c.name)} : `).join("")}bad("${t}");`);
     } else if (kind === "record") {
       if (into.has(t)) out.push(`  const to${t} = (v: ${t}): unknown => { if (typeof v !== "object" || v === null) return unknown("${t}", v); return M.${t}.create_${ctors[0].name}(${args(ctors[0], "v")}); };`);
       if (outOf.has(t)) out.push(`  const from${t} = (v: any): ${t} => ({ ${fields(ctors[0], "v")} });`);
     } else {
-      if (into.has(t)) out.push(`  const to${t} = (v: ${t}): unknown => { switch (v?.$) { ${ctors.map((c) => `case ${JSON.stringify(c.name)}: return M.${t}.create_${c.name}(${args(c, "v")});`).join(" ")} default: return unknown("${t}", v); } };`);
+      if (into.has(t)) out.push(`  const to${t} = (v: ${t}): unknown => { switch (v?.$) { ${ctors.map((c) => `case ${JSON.stringify(c.name)}: return ${c.fields.length ? `M.${t}.create_${c.name}(${args(c, "v")})` : `the${t}.${c.name}`};`).join(" ")} default: return unknown("${t}", v); } };`);
       if (outOf.has(t)) out.push(`  const from${t} = (v: any): ${t} => ${ctors.map((c) => `v.is_${c.name} ? { $: ${JSON.stringify(c.name)}${c.fields.length ? ", " : ""}${fields(c, "v")} } : `).join("")}bad("${t}");`);
     }
   }
   // Compiled code does not check \`requires\`, so each precondition the laws state is checked here first.
-  const call = (f) => `M.__default.${f.name}(${f.params.map((p) => `${p.name}$`).join(", ")})`;
+  const call = (f) => `M.__default.${f.name}(${(f.method?.order ?? f.params.map((p) => p.name)).map((name) => `${name}$`).join(", ")})`;
   const body = (f) => {
     const converted = f.params.map((p) => `const ${p.name}$ = ${toCore(p.type, p.name)};`);
     const checks = f.checks.map((c) => `if (!M.__default.${c.predicate}(${c.args.map((a) => `${a}$`).join(", ")})) throw new RangeError("precondition ${c.predicate}(${c.args.join(", ")}) of ${f.name} does not hold");`);
-    return `{ ${[...converted, ...checks, `return ${fromCore(f.returns, call(f))};`].join(" ")} }`;
+    // A method's arrays are lent here, fresh and as long as the sequence its precondition names.
+    const bounds = (f.method?.bounds ?? []).map((b) => `if (!(${b.seq}$.length < ${b.limit})) throw new RangeError("precondition |${b.seq}| < ${b.limit} of ${f.name} does not hold");`);
+    const arrays = [...(f.method?.sized ?? [])].map(([array, of]) => `const ${array}$ = new Array(${of}$.length);`);
+    return `{ ${[...converted, ...checks, ...bounds, ...arrays, `return ${fromCore(f.returns, call(f))};`].join(" ")} }`;
   };
   out.push(`  return {`, ...functions.map((f) => `    ${f.name}: (${f.params.map((p) => `${p.name}: ${tsType(p.type)}`).join(", ")}) => ${body(f)},`), `  };`, `}`,
-    ...([...outOf].some((t) => shape(t)) ? [`function bad(type: string): never { throw new TypeError(\`compiled core returned an unknown \${type}\`); }`] : []),
+    ...([...outOf].some((t) => shape(t)) || listsOut.size ? [`function bad(type: string): never { throw new TypeError(\`compiled core returned an unknown \${type}\`); }`] : []),
     ...([...into].some((t) => shape(t)) ? [`function unknown(type: string, value: unknown): never { throw new TypeError(\`not a \${type}: \${JSON.stringify(value)}\`); }`] : []), ``,
     `/** The checked-in compiled core, bound. */`,
     `export const core: Core = bind(compiled);`, ``);
@@ -192,6 +253,8 @@ export function emitFacade({ datatypes, newtypes, functions }, module, source) {
 // block is shadow-only: a shell cannot ship it, because the runtime needs the bignumber.js package. It goes when
 // the last block names its shell (#2393).
 function emitRuntimeFacade({ datatypes, functions }, module, source, packageJson) {
+  const method = functions.find((f) => f.method);
+  if (method) throw new UsageError(`${method.name}: a compiled method needs a block a shell runs (block.json "shell")`);
   const shape = (name) => {
     const ctors = datatypes.get(name);
     if (!ctors) return null;
