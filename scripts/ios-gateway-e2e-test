@@ -258,6 +258,9 @@ Environment:
                                 failure no lane starts another journey; running ones
                                 finish with their evidence. Each journey's output is
                                 printed whole when it ends.
+  TRON_IOS_E2E_UI_KEEP_GOING    1: run-ui runs every selected journey after a failure and
+                                names every failed one (the post-land batch); unset, it
+                                stops starting journeys at the first failure
   TRON_IOS_E2E_UI_JOURNEY_SECONDS      JSON object of journey to seconds from an earlier
                                 run; run-ui starts the longest journeys first
   TRON_IOS_E2E_NO_INSTALL             1 reuses existing Gateway dependencies; absent dependencies fail closed
@@ -921,15 +924,11 @@ root, operation, arguments = Path(sys.argv[1]), sys.argv[2], sys.argv[3:]
 with (root / "lock").open("a") as lock:
     fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
     if operation == "claim":
-        # After the first failure no lane starts another journey, as a serial
-        # run stops at its first failure; journeys already running finish.
-        if (root / "failed").exists():
+        if (root / "stopped").exists() or ((root / "failed").exists() and not (root / "keep-going").exists()):
             raise SystemExit(0)
         pending = (root / "pending").read_text().splitlines()
         if not pending:
             raise SystemExit(0)
-        # Claimed before it leaves `pending`, so a failed write never loses it;
-        # the verdict still requires a completion for every selected journey.
         with (root / "claimed").open("a") as handle:
             handle.write(f"{arguments[0]} {pending[0]}\n")
         (root / "pending").write_text("".join(line + "\n" for line in pending[1:]))
@@ -946,6 +945,7 @@ with (root / "lock").open("a") as lock:
             shutil.copyfileobj(source, sys.stdout.buffer)
         sys.stdout.buffer.flush()
     elif operation == "stop":
+        (root / "stopped").write_text(f"{arguments[0]} {arguments[1]}\n")
         if not (root / "failed").exists():
             (root / "failed").write_text(f"{arguments[0]} {arguments[1]}\n")
     elif operation == "say":
@@ -991,7 +991,7 @@ run_ui_lane() {
       rm -f "$journey_log"
     fi
     ui_queue_tool complete "$journey" "$status" "$test_lane"
-    ((status == 0)) || break
+    ((status == 0)) || [[ -e "$ui_queue/keep-going" ]] || break
   done
   return 0
 }
@@ -1071,14 +1071,18 @@ def lines(name):
     path = root / name
     return path.read_text().splitlines() if path.exists() else []
 failed = lines("failed")
+completed = {line.split(" ")[1] for line in lines("completed")}
+missing = [journey for journey in lines("selected") if journey not in completed]
+if failed and (root / "keep-going").exists():
+    status = failed[0].split(" ", 1)[0]
+    failing = [line.split(" ")[1] for line in lines("completed") if line.split(" ")[2] != "0"]
+    print(f"{status} failed journeys: {' '.join(failing) or 'none'}"
+          + (f"; never finished: {' '.join(missing)}" if missing else ""))
+    raise SystemExit(0)
 if failed:
     status, journey = failed[0].split(" ", 1)
     print(f"{status} first failure: {journey}")
     raise SystemExit(0)
-# Every selected journey must have completed: one that was never claimed,
-# never finished, or lost from the queue fails the run.
-completed = {line.split(" ")[1] for line in lines("completed")}
-missing = [journey for journey in lines("selected") if journey not in completed]
 if missing or not lines("selected"):
     print(f"1 journeys never finished: {' '.join(missing) or 'none selected'}")
 else:
@@ -1107,6 +1111,7 @@ run_ui() {
   mkdir -p "$ui_queue"
   ui_journey_order "${journeys[@]}" >"$ui_queue/selected"
   cp "$ui_queue/selected" "$ui_queue/pending"
+  [[ "${TRON_IOS_E2E_UI_KEEP_GOING:-}" != 1 ]] || : >"$ui_queue/keep-going"
   trap finish_e2e_run EXIT
   for ((index = 2; index <= ui_lanes; index++)); do
     spawn_ui_lane "$index"

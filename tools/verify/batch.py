@@ -72,7 +72,7 @@ def lanes(root: Path, base: str) -> list[dict]:
          'requires': 'scripts/ios-gateway-e2e-test', 'ios': True, 'env': lane_only},
         {'name': UI_JOURNEY_LANE, 'chain': 'apple', 'command': ['scripts/ios-gateway-e2e-test', 'run-ui'],
          'requires': 'scripts/ios-gateway-e2e-test', 'ios': True,
-         'env': {**lane_only, 'TRON_IOS_E2E_UI_LANES': str(UI_JOURNEY_LANES)}},
+         'env': {**lane_only, 'TRON_IOS_E2E_UI_LANES': str(UI_JOURNEY_LANES), 'TRON_IOS_E2E_UI_KEEP_GOING': '1'}},
     ])
     return result
 

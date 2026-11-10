@@ -3851,9 +3851,9 @@ if "test-without-building" in arguments and "-resultBundlePath" in arguments:
                 print("fake xcodebuild: no concurrent run reached the barrier", file=sys.stderr)
                 raise SystemExit(99)
             time.sleep(0.05)
-    # `FAKE_XCODEBUILD_FAIL_FILTER` fails that one journey; every other run then
-    # waits for `FAKE_XCODEBUILD_PASS_AFTER` (a path) to exist, if set.
-    if os.environ.get("FAKE_XCODEBUILD_FAIL_FILTER") == test_filter:
+    # `FAKE_XCODEBUILD_FAIL_FILTER` fails each listed journey (comma-separated); every other run
+    # then waits for `FAKE_XCODEBUILD_PASS_AFTER` (a path) to exist, if set.
+    if test_filter in os.environ.get("FAKE_XCODEBUILD_FAIL_FILTER", "").split(","):
         raise SystemExit(65)
     if os.environ.get("FAKE_XCODEBUILD_PASS_AFTER"):
         deadline = time.monotonic() + 60
@@ -4578,6 +4578,31 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         failed = re.findall(r"Real-UI journey (\w+/\w+/\w+) completed .*\(status [1-9]\d*\)", result.stdout)
         self.assertEqual(failed, [journeys[0]], "the batch probes exactly the failed journey")
 
+    def test_keep_going_run_ui_runs_every_journey_after_a_failure_and_names_each_failure(self) -> None:
+        """#2414: the post-land batch sets TRON_IOS_E2E_UI_KEEP_GOING, so a red journey hides no
+        other: with both lanes' first journeys failing, the third still runs with its evidence,
+        the run fails with the first failure's status, and it names every failed journey."""
+        journeys = self.three_ui_journeys()
+        environment = self.ui_environment(
+            TRON_IOS_E2E_UI_LANES="2",
+            TRON_IOS_E2E_UI_KEEP_GOING="1",
+            FAKE_XCODEBUILD_RUN_BARRIER=str(self.root / "barrier"),
+            FAKE_XCODEBUILD_RUN_BARRIER_COUNT="2",
+            FAKE_XCODEBUILD_FAIL_FILTER=",".join(journeys[:2]),
+        )
+        arguments = [argument for journey in journeys for argument in ("--only-testing", journey)]
+        result = self.e2e("run-ui", *arguments, environment=environment)
+        self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+        self.assertRegex(result.stderr, r"failed journeys: \S+ \S+\)")
+        self.assertEqual(sorted(result.stderr.split("failed journeys: ", 1)[1].split(")", 1)[0].split()), sorted(journeys[:2]))
+        self.assertEqual(sorted(entry["test_filter"] for entry in self.ui_runs(environment)), sorted(journeys))
+        reports = self.ui_reports()
+        self.assertEqual(sorted(reports), sorted(journeys))
+        for journey in journeys[:2]:
+            self.assertEqual(reports[journey][0][1]["journey_status"], 65)
+        self.assertEqual(reports[journeys[2]][0][1]["journey_status"], 0)
+        self.assertTrue(reports[journeys[2]][0][1]["evidence_complete"])
+
     def test_a_journey_whose_setup_fails_never_runs(self) -> None:
         """#2253 review: each journey runs in a subshell; a failed setup step
         (here the xctestrun patch) must end it before xcodebuild runs, serially
@@ -4614,18 +4639,19 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
         process owner stop xcodebuild before the command resets the hosted app
         and stops the fixture, as the serial loop did, on one lane and on two,
         for SIGTERM and for SIGINT (which an async subshell would ignore)."""
-        for lanes, signalled in (("1", signal.SIGTERM), ("2", signal.SIGTERM), ("1", signal.SIGINT), ("2", signal.SIGINT)):
-            with self.subTest(lanes=lanes, signal=signalled.name):
+        for lanes, signalled, keep in (("1", signal.SIGTERM, ""), ("2", signal.SIGTERM, ""), ("1", signal.SIGINT, ""),
+                                       ("2", signal.SIGINT, ""), ("1", signal.SIGTERM, "1")):
+            with self.subTest(lanes=lanes, signal=signalled.name, keep_going=keep):
                 self.log_path.unlink(missing_ok=True)
-                key = f"{lanes}-{signalled.name}"
+                key = f"{lanes}-{signalled.name}-{keep}"
                 started = self.root / f"run-started-{key}"
                 environment = self.ui_environment(
-                    TRON_IOS_E2E_UI_LANES=lanes, FAKE_XCODEBUILD_RUN_STARTED=str(started),
+                    TRON_IOS_E2E_UI_LANES=lanes, FAKE_XCODEBUILD_RUN_STARTED=str(started), TRON_IOS_E2E_UI_KEEP_GOING=keep,
                     FAKE_XCODEBUILD_TERM_DELAY="2", FAKE_XCODEBUILD_LOG=str(self.root / f"signal-xcodebuild-{key}.jsonl"),
                 )
-                journey = self.owned_ui_journeys()[0]
+                selected = self.owned_ui_journeys()[:2 if keep else 1]
                 process = subprocess.Popen(
-                    [str(E2E), "run-ui", "--only-testing", journey],
+                    [str(E2E), "run-ui", *(argument for journey in selected for argument in ("--only-testing", journey))],
                     env=self.readiness_node_environment(environment),
                     text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
                 )
