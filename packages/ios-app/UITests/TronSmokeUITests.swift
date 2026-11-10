@@ -180,7 +180,7 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Answers the fixture's next held Tasks read (`-home-sheet-presentation-loading`).
+    /// Releases the fixture's next held `home.taskList` read (Manage Home's or the Tasks sheet's).
     private func releaseHeldTaskList() {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-task-list" as CFString), nil, nil, true)
@@ -4131,10 +4131,8 @@ final class TronSmokeUITests: XCTestCase {
         let before = staging.frame.minY
         staging.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.05, thenDragTo: staging.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 2.5)))
-        let scrolled = NSPredicate { _, _ in staging.frame.minY > before + 15 }
-        expectation(for: scrolled, evaluatedWith: staging)
-        waitForExpectations(timeout: 3)
         let settled = staging.frame.minY
+        XCTAssertGreaterThan(settled, before + 15, "The content drag scrolled the page")
         Thread.sleep(forTimeInterval: 1)
         XCTAssertEqual(staging.frame.minY, settled, accuracy: 2, "The page snapped back after the drag")
         XCTAssertLessThan(send.frame.minY, mediumY - 100, "A content drag resized the sheet")

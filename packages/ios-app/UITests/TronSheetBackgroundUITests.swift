@@ -44,7 +44,7 @@ final class TronSheetBackgroundUITests: XCTestCase {
         }
     }
 
-    /// Answers the fixture's next held Tasks read (`-home-sheet-presentation-loading`).
+    /// Releases the fixture's next held `home.taskList` read (Manage Home's or the Tasks sheet's).
     private func releaseHeldTaskList() {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-task-list" as CFString), nil, nil, true)
@@ -90,7 +90,7 @@ final class TronSheetBackgroundUITests: XCTestCase {
         let window = app.windows.firstMatch.frame
         let toolbarY = done.frame.midY
         // The gutter is inside the medium sheet but outside cards/buttons. Sample
-        // the whole fade, not title ink or the pulse. The fixture delays reads 12s.
+        // the whole fade, not title ink or the pulse. The held read keeps the pulse up for this 13 s sample.
         let offsets: [CGFloat] = [-8, 12, 32, 52, 72]
         func profile(_ screenshot: XCUIScreenshot) -> [[Double]] {
             guard let source = screenshot.image.cgImage else { XCTFail("No screenshot pixels"); return [] }

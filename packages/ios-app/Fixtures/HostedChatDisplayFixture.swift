@@ -185,7 +185,6 @@ struct HostedChatDisplayFixture: View {
     }
 }
 
-/// Retains the actual mounted Manage Home action to exercise a callback after route replacement.
 /// Holds each presentation-loading `home.taskList` read (one per Manage Home or
 /// Tasks sheet load) until the UI test releases it. Each Darwin notification
 /// grants one read, so a release posted before its read arrives is kept, not
@@ -207,6 +206,7 @@ enum HostedHomeTaskListRelease {
     }
 }
 
+/// Retains the actual mounted Manage Home action to exercise a callback after route replacement.
 @MainActor
 final class HostedHomeActionProbe {
     var pause: (() -> Void)?
