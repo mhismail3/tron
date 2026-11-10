@@ -269,17 +269,6 @@ final class ConfirmedMutationExecutor {
         }
     }
 
-    /// Callers whose contract is "completed value or uncertain outcome" keep the
-    /// missing receipt uncertain; only a Home change may treat `.missing` as final.
-    func resolveValue(method: String, commandID: String) async throws -> JSONValue {
-        switch try await resolveReceipt(method: method, commandID: commandID) {
-        case .completed(let value): return value
-        case .missing:
-            throw Self.uncertainMutationOutcome(method: method, commandID: commandID,
-                lastFailure: Self.noCompletedReceipt)
-        }
-    }
-
     private static let noCompletedReceipt = GatewayFailure(
         code: "receipt_unavailable",
         message: "The original command has no completed receipt. Do not submit a replacement.",

@@ -1222,9 +1222,6 @@ private actor HostedHomeShellGateway {
             "maximum": .number(1_000_000), "default": .number(200_000), "effective": .number(1_000_000), "override": .null,
             "source": .string("model"), "warning": .null]).decode(ContextWindowPolicy.self)
     }
-    private func anthropicRef(_ id: String) -> JSONValue {
-        .object(["provider": .string("anthropic"), "id": .string(id)])
-    }
     /// An ISO timestamp the given seconds before now, so fixture rows read as recent.
     private func nowMilliseconds() -> Double {
         (Date.now.timeIntervalSince1970 * 1000).rounded(.down)

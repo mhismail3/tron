@@ -313,11 +313,6 @@ struct ComposerResourceCatalog: Equatable, Sendable {
         return entries(kind: picker.kind, query: picker.query)
     }
 
-    func exactSkill(named displayName: String) -> ComposerResourceEntry? {
-        let matches = skills.filter { $0.displayName == displayName }
-        return matches.count == 1 ? matches[0] : nil
-    }
-
     private static func order(_ lhs: ComposerResourceEntry, _ rhs: ComposerResourceEntry) -> Bool {
         if lhs.normalizedName != rhs.normalizedName { return lhs.normalizedName < rhs.normalizedName }
         return lhs.id < rhs.id

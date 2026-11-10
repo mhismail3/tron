@@ -651,7 +651,6 @@ package struct AutomationProfileCatalog: Identifiable, Hashable, Sendable {
     package var catalogRevision: Int = 0
     package var summaries: [GatewayAutomationSummary] = []
     package var failure: String?
-    var isStale: Bool { state != .connected }
     var state: DashboardServerConnectionState { profile.state }
     package var id: String { profile.id }
 
