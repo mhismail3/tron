@@ -227,7 +227,7 @@ status and revision. `--skip ios` skips them.
 When `ios-lanes` (the Gateway E2E and profiling targets, and the UIValidation
 journeys that need another harness's fixture: `scripts/ios-mac-terminal-journey`) are selected,
 the run is `incomplete` (exit 1) unless `--skip ios` names them. `--skip mac` covers `mac-terminal`. A `relay` run needs the relay's installed
-lockfile, else verify refuses before step 1 with its `npm ci` command. An empty run fails: it is not evidence.
+lockfile, and a `python-here` run (the proof gate runs compiled cores) `packages/core`'s, else verify refuses before step 1 with its `npm ci` command. An empty run fails: it is not evidence.
 
 ## Manifest `verify` declarations
 
