@@ -366,7 +366,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             failures = [f"{Path(suite['name']).name} > {test['fullName']}" for suite in data.get('testResults', [])
                         for test in suite.get('assertionResults', []) if test.get('status') == 'failed']
             shutil.copy2(vitest, directory / 'vitest.json')
-        elif group == 'python':
+        elif group in ('python', 'python-here'):
             count = verify.python_count(output)
         elif group in ('node', 'node-gateway'):
             count = verify.tap_count(output)
@@ -803,9 +803,12 @@ def file_issue(report: dict, directory: Path, state: Path) -> dict:
             f"Lane: {report['failed']['name']}; attribution: {attribution['status']}"
             + (f" ({attribution['reason']})" if attribution.get('reason') else '') + '.\n\n'
             + (f"Causal landing: `{attribution['commit']}` (first parent `{attribution['parent']}`).\n" if attribution.get('commit') else
-               'Candidates: ' + ', '.join(f"`{sha}`" for sha in attribution.get('candidates', [])) + '.\n')
+               # Attribution narrows nothing short of a causal landing, so the candidates are the whole range:
+               # named by count, which keeps a long range within the 64 KiB issue bound.
+               f"Candidates: all {len(report['commits'])} covered commits of the range.\n")
             + repair_summary(journal)
-            + '\nFiles: ' + ', '.join(f'`{p}`' for p in attribution.get('files', report['files']))
+            + ('\nFiles: ' + ', '.join(f'`{p}`' for p in attribution['files']) if 'files' in attribution else
+               f"\nFiles: {len(report['files'])} changed in the range (`report.json` `files`).")
             + '\n\nThe first failure, exact commands, counts and logs are frozen in the repository-local '
             f"Git common directory at `verify/batches/{directory.parent.name}/` (`evidence.json` manifest). "
             'No test, golden, assertion or timeout changed. The red stays red until a raw-green batch.\n')

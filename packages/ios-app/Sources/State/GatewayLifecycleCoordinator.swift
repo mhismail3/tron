@@ -8,7 +8,9 @@ enum GatewayConnectionState: Equatable {
 }
 
 typealias GatewayPairingCommit = @MainActor @Sendable (GatewayProfile, String) throws -> Void
-typealias GatewayProfileTokenLookup = @MainActor @Sendable (GatewayProfile) -> String?
+/// Returns nil when the profile has no stored token, and throws when the
+/// Keychain cannot be read right now (for example before the first unlock).
+typealias GatewayProfileTokenLookup = @MainActor @Sendable (GatewayProfile) throws -> String?
 
 @MainActor
 protocol GatewayLifecycleProjectionDelegate: AnyObject, Sendable {
@@ -266,6 +268,26 @@ final class GatewayLifecycleCoordinator {
               connectionID == expectedConnectionID else { throw CancellationError() }
     }
 
+    private enum TokenRead {
+        case token(String)
+        case missing
+        case unreadable(Error)
+    }
+
+    static let unreadableTokenReason = "This iPhone's Keychain cannot be read yet. Unlock it to reconnect."
+
+    /// A missing token means unpaired. A Keychain that cannot be read right now
+    /// is not: the profile stays paired and offline, and the next foreground
+    /// or reconnect reads it again.
+    private func readToken(_ profile: GatewayProfile) -> TokenRead {
+        do {
+            guard let token = try profileTokenLookup(profile) else { return .missing }
+            return .token(token)
+        } catch {
+            return .unreadable(error)
+        }
+    }
+
     func start() async {
         guard phase.admitsWork, !sceneIsBackgrounded,
               connectionAdmissionTask == nil,
@@ -274,8 +296,20 @@ final class GatewayLifecycleCoordinator {
               connectionState != .connecting,
               connectionState != .connected,
               connectionState != .reconnecting else { return }
-        guard let profile = profiles.selected, let token = profileTokenLookup(profile) else {
+        guard let profile = profiles.selected else {
             connectionState = .unpaired
+            hasResolvedLaunchState = true
+            return
+        }
+        let token: String
+        switch readToken(profile) {
+        case .token(let stored): token = stored
+        case .missing:
+            connectionState = .unpaired
+            hasResolvedLaunchState = true
+            return
+        case .unreadable:
+            connectionState = .offline(Self.unreadableTokenReason)
             hasResolvedLaunchState = true
             return
         }
@@ -462,7 +496,16 @@ final class GatewayLifecycleCoordinator {
         if case .tornDown = phase { return }
         let generation = await beginTransition()
         guard phase.generation == generation else { return }
-        guard let token = profileTokenLookup(profile) else {
+        let token: String
+        switch readToken(profile) {
+        case .token(let stored): token = stored
+        case .unreadable(let error):
+            finishTransition(generation)
+            connectionState = .offline(Self.unreadableTokenReason)
+            hasResolvedLaunchState = true
+            delegate?.lifecycleSurface(error)
+            return
+        case .missing:
             finishTransition(generation)
             connectionState = .unpaired
             hasResolvedLaunchState = true
@@ -720,7 +763,7 @@ final class GatewayLifecycleCoordinator {
               foregroundReconciliationTask == nil,
               deferredProjectionTask == nil,
               backgroundRetirementTask == nil,
-              let profile = profiles.selected, let token = profileTokenLookup(profile) else { return }
+              let profile = profiles.selected, case .token(let token) = readToken(profile) else { return }
         nonRetryableRecoveryFailure = false
         if reconnectTask != nil, reconnectCanBeAccelerated {
             reconnectSchedule.accelerate()
@@ -1491,9 +1534,13 @@ final class GatewayLifecycleCoordinator {
                         attemptGeneration: attemptGeneration
                     ), self.connectionState == connectionStateAtAttempt else { return }
                     var establishedConnectionID: Int?
-                    guard let profile = self.profiles.selected,
-                          let token = self.profileTokenLookup(profile) else {
-                        self.connectionState = .unpaired
+                    let tokenRead = self.profiles.selected.map { self.readToken($0) } ?? .missing
+                    guard let profile = self.profiles.selected, case .token(let token) = tokenRead else {
+                        if case .unreadable = tokenRead {
+                            self.connectionState = .offline(Self.unreadableTokenReason)
+                        } else {
+                            self.connectionState = .unpaired
+                        }
                         self.hasResolvedLaunchState = true
                         self.finishReconnect(lifecycleGeneration: lifecycleGeneration, attemptGeneration: attemptGeneration)
                         return

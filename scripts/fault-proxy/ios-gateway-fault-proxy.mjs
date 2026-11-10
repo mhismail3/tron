@@ -534,7 +534,15 @@ export async function ownedGatewayVerifier(initialPid, port, { execute = promisi
     }
     return { command: nextCommand, birth: await inspect(target, "lstart") };
   };
-  const initial = await capture(pid, process.ppid);
+  // A helper killed at its deadline proves nothing either way, so an unproven
+  // capture or proof retries it; five such kills in a row refuse (the same
+  // bound as the watcher's misses below). Any real mismatch refuses at once.
+  const answered = async run => {
+    for (let attempt = 1; ; attempt++) {
+      try { return await run(); } catch (error) { if (!error?.killed || attempt >= 5) throw error; }
+    }
+  };
+  const initial = await answered(() => capture(pid, process.ppid));
   command = initial.command;
   birth = initial.birth;
   // The full proof (birth, command line, listener) is off the request path; a
@@ -542,10 +550,9 @@ export async function ownedGatewayVerifier(initialPid, port, { execute = promisi
   // proxy start and at the first request after a respawn is adopted. A watcher
   // re-proves it every interval, so a PID that died and was reused, a zombie or
   // a lost listener is unproven within one interval even when no request saw
-  // it die. A helper killed at its deadline proves nothing either way; five such
-  // misses in a row unprove the Gateway (Home decision on #2386), at the cost of
-  // refusals while they last. Residual: a PID reused and serving the port inside
-  // that window is trusted.
+  // it die. Five killed watcher proofs in a row unprove the Gateway (Home
+  // decision on #2386), at the cost of refusals while they last. Residual: a
+  // PID reused and serving the port inside that window is trusted.
   let proven = false;
   // Bumped by every adopt and exit, so a proof that started before either
   // cannot prove what replaced it.
@@ -569,7 +576,7 @@ export async function ownedGatewayVerifier(initialPid, port, { execute = promisi
     }
     checking ??= (async () => {
       const started = generation;
-      await prove(pid);
+      await answered(() => prove(pid));
       // Nothing proven for an adopt or exit that came during the proof.
       if (generation !== started) throw new Error("Gateway changed during its ownership proof");
       proven = true;
@@ -590,7 +597,7 @@ export async function ownedGatewayVerifier(initialPid, port, { execute = promisi
       .finally(() => { watching = undefined; });
   }, proofIntervalMs).unref();
   verifyTarget.adopt = async target => {
-    const next = await capture(target, process.pid);
+    const next = await answered(() => capture(target, process.pid));
     generation += 1;
     proven = false;
     pid = target;

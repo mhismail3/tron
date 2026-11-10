@@ -8,7 +8,7 @@ Block hash: `a94bb889432a500f` (over `blocks/schedule/calendar/Block.dfy`, `laws
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/schedule/calendar/Block.dfy: Dafny program verifier finished with 71 verified, 0 errors;  |
 | Independent review | ACCEPT by law-reviewer (run ba5d22b5) (openai/gpt-6-luna, transcript-verified); writer parent (anthropic/claude-opus-5-5); 2026-11-09 |
 | Mutation check | PASS: 211 valid mutants, 207 killed by laws, 0 law-gap, 0 survived, 4 accepted (blocks/schedule/calendar/MUTATION.json) |
-| Shadow | match: 19896 inputs compared, 0 mismatches; lab traffic only; compiled core over zone-table.ts tables vs the calendar code of packages/gateway/src/automations/schedule.ts on 20,000 generated inputs (not real traffic; inputs the TypeScript throws on are counted apart, not compared) |
+| Shadow | match: 19891 inputs compared, 0 mismatches; lab traffic only; compiled core over zone-table.ts tables vs the calendar code of packages/gateway/src/automations/schedule.ts on 20,000 generated inputs (not real traffic; inputs the TypeScript throws on are counted apart, not compared) |
 | **Ready for cut-over** | no (READY is only computed with --recheck) (needs a current real-traffic shadow over >= 7 days) |
 
 ## N1 next-sound

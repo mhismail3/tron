@@ -1,6 +1,6 @@
 {
  "status": "match",
- "compared": 19896,
+ "compared": 19891,
  "unit": "inputs",
  "mismatches": 0,
  "firstMismatch": null,
@@ -10,5 +10,5 @@
  "inputsHash": "a94bb889432a500f",
  "coreJsHash": "d6b36d9989b0d438",
  "command": "node tools/proof/oracles/schedule-calendar.mjs {core} 20000",
- "date": "2026-11-09"
+ "date": "2026-11-10"
 }

@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { importGatewaySource } from "./gateway-source.mjs";
+import { mulberry32 } from "./random.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 // The schedule seams record on an opted-in Debug Gateway; an oracle run must never add its own calls to that corpus.
@@ -24,7 +25,7 @@ const [corePath, countArg, seedArg] = process.argv.slice(2);
 if (!corePath) { console.error("usage: schedule-calendar.mjs <compiled core.js> [count] [seed] | --replay <corpus.jsonl>..."); process.exit(2); }
 const replay = countArg === "--replay";
 const count = Number(countArg ?? 3000);
-let seed = Number(seedArg ?? 11);
+const seed = Number(seedArg ?? 11);
 
 const { load } = await import(join(REPO, "packages/core/dist/schedule/calendar/facade.ts"));
 const core = load(resolve(corePath));
@@ -84,7 +85,7 @@ if (replay) {
   const ZONES = ["America/New_York", "Europe/London", "Europe/Berlin", "Australia/Sydney", "Australia/Lord_Howe",
     "America/Santiago", "America/St_Johns", "Asia/Kathmandu", "Pacific/Chatham", "Antarctica/Troll", "Pacific/Apia",
     "Asia/Tokyo", "UTC", "America/Sao_Paulo", "Africa/Casablanca", "Asia/Tehran", "Pacific/Kiritimati", "America/Havana"];
-  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const rnd = mulberry32(seed);
   const int = (lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1));
   const DAY = 86_400_000;
   const pad = (n) => String(n).padStart(2, "0");

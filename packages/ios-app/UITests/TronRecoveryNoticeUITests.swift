@@ -36,6 +36,39 @@ final class TronRecoveryNoticeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Retries 1"].waitForExistence(timeout: 5), "Retry did not receive the tap")
     }
 
+    /// #2296 item 15: a launch whose Keychain cannot be read yet (before the
+    /// first unlock) keeps its paired Mac offline with the reason instead of
+    /// offering setup, and the next foreground reads the token and reconnects.
+    @MainActor
+    func testUnreadableKeychainAtLaunchStaysPairedAndRetriesOnForeground() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-keychain-locked-fixture", "-tronSetupComplete.v1", "YES",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+        let state = app.staticTexts["keychain-locked-state"]
+        let unreadable = "offline: This iPhone's Keychain cannot be read yet. Unlock it to reconnect."
+        XCTAssertTrue(state.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", unreadable), object: state)], timeout: 15) == .completed,
+                      "an unreadable Keychain did not leave the paired Mac offline: \(state.label)")
+        XCTAssertFalse(app.staticTexts["Welcome to Tron"].waitForExistence(timeout: 5),
+                       "an unreadable Keychain presented setup for a paired Mac: \(app.debugDescription)")
+        keep(app.screenshot(), "2296-keychain-unreadable-launch")
+
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackgroundSuspended, timeout: 10) || app.state == .runningBackground)
+        app.activate()
+        // The fixture Mac never resolves, so a read token starts a reconnect
+        // that fails for a network reason, never the Keychain one.
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label != %@ AND label != %@", unreadable, "unpaired"), object: state)],
+                                       timeout: 20) == .completed,
+                      "the foreground did not read the token and reconnect: \(state.label)")
+        XCTAssertFalse(app.staticTexts["Welcome to Tron"].exists, app.debugDescription)
+        keep(app.screenshot(), "2296-keychain-readable-after-foreground")
+    }
+
     private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {

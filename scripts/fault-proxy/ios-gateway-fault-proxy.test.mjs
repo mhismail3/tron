@@ -306,12 +306,42 @@ test("five straight helper timeouts unprove the Gateway; a success resets the co
   // The fifth straight miss unproves it: a request now needs a full proof.
   await missWatcherProofs(1);
   const unproven = verify();
-  const proof = await fixture.nextCall();
-  proof.timeOut();
-  await assert.rejects(unproven);
+  for (let miss = 0; miss < 5; miss++) (await fixture.nextCall()).timeOut();
+  await assert.rejects(unproven, /timed out/);
   // A real mismatch is not a timeout: a reused PID is refused on the first watcher proof.
   fixture.hold(false);
   await verify();
   fixture.table.get(process.pid).lstart = "start-reused";
   await until(async () => await settles(verify()) === "rejected", "refusal of the reused PID", 2_000);
+});
+
+test("a helper killed at its deadline proves nothing: an unproven capture or proof retries it up to five times", async () => {
+  const fixture = await verifierCase();
+  fixture.row(process.pid, process.ppid, "start-a");
+  fixture.hold(true);
+  // The identity capture at construction retries a killed ps.
+  let helperCalls = 0;
+  const constructing = fixture.proxyModule.ownedGatewayVerifier(process.pid, fixture.port,
+    { execute: (...args) => { helperCalls++; return fixture.execute(...args); }, proofIntervalMs: 60_000 });
+  (await fixture.nextCall()).timeOut();
+  for (let step = 0; step < 3; step++) (await fixture.nextCall()).pass();
+  const verify = await constructing;
+  // The first proof (the proxy's startup proof) survives four killed helpers.
+  const first = verify();
+  for (let miss = 0; miss < 4; miss++) (await fixture.nextCall()).timeOut();
+  assert.equal(await settles(first), "pending", "a killed helper must not refuse an unproven Gateway");
+  for (let step = 0; step < 3; step++) (await fixture.nextCall()).pass();
+  await first;
+  // Unproven again (its child exited); the fifth killed helper refuses.
+  verify.exited(process.pid);
+  const bounded = verify();
+  for (let miss = 0; miss < 5; miss++) (await fixture.nextCall()).timeOut();
+  await assert.rejects(bounded, /timed out/);
+  // A real mismatch is never retried: one proof (2 ps, 1 lsof) refuses.
+  fixture.hold(false);
+  fixture.table.get(process.pid).listening = false;
+  verify.exited(process.pid);
+  const before = helperCalls;
+  await assert.rejects(verify(), /does not own the fixture listener/);
+  assert.equal(helperCalls - before, 3, "a listener mismatch must refuse without a retry");
 });

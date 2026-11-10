@@ -45,7 +45,7 @@ Wire-traffic profiling and multi-session qualification:
   ([verify](../../tools/verify/README.md#gateway-test-isolation)); a bare `npx vitest run` has neither.
 - **Test-host pool.** `scripts/tron verify` and `scripts/tron test gateway` run the Gateway Vitest lanes on the
   Mac mini at the exact commit when it is reachable, set up and idle, and otherwise here, naming the host and why
-  ([pool](../../tools/verify/README.md#gateway-lanes-on-the-test-host-pool)); `--gateway-host local|mini` overrides it.
+  ([pool](../../tools/verify/README.md#gateway-and-python-lanes-on-the-test-host-pool)), verify's Python group with them; `--gateway-host local|mini` overrides it.
 - **Nested pass.** Files that run nested Vitest or real pi children, or activate the managed
   pi-subagents install, run one at a time in the nested pass; `vitest.nested.config.ts` lists them
   ([test-support](test-support/README.md#contract)).
