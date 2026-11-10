@@ -18,6 +18,8 @@ final class TronSheetBackgroundUITests: XCTestCase {
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
                 predicate: NSPredicate(format: "exists == true AND enabled == true"), object: ring)], timeout: 15), .completed)
             ring.tap()
+            XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 15))
+            releaseHeldTaskList()
             XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 30))
             capture(app, name: "manage-\(mode)")
             app.terminate()
@@ -40,6 +42,12 @@ final class TronSheetBackgroundUITests: XCTestCase {
             capture(app, name: "tool-search-\(mode)")
             app.terminate()
         }
+    }
+
+    /// Releases the fixture's next held `home.taskList` read (Manage Home's or the Tasks sheet's).
+    private func releaseHeldTaskList() {
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-task-list" as CFString), nil, nil, true)
     }
 
     @MainActor private func capture(_ app: XCUIApplication, name: String) {
@@ -66,11 +74,13 @@ final class TronSheetBackgroundUITests: XCTestCase {
         let manageDone = app.buttons["home-sheet-done-manage"]
         XCTAssertTrue(manageDone.waitForExistence(timeout: 5))
         assertStationaryBlur(app, done: manageDone, dark: dark, name: "manage")
+        releaseHeldTaskList()
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5))
         app.descendants(matching: .any)["home-manage-tasks"].tap()
         let tasksDone = app.buttons["home-sheet-done-tasks"]
         XCTAssertTrue(tasksDone.waitForExistence(timeout: 5))
         assertStationaryBlur(app, done: tasksDone, dark: dark, name: "tasks")
+        releaseHeldTaskList()
         XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
     }
 
@@ -80,7 +90,7 @@ final class TronSheetBackgroundUITests: XCTestCase {
         let window = app.windows.firstMatch.frame
         let toolbarY = done.frame.midY
         // The gutter is inside the medium sheet but outside cards/buttons. Sample
-        // the whole fade, not title ink or the pulse. The fixture delays reads 12s.
+        // the whole fade, not title ink or the pulse. The held read keeps the pulse up for this 13 s sample.
         let offsets: [CGFloat] = [-8, 12, 32, 52, 72]
         func profile(_ screenshot: XCUIScreenshot) -> [[Double]] {
             guard let source = screenshot.image.cgImage else { XCTFail("No screenshot pixels"); return [] }
