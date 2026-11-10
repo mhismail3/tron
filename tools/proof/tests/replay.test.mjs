@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { mulberry32 } from "../oracles/random.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -18,8 +19,7 @@ test("replayed Debug traffic is a real-traffic shadow that catches a corrupted r
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const { importGatewaySource } = await import(join(ROOT, "tools/proof/oracles/gateway-source.mjs"));
   const ts = await importGatewaySource("automations/schedule.ts");
-  let seed = 3;
-  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const rnd = mulberry32(3);
   const start = Date.parse("2026-11-01T00:00:00.000Z");
   const day = (d) => {
     const lines = [];

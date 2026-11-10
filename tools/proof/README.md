@@ -126,7 +126,7 @@ one). Seams (shell files under `packages/gateway/src/`), with the oracle each bl
 | `schedule/occurrence`, `schedule/calendar` | `next/first/classifyDueOccurrence` (`automations/schedule.ts`) | once and interval triggers under the first, calendar triggers under the second; nested calls are not seams | calendar: core fed `automations/zone-table.ts`'s Intl table (also on replay); TS throws (a skipped civil date) counted as `tsRefused` |
 | `settings/precedence` | `resolveInstance` (`kernel/settings/settings-resolver.ts`) | `precedenceFacts` (per layer: in target, bound, per-model and plain value, applied; default token 0) and the fold before clamping; a composing value as null | real `resolveSettings`/`composedBelow` over a synthetic schema; compose builds a term, so its order is exact |
 | `settings/tool-selection` | `toolSelectionType().compose/encode` (`kernel/settings/settings-types.ts`) | `toolSelectionFacts` (empty name 0); a non-list below/current is none; a list holding a non-string is not recorded | plain names, modifiers, repeats and the empty name over every kind of selection below |
-| `receipts/invocation-lifecycle` | `invocationProjection` (`kernel/receipts/invocation-receipts.ts`) | `invocationLifecycleFacts` and the projections or refusal reason; not above 64 receipts, once per history (snapshots refold branches) | legal moves with duplicate/contradictory terminals, orphans, foreign owners, renames, origin changes, rebinds (mulberry32); 1 in 10 with tokens shifted sparse or past the core's array limit (its fallback) |
+| `receipts/invocation-lifecycle` | `invocationProjection` (`kernel/receipts/invocation-receipts.ts`) | `invocationLifecycleFacts` and the projections or refusal reason; not above 64 receipts, once per history (snapshots refold branches) | legal moves with duplicate/contradictory terminals, orphans, foreign owners, renames, origin changes, rebinds; 1 in 10 with tokens shifted sparse or past the core's array limit (its fallback) |
 
 - **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
   `TRON_PROOF_TRAFFIC=1` for that launch; a running supervisor keeps its setting across promotions, so the
@@ -164,7 +164,7 @@ a signal, unparsable output, nothing compared, or an exit status that contradict
 core to check `coreJsHash`, and `--recheck` re-runs the shadow.
 
 `oracles/<block>.mjs` compare a compiled core with the shipped TypeScript it models on seeded generated
-inputs, or with `--replay <files>` on recorded calls (the recorded TypeScript output is the expectation), and
+inputs (one generator, `oracles/random.mjs`: exact 32-bit mulberry32, which does not cycle early), or with `--replay <files>` on recorded calls (the recorded TypeScript output is the expectation), and
 print `{requests, agree, diffs}` (exit 0 iff all agree, 1 on a mismatch, 2 on a record it cannot read); a block's `mutate.json` uses its oracle
 both as a mutation oracle (`law-gap` detection) and as its shadow command. `oracles/schedule-occurrence.mjs`
 imports `packages/gateway/src/automations/schedule.ts` through `oracles/gateway-source.mjs` (module hooks

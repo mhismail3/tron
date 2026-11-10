@@ -10,5 +10,5 @@
  "inputsHash": "01d0be5df284bd5d",
  "coreJsHash": "bb7f8c5b037f6254",
  "command": "node tools/proof/oracles/settings-tool-selection.mjs {core} 20000",
- "date": "2026-11-09"
+ "date": "2026-11-10"
 }
