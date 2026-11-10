@@ -125,10 +125,7 @@ final class TronSmokeUITests: XCTestCase {
             let title = app.staticTexts["Tasks"].firstMatch
             title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1,
                 thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                taskDone.frame.midY < mediumY - 100
-            }, object: nil)
-            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed)
+            XCTAssertLessThan(taskDone.frame.midY, mediumY - 100, "Tasks drags to its large detent")
             XCTAssertLessThan(assertHomeLoadingSurface(app, name: "\(appearance)-tasks-large", done: taskDone), tasksMediumTop - 100,
                               "The pulse re-centers in the larger visible sheet")
             let largeDoneY = taskDone.frame.midY
@@ -144,10 +141,7 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertEqual(assertHomeLoadingSurface(app, name: "\(appearance)-manage-reopened", done: done), manageMediumTop, accuracy: 2)
             app.staticTexts["Manage Home"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-            let manageExpanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                done.frame.midY < mediumY - 100
-            }, object: nil)
-            XCTAssertEqual(XCTWaiter.wait(for: [manageExpanded], timeout: 3), .completed)
+            XCTAssertLessThan(done.frame.midY, mediumY - 100, "Manage Home drags to its large detent")
             XCTAssertLessThan(assertHomeLoadingSurface(app, name: "\(appearance)-manage-large", done: done), manageMediumTop - 100,
                               "The pulse re-centers in the larger visible sheet")
             done.tap()
@@ -1583,8 +1577,7 @@ final class TronSmokeUITests: XCTestCase {
         // It drags to large from the sheet title.
         let title = app.staticTexts["Manage Home"].firstMatch
         title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < mediumTop - 100 }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed, "Manage Home must drag to its large detent")
+        XCTAssertLessThan(done.frame.minY, mediumTop - 100, "Manage Home must drag to its large detent")
         keepScreenshot(named: "manage-home-large")
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-chapters"].exists)
         for row in ["home-manage-memory-browser", "home-manage-tasks", "home-manage-settings"] {
@@ -3843,10 +3836,7 @@ final class TronSmokeUITests: XCTestCase {
             forDuration: 0.1,
             thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
         )
-        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            MainActor.assumeIsolated { bar.frame.minY < app.frame.height * 0.2 }
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed, "\(bar.frame)")
+        XCTAssertLessThan(bar.frame.minY, app.frame.height * 0.2, "The sheet expands to the large detent")
         for card in [enabled, paused] + drafts { XCTAssertTrue(card.exists, app.debugDescription) }
         XCTAssertLessThan(running.frame.minY, enabled.frame.minY, "Running first among active")
         XCTAssertLessThan(running.frame.minY, paused.frame.minY, "Active before paused")
@@ -3878,10 +3868,7 @@ final class TronSmokeUITests: XCTestCase {
             forDuration: 0.1,
             thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
         )
-        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            MainActor.assumeIsolated { bar.frame.minY < app.frame.height * 0.2 }
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed, "The sheet expands to the large detent: \(bar.frame)")
+        XCTAssertLessThan(bar.frame.minY, app.frame.height * 0.2, "The sheet expands to the large detent")
 
         // No search: Filter is the floating bottom-trailing control and opens the filter sheet.
         XCTAssertFalse(app.buttons["automations.search"].exists || app.buttons["Search Automations"].exists)

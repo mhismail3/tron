@@ -117,6 +117,12 @@ executed: an unmatched selector is not evidence. Screenshots stay in the reporte
 `TestResults.xcresult` (`xcrun xcresulttool export attachments --path <xcresult> --output-path
 <private-dir>`), never in the source tree. Accessibility witnesses: [UI locks](../UITests/Locks/README.md).
 
+A synthesized tap or drag returns only after the app is idle, so state it settles (a sheet detent) is
+read directly afterwards. An `XCTNSPredicateExpectation` or `waitForExistence` polls first after about
+1 s, and each poll takes accessibility snapshots that cost seconds under host load; a short window
+over already-settled state therefore fails on load, not behaviour (#2410). Wait only for asynchronous
+state, such as a fixture's held reply.
+
 ### Simulator lifecycle
 
 The skill's [Simulator lifecycle](../../../.agents/skills/tron-ios/SKILL.md#simulator-lifecycle).
