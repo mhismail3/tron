@@ -26,6 +26,7 @@ final class ModelDisplayNameTests: XCTestCase {
         for (id, name) in names {
             XCTAssertEqual(ModelRef(provider: "anthropic", id: id).displayName, name, id)
         }
+        XCTAssertEqual(ModelRef(provider: "anthropic", id: " ").displayName, "Unknown model")
         XCTAssertEqual(ModelRef(provider: "anthropic", id: "claude-fable-5-2").displayDescription,
                        "Anthropic / Claude Fable 5.2")
     }

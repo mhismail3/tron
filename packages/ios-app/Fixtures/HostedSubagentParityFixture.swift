@@ -41,7 +41,7 @@ struct HostedSubagentParityFixture: View {
         let process = SessionProcessActivity(processId: "worker", kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
             lifecycle: .init(state: .running, sequence: 1, observedAt: startedAt), visibility: .active,
             startedAt: startedAt, title: "Worker", currentTool: "read", currentPathBasename: "parity.txt",
-            model: "fixture/model", thinking: "medium", outputTail: "PARITY_CHILD_COMPLETE", toolCount: 2, turnCount: 1, toolCallId: "launch", runId: "run-worker")
+            model: "anthropic/claude-fable-5-2", thinking: "medium", outputTail: "PARITY_CHILD_COMPLETE", toolCount: 2, turnCount: 1, toolCallId: "launch", runId: "run-worker")
         var snapshot = SessionSnapshot(sessionId: "parity", runtimeGeneration: "fixture-runtime", revision: 1, eventSequence: 1,
             phase: .idle, name: historic ? "Historical subagents" : "Subagents", cwd: "/workspace", parentSessionId: nil, model: nil,
             thinkingLevel: "medium", availableThinkingLevels: [], contextUsage: nil,
