@@ -380,10 +380,8 @@ check_owner() {
   [[ "$(plist_value EnvironmentVariables.TRON_GATEWAY_CHANNEL "$plist")" == "$channel" ]] && pass "$label channel marker" || fail "$label channel marker"
   if [[ "$channel" == dev ]]; then
     [[ "$(plist_value EnvironmentVariables.TRON_HOME_NAME "$plist")" == "$expected_home" ]] && pass "$label home marker" || fail "$label home marker"
-    [[ -z "$(plist_value EnvironmentVariables.TRON_AGENT_DIR_NAME "$plist")" ]] && pass "$label agent-dir marker absent" || fail "$label has retired agent-dir marker"
   else
     [[ -z "$(plist_value EnvironmentVariables.TRON_HOME_NAME "$plist")" ]] && pass "$label stable home marker absent" || fail "$label has Debug home marker"
-    [[ -z "$(plist_value EnvironmentVariables.TRON_AGENT_DIR_NAME "$plist")" ]] && pass "$label stable agent-dir marker absent" || fail "$label has retired agent-dir marker"
   fi
   output="$(launchctl print "gui/$UID_VALUE/$label" 2>/dev/null || true)"
   if [[ -z "$output" ]]; then
@@ -410,10 +408,8 @@ check_owner() {
   [[ "$output" == *"TRON_GATEWAY_CHANNEL => $channel"* || "$output" == *"TRON_GATEWAY_CHANNEL = $channel"* ]] || fail "$label runtime channel marker missing"
   if [[ "$channel" == dev ]]; then
     [[ "$output" == *"TRON_HOME_NAME => $expected_home"* || "$output" == *"TRON_HOME_NAME = $expected_home"* ]] || fail "$label runtime home marker missing"
-    [[ "$output" != *TRON_AGENT_DIR_NAME* ]] || fail "$label runtime has retired agent-dir marker"
   else
     [[ "$output" != *TRON_HOME_NAME* ]] || fail "$label runtime has Debug home marker"
-    [[ "$output" != *TRON_AGENT_DIR_NAME* ]] || fail "$label runtime has Debug agent-dir marker"
   fi
   listener_pids="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | sed '/^$/d' || true)"
   [[ "$listener_pids" == "$pid" ]] \

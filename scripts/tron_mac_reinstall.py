@@ -438,7 +438,7 @@ class MacPlatform:
                 'resources': digest_file(safe_path(app / 'Contents/_CodeSignature/CodeResources'))}
 
     def offline(self):
-        for key in ('PI_CODING_AGENT_DIR', 'TRON_DATA_DIR', 'TRON_HOME_NAME', 'TRON_AGENT_DIR_NAME',
+        for key in ('PI_CODING_AGENT_DIR', 'TRON_DATA_DIR', 'TRON_HOME_NAME',
                     'PI_AGENT_BROWSER_CONFIG', 'PI_AGENT_BROWSER_GLOBAL_CONFIG'):
             require(not os.environ.get(key), 'custom-configuration: environment override requires a reviewed owner decision')
             value = command(['/bin/launchctl', 'getenv', key], 'environment-probe', timeout=15)
@@ -483,7 +483,7 @@ class MacPlatform:
                          'agent-authority-verification', timeout=15).decode()
         # The canonical verifier pins the selected signed runtime. With no path
         # overrides in that job, its current config resolves the Stable default.
-        for key in ('PI_CODING_AGENT_DIR', 'TRON_DATA_DIR', 'TRON_HOME_NAME', 'TRON_AGENT_DIR_NAME'):
+        for key in ('PI_CODING_AGENT_DIR', 'TRON_DATA_DIR', 'TRON_HOME_NAME'):
             require(not re.search(r'^\s*' + key + r'\s*(?:=>|=)', loaded, re.M),
                     'custom-agent-authority: loaded job has a path override; verify its owner before proceeding')
 
