@@ -1358,8 +1358,12 @@ class ChainInterruptTests(unittest.TestCase):
                 with batch.RUNNING_LOCK:
                     batch.RUNNING.discard(process.pid)
 
-        with mock.patch('os.killpg', observed_killpg), self.assertRaises(KeyboardInterrupt):
-            batch.run_chains([[(0, {})]], lane)
+        inherited = signal.signal(signal.SIGINT, signal.default_int_handler)
+        try:
+            with mock.patch('os.killpg', observed_killpg), self.assertRaises(KeyboardInterrupt):
+                batch.run_chains([[(0, {})]], lane)
+        finally:
+            signal.signal(signal.SIGINT, inherited)
         self.assertFalse(batch.CANCELLED.is_set())
 
 
