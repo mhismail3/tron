@@ -512,32 +512,6 @@ class GatewayDependenciesTests(VerifyCase):
         passed = r.verify("--changed")
         self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
 
-    def test_the_proof_gate_refuses_before_step_one_while_the_core_install_differs_from_its_lockfile(self) -> None:
-        # The proof gate (python-here) runs each block's compiled core, which needs packages/core's runtime
-        # dependency; a fresh worktree without it once failed the gate as a red test instead of refusing.
-        r = self.repo
-        lock = {"lockfileVersion": 3, "packages": {"": {"name": "@tron/core"},
-                "node_modules/bignumber.js": {"version": "11.1.5", "integrity": "sha512-bn"}}}
-        r.write("packages/core/package-lock.json", json.dumps(lock))
-        r.write("packages/core/core.module.json", json.dumps({"layer": "L1", "owns": ["package-lock.json", "core.module.json"]}))
-        r.write("tools/proof/tests/test-core.py", PASSING)
-        r.write(".gitignore", "test-results/\npackages/core/node_modules/\n")
-        r.commit("core lockfile and proof gate")
-        r.git("branch", "-f", "base")
-        r.write("tools/proof/tests/test-core.py", PASSING + "# reworded\n")
-        r.commit("proof gate change")
-        refused = r.verify("--changed")
-        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
-        self.assertIn("Core dependencies are not installed; prepare this worktree with: "
-                      "scripts/tron-node exec npm --prefix packages/core ci --include=dev", refused.stderr)
-        self.assertNotIn("[1/", refused.stdout, "a step ran before the refusal")
-        installed = r.path / "packages/core/node_modules/.package-lock.json"
-        installed.parent.mkdir(parents=True)
-        installed.write_text(json.dumps({"lockfileVersion": 3, "packages": {"node_modules/bignumber.js": lock["packages"]["node_modules/bignumber.js"]}}))
-        passed = r.verify("--changed")
-        self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
-        self.assertIn("python-here", passed.stdout)
-
     def test_a_relay_test_runs_in_the_relay_lane_on_its_installed_lockfile(self) -> None:
         # A relay-only change once ended `incomplete` or, skipped, `zero tests ran`: no passing path (#2299).
         r = self.repo

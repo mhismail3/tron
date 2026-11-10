@@ -21,7 +21,7 @@ nothing: the attribution is unresolved for that batch only (not memoized) and a 
 `pending`, so both resume on the next batch. A
 caller's `TRON_FULL_GATEWAY_LOCK_HELD` never reaches a lane, so a local Gateway run inside one
 (the Mac Terminal group) queues for this host's lock itself.
-Same green HEAD does nothing once its turn comes; `--repeat` reruns all nine lanes there. `--plan` is read-only. After pinned Gateway, relay and core dependency preparation (also in each probe worktree) every
+Same green HEAD does nothing once its turn comes; `--repeat` reruns all nine lanes there. `--plan` is read-only. After pinned Gateway and relay dependency preparation (also in each probe worktree) every
 required lane runs, even after failures: locks and every declaration (`verify --all`), full
 default and nested Gateway Vitest (on the mini), signed Mac integration, relay Workers Vitest, unsigned
 shipping iOS compile, UI smoke `checkpoint`, real-Gateway boundary and real-UI journeys

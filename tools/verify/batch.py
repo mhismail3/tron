@@ -38,8 +38,8 @@ IRREVERSIBLE_RISK = {'persistence', 'security', 'mac-installer'}
 # iOS lanes under host slots). Both join before freeze, attribution and verdict.
 CHAINS = ('node', 'apple')
 # The packages whose pinned dependencies a batch (and each probe worktree) installs first: the
-# Gateway's (most tests import it), the relay's lane, and the core runtime the proof gate runs.
-PACKAGES = ('gateway', 'push-relay', 'core')
+# Gateway's (most tests import it) and the relay's lane.
+PACKAGES = ('gateway', 'push-relay')
 # The real-UI journey lane runs its journeys on this many owned simulator lanes at once, one
 # host slot each, longest first by the previous batch's per-journey seconds.
 UI_JOURNEY_LANES = 3
