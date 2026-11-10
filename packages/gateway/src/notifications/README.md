@@ -14,8 +14,6 @@ tool and explicit lifecycle result notifications.
 owner-only document holding grants (at most 64 active devices), 256 pending intents,
 512 receipts, 192 revocation tombstones and the 512-row inbox. It never stores raw
 APNs tokens; secrets and message content stay out of RPC projections, logs and JSONL.
-A version-1 document migrates on read (its ask choice kept, its envelope-less pending
-deliveries retired as failed with one `schema_upgrade` signal).
 
 ## Contract
 
@@ -103,7 +101,7 @@ deliveries retired as failed with one `schema_upgrade` signal).
 |---|---|---|
 | `notification.inbox.read_failed` | warning | Session read state could not be persisted; unread state is kept in memory only |
 | `notification.push.refused` | warning | Admission refused at the bounded pending-intent capacity: `kind`, `outcome=refused`, `reason=pending_capacity` |
-| `notification.push.failed` | warning | Relay delivery ended non-accepted, or a legacy intent was retired by migration: `kind`, `outcome=failed`, bounded `reason` or `schema_upgrade` |
+| `notification.push.failed` | warning | Relay delivery ended non-accepted: `kind`, `outcome=failed`, bounded `reason` |
 | `notification.push.rate-limited` | info | The relay refused one request at a device cap: `kind`, `outcome=rate_limited`, `reason` (`daily_limit`, `hourly_limit`); never retried blindly |
 | `notification.inbox.list` row `title`, `sessionId`, `isUnread` and whole-inbox `unreadCount` | RPC projection, no log | For a Home row left unread after opening a completion, compare the rows' session identities: two Home chapters can differ. A synchronized opening reads the ledger-owned Home rows in its cut; `notification.inbox.changed` carries the committed count |
 
