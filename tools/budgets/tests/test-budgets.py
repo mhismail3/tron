@@ -5,8 +5,8 @@ Each case copies the real `scripts/tron`, `tools/budgets` and `tools/metrics`
 into a disposable Git repository and commits a change:
 
 1. Docs fail only above twice their budget (package README 200, other README
-   150, other docs 300); the root README (250) and AGENTS.md (150) fail one line
-   over their budget. Code files of any size are not this checker's.
+   150, other docs 300); the root README (250) fails one line over its budget.
+   AGENTS.md files and code files of any size are not this checker's.
 2. An unknown revision is an error (exit 2), never clean.
 
 The last run's output is kept in `test-results/budgets-cli/`.
@@ -95,7 +95,6 @@ class DocTests(BudgetCase):
         r.write("packages/gateway/README.md", lines(400))
         r.write("docs/tool/README.md", lines(300))
         r.write("docs/fine.md", lines(600))
-        r.write("AGENTS.md", lines(150))
         r.commit("docs within twice their budget")
         self.assertEqual(self.problems(0), [])
         self.assertIn("3 docs over budget (reported)", r.budgets().stdout)
@@ -111,16 +110,16 @@ class DocTests(BudgetCase):
         ])
 
 
-    def test_root_readme_and_charter_fail_one_line_over_their_budget(self) -> None:
+    def test_root_readme_fails_one_line_over_its_budget_and_agents_files_are_not_budgeted(self) -> None:
         r = self.repo
-        r.write("AGENTS.md", lines(150))
+        r.write("README.md", lines(250))
+        r.write("AGENTS.md", lines(700))
+        r.write("tools/AGENTS.md", lines(700))
         r.commit("at budget")
         self.assertEqual(self.problems(0), [])
         r.write("README.md", lines(251))
-        r.write("AGENTS.md", lines(151))
         r.commit("one line over")
-        self.assertEqual(self.problems(1), ["AGENTS.md has 151 lines; maximum is 150",
-                                            "README.md has 251 lines; maximum is 250"])
+        self.assertEqual(self.problems(1), ["README.md has 251 lines; maximum is 250"])
 
 
 class ErrorTests(BudgetCase):

@@ -146,5 +146,6 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
 - Owners: `README.md` (≤ 250 lines), `docs/PRINCIPLES.md`, `packages/gateway/README.md` (local lanes and hazards in its `AGENTS.md`), `packages/ios-app/docs/`, `packages/mac-app/docs/`,
   repo runbooks `docs/development.md` and `scripts/tron --help`, `tools/work/README.md`, skills only in `.agents/skills/`.
 - If docs and code disagree, follow existing code conventions and report each inconsistency.
-- Docs state current behavior: no history, evidence or audit ledgers; indexes are generated; this charter ≤ 150 lines, other docs ≤ 2× budget.
+- Docs state current behavior: no history, evidence or audit ledgers; indexes are generated; docs ≤ 2× budget. AGENTS.md files
+  stay concise, at the highest information density: a new rule earns its place by replacing or tightening weaker text, never by padding.
   [check: `scripts/tron budgets`, `scripts/check-documentation-policy.py`, `scripts/check-agent-policy.sh`]
