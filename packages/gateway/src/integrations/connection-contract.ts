@@ -1,6 +1,6 @@
 import {
-  CONNECTION_STATE_SCHEMA_VERSION, CONNECTION_DEFINITION_SCHEMA_VERSION,
-  type ConnectionPolicy, type IntegrationDefinition, type ConnectionInstance,
+  CONNECTION_STATE_SCHEMA_VERSION,
+  type ConnectionPolicy, type ConnectionInstance,
   type RaindropCollectionMapping, type ConnectionOwnerState, type ConnectionOwnerReceipt,
 } from "../modules/integrations/contract.js";
 
@@ -35,21 +35,6 @@ function validateConnectionPolicy(value: unknown): asserts value is ConnectionPo
   const policy = value as Record<string, unknown>;
   if (typeof policy.enabled !== "boolean" || typeof policy.allowWrites !== "boolean" || typeof policy.paidAccessApproved !== "boolean" || typeof policy.recurringApproved !== "boolean"
     || !Number.isSafeInteger(policy.paidBudgetCents) || (policy.paidBudgetCents as number) < 0 || (policy.paidBudgetCents as number) > 1_000_000) throw new Error("Connection policy is invalid");
-}
-
-export function validateIntegrationDefinition(value: unknown): asserts value is IntegrationDefinition {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Integration definition is invalid");
-  const item = value as Record<string, unknown>;
-  if (item.schemaVersion !== CONNECTION_DEFINITION_SCHEMA_VERSION) throw new Error("Unsupported integration definition schema");
-  assertDefinitionId(item.id); if (item.implementation !== "knowledge-connector") throw new Error("Integration implementation is invalid");
-  bounded(item.displayName, "Integration display name", 160);
-  if (!Array.isArray(item.setupMethods) || item.setupMethods.length < 1 || item.setupMethods.some(method => !["oauth", "token", "browser"].includes(method as string))) throw new Error("Integration setup methods are invalid");
-  if (!Array.isArray(item.capabilities) || item.capabilities.length > 64) throw new Error("Integration capabilities are invalid");
-  for (const capability of item.capabilities) {
-    if (!capability || typeof capability !== "object" || Array.isArray(capability)) throw new Error("Integration capability is invalid");
-    const value = capability as Record<string, unknown>; assertConnectionId(value.id, "capability id"); bounded(value.displayName, "Capability display name", 160);
-    if (typeof value.supported !== "boolean" || !Array.isArray(value.effects) || value.effects.length === 0 || value.effects.some(effect => !["read", "write", "paid", "disclosure"].includes(effect as string))) throw new Error("Integration capability effects are invalid");
-  }
 }
 
 function validateConnectionInstance(value: unknown): asserts value is ConnectionInstance {

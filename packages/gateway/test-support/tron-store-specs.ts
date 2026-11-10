@@ -236,7 +236,7 @@ export const STORES: readonly StoreSpec[] = [
     async read(home) {
       const grants = new NotificationGrantStore(home);
       await grants.initialize();
-      return { document: await grants.snapshot(), migratedLegacyKinds: grants.takeMigratedLegacyKinds() };
+      return { document: await grants.snapshot() };
     },
   },
   {
