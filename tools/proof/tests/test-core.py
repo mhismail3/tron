@@ -7,21 +7,18 @@ For every block with a mutate.json, with the pinned toolchain and the repository
 2. `scripts/tron proof packet <block>` regenerates exactly the committed LAWS.md, has no packet problems,
    and its gates hold for the current sources: proof PASS, mutation report PASS and not STALE, REVIEW.json
    for the current block hash with every law ACCEPT.
-3. `scripts/tron proof facade <block> --check`: the checked-in compiled core and façade are exactly what the
-   current sources generate.
-4. A block no shell runs yet (no block.json "shell") is shadowed: its recorded shadow matches and is not
-   STALE, and `scripts/tron proof shadow <block>` still matches today's shipped TypeScript. A block its shell
-   runs has no TypeScript to compare with.
+3. `scripts/tron proof facade <block> --check`: the checked-in compiled core and façade in the block's shell
+   (block.json "shell") are exactly what the current sources generate, and the packet shows the block cut over.
 
 And for the protocol source packages/core/wire/Protocol.dfy: the Gateway's protocol types are what it
 generates, and its TypeScript and Swift codecs agree (the protocol test of wire.test.mjs).
 
-5. A block with a compiled method lists hand-made changes to it in `method-mutants.json` (`[{from, to}]`, each
+4. A block with a compiled method lists hand-made changes to it in `method-mutants.json` (`[{from, to}]`, each
    `from` text occurring once in the block's implementation): the mutation tool does not mutate a method, so
    each change must make `scripts/tron proof check` fail on a copy of the block with a verification error.
 
-So an edit to a block that does not re-run its mutation check, shadow and review, or regenerate its
-packet, fails here. The review row is verified against the reviewer's transcript in this machine's Pi
+So an edit to a block that does not re-run its mutation check and review, or regenerate its packet and
+façade, fails here. The review row is verified against the reviewer's transcript in this machine's Pi
 session store (read only), so the test needs that transcript.
 """
 
@@ -78,20 +75,8 @@ class CoreBlocksTest(unittest.TestCase):
                 self.assertEqual({law: review["laws"].get(law, {}).get("verdict") for law in laws}, {law: "ACCEPT" for law in laws})
                 facade = tron("facade", block, "--check")
                 self.assertEqual(facade.returncode, 0, facade.stdout + facade.stderr)
-                if "shell" in json.loads((directory / "block.json").read_text()):
-                    self.assertIn("Cut over", rows)
-                    self.assertNotIn("Shadow", rows)
-                    continue
-                self.assertRegex(rows["Shadow"], r"^\| Shadow \| match: ")
-                self.assertNotIn("STALE", rows["Shadow"])
-                self.assertNotIn("not checked", rows["Shadow"])
-                # The shadow comparison still runs against today's shipped TypeScript (a change there, such as a
-                # new import, must not break the block's oracle).
-                with tempfile.TemporaryDirectory(prefix="tron-proof-shadow.") as tmp:
-                    out = Path(tmp) / "SHADOW.json"
-                    shadow = tron("shadow", block, "--out", str(out))
-                    self.assertEqual(shadow.returncode, 0, shadow.stderr)
-                    self.assertEqual(json.loads(out.read_text())["status"], "match")
+                # Every block is cut over: its shell runs the compiled core.
+                self.assertRegex(rows["Cut over"], r"^\| Cut over \| the only implementation: ")
 
     def test_compiled_methods_reject_their_hand_mutants(self) -> None:
         for listed in sorted((CORE / "blocks").rglob("method-mutants.json")):

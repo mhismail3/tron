@@ -14,8 +14,8 @@ a call of a compiled predicate on parameters, generic functions, and any Dafny t
 carry (an unused generic datatype is ignored). `--check` regenerates into a temporary directory and exits 1 if
 the checked-in files differ.
 
-**A block its shell runs** (`block.json` `shell`, a directory relative to the repository) is written there as
-`core.mjs` and `facade.ts`. `core.mjs` imports nothing: it is the output of `dafny translate js` without the
+Every block names the shell that runs it (`block.json` `shell`, a directory relative to the repository); its core
+and façade are written there as `core.mjs` and `facade.ts`. `core.mjs` imports nothing: it is the output of `dafny translate js` without the
 Dafny runtime, byte for byte, after a generated header and before one `export { <module> as compiled }` line.
 The compiled functions of such a block may not use the runtime, with one exception: a runtime helper that is a
 closed function (it names nothing else of the runtime; today integer division and modulo on numbers) is copied
@@ -35,14 +35,6 @@ parameters only: each `array<T>` parameter is a work array the façade lends, fr
 the sequence parameter its precondition names (`a.Length == |s|`), so nothing a call left behind reaches the
 next. A method's preconditions must be ones the façade establishes or checks: that sizing, `|s| < literal`, or a
 call of a compiled predicate on parameters; anything else is refused. `bind(compiled)` binds the façade to another translation of the block; `core` is the checked-in one.
-
-**A shadowed block** is written to `packages/core/dist/<block>` as `core.js`, compiled with the Dafny runtime
-(unedited, with a generated header), and a `facade.ts` that evaluates it: `load(corePath)` binds it to any
-compiled core (the checked-in one, or a mutant or fresh translation for oracles), and `core` is the bound
-checked-in one. Types there: `int` -> `number` and `nat` -> `number >= 0` (safe integers, converted to and from
-the runtime's BigNumber and checked both ways), and the datatype, `bool` and `seq<T>` forms above. No shell can
-run such a core, because the runtime needs the `bignumber.js` package: a block is rewritten to the form above
-before its cut-over, and this form goes with the last shadowed block.
 
 ## Wire
 

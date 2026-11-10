@@ -11,7 +11,6 @@ scripts/tron proof mutate <block> [--root <dir>] [--jobs 1..4] [--no-oracle] [--
                           [--config <mutate.json>] [--only <id>] [--list] [--equiv <id>] [--recheck <report.json> [--sample N]]
 scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]
 scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...
-scripts/tron proof shadow <block> [--root <dir>] [--out <file>] [--days N [--corpus <dir>]]
 scripts/tron proof facade <block> [--check]
 scripts/tron proof wire --generate <in.dfy> <out-dir>
 scripts/tron proof wire --protocol [--check]
@@ -106,78 +105,16 @@ law-kind table and five gates, each bound to the block hash:
   `~/.tron/agent/sessions` (read, never written), so a committed review holds no machine path; it must match
   exactly one transcript.
 - **Mutation:** the `report` for the current hash and checker, PASS (with `--recheck`, re-run with 12 samples).
-- **Shadow** (a shadowed block): `SHADOW.json` match at the current hash and compiled core; cut-over needs
-  real traffic over 7 (high-stakes) or 3 (leaf) days.
-- **Ready for cut-over** (a shadowed block): only with `--recheck`, which re-runs the shadow too, and only
-  with a real-traffic shadow over the tier's window.
-- **Cut over** (a block its shell runs, `block.json` `shell`): replaces the two rows above and names the shell.
+- **Cut over:** names the shell that runs the block (`block.json` `shell`); every core block has one.
 
 A gate for another hash shows STALE. Exit 1 lists packet problems: a missing English comment, a law lemma not
 found, a lemma neither a law nor a declared helper, a law-marked lemma not listed, an escape hatch, an
 unaccounted law kind (high-stakes) or a report acceptance not in mutate.json.
 
-## Traffic corpus
-
-Shadows need real inputs. `packages/gateway/src/proof/traffic-recorder.ts` records, at each seam where a
-block will replace TypeScript logic, the exact typed inputs and the output the TypeScript returned:
-`recordSeam(block, seam, input, output)`, a no-op unless enabled; a seam whose record costs work checks
-`seamsRecorded()` first, and none records an identity or text: values enter as per-call tokens (equal values share
-one). Seams (shell files under `packages/gateway/src/`), with the oracle each block's shadow runs (below):
-
-| Block | Seam | Recorded | Oracle's generated inputs |
-|---|---|---|---|
-| `schedule/calendar` | `next/first/classifyDueOccurrence` (`automations/schedule.ts`) | calendar triggers only (once and interval triggers are decided by block `schedule/occurrence`, which its shell runs); nested calls are not seams | core fed `automations/zone-table.ts`'s Intl table (also on replay); TS throws (a skipped civil date) counted as `tsRefused` |
-
-- **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
-  `TRON_PROOF_TRAFFIC=1` for that launch; a running supervisor keeps its setting across promotions, so the
-  flag is refused while it runs (stop first). The Gateway honours it only with `TRON_GATEWAY_CHANNEL=dev` and
-  never for a home inside the Stable home (also through a symlink), so Stable and Release builds ignore it. It is an environment variable rather
-  than a typed setting because every settings key appears in iOS Settings and the settings tool; making it
-  a setting is a later product decision.
-- **Format:** JSONL under `<Debug home>/gateway/proof-traffic/<block>/<yyyy-mm-dd>.jsonl` (UTC days), one
-  record `{schema: "tron-proof-traffic/1", block, seam, seq, at, input, output}` per call (`output` null
-  for no value); at most 20,000 records per block and day, newest 14 days kept. Appends are synchronous and
-  unsynced: a lost tail record costs one comparison, and a write error never reaches the caller.
-- **Privacy:** seams pass typed values only (times, trigger shapes, policies); free text and identities are
-  not recorded. A seam that carries an identity must pseudonymise it before it is added. The corpus stays on
-  the Mac and is never committed.
-- **Determinism:** time enters as a value, the recorder feeds nothing back, and every record carries the
-  TypeScript output, so a replay is offline and exact.
-
-## Shadow and oracles
-
-`shadow/shadow.mjs` (`proof shadow`) compiles the block's `translate` file with the pinned toolchain into a
-temporary directory and runs `mutate.json` `shadow.cmd` with `{core}` set to the compiled `core.js`; it writes
-`blocks/<block>/SHADOW.json` `{status: match|mismatch|error, compared, mismatches, firstMismatch, source,
-realTraffic, windowDays, inputsHash, coreJsHash, command, date}`, deleting the old file first, so a failed run
-never leaves a stale match.
-With `--days N` it replays recorded Debug traffic instead: the newest N day files of
-`~/.tron-dev/gateway/proof-traffic/<block>/` (read only; `--corpus` names another directory) go to
-`mutate.json` `replay.cmd` (`{corpus}` expands to the files), and the result is `realTraffic: true`,
-`windowDays` = the non-empty day files with a real date replayed (gaps allowed; a file is a day), and `corpus: {first, last, hash}` (dates and a digest, no paths). No
-recorded traffic is an error. The packet's `--recheck` re-runs a recorded shadow over the same number of days
-and requires a match on at least as many calls; a real-traffic shadow counts for cut-over only while its
-newest recorded day is at most three days old. The oracle refuses (exit 2) any record the recorder would
-not write: another schema, block or seam, a missing `output`, an `at` off the file's day, or an input or
-output of the wrong shape. The command must exit 0 with every request agreeing or 1 with mismatches; a crash,
-a signal, unparsable output, nothing compared, or an exit status that contradicts the counts is `error`. Generated-input comparisons are `realTraffic: false`. The packet re-compiles the
-core to check `coreJsHash`, and `--recheck` re-runs the shadow.
-
-`oracles/<block>.mjs` compare a compiled core with the shipped TypeScript it models on seeded generated
-inputs (one generator, `oracles/random.mjs`: exact 32-bit mulberry32, which does not cycle early), or with `--replay <files>` on recorded calls (the recorded TypeScript output is the expectation), and
-print `{requests, agree, diffs}` (exit 0 iff all agree, 1 on a mismatch, 2 on a record it cannot read); a block's `mutate.json` uses its oracle
-both as a mutation oracle (`law-gap` detection) and as its shadow command. An oracle
-imports the shipped Gateway source it compares with through `oracles/gateway-source.mjs` (module hooks
-that map the sources' `./x.js` imports to `.ts` and apply Node's TypeScript transform) and calls the core
-through the block's generated façade (table above). A block its shell runs has no oracle, shadow or replay:
-the TypeScript it was compared with is gone. Oracles clear `TRON_PROOF_TRAFFIC` so a run never adds to
-the corpus, and exit 2 on a corpus file they cannot read. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
-(`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
-
 ## Façade and wire
 
 [dafny2wire/README.md](dafny2wire/README.md) owns `proof facade` (a block's compiled core and typed façade, in
-its shell or in `packages/core/dist`) and `proof wire` (the protocol's generated TypeScript and Swift codecs).
+its shell) and `proof wire` (the protocol's generated TypeScript and Swift codecs).
 
 ## Verify
 
@@ -200,16 +137,14 @@ proven equivalences; a weakened law FAILS with the survivor it no longer catches
 rejected by its failing proof; a mutant only an unmapped helper catches is `unmapped`, not killed; a law proof
 that runs out of resources is `unknown-timeout` after its retry, never killed; the packet renders each law's
 English and statement from the laws file; and an impl or a law edit shows the review and the mutation report
-STALE; and `proof shadow` records a match or mismatch only from a comparison that ran and agrees with
-its exit status (`tests/fixtures/mutate-variants/shadow-stub.mjs`). The oracle and `law-gap` path is exercised by the first core block's real oracle, not by this test.
+STALE. No core block declares an oracle, so the oracle and `law-gap` path is not exercised.
 
 `scripts/tron test tooling tools/proof/tests/test-core.py` is the gate test of the real blocks, declared by
 `packages/core/package.module.json` and by the generated cores' module (`packages/gateway/src/core`), so any
 change under either runs it: `proof check` passes on a fresh cache, and for each block with a `mutate.json` the
 regenerated packet equals the committed `LAWS.md` and shows proof PASS, a current mutation PASS and a
 `REVIEW.json` for the current block hash with every law ACCEPT, and `proof facade --check` finds the generated
-core and façade fresh; a shadowed block also shows a current shadow match and still matches today's TypeScript;
-and each change listed in a block's `method-mutants.json` (to a compiled method, which `proof mutate` does not
+core and façade fresh in the shell the packet names as cut over; and each change listed in a block's `method-mutants.json` (to a compiled method, which `proof mutate` does not
 mutate) makes `proof check` fail on a copy of the block with a verification error.
 An edit that skips any gate fails it.
 
@@ -224,30 +159,16 @@ keys and strings, TypeScript and Swift (`swiftc -O`) produce identical bytes and
 non-canonical inputs (and a Swift-built map encodes in JavaScript order), and of 16 malformed inputs
 TypeScript rejects each at its path and Swift rejects or reads each as stated.
 
-`scripts/tron test gateway src/proof/traffic-recorder.integration.test.ts` proves the recorder is refused
-outside an opted-in Debug Gateway (Stable channel, no channel, other values, the Stable home), that a
-seeded schedule journey through the real seams writes one record per calendar call under `schedule/calendar` (none for
-nested calls or for once and interval triggers, which their block decides), that replays through the same TypeScript to the recorded outputs,
-and that the daily cap and retention hold.
-
-`scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the shadowed
-fixture block `demo/counter` (`tests/fixtures/facade`): it exposes exactly the compiled declarations (a multi-line datatype in
-full, an opaque function; no ghost or commented-out one), round trips values (sequences, nested and as fields),
-refuses unknown constructors, a non-array sequence, non-integers, negative naturals, a broken precondition and an out-of-range result; `--check` fails on a hand edit of
-either file; and `function method`, an uncheckable precondition and an unsupported type are refused. And of the
-fixture block `demo/meter`, which names a shell: its `core.mjs` lands in the shell's directory, imports nothing,
+`scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the
+fixture block `demo/meter` (`tests/fixtures/facade`), which names a shell: its `core.mjs` lands in the shell's directory, imports nothing,
 holds the compiler's module output byte for byte and exactly one copied helper, and loads with no
 `node_modules` above it; numbers cross only as integers of their newtype's range and preconditions are checked;
 a linked list crosses as an array in order, 200,000 items long without touching the call stack;
 `--check` fails on a hand edit of either file; the copied helper stands alone and a helper that names anything
-but its parameters, locals and `Math` does not; and datatype equality, building a sequence, a function named
+but its parameters, locals and `Math` does not; and `function method`, datatype equality, building a sequence, a function named
 like a runtime member that uses the runtime, an `int`, a newtype whose range is not literal and a generic datatype
 that is not a linked list are each refused, naming the function or type, with nothing written; a constructor
 without fields is one shared value found by its own name only; and a compiled method gets a fresh work array on
 each call, sized by its precondition, and is refused when an array is unsized or a precondition is one the façade
 cannot establish.
 
-`scripts/tron-node exec node --test tools/proof/tests/replay.test.mjs` replays a corpus of recorder-format
-calendar calls of the shipped schedule functions through the real block `schedule/calendar`: two faithful days are a real-traffic match
-over two days, a recorded output nudged by 1 ms is a mismatch naming that record, `--days 1` replays only the
-newest day, and a malformed line, a foreign record or an empty corpus is an error.

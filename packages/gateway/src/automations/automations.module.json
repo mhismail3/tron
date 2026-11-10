@@ -13,7 +13,6 @@
     "gateway/notifications",
     "gateway/resources",
     "gateway/run",
-    "gateway/proof",
     "gateway/core"
   ]
 }
