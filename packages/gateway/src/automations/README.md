@@ -15,7 +15,8 @@ definition, retry or ledger. iOS and the first-party `schedule` tool (including 
 UTC offsets around an instant, from Intl: the trusted input of proof block `schedule/calendar`; a table covers the
 UTC day of the instant asked about plus 19 days either side, so it is a pure function of the timezone and the day,
 and the 64 most recently built are kept, since a build reads Intl about a hundred times and the scheduler asks
-about the same few days again and again). `schedule.ts` decides occurrences by
+about the same few days again and again). A calendar time that is not a finite instant is refused as
+`Schedule boundary is invalid`. `schedule.ts` decides occurrences by
 calling proof blocks `schedule/occurrence` (once and interval triggers) and `schedule/calendar` (calendar triggers)
 ([`gateway/core`](../core/schedule), generated from `packages/core`): it converts timestamps to milliseconds and
 back and holds no copy of that arithmetic (`schedule.test.ts` pins the text and shape of what its callers get

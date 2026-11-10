@@ -7,10 +7,6 @@ import { zoneTable } from "./zone-table.js";
 type CalendarTrigger = Extract<AutomationTrigger, { kind: "calendar" }>;
 type TimedTrigger = Exclude<AutomationTrigger, CalendarTrigger>;
 
-// Proof blocks (packages/core) decide every occurrence: schedule/occurrence for once and interval triggers,
-// schedule/calendar for calendar triggers, which also gets the trigger's timezone as a table of UTC offsets
-// around the time asked about. This file gives them times in milliseconds and writes their answers as
-// timestamps.
 function timed(trigger: TimedTrigger): Trigger {
   return trigger.kind === "once" ? { $: "Once", at: Date.parse(trigger.at) }
     : { $: "Interval", anchor: Date.parse(trigger.anchorAt), every: trigger.everySeconds * 1_000 };

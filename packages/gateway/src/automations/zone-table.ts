@@ -8,7 +8,7 @@
  * seconds, such as a zone's local mean time, shows its wall clock to the minute), so every offset and change
  * instant is a whole minute. Changes are found by sampling every SAMPLE_MS and bisecting a sampled difference to
  * the minute; two changes closer together than SAMPLE_MS that cancel out are not seen (no IANA zone has one in
- * the years automations use; the old-against-new comparison at the block's cut-over found none).
+ * the years automations use).
  */
 export interface ZoneTable {
   readonly base: number;
