@@ -52,4 +52,59 @@ struct HostedRecoveryNoticeFixture: View {
         .task { await model.start() }
     }
 }
+
+/// #2296 item 15: the selected profile's Keychain token cannot be read until the
+/// app first leaves the foreground, as on a launch before the device's first
+/// unlock. The production scene runs over it; the overlay shows the lifecycle's
+/// connection state and unlocks the store when the app enters the background.
+@MainActor
+enum HostedKeychainLockedFixture {
+    struct Locked: Error {}
+
+    final class Store: GatewayProfileMetadataStoring, GatewayTokenStoring {
+        var locked = false
+        private var document: GatewayProfileDocument?
+        private var tokens: [String: String] = [:]
+        func load() throws -> GatewayProfileDocument? { document }
+        func save(_ document: GatewayProfileDocument) throws { self.document = document }
+        func save(_ token: String, profileID: String) throws { tokens[profileID] = token }
+        func read(profileID: String) throws -> String? {
+            if locked { throw Locked() }
+            return tokens[profileID]
+        }
+        func delete(profileID: String) throws { tokens.removeValue(forKey: profileID) }
+    }
+
+    static let store = Store()
+
+    static let model: AppModel = {
+        let profiles = GatewayProfileStore(metadata: store, tokens: store)
+        try! profiles.save(GatewayProfile(id: "keychain-locked", label: "Studio Mac", host: "keychain-locked.invalid",
+                                          port: 9847, machineId: "keychain-locked-machine"), token: "fixture-only-token")
+        store.locked = true
+        let root = FileManager.default.temporaryDirectory.appending(path: "keychain-locked-fixture-\(UUID().uuidString)")
+        return AppModel(profiles: profiles, cache: SnapshotCache(root: root.appending(path: "cache")))
+    }()
+
+    /// The lifecycle's connection state for the selected Mac, which only the
+    /// coordinator writes.
+    struct ConnectionState: View {
+        var body: some View {
+            Text(Self.describe(HostedKeychainLockedFixture.model.connectionState))
+                .font(.caption2)
+                .accessibilityIdentifier("keychain-locked-state")
+                .allowsHitTesting(false)
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+                    HostedKeychainLockedFixture.store.locked = false
+                }
+        }
+
+        private static func describe(_ state: AppModel.ConnectionState) -> String {
+            switch state {
+            case .offline(let reason): "offline: \(reason)"
+            default: "\(state)"
+            }
+        }
+    }
+}
 #endif

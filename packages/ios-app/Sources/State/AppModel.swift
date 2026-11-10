@@ -507,7 +507,7 @@ final class AppModel {
             try profiles.save(profile, token: token, selecting: false)
         }
         let resolvedProfileTokenLookup = profileTokenLookup ?? { profile in
-            profiles.token(for: profile)
+            try profiles.token(for: profile)
         }
         let noticeCenter = InAppNoticeCenter(clock: clock)
         let appLogSignposts = AppLogSignposts(base: performanceSignposts, log: appLog)
@@ -599,7 +599,7 @@ final class AppModel {
         let gatewayDiagnostics = GatewayDiagnosticsService(client: client)
         let chatInteractionTrace = ChatInteractionTrace()
         let automationCatalog = AutomationCatalogCoordinator(endpoints: { @MainActor in
-            profiles.profiles.filter { $0.isEnabled && profiles.token(for: $0) != nil }.compactMap { profile in
+            profiles.profiles.filter { $0.isEnabled && (try? profiles.token(for: $0)) != nil }.compactMap { profile in
                 let state: DashboardServerConnectionState
                 let capabilities: Set<String>
                 if profile.id == lifecycle.selectedProfileID {
@@ -3189,7 +3189,7 @@ extension AppModel {
     private func activateDashboardProfile(_ profileID: String?) async throws -> DashboardMutationOwner {
         guard let profileID,
               let profile = profiles.profiles.first(where: { $0.id == profileID }),
-              profiles.token(for: profile) != nil else { throw CancellationError() }
+              (try? profiles.token(for: profile)) != nil else { throw CancellationError() }
         if profiles.selected?.id != profileID {
             await switchGateway(profile)
         }
@@ -4825,7 +4825,7 @@ extension AppModel {
         dashboardConnections.reconcile(
             profiles: profiles.profiles,
             selectedProfileID: selectedProfileID,
-            token: { [profiles] profile in profiles.token(for: profile) }
+            token: { [profiles] profile in try? profiles.token(for: profile) }
         )
         for profile in profiles.profiles where profile.id != selectedProfileID {
             Task { @MainActor [weak self] in
