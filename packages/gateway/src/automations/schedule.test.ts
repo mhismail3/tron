@@ -76,3 +76,38 @@ describe("once and interval occurrences", () => {
     expect(() => classifyDueOccurrence(hourly, "not a timestamp", ANCHOR, "latest")).toThrow(RangeError);
   });
 });
+
+describe("calendar occurrences", () => {
+  const calendar = (timezone: string, localTime: string, weekdays: number[]) => ({ kind: "calendar" as const, timezone, localTime, weekdays });
+  const daily = [1, 2, 3, 4, 5, 6, 7];
+
+  it("resolves a local time skipped by clocks set forward to the first minute after the jump, and a repeated one to its first instant", () => {
+    expect(nextAutomationOccurrence(calendar("America/New_York", "02:30", daily), Date.parse("2026-03-08T05:00:00Z")))
+      .toBe("2026-03-08T07:00:00.000Z");
+    expect(nextAutomationOccurrence(calendar("America/New_York", "01:30", daily), Date.parse("2026-11-01T04:00:00Z")))
+      .toBe("2026-11-01T05:30:00.000Z");
+    expect(firstAutomationOccurrence(calendar("Europe/Berlin", "09:00", [1]), Date.parse("2026-11-09T08:00:00Z")))
+      .toBe("2026-11-09T08:00:00.000Z");
+  });
+
+  it("keeps a stored occurrence that is not due, and writes a due one's latest and next occurrences anew", () => {
+    const trigger = calendar("Europe/Berlin", "09:00", [1, 3]);
+    const now = Date.parse("2026-11-10T12:00:00Z");
+    expect(classifyDueOccurrence(trigger, "2026-11-11T09:00:00+01:00", now, "skip"))
+      .toStrictEqual({ nextOccurrenceAt: "2026-11-11T09:00:00+01:00", skipped: [] });
+    expect(classifyDueOccurrence(trigger, "2026-11-02T08:00:00.000Z", now, "latest"))
+      .toStrictEqual({ dispatchAt: "2026-11-09T08:00:00.000Z", nextOccurrenceAt: "2026-11-11T08:00:00.000Z", skipped: [] });
+    expect(classifyDueOccurrence(trigger, "2026-11-02T08:00:00.000Z", now, "skip"))
+      .toStrictEqual({ nextOccurrenceAt: "2026-11-11T08:00:00.000Z", skipped: ["2026-11-09T08:00:00.000Z"] });
+  });
+
+  it("skips a civil date the timezone skips entirely and keeps scheduling on the dates that exist (#2382)", () => {
+    // Pacific/Apia went from UTC-10 to UTC+14 at the end of Thursday 2011-12-29: Friday 2011-12-30 has no instants.
+    const fridays = calendar("Pacific/Apia", "09:00", [5]);
+    expect(nextAutomationOccurrence(fridays, Date.parse("2011-12-23T19:00:00Z"))).toBe("2012-01-05T19:00:00.000Z");
+    expect(nextAutomationOccurrence(calendar("Pacific/Apia", "09:00", daily), Date.parse("2011-12-29T21:00:00Z")))
+      .toBe("2011-12-30T19:00:00.000Z");
+    expect(classifyDueOccurrence(fridays, "2011-12-23T19:00:00.000Z", Date.parse("2012-01-01T00:00:00Z"), "latest"))
+      .toStrictEqual({ dispatchAt: "2011-12-23T19:00:00.000Z", nextOccurrenceAt: "2012-01-05T19:00:00.000Z", skipped: [] });
+  });
+});
