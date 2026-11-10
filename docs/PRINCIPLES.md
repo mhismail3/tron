@@ -35,8 +35,7 @@ tracked as #2230–#2235.
 
 **Rule (Mohsin, 2026-11-10).** Every Tron component and capability, core or feature, has one
 clear owner module with a separated concern. Each change leaves the module it touches clean:
-minimal for what it does, no dead code, no legacy or compatibility paths, no comments beyond the
-rationale the charter's Comments rule keeps, and no unnecessary tests. Agents minimize, where possible, the code a
+minimal for what it does, no dead code, no legacy or compatibility paths, no comments, and no unnecessary tests. Agents minimize, where possible, the code a
 module needs per unit of functionality, and this applies the same way to a file, a module, a package or
 the whole repository. Line counts may be reported as a signal, never as a target or a gate.
 Code, tests, scripts and docs must trace to a named consumer, contract or journey.

@@ -96,7 +96,6 @@ Commands:
   layers tests                      Report only: per Gateway module, test files that
                                     reach another module's files, test-support, or
                                     import the registry directly (#2316)
-  budgets [<rev>]                   Report docs over budget; fail a doc over twice its budget
   proof bootstrap|doctor            Install (bootstrap) or re-verify (doctor) the pinned Dafny
                                     proof toolchain in the per-user cache (tools/proof)
   proof wire --generate <in.dfy> <out-dir>
@@ -254,9 +253,6 @@ case "$cmd" in
     ;;
   tidy)
     exec python3 "$ROOT/tools/ownership/tidy.py" "$@"
-    ;;
-  budgets)
-    exec python3 "$ROOT/tools/budgets/budgets.py" "$@"
     ;;
   health)
     exec python3 "$ROOT/tools/metrics/health.py" "$@"

@@ -106,10 +106,8 @@ Finish each authorized improvement with the evidence that makes it safe to keep:
   outside normal validation does not protect later changes.
 - Update the nearest owner documentation with the current requirement, authority,
   ordering, failure/recovery contract, and focused regression reference where useful.
-  Add a concise adjacent comment only where a current invariant, ownership, ordering
-  or non-obvious tradeoff would otherwise be easy to break. Follow the
-  [charter's comment rule](../../../AGENTS.md#engineering-rules): useful rationale,
-  not dialogue/history or a defense of hacks/temporary workarounds; delete stale prose.
+  Code carries no comments ([charter](../../../AGENTS.md#engineering-rules)); that rationale
+  goes in the owner doc and the commit.
 - Put genuinely cross-cutting rules in AGENTS.md and recurring review procedures
   in this skill; do not duplicate subsystem facts across instructions. Keep raw
   experiments, coverage logs, and investigation history in run-owned audit artifacts.

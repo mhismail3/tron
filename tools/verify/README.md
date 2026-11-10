@@ -118,15 +118,14 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 ## Static checks (existing tools only)
 1. `scripts/tron ownership`, including the repository layout
 2. `scripts/tron tidy --here --landing`: no untracked file or ignored path without a named writer
-3. `scripts/tron budgets HEAD` (sizes are reported; few cases fail)
-4. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
+3. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
    --base <base>` when Markdown, a manifest or the Gateway changed; `--all` and empty-diff
    baselines check every block without `--base` (loaded generators need Gateway dependencies).
-5. the privacy guard over `git diff <base>..HEAD`
-6. `git diff --check`
-7. When the selection touches the Gateway: `npm run check` (production and test
+4. the privacy guard over `git diff <base>..HEAD`
+5. `git diff --check`
+6. When the selection touches the Gateway: `npm run check` (production and test
    support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
-8. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
+7. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
    below). A selection without the iOS lane runs it only when a fresh index
    exists; otherwise it is reported as skipped, never as passed.
 
@@ -227,7 +226,7 @@ status and revision. `--skip ios` skips them.
 When `ios-lanes` (the Gateway E2E and profiling targets, and the UIValidation
 journeys that need another harness's fixture: `scripts/ios-mac-terminal-journey`) are selected,
 the run is `incomplete` (exit 1) unless `--skip ios` names them. `--skip mac` covers `mac-terminal`. A `relay` run needs the relay's installed
-lockfile, else verify refuses before step 1 with its `npm ci` command. An empty run fails: it is not evidence.
+lockfile, and a `python-here` run (the proof gate runs compiled cores) `packages/core`'s, else verify refuses before step 1 with its `npm ci` command. An empty run fails: it is not evidence.
 
 ## Manifest `verify` declarations
 
