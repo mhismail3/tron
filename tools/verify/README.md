@@ -78,7 +78,7 @@ user's settings or profile. Test input and output must not depend on live stores
 
 ## Gateway and Python lanes on the test-host pool
 
-The Gateway Vitest lanes of `verify` and `scripts/tron test gateway`, and verify's Python group, run on the pool {the Mac mini, this Mac}:
+The Gateway Vitest lanes of `verify` and `scripts/tron test gateway`, and verify's Python group (not `python-here`), run on the pool {the Mac mini, this Mac}:
 `mini.py`'s `choose_host` picks the mini when it is configured, the tree is committed and an ssh probe (5 s to
 connect, 30 s in all) finds it set up with its job lock free, and otherwise this Mac. Each run prints which host
 ran its lanes and why; verify records it (`gatewayHostReason`). `--gateway-host local|mini` (for both kinds of lane; `test gateway --local|--mini`) overrides the pool; `--update-locks` always runs here, and the pool runs a lane here when its arguments name a path outside the checkout (a relative one resolved against `packages/gateway`).
@@ -91,8 +91,8 @@ only when `package.json`, `package-lock.json`, `third_party/` or the Node binary
 live; the Vitest output files come back with paths rewritten to this checkout, and the lane's exit code is the step's. With `--mini`, an unconfigured or
 unreachable mini exits 2; once a lane is on the mini, a failed push, an off-pin toolchain or a session without a result exits 2, never falling back here. Stopping verify, or killing
 its whole process group, ends the session and SIGTERMs the mini job's child. Setup: `git config tron.verify.mini <user@host>` and
-`tron.verify.miniIdentity <key file>`, and a bare `~/tron-ci/tron.git` on the mini; until the pinned Node is
-installed there, the first job refuses with the `scripts/tron-node install` command to run in its checkout. `verify --batch` and `mutate` run their lanes here.
+`tron.verify.miniIdentity <key file>`, and a bare `~/tron-ci/tron.git` on the mini; until the pinned Node and Dafny are
+installed there, a job refuses with the `scripts/tron-node install` or (Python lanes) `scripts/tron proof bootstrap` command for its checkout. `verify --batch` and `mutate` run their lanes here.
 
 ## Run output
 
@@ -208,7 +208,7 @@ Runners are the existing ones:
 |---|---|
 | `gateway` / `gateway-nested` | Gateway vitest, main or `vitest.nested.config.ts` |
 | `node-gateway` / `node` | `node --test` |
-| `python` / `shell` | `python3` / `bash` per file |
+| `python` / `python-here` / `shell` | `python3` / `bash` per file; `python-here` (`PYTHON_HERE`: tests reading this Mac's Pi session store) runs on this Mac, never the pool |
 | `ios` | `scripts/tron-ios-test run --only-testing <target>/<class>/<test>` shards: the UIValidation targets |
 | `ios-journeys` | `scripts/ios-gateway-e2e-test run-ui --only-testing <journey>`: the real-UI journeys |
 | `relay` | the relay's Vitest: `npm test` in `packages/push-relay`, as `verify --batch`'s relay lane |

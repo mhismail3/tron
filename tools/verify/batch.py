@@ -366,7 +366,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             failures = [f"{Path(suite['name']).name} > {test['fullName']}" for suite in data.get('testResults', [])
                         for test in suite.get('assertionResults', []) if test.get('status') == 'failed']
             shutil.copy2(vitest, directory / 'vitest.json')
-        elif group == 'python':
+        elif group in ('python', 'python-here'):
             count = verify.python_count(output)
         elif group in ('node', 'node-gateway'):
             count = verify.tap_count(output)
