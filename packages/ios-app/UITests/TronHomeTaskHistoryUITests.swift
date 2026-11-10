@@ -139,7 +139,7 @@ final class TronHomeTaskHistoryUITests: XCTestCase {
         guard done.frame.minY > 120 else { return }
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         origin.withOffset(CGVector(dx: 60, dy: done.frame.midY)).press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        _ = waitUntil(done, NSPredicate(format: "frame.minY < 120"), timeout: 3)
+        _ = waitUntil(timeout: 3) { done.frame.minY < 120 }
     }
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
     @MainActor private func shot(_ name: String) {

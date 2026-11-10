@@ -241,7 +241,7 @@ extension RealGatewayPairAndChatUITests {
         for _ in 0..<3 where heading.frame.minY > 120 {
             origin.withOffset(CGVector(dx: 60, dy: heading.frame.midY))
                 .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-            _ = waitUntil(heading, NSPredicate(format: "frame.minY < 120"), timeout: 2)
+            _ = waitUntil(timeout: 2) { heading.frame.minY < 120 }
         }
     }
 

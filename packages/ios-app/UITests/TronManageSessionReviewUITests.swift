@@ -143,7 +143,7 @@ final class TronManageSessionReviewUITests: XCTestCase {
         for _ in 0..<3 where title.frame.minY > 120 {
             origin.withOffset(CGVector(dx: 60, dy: title.frame.midY))
                 .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-            _ = waitUntil(title, NSPredicate(format: "frame.minY < 120"), timeout: 2)
+            _ = waitUntil(timeout: 2) { title.frame.minY < 120 }
         }
     }
 

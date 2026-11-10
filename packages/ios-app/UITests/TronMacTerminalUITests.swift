@@ -325,11 +325,7 @@ final class TronMacTerminalUITests: XCTestCase {
     /// What the emulator shows (HOSTED_TEST exposes its text as the value).
     @MainActor
     private func waitForEmulator(_ app: XCUIApplication, containing text: String, timeout: TimeInterval = 20) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if emulatorText(app).contains(text) { return }
-            Thread.sleep(forTimeInterval: 0.25)
-        }
+        if waitUntil(timeout: timeout, { emulatorText(app).contains(text) }) { return }
         try? capture(app, "failure-output")
         XCTFail("The terminal never showed \(text): \(emulatorText(app).suffix(600))\n\(app.debugDescription)")
     }

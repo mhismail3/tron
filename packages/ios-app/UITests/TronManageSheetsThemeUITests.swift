@@ -38,7 +38,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
                 row.tap()
                 let title = navigationTitle(app, label)
                 XCTAssertTrue(title.waitForExistence(timeout: 8), "\(label) opens a sheet titled \(label)\n\(app.debugDescription)")
-                _ = waitUntil(title, "hittable == true", timeout: 3)
+                _ = waitUntilSettled(title, timeout: 3)
                 assertInk(ink(app, title), theme, "\(label) sheet title (\(mode))")
                 closeTop(app)
             }
@@ -61,7 +61,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
             XCTAssertTrue(app.buttons[done].waitForExistence(timeout: 8), app.debugDescription)
             let title = navigationTitle(app, label)
             XCTAssertTrue(title.waitForExistence(timeout: 5), "\(id) opens a sheet titled \(label)\n\(app.debugDescription)")
-            _ = waitUntil(title, "hittable == true", timeout: 3)
+            _ = waitUntilSettled(title, timeout: 3)
             assertInk(ink(app, title), theme, "\(label) sheet title")
             app.buttons[done].tap()
             Thread.sleep(forTimeInterval: 0.6)
@@ -190,7 +190,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         for _ in 0..<3 where title.frame.minY > 120 {
             origin.withOffset(CGVector(dx: 60, dy: title.frame.midY))
                 .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-            _ = waitUntil(title, NSPredicate(format: "frame.minY < 120"), timeout: 2)
+            _ = waitUntil(timeout: 2) { title.frame.minY < 120 }
         }
     }
 
@@ -201,7 +201,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
             .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        _ = waitUntil(done, NSPredicate(format: "frame.minY < 120"), timeout: 3)
+        _ = waitUntil(timeout: 3) { done.frame.minY < 120 }
     }
 
     @MainActor private func closeTop(_ app: XCUIApplication) {

@@ -173,7 +173,7 @@ import Vision
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         origin.withOffset(CGVector(dx: 60, dy: done.frame.midY)).press(forDuration: 0.1,
             thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        _ = waitUntil(done, "frame.minY < 120", timeout: 8)
+        _ = waitUntil(timeout: 8) { done.frame.minY < 120 }
     }
     private func expandTitle(_ app: XCUIApplication, title: String) {
         let bar = app.navigationBars.staticTexts[title].firstMatch
@@ -182,7 +182,7 @@ import Vision
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         origin.withOffset(CGVector(dx: 60, dy: bar.frame.midY)).press(forDuration: 0.1,
             thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        _ = waitUntil(bar, "frame.minY < 120", timeout: 8)
+        _ = waitUntil(timeout: 8) { bar.frame.minY < 120 }
     }
     private func shot(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

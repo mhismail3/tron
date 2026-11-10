@@ -15,8 +15,8 @@ extension XCTestCase {
         // A covered sheet of the same title (Profile under its item) stays in the tree
         // with no activation point; the frontmost sheet's title is the last.
         let titleText = titles.allElementsBoundByIndex.last ?? titles.firstMatch
-        // Let the presentation settle so the screenshot shows final colours.
-        _ = waitUntil(titleText, NSPredicate(format: "hittable == true"), timeout: 3)
+        // Sample final colours: the presentation has settled once the title stops moving.
+        _ = waitUntilSettled(titleText, timeout: 3)
         let bar = app.navigationBars.containing(.staticText, identifier: title).allElementsBoundByIndex
             .last { $0.frame.contains(CGPoint(x: titleText.frame.midX, y: titleText.frame.midY)) }
         let actions = (bar?.buttons.allElementsBoundByIndex ?? [])

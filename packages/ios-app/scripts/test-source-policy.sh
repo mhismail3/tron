@@ -131,9 +131,12 @@ predicate_waits() {
   grep -rnE 'XCTNSPredicateExpectation|expectation\(for:' "$@" --include='*.swift'
 }
 wait_probe="$(mktemp -d)"
-printf 'let e = expectation(for: p, evaluatedWith: x)\n' > "$wait_probe/Probe.swift"
-predicate_waits "$wait_probe" >/dev/null || { rm -rf "$wait_probe"; fail "UI-test wait check no longer detects a predicate expectation"; }
+for probe in 'let e = expectation(for: p, evaluatedWith: x)' 'let e = XCTNSPredicateExpectation(predicate: p, object: x)'; do
+  printf '%s\n' "$probe" > "$wait_probe/Probe.swift"
+  predicate_waits "$wait_probe" >/dev/null || { rm -rf "$wait_probe"; fail "UI-test wait check no longer detects: $probe"; }
+done
 rm -rf "$wait_probe"
+[[ -d "$ROOT/UITests" && -d "$ROOT/SwiftAppUITests" ]] || fail "UI-test sources moved; point the wait check at them"
 ! predicate_waits "$ROOT/UITests" "$ROOT/SwiftAppUITests" || fail "UI tests wait through waitUntil, not a predicate expectation"
 
 echo "iOS source policy passed (orientation/resources, managed presentation, shared sheet loading, Foundation-only Core and UI-test waits)"

@@ -64,13 +64,8 @@ final class TronRecoveryNoticeUITests: XCTestCase {
         keep(app.screenshot(), "2296-keychain-readable-after-foreground")
     }
 
-    private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if element.exists && element.isHittable { return true }
-            Thread.sleep(forTimeInterval: 0.2)
-        }
-        return false
+    @MainActor private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        waitUntil(timeout: timeout) { element.exists && element.isHittable }
     }
 
     private func keep(_ screenshot: XCUIScreenshot, _ name: String) {
