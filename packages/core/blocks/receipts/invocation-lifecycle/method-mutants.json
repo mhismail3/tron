@@ -126,5 +126,17 @@
  {
   "from": "    while i > 0\n      invariant 0 <= i <= count && Elems(list)",
   "to": "    while i > 1\n      invariant 0 <= i <= count && Elems(list)"
+ },
+ {
+  "from": "        var p := cells[i];",
+  "to": "        var p := cells[0];"
+ },
+ {
+  "from": "      i := i - 1;",
+  "to": "      i := i - 0;"
+ },
+ {
+  "from": "    while k < n\n      invariant 0 <= k <= n\n      invariant forall t | 0 <= t < k ::",
+  "to": "    while k < 0\n      invariant 0 <= k <= n\n      invariant forall t | 0 <= t < k ::"
  }
 ]

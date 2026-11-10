@@ -6,7 +6,7 @@ Block hash: `c1280ddac3866fba` (over `blocks/receipts/invocation-lifecycle/Block
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/receipts/invocation-lifecycle/Block.dfy: Dafny program verifier finished with 72 verified, 0 errors;  |
-| Independent review | NOT ACCEPTED: STALE (reviewed 567b18e428635b86, current c1280ddac3866fba); reviewer transcript never mentions the current block hash (it did not review this version); F1 fold-computed: no verdict |
+| Independent review | ACCEPT by law-reviewer (run e7a9ec58, rounds 4e7ccec8, bb15ea40) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (anthropic/claude-fable-5-2); 2026-11-10 |
 | Mutation check | PASS: 155 valid mutants, 155 killed by laws, 0 law-gap, 0 survived, 0 accepted (blocks/receipts/invocation-lifecycle/MUTATION.json) |
 | Cut over | the only implementation: `packages/gateway/src/core/receipts/invocation-lifecycle` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -90,7 +90,7 @@ lemma FindIndexUpdate(projs: seq<Proj>, i: int, q: Proj)
 
 **Mutation results.** kills 144 of 155 valid mutants; 140 killed by this law alone.
 
-**Reviewer notes.** (not reviewed)
+**Reviewer notes.** ACCEPT: The stronger first ensures, Unfit only at a position 0 <= at < |facts| whose fact fails Fit(f, |facts|), matches the code exactly: Fold returns Unfit(k) at the loop's k, where the test f.inv < 0 || f.inv >= n || (entry bad) is the negation of Fit with n = |facts|. The English names the fact's position and says 'negative or not below the number of facts', which is Fit's negation. The 'Unfit(0)' mutant is now a verification failure, and the second ensures (Agrees otherwise) is unchanged and still holds.
 
 ## L1 legal-moves
 
@@ -104,7 +104,7 @@ lemma L1LegalMoves(from: Life, to: Life, settle: bool)
 
 **Mutation results.** kills 10 of 155 valid mutants; 4 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English matches the equation: NoLife and terminal sources are illegal; terminals may move any unsettled source to a terminal target and ordinary moves use exactly Allowed. Staged→Accepted with settle=false witnesses it; the disjunction implementation preserves the transition table.
+**Reviewer notes.** ACCEPT: Unchanged and equal to its Dafny: no-lifecycle receipts move nothing, settled sources never move, terminals settle any unsettled source into a terminal target, and transitions make exactly the Allowed moves. The premise is satisfiable (Staged to Accepted, settle false), and it matches both branches of legalTransition in the TypeScript; 10 mutants killed, 4 alone.
 
 ## S1 start
 
@@ -132,7 +132,7 @@ lemma FindIndexSpec(projs: seq<Proj>, inv: int)
 
 **Mutation results.** kills 0 of 155 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: The equation matches start behavior, including Accepted default, copied identity/name/origin/sequence/time, and empty entry/flag/unsettled fields; empty state plus a Staged start witnesses it. FindIndexAppend supports the optimized first-index invariant for appends.
+**Reviewer notes.** ACCEPT: Unchanged: a start appends the stated state, a duplicate start is refused, and nothing else changes; the English equals the Dafny. The premise is any start on any state, matching the TypeScript start branch. 0 mutants alone because StepOf is ghost; it is the readable statement of the spec.
 
 ## S2 checks
 
@@ -158,7 +158,7 @@ lemma FindIndexAt(projs: seq<Proj>, inv: int, i: int)
 
 **Mutation results.** kills 0 of 155 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: A matching first projection and binding with empty bound sets and matching ownership satisfies the premise; Check failures refuse in order and passing bindings proceed. The method preserves ownership, entry-bound, invocation-bound, name, origin, terminal, then transition check precedence.
+**Reviewer notes.** ACCEPT: Unchanged: a later receipt that fails a check is refused for the first failing check, and a passing binding is accepted. The premise holds for a started invocation and a matching receipt, and the check order is the TypeScript order. 0 mutants alone (ghost spec).
 
 ## S3 no-start
 
@@ -172,7 +172,7 @@ lemma S3NoStart(st: State, r: Receipt)
 
 **Mutation results.** kills 0 of 155 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: An empty state and any non-start receipt satisfy the premise and yield NoStart. The fast fold preserves this refusal before subsequent checks.
+**Reviewer notes.** ACCEPT: Unchanged: a non-start receipt for an invocation with no start is refused with NoStart, as in the TypeScript, which tests NoStart before ownership. The premise holds for the empty state; 0 mutants alone (ghost spec).
 
 ## S4 settle
 
@@ -193,7 +193,7 @@ lemma S4Settle(st: State, r: Receipt, i: int)
 
 **Mutation results.** kills 0 of 155 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: A started Staged invocation with a legal Completed terminal witnesses settlement; same-lifecycle terminal duplicates pass and contradictory ones refuse, while transitions require legal moves. The fast fold preserves check order and permits bindings after settlement.
+**Reviewer notes.** ACCEPT: Unchanged: the refusal condition equals the Dafny, and the reasons match the TypeScript (ContradictoryTerminal, IllegalTerminal, IllegalTransition). The premise is satisfiable (Staged start, Completed terminal). 0 mutants alone (ghost spec).
 
 ## S5 update
 
@@ -218,7 +218,7 @@ lemma S5Update(st: State, r: Receipt, i: int)
 
 **Mutation results.** kills 3 of 155 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: A started invocation followed by a successful binding witnesses the update rule: only its projection changes, updated time advances, optional entry/flag update, and lifecycle is retained after settlement. FindIndexUpdate is correctly grouped here because it proves in-place update indexing.
+**Reviewer notes.** ACCEPT: Unchanged since 16b0ecad: the ensures r.kind.Terminal? ==> r.life.LifeOf? matches the English sentence 'An accepted terminal receipt always carries a lifecycle', and the update rule still equals StepOf and the TypeScript. The premise is satisfiable; 3 mutants killed, 0 alone.
 
 ## P1 progress
 
@@ -236,7 +236,7 @@ lemma P1Progress(inv: int, op: int, src: int, origin: int, e: int, s: int)
 
 **Mutation results.** kills 3 of 155 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: The fixed start/accept/running/completed/binding trace witnesses the law and yields the specified completed, settled, bound projection. Method/function equivalence carries the result to the optimized implementation.
+**Reviewer notes.** ACCEPT: The English now says 'the completion's retryable flag (false)', which is the Dafny's FlagOf(false). The other conjuncts (operation, source, origin and sequence of the start, no name, the binding's time, completed, settled, bound to the entry) equal the Dafny, and the trace is satisfiable and matches the TypeScript. 3 mutants killed, 0 alone.
 
 ## I1 settled-stays-settled
 
@@ -287,7 +287,7 @@ lemma StepSettles(st: State, r: Receipt)
 
 **Mutation results.** kills 3 of 155 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: A Staged start followed by a Completed terminal satisfies the premise and conclusion; duplicate terminals and post-settlement bindings retain lifecycle and settlement. The implementation equivalence supports the unchanged history invariant.
+**Reviewer notes.** ACCEPT: Unchanged and equal to its Dafny: in a non-refused history an invocation that received a terminal receipt ends settled with that receipt's lifecycle. The premise is satisfiable, and it matches the TypeScript (duplicates and later bindings keep the lifecycle); 3 mutants killed, 0 alone.
 
 ## I2 one-binding
 
@@ -339,7 +339,7 @@ lemma StepGrows(st: State, r: Receipt)
 
 **Mutation results.** kills 0 of 155 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: Two distinct started invocations bound to distinct entries give a concrete projected history; repeated entry or invocation bindings are refused. The fast path's bound arrays implement the same constraints as StepOf.
+**Reviewer notes.** ACCEPT: Unchanged and equal to its Dafny: in a non-refused history no two bindings share an entry or an invocation. The premise is satisfiable, and it matches the TypeScript boundEntries and boundInvocations checks. 0 mutants alone; a whole-history safety statement.
 
 ## Law kinds
 
@@ -589,4 +589,4 @@ ghost predicate SettledIn(st: State, inv: int, l: Life) {
 
 ## Reviewer: general notes
 
-High-stakes remains correct for task/run lifecycle facts. ProjectFast's by-method uses bounded i53 indices and dense token-indexed arrays, with fallback to RunAt for histories at/above 2^20 or invocation/entry tokens outside the array range; the proof obligation establishes equality with its functional fold. The code comment now states the dense-token precondition for O(1), and the oracle exercises sparse tokens and fallback beyond the array limit. The mutation tool does not mutate the by-method body, which is a residual mutation-coverage risk; the body is held by the Dafny proof obligation and 18/18 hand mutants fail verification, useful supplemental evidence but not a substitute for automated mutation coverage. FindIndexUpdate is correctly assigned to S5 as an in-place update lemma; FindIndexAppend remains with S1. Legal's disjunction rewrite preserves the table while avoiding per-call set construction. The final mutation run reports PASS: 267 total, 225 valid, all 225 killed by laws, 0 accepted and 0 survived; shadow matched 5,000/5,000 generated histories, not real traffic. Semantics remain aligned with the TS: ordered checks, duplicate versus contradictory terminals, lifecycle/updatedAt/retryable handling, permitted binding after settlement, and the unreachable ChangedAfterTerminal branch. A1 token/receipt shape and A2 shell result ordering remain boundary contracts; A2 sorting is intentionally outside the core. All six law kinds are accounted for; no unresolved subjective product decision identified. Real-traffic shadow window remains necessary before cut-over.
+Reviewed block hash c1280ddac3866fba (commit 670e35eaa, clean tree); the model is anthropic/claude-haiku-5-5, as confirmed from my run record; reviewer model and session fields are left empty. Verdicts: ACCEPT all ten laws. The previous blocking items are resolved: (a) P1 now states the retryable value false; (b) the named-resource progress gap is answered by the differential corpus, which I accept as the evidence for named histories (1,961 accepted histories with a terminal repeating its start's name, 1,951 with an origin equal to the start's, and name and origin refusals on both sides, 0 differences in 316,365 exact comparisons). I have not verified those counts. The law side also holds: AdvanceSpec ties Advance's name and origin checks, through Changed and SameSpec, to StepOf for every input. A residual risk remains: the differential corpus is generated plus recorded traffic, not a proof, so a named-history bug that is absent from both would pass; the owner test pins one such case by hand. Checks at this hash: A1 and A2 match the parser grammar and the shell's reads, as in the prior round; the method mutants (32 listed, including Unfit(0)) are gated by the test, which first checks that the unchanged copy verifies. Proof: scripts/tron proof check printed a cached PASS for this hash; I did not re-run the verifier, and the packet reports 72 obligations verified. Neither .dfy file contains assume, {:axiom}, {:verify false} or {:extern}. Outside the block, unchanged: the shell's invocationReceipts pre-checks can name a later refusal than Project's first when a history has two refusals; the TypeScript reference does the same, so it is not a divergence.
