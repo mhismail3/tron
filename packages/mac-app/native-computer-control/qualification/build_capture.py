@@ -137,12 +137,11 @@ def main():
     args = arguments()
     product = PRODUCT
     output = output_path(args.output)
-    output.mkdir(mode=0o700)  # Parent must already exist; never create installation trees.
+    output.mkdir(mode=0o700)
     frozen = output / "source"
     sources = freeze_sources(ROOT, frozen)
     context = output / "source-context"
     context.mkdir()
-    # The capture builder owns its signing policy; project.yml owns the team.
     inputs = [MAC / "project.yml"]
     context_hashes = {}
     for path in inputs:

@@ -76,7 +76,6 @@ class ProofToolchainTest(unittest.TestCase):
         alternate = self.cache / f"tron-proof/dafny-{PIN['DAFNY_VERSION']}/z3/bin/z3-{PIN['Z3_ALT_VERSION']}"
         portable = self.dafny("verify", "--solver-path", str(alternate), str(FIXTURES / "holds.dfy"))
         self.assertEqual(portable.returncode, 0, portable.stdout + portable.stderr)
-        # Every solver-running command gets the one-core cap, translate included (its language comes first).
         translated = self.dafny("translate", "js", str(FIXTURES / "holds.dfy"), "-o", str(self.base / "holds"))
         self.assertEqual(translated.returncode, 0, translated.stdout + translated.stderr)
         self.assertNotIn("was not matched", translated.stdout + translated.stderr)

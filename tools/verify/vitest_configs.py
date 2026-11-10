@@ -2,7 +2,6 @@
 from pathlib import Path
 import re
 
-# Each listing config and the exported list it includes; the default config excludes them all.
 LISTS = {"vitest.nested.config.ts": "nestedTestFiles", "vitest.mac-terminal.config.ts": "macTerminalTestFiles"}
 
 

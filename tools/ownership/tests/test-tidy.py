@@ -254,7 +254,7 @@ class PruneTests(TidyCase):
         self.unmerged = f.worktree("unmerged", merged=False, idle_days=20)
         self.done = f.branch("done", merged=True)
         self.wip = f.branch("wip", merged=False)
-        f.branch("local-only", merged=False, days_old=20)  # merged into this checkout's main, never pushed
+        f.branch("local-only", merged=False, days_old=20)
         f.git(f.repo, "merge", "-q", "--no-ff", "--no-edit", "local-only")
         age(f.write(".scratch/old.js"), 10)
         f.write(".scratch/new.js")

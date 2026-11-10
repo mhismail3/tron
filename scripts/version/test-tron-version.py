@@ -9,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def tron(*args: str) -> subprocess.CompletedProcess:
-    # The self-test also checks the pinned Node, so it runs with that Node first on PATH.
     return subprocess.run([str(ROOT / "scripts/tron-node"), "exec", str(ROOT / "scripts/tron"), "version", *args],
                           cwd=ROOT, capture_output=True, text=True, timeout=120)
 

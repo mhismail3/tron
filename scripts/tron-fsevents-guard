@@ -149,7 +149,6 @@ def temp_counts(temp_dir):
     except OSError:
         pass
     try:
-        # The directory's own size is the only sudo-free view of the event-log store.
         counts["fseventsdStoreDirBytes"] = os.stat(FSEVENTS_STORE).st_size
     except OSError:
         counts["fseventsdStoreDirBytes"] = None
@@ -161,7 +160,6 @@ def is_fixture_name(name):
 
 
 def last_change(info):
-    # ctime too: a copy that preserved old mtimes (cp -p, tar) is still a new tree.
     return max(info.st_mtime, info.st_ctime)
 
 
@@ -214,7 +212,6 @@ def paths_in_use():
     status, output = run(["/usr/sbin/lsof", "-nP", "-w", "-F", "n"], timeout=120)
     if status != 0 or not output:
         return None
-    # lsof names the canonical /private/var form; the temp dir is resolved the same way.
     return ["/private" + line[1:] if line.startswith("n/var/") else line[1:]
             for line in output.splitlines() if line.startswith("n/")]
 
@@ -249,8 +246,6 @@ def clean_fixtures(temp_dir, args, now):
         elif now - newest < age:
             report["keptRecent"] += 1
         elif entries + 1 > args.max_delete_entries:
-            # Never removable within one pass; keep it visible instead of letting
-            # it hold back every root sorted after it.
             report["keptOversized"].append(name)
         else:
             candidates.append((path, entries, empty_only, age))
@@ -267,7 +262,6 @@ def clean_fixtures(temp_dir, args, now):
                 report["keptUnproven"] += len(candidates) - index
                 report["error"] = "lsof failed; nothing further removed"
                 break
-        # Re-prove staleness at the moment of removal, not at the scan.
         newest, entries = cleanup_age(path, empty_only, args.max_walk_entries)
         if newest is None or time.time() - newest < age:
             report["keptRecent" if newest is not None else "keptUnproven"] += 1
@@ -279,7 +273,6 @@ def clean_fixtures(temp_dir, args, now):
             report.setdefault("wouldDelete", []).append(os.path.basename(path))
             continue
         if empty_only:
-            # rmdir fails if a compiler writes after the emptiness check.
             try:
                 os.rmdir(path)
             except OSError:
@@ -367,7 +360,6 @@ def check(args):
         state.update({"started": sample["started"], "cpuSeconds": sample["cpuSeconds"], "at": now,
                       "consecutiveHot": consecutive})
     else:
-        # A pass that could not measure breaks the streak: "sustained" means consecutive passes.
         state["consecutiveHot"] = 0
     with open(state_file + ".tmp", "w") as handle:
         json.dump(state, handle)

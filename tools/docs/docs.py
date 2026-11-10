@@ -22,8 +22,6 @@ BLOCK = re.compile(r"^<!-- tron docs ([^>]*?) -->\n(.*?)^<!-- /tron docs -->$", 
 OPENER = re.compile(r"^<!-- tron docs [^>]*-->", re.M)
 FENCE = re.compile(r"^```.*?^```", re.S | re.M)
 CELL = re.compile(r"(?<!\\)\|")
-# Generators that load Gateway code, so need its installed dependencies, and whether a path is a source of
-# theirs. With `check --base`, their blocks are regenerated only when a source or the block itself changed.
 LOADED = {"settings": lambda path: path.startswith("tools/docs/") or path in (f"{GATEWAY}/package.json",
           f"{GATEWAY}/package-lock.json") or path.startswith(f"{GATEWAY}/src/")}
 
@@ -240,7 +238,6 @@ def blocks(write: bool, base: str | None = None) -> int:
             return [m for m in matches if not any(start <= m.start() < end for start, end in fences)]
         found = unfenced(BLOCK.finditer(text))
         if len(unfenced(OPENER.finditer(text))) != len(found):
-            # An unclosed opener would match through the next block's end; never rewrite such a file.
             problems.append(f"{path}: a `<!-- tron docs … -->` block has no `<!-- /tron docs -->` end")
             continue
         updated = text
@@ -250,7 +247,7 @@ def blocks(write: bool, base: str | None = None) -> int:
             count += 1
             args = tuple(match.group(1).split())
             if args[:1] and args[0] in quiet and before.get(args) == match.group(2):
-                kept += 1  # its sources and its text are as at the base: regenerating cannot differ
+                kept += 1
                 continue
             try:
                 expected = outputs[args] if args in outputs else outputs.setdefault(args, generate(list(args)))

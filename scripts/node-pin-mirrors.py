@@ -21,7 +21,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADERS_PIN = "packages/mac-app/native-gateway-client/node-headers.json"
-# (path, pattern whose group 1 is the literal, authority key)
 LITERALS = [
     ("scripts/gateway-payload-deploy.mjs", r'^export const PINNED_NPM_VERSION = "([^"]*)";$', "TRON_NODE_NPM_VERSION"),
     ("scripts/gateway-payload-deploy.mjs", r'^export const PINNED_NPM_TREE_SHA256 = "([^"]*)";$', "TRON_NODE_NPM_TREE_SHA256"),

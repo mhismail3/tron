@@ -19,8 +19,6 @@ ROOT = Path(__file__).resolve().parent.parent
 PUBLISH = ROOT / "scripts/ios-share-publish.py"
 REPORT = ROOT / "test-results/ios-share-concurrency/report.json"
 BASE = "https://fixture.invalid"
-# Only the clock is fixed. Each subprocess executes the complete unmodified
-# publisher front door, real flock, ZIP reads, staging, renames and retention.
 CLOCK = """import datetime, runpy, sys
 second = int(sys.argv.pop(1))
 class Clock(datetime.datetime):
@@ -41,8 +39,6 @@ class ConcurrentPublicationTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c",
                             "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture"],
                            check=True, capture_output=True)
-            # Runner artifacts must not trip the old live path's clean-tree check
-            # before the rejecting executable observes its attempted delivery.
             (root / ".git/info/exclude").write_text("*\n")
             sentinel, calls = root / "device-sentinel", root / "delivery.jsonl"
             sentinel.write_text(f'''#!{sys.executable}
@@ -96,8 +92,6 @@ runner.main()
                             "--branch", "fixture/concurrency", "--keep", str(keep)]
                 children = []
                 try:
-                    # Start all eight before waiting for any; they contend on
-                    # the real publication lock at the exact same clock value.
                     for n in range(8):
                         children.append(subprocess.Popen(command(f"call-{n}", 0, 8),
                                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True))
@@ -137,8 +131,6 @@ runner.main()
                 latest = (served / "latest.plist").read_bytes()
                 self.assertIn(latest, [data["manifest.plist"] for data in originals.values()])
                 report["stages"].append({"persisted_ids": ids, "unique_ipa_urls": urls, "index_manifest_urls": links})
-                # Retention and latest remain a single real publication path,
-                # including records created before the newest five-call window.
                 for n in range(1, 4):
                     result = subprocess.run(command(f"later-{n}", n, 5), capture_output=True, text=True, timeout=20)
                     self.assertEqual(result.returncode, 0, result.stderr)

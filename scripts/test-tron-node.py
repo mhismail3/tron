@@ -78,8 +78,6 @@ class TronNodeResolver(unittest.TestCase):
         self.home.mkdir()
         self.nvm = self.tmp / "nvm"
         self.nvm_node = self.toolchain(self.nvm / f"versions/node/v{VERSION}/bin", VERSION, "nvm")
-        # A payload in the layout bundle-gateway.sh stages and the Gateway installs:
-        # <payload>/manifest.json, runtime/node-<arch>, runtime/bin-<arch>/{node,npm}.
         runtime = self.tmp / "payloads/stable/versions/1/runtime"
         real = self.toolchain(runtime / "real", VERSION, "payload")
         real.rename(runtime / "node-arm64")
@@ -144,8 +142,6 @@ class TronNodeResolver(unittest.TestCase):
         old = self.toolchain(self.tmp / "old", "1.0.0", "old")
         no_npm = self.toolchain(self.tmp / "nonpm", VERSION, "nonpm", npm=False)
         ambient = self.toolchain(self.tmp / "ambient", VERSION, "ambient")
-        # The proven Node is last on PATH: chosen only if both earlier ones are
-        # skipped, and always before any host Homebrew Node.
         self.assertResolves(ambient, PATH=f"{old.parent}:{no_npm.parent}:{ambient.parent}:{SYSTEM_PATH}")
         self.assertRefused(f"reports v1.0.0, not v{VERSION}", TRON_NODE_BIN=str(old))
         self.assertRefused("has no sibling npm", TRON_NODE_BIN=str(no_npm))
@@ -157,7 +153,6 @@ class TronNodeResolver(unittest.TestCase):
         runs = self.invocations.read_text()
         self.assertRegex(runs, r"(?m)^nvm .*diagnose\.js")
         self.assertNotIn("payload", runs)
-        # Mutant control: without the resolver, the entry point reaches PATH's node.
         tron.write_text("".join(line for line in tron.read_text().splitlines(keepends=True)
                                 if line.strip() != "use_pinned_node"))
         self.invocations.write_text("")
@@ -185,14 +180,11 @@ class TronNodeResolver(unittest.TestCase):
         (self.checkout / ".node-version").write_text(version.removeprefix("v") + "\n")
         self.assertRefused("its hardened-runtime signature refuses unsigned native add-ons", TRON_NODE_BIN=str(copy / "node"))
 
-    # --- the verified cache, release status and the pin update (#244) ---
-
     def release_checkout(self) -> Path:
         """The fixture checkout with the release commands' real collaborators and a
         config pointing every release URL at a local directory."""
         for name in ("install-ci-tools.sh", "hash-npm-runtime.py", "node-pin-mirrors.py"):
             shutil.copy2(ROOT / "scripts" / name, self.checkout / "scripts" / name)
-        # The real compiled-in copies `pin` owns (scripts/node-pin-mirrors.py).
         for path in MIRRORS:
             (self.checkout / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / path, self.checkout / path)
@@ -245,14 +237,11 @@ class TronNodeResolver(unittest.TestCase):
         worktree = self.tmp / "worktree"
         subprocess.run(["git", "-C", str(primary), "worktree", "add", "-q", str(worktree)], check=True)
         cached = self.toolchain(primary / f".ci-tools/node-v{VERSION}-{ARCH}/bin", VERSION, "cached")
-        # The Gateway runtime is first on PATH and there is no nvm: only the cache can serve.
         result = self.run_script([str(worktree / "scripts/tron-node")], PATH=self.gateway_path)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), str(cached))
-        # nvm's exact directory still wins over the cache.
         result = self.run_script([str(worktree / "scripts/tron-node")], PATH=self.gateway_path, NVM_DIR=str(self.nvm))
         self.assertEqual(result.stdout.strip(), str(self.nvm_node))
-        # Without the cache the refusal names the verified install command.
         shutil.rmtree(primary / ".ci-tools")
         result = self.run_script([str(worktree / "scripts/tron-node")], PATH=self.gateway_path)
         self.assertEqual(result.returncode, 127)
@@ -269,8 +258,6 @@ class TronNodeResolver(unittest.TestCase):
         pinned = self.pins()
         self.assertEqual(pinned["TRON_NODE_NPM_VERSION"], "11.5.0")
         self.assertTrue(all(pinned[key] != before[key] for key in PIN_KEYS), pinned)
-        # Every compiled-in copy follows: the payload deployer, the signed app's
-        # payload validator and the native client's C header pins.
         deploy = (self.checkout / MIRRORS[0]).read_text()
         self.assertIn(f'PINNED_NPM_VERSION = "11.5.0";', deploy)
         self.assertIn(f'PINNED_NPM_TREE_SHA256 = "{pinned["TRON_NODE_NPM_TREE_SHA256"]}";', deploy)
@@ -281,19 +268,16 @@ class TronNodeResolver(unittest.TestCase):
                          hashlib.sha256(b"/* node_api.h of v99.1.0 */\n").hexdigest())
         mirrors = [sys.executable, str(self.checkout / "scripts/node-pin-mirrors.py"), "check"]
         self.assertEqual(subprocess.run(mirrors, capture_output=True, text=True).returncode, 0)
-        # Drift in one compiled-in copy is named, so it cannot ship unnoticed.
         swift = self.checkout / MIRRORS[1]
         swift.write_text(swift.read_text().replace('== "11.5.0",', '== "10.0.0",'))
         drift = subprocess.run(mirrors, capture_output=True, text=True)
         self.assertEqual(drift.returncode, 1)
         self.assertIn("GatewayPayloadStore.swift: TRON_NODE_NPM_VERSION literal 10.0.0 differs from 11.5.0", drift.stderr)
         swift.write_text(swift.read_text().replace('== "10.0.0",', '== "11.5.0",'))
-        # The real installer accepts exactly what pin recorded, and the resolver serves it.
         cache = self.tmp / "cache"
         result = self.tron_node("install", PATH=self.gateway_path, TRON_CI_TOOLS_DIR=str(cache))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip().splitlines()[-1], str(cache / f"node-v99.1.0-{ARCH}/bin/node"))
-        # Rollback is the same command with the earlier version: every pin returns.
         self.publish("99.0.0", npm_version="11.4.0")
         self.assertEqual(self.tron_node("pin", "99.1.0").returncode, 0)
         moved = self.pins()
@@ -320,7 +304,6 @@ class TronNodeResolver(unittest.TestCase):
     def test_status_reports_offline_and_online_release_freshness(self) -> None:
         self.release_checkout()
         major = VERSION.split(".")[0]
-        # Offline status reads nothing remote: the (absent) release files cannot fail it.
         result = self.tron_node("status", PATH=self.gateway_path, NVM_DIR=str(self.nvm))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f"pin: v{VERSION}", result.stdout)
@@ -345,7 +328,6 @@ class TronNodeResolver(unittest.TestCase):
         self.assertIn(f"scripts/tron-node pin {newer}", result.stdout)
         self.assertIn(f"major: v{major} is maintenance LTS since 2001-01-01, end of life 2098-01-01", result.stdout)
         self.assertIn("lts: v1000 is the active LTS major", result.stdout)
-        # The report never edits the pin.
         self.assertEqual((self.checkout / ".node-version").read_text().strip(), VERSION)
 
 

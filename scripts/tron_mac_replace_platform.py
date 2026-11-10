@@ -26,9 +26,6 @@ from tron_mac_replace_rpc import RPC_CLIENT, RpcError
 from tron_rebuild_lock import inherited_fd
 
 REPO = Path(__file__).resolve().parent.parent
-# The runner's launchd PATH is the system's only. Build and git commands also need
-# Homebrew's tools: a global git-lfs filter runs on checkout and on `git status`
-# of any stat-dirty LFS file (#1520, #1523).
 BUILD_PATH = '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin'
 
 
@@ -91,7 +88,6 @@ class MacPlatform:
     helper_label = 'com.tron.mac.native-host'
     port = 9847
     quit_timeout = 45 * 60
-    # How long accepted Gateway work may take to settle before replacement refuses to stop it.
     drain_settle_timeout = 5 * 60
     start_timeout = 5 * 60
 
@@ -100,7 +96,6 @@ class MacPlatform:
         self.installed = Path('/Applications/Tron.app')
         self.endpoint = None
 
-    # Locations ---------------------------------------------------------
     @property
     def tron_home(self):
         return self.home / '.tron'
@@ -111,7 +106,6 @@ class MacPlatform:
 
     @property
     def store(self):
-        # The Gateway derives the same path from its tronHome's parent.
         return self.maintenance / 'replace'
 
     def admit(self):
@@ -141,7 +135,6 @@ class MacPlatform:
     def stable_channel(self):
         return self.tron_home / 'gateway/payloads/stable'
 
-    # Detached runner: the launchd job runs a private copy of these files.
     def runner_files(self):
         return ()
 
@@ -151,7 +144,6 @@ class MacPlatform:
     def runner_arguments(self):
         return []
 
-    # Gateway RPC -------------------------------------------------------
     def node(self):
         payload = self.bundled_gateway(self.installed)
         arch = 'node-x64' if os.uname().machine == 'x86_64' else 'node-arm64'
@@ -196,8 +188,6 @@ class MacPlatform:
                 urls.append(url)
         if not urls:
             raise RpcError('unreachable', f'{self.gateway_label} (pid {pid}) has no TCP listener on port {self.port}')
-        # The listener that answered last goes first, so the TLS-only one is
-        # probed at most once per Gateway process.
         return sorted(urls, key=lambda url: url != self.endpoint)
 
     def rpc(self, method, params=None, timeout=30):
@@ -233,7 +223,6 @@ class MacPlatform:
     def system_info(self):
         return self.rpc('system.info', timeout=10)
 
-    # App lifecycle -----------------------------------------------------
     @property
     def quit_directory(self):
         return self.store / 'quit'
@@ -274,35 +263,23 @@ class MacPlatform:
                           'replacement-aware Quit was not attempted')
 
     def quit_app(self, log):
-        # NSRunningApplication.terminate is AppKit's ordinary quit request: the
-        # app runs its coordinated Quit (drain, authenticated stop, helper
-        # retirement) exactly as the menu item does. It needs no Automation
-        # consent, and it never signals a process.
         identity = self.app_identity()
         if identity is None:
             if self.gateway_pid() is not None:
                 raise Failure('Gateway is live but its Mac wrapper is not running. Launch the installed app, '
                               'then retry so its accepted-work drain and helper retirement can run')
             if self.offline_blocker() is None:
-                # Explicit retry after a late successful retirement: a prior
-                # failure receipt cannot poison independently proven offline.
                 self.clear_quit_request()
             return
         self.require_replacement_quit()
         start = self.process_start(identity['pid'])
         if start is None:
             raise Failure('Mac app identity changed before replacement Quit; retry')
-        # The app consumes only a fresh request bound to this exact process.
-        # Retain the Gateway fence through retries, even if launchd drops its job
-        # before the old process exits. Job/listener absence alone is not offline.
         gateway = self.gateway_pid()
         previous = self.quit_request()
         if previous.get('gatewayPID') != gateway and self.captured_process_blocker('gateway'):
             raise Failure('the previous owned Gateway process is still retiring; no new Quit or swap was requested')
         result = self.read_quit_file('result.json')
-        # A restarted runner joins an already accepted Quit. Rotating its nonce
-        # would discard the only eventual success/failure receipt while AppKit
-        # coalesces the second terminate request. Failed attempts get a new nonce.
         join = (previous.get('appPID') == identity['pid'] and previous.get('appStart') == start
                 and not (result.get('id') == previous.get('id') and result.get('state') == 'failed'))
         request = {'version': 1, 'id': previous['id'] if join else str(uuid.uuid4()), 'appPID': identity['pid'],
@@ -311,8 +288,6 @@ class MacPlatform:
                    'gatewayStart': self.process_start(gateway) if gateway else previous.get('gatewayStart')}
         self.check_quit_directory(create=True)
         write_json_atomic(self.quit_directory / 'request.json', request)
-        # Pin the NSRunningApplication handle, then recheck its process start
-        # inside the same client before asking that handle to terminate.
         script = (f"ObjC.import('AppKit'); var a = $.NSRunningApplication.runningApplicationWithProcessIdentifier({identity['pid']});"
                   " var t=$.NSTask.alloc.init, p=$.NSPipe.pipe; t.launchPath='/bin/ps';"
                   f" t.arguments=['-p','{identity['pid']}','-o','lstart=']; t.standardOutput=p; t.launch;"
@@ -370,8 +345,6 @@ class MacPlatform:
         return result.get('detail')
 
     def clear_quit_request(self):
-        # Called only after all captured processes are confirmed offline. An
-        # interrupted runner leaves its fence available to the next attempt.
         for name in ('request.json', 'result.json'):
             (self.quit_directory / name).unlink(missing_ok=True)
 
@@ -422,7 +395,6 @@ class MacPlatform:
     def helper_state(self):
         return self.launchd_state(self.gateway_label), self.launchd_state(self.helper_label)
 
-    # Build and verification -------------------------------------------
     def signing_identities(self):
         _, out, _ = capture(['/usr/bin/security', 'find-identity', '-v', '-p', 'codesigning'])
         return len(re.findall(r'^\s+\d+\) [0-9A-F]{40} ', out, re.M))
@@ -441,8 +413,6 @@ class MacPlatform:
     def build(self, source_root, revision, log):
         """Release build of `revision` in its own detached worktree; returns the signed app."""
         worktree = self.checkout(source_root, revision)
-        # The one repository resolver picks the pinned development Node (#242);
-        # this process inherits the Gateway's signed payload runtime on PATH.
         code, out, err = capture([Path(source_root) / 'scripts/tron-node'], env=dict(os.environ, HOME=str(self.home)))
         if code != 0:
             raise Failure(err.strip() or 'no repository-pinned Node')
@@ -482,8 +452,6 @@ class MacPlatform:
             env=dict(os.environ, TRON_APP_PATH=str(self.installed)))
 
     def refresh_guard(self, root, revision, log):
-        # The runner is a private snapshot and the checkout may trail the fetched
-        # revision. Install the selected revision, not either stale local copy.
         source = git(root, 'show', f'{revision}:scripts/tron-fsevents-guard')
         with tempfile.TemporaryDirectory(prefix='tron-guard-install-') as temporary:
             script = Path(temporary) / 'guard.py'

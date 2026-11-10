@@ -17,7 +17,6 @@ JOURNEY = re.compile(r'^(Real-UI journey|Focused E2E case) (\S+) completed in (\
 RESULT_BUNDLE = re.compile(r'(?:-resultBundlePath |^\s+)(/\S+\.xcresult)\s*$', re.M)
 IOS_RUN = re.compile(r'^iOS test run (?:complete|failed with status \d+): (/\S+)$', re.M)
 XCRESULT_SECONDS = 120
-# Bounds keep report.json reviewable: slowest activities per case, normalized-title groups.
 SLOWEST_ACTIVITIES = 15
 
 
@@ -159,7 +158,6 @@ def lane_timing(result: dict, directory: Path, root: Path) -> dict:
         try:
             results.append(bundle_timing(bundle, errors))
         except subprocess.TimeoutExpired as error:
-            # A hung xcresulttool would cost every remaining bundle the same wait; stop observing.
             errors.append(f'{bundle}: {error}; remaining result bundles not read')
             break
         except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:

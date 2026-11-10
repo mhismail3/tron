@@ -44,10 +44,7 @@ TEST_DIRS = {
     "E2ETests", "ProfilingTests",
 }
 TOOLING_ROOTS = {"scripts", "tools", ".agents", ".github", ".pi"}
-# Explicit exceptions to the path rules until 0.4 manifests own classification.
-# Shipped source beside tooling: the Mac bundle compiles this launcher.
 PRODUCTION_PATHS = {"packages/mac-app/scripts/tron-gateway-launcher.c"}
-# Never-shipped test client beside shipped sources: the Mac Terminal journey's probe.
 TEST_PATHS = {"packages/ios-app/MacTerminalSSH/Sources/MacTerminalProbe/main.swift"}
 LEGAL = re.compile(r"(?i)(^|[-_.])(license|notice|copying)$")
 TEST_NAME = re.compile(r"\.test\.[A-Za-z0-9]+$")
@@ -85,7 +82,6 @@ def git(*args: str, data: bytes | None = None) -> bytes:
 
 
 def decode_path(raw: bytes) -> str:
-    # Git paths are bytes; keep non-UTF-8 names measurable and round-trippable.
     return raw.decode("utf-8", "surrogateescape")
 
 
@@ -210,7 +206,6 @@ def hotspot(sha: str, end: int) -> dict:
             window.append(commit)
     touched: dict[str, set[str]] = {}
     if window:
-        # --always prints every commit id, in input order, before its paths.
         tokens = git(
             "diff-tree", "--stdin", "-r", "--root", "--always", "--no-renames", "--name-only", "-z",
             data=("\n".join(window) + "\n").encode(),
@@ -233,7 +228,6 @@ def hotspot(sha: str, end: int) -> dict:
         "commits": len(window),
         "touchingTop": len(hit),
         "touchedPaths": len(touched),
-        # No window commits means no observation, not a 0% share.
         "share": round(len(hit) / len(window), 4) if window else None,
         "top": [{"path": path, "commits": len(commits)} for path, commits in ranked],
     }

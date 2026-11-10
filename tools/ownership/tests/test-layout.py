@@ -147,7 +147,7 @@ class PurposeRuleTests(LayoutCase):
     def test_tooling_without_a_purpose_line_is_refused(self) -> None:
         self.repo.write("tools/ownership/helper.py", "import sys\nprint(sys.argv)\n")
         self.repo.write("packages/gateway/scripts/check.mjs", "#!/usr/bin/env node\nimport fs from 'node:fs';\n")
-        self.repo.write("packages/gateway/src/scripts/source.ts", "export const value = 1;\n")  # source, not tooling
+        self.repo.write("packages/gateway/src/scripts/source.ts", "export const value = 1;\n")
         out = self.refused("layout: tools/ownership/helper.py: add a one-line purpose comment",
                            "layout: packages/gateway/scripts/check.mjs: add a one-line purpose comment")
         self.assertNotIn("tools/ownership/ownership.py", out)
@@ -198,7 +198,7 @@ class RatchetTests(LayoutCase):
         r.git("add", "-A")
         r.git("commit", "-q", "-m", "grow")
         r.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        self.clean()  # once main has the entry, a later branch sees no growth
+        self.clean()
 
     def test_a_frozen_path_cannot_be_unfrozen_and_removed_in_one_change(self) -> None:
         r = self.repo
@@ -207,7 +207,7 @@ class RatchetTests(LayoutCase):
         r.layout["scriptsTop"].remove("scripts/tron-frozen")
         r.save_root()
         self.refused("layout: scripts/tron-frozen was frozen at origin/main and this change unfreezes and removes it")
-        r.write("scripts/tron-frozen", PURPOSE, mode=0o755)  # unfreezing alone, keeping the file, passes
+        r.write("scripts/tron-frozen", PURPOSE, mode=0o755)
         r.layout["scriptsTop"].append("scripts/tron-frozen")
         r.save_root()
         self.clean()

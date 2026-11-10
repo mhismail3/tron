@@ -214,8 +214,6 @@ class FseventsGuard(unittest.TestCase):
         self.assertFalse((self.home / "Library" / "Logs" / "tron-fsevents-guard.jsonl").exists())
 
     def test_default_temp_dir_is_this_users_private_darwin_temp_dir(self):
-        # Without --temp-dir the guard resolves the per-user Darwin temp dir the
-        # way the maintainer runs `install`; a dry run removes nothing.
         expected = subprocess.run(["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"], stdout=subprocess.PIPE,
                                   text=True, check=True).stdout.strip()
         env = {"HOME": str(self.home), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
@@ -232,7 +230,6 @@ class FseventsGuard(unittest.TestCase):
         self.assertEqual(record["cleanup"].get("deleted", []), [], record)
 
     def test_install_is_noop_when_current_and_refreshes_changed_source(self):
-        # A private label exercises real launchd without touching the live guard.
         label = "com.tron.fsevents-guard.test-%d" % os.getpid()
         script = self.base / "guard"
         source = SCRIPT.read_text().replace('LABEL = "com.tron.fsevents-guard"',
@@ -256,8 +253,6 @@ class FseventsGuard(unittest.TestCase):
             result = install()
             self.assertIn("already current", result.stdout)
             self.assertEqual(plist.stat().st_mtime_ns, before)
-            # Change behavior, not a source-string oracle: the same loaded job
-            # must execute the new implementation after the refresh.
             repository = self.base / "repository"
             (repository / "scripts").mkdir(parents=True)
             (repository / "scripts/tron-fsevents-guard").write_text(
@@ -268,8 +263,6 @@ class FseventsGuard(unittest.TestCase):
                           "-c", "commit.gpgsign=false", "commit", "-qm", "guard"]):
                 subprocess.run(["/usr/bin/git", "-C", str(repository), *args], check=True,
                                env=dict(env, GIT_CONFIG_GLOBAL="/dev/null"))
-            # The replacement boundary installs its selected Git revision, even
-            # when the runner and current checkout carry an older script.
             driver = ("import sys; sys.path.insert(0, sys.argv[1]); "
                       "from pathlib import Path; from tron_mac_replace_platform import MacPlatform; "
                       "p=MacPlatform(); p.home=Path(sys.argv[2]); "
@@ -283,7 +276,6 @@ class FseventsGuard(unittest.TestCase):
                                  env=env, capture_output=True, text=True, timeout=180, check=True)
             self.assertIn("refreshed-guard-behavior", run.stdout)
             subprocess.run(["/bin/launchctl", "print", target], capture_output=True, check=True)
-            # A matching plist without a loaded job still needs bootstrapping.
             script.write_text((repository / "scripts/tron-fsevents-guard").read_text())
             subprocess.run(["/bin/launchctl", "bootout", target], check=True)
             install()
@@ -303,8 +295,6 @@ class FseventsGuard(unittest.TestCase):
         stale = self.temp / "tron-agent-run-Ab12Cd"
         make_tree(stale)
         age_out()
-        # Run the agent's exact program once; COLD keeps the pass from alerting
-        # or deferring regardless of the machine's fseventsd.
         result = subprocess.run([PYTHON, *program[1:], "--sample-seconds", "0.2", *COLD, *AGED],
                                 env={"HOME": str(self.home), "PATH": "/usr/bin:/bin"},
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)

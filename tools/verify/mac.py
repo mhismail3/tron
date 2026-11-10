@@ -29,7 +29,6 @@ def main(classes: list[str]) -> int:
         code = subprocess.run(command, cwd=ROOT).returncode
         if code:
             return code
-    # The tests write app state under HOME and TMPDIR: never the user's.
     scratch = Path(tempfile.mkdtemp(prefix="tron-mac-tests-"))
     try:
         (scratch / "home").mkdir(mode=0o700)
@@ -42,7 +41,7 @@ def main(classes: list[str]) -> int:
 
 
 def interrupted(_signal, _frame):
-    raise KeyboardInterrupt  # verify stops a step with SIGTERM; unwind so the scratch HOME is removed
+    raise KeyboardInterrupt
 
 
 if __name__ == "__main__":

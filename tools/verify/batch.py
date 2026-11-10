@@ -23,25 +23,11 @@ import timing
 import verify
 
 ROOT = verify.ROOT
-# Every Gateway Vitest and Python run the batch starts (its Gateway lanes, `verify --all`'s groups,
-# their probes and the candidate's affected checks) runs on the Mac mini (tools/verify/mini.py), never
-# beside the Apple chain on this Mac; only the groups that need this host (mac-terminal, python-here)
-# run here. Each waits its turn for the mini's job lock this long. A run the mini gives no result for
-# is uncovered naming why, never red; during attribution or repair it raises MiniNoResult, so nothing
-# is concluded and the investigation resumes on the next batch.
 MINI_JOB_WAIT_SECONDS = 45 * 60
 REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
-# Inverse deltas touching these owners can change persisted data or authority.
 IRREVERSIBLE_RISK = {'persistence', 'security', 'mac-installer'}
-# The lanes run as two concurrent chains under their existing owners, each in plan order:
-# Node (verifier, Gateway Vitest on the mini, Mac, relay) and Apple (the
-# iOS lanes under host slots). Both join before freeze, attribution and verdict.
 CHAINS = ('node', 'apple')
-# The packages whose pinned dependencies a batch (and each probe worktree) installs first: the
-# Gateway's (most tests import it) and the relay's lane.
 PACKAGES = ('gateway', 'push-relay')
-# The real-UI journey lane runs its journeys on this many owned simulator lanes at once, one
-# host slot each, longest first by the previous batch's per-journey seconds.
 UI_JOURNEY_LANES = 3
 UI_JOURNEY_LANE = 'real Gateway UI journeys'
 
@@ -61,8 +47,6 @@ def apple_lane(root: Path) -> dict[str, str]:
     repository = os.path.realpath(subprocess.check_output(
         ['git', '-C', str(root), 'rev-parse', '--path-format=absolute', '--git-common-dir'], text=True).strip())
     name = 'batch-apple-' + hashlib.sha256(repository.encode()).hexdigest()[:12]
-    # Smoke products stay the batch worktree's: their stamp names it, and products prune deletes
-    # a gone worktree's products, so a shared directory could be deleted beneath a later build.
     products = 'batch-apple-' + hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:12]
     return {'TRON_IOS_TEST_LANE': name, 'TRON_IOS_TEST_LANE_REPOSITORY': repository,
             'TRON_IOS_TEST_DERIVED_DATA': str(Path.home() / 'Library/Developer/Tron/ios/test-derived-data' / products)}
@@ -72,7 +56,6 @@ def lanes(root: Path, base: str) -> list[dict]:
     """Compose existing owners, not a second test catalog."""
     apple = apple_lane(root)
     lane_only = {key: apple[key] for key in ('TRON_IOS_TEST_LANE', 'TRON_IOS_TEST_LANE_REPOSITORY')}
-    # Required lanes never disappear when a checkout/tool is missing.
     result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base, '--gateway-host', 'mini']}]
     for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
         result.append({'name': name, 'chain': 'node', 'command': ['python3', 'tools/verify/mini.py', *config],
@@ -85,7 +68,6 @@ def lanes(root: Path, base: str) -> list[dict]:
          'requires': 'packages/ios-app/project.yml', 'ios': True},
         {'name': 'iOS smoke', 'chain': 'apple', 'command': ['scripts/tron-ios-test', 'checkpoint'],
          'requires': 'scripts/tron-ios-test', 'ios': True, 'env': apple},
-        # The E2E harness keeps its own DerivedData and fixture; only its lane moves.
         {'name': 'real Gateway boundary', 'chain': 'apple', 'command': ['scripts/ios-gateway-e2e-test', 'all'],
          'requires': 'scripts/ios-gateway-e2e-test', 'ios': True, 'env': lane_only},
         {'name': UI_JOURNEY_LANE, 'chain': 'apple', 'command': ['scripts/ios-gateway-e2e-test', 'run-ui'],
@@ -113,8 +95,6 @@ def case_names(data: dict, failed: dict, root: Path) -> dict:
 
 
 def signature(message: str, failures: list[str], output: str, root: Path) -> dict | None:
-    # A test identity alone cannot distinguish a code regression from setup failing
-    # in that same case (for example missing staged products at the baseline).
     diagnostics = re.findall(r'^(?:AssertionError:|Error:|error:|failure:|unowned:|overlap:|.+:\d+: error:).+$', output, re.M)
     diagnostics = sorted(line.replace(str(root), '<worktree>') for line in diagnostics[:20])
     failures = sorted(line.replace(str(root), '<worktree>') for line in failures)
@@ -152,8 +132,6 @@ def previous_journey_seconds(state: Path, current: Path) -> dict[str, int]:
     return {}
 
 
-# Lane process groups running now, so an interrupted or failed chain set can stop both chains,
-# and the cancellation a lane not yet started observes.
 RUNNING: set[int] = set()
 RUNNING_LOCK = threading.Lock()
 CANCELLED = threading.Event()
@@ -192,7 +170,7 @@ def run_chains(chains: list[list[tuple[int, dict]]], run_lane) -> None:
                 if stop.is_set():
                     return
                 run_lane(index, lane)
-        except BaseException as error:  # re-raised on the main thread after both chains joined
+        except BaseException as error:
             errors.append(error)
             stop.set()
 
@@ -207,7 +185,6 @@ def run_chains(chains: list[list[tuple[int, dict]]], run_lane) -> None:
                 thread.join(timeout=0.1)
     except BaseException:
         stop.set()
-        # Join every chain even through a repeated interrupt: nothing may write the report after.
         while any(thread.is_alive() for thread in threads):
             try:
                 stop_running()
@@ -215,7 +192,6 @@ def run_chains(chains: list[list[tuple[int, dict]]], run_lane) -> None:
                     thread.join(timeout=0.1)
             except KeyboardInterrupt:
                 continue
-        # Every chain has ended: cleanup that runs after (the fixture stop) must not see the stop.
         stop.clear()
         raise
     stop.clear()
@@ -241,8 +217,6 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     if deferred_ios:
         command = [*command, '--skip', 'ios']
     if lane['name'] == 'shipping iOS compile':
-        # This compile owner has a device lease, not a simulator slot; compose the
-        # common host-slot owner rather than reserving capacity for the whole batch.
         command = ['python3', 'scripts/ios-test-lock.py', '--host-slot', '--lock',
                    str(directory / 'compile.lock'), '--', *command]
     if lane.get('vitest'):
@@ -255,13 +229,11 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     if lane['name'] == 'full verify':
         sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
         (root / 'test-results/verify' / f'{sha}.json').unlink(missing_ok=True)
-    # A caller's held full-Gateway lock marker never reaches a lane: a local Gateway run inside one takes the lock itself.
     env = {key: value for key, value in os.environ.items() if key != HELD_BY_CALLER}
     env['TRON_IOS_E2E_NO_INSTALL'] = '1'
     env['TRON_MINI_JOB_WAIT_SECONDS'] = str(MINI_JOB_WAIT_SECONDS)
     env.update(lane.get('env', {}))
     if CANCELLED.is_set():
-        # Stopped while it set up: a lane that has not started never starts.
         return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
                 'reason': 'batch stopped before this lane started; not run'}
     with log.open('w') as output:
@@ -291,7 +263,6 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         return result
     if deferred_ios:
         result.update(status='uncovered', reason='deferred: verifier iOS consumers; all host slots held')
-    # Preserve the owning verifier's exact selection, failed tests and partial step logs.
     if lane['name'] == 'full verify':
         sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
         source = root / 'test-results/verify' / f'{sha}.json'
@@ -323,7 +294,6 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             result['signature'] = signature(report['message'], failures, detail, root)
     elif lane.get('vitest'):
         output = log.read_text(errors='replace')
-        # The owning parser normalizes only the repo prefix and rejects suite errors.
         previous = verify.ROOT
         verify.ROOT = root
         try:
@@ -347,7 +317,6 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             result.update(status='uncovered', reason='missing test report')
     elif lane.get('probe'):
         output = log.read_text(errors='replace')
-        # A sharded iOS step is named `tests: ios k/N`; its runner group is the first word.
         group = lane['name'].removeprefix('tests: ').split()[0]
         failures = []
         count = 0 if lane['name'].startswith('tests:') else None
@@ -368,7 +337,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
         elif group == 'shell':
             count = len(output.split(verify.FILE_MARKER)) - 1
         if lane['name'].startswith('tests:') and code == 0 and count == 0:
-            result['exit'] = 1  # a runner that executes nothing cannot prove a good bisect probe
+            result['exit'] = 1
         result['signature'] = signature(f"{lane['name']} failed", failures, output, root)
     output = log.read_text(errors='replace')
     if lane['name'] == 'Mac integration':
@@ -383,7 +352,6 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             result.update(status='uncovered', reason='missing or empty XCTest summary')
         failures = verify.ios_failures(output)
         result['signature'] = signature(f"{lane['name']} failed", failures, output, root)
-        # The summary retains method identity; this owner accepts exact selectors.
         if failures and re.fullmatch(r'\w+/\w+/\w+(?:\(\))?', failures[0].split(':', 1)[0]):
             selector = failures[0].split(':', 1)[0]
             result['probe'] = {'name': lane['name'], 'command': ['scripts/tron-ios-test', 'checkpoint', '--only-testing', selector], 'ios': True}
@@ -474,7 +442,6 @@ class Prober:
             save(self.directory / 'progress.json', self.record)
             raise MiniNoResult(outcome['reason'].removeprefix('the mini gave no result: '))
         if selection_required and outcome.get('selectedTests') == 0:
-            # The case failed at this commit, so a recipe selecting nothing is a broken selector, not a non-reproduction.
             self.record['probes'].append({'commit': sha, 'outcome': 'selector-error', 'fresh': True, **outcome})
             save(self.directory / 'progress.json', self.record)
             raise ProbeSelectionError(f"attribution probe for {self.failed['name']} selected no tests at {sha[:12]}: "
@@ -486,7 +453,6 @@ class Prober:
         elif outcome.get('signature') == self.failed['signature']:
             state = 'bad'
         else:
-            # An exit alone is not proof that the same regression reproduced.
             state = 'unknown'
         observed = {'commit': sha, 'outcome': state, 'fresh': not hint, **outcome}
         self.record['probes'].append(observed)
@@ -500,7 +466,6 @@ class Prober:
         return all(self.probe(sha, selection_required=selection_required) == expected for _ in range(2))
 
     def close(self) -> None:
-        # Never erase a probe whose owning resource helper could not clean it.
         cleanup = []
         self.record.update(cleanup=cleanup, retainedWorktree=str(self.root))
         save(self.directory / 'progress.json', self.record)
@@ -541,16 +506,12 @@ def attribute(base: str, head: str, failed: dict, prober: Prober) -> dict:
         return unresolved('no exact-case selector or failure signature')
     if not commits:
         return unresolved('empty range')
-    # A landing is one first-parent unit: an ordinary commit or a two-parent integration.
     octopus = [sha for sha in commits if parents(sha) > 2]
     if octopus:
         result['unsupportedHistory'] = octopus
         return unresolved('octopus landing on main first-parent history')
-    # Only an exact-case Vitest recipe names one case known to exist; other recipes may select
-    # nothing for real reasons (a file that fails to load), which stays an ordinary outcome.
     if not prober.controls(head, 'bad', selection_required=bool(failed['probe'].get('vitest'))):
         return unresolved('head did not reproduce the exact failure in two fresh executions')
-    # `base` is the last raw-green batch; the search assumes it, the parent control proves it.
     low, high = -1, len(commits) - 1
     while high - low > 1:
         middle = (low + high) // 2
@@ -714,7 +675,6 @@ def investigate(base: str, head: str, failed: dict, directory: Path, state: Path
     if attribution and attribution.get('status') == 'proven':
         path = repair_path(state, attribution['commit'])
         if not path.exists():
-            # A proof is only trusted beside the repair journal it produced; re-prove otherwise.
             attribution = None
         elif not resumable(json.loads(path.read_text())):
             return attribution, json.loads(path.read_text())
@@ -728,7 +688,6 @@ def investigate(base: str, head: str, failed: dict, directory: Path, state: Path
             try:
                 attribution = attribute(base, head, failed, prober)
             except MiniNoResult as error:
-                # No outcome is no evidence: unresolved for this batch only, never memoized.
                 attribution = {**prober.record, 'status': 'unresolved', 'noResult': True,
                                'reason': f'the mini gave no result: {error}; attribution resumes on the next batch'}
         if attribution.get('status') == 'proven':
@@ -762,7 +721,6 @@ def reconcile(journal: dict, path: Path) -> str:
     elif subprocess.run(['git', 'merge-base', '--is-ancestor', commit, current], cwd=ROOT).returncode == 0:
         journal.update(state='published', reason=None, remoteMain=current)
     elif current == journal['tip']:
-        # Positively not applied and main unchanged: the bound ACCEPT may be presented again.
         journal.update(state='review-required', reason='push not applied; remote main unchanged')
     else:
         journal.update(state='review-required', reason='remote main advanced', remoteMain=current)
@@ -772,8 +730,6 @@ def reconcile(journal: dict, path: Path) -> str:
 
 
 def issue_write(key: str, title: str, body: str, directory: Path, state: Path, target: int | None = None) -> dict:
-    # The batch lock serializes this journal. Persist BEFORE dispatch: a killed or
-    # uncertain GitHub write must not become a second create on an operator rerun.
     journal = state / 'issue-writes' / f'{key}.json'
     previous = json.loads(journal.read_text()) if journal.exists() else None
     if previous and (not previous.get('number') or previous.get('status') != 'completed'):
@@ -789,7 +745,6 @@ def issue_write(key: str, title: str, body: str, directory: Path, state: Path, t
                 '--kind', 'kind:bug', '--area', 'area:tooling'])
     outcome = execute(ROOT, {'name': 'issue write', 'command': command}, directory / 'issue')
     if 'log' not in outcome:
-        # The batch stopped before dispatch: nothing reached GitHub, so the journal goes back to what it was.
         save(journal, previous) if previous else journal.unlink()
         return {**outcome, 'number': number}
     match = re.search(r'(?:/issues/|created issue #)(\d+)', Path(outcome['log']).read_text(errors='replace'))
@@ -825,8 +780,6 @@ def file_issue(report: dict, directory: Path, state: Path) -> dict:
             f"Lane: {report['failed']['name']}; attribution: {attribution['status']}"
             + (f" ({attribution['reason']})" if attribution.get('reason') else '') + '.\n\n'
             + (f"Causal landing: `{attribution['commit']}` (first parent `{attribution['parent']}`).\n" if attribution.get('commit') else
-               # Attribution narrows nothing short of a causal landing, so the candidates are the whole range:
-               # named by count, which keeps a long range within the 64 KiB issue bound.
                f"Candidates: all {len(report['commits'])} covered commits of the range.\n")
             + repair_summary(journal, attribution)
             + ('\nFiles: ' + ', '.join(f'`{p}`' for p in attribution['files']) if 'files' in attribution else
@@ -851,10 +804,8 @@ def failure_cases(outcome: dict) -> list[dict]:
             cases.append({**outcome, 'signature': {'failures': {identity: digest}},
                           'probe': {'name': outcome['name'], 'vitest': True,
                                     'command': [*command, file.removeprefix(outcome.get('testRoot', 'packages/gateway') + '/'), '-t', '^' + re.escape(' > '.join(names)) + '$']}})
-    # Other owners may only be probed if the recorded invocation is already a case filter.
     elif outcome.get('xctestCases') and outcome.get('signature'):
         for case in outcome['xctestCases']:
-            # Build remains at each revision; execution selects one class/method.
             cases.append({**outcome, 'signature': {**outcome['signature'], 'failedTests': [case]},
                           'probe': {'name': outcome['name'], 'command': [*outcome['command'], case.split('/', 1)[1]]}})
     elif outcome.get('probe') and '--only-testing' in outcome['probe'].get('command', []):
@@ -947,7 +898,6 @@ def review(args, state: Path) -> int:
         if not current:
             raise verify.VerifyError('remote main unreadable; nothing published')
         if current != journal['bindings']['tip']:
-            # A stale ACCEPT never publishes. Rebuild once at the new tip; it needs a fresh review.
             directory = path.parent / journal['culprit'] / f'rebuild-{time.time_ns()}'
             prober = Prober(journal['investigation'], directory, state, {})
             try:
@@ -1029,7 +979,6 @@ def main(argv: list[str]) -> int:
         if not green and not args.base:
             raise verify.VerifyError('no green batch: supply --base <main-anchor> explicitly on first use')
         base = green['commit'] if green else verify.git('rev-parse', '--verify', f'{args.base}^{{commit}}').strip()
-        # A batch covers landed main only; pin a snapshot, never fetch/merge another worker's checkout.
         fetch_head = Path(verify.git('rev-parse', '--git-path', 'FETCH_HEAD').strip())
         ref = ('FETCH_HEAD' if fetch_head.is_file() else
                'origin/main' if verify.git('for-each-ref', 'refs/remotes/origin/main').strip() else 'main')
@@ -1048,7 +997,6 @@ def main(argv: list[str]) -> int:
             current = json.loads(green_path.read_text()) if green_path.exists() else None
             if current != green:
                 raise verify.VerifyError('last-green changed while planning; rerun against its current coverage')
-            # Settle any dispatched revert push before new repair work.
             for path in sorted((state / 'repairs').glob('*.json')):
                 journal = json.loads(path.read_text())
                 if journal['state'] in ('push-intent', 'push-uncertain') and reconcile(journal, path) == 'published':
@@ -1077,7 +1025,6 @@ def main(argv: list[str]) -> int:
                             setup = {'exit': 2, 'error': str(error), 'name': f'{package} dependencies'}
                         report['setup'].append(setup)
                         save(path, report)
-                # `results` stays in plan order whichever chain finishes a lane first.
                 outcomes, active, report_lock = {}, {}, threading.Lock()
 
                 def record(change):
@@ -1103,7 +1050,7 @@ def main(argv: list[str]) -> int:
                         outcome = {**lane, 'exit': None, 'status': 'uncovered', 'error': str(error), 'seconds': 0}
                     try:
                         outcome['timing'] = timing.lane_timing(outcome, directory / f'lane-{index}', ROOT)
-                    except Exception as error:  # observation only: never a verdict input
+                    except Exception as error:
                         outcome['timing'] = {'errors': [f'{type(error).__name__}: {error}']}
                     record(lambda: (outcomes.update({index: outcome}), active.pop(lane['chain'], None)))
                     source_unchanged()
@@ -1114,7 +1061,6 @@ def main(argv: list[str]) -> int:
                 run_chains(chains, run_lane)
                 report['fixtureCleanup'] = stop_fixture(ROOT, directory / 'fixture-stop')
                 save(path, report)
-                # Finish coverage and freeze it before spending any host time on attribution.
                 red = [(index, outcome) for index, outcome in enumerate(report['results']) if outcome.get('exit')]
                 if red:
                     manifest = freeze(directory)
@@ -1123,7 +1069,6 @@ def main(argv: list[str]) -> int:
                 for index, outcome in red:
                     cases = failure_cases(outcome)
                     if not cases:
-                        # Nothing exact to bisect: the red is filed unresolved and the suite is never rerun.
                         reason = 'owner provided no exact-case attribution selector'
                         outcome.update(status='uncovered', reason=reason)
                     for case_index, failed in enumerate(cases or [outcome]):

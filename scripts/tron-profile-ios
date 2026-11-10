@@ -62,8 +62,6 @@ EXIT_RUNNER = 74
 EXIT_TIMEOUT = 75
 EXIT_SELF_TEST = 77
 
-# name -> (test identifier, default window seconds, description). The Swift
-# tests skip unless TRON_PROFILE_SCENARIO names them, so these must match.
 SCENARIOS: dict[str, tuple[str, float, str]] = {
     "idle-dashboard": (
         "ProfileDashboardScenarioTests/testIdleDashboard", 30.0,
@@ -101,16 +99,12 @@ CONTROL_SCENARIOS: dict[str, tuple[str, float, str]] = {
     "control-wakeups": ("ProfileControlScenarioTests/testControlExtraWakeups", 2.0, "control plus a 200 Hz main-run-loop timer."),
 }
 ALL_SCENARIOS = {**SCENARIOS, **CONTROL_SCENARIOS}
-# Self-test: each variant must regress its metric beyond the noise bound
-# against `control`. CPU falls back to process CPU time only where the kernel
-# exposes no instruction counter.
 SELF_TEST_EXPECTATIONS = {
     "control-cpu": ("cpu.instructions", "cpu.time"),
     "control-disk": ("disk.logical_writes",),
     "control-wakeups": ("wakeups.interrupt",),
 }
 
-# Report metadata for every value the Swift ProfileResourceMetric emits.
 METRICS: dict[str, tuple[str, str]] = {
     "cpu.instructions": ("instructions", "Instructions retired by the whole app process in the window (primary CPU metric; least sensitive to host contention)."),
     "cpu.cycles": ("cycles", "CPU cycles of the whole app process in the window."),
@@ -127,23 +121,12 @@ METRICS: dict[str, tuple[str, str]] = {
 }
 ESSENTIAL_METRICS = ("time.wall", "cpu.time")
 
-# Tracing handshake bounds (seconds), passed to the hosted test so both sides
-# give up at the same time: attaching and starting the recording, and stopping
-# and saving it after the last window.
 TRACE_RECORDING_TIMEOUT = 300
 TRACE_STOP_TIMEOUT = 600
-# How long a traced run waits for the host-wide trace lock and for another
-# session's Instruments processes to exit before failing.
 TRACE_HOST_WAIT = int(os.environ.get("TRON_PROFILE_TRACE_HOST_WAIT_SECONDS", 900))
 TRACE_HOST_LOCK = Path.home() / "Library/Developer/Tron/profiles-instruments.lock"
-# Recording clients. Their DTServiceHub helpers are not matched on their own:
-# xcodebuild test runs of every session spawn DTServiceHub too, and idle
-# orphans linger for minutes without recording.
 INSTRUMENTS_PROCESS = re.compile(r"(/usr/bin/xctrace |/Instruments\.app/Contents/MacOS/Instruments)")
 KPERF_LOCKED = "could not lock kperf"
-# The CPU control variant's workload function
-# (ProfileControlScenarioTests.swift); `--self-test --trace time-profiler`
-# requires it among the top self-time symbols of a traced control-cpu run.
 CONTROL_WORKLOAD_SYMBOL = "controlExtraCPUWorkload"
 CONTROL_WORKLOAD_RANK = 5
 TRACED_WARNING = (
@@ -157,8 +140,6 @@ class ProfileError(Exception):
         super().__init__(message)
         self.code = code
 
-
-# ---------------------------------------------------------------- xcresult ---
 
 def _walk(value: Any):
     if isinstance(value, dict):
@@ -290,8 +271,6 @@ def self_test_verdicts(comparisons: dict[str, dict[str, Any]]) -> list[tuple[str
     return rows
 
 
-# ------------------------------------------------------------------ runner ---
-
 def development_state_path() -> Path:
     """The remembered Development simulator's marker, as the runner names it."""
     return Path(
@@ -336,9 +315,6 @@ def bounded(log: Path, evidence: Path, overall: float, no_output: float, artifac
     child = subprocess.Popen(
         process, env={**os.environ, "NSUnbufferedIO": "YES", **(environment or {})}, stdout=subprocess.DEVNULL
     )
-    # The lease holder signals this command's whole process group, but
-    # xcodebuild runs in the bounded runner's own session; relay the signal to
-    # the runner, which stops that session.
     def forward(signum: int, _frame: object) -> None:
         if child.poll() is None:
             child.send_signal(signum)
@@ -384,7 +360,6 @@ class TraceRecorder:
 
     def command(self, pid: int, notification: str) -> list[str]:
         mode, template, instruments = attribution.TEMPLATES[self.template]
-        # Host mode samples every process and attribution keeps only `pid`.
         target = ["--all-processes"] if mode == "host" else ["--device", self.simulator_id, "--attach", str(pid)]
         command = ["xcrun", "xctrace", "record", *target, "--output", str(self.output), "--no-prompt",
                    "--notify-tracing-started", notification, "--time-limit", f"{int(self.time_limit)}s"]
@@ -423,7 +398,7 @@ class TraceRecorder:
             notification = f"com.tron.profile.recording.{secrets.token_hex(8)}"
             self._notifier = subprocess.Popen(["notifyutil", "-1", notification],
                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(0.5)  # let notifyutil register before xctrace can post
+            time.sleep(0.5)
             with self.log.open("ab") as log:
                 self._xctrace = subprocess.Popen(
                     self.command(self.pid, notification), stdout=log, stderr=subprocess.STDOUT,
@@ -459,8 +434,6 @@ class TraceRecorder:
         helpers = self._helpers()
         if process is not None and process.poll() is None:
             process.send_signal(signal.SIGINT)
-            # A started recording needs time to save; one that never started
-            # has nothing to save.
             try:
                 process.wait(timeout=TRACE_STOP_TIMEOUT - 60 if self.recording_started else 30)
             except subprocess.TimeoutExpired:
@@ -493,7 +466,7 @@ class TraceRecorder:
             command = run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, timeout=30).stdout
             if "DTServiceHub" in command:
                 try:
-                    os.kill(pid, signal.SIGKILL)  # it ignores SIGTERM
+                    os.kill(pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
 
@@ -503,7 +476,6 @@ class TraceRecorder:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
-            # Already exited: macOS answers EPERM while it awaits reaping (ESRCH once reaped).
             pass
         process.wait()
 
@@ -512,7 +484,6 @@ class TraceRecorder:
         self._finish.set()
         self._thread.join(timeout=TRACE_STOP_TIMEOUT)
         if self._thread.is_alive():
-            # The thread is stuck; reclaim its processes directly.
             if self._notifier is not None and self._notifier.poll() is None:
                 self._notifier.kill()
             if self._xctrace is not None and self._xctrace.poll() is None:
@@ -524,8 +495,6 @@ def foreign_instruments(own_groups: set[int]) -> list[str]:
     """Host Instruments processes (xctrace, Instruments, DTServiceHub) that do
     not belong to this profiler's own process groups."""
     listing = run(["ps", "-axo", "pid=,pgid=,command="], capture_output=True, timeout=30).stdout
-    # (A traced run holds the host lock before starting xctrace, so none of
-    # this profiler's own processes match while it waits.)
     found = []
     for line in listing.splitlines():
         fields = line.strip().split(None, 2)
@@ -622,10 +591,6 @@ class Profiler:
             "--marker", str(self.lane.state_root / "simulator.json"), "--runtime", self.runtime,
             "--device-type", self.device_type, "--name", self.lane.device_name,
             "--development-state", str(self.development_state),
-            # The lane root, the default lane and this worktree, so this lane is
-            # discovered by the sweep, reported by the lane tables and recorded
-            # as this worktree's. The owned directories and the Development
-            # simulator are resolved by the shared owner, not here.
             "--discovery-root", str(self.lane.lane_root),
             "--default-state-dir", str(self.lane.default_state_root),
             "--worktree", str(ROOT),
@@ -656,10 +621,6 @@ class Profiler:
         sys.stderr.write(result.stderr)
         udid = result.stdout.strip()
         if result.returncode == EXIT_LOCKED:
-            # The shared provisioner's "not now": a lane a live process holds, or
-            # a Mac too short of memory to admit the boot. Reported and kept as
-            # its own exit, not as a broken destination - the caller decides
-            # whether to wait.
             raise ProfileError("the shared provisioner refused the boot (73); the lane is leased", EXIT_LOCKED)
         if result.returncode != 0 or len(udid) != 36:
             raise ProfileError("cannot provision the owned test simulator", EXIT_DESTINATION)
@@ -696,7 +657,6 @@ class Profiler:
         status = bounded(
             self.build_log, logs / "evidence",
             float(os.environ.get("TRON_PROFILE_IOS_BUILD_TIMEOUT_SECONDS", 2400)),
-            # One whole-module compile prints nothing until it finishes.
             float(os.environ.get("TRON_PROFILE_IOS_BUILD_NO_OUTPUT_SECONDS", 1500)),
             self.derived_data / "Build/Products",
             [str(ROOT / "scripts/tron-xcodebuild"), "build-for-testing", "-project", str(IOS / "TronMobile.xcodeproj"),
@@ -749,12 +709,9 @@ class Profiler:
         }
         if self.arguments.window_seconds:
             environment["TEST_RUNNER_TRON_PROFILE_WINDOW_SECONDS"] = f"{window:g}"
-        # Launch and installation dominate short scenarios; every iteration
-        # also gets its readiness and teardown allowance.
         overall = 420 + iterations * (window + 120)
         recorder: TraceRecorder | None = None
         if trace:
-            # The hosted test waits for these markers; both sides share the bounds.
             overall += TRACE_RECORDING_TIMEOUT + TRACE_STOP_TIMEOUT
             recorder = TraceRecorder(trace, self.simulator_id, run_dir / "trace-handshake",
                                      run_dir / f"{scenario}.trace", run_dir / "xctrace.log", overall)
@@ -999,19 +956,6 @@ def main(argv: list[str]) -> int:
         print(f"error: {error}", file=sys.stderr)
         return error.code
     if os.environ.get("TRON_IOS_TEST_LOCK_HELD") != "1":
-        # The same lease, and the same release, as scripts/tron-ios-test: when
-        # this run ends, on success, failure, deadline or signal, the holder
-        # shuts down the lane's simulator unless it was already booted under a
-        # keep-booted lease - and it never touches the remembered Development
-        # simulator. Profiling and tests therefore never share one simulator.
-        # The holder is exec'd, not spawned: CPython's subprocess.run kills its
-        # child with SIGKILL when a Ctrl-C raises KeyboardInterrupt, so a holder
-        # started that way is killed before it can release the simulator. As the
-        # same process, this run's signal goes to the holder, which forwards it
-        # to the command tree and releases the lane's simulator afterwards.
-        # The lane travels with the run, as in scripts/tron-ios-test: the run the
-        # holder starts re-derives the lane it leased, and the holder alone
-        # creates the lane's state directory.
         try:
             os.execv(sys.executable, [
                 sys.executable, str(LOCKER), "--lock", str(lane.state_root / "lease.lock"),
@@ -1022,8 +966,6 @@ def main(argv: list[str]) -> int:
         except OSError as error:
             print(f"error: cannot start the iOS test lease holder: {error}", file=sys.stderr)
             return EXIT_RUNNER
-    # The runner's refusal (74), from the same owner: an inherited lease that
-    # does not cover this lane would leave this run on it unleased.
     verified = run([sys.executable, str(LOCKER), "--lock", str(lane.state_root / "lease.lock"),
                     "--verify-inherited", lane.label])
     if verified.returncode != 0:
@@ -1035,8 +977,6 @@ def main(argv: list[str]) -> int:
         profiler.ensure_products()
         if arguments.self_test:
             return profiler.self_test()
-        # A failing scenario does not hide the others' measurements; the first
-        # failure's status is the command's status.
         written: list[Path] = []
         failures: list[tuple[str, ProfileError]] = []
         for name in arguments.scenario:
@@ -1046,7 +986,7 @@ def main(argv: list[str]) -> int:
                 print(f"error: {error}", file=sys.stderr)
                 failures.append((name, error))
                 if error.code >= 128:
-                    break  # interrupted: stop instead of starting the next scenario
+                    break
         if len(arguments.scenario) > 1:
             print("\nReports:")
             for directory in written:

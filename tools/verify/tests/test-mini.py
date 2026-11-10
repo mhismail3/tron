@@ -29,7 +29,6 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-# mini.py's exit for a lane that produced no result: never a test outcome (verify and the batch read it).
 NO_RESULT = 75
 SSH = r'''#!/bin/bash
 while (($#)); do
@@ -66,7 +65,6 @@ Path(output).write_text(json.dumps({'testResults': [{'name': str(ROOT / 'package
 sys.exit(3 if 'fail' in args else 0)
 '''
 
-# A stand-in Python test file: progress on stdout, unittest's summary on stderr, then where it ran.
 PROBE = r'''import os, sys
 from pathlib import Path
 print('stand-in python progress', flush=True)
@@ -100,7 +98,6 @@ class MiniGatewayLane(unittest.TestCase):
         (bin_dir / 'ssh').write_text(SSH)
         (bin_dir / 'ssh').chmod(0o755)
         subprocess.run(['git', 'init', '-q', '--bare', str(self.mini / 'tron-ci/tron.git')], check=True)
-        # The pinned Node, where the mini's scripts/tron-node finds it (nvm's directory).
         node = Path(subprocess.check_output([str(ROOT / 'scripts/tron-node')], text=True).strip())
         version = (ROOT / '.node-version').read_text().strip()
         (self.mini / '.nvm/versions/node').mkdir(parents=True)
@@ -148,7 +145,6 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertIn('npm ci', passed.stdout)
         checkout = (self.mini / 'tron-ci/jobs/gateway').resolve()
         returned = json.loads(report.read_text())
-        # The mini checkout path is this checkout's in what comes back; the arguments reached the lane.
         self.assertEqual(returned['testResults'][0]['name'], str(self.local.resolve() / 'packages/gateway/src/a.test.ts'))
         self.assertEqual(returned['cwd'], 'tron-ci/jobs/gateway/packages/gateway', 'the lane ran in the mini checkout')
         self.assertIn('src/a.test.ts', returned['args'])
@@ -161,7 +157,6 @@ class MiniGatewayLane(unittest.TestCase):
         self.write('README', 'next commit\n')
         self.commit('next')
         report.unlink()
-        # From the repository root: a relative output path is still the Gateway package's, as Vitest resolves it.
         failed = subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), '--reporter=json',
                                  '--outputFile.json=../../test-results/lane.json', 'src/a.test.ts', 'fail'],
                                 cwd=self.local, env=self.env, text=True, capture_output=True, timeout=300)
@@ -184,8 +179,6 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertFalse(report.exists())
 
     def test_a_python_lane_runs_its_command_at_the_exact_commit_with_one_ordered_output(self) -> None:
-        # #2397: verify's Python group, the same per-file command, run in the mini checkout. stderr comes back in order
-        # with stdout, as verify counts each file's summary after its marker.
         self.write('tools/probe.py', PROBE)
         sha = self.commit('probe')
         command = "echo '### one' && python3 tools/probe.py && echo '### two' && python3 tools/probe.py 4"
@@ -198,7 +191,6 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertEqual(self.git('rev-parse', 'HEAD', cwd=(self.mini / 'tron-ci/jobs/gateway').resolve()), sha)
 
     def test_stopping_a_python_lane_stops_every_test_process_before_the_lock_is_free(self) -> None:
-        # The per-file command is a shell chain: a stop must reach the test it is running, not only the shell (#2397 review).
         self.write('tools/hang.py', "import os, pathlib, time\npathlib.Path(os.environ['HOME'], 'python-test').write_text(str(os.getpid()))\n"
                                     "time.sleep(120)\n")
         self.commit('hanging python test')
@@ -215,7 +207,6 @@ class MiniGatewayLane(unittest.TestCase):
         runner.send_signal(signal.SIGTERM)
         output, _ = runner.communicate(timeout=60)
         self.assertEqual(runner.returncode, 143, output)
-        # Once the mini job lock is free, nothing of the job may still run in the checkout the next job cleans.
         with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
             deadline = time.time() + 60
             while True:
@@ -233,13 +224,10 @@ class MiniGatewayLane(unittest.TestCase):
             self.fail(f'the python test {pid} outlived its stopped job:\n{output}')
 
     def pool(self, *args: str) -> subprocess.CompletedProcess:
-        # The local lane is gateway.py here; its stand-in reads its working directory relative to HOME.
         return subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', *args], cwd=self.local / 'packages/gateway',
                               env={**self.env, 'HOME': str(self.temporary)}, text=True, capture_output=True, timeout=300)
 
     def test_the_pool_runs_on_the_mini_when_reachable_and_idle_and_names_this_mac_otherwise(self) -> None:
-        # #2336: the mini is the pool's default host; this Mac runs a lane only when the mini cannot,
-        # and every run names the host and why. No case skips the lane or reports a pass without one.
         report, args = self.report_args()
         mini = self.pool(*args)
         self.assertEqual(mini.returncode, 0, mini.stdout + mini.stderr)
@@ -262,11 +250,10 @@ class MiniGatewayLane(unittest.TestCase):
             here('the mini is busy with another job')
         outside = self.temporary / 'outside.config.ts'
         here(f'an argument names {outside}, outside this checkout', '--config', str(outside))
-        # A relative argument resolves against the Gateway package, as the lane reads it.
         here('an argument names ../../../outside.config.ts, outside this checkout', '--config=../../../outside.config.ts')
         here('an argument names ../../../outside.test.ts, outside this checkout', '../../../outside.test.ts')
         self.git('config', 'tron.verify.mini', 'unreachable.test')
-        here('the mini unreachable.test is unreachable: ssh: connect to host unreachable.test port 22: Connection refused', 'fail')  # a red lane here is still that lane's result
+        here('the mini unreachable.test is unreachable: ssh: connect to host unreachable.test port 22: Connection refused', 'fail')
         self.git('config', 'tron.verify.mini', 'silent.test')
         here('the mini silent.test answered no status: no output')
         self.git('config', 'tron.verify.mini', 'garbled.test')
@@ -282,8 +269,6 @@ class MiniGatewayLane(unittest.TestCase):
         here('uncommitted changes; the mini runs a commit')
 
     def test_stopping_a_pool_lane_on_this_mac_stops_the_lane_itself(self) -> None:
-        # The pool's local lane is gateway.py in the runner's own process, so a stop reaches its signal
-        # forwarding and cleanup instead of orphaning it (and the host's full-Gateway lock) (#2336 review).
         self.git('config', 'tron.verify.mini', 'unreachable.test')
         runner = subprocess.Popen(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', 'hang'], cwd=self.local / 'packages/gateway',
                                   env={**self.env, 'HOME': str(self.temporary)}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -328,14 +313,12 @@ class MiniGatewayLane(unittest.TestCase):
             capped = self.lane(*args, env={**self.env, 'TRON_MINI_JOB_WAIT_SECONDS': '2'})
             waited = time.monotonic() - started
         self.assertEqual(capped.returncode, NO_RESULT, capped.stdout + capped.stderr)
-        # The mini's reason is the last thing said, where verify and the batch read it.
         reason = capped.stderr.strip().splitlines()[-1]
         self.assertRegex(reason, r'^mini: no result: waited \d+s for the mini job lock, held by .*/other/worktree')
         self.assertEqual(self.reader().no_result_reason(capped.returncode, capped.stdout + capped.stderr), reason.removeprefix('mini: no result: '))
         self.assertGreaterEqual(waited, 2)
         self.assertNotIn('stand-in lane progress', capped.stdout)
         self.assertFalse(report.exists())
-        # Free again, the same lane runs.
         self.assertEqual(self.lane(*args, env={**self.env, 'TRON_MINI_JOB_WAIT_SECONDS': '2'}).returncode, 0)
 
     def test_stopping_a_lane_waiting_for_the_job_lock_ends_it_before_it_starts(self) -> None:
@@ -365,13 +348,11 @@ class MiniGatewayLane(unittest.TestCase):
         exited = self.lane(*args)
         self.assertEqual(exited.returncode, NO_RESULT, exited.stdout + exited.stderr)
         self.assertTrue(report.is_file(), 'the lane ran and returned its report')
-        # verify and the batch classify through the shipped reader: a lane's own 75 is a result.
         self.assertIsNone(self.reader().no_result_reason(exited.returncode, exited.stdout + exited.stderr))
 
     def test_a_push_whose_job_never_started_leaves_no_ref_after_the_next_job(self) -> None:
         report, args = self.report_args()
         repository = self.mini / 'tron-ci/tron.git'
-        # The push succeeds, then the session that would start the job drops.
         self.git('config', 'tron.verify.mini', 'nojob.test')
         abandoned = self.lane(*args)
         self.assertEqual(abandoned.returncode, NO_RESULT, abandoned.stdout + abandoned.stderr)
@@ -394,7 +375,7 @@ class MiniGatewayLane(unittest.TestCase):
     def assert_mini_job_ended(self) -> None:
         self.assertEqual((self.mini / 'lane-terminated').read_text(), 'SIGTERM')
         with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if a mini job still held it
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self.assertEqual(list((self.mini / 'tron-ci/results').iterdir()), [])
 
     def test_killing_the_local_runner_process_group_stops_the_mini_lane_and_frees_its_lock(self) -> None:
@@ -403,10 +384,8 @@ class MiniGatewayLane(unittest.TestCase):
                                   env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
         self.addCleanup(lambda: runner.poll() is None and runner.kill())
         self.wait_for_lane(runner)
-        # No local handler runs: the runner and its ssh client die together, as under a timeout's group kill.
         os.killpg(runner.pid, signal.SIGKILL)
         runner.communicate(timeout=60)
-        # Nothing local outlives the kill to wait for the mini job: it ends on its own once its input closes.
         deadline = time.time() + 60
         with open(self.mini / 'tron-ci/jobs/gateway.lock') as lock:
             while True:
@@ -423,7 +402,6 @@ class MiniGatewayLane(unittest.TestCase):
         runner = self.lane(*args, 'hang', background=True)
         self.addCleanup(lambda: runner.poll() is None and runner.kill())
         self.wait_for_lane(runner)
-        # A later push owns the incoming ref; the running job must not remove it.
         self.write('README', 'later push\n')
         later = self.commit('later')
         self.git('push', '-q', '--force', str(self.mini / 'tron-ci/tron.git'), f'{later}:refs/tron-jobs/incoming')

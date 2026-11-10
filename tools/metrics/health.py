@@ -27,18 +27,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ownership"))
 import metrics  # noqa: E402  (the one inventory and classification authority)
 import ownership  # noqa: E402  (the one module authority)
 
-BASELINE = "356b00a3b"  # docs/HEALTH.md "Baseline"
+BASELINE = "356b00a3b"
 DAYS = 30
 DAY = 86400
 SCORED = metrics.HAND_WRITTEN + metrics.SEPARATE
 FIX = re.compile(r"\bfix(e[sd])?\b|^revert\b", re.IGNORECASE)
 ISSUE_REF = re.compile(r"#(\d{3,5})")
-# An issue about a red verdict rather than a feature (docs/HEALTH.md O4).
 RED = re.compile(r"\bred\b|\bflak|\bfails? on (main|base)\b|\btimed? ?out\b|\btimeouts?\b|\bunder load\b|"
                  r"\bload-sensitive\b|\bintermittent|\bnondetermin|\bspurious|\bstall(s|ed)?\b", re.IGNORECASE)
-BROAD = 40  # a commit touching more files is a sweep; it says nothing about coupling
+BROAD = 40
 HASH_PIN = re.compile(rb"\b[0-9a-f]{64}\b|promptHash")
-# A maintainer message that asks for status instead of deciding something (docs/HEALTH.md O2).
 CHASE = re.compile(r"\b(where|what'?s left|status|stuck|still running|why (didn|did|is|are|hasn)\w*|did you|"
                    r"what happened|any update)\b", re.IGNORECASE)
 
@@ -152,7 +150,7 @@ def measure(rev: str, days: int) -> dict:
     for _, first, second, *_ in merges:
         result = subprocess.run(["git", "-C", str(metrics.ROOT), "merge-tree", "--write-tree", "--name-only",
                                  "--no-messages", first, second], capture_output=True, text=True)
-        if result.returncode not in (0, 1):  # 0 clean, 1 conflicted, anything else is a Git error
+        if result.returncode not in (0, 1):
             raise metrics.MetricsError(f"merge-tree {first[:9]} {second[:9]}: {result.stderr.strip()}")
         if result.returncode == 1:
             conflicted.update(result.stdout.splitlines()[1:])
@@ -191,7 +189,7 @@ def github_outcomes(head: dict) -> list[str]:
     """O1 bug intake, O3 bug lead time and O4 red causes from GitHub issues (read-only `gh`)."""
     limit, issues, truncated = 1000, {}, False
     day = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d")  # noqa: E731
-    for start in range(head["end"] - head["days"] * DAY, head["end"], 7 * DAY):  # GitHub search caps each query
+    for start in range(head["end"] - head["days"] * DAY, head["end"], 7 * DAY):
         raw = subprocess.run(["gh", "issue", "list", "--state", "all", "--limit", str(limit), "--search",
                               f"created:{day(start)}..{day(min(start + 6 * DAY, head['end']))}",
                               "--json", "number,title,labels,createdAt,closedAt,stateReason"],
@@ -207,7 +205,6 @@ def github_outcomes(head: dict) -> list[str]:
     def ts(value: str) -> float:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
     hours = sorted((ts(b["closedAt"]) - ts(b["createdAt"])) / 3600 for b in bugs if b["stateReason"] == "COMPLETED")
-    # A red is real when a commit naming its issue changed production code (a lower bound: not every fix names it).
     named = defaultdict(set)
     for c in head["commits"]:
         for n in ISSUE_REF.findall(c["subject"]):
@@ -314,7 +311,7 @@ def attention(sessions: Path, head: dict) -> str:
             try:
                 entry = json.loads(raw)
             except ValueError:
-                continue  # a partially written last line
+                continue
             message = entry.get("message") or {}
             if entry.get("type") != "message" or message.get("role") != "user" or not entry.get("timestamp"):
                 continue
@@ -322,7 +319,7 @@ def attention(sessions: Path, head: dict) -> str:
             text = content if isinstance(content, str) else " ".join(
                 p.get("text", "") for p in content or [] if isinstance(p, dict))
             when = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00")).timestamp()
-            if start < when <= head["end"] and not text.lstrip().startswith(("[", "{")):  # skip injected payloads
+            if start < when <= head["end"] and not text.lstrip().startswith(("[", "{")):
                 total += 1
                 chase += bool(CHASE.search(text[:400]))
     return (f"  O2 maintainer messages to Home: {total}; {ratio(total, head['landed'])} per landed change; "
@@ -355,7 +352,7 @@ def backtest(t0: str, t1: str) -> list[str]:
              and f["lines"]}
     area = lambda p: "/".join(p.split("/")[:4 if p.startswith("packages/") else 2])  # noqa: E731
     rows = {r["path"]: r for r in file_rows(list(files.values()), commits_in(s0, end0 - DAYS * DAY, end0), area)}
-    churned = Counter()  # Nagappan & Ball's relative churn: lines added + deleted in the window / size
+    churned = Counter()
     for line in git("log", "--no-merges", "--no-renames", "--numstat", "--format=",
                     f"--since={end0 - DAYS * DAY}", s0).splitlines():
         added, deleted, path = (line.split("\t") + ["", "", ""])[:3]
@@ -450,7 +447,7 @@ def main(argv: list[str]) -> int:
         lines += [attention(args.home_sessions, head)] if args.home_sessions else []
         lines += local_evidence(head["sha"]) if args.evidence else []
         lines += [""] + backtest(args.backtest, head["sha"]) if args.backtest else []
-    except (metrics.MetricsError, ownership.GitError, OSError, ValueError) as error:  # unreadable input: exit 2
+    except (metrics.MetricsError, ownership.GitError, OSError, ValueError) as error:
         print(f"health: {error}", file=sys.stderr)
         return 2
     print("\n".join(lines))

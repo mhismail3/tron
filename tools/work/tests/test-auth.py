@@ -69,7 +69,6 @@ def run() -> None:
                     "AUTH_FIXTURE_LOG": str(log), "TRON_WORK_KEYCHAIN": str(keychain), "WORK_SESSION_ID": "fixture-session",
                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "PYTHONDONTWRITEBYTECODE": "1"})
         subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
-        # A real, isolated keychain file; the isolated HOME keeps the user's search list untouched.
         subprocess.run(["/usr/bin/security", "create-keychain", "-p", "unlock-secret", str(keychain)], check=True, env=env)
         subprocess.run(["/usr/bin/security", "unlock-keychain", "-p", "unlock-secret", str(keychain)], check=True, env=env)
 
@@ -125,22 +124,17 @@ def run() -> None:
             assert token not in text, "the pasted token is never echoed"
             return os.waitstatus_to_exitcode(status), text
 
-        # 1. Never set up: refused before any GitHub request, naming the one setup command.
         result = comment()
         evidence.append({"case": "not set up", "exit": result.returncode, "stderr": result.stderr.strip(), "gh": calls()})
         assert result.returncode == 1 and "not set up" in result.stderr and SETUP in result.stderr and calls() == [], result.stderr
 
-        # 2. Setup refuses an under-scoped token and stores nothing.
         code, text = setup("ghp_noproject")
         evidence.append({"case": "setup refuses missing scope", "exit": code, "output": text.strip()[-400:]})
         assert code == 1 and "lacks scope project" in text and stored() is None, text
 
-        # 3. Setup stores a valid token, read back the way agents read it; status names login and scopes.
         code, text = setup("ghp_full")
         evidence.append({"case": "setup stores a valid token", "exit": code, "output": text.strip()[-400:]})
         assert code == 0 and "fixture-owner" in text and stored() == "ghp_full", text
-        # 3b. A keychain locked in this shell (SSH, a detached tmux) is unlocked by `security`'s own
-        # password prompt, then the token is stored; replacing a token is the same command.
         subprocess.run(["/usr/bin/security", "lock-keychain", str(keychain)], check=True, env=env)
         code, text = setup("ghp_full", unlock="unlock-secret")
         evidence.append({"case": "setup unlocks a locked keychain", "exit": code, "output": text.strip()[-400:]})
@@ -150,7 +144,6 @@ def run() -> None:
         assert status.returncode == 0 and json.loads(status.stdout) == {"source": "keychain", "login": "fixture-owner",
             "scopes": ["admin:public_key", "project", "repo", "workflow"]}, status.stdout
 
-        # 4. Every request uses the Keychain token, even with a stale token inherited from the shell.
         result = comment({"GH_TOKEN": "ghp_revoked"})
         made = calls()
         evidence.append({"case": "keychain token wins over an inherited GH_TOKEN", "exit": result.returncode, "gh": made})
@@ -158,7 +151,6 @@ def run() -> None:
         assert [call["args"][:2] for call in made] == [["api", "--include"], ["issue", "comment"]]
         assert {call["token"] for call in made} == {"ghp_full"}
 
-        # 5-6. A revoked or under-scoped token fails at the check, before any write.
         for token, message in (("ghp_revoked", "invalid, revoked or expired"), ("ghp_noproject", "lacks scope project")):
             store(token)
             result = comment()
@@ -167,7 +159,6 @@ def run() -> None:
             assert result.returncode == 1 and message in result.stderr and SETUP in result.stderr, result.stderr
             assert [call["args"] for call in made] == [["api", "--include", "/user"]], made
 
-        # 7. A token close to expiry still works and warns once with the fix.
         store("ghp_expiring")
         result = comment()
         evidence.append({"case": "expiring token warns", "exit": result.returncode, "stderr": result.stderr.strip()})

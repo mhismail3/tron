@@ -31,8 +31,6 @@ REPO = HERE.parent
 
 
 def fixture_main(root, arguments):
-    # The driver itself has no path to the live platform: use the existing
-    # production boundary, rather than adding an environment bypass to main().
     import tron_mac_reinstall as reinstall
 
     class FixturePlatform:
@@ -51,7 +49,6 @@ def fixture_main(root, arguments):
                     raise reinstall.Stop('fixture-writer-present: offline preparation refused') from None
 
         def verify_installed(self, require_bundled=False):
-            # Host launch and supervision are deliberately outside this lock.
             reinstall.require((root / 'resumed').exists(), 'fixture-not-resumed')
             if require_bundled:
                 reinstall.require(not (root / 'home/.tron/gateway/payloads/stable').exists(),
@@ -72,7 +69,6 @@ class CheckpointPlan(unittest.TestCase):
         sys.path.insert(0, str(HERE))
         checkpoint = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(checkpoint)
-        # run-ui refuses any selector outside its owned list; read that list as bash defines it.
         harness = HERE / "ios-gateway-e2e-test"
         listed = subprocess.run(["/bin/bash", "-c", 'eval "$(sed -n "/^ui_owned_journeys=(/,/^)/p" "$1")"; '
                                  'printf "%s\\n" "${ui_owned_journeys[@]}"', "owned", str(harness)],
@@ -175,7 +171,6 @@ class ReinstallWindow(unittest.TestCase):
         old_identity = (operation / 'backups/old-app/identity.json').read_bytes()
         self.cli('--finish', error='not-verified')
         self.cli('--verify', error='wrong-installed-app')
-        # Only fixture identity data changes; no app is installed or launched.
         (self.installed / 'identity.json').write_bytes((self.candidate / 'identity.json').read_bytes())
         backup = operation / 'backups/agent/session.jsonl'
         original = backup.read_bytes()

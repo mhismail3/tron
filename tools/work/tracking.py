@@ -25,8 +25,6 @@ class TrackingError(RuntimeError):
 
 
 def _mutation_failure(error: GhError) -> str:
-    # Only owned pre-dispatch diagnostics are public-safe. Arbitrary gh replies
-    # stay opaque and may follow a commit; do not expose their response bodies.
     if isinstance(error, GhWriteRefused):
         return f"was not attempted: {error}"
     return "failed or is uncertain"
@@ -97,9 +95,7 @@ def _repository(gh: Gh) -> Tuple[str, str]:
     return owner, name
 
 
-# Title prefixes the retired issue templates added; labels carry the type and kind.
 _TEMPLATE_PREFIX = re.compile(r"^\s*\[[^\]]{1,20}\]:?\s|^\s*(Task|Bug|Feature|Epic):\s", re.IGNORECASE)
-# An issue that waits for the next failure or recurrence lives forever unless it names when to stop waiting.
 _WAITS_FOR_RECURRENCE = re.compile(
     r"next (failure|occurrence|recurrence|time it (fails|happens))|if it (recurs|reappears|happens again)"
     r"|until it (recurs|reproduces|happens again)|wait(ing)? for (it to recur|a recurrence|the next)", re.IGNORECASE)
@@ -142,7 +138,6 @@ def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path, 
     board = config["issues"]
     labels: List[str] = []
     if issue_type == "task":
-        # Every task is classified at filing: exactly one kind and at least one area.
         if not kind:
             raise TrackingError("a task needs --kind with one declared kind: label")
         if not kind.startswith(board["kindPrefix"]) or kind not in declared:
@@ -160,7 +155,6 @@ def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path, 
             raise TrackingError("epics do not take kind or area labels")
         labels = [board["epicLabel"]]
     for label in extra_labels or []:
-        # Applied atomically with creation, so a label-filtered lookup finds the issue even if a later step fails.
         if (label not in declared or label == board["epicLabel"] or label in labels
                 or label.startswith((board["kindPrefix"], board["areaPrefix"]))):
             raise TrackingError(f"{label!r} is not an additional declared label")
@@ -169,7 +163,7 @@ def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path, 
     _check_options(config, status, priority)
     _scrub(repo, config, title + "\n\n" + body, "issue title and body")
     owner, name = _repository(gh)
-    _, project = _project(gh, repo, config)  # resolved before filing, so a missing Project refuses first
+    _, project = _project(gh, repo, config)
     response = gh.rest("POST", f"repos/{owner}/{name}/issues", {"title": title, "body": body, "labels": labels})
     if not isinstance(response, dict) or not isinstance(response.get("number"), int):
         raise TrackingError("GitHub did not return the created issue number")
@@ -247,7 +241,6 @@ def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals
         updated = [label for label in current if label not in removals]
         updated.extend(label for label in additions if label not in updated)
         if "epic" not in updated:
-            # A task holds one kind; areas may repeat.
             for prefix in taxonomy_prefixes:
                 classified = [label for label in updated if label.startswith(prefix)]
                 if any(label not in declared for label in classified):
@@ -369,7 +362,6 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
     child = _issue(gh, f"{owner}/{name}", child_number)
     epic = _issue(gh, f"{owner}/{name}", epic_number)
     epic_labels = {label["name"] for label in epic.get("labels", [])}
-    # Match the canonical module identity, not an arbitrary maintenance issue.
     module_parent = False
     if "kind:maintenance" in epic_labels and epic.get("state") == "open":
         try:
@@ -390,7 +382,6 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
                 if isinstance(data, dict):
                     ids |= {own_id for own_id, *_ in directory_modules(path, data, []).values()}
         module_parent = epic.get("title") in {f"Module: {own_id}" for own_id in ids}
-    # Phase and area epics retain their links; module issues remain maintenance.
     if child_number == epic_number or not (
         config["issues"]["epicLabel"] in epic_labels or module_parent
     ):
@@ -399,7 +390,6 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
         print(f"issue #{child_number} is already a sub-issue of #{epic_number}")
         return
     gh.graphql(
-        # GitHub allows one parent; replacing it must be explicit.
         "mutation($epic: ID!, $child: ID!, $replace: Boolean!) { addSubIssue(input: "
         "{issueId: $epic, subIssueId: $child, replaceParent: $replace}) { issue { id } } }",
         epic=epic["node_id"], child=child["node_id"], replace=replace_parent,
@@ -446,8 +436,6 @@ _CLOSE_REASONS = {"completed": "completed", "not_planned": "not planned"}
 
 
 def _close_marker(reason: str, text: str) -> str:
-    # One close is identified by its reason and exact public text: a re-run of
-    # the same close finds its comment, while a new close after a reopen posts its own.
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return f"<!-- work:close reason={reason} digest={digest} -->"
 
@@ -493,7 +481,6 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
     issue = _issue(gh, repository, number)
     labels = {label["name"] for label in issue.get("labels", [])}
     if config["issues"]["epicLabel"] in labels:
-        # Read every page before any write; a finished first page is not a finished epic.
         unfinished = open_sub_issues(gh, repository, number)
         if unfinished:
             raise TrackingError(f"#{number} has unfinished sub-issues: "

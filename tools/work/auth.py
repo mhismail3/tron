@@ -29,13 +29,10 @@ def setup() -> int:
     try:
         store_keychain_token(token, account)
     except KeychainLocked:
-        # A shell outside the login GUI session (SSH, a detached tmux) sees the login keychain
-        # locked. `security` asks for the macOS login password itself; nothing here reads it.
         print("Your login keychain is locked in this shell; enter your macOS login password at the next prompt.")
         if subprocess.run([SECURITY, "unlock-keychain", *keychain_paths()]).returncode:
             raise GhError("the login keychain stayed locked; nothing changed")
         store_keychain_token(token, account)
-    # The stored item, read back the way every agent reads it, is the proof.
     stored = keychain_token()
     if stored != token:
         raise GhError("Keychain did not return the token it stored")

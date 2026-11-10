@@ -28,41 +28,26 @@ import mini  # noqa: E402  (the test-host pool's one owner)
 GATEWAY = "packages/gateway"
 RELAY = "packages/push-relay"
 MAC = "packages/mac-app"
-# A change here reaches everything above it, so it selects every lock.
 WIDENING_LAYERS = {"L0", "L1", "L2"}
 WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
-# Locks not named `*.lock.integration.test.ts`: the Pi SDK seam's behavior trace and corpus.
 NAMED_LOCKS = {f"{GATEWAY}/src/e2e/sessions/sdk-behavior-trace.integration.test.ts",
                f"{GATEWAY}/src/e2e/sessions/pi-persisted-state-corpus.integration.test.ts"}
 SKIPPABLE = ("ios", "mac", "relay")
 IOS = "packages/ios-app"
-# The UIValidation test plan's targets, which scripts/tron-ios-test builds and runs. The Gateway E2E
-# and profiling targets have their own lanes (scripts/ios-gateway-e2e-test, scripts/tron-profile ios).
 IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppUITests"}
-# UIValidation journey classes that need a fixture only their harness provides; they run in its lane.
 IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
                  "TronMacTerminalUITests": "scripts/ios-mac-terminal-journey"}
 NOT_DRIVEN = ("ios-lanes",)
-# The real-UI journeys run, by exact selector, through the harness that owns them (its
-# `ui_owned_journeys`), as `verify --batch`'s UI journey lane runs them all.
 JOURNEY_CLASS = "RealGatewayPairAndChatUITests"
 JOURNEY_HARNESS = "scripts/ios-gateway-e2e-test"
 JOURNEY_LANES = 3
 JOURNEY_LINE = re.compile(r"^Real-UI journey (\S+) completed in \d+s \(status (\d+)\); evidence: (\S+)$", re.M)
-# Estimated test seconds per iOS runner process. A shard keeps the runner's unchanged 1200 s
-# focused deadline even when every method takes twice its longest recorded time and the process
-# spends IOS_LAUNCH_SECONDS launching. A method with no record counts a third of the budget, so
-# unmeasured methods run three to a process.
 IOS_DEADLINE_SECONDS = 1200
 IOS_LAUNCH_SECONDS = 60
 IOS_SHARD_SECONDS = (IOS_DEADLINE_SECONDS - IOS_LAUNCH_SECONDS) / 2
 IOS_UNMEASURED_SECONDS = IOS_SHARD_SECONDS / 3
-# Runner logs scripts/tron-ios-test keeps for every worktree and lane (its RESULTS_ROOT), and the
-# line XCTest prints for each finished case.
 IOS_RESULTS_ROOT = Path(os.environ.get("TRON_IOS_TEST_RESULTS_DIR") or Path.home() / "Library/Developer/Tron/ios/test-runs")
 IOS_CASE_LINE = re.compile(rb"^Test Case '-\[(\w+)\.(\w+) (\w+)\]' (?:passed|failed) \((\d+(?:\.\d+)?) seconds\)", re.M)
-# An iPad-only UI test skips on the iPhone lane (`XCTSkipUnless(... == .pad ...)`), so
-# its shard runs on this worktree's iPad lane with this device type instead.
 IOS_PAD_GATE = re.compile(r"XCTSkipUnless\(\s*UIDevice\.current\.userInterfaceIdiom\s*==\s*\.pad\b")
 IOS_PAD_DEVICE_TYPE = "iPad Pro 13-inch (M5)"
 
@@ -141,7 +126,7 @@ def is_lock(path: str) -> bool:
 def is_test(path: str) -> bool:
     name = path.rsplit("/", 1)[-1]
     if "/test-fixtures/" in path:
-        return False  # recorders regenerate committed fixtures; never part of a verify run
+        return False
     if path.startswith("packages/") and path.endswith(".swift"):
         return any(part in path.split("/") for part in ("UITests", "E2ETests", "ProfilingTests", "SwiftAppUITests", "Tests")) \
             and name.endswith("Tests.swift")
@@ -163,9 +148,6 @@ def nested_files() -> tuple[set, set]:
     return tuple({f"{GATEWAY}/{entry}" for entry in listed[config]} for config in vitest_configs.LISTS)
 
 
-# Python tests that read this Mac's own state run here, never on the mini: test-core.py verifies each block's review
-# row against the reviewer's transcript in this Mac's Pi session store (tools/proof/README.md). Grow it only for
-# tests that read this Mac's own state.
 PYTHON_HERE = {"tools/proof/tests/test-core.py"}
 
 
@@ -304,7 +286,6 @@ def ios_test_methods(owner: str) -> tuple[list[str], set[str]]:
             if scope == name and member and IOS_PAD_GATE.search(line):
                 class_pad = class_pad or member in ("setUp", "setUpWithError")
                 pad.add(member)
-            # A top-level line opens a type's scope, or an unknown one; a bare attribute line does not.
             if line[:1] not in ("", " ", "\t", "}", "/", "#") and (
                     line[:1] != "@" or re.search(r"\b(?:class|struct|enum|actor|extension|protocol|func|var|let)\b", line)):
                 declared = top_level.match(line)
@@ -313,12 +294,11 @@ def ios_test_methods(owner: str) -> tuple[list[str], set[str]]:
             elif scope == name and (match := method.match(line)):
                 found += [] if match.group(1) in found else [match.group(1)]
             elif scope == name and shaped.search(line) and not hidden.search(line):
-                unplaced = True  # a test spelled in a way the reader does not select
+                unplaced = True
             elif scope is None and shaped.search(line) and not hidden.search(line):
                 unplaced = True
     if unplaced:
         return [], set()
-    # A test that calls a gated helper of its class is iPad-only too (one call level).
     helpers = [helper for helper in pad if helper not in found]
     gated = {test for test in found if class_pad or test in pad
              or any(re.search(rf"\b{re.escape(helper)}\(", bodies.get(test, "")) for helper in helpers)}
@@ -404,7 +384,6 @@ def ios_index_stale() -> str | None:
         products = swift_index.fresh_store(ROOT).parent.parent
     except swift_index.IndexError_ as error:
         return str(error)
-    # scripts/tron-ios-test run needs the products too, not only the index.
     return None if (products / "Build" / "Products").is_dir() else f"no test products in {products}"
 
 
@@ -414,7 +393,7 @@ def ios_count(output: str) -> int:
     try:
         return json.loads((Path(found[-1]) / "summary.json").read_text()).get("passedTests", 0) if found else 0
     except (OSError, ValueError):
-        return 0  # no readable summary: no evidence
+        return 0
 
 
 def ios_failures(output: str) -> list[str]:
@@ -426,8 +405,6 @@ def ios_failures(output: str) -> list[str]:
     return [f"{item.get('testIdentifierString') or item.get('testName')}: {item.get('failureText', '').splitlines()[0][:200] if item.get('failureText') else ''}"
             for item in summary.get("testFailures", [])]
 
-
-# ---------------------------------------------------------------------------- selection
 
 def declared_files(command: str, tracked: list[str]) -> set[str]:
     """Manifest commands select tracked inputs to existing runners, never a shell command."""
@@ -467,7 +444,6 @@ def declared_files(command: str, tracked: list[str]) -> set[str]:
 
 
 def changed_paths(base: str, working: bool = False) -> list[str]:
-    # Both rename endpoints matter; NUL records preserve whitespace and non-ASCII names.
     names = set()
     ranges = [[f"{base}...HEAD"]] + ([["HEAD"]] if working else [])
     for comparison in ranges:
@@ -504,14 +480,13 @@ def delta(base: str) -> dict:
     for line in git("diff", "--numstat", "-M", f"{base}..HEAD").splitlines():
         added, removed, path = line.split("\t", 2)
         if added == "-":
-            continue  # binary
+            continue
         path = re.sub(r"\{[^{}]* => ([^{}]*)\}", r"\1", path).split(" => ")[-1].replace("//", "/")
         side = counts["docs" if is_doc(path) else "tests" if is_test_code(path) else "source"]
         side[0] += int(added)
         side[1] += int(removed)
     status = git("diff", "--name-status", "-M", f"{base}..HEAD").splitlines()
     rows = [row.split("\t") for row in status]
-    # A rename into a new test path is reviewed like an addition; its source left as a deletion.
     added = [fields[-1] for fields in rows if fields[0][0] in "AR" and is_test(fields[-1])
              and not (fields[0][0] == "R" and is_test(fields[1]) and test_stem(fields[1]) == test_stem(fields[-1]))]
     deleted = [fields[1] for fields in rows if fields[0][0] in "DR" and is_test(fields[1])
@@ -523,7 +498,6 @@ def delta(base: str) -> dict:
                   and test_stem(name) == test_stem(path)]
         if owners:
             beside[path] = sorted(owners)
-    # Added source lines that name compatibility machinery, which AGENTS.md forbids.
     bridges, path = [], None
     for line in git("diff", "-U0", "-M", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", f"{base}..HEAD").splitlines():
         if line.startswith("+++ "):
@@ -556,8 +530,6 @@ def golden_readers(goldens: list[str], tests: list[str]) -> set[str]:
             arguments = re.findall(r"lockPaths\(import\.meta\.url,\s*([\w.$]+|\"[^\"]+\"|'[^']+')\s*\)", source)
             names = {argument[1:-1] for argument in arguments if argument[0] in "\"'"}
             computed = [argument for argument in arguments if argument[0] not in "\"'"]
-            # A computed name (a constant or a trace field) reads this golden when the
-            # lock spells the name as a string anywhere in its source.
             if computed and re.search(rf"['\"]{re.escape(name)}['\"]", source):
                 names.add(name)
             if name in names:
@@ -624,7 +596,6 @@ def importers(changed: list[str], tracked: list[str]) -> dict[str, set[str]]:
 
 def select(mode: str, target: str | None, base: str, modules: dict, tracked: list, paths: list | None = None) -> dict:
     """The tests a run selects; `paths` stands in for the changed paths (the mutation sampler's one file)."""
-    # A serial-runner entry naming no tracked file matches nothing, so its runner would pass silently.
     stale = sorted(set().union(*nested_files()) - set(tracked))
     if stale:
         raise VerifyError(f"serial runner config lists untracked {', '.join(stale)}; remove the entry")
@@ -644,8 +615,6 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         reasons.append(f"--all: every lock ({len(locks)} files)")
         touched, chosen = ["(all)"], set()
         declared = set(modules)
-        # Include all serial files selected by the covered diff, including changed
-        # tests run before landing: later integration can affect those cases too.
         changed = select("changed", None, base, modules, tracked)
         serial = set(changed["deferredTests"]) | (set(changed["tests"]) & nested_files()[0])
         selected |= serial
@@ -661,7 +630,6 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
         touched = sorted(modules[target]["owned"])
     else:
         touched = changed_paths(base) if paths is None else sorted(paths)
-        # A deleted documentation asset still belongs to its base owner.
         gone = [path for path in touched if path not in tracked]
         if gone:
             base_modules = ownership.check(base)[0]["modules"]
@@ -671,7 +639,6 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             reasons.append(f"{len(docs)} documentation file(s): the documentation checks cover them; they select no test")
         code = [path for path in touched if path not in docs]
         unowned = [path for path in code if path not in owner and path in tracked]
-        # A deleted or renamed-away path is owned as of the base revision.
         gone = [path for path in code if path not in tracked]
         if gone:
             base_modules = ownership.check(base)[0]["modules"]
@@ -682,8 +649,6 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             if path in owner:
                 changes.setdefault(owner[path], []).append(path)
         chosen = set(changes)
-        # A module whose change is only its own tests and goldens runs those tests and, for a golden, its
-        # locks: no other code reads a test file or a golden, so nothing depending on the module changed.
         narrow = {key for key, paths in changes.items() if all(is_test(path) or is_golden(path) for path in paths)
                   and (not any(is_golden(path) for path in paths) or any(is_lock(path) for path in modules.get(key, {"owned": []})["owned"]))}
         for key in sorted(chosen):
@@ -696,9 +661,6 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             else:
                 reasons.append(f"{key}: owns a changed path; its {len(owned)} owned test file(s)")
             selected |= set(owned)
-        # A changed source file's untyped importers in other modules run their tests too: no compiler
-        # checks the shape they read (#2364). An importing test file runs alone; importing source runs
-        # its module's owned tests, a deleted file's included. One hop: the importer's own exports did not change.
         sources = [path for key in changes if key not in narrow for path in changes[key] if not is_test(path)]
         consumers: dict[str, set[str]] = {}
         for importer, hits in importers(sources, tracked).items():
@@ -716,10 +678,6 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             selected |= set(owned)
             reasons.append(f"{key}: imports changed {', '.join(sorted(consumers[key]))}; its {len(owned)} owned test file(s)")
     if mode in ("changed", "module"):
-        # A change is gated by its own modules' tests (docs/PRINCIPLES.md P1). The one consumer
-        # added is a module whose dynamic edge names a selected one (today only the iOS UI
-        # tests' spawn edges to the hosted app): its locks are that module's rendered tests. `dependsOn` consumers'
-        # locks run in the batch.
         sources = chosen - narrow
         spawners = {key for key, module in modules.items() if key not in sources
                     and set(module.get("dynamicTargets", [])) & sources}
@@ -728,7 +686,6 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             selected |= set(spawned)
             reasons.append(f"{key}: launches a selected module; its {len(spawned)} lock file(s)")
         chosen |= spawners
-        # Risk belongs to the changed producer; the locks a full tier adds run in the next batch.
         if mode == "changed":
             for key in sorted(set(changes) - narrow):
                 module = modules.get(key)
@@ -748,8 +705,6 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             if full_reasons:
                 batch_tests |= set(locks)
                 reasons.append(f"full batch required; widened to every lock ({len(locks)} files) in batch: {', '.join(full_reasons)}")
-        # Retired owners still seed full risk above, but only live
-        # modules own verification commands that can execute now.
         declared |= (chosen - narrow) & modules.keys()
     for key in sorted(declared):
         external = set()
@@ -777,15 +732,12 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             for command in module.get("verify", []):
                 batch_tests |= declared_files(command, tracked)
     docs_only = mode == "changed" and len(docs) == len(touched)
-    # Generated doc blocks are built from Markdown, manifests and Gateway sources (tools/docs/README.md).
     doc_inputs = mode == "all" or any(is_doc(path) or path.endswith(".module.json") for path in touched)
     tier = "none" if docs_only else "full" if mode == "all" or full_reasons else "partial"
     return {"mode": mode, "base": base, "modules": sorted(chosen), "touched": len(touched), "paths": touched,
             "tier": tier, "fullReasons": full_reasons, "batchTests": sorted(batch_tests), "deferredTests": sorted(deferred), "reasons": reasons,
             "tests": sorted(selected), "docsOnly": docs_only, "docInputs": doc_inputs}
 
-
-# ---------------------------------------------------------------------------- steps
 
 class Launched:
     def __init__(self, label: str, result: dict, process: subprocess.Popen, log: Path, started: float):
@@ -795,7 +747,7 @@ class Launched:
 class Run:
     def __init__(self, sha: str, total: int):
         self.sha, self.total, self.index, self.steps = sha, total, 0, []
-        self.live: list[Launched] = []  # launched step processes not yet settled
+        self.live: list[Launched] = []
         self.logs = ROOT / "test-results" / "verify" / sha
         self.logs.mkdir(parents=True, exist_ok=True)
         self.on_update = lambda: None
@@ -804,7 +756,6 @@ class Run:
              accept=(0,)) -> dict:
         self.index += 1
         try:
-            # Inside the try: a signal held during launch arrives as it returns.
             launched = self.launch(self.index, name, command, cwd, env)
             code = launched.process.wait()
         except KeyboardInterrupt:
@@ -822,8 +773,6 @@ class Run:
                   "tests": None, "seconds": 0, "log": str(log.relative_to(ROOT))}
         self.steps.append(result)
         self.on_update()
-        # Signals wait until the process is recorded as live, so an interrupt always finds it to
-        # stop; the child starts with them unblocked, so it can be stopped.
         stopping = {signal.SIGINT, signal.SIGTERM}
         blocked = signal.pthread_sigmask(signal.SIG_BLOCK, stopping)
         try:
@@ -909,8 +858,6 @@ def comparable_steps(steps: list[dict]) -> list[dict]:
 
 
 def failure_digest(messages: list[str]) -> str:
-    # Only the checkout prefix varies between base/candidate. Preserve messages,
-    # stack locations and temporary paths: a changed failure must not be waived.
     return hashlib.sha256(json.dumps([message.replace(str(ROOT), "<repo>") for message in messages], ensure_ascii=False).encode()).hexdigest()
 
 
@@ -918,8 +865,6 @@ def gateway_failures(report: Path, output: str) -> tuple[dict[str, str], bool]:
     """Missing reports and suite/runtime errors never become an exact-case waiver."""
     try:
         data = json.loads(report.read_text())
-        # Pinned Vitest JSON omits global unhandled errors; its diagnostic is
-        # therefore also a refusal signal, never another waiver source.
         failed, suite_error, count = {}, bool(re.search(r"unhandled (?:errors?|rejection)|uncaught exception|failed suites?", output, re.I)), 0
         for suite in data["testResults"]:
             cases = [test for test in suite["assertionResults"] if test["status"] == "failed"]
@@ -967,11 +912,10 @@ def case_outcomes(report: Path) -> tuple[list[dict], bool]:
 
 def vitest_count(output_path: Path):
     def count(_output: str):
-        # A missing report counts zero, which fails the group: vitest must have written it this run.
         try:
             return json.loads(output_path.read_text()).get("numPassedTests", 0)
         except (OSError, ValueError):
-            return 0  # missing or truncated: no evidence
+            return 0
     return count
 
 
@@ -998,7 +942,7 @@ def python_count(output: str) -> int:
     for segment in output.split(FILE_MARKER)[1:]:
         ran = re.findall(r"^Ran (\d+) tests?", segment, re.M)
         if "0" in ran:
-            return 0  # an empty declared/owned suite is not hidden by a passing neighbour
+            return 0
         summaries = re.findall(r"^OK \(([^)]*)\)$", segment, re.M)
         excluded = sum(int(n) for summary in summaries for n in re.findall(r"(?:skipped|expected failures)=(\d+)", summary))
         passing = sum(int(n) for n in ran) - excluded if ran else 1
@@ -1028,7 +972,6 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
     if group in ("gateway", "gateway-nested"):
         report = logs / f"{group}-vitest.json"
         config = ["--config", "vitest.nested.config.ts"] if group == "gateway-nested" else []
-        # mini.py runs this same gateway.py lane on the mini and returns its report and exit code (README).
         runner = "mini.py" if gateway_host == "mini" else "gateway.py"
         return (["python3", str(ROOT / "tools/verify" / runner), *config, "--reporter=default", "--reporter=json",
                         f"--outputFile.json={report}", *[path[len(GATEWAY) + 1:] for path in files]],
@@ -1042,15 +985,12 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
     if group == "ios-journeys":
         return ([str(ROOT / JOURNEY_HARNESS), "run-ui", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, None)
     if group == "mac-terminal":
-        # Its own Vitest config, on this Mac: the journey needs this host's tailnet sshd (vitest.mac-terminal.config.ts).
         report = logs / f"{group}-vitest.json"
         return (["python3", str(ROOT / "tools/verify/gateway.py"), "--config", "vitest.mac-terminal.config.ts", "--reporter=default",
                  "--reporter=json", f"--outputFile.json={report}", *[path[len(GATEWAY) + 1:] for path in files]], ROOT / GATEWAY, vitest_count(report))
     if group == "mac":
-        # The Mac integration target, by test class, as `verify --batch`'s Mac integration lane runs all of it.
         return (["python3", str(ROOT / "tools/verify/mac.py"), *sorted({Path(path).stem for path in files})], ROOT, mac_count)
     if group == "relay":
-        # The relay's own Vitest (Workers pool), as `verify --batch`'s relay lane runs it.
         report = logs / f"{group}-vitest.json"
         return (node + ["npm", "test", "--", "--reporter=default", "--reporter=json", f"--outputFile.json={report}",
                         *[path[len(RELAY) + 1:] for path in files]], ROOT / RELAY, vitest_count(report))
@@ -1083,7 +1023,7 @@ def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: l
     run.index += len(shards)
     queue = sorted(range(len(shards)), key=lambda index: -shards[index].seconds)
     order = {lane: position for position, lane in enumerate(phone_lanes)}
-    refused: set[str | None] = set()  # lanes refused a slot since their last admitted shard, tried last
+    refused: set[str | None] = set()
     rank = lambda name: (name in refused, order.get(name, 0))  # noqa: E731
     free: dict[bool, list[str | None]] = {False: list(phone_lanes), True: [ios_pad_lane()]}
     limit = len(phone_lanes)
@@ -1126,7 +1066,6 @@ def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: l
                 free[shard.pad].sort(key=rank)
                 result = run.settle(launched, code, ios_count, (0,))
                 if code == 73:
-                    # Admission refused: this shard and the rest wait for the batch, never pass.
                     result.update(status="deferred", deferredTests=files)
                     deferred = True
                     continue
@@ -1139,7 +1078,6 @@ def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: l
                     result["status"] = "failed"
                     failures.append((index, f"{labels[index]} ran zero passing tests: an empty group is not evidence"))
                 elif all(owner.count("/") == 2 for owner in shard) and result["tests"] != len(shard):
-                    # A method selector that matches nothing passes silently; every named test must run.
                     result["status"] = "failed"
                     failures.append((index, f"{labels[index]} passed {result['tests']} of its {len(shard)} named test(s)"))
     except KeyboardInterrupt:
@@ -1148,7 +1086,6 @@ def run_ios_shards(run: Run, shards: list[IosShard], labels: list[str], files: l
     for index in sorted(queue):
         run.skipped(labels[index], "iOS acquisition deferred to batch", index=base + index + 1)
         run.steps[-1].update(status="deferred", deferredTests=files)
-    # Report the shards in plan order, whichever lane finished first.
     shard_steps = sorted((step for step in run.steps if step["name"] in labels), key=lambda step: labels.index(step["name"]))
     run.steps[:] = [step for step in run.steps if step["name"] not in labels] + shard_steps
     run.on_update()
@@ -1172,7 +1109,6 @@ def main(argv: list[str]) -> int:
                         help="where the Gateway Vitest and Python test lanes run: the test-host pool (the Mac mini when reachable and idle, "
                              "else this Mac), this Mac, or the mini (tools/verify/mini.py)")
     args = parser.parse_args(argv)
-    # Recorded goldens must land in this checkout, so recording runs here.
     gateway_host = "local" if args.update_locks else args.gateway_host
     gateway_reason = "--update-locks records goldens here" if args.update_locks else f"--gateway-host {gateway_host}"
     skip = {item for item in args.skip.split(",") if item}
@@ -1184,7 +1120,7 @@ def main(argv: list[str]) -> int:
             raise VerifyError("the worktree has uncommitted or untracked changes; verify reads the committed state, commit first")
         sha = git("rev-parse", "HEAD").strip()
         base = git("merge-base", args.base, "HEAD").strip() if name == "changed" else git("rev-parse", "--verify", args.base).strip()
-        result, _ = ownership.check()  # violations fail the ownership step below
+        result, _ = ownership.check()
         modules = result["modules"]
         paths = changed_paths(base, working=True) if args.plan and name == "changed" else None
         selection = select(name, args.module or args.update_locks, base, modules, result["tracked"], paths=paths)
@@ -1198,7 +1134,6 @@ def main(argv: list[str]) -> int:
     try:
         for path in selection["tests"]:
             groups.setdefault(runner_of(path, nested, mac_terminal), []).append(path)
-        # Selectors are needed only by a run that drives the iOS group (#1522).
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
         shards = ios_shards(selectors, ios_method_seconds() if selectors else {})
         journeys = journey_selectors(groups.get("ios-journeys", [])) if "ios" not in skip else []
@@ -1206,8 +1141,6 @@ def main(argv: list[str]) -> int:
         print(f"verify: {error}", file=sys.stderr)
         return 2
     skipped_group = lambda group: group.split("-")[0] in skip  # noqa: E731  (--skip ios covers ios-lanes)
-    # The iOS lane: a fresh test build of this commit (reused when its stamp matches), the index-store
-    # reference check on it, and the selected UIValidation tests on those same products.
     ios_lane = "ios" not in skip and ((name == "all" and any(key.startswith("ios-app/") for key in modules)) or "ios" in groups or (
         name == "changed" and any(key.startswith("ios-app/") for key in selection["modules"])))
     gateway_touched = (name == "all" and any(key.startswith("gateway/") for key in modules)) or any(key.startswith("gateway/") for key in selection["modules"]) \
@@ -1249,8 +1182,6 @@ def main(argv: list[str]) -> int:
     ios_test = str(ROOT / "scripts/tron-ios-test")
     ios_policy = [str(ROOT / "packages/ios-app/scripts/test-source-policy.sh")]
     node = [str(ROOT / "scripts/tron-node"), "exec"]
-    # A baseline has no trusted green predecessor: unchanged bytes can already
-    # be stale. Keep diff-scoped generation only for actual changed selections.
     baseline_docs = name == "all" or (name == "changed" and not selection["paths"])
     checks = [
         ("ownership", [tron, "ownership"], {}),
@@ -1291,15 +1222,10 @@ def main(argv: list[str]) -> int:
         print(json.dumps({"selection": selection, "delta": change, "groups": groups, "steps": plan_steps, "commands": commands,
                           "gatewayHost": {"host": gateway_host, "reason": gateway_reason},
                           "deferredCommands": deferred_commands,
-                          # Planned iOS commands are each shard's form when it runs alone; beside others in
-                          # flight a shard runs on another of these lanes with --host-slot-wait-seconds 0.
                           "iosLanes": [lane or "(this worktree's lane)" for lane in ios_phone_lanes()] + [ios_pad_lane()] if "ios" in groups and "ios" not in skip else [],
                           "batchCommand": [tron, "verify", "--batch"] if selection["tier"] == "full" else None}, indent=2))
         return 0
 
-    # Worktree creation deliberately does not install dependencies. Refuse before
-    # any checks (including generated docs) can use an absent/stale install or PATH tsc.
-    # A checkout without a Gateway lockfile (a verify fixture) has no install to compare.
     runs_tests = any(group not in NOT_DRIVEN and not skipped_group(group) for group in groups) or bool(selection["deferredTests"])
     if gateway_touched or runs_tests:
         try:
@@ -1336,7 +1262,6 @@ def main(argv: list[str]) -> int:
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
                   "selection": selection, "delta": change, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
                   "gatewayHostReason": gateway_reason,
-                  # A selection, even --all, is not the complete post-land batch.
                   "checkpointEligible": False,
                   "passingTests": sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))}
         temporary = report_path.with_suffix(".tmp")
@@ -1361,8 +1286,6 @@ def main(argv: list[str]) -> int:
                 cwd = ROOT if label == "layers gateway" else ROOT / GATEWAY
                 if run.step(label, command, cwd=cwd)["status"] == "failed":
                     return finish("failed", f"{label} failed")
-        # The iOS reference check reads the index of this commit's own test build (#1459). The iOS
-        # lane builds it when the stamp is stale; a selection without iOS reports it skipped, never passed.
         stale = ios_index_stale()
         ios_deferred = False
         if ios_lane:
@@ -1407,7 +1330,6 @@ def main(argv: list[str]) -> int:
                     continue
                 env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
                 failed_shards, ios_deferred = run_ios_shards(run, shards, labels, files, name != "all", env, ios_phone_lanes())
-                # Every admitted shard runs, so one red cannot hide another selected test's outcome.
                 if failed_shards:
                     return finish("failed", "; ".join(failed_shards))
                 continue
@@ -1431,7 +1353,6 @@ def main(argv: list[str]) -> int:
             env = {**update, "TRON_VERIFY_COMMIT": sha} if on_mini else update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
             if on_mini and (reason := mini.no_result_reason(result["exit"], (ROOT / result["log"]).read_text(errors="replace"))):
-                # Not a test outcome, so the run is incomplete, not failed.
                 result.update(status="no result", reason=reason)
                 return finish("incomplete", f"{label}: the mini gave no result: {reason}")
             if group in ('gateway', 'gateway-nested'):

@@ -16,17 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-# Agent shells can inherit a PATH without Homebrew; these are gh's standard
-# install locations, checked only after WORK_GH and PATH.
 _FALLBACKS = ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
 AUDIT_MAX_BYTES = 16 * 1024 * 1024
 _AUDIT_RESERVE_BYTES = 128
 
 
-# Agents reach GitHub with one dedicated classic token kept in the login Keychain, never
-# through the maintainer's interactive `gh auth` state, which a re-login can swap or narrow
-# for every agent at once (#1168). Classic, because user-owned Projects are unreachable from
-# fine-grained tokens and GitHub Apps.
 KEYCHAIN_SERVICE = "tron-work-github"
 REQUIRED_SCOPES = ("repo", "project", "workflow")
 EXPIRY_WARNING_SECONDS = 14 * 24 * 3600
@@ -73,8 +67,6 @@ def _audit_directory(cwd: Path) -> Path:
 
 def _write_kind(args: tuple[str, ...]) -> Optional[str]:
     if len(args) >= 2 and args[:2] == ("issue", "close") and "--comment" in args:
-        # gh combines comment creation and closure; one sub-write may commit
-        # even when the combined command reports a later failure.
         return "issue.close.compound"
     if len(args) >= 2 and args[0] in {"issue", "pr", "project", "label", "release", "repo"}:
         verbs = {
@@ -99,13 +91,8 @@ def _write_kind(args: tuple[str, ...]) -> Optional[str]:
 
 
 def _failed_status(completed: subprocess.CompletedProcess, operation: str) -> str:
-    # Compound calls and GraphQL mutations can commit before a later field
-    # fails, even when non-null propagation leaves data null. Error text
-    # (including HTTP-looking text) cannot prove that no write applied (#1299).
     if ".compound" in operation or operation == "graphql.mutation":
         return "uncertain"
-    # A single request explicitly rejected with HTTP 4xx is a known failure.
-    # Transport and opaque errors may follow a server commit.
     text = (completed.stderr or "") + "\n" + (completed.stdout or "")
     if re.search(r"\bHTTP\s+4\d\d\b", text, re.I):
         return "failed"
@@ -113,7 +100,6 @@ def _failed_status(completed: subprocess.CompletedProcess, operation: str) -> st
 
 
 def keychain_paths() -> list[str]:
-    # An explicit keychain file instead of the login search list (an isolated fixture keychain).
     explicit = os.environ.get("TRON_WORK_KEYCHAIN")
     return [explicit] if explicit else []
 
@@ -125,7 +111,7 @@ def keychain_token() -> Optional[str]:
                                capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise GhError(f"cannot read the agent GitHub token from Keychain: {error}") from error
-    if found.returncode == 44:  # errSecItemNotFound
+    if found.returncode == 44:
         return None
     if found.returncode:
         raise GhError(f"cannot read the agent GitHub token from Keychain ({found.stderr.strip() or found.returncode}); "
@@ -140,7 +126,6 @@ def store_keychain_token(token: str, account: str) -> None:
     keychain = " ".join(f'"{path}"' for path in keychain_paths())
     command = f'add-generic-password -U -s {KEYCHAIN_SERVICE} -a {account} -l "Tron agent GitHub access" -w {token} {keychain}\n'
     stored = subprocess.run([SECURITY, "-i"], input=command, capture_output=True, text=True, timeout=30)
-    # errSecInteractionNotAllowed outside the GUI session; an authorization refusal for a locked file keychain.
     if re.search(r"returned -(25308|60008)\b", stored.stderr):
         raise KeychainLocked("the keychain is locked in this shell session")
     if stored.returncode or stored.stderr.strip():
@@ -197,7 +182,6 @@ class Gh:
         self.cwd = cwd
         self._audit_dir: Optional[Path] = None
         self.env: Optional[dict] = None
-        # WORK_GH substitutes the whole CLI (a fixture); the substitute owns its credentials.
         if not os.environ.get("WORK_GH"):
             token = keychain_token()
             if not token:
@@ -219,7 +203,6 @@ class Gh:
     def taxonomy_labels_lock(self):
         """Serialize taxonomy read-modify-writes across linked worktrees."""
         audit_path, _ = self._audit_location()
-        # One fixed lock avoids a persistent per-issue lock-file registry.
         lock_path = audit_path.with_name("issue-label-taxonomy.lock")
         fd = self._open_private(lock_path, os.O_CREAT | os.O_RDWR)
         try:
@@ -342,8 +325,6 @@ class Gh:
         operation = "graphql.mutation" if re.search(r"\bmutation\b", query) else None
         completed = self._exec("api", "graphql", "--input", "-", stdin=body,
                                operation_override=operation)
-        # gh exits non-zero whenever the response carries errors, but still
-        # prints the response; anything unparseable is a transport failure.
         try:
             response = json.loads(completed.stdout)
         except json.JSONDecodeError:
@@ -365,6 +346,5 @@ class Gh:
         return json.loads(output) if output.strip() else None
 
     def rest_pages(self, path: str) -> list:
-        # --slurp wraps every page in one outer array.
         pages = json.loads(self.run("api", "--paginate", "--slurp", path))
         return [item for page in pages for item in page]

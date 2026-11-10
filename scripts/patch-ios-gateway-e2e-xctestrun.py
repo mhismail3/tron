@@ -17,9 +17,6 @@ import tempfile
 from pathlib import Path
 
 MAX_XCTESTRUN_BYTES = 16 * 1024 * 1024
-# Blueprint name to whether that target is the XCUITest bundle. Xcode writes
-# `IsUITestBundle = true` on a UI-test target and omits the key on a hosted
-# XCTest target (#497), so a hosted target is one whose key is anything but true.
 TARGETS = {
     "TronMobileE2ETests": False,
     "TronMobileUITests": True,

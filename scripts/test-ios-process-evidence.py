@@ -17,8 +17,6 @@ PROCESS = ROOT / "scripts/ios-test-process.py"
 
 class TimeoutEvidenceTests(unittest.TestCase):
     def capture(self, foreign_name: str | None = None, padding: int = 0) -> dict:
-        # Only these two fixture processes may reach system sample. The ps
-        # executable is synthetic, so unrelated real host PIDs are never read.
         with tempfile.TemporaryDirectory(prefix="tron-process-evidence-") as temporary:
             root = Path(temporary)
             binary = root / "bin"
