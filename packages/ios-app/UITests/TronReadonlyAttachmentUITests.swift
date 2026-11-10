@@ -2,7 +2,6 @@ import XCTest
 import UIKit
 
 final class TronReadonlyAttachmentUITests: XCTestCase {
-    /// Shared photo chrome in both appearances and at the largest text size.
     @MainActor func testPhotoChromeForVisualReview() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
@@ -22,8 +21,6 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         }
     }
 
-    /// Every photo chip of one sent message opens the preview of its own photo,
-    /// inside a chat route's presentation surface as in production (#1652).
     @MainActor func testEveryPhotoChipOpensItsOwnPreview() {
         continueAfterFailure = false
         let app = launch("multi-image"); defer { app.terminate() }
@@ -32,8 +29,6 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(app, "1652-photo-chip-row")
         let ordered = chips.allElementsBoundByIndex.sorted { $0.frame.minX < $1.frame.minX }
         XCTAssertEqual(ordered.count, 5)
-        // The last chip first: once any chip of the row has presented, every
-        // other chip must still present its own photo.
         for index in [4, 0, 1, 2, 3] {
             let chip = ordered[index]
             XCTAssertTrue(chip.isHittable, "Chip \(index) is reachable: \(chip.frame)")
@@ -47,14 +42,10 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         }
     }
 
-    /// Every pending composer chip above the input bar opens the preview of its
-    /// own photo, whichever sibling presented before it (#1656).
     @MainActor func testEveryPendingComposerChipOpensItsOwnPreview() {
         continueAfterFailure = false
         let app = launch("pending-multi"); defer { app.terminate() }
         let probe = app.staticTexts["fixture.preview-native"]
-        // Last first: a sibling that already presented publishes after the
-        // first chip, so the first and middle chips must still win their taps.
         for index in [2, 0, 1] {
             let chip = app.buttons["Preview pending-\(index).png"]
             XCTAssertTrue(chip.waitForExistence(timeout: 15), app.debugDescription)
@@ -68,8 +59,6 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         }
     }
 
-    /// The fitted, unzoomed photo opens below the sheet's title row with the
-    /// shared `TronSpacing.section` gap instead of underlapping the title or Done.
     @MainActor func testFittedPhotoClearsSheetTitleRow() {
         continueAfterFailure = false
         let app = launch("image"); defer { app.terminate() }
@@ -80,14 +69,10 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         guard let titleRow else { return XCTFail("The sheet title row hosts Close: \(app.debugDescription)") }
         let detail = "image \(image.frame) title row \(titleRow.frame) close \(close.frame)"
         keepScreenshot(app, "1481-fitted-photo-clearance")
-        // The layout gap is measured from the bar's safe-area inset, which ends
-        // above its accessibility frame; assert the user-visible outcome.
         XCTAssertGreaterThanOrEqual(image.frame.minY, titleRow.frame.maxY, "No overlap with the title row: \(detail)")
         XCTAssertGreaterThanOrEqual(image.frame.minY - close.frame.maxY, 16, "Section gap below Done: \(detail)")
     }
 
-    /// Both actual pending-chip branches use the shared native photo owner:
-    /// full local preparation and thumbnail-only restored metadata.
     @MainActor func testLocalPendingAndDecodedPhotoPreviewZoomAndClose() {
         continueAfterFailure = false
         for scenario in ["pending-local", "decoded-local"] {
@@ -147,8 +132,6 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepEvidence(app, name: "348-readonly-file-after")
     }
 
-    /// A small encoded PNG can exceed the decoded preview budget at 16 bits.
-    /// Exercise the actual display sheet, not a standalone decoder assertion.
     @MainActor func testHighDepthDisplayImageOpensAndReopensInBothAppearances() {
         for mode in ["light", "dark"] {
             let app = launch("display-image-16bit-\(mode)")
@@ -189,7 +172,6 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let app = launch("display-image"); defer { app.terminate() }
         let button = app.buttons["Open Orientation Image photo preview"]
         XCTAssertTrue(button.waitForExistence(timeout: 15))
-        // The lone inline image is the same thumbnail component grouped displays use.
         XCTAssertEqual(button.identifier, "display-inline-thumbnail")
         XCTAssertGreaterThanOrEqual(button.frame.width, 44, "The actual thumbnail remains an accessible tap target")
         keepScreenshot(app, "998-inline-display-thumbnail")
@@ -425,8 +407,6 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             }
             return color
         }
-        // The generated clip is cyan on the left and magenta on the right. The
-        // matched pair sits in the top band, where title-blur underlap occurred.
         let delta = max(fittedSide * 0.01, 1)
         guard let left = sample(viewport.midX - delta), let right = sample(viewport.midX + delta) else {
             XCTFail("\(scenario): video edge samples are outside the captured viewport", file: file, line: line)

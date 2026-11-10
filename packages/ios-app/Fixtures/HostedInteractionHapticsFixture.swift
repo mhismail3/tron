@@ -1,8 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
 
-/// Real shared interaction controls, not buttons that invoke the haptic seam.
-/// Changing a binding externally proves that restoration is not user intent.
 struct HostedInteractionHapticsFixture: View {
     @State private var activity = PresentationActivityCoordinator()
     @State private var enabled = false

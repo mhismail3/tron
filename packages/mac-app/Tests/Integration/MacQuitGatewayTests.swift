@@ -3,9 +3,6 @@ import Foundation
 import Testing
 @testable import TronMac
 
-/// The signed built Mac owner talks to its signed bundled Gateway, supervised by
-/// a disposable launchd job with the production SuccessfulExit=false policy.
-/// Nothing addresses the installed service, an existing Gateway, or live stores.
 @Suite("Mac Quit with a real supervised Gateway", .serialized)
 struct MacQuitGatewayTests {
     enum Scenario: String, CaseIterable {
@@ -88,8 +85,6 @@ struct MacQuitGatewayTests {
             },
             serviceEnabled: { fixture.jobEnabled },
             shutdownCompleted: { pid, drainID in
-                // Read the real receipt. Corruption controls happen in the
-                // exit preload, before this process can observe completion.
                 await MacQuitCoordinator.hasCompletedShutdown(pid: pid, drainID: drainID, receiptURL: fixture.receipt)
             },
             readDrain: { try await GatewayStopClient.drain(host: "127.0.0.1", port: port, token: token) },
@@ -112,14 +107,10 @@ struct MacQuitGatewayTests {
             catch { result = .failure(error) }
         }
         if scenario == .blockedExit {
-            // UI/runner cancellation cannot abandon an accepted stop or its
-            // launchd retirement. Duplicate callers still join this same owner.
             try await Task.sleep(for: .seconds(2))
             quit.cancel()
         }
         if scenario == .acceptedWork {
-            // Longer than BOTH the exit grace and launchd's shipped 20s signal
-            // budget: a real held model request must never authorize bootout.
             try await Task.sleep(for: .seconds(22))
             #expect(result == nil, "a reachable accepted-work drain must not have a wall-clock cutoff")
             #expect(fixture.isRunning)
@@ -130,7 +121,6 @@ struct MacQuitGatewayTests {
                 let drain = try await GatewayStopClient.drain(host: "127.0.0.1", port: port, token: token)
                 #expect(drain.phase == "waiting")
             } catch {
-                // The 2 s drain read shares the create's `.timeout` text: name which call failed.
                 Issue.record("gateway.drain.status during the held work failed after \(ContinuousClock.now - asked): \(error)")
                 throw error
             }
@@ -146,8 +136,6 @@ struct MacQuitGatewayTests {
         let shutdownRecorded = fixture.logContains(event: "gateway.stopped")
         if observed == nil { fixture.stop() }
         await quit.value
-        // Successful duplicate callers join the same Quit, not another outcome.
-        // Read immediately: the owner must flush before permitting app termination.
         if case .success = observed { try await coordinator.quit() }
         let commandID = try #require(stopCommandID)
         let macLog = TronPaths.tronHome.appendingPathComponent("logs/mac.jsonl")
@@ -192,8 +180,6 @@ struct MacQuitGatewayTests {
             #expect(runtime?.pid == nil)
             #expect((runtime == nil) == (scenario == .blockedExit), "normal exit 0 must leave its job registered")
         }
-        // Observe the actual supervisor after its restart throttle. A signal
-        // escalation or unsuccessful normal exit would start a second Gateway.
         try await Task.sleep(for: .seconds(2))
         #expect(fixture.launchCount == 1, "intentional stop must not trigger launchd relaunch")
         if scenario == .blockedExit {
@@ -202,8 +188,6 @@ struct MacQuitGatewayTests {
             #expect(!fixture.logContains(event: "gateway.exit-stalled"), "exit 0 must not install a SIGKILL watcher")
         }
         if scenario.blocksExit && scenario != .blockedExit {
-            // Let Node's held exit finish with 0; leave the supervisor job
-            // registered so Retry exercises the real stopped-but-enabled case.
             try Data().write(to: fixture.root.appendingPathComponent("release-exit"))
             let exitDeadline = ContinuousClock.now.advanced(by: .seconds(5))
             while fixture.isRunning && ContinuousClock.now < exitDeadline {
@@ -368,10 +352,6 @@ private final class QuitGatewayFixture: @unchecked Sendable {
     }
 
     func startAcceptedWork() async throws {
-        // A fresh home's first session joins the Gateway's post-serve transform of
-        // the managed subagent closure: seconds of CPU, many more under host load.
-        // Start once the Gateway logs that step, so the RPC deadline bounds only
-        // this session's create and prompt.
         try await waitUntilLogged(event: "gateway.startup-step", step: "subagent-transforms")
         var method = "session.create"
         let started = ContinuousClock.now
@@ -381,7 +361,6 @@ private final class QuitGatewayFixture: @unchecked Sendable {
             method = "session.prompt"
             _ = try await rpc(method, ["commandId": UUID().uuidString, "sessionId": sessionID, "text": "Wait for the fixture."])
         } catch {
-            // The fixture's Gateway log goes with its root: name where the time went first.
             let timing = ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n").compactMap { line -> String? in
                 guard let record = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                       ["gateway.startup-step", "runtime.loaded", "rpc.completed"].contains(record["event"] as? String ?? "") else { return nil }
@@ -440,8 +419,6 @@ private final class QuitGatewayFixture: @unchecked Sendable {
     func didBootout() { bootstrapped = false }
 
     func stop() {
-        // Retire only this randomly named fixture through its supervisor. Its
-        // shipped ExitTimeOut owns cleanup; never signal a possibly reused PID.
         if bootstrapped {
             do { try launchctl(["bootout", service]); bootstrapped = false }
             catch { Issue.record("fixture supervisor cleanup failed: \(error)"); return }

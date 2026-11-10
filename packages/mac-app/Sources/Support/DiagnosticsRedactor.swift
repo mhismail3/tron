@@ -1,15 +1,8 @@
 import Foundation
 
-/// Masks known credential fields and local paths in exported feedback text,
-/// retaining surrounding diagnostics. This is not a general secret detector.
 struct DiagnosticsRedactor {
     func redactMessage(_ input: String) -> String {
-        // URL userinfo is a credential in the same position a key/value pair
-        // would occupy, so it is masked before the credential and path passes
-        // could consume part of the URL instead.
         let urls = Self.redactURLUserinfo(input)
-        // Mask complete quoted values first, before a nested Bearer run could
-        // replace part of their value and change the reported source length.
         let credentials = Self.redactQuotedCredentials(urls)
         let bearers = Self.redactBearerRuns(credentials)
         let fields = Self.redactUnquotedCredentials(bearers)
@@ -20,24 +13,15 @@ struct DiagnosticsRedactor {
         )
     }
 
-    // RFC 3986 userinfo: everything between the scheme's `//` and the host's
-    // separator `@`. The class stops at `/` so a plain text address with no
-    // scheme cannot be read as userinfo and the host, port, path and query are
-    // left to the other passes.
     private static let urlUserinfoRegex = try! NSRegularExpression(
         pattern: #"\b([A-Za-z][A-Za-z0-9+.\-]*)://([^\s/@]+)@"#
     )
 
-    // A missing token at line end must not consume the next diagnostic line.
     private static let bearerRegex = try! NSRegularExpression(
         pattern: #"\bBearer\h+([^\s,;]+)"#,
         options: [.caseInsensitive]
     )
 
-    // JSON and Swift descriptions share quoted-value syntax. Consume escaped
-    // quotes/backslashes as units; length heuristics or stopping at an escaped
-    // quote can expose secrets. A bounded Gateway log can end mid-value, so an
-    // unterminated value is masked through its line end, never the next record.
     private static let quotedCredentialRegex = try! NSRegularExpression(
         pattern: #"(?<![\w"])("?)(token|authorization|bearer|access[-_ ]?token|api[-_ ]?key|refresh[-_ ]?token|clientSecret|authorizationCode|authCode|oauthCode|password|secret|code)\1\s*:\s*"((?:\\[^\r\n]|[^"\\\r\n])*(?:\\(?=\r?$))?)(?:"|(?=\r?$))"#,
         options: [.caseInsensitive, .anchorsMatchLines]

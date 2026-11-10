@@ -1,9 +1,6 @@
 import Foundation
 import TronNativeCaptureHost
 
-/// A launchd-demand-launched stand-in for the native helper's wrapper service.
-/// It serves only retirement, through the production retirement owner, and
-/// really exits the process when that owner terminates it.
 final class ProbeService: NSObject, NativeHostPermissionService {
     private let retirement = NativeHostServiceRetirement(captures: NativeCaptureSlot(), retireAutomation: {}) { exit(0) }
     func probePermissions(withReply reply: @escaping @Sendable ([String: String]) -> Void) { reply([:]) }

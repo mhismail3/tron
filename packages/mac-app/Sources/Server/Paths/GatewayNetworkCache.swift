@@ -2,14 +2,11 @@ import CoreFoundation
 import Darwin
 import Foundation
 
-/// Disposable wrapper presentation cache. Agent settings remain owned by the
-/// embedded runtime under its canonical agent directory.
 enum GatewayNetworkCacheReader {
     static let maximumBytes = 64 * 1024
     private static let expectedKeys: Set<String> = ["version", "tailscaleIP", "updatedAt"]
 
     static func tailscaleIP(at path: URL) -> String? {
-        // JSONSerialization bridges true to Int(1), but it is not schema version 1.
         guard let data = OwnerOnlyJSONReader.readData(at: path, maximumBytes: maximumBytes),
               let object = try? JSONSerialization.jsonObject(with: data),
               let document = object as? [String: Any],
@@ -58,8 +55,6 @@ enum GatewayNetworkCacheWriter {
         guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         do {
             do {
-                // The descriptor is closed exactly once, before publication. A
-                // second close could hit a number another thread has reused.
                 defer { _ = close(descriptor) }
                 try data.withUnsafeBytes { bytes in
                     var offset = 0

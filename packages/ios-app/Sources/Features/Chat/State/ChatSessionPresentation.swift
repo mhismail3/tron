@@ -35,9 +35,6 @@ enum ChatOpeningSurfacePolicy {
 }
 
 enum ChatOpeningAttemptPolicy {
-    /// Bounds the complete open → synchronize → local projection → ready-frame
-    /// transaction. Inner Gateway and physical-tail operations retain their
-    /// narrower deadlines; this is the final fail-closed presentation boundary.
     static let deadline: Duration = .seconds(30)
     static let timeoutMessage = "Opening took too long. The session is safe; retry this conversation."
     static let unsettledMessage = "The conversation changed while opening. Please retry."
@@ -82,9 +79,6 @@ enum ChatSessionVisibilityPolicy {
     }
 }
 
-/// Disposable, session-scoped presentation state. Canonical session facts stay
-/// in AppModel and the transcript store; this owner is abandoned on route
-/// retirement and rebuilt from canonical snapshot plus bounded draft facts.
 @MainActor
 @Observable
 final class ChatSessionPresentation {
@@ -105,8 +99,6 @@ final class ChatSessionPresentation {
     var automaticallyPresentedDisplayIDs = BoundedChatIdentityLedger()
     var suppressedInteractionScope: ExtensionInteractionScope?
     var requestedInteractionScope: ExtensionInteractionScope?
-    /// Turns true only after the mounted transcript has crossed its first ready
-    /// frame. A pending interaction must never cover and cancel session opening.
     var permitsExtensionInteractionPresentation = false
 
     var mutatingQueuedMessageIDs: Set<String> = []
@@ -129,9 +121,6 @@ final class ChatSessionPresentation {
     private(set) var openingTaskRevision = 0
     private var openingTaskGeneration = 0
     private var cancelledOpeningTaskGeneration: Int?
-    /// The opening generation whose current first-ready frame was validated.
-    /// From that frame its task only drains; it owns no work that cover,
-    /// background or deadline cancellation could interrupt or resume (#935).
     @ObservationIgnored private var readyOpeningTaskGeneration: Int?
 
     init(sessionID: String) {
@@ -151,8 +140,6 @@ final class ChatSessionPresentation {
         case .showSheet:
             if displaySheet?.id != route.id { displaySheet = route }
         case .showFloating:
-            // Selecting another action in this same browser retains its viewer,
-            // drag position and request owner instead of reopening the lease.
             if floatingDisplay?.id != route.id { floatingDisplay = route }
         }
     }
@@ -181,16 +168,10 @@ final class ChatSessionPresentation {
         route.display.artifact != nil && [.image, .markdown, .text, .code, .pdf, .document].contains(route.display.kind)
     }
 
-    /// Backgrounding retires only disposable UI work. An admitted composer
-    /// transport is owned by ComposerDraftCoordinator and intentionally remains
-    /// alive so an accepted prompt can reconcile after reconnect.
     var needsOpeningResume: Bool { shouldBeginOpening(retryingFailure: false) }
 
     func shouldBeginOpening(retryingFailure: Bool) -> Bool {
         guard openingTask == nil else { return false }
-        // A failed attempt owns an explicit Retry action. Automatic task-revision
-        // wakeups must not retry it, but a user's Retry survives the old lease's
-        // drain rather than requiring a second tap.
         if ChatOpeningAttemptPolicy.isFailed(open.phase) { return retryingFailure }
         return open.phase != .ready || modelPresentationGeneration == nil
             || cancelledOpeningTaskGeneration == openingTaskGeneration
@@ -213,16 +194,10 @@ final class ChatSessionPresentation {
         return openingTaskGeneration
     }
 
-    /// Whether an installed opening task still owns unfinished presentation
-    /// work. A task past its ready frame is settled even before it drains.
     var ownsUnsettledOpening: Bool {
         openingTask != nil && readyOpeningTaskGeneration != openingTaskGeneration
     }
 
-    /// Called by the exact opening at its validated first-ready frame, before
-    /// it admits parent-covering interaction sheets. A sheet that covers the
-    /// chat in the remaining drain must not mark that ready opening for a
-    /// resume, which would hide and re-reveal the transcript on uncover.
     func markOpeningReady() {
         guard openingTask != nil else { return }
         readyOpeningTaskGeneration = openingTaskGeneration
@@ -236,15 +211,10 @@ final class ChatSessionPresentation {
     func finishOpeningTask(_ generation: Int) -> Bool {
         guard openingTaskGeneration == generation, openingTask != nil else { return false }
         openingTask = nil
-        // A cancelled opening can drain after foreground/surface callbacks have
-        // already fired. Publish that newly resumable edge explicitly.
         openingTaskRevision &+= 1
         return true
     }
 
-    /// Cancels only the exact task that installed the deadline, but retains its
-    /// lease until the task has actually drained. Retry/foreground resume joins
-    /// that lease instead of overlapping a second session.open.
     @discardableResult
     func expireOpeningTask(_ generation: Int) -> Bool {
         guard openingTaskGeneration == generation, ownsUnsettledOpening,
@@ -311,8 +281,6 @@ struct BoundedChatIdentityAliasLedger: Equatable {
     private(set) var aliases: [String: String] = [:]
     private var order: [String] = []
 
-    /// Installs only one-to-one causal aliases. Ambiguity fails closed without
-    /// changing an already admitted identity.
     @discardableResult
     mutating func insert(canonicalID: String, presentationID: String) -> Bool {
         guard !canonicalID.isEmpty, !presentationID.isEmpty else { return false }

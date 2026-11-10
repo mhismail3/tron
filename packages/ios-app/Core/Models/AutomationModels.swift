@@ -7,8 +7,6 @@ private struct AutomationCodingKey: CodingKey {
     init?(intValue: Int) { self.stringValue = String(intValue); self.intValue = intValue }
 }
 
-// Gateway-owned automation projections. These are disposable iOS values; the
-// Gateway remains the authority for definitions, occurrences, and run state.
 package enum AutomationActivation: String, Codable, Hashable, Sendable, CaseIterable {
     case draft, enabled, paused, completed, blocked, expired
     package var label: String {
@@ -624,9 +622,6 @@ package struct AutomationDashboardProfile: Identifiable, Hashable, Sendable {
     package let label: String
     package let state: DashboardServerConnectionState
     package let capabilities: Set<String>
-    /// Connection identity is part of timeline admission. A reconnect with
-    /// the same profile must not allow a prior timeline task to be treated as
-    /// current merely because its capabilities are unchanged.
     package let connectionID: Int?
 
     package init(id: String, label: String, state: DashboardServerConnectionState, capabilities: Set<String>, connectionID: Int? = nil) {

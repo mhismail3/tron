@@ -1,34 +1,23 @@
 import UIKit
 import XCTest
 
-/// UI locks (README.md beside this file). A lock pins one hosted-fixture screen
-/// state with an accessibility witness: the app's hierarchy as normalized text
-/// (`UILockTree`: type, identifier, label, value, traits, frame in whole points,
-/// nesting by indentation, in order), compared exactly with the caller's literal.
-/// Every run writes its capture under `test-results/ui-locks/`; a failure puts the
-/// text diff in its message.
 enum UILock {
-    /// How long a state may keep changing before the lock gives up on it.
     static let settleTimeout: TimeInterval = 10
     static let results = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent() // Locks
-        .deletingLastPathComponent() // UITests
-        .deletingLastPathComponent() // ios-app
-        .deletingLastPathComponent() // packages
-        .deletingLastPathComponent() // repository root
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
         .appending(path: "test-results/ui-locks")
 }
 
 extension XCTestCase {
-    /// Locks the app's current state as `name`: waits until the accessibility
-    /// hierarchy stops changing, then compares it with `expectedTree` exactly.
     @MainActor
     func assertUILock(_ app: XCUIApplication, _ name: String, accessibility expectedTree: String, file: StaticString = #filePath, line: UInt = #line) {
         guard let tree = settledTree(app, name, file: file, line: line) else { return }
         checkTree(tree, expected: expectedTree, name, file: file, line: line)
     }
-
-    // MARK: Settling
 
     @MainActor
     private func settledTree(_ app: XCUIApplication, _ name: String, file: StaticString, line: UInt) -> String? {
@@ -51,10 +40,6 @@ extension XCTestCase {
         } while true
     }
 
-    // MARK: Comparison
-
-    /// Every run leaves its capture under `test-results/ui-locks/`, so two runs
-    /// can be compared byte for byte.
     private func checkTree(_ tree: String, expected: String, _ name: String, file: StaticString, line: UInt) {
         let actual = UILock.results.appending(path: "\(name).a11y.txt")
         write(Data(tree.utf8), to: actual, name, file: file, line: line)
@@ -81,9 +66,6 @@ extension XCTestCase {
     }
 }
 
-/// The normalized accessibility text. Structural `other` containers with no
-/// identifier, label, value or traits are elided and their children hoisted:
-/// they are SwiftUI hosting detail, not what VoiceOver or a test can address.
 enum UILockTree {
     static func render(_ root: XCUIElementSnapshot) -> String {
         var lines: [String] = []
@@ -92,8 +74,6 @@ enum UILockTree {
     }
 
     private static func visit(_ node: XCUIElementSnapshot, depth: Int, into lines: inout [String]) {
-        // Hosted fixtures publish `fixture.*` probes (request counters, routes)
-        // for behavioral journeys; they are test instrumentation, not UI.
         if node.identifier.hasPrefix("fixture.") { return }
         let traits = traitNames(node)
         let value = node.value.map { "\($0)" } ?? ""
@@ -120,12 +100,9 @@ enum UILockTree {
             .replacingOccurrences(of: "\n", with: "\\n") + "\""
     }
 
-    /// XCTest exposes UIAccessibility traits only on its snapshot object; the
-    /// selected and enabled states are traits too, so this is the one source.
     private static func traitNames(_ node: XCUIElementSnapshot) -> [String] {
         guard let object = node as? NSObject, object.responds(to: NSSelectorFromString("traits")),
               let raw = (object.value(forKey: "traits") as? NSNumber)?.uint64Value else { return [] }
-        // Bit 33 is set on every element XCTest reports: carrying it says nothing.
         var remaining = raw & ~(UInt64(1) << 33)
         var names: [String] = []
         for (trait, name) in knownTraits where remaining & trait.rawValue != 0 {
@@ -146,7 +123,6 @@ enum UILockTree {
         (.supportsZoom, "supportsZoom"),
     ]
 
-    /// `XCUIElement.ElementType` raw values in declaration order.
     private static func typeName(_ type: XCUIElement.ElementType) -> String {
         let names = ["any", "other", "application", "group", "window", "sheet", "drawer", "alert", "dialog", "button",
                      "radioButton", "radioGroup", "checkBox", "disclosureTriangle", "popUpButton", "comboBox", "menuButton",
@@ -164,7 +140,6 @@ enum UILockTree {
     }
 }
 
-/// A line diff for failure messages: changed lines with two lines of context.
 enum UILockDiff {
     static func lines(_ old: String, _ new: String, limit: Int = 80) -> String {
         let a = old.split(separator: "\n", omittingEmptySubsequences: false)
@@ -176,7 +151,6 @@ enum UILockDiff {
             case let .insert(offset, _, _): inserted.insert(offset)
             }
         }
-        // Merge both sides into one ordered edit script.
         var ops: [String] = []
         var i = 0, j = 0
         while i < a.count || j < b.count {

@@ -19,8 +19,6 @@ enum CommandLifecyclePresentationPolicy {
     }
 }
 
-/// Canonical invocation receipt presentation. This is an ambient command
-/// record, not a user prompt bubble; its physical identity is the receipt ID.
 struct CommandLifecycleView: View {
     let item: TranscriptItem
     @State private var showingDetails = false

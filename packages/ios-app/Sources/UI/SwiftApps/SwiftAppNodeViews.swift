@@ -30,27 +30,18 @@ extension EnvironmentValues {
         get { self[SwiftAppEnvironmentObjectsKey.self] }
         set { self[SwiftAppEnvironmentObjectsKey.self] = newValue }
     }
-    /// How many interpreted view structs enclose this one.
     var swiftAppViewDepth: Int {
         get { self[SwiftAppViewDepthKey.self] }
         set { self[SwiftAppViewDepthKey.self] = newValue }
     }
-    /// The dismiss action of the innermost presentation the program created
-    /// (`SwiftAppPresentedContent`); nil in the program's root.
-    /// Set from the runner's root until the program's first real view, which
-    /// `SwiftAppModifiedView` wraps in a `SwiftAppHostStack` (#909).
     var swiftAppHostChrome: SwiftAppHostChrome? {
         get { self[SwiftAppHostChromeKey.self] }
         set { self[SwiftAppHostChromeKey.self] = newValue }
     }
-    /// True inside the program's root as the runner hosts it, until a
-    /// presentation the program creates (#909).
     var swiftAppHostedRoot: Bool {
         get { self[SwiftAppHostedRootKey.self] }
         set { self[SwiftAppHostedRootKey.self] = newValue }
     }
-    /// True until the program's outermost NavigationStack, which merges into
-    /// the runner sheet's own stack (`SwiftAppNavigationStack`).
     var swiftAppHostsNavigation: Bool {
         get { self[SwiftAppHostsNavigationKey.self] }
         set { self[SwiftAppHostsNavigationKey.self] = newValue }
@@ -61,8 +52,6 @@ extension EnvironmentValues {
     }
 }
 
-/// One interpreted user view struct. SwiftUI keeps `state` alive for as long
-/// as this view keeps its identity, exactly like a native `@State`.
 struct SwiftAppCustomView: View {
     let runtime: SwiftAppRuntime
     let node: SwiftAppViewNode
@@ -71,8 +60,6 @@ struct SwiftAppCustomView: View {
     @Environment(\.swiftAppViewDepth) private var depth
     @Environment(\.swiftAppDismiss) private var dismiss
     @Environment(\.swiftAppHostChrome) private var hostChrome
-    /// A view that contains itself (`struct A { var body { A() } }`) is
-    /// unbounded SwiftUI recursion; it stops here with a diagnostic.
     static let maximumDepth = 48
 
     init(runtime: SwiftAppRuntime, node: SwiftAppViewNode) {
@@ -91,8 +78,6 @@ struct SwiftAppCustomView: View {
                     .environment(\.swiftAppViewDepth, depth + 1)
             case .failure(let error):
                 if let hostChrome {
-                    // A root that fails before its first view still gets the
-                    // runner's chrome, so Done can close it.
                     SwiftAppHostStack(chrome: hostChrome) { SwiftAppErrorView(message: String(describing: error)) }
                 } else {
                     SwiftAppErrorView(message: String(describing: error))
@@ -125,8 +110,6 @@ struct SwiftAppErrorView: View {
     }
 }
 
-/// Renders a list of sibling nodes, keeping ForEach rows transparent to the
-/// enclosing List/VStack so swipe actions and lazy rows behave natively.
 struct SwiftAppNodesView: View {
     let runtime: SwiftAppRuntime
     let nodes: [SwiftAppViewNode]
@@ -145,7 +128,6 @@ struct SwiftAppNodeView: View {
 
     var body: some View {
         if let hostChrome, node.name == SwiftAppRenderer.builderGroup || node.name == "ForEach" {
-            // Several root views, or a root ForEach, share one runner stack.
             SwiftAppHostStack(chrome: hostChrome) { SwiftAppNodeView(runtime: runtime, node: node) }
         } else if node.name == SwiftAppRenderer.builderGroup {
             SwiftAppNodesView(runtime: runtime, nodes: node.children ?? [])

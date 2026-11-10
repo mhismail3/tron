@@ -1,9 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// Shared behavior-aware visual core for queued-kind prompt lifecycles. The
-/// surrounding shell owns whether facts are optimistic, pending, or
-/// authoritative; this card never invents queue position or edit capability.
 struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
     let behavior: ChatPromptBehavior
     let title: String
@@ -60,8 +57,6 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
             .padding(.top, QueuedMessageCardLayout.contentSpacing)
             .padding(.bottom, ChatPromptContainerStyle.queuedMessageBottomPadding)
             .contentShape(shape)
-            // The whole prompt surface is the editor affordance, not only its
-            // title/text. Attachment controls still retain their own actions.
             .modifier(ChatPromptActivationModifier(action: onActivate))
             .tronGlassSurface(
                 accent: surfaceAccent,
@@ -106,13 +101,10 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
                 statusContent
             }
 
-            // An annotation can be the whole prompt. Keep its chip inside the
-            // same editor surface throughout optimistic, pending and queued states.
             if let parsed {
                 ChatSentAnnotationChips(annotations: parsed.annotations)
             }
             if !body.isEmpty {
-                // The user bubble's cut; a manageable card opens its editor.
                 PromptTextPreview(text: body, onOpen: onActivate)
             }
         }
@@ -136,9 +128,6 @@ private struct ChatPromptActivationModifier: ViewModifier {
     }
 }
 
-/// An authoritative pending prompt reconstructed from the Gateway snapshot.
-/// It stays in the user-message position while compaction or prompt preflight
-/// delays the canonical transcript entry.
 struct ChatPendingPromptRow: View, Equatable {
     let presentation: ChatPendingPromptPresentation
 
@@ -227,10 +216,6 @@ struct ChatPendingPromptRow: View, Equatable {
     }
 }
 
-/// A presentation-only user bubble shown until the authoritative transcript or
-/// queue projection owns the submission. It intentionally uses the same visual
-/// language as a canonical user message: no transport-status label or duplicate
-/// "submitted" affordance is shown.
 struct ChatOutgoingSubmissionRow: View, Equatable {
     let presentation: ChatOutgoingSubmissionPresentation
     let attachments: [PendingAttachment]
@@ -264,10 +249,6 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
             .accessibilityElement(children: .contain)
             .accessibilityLabel(promptAccessibilityLabel)
         } else {
-            // Match the canonical user row's full-width proposal exactly. An
-            // extra leading spacer narrows long optimistic prompts, then lets
-            // them rewrap and change height when canonical content replaces
-            // the same physical row.
             VStack(alignment: .trailing, spacing: 4) {
                 resourceChip
                 attachmentStrip

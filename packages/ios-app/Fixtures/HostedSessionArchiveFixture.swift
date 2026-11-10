@@ -2,57 +2,25 @@
 import SwiftUI
 import TronMobileCore
 
-/// Hosted journey for the dashboard's archived container. It renders the real
-/// row swipe actions and the real `ArchivedSessionsContainerSection`, so the
-/// journey drives the same visibility, expansion, zero-count collapse, and page
-/// handling the dashboard runs. Session membership is fixture input; the
-/// surfaces and the container's control flow are production code. Its paging
-/// mode serves one archived session per page and refuses continuations, and
-/// hangs the first page read, so the journey can also drive a reload that lands
-/// while a pass is still reading and a continuation the Gateway refuses. Its
-/// reveal mode fills the list with live rows and delays the first page read, so
-/// the journey can expand a header that sits at the bottom of the screen, catch
-/// the header's spinner, and check that the revealed rows are on screen.
 struct HostedSessionArchiveFixture: View {
     private static let profileID = "fixture"
     private static let pagesOneArchivedSessionPerRead =
         ProcessInfo.processInfo.arguments.contains("-tron-session-archive-paging-fixture")
     private static let revealFixture =
         ProcessInfo.processInfo.arguments.contains("-tron-session-archive-reveal-fixture")
-    /// How many of the fixture's page reads are gated. The paging mode hangs its
-    /// first read so a reload retires that pass; the reveal mode only delays it,
-    /// so the journey can capture the header's spinner before the rows arrive.
     private static let gatedReadCount = pagesOneArchivedSessionPerRead || revealFixture ? 1 : 0
     private static let revealReadDelay = Duration.seconds(3)
-    /// Enough live rows that the archived header starts below the fold, and
-    /// enough archived rows that the revealed section is taller than the screen,
-    /// so the reveal is proven to stop with the header at the top.
     private static let revealLiveRowCount = 24
     private static let revealArchivedRowCount = 20
-    /// The hosted harness is not the presented production dashboard, so it
-    /// declares its own branch activity instead of inheriting the
-    /// no-coordinator `.active` fallback. An active branch runs the dashboard's
-    /// row clock (a `TimelineView` that ticks every second while a label counts
-    /// seconds), and XCUI never observes app quiescence while that clock keeps
-    /// the run loop busy, so every query in the journey would time out before
-    /// its first assertion. The
-    /// surfaces under test—row swipes and the archived container—read no
-    /// presentation activity, so only the row's relative-time clock is affected.
     private static let branchActivity = PresentationSurfaceActivity.covered
 
     @State private var live: [SessionSummary] = HostedSessionArchiveFixture.initialLive
     @State private var archived: [SessionSummary] = []
-    /// Stands in for the dashboard's own archive projection revision: it
-    /// advances whenever this fixture's Gateway-owned count changes.
     @State private var projectionRevision = 0
     @State private var gatedReadsStarted = 0
     @State private var archiveConfirmation: SessionArchiveConfirmation?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The fixture's Gateway-side membership. The reveal mode needs enough live
-    /// rows to push the archived header below the fold, and enough archived rows
-    /// that the reveal has rows to show; every other mode keeps the single pair
-    /// the journeys were written against.
     private static var initialLive: [SessionSummary] {
         guard revealFixture else {
             return [session(id: "live-session", title: "Live session", archivedAt: nil)]
@@ -107,10 +75,6 @@ struct HostedSessionArchiveFixture: View {
                 List {
                     Section {
                         ForEach(live, id: \.dashboardID) { session in
-                            // Mirrors the dashboard's own row: the identifier and the
-                            // swipe actions belong to the row button, not to the row
-                            // content, so the journey reaches the same element
-                            // production exposes. The fixture has no navigation.
                             Button(action: {}) {
                                 HistoricalSessionRow(session: session, activity: .idle, showsContext: true)
                             }
@@ -142,9 +106,6 @@ struct HostedSessionArchiveFixture: View {
                         projectionRevision: projectionRevision,
                         presentationActive: true,
                         loadPage: { _, cursor in
-                            // The page a real read answers with is the projection at
-                            // read time, so a pass that a reload retires can never
-                            // publish the newer rows either.
                             let snapshot = archived
                             await self.gateRead()
                             return try await Self.page(archived: snapshot, cursor: cursor)
@@ -165,10 +126,6 @@ struct HostedSessionArchiveFixture: View {
         .environment(\.tronPresentationActivity, Self.branchActivity)
     }
 
-    /// One page of the fixture's Gateway-side archived list, through the
-    /// production admission so the container sees the same shape a real page
-    /// read produces. The paging fixture serves one session per page and refuses
-    /// every continuation, which is what an expired cursor looks like.
     private static func page(
         archived: [SessionSummary],
         cursor: String?
@@ -187,11 +144,6 @@ struct HostedSessionArchiveFixture: View {
         return await ArchivedSessionsLoader.admit(response, requestedCursor: cursor) { true }
     }
 
-    /// Gates the fixture's configured first reads. The paging mode hangs its
-    /// read forever: cancelling the pass releases the sleep, and the page then
-    /// reaches a retired container, which is what a response already in flight
-    /// when a newer authority lands looks like. The reveal mode only delays the
-    /// read, so the journey sees the header's spinner and then the rows.
     private func gateRead() async {
         guard gatedReadsStarted < Self.gatedReadCount else { return }
         gatedReadsStarted += 1

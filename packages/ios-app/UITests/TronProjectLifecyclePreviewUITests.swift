@@ -1,6 +1,5 @@
 import XCTest
 
-/// The project-lifecycle fixture's drill-ins each return through their own sub-sheet.
 @MainActor
 final class TronProjectLifecyclePreviewUITests: XCTestCase {
     func testProjectDrillInsReturnThroughTheirSubSheets() {
@@ -39,8 +38,6 @@ final class TronProjectLifecyclePreviewUITests: XCTestCase {
     }
 
     private func close(_ app: XCUIApplication) {
-        // Covered sheet chrome can retain a second AX representation of Done.
-        // Match the shared sheet-preview convention: use the last hittable target.
         guard let button = app.buttons.matching(NSPredicate(format: "label == 'Done'"))
             .allElementsBoundByIndex.last(where: { $0.isHittable }) else {
             XCTFail("No hittable Done button in the presented sheet")

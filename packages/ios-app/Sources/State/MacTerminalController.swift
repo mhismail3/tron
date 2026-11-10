@@ -4,7 +4,6 @@ import MacTerminalSSH
 import Observation
 import TronMobileCore
 
-/// Enrollment facts only. Once enrolled, connect and reconnect never call the Gateway.
 struct MacTerminalStatus: Decodable, Equatable, Sendable {
     let username: String
     let port: Int
@@ -20,8 +19,6 @@ struct MacTerminalStatus: Decodable, Equatable, Sendable {
     }
 }
 
-/// One SSH attachment to a stable tmux session. tmux, not Tron or the Gateway,
-/// owns the remote shell across backgrounding and network loss.
 @MainActor
 @Observable
 final class MacTerminalController {
@@ -69,7 +66,6 @@ final class MacTerminalController {
 
     func present(model: AppModel) {
         isPresented = true
-        // An accepted key mutation owns its completion even across presentation/profile changes.
         guard !isChangingAuthorization else { return }
         guard let profile = model.profiles.selected else { reset(); stage = .setup(.unpaired); return }
         if machineID != profile.machineId { reset(); machineID = profile.machineId }
@@ -79,7 +75,6 @@ final class MacTerminalController {
             if let enrollment = try store.enrollment(machineID: profile.machineId) {
                 self.enrollment = enrollment
                 if enrollment.endpoint.port < 1024 {
-                    // Keep the old record and identity intact; never dial stock SSH or silently repin.
                     Task { await refreshSetup(model: model) }
                     return
                 }
@@ -93,7 +88,6 @@ final class MacTerminalController {
         }
     }
 
-    /// iOS can discard sockets while suspended. Detach explicitly; never replay input.
     func conceal() {
         isPresented = false
         closeLink()
@@ -101,7 +95,6 @@ final class MacTerminalController {
         if case .trust = stage { stage = .loading }
     }
 
-    /// Re-reads the Mac's status for the setup notice ("Check Again").
     func refreshSetup(model: AppModel) async {
         guard !isChangingAuthorization else { return }
         closeLink()
@@ -121,8 +114,6 @@ final class MacTerminalController {
         }
     }
 
-    /// Explicit enable prepares the private service and identity only. It does
-    /// not create a client key, publish authorization, or replace an old pin.
     func enroll(model: AppModel) async {
         guard !isChangingAuthorization,
               let profile = model.profiles.selected, profile.deviceId != nil else { return }
@@ -180,7 +171,6 @@ final class MacTerminalController {
             }
             let key = try store.key(machineID: profile.machineId)
             try await model.setMacTerminalKey(device: deviceID, publicKey: key.openSSHPublicKey)
-            // Accepted authorization owns this save even if the sheet closed.
             let record = MacTerminalEnrollment(machineID: profile.machineId, deviceID: deviceID,
                 endpoint: MacTerminalEndpoint(hosts: status.hosts, port: status.port, username: status.username, hostKeys: status.hostKeys),
                 publicKey: key.openSSHPublicKey, enrolledAt: Date())
@@ -202,10 +192,6 @@ final class MacTerminalController {
         }
     }
 
-    /// Revokes this iPhone's key on the Mac, then forgets it here. The Mac
-    /// change needs the Gateway; without it nothing local is removed, so the
-    /// key cannot be orphaned on the Mac. Shells already open on the Mac keep
-    /// running until they exit.
     func removeKey(model: AppModel) async throws {
         guard !isChangingAuthorization, let enrollment else { return }
         guard model.connectionState == .connected else {
@@ -219,8 +205,6 @@ final class MacTerminalController {
             reset()
             if isPresented { present(model: model) }
         } catch {
-            // A failed accepted mutation still belongs to the original Mac;
-            // never reconnect its cached enrollment under a new selection.
             if model.profiles.selected?.machineId != enrollment.machineID {
                 reset()
                 if isPresented { present(model: model) }
@@ -278,7 +262,6 @@ final class MacTerminalController {
         let accepted = generation
         let size = size
         link = .connecting
-        // Stable per Mac/iPhone; only a shell-safe digest crosses the SSH exec boundary.
         let digest = SHA256.hash(data: Data("\(enrollment.machineID):\(enrollment.deviceID)".utf8))
         let name = "tron-" + digest.map { String(format: "%02x", $0) }.joined()
         connectTask = Task { [weak self, store] in
@@ -296,8 +279,6 @@ final class MacTerminalController {
                 self.session = connected
                 self.link = .connected
                 self.stage = .terminal
-                // tmux repaints its authoritative screen on every attachment;
-                // feeding old transport output would corrupt that repaint.
                 self.replaceOutput()
                 self.eventTask = Task { [weak self] in
                     for await event in connected.events {
@@ -354,7 +335,6 @@ final class MacTerminalController {
     private func appendText(_ text: String) {
         localSequence += 1
         chunks.append(TerminalChunk(sequence: localSequence, data: text))
-        // Counted as retained text, the same measure removal subtracts.
         retainedBytes += text.utf8.count
         while retainedBytes > Self.retainedByteLimit, chunks.count > 1 {
             retainedBytes -= chunks.removeFirst().data.utf8.count

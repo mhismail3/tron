@@ -2,7 +2,6 @@
 import Foundation
 import TronMobileCore
 
-/// Synthetic Gateway changes at a real socket reconnect, not an iOS state injection.
 struct HostedForegroundSheetScenario {
     private var connections = 0
     var queueEnabled: Bool { ProcessInfo.processInfo.arguments.contains("-foreground-queued-editor") }

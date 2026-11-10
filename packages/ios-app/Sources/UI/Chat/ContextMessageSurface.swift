@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Both branches use the shared surface owners; content geometry never changes.
 struct ContextMessageSurface: ViewModifier {
     let accent: Color
     let isLong: Bool

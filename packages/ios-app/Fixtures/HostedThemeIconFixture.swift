@@ -2,8 +2,6 @@
 import SwiftUI
 import UIKit
 
-/// Only reads native icon state; theme actions use the production Appearance view.
-/// No icon adapter, injected receipt or duplicate theme state participates.
 @MainActor
 struct HostedThemeIconFixture: View {
     @State private var nativeState = "Not read"

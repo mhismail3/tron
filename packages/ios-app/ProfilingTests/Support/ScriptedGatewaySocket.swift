@@ -138,9 +138,6 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         if suspendsClose {
             let barrierToken = nextWaiterToken
             nextWaiterToken += 1
-            // GatewayClient cancels its receive task before that same task closes an
-            // overflowing socket. Preserve the scripted barrier for that pre-existing
-            // cancellation, while still making newly cancelled close waits exit.
             let cancellationWasAlreadySet = Task.isCancelled
             try? await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -235,9 +232,6 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         try await wait(until: count, observedCount: sent.count, kind: .sent)
     }
 
-    /// Bounded `waitUntilSent` for the case where the awaited frame is exactly
-    /// what a regression drops: an unbounded wait turns that into a watchdog
-    /// expiry instead of a named failure.
     func waitUntilSent(count: Int, within timeout: Duration) async -> Bool {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {

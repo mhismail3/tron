@@ -3,9 +3,6 @@ import CryptoKit
 import Darwin
 import TronNativeCaptureHost
 
-/// Owns the embedded Cua process and its parent-liveness pipe. This is an
-/// optional automation backend: failure here must not prevent the permission
-/// or capture services from starting.
 final class CuaProcessOwner: @unchecked Sendable {
     private let lock = NSLock()
     private let executable: URL
@@ -22,8 +19,6 @@ final class CuaProcessOwner: @unchecked Sendable {
         self.verifyExecutable = verifyExecutable
     }
 
-    /// Starts at most one child for this host generation. A missing optional
-    /// asset, incompatible binary, or spawn failure simply disables automation.
     @discardableResult func start() -> Bool {
         lock.withLock {
             guard !sealed, process == nil, FileManager.default.isExecutableFile(atPath: executable.path), verifyExecutable(executable),
@@ -35,8 +30,6 @@ final class CuaProcessOwner: @unchecked Sendable {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
                     attributes: [.posixPermissions: 0o700])
             } catch { return false }
-            // Keep the pathname within sockaddr_un even under macOS's long
-            // per-user temporary directory. Generation lives in the directory.
             let socket = directory.appendingPathComponent("s").path
             guard socket.utf8.count < 104 else { try? FileManager.default.removeItem(at: directory); return false }
             let child = Process()
@@ -74,7 +67,6 @@ final class CuaProcessOwner: @unchecked Sendable {
                 return true
             } catch {
                 try? FileManager.default.removeItem(at: directory)
-                // Keep the host alive for permission/capture operations.
                 process = nil; input = nil; endpointValue = nil
                 return false
             }
@@ -88,8 +80,6 @@ final class CuaProcessOwner: @unchecked Sendable {
         return matchesRelease(executable, sha256: expected)
     }
 
-    /// Expected bytes come from the helper's signed build metadata, not the
-    /// replaceable executable's adjacent manifest or its own computed CDHash.
     static func matchesRelease(_ executable: URL, sha256 expected: String) -> Bool {
         guard expected.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else { return false }
         let descriptor = open(executable.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
@@ -120,8 +110,6 @@ final class CuaProcessOwner: @unchecked Sendable {
         }
     }
 
-    /// Seals startup, closes the liveness pipe, and waits for the actual child
-    /// exit. No timeout or forced termination substitutes for native cleanup.
     func retire() async {
         let task = lock.withLock {
             if let retirement { return retirement }

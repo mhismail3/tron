@@ -1,14 +1,5 @@
 import XCTest
 
-// Run directly with scripts/ios-mac-terminal-journey.
-
-/// Mac Terminal from Settings against a real OpenSSH sshd on this Mac's
-/// Tailscale address (`scripts/ios-mac-terminal-journey` starts it and names
-/// its description in `TRON_MAC_TERMINAL_FIXTURE`). The Gateway is synthetic
-/// and only answers enrollment; the key, the SSH client, the PTY and the shell
-/// are real. Shell side effects land in a marker file beside the description,
-/// which the test reads back, so typed input, the Control key and resize are
-/// proved by the Mac, not by the screen.
 final class TronMacTerminalUITests: XCTestCase {
     private var configuration: URL!
     private var marker: URL { configuration.deletingLastPathComponent().appendingPathComponent("marker.txt") }
@@ -38,11 +29,8 @@ final class TronMacTerminalUITests: XCTestCase {
         focusTerminal(app)
         app.typeText("echo TRON_UI_$((6*7)) > \(marker.path); stty size >> \(marker.path)\n")
         try waitForMarker(containing: "TRON_UI_42")
-        // The emulator sized the PTY to the sheet: the Mac reports the
-        // emulator's rows and columns, not the 80x24 the shell opened with.
         let size = try String(contentsOf: marker, encoding: .utf8).split(separator: "\n").last.map(String.init) ?? ""
         XCTAssertNotEqual(size, "24 80", "resize did not reach the PTY")
-        // Control-C through the control bar interrupts a running command.
         app.typeText("sleep 60\n")
         app.buttons["Control modifier"].tap()
         app.typeText("c")
@@ -50,7 +38,6 @@ final class TronMacTerminalUITests: XCTestCase {
         try waitForMarker(containing: "INTERRUPTED", timeout: 20)
         try capture(app, "connected")
 
-        // The Gateway goes away; a new shell still opens straight to the Mac.
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName("com.tron.mobile.fixture.mac-terminal.stop-gateway" as CFString), nil, nil, true)
         app.buttons["Mac Terminal options"].tap()
@@ -61,8 +48,6 @@ final class TronMacTerminalUITests: XCTestCase {
         try waitForMarker(containing: "GATEWAY_DOWN")
         try capture(app, "gateway-down")
 
-        // Removing the key changes the Mac, so without the Gateway it refuses
-        // and says how to revoke on the Mac instead.
         app.buttons["Mac Terminal options"].tap()
         app.buttons["Remove Mac Terminal"].tap()
         app.buttons["Remove"].tap()
@@ -71,10 +56,6 @@ final class TronMacTerminalUITests: XCTestCase {
         try capture(app, "remove-needs-gateway")
     }
 
-    /// The shell lives in tmux. Closing the sheet and
-    /// leaving the app only detach; reopening shows the same output and types
-    /// into the same shell, and output the shell printed while the app was in
-    /// the background is replayed when it returns.
     @MainActor
     func testShellAndOutputSurviveDismissAndBackground() throws {
         let app = launch(scenario: "enroll")
@@ -93,7 +74,6 @@ final class TronMacTerminalUITests: XCTestCase {
         let row = app.buttons["settings-link-Mac Terminal"]
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         row.tap()
-        // The same output, before anything is typed, then the same shell.
         waitForEmulator(app, containing: "SHELL_ONE_42")
         waitForPhase(app, "Connected")
         try capture(app, "persist-after-reopen")
@@ -101,8 +81,6 @@ final class TronMacTerminalUITests: XCTestCase {
         app.typeText("echo \"again=$$\" >> \(marker.path)\n")
         XCTAssertEqual(try markerValue("again"), pid, "reopening reached a different shell")
 
-        // The shell keeps printing while the app is in the background; the
-        // host keeps that output and replays it on return.
         app.typeText("sleep 4; echo LATE_$((7*7))\n")
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 8)
@@ -247,7 +225,6 @@ final class TronMacTerminalUITests: XCTestCase {
     private func openMacTerminal(_ app: XCUIApplication) {
         let row = app.buttons["settings-link-Mac Terminal"]
         XCTAssertTrue(row.waitForExistence(timeout: 15), app.debugDescription)
-        // System is the last Settings group (#1030).
         for _ in 0..<12 where !row.isHittable { app.swipeUp() }
         row.tap()
     }
@@ -261,7 +238,6 @@ final class TronMacTerminalUITests: XCTestCase {
 
     @MainActor
     private func focusTerminal(_ app: XCUIApplication) {
-        // The emulator fills the sheet; a tap in it takes the keyboard.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
         XCTAssertTrue(app.buttons["Control modifier"].waitForExistence(timeout: 10), app.debugDescription)
         let typingTip = app.buttons["Continue"]
@@ -274,7 +250,6 @@ final class TronMacTerminalUITests: XCTestCase {
         return emulator.exists ? (emulator.value as? String ?? "") : ""
     }
 
-    /// What the emulator shows (HOSTED_TEST exposes its text as the value).
     @MainActor
     private func waitForEmulator(_ app: XCUIApplication, containing text: String, timeout: TimeInterval = 20) {
         let deadline = Date().addingTimeInterval(timeout)
@@ -286,7 +261,6 @@ final class TronMacTerminalUITests: XCTestCase {
         XCTFail("The terminal never showed \(text): \(emulatorText(app).suffix(600))\n\(app.debugDescription)")
     }
 
-    /// The pid a typed `echo "label=$$" >> marker` wrote.
     private func markerValue(_ label: String) throws -> String {
         try waitForMarker(containing: "\(label)=")
         let contents = try String(contentsOf: marker, encoding: .utf8)
@@ -318,12 +292,6 @@ final class TronMacTerminalUITests: XCTestCase {
     }
 }
 
-/// #1517: while Mac Terminal checks the Mac, its sheet is one uniform surface
-/// under the standard pulse. The fixture's `loading` scenario never answers
-/// the status read. The loading content is a zero-size pulse request; before
-/// the fix the sheet's top blur and tint attached to it, painting a band with
-/// a hard edge across the middle of the sheet. Sampled from the screen, so the
-/// oracle is what the user sees, away from the toolbar blur and the pulse.
 final class TronMacTerminalLoadingUITests: XCTestCase {
     @MainActor
     func testLoadingSheetIsOneUniformBackground() throws {
@@ -339,14 +307,12 @@ final class TronMacTerminalLoadingUITests: XCTestCase {
             row.tap()
             let title = app.descendants(matching: .any)["terminal-sheet-title"].firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 15), app.debugDescription)
-            Thread.sleep(forTimeInterval: 2) // the sheet's presentation settles
+            Thread.sleep(forTimeInterval: 2)
             let screenshot = XCUIScreen.main.screenshot()
             let attachment = XCTAttachment(screenshot: screenshot)
             attachment.name = "mac-terminal-loading-\(scheme)"
             attachment.lifetime = .keepAlways
             add(attachment)
-            // Below the toolbar blur (title bottom + its 116 pt blur), above the
-            // sheet's bottom corners, at a fifth of the width beside the pulse.
             let window = app.windows.firstMatch.frame
             let top = title.frame.maxY + 120, bottom = window.maxY - 80
             let spread = try Self.lumaSpread(screenshot.image, x: window.width * 0.2, from: top, to: bottom, scale: window.width)
@@ -355,7 +321,6 @@ final class TronMacTerminalLoadingUITests: XCTestCase {
         }
     }
 
-    /// The largest luma difference down one column, in points of a `width`-wide screen.
     private static func lumaSpread(_ image: UIImage, x: CGFloat, from top: CGFloat, to bottom: CGFloat, scale width: CGFloat) throws -> Int {
         let cg = try XCTUnwrap(image.cgImage)
         let factor = CGFloat(cg.width) / width

@@ -2,7 +2,6 @@ import SwiftUI
 import TronMobileCore
 
 enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
-    // Declaration order is the sheet's section order.
     case skills = "Skills"
     case subagents = "Subagents"
     case prompts = "Prompts"
@@ -35,9 +34,6 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
         case .subagents: "person.2"
         }
     }
-    /// The command accent is shared with chat chips; prompt templates keep
-    /// their Resources purple here (chat gives them the command identity), and
-    /// the other categories retain their existing destination colors.
     @MainActor var accent: Color {
         switch self {
         case .prompts: .tronPurple
@@ -95,8 +91,6 @@ struct ProjectResourceOverviewSection: Identifiable, Equatable, Sendable {
     let rows: [ProjectResourceOverviewRow]
 }
 
-/// One projection of `session.resources` into the sheet's groups, so the
-/// sections the sheet shows are inspectable without mounting it.
 struct ProjectResourceOverviewContent: Equatable, Sendable {
     static let empty = ProjectResourceOverviewContent(sections: [], diagnostics: .array([]), subagentDiagnostic: nil)
 
@@ -106,7 +100,6 @@ struct ProjectResourceOverviewContent: Equatable, Sendable {
 }
 
 enum ProjectResourceOverviewPresentation {
-    /// A resource row: name, description, and where it comes from as tags.
     @MainActor static func rowContent(_ row: ProjectResourceOverviewRow) -> TronListRowContent {
         let tags = ComposerResourceBadges.titles(origin: row.resourceOrigin, scope: row.resourceScope)
             + [ResourceDistributionTag.title(for: row.distribution, scope: row.resourceScope)].compactMap { $0 }
@@ -115,8 +108,6 @@ enum ProjectResourceOverviewPresentation {
 
     static func content(from resources: JSONValue?) -> ProjectResourceOverviewContent {
         guard let root = resources?.objectValue else { return .empty }
-        // Tools are listed once, in Manage Session → Available Tools, where
-        // they can also be turned on or off.
         let sections = ProjectResourceKind.allCases.filter { $0 != .tools }.map { kind in
             ProjectResourceOverviewSection(kind: kind, rows: rows(kind: kind, root: root))
         }
@@ -156,16 +147,12 @@ enum ProjectResourceOverviewPresentation {
         }
     }
 
-    /// Skills and prompts name their scope; commands carry the command catalog's
-    /// `resourceScope`, and a subagent's discovery source is its scope.
     private static func scope(kind: ProjectResourceKind, _ value: JSONValue) -> CommandInfo.ResourceScope? {
         let object = value.objectValue ?? [:]
         let raw = kind == .subagents ? object["source"]?.stringValue : (object["scope"] ?? object["resourceScope"])?.stringValue
         return raw.flatMap(CommandInfo.ResourceScope.init(rawValue:))
     }
 
-    /// Only extension commands belong in the Commands group: prompt- and
-    /// skill-sourced entries already appear under Prompts and Skills.
     private static func extensionCommands(_ raw: JSONValue?) -> [JSONValue] {
         (raw?.arrayValue ?? []).filter { $0.objectValue?["source"]?.stringValue == "extension" }
     }
@@ -181,8 +168,6 @@ enum ProjectResourceOverviewPresentation {
         return scope ?? object["path"]?.stringValue
     }
 
-    /// Subagent rows name their definition, describe its purpose, and name the
-    /// pinned model when pi-subagents resolved one.
     private static func subagentSubtitle(_ value: JSONValue) -> String? {
         let object = value.objectValue ?? [:]
         let description = object["description"]?.stringValue.map(ProjectResourceTextPresentation.readableDescription)
@@ -200,9 +185,6 @@ enum ProjectResourceOverviewPresentation {
 
 enum ProjectResourceTextPresentation {
     static func readableDescription(_ value: String) -> String {
-        // Resource descriptions may arrive from Markdown/front matter with
-        // hard wraps. Collapse all producer whitespace before SwiftUI lays the
-        // text out so wrapping happens only at the card's actual width.
         let normalized = value
             .replacingOccurrences(of: "\r\n", with: "\n")
             .split(whereSeparator: \.isWhitespace)
@@ -222,7 +204,6 @@ enum ProjectResourceTextPresentation {
 }
 
 struct ProjectResourceDetailPresentation: Equatable {
-    /// One declared tool parameter, in the schema's declaration order.
     struct ToolInput: Equatable, Identifiable {
         let name: String
         let type: String?
@@ -306,8 +287,6 @@ struct ProjectResourceDetailPresentation: Equatable {
         model = kind == .subagents ? object["model"]?.stringValue : nil
     }
 
-    /// JSON object keys carry no order; inputs list required ones first, then
-    /// by name, so the same tool always reads the same way.
     private static func toolInputs(_ parameters: [String: JSONValue]?) -> [ToolInput] {
         let required = Set(parameters?["required"]?.arrayValue?.compactMap(\.stringValue) ?? [])
         let properties = parameters?["properties"]?.objectValue ?? [:]
@@ -334,13 +313,11 @@ private struct ProjectResourceListRow: Identifiable {
 }
 
 struct ProjectResourcesView: View {
-    /// The one label of this sheet's title and the Manage Session row that opens it.
     static let title = "Resources"
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    /// A surface starts loading: its empty state waits for the first read.
     @PresentationState private var loading = true
     @PresentationState private var reloading = false
     @PresentationState private var loadGeneration = 0
@@ -437,7 +414,6 @@ struct ProjectResourcesView: View {
         .tronSettingsVisualTheme(inheriting: .tronPrimary)
     }
 
-    /// One container per kind, in the kind's own tint; a kind with nothing loaded says so.
     private var resourceGroup: some View {
         TronListGroup(sections: content.sections.map { section in
             TronListSection(title: section.kind.rawValue, rows: section.rows.isEmpty
@@ -462,8 +438,6 @@ struct ProjectResourcesView: View {
     private func reload() {
         guard !loading, !reloading else { return }
         reloading = true
-        // Reload changes runtime resources. Keep that admitted mutation alive;
-        // its authoritative resource revision drives the disposable read task.
         Task {
             defer { reloading = false }
             do { try await model.reloadResources(sessionID: sessionID) }
@@ -492,8 +466,6 @@ struct ProjectResourcesView: View {
 struct ProjectResourceDetailSheet: View {
     let sessionID: String
     let selection: ProjectResourceSelection
-    /// The presenting sheet's accent when it differs from the kind's own
-    /// (Available Tools keeps its session teal).
     var accentOverride: Color?
     let onDone: () -> Void
     @Environment(AppModel.self) private var model
@@ -588,7 +560,6 @@ struct ProjectResourceDetailSheet: View {
         return ProjectResourceTextPresentation.readableDescription(description)
     }
 
-    /// Tools have no body; what the model must supply is their useful detail.
     private var inputsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             TronTechnicalSectionLabel("Inputs").containerValue(\.tronSettingsSection, false)
@@ -677,9 +648,6 @@ struct ProjectResourceDetailSheet: View {
         return items
     }
 
-    /// Identity of the reader this sheet displays. A completed detail for this
-    /// exact selection/revision stays mounted across a cover, so returning from
-    /// the nested Info sheet neither blanks content nor refetches the source.
     private var loadIdentity: String {
         "\(selection.id):\(model.sessionResourceRevision(for: sessionID))"
     }
@@ -692,8 +660,6 @@ struct ProjectResourceDetailSheet: View {
         detail = nil
         subagentDetail = nil
         loadError = nil
-        // The settings catalog carries the authoritative tool record already;
-        // there is no session RPC to fetch for a Mac/Project settings editor.
         if selection.kind == .tools,
            selection.value.objectValue?["description"]?.stringValue != nil,
            selection.value.objectValue?["parameters"] != nil {
@@ -719,8 +685,6 @@ struct ProjectResourceDetailSheet: View {
             }
             loadedIdentity = identity
         } catch is CancellationError {
-            // A rejected live-session read is not a cancelled presentation.
-            // Settle it so disconnected/busy sessions offer retry, not a spinner.
             guard generation == detailGeneration,
                   !Task.isCancelled,
                   presentationActivity.allowsPresentationPublication else { return }

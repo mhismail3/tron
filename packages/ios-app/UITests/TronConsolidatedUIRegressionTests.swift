@@ -1,8 +1,6 @@
 import XCTest
 import Vision
 
-/// Production SwiftUI and typed Gateway sockets: each case observes a user-visible
-/// outcome. No source, token or fixture-constant-only assertions.
 final class TronConsolidatedUIRegressionTests: XCTestCase {
     @MainActor func testMemoryToolRowsAndCanonicalNavigation() {
         let app = home(["-memory-redesign"]); defer { app.terminate() }
@@ -91,8 +89,6 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         waitForExpectations(timeout: 5)
         let published = paintedText(workspace)
         tap(app, "manage-session-rename"); tap(app, "Cancel")
-        // Native AX queries sample the delayed socket response interval; the old
-        // monitor clears the value immediately, before its one-second read resolves.
         for _ in 0..<5 { XCTAssertEqual(paintedText(workspace), published, "Closing a covering sheet must retain the published workspace") }
         keep("workspace-uncovered-retains-value")
     }

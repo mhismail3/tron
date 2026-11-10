@@ -4,11 +4,6 @@ import Foundation
 import UIKit
 import XCTest
 
-/// Selection and timing handed to the hosted test process by
-/// `scripts/tron-profile ios` through `TEST_RUNNER_`-prefixed xcodebuild
-/// environment (xcodebuild strips the prefix for the test process). A scenario
-/// test skips unless it is the selected scenario, so ordinary unit runs never
-/// execute profiling workloads.
 struct ProfileRunConfiguration {
     let scenario: String
     let iterations: Int
@@ -50,34 +45,19 @@ enum ProfileScenarioError: Error, CustomStringConvertible {
     }
 }
 
-/// How the mounted surface rendered the window's workload, read right after
-/// the window. `counters` are reported as `scenario.render.*` for the accepted
-/// window; a non-nil `divergence` means the window measured a different
-/// workload (for example a pinned chat that stopped following the stream and
-/// so rendered a fraction of it), and the harness measures a fresh instance.
 struct ProfileRenderCheck {
     var counters: [String: Int] = [:]
     var divergence: String?
-    /// Evidence printed with the check (geometry, trace signals).
     var detail = ""
 }
 
-/// One scenario instance: built and made ready outside the measured window,
-/// driven for exactly the window inside it, and torn down afterwards.
 @MainActor
 protocol ProfileScenarioRun: AnyObject {
-    /// Waits (bounded) until the mounted surface shows the fixture state.
     func ready() async throws
-    /// Applies the scripted workload for exactly `window`.
     func workload(window: Duration) async throws
-    /// Read immediately after the window, before `verify` waits for anything:
-    /// the rendering mode the window measured.
     func renderCheck() -> ProfileRenderCheck
-    /// After the window, proves the workload was applied as scripted.
     func verify() async throws
     func teardown() async
-    /// The mounted surface, captured once per run as evidence of what the
-    /// window measured.
     var surface: UIView? { get }
 }
 
@@ -91,12 +71,6 @@ extension XCTestCase {
     static var profileSetupAttempts: Int { 3 }
     static var profileRenderAttempts: Int { 3 }
 
-    /// Runs `iterations` fresh scenario instances under `ProfileResourceMetric`.
-    /// `ProfileMeasuredWindow` brackets only the scripted window of each
-    /// attempt, so setup, readiness, checks and teardown are never measured.
-    /// A window whose render check diverged is discarded and measured again
-    /// on a fresh instance, a bounded number of times, so every reported
-    /// iteration measured the same workload or the run fails.
     @MainActor
     func profileScenario(
         _ scenario: String,
@@ -107,10 +81,6 @@ extension XCTestCase {
         let configuration = try ProfileRunConfiguration.selected(scenario, defaultWindow: defaultWindow)
         ProfileResourceSample.captureMainThread()
         let trace = try ProfileTraceHandshake.requested()
-        // The transcript's development switch is the one input a profile report
-        // cannot otherwise attribute: the same scenario measured on both sides of
-        // it produces two different containers. The line names it, like the
-        // harness's own metrics lines do.
         print("TRON_PROFILE_SCENARIO_START name=\(scenario) transcript_orientation=\(ChatTranscriptOrientation.newestAtOrigin) iterations=\(configuration.iterations) window_ms=\(configuration.window.profileMilliseconds)")
         try trace?.awaitRecording()
         let options = XCTMeasureOptions()
@@ -120,10 +90,6 @@ extension XCTestCase {
         var iteration = 0
         measure(metrics: [ProfileResourceMetric()], options: options) {
             iteration += 1
-            // XCTest's start/stop only brackets the invocation; the metric
-            // reports the window this invocation accepted, if any. After a
-            // failure the remaining invocations accept nothing and the test
-            // fails with the first error.
             startMeasuring()
             defer { stopMeasuring() }
             guard failure == nil else { return }
@@ -186,10 +152,6 @@ extension XCTestCase {
         }
     }
 
-    /// Setup is outside the window, so a scenario that did not reach
-    /// readiness (for example a chat opening that did not settle on a loaded
-    /// host) is rebuilt from scratch a bounded number of times. Retries are
-    /// printed; the profiler reports them as warnings.
     @MainActor
     private func prepareRun(
         _ scenario: String,
@@ -219,7 +181,6 @@ extension XCTestCase {
 }
 
 extension XCTestCase {
-    /// Evidence of what the window measured: the mounted surface as drawn.
     @MainActor
     func attachSurface(of run: any ProfileScenarioRun, name: String) {
         guard let view = run.surface, view.bounds.width > 0, view.bounds.height > 0 else { return }
@@ -233,18 +194,6 @@ extension XCTestCase {
     }
 }
 
-/// Bounded file handshake with `scripts/tron-profile ios --trace`, active only
-/// when the profiler names a handshake directory. The simulator process shares
-/// the host file system, so the test writes its pid and waits until the
-/// profiler's xctrace recording is confirmed started before the first
-/// iteration, appends each measured window's wall-clock bounds to
-/// `windows.jsonl` (the profiler attributes only samples inside them), and
-/// after the last iteration waits until the profiler has stopped the
-/// recording, so the process outlives the capture.
-///
-/// Wall-clock bounds rather than signposts: a host-wide Time Profiler
-/// recording cannot read the simulator's logd, and simulator and host share
-/// one clock, which the trace's start date maps to within about a millisecond.
 @MainActor
 final class ProfileTraceHandshake {
     private let directory: URL
@@ -281,12 +230,8 @@ final class ProfileTraceHandshake {
         print("TRON_PROFILE_TRACE_RECORDING")
     }
 
-    /// Taken just outside `ProfileMeasuredWindow`'s bounds, so the traced
-    /// window contains the metric's.
     func windowBound() -> Date { Date() }
 
-    /// Called for an accepted window only, after it ended: a discarded
-    /// window is not attributed, and the file write is outside the window.
     func recordWindow(start: Date, end: Date, iteration: Int) throws {
         let line = "{\"iteration\": \(iteration), \"start\": \(start.timeIntervalSince1970), \"end\": \(end.timeIntervalSince1970)}\n"
         let url = directory.appending(path: "windows.jsonl")
@@ -305,9 +250,6 @@ final class ProfileTraceHandshake {
         try wait(for: "stopped", timeout: stopTimeout)
     }
 
-    /// Outside every measured window, so plain polling adds nothing measured.
-    /// The profiler writes `abort` (with its reason) when the recording
-    /// cannot start or failed, so the test fails at once instead of waiting.
     private func wait(for name: String, timeout: Duration) throws {
         let marker = directory.appending(path: name).path
         let abort = directory.appending(path: "abort")
@@ -324,9 +266,6 @@ final class ProfileTraceHandshake {
     }
 }
 
-/// Drives main-actor async work from XCTest's synchronous measure block. The
-/// main run loop sleeps until the work finishes (the task stops it), so the
-/// wait itself adds no polling wakeups to the measured window.
 @MainActor
 enum ProfileMainLoop {
     private final class Box<T> { var result: Result<T, Error>? }
@@ -346,8 +285,6 @@ enum ProfileMainLoop {
             let remaining = ContinuousClock.now.duration(to: deadline)
             if remaining <= .zero {
                 task.cancel()
-                // Give cancellation a bounded chance to retire the work before
-                // reporting, so a timed-out scenario does not leak into teardown.
                 let grace = ContinuousClock.now + .seconds(5)
                 while box.result == nil, ContinuousClock.now < grace {
                     _ = CFRunLoopRunInMode(.defaultMode, 0.05, false)
@@ -360,7 +297,6 @@ enum ProfileMainLoop {
     }
 }
 
-/// Keeps synthetic work observable to the optimizer.
 enum ProfileSink {
     nonisolated(unsafe) static var value: UInt64 = 0
 
@@ -380,10 +316,6 @@ extension Duration {
     }
 }
 
-/// Sleeps until an absolute offset from a window start, so a scripted cadence
-/// does not drift with the work each step does. The explicit tolerance keeps
-/// an idle process's timer coalescing from stretching the window (a default
-/// sleep ended a 30 s idle window about 2 s late).
 func profileSleep(until offset: Duration, from start: ContinuousClock.Instant) async throws {
     try await Task.sleep(until: start + offset, tolerance: .milliseconds(5), clock: .continuous)
 }

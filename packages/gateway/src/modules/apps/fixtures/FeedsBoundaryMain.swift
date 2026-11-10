@@ -1,7 +1,6 @@
 #if SWIFT_APP_FEEDS_BOUNDARY
 import Foundation
 
-/// A fresh native interpreter process consumes the real Gateway's exact feed.
 @main
 struct FeedsBoundaryMain {
     struct Input: Decodable {

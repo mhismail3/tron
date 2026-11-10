@@ -1,27 +1,17 @@
 import SwiftUI
 import TronMobileCore
 
-/// Portrait label for one model in the picker's Recent and Latest rails.
-/// `TronCardRail` owns the glass surface and press behavior; this view owns
-/// only the card's content. Facts come straight from the Gateway catalog, and
-/// an absent fact is omitted rather than shown as zero.
 struct ModelRailCard: View {
     let model: ModelSummary
-    /// Non-nil paints the selected checkmark in that accent.
     let selectionAccent: Color?
     var isApplying = false
 
     static let width: CGFloat = 138
-    /// A minimum, so larger Dynamic Type grows the card instead of clipping it.
-    /// The picker's opening sheet height follows the measured rails, not this.
     static let minimumHeight: CGFloat = 138
     private static let checkmarkSize: CGFloat = 14
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // The checkmark slot has a fixed size in both states, so selecting
-            // a card changes no layout. It is
-            // centred on the provider line, clear of the model name below.
             HStack(alignment: .center, spacing: 4) {
                 Text(model.displayProviderName)
                     .font(TronTypography.settingsRowSubtext)

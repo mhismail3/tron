@@ -3,26 +3,17 @@ import SwiftUI
 import TronMobileCore
 
 enum ProviderUsagePresentation {
-    /// Skeleton copy shown while a supported row waits for its first snapshot.
-    /// It shares the usage line's font and stays single-line at ordinary widths
-    /// so the resolved text does not change the row height.
     static let loadingPlaceholder = "00% used (5h) · 00% used (Weekly)"
-    /// The same skeleton as window columns (the Home usage card's column copy).
     static let loadingPlaceholderParts = [
         WindowPart(text: "00% (5h)", usedPercent: 0),
         WindowPart(text: "00% (Weekly)", usedPercent: 0),
     ]
 
-    /// How close a window is to its limit. Every surface draws a window's copy
-    /// and bar in its level's accent: a window from 60% warns, and a reached
-    /// limit, which blocks requests until it resets, takes the error hue,
-    /// softened so it reads as a state rather than an alarm.
     enum Level: Equatable {
         case normal, warning, exhausted
 
         static let warningPercent: Double = 60
 
-        /// The level's accent, or nil where the surface keeps its own color.
         var accent: Color? {
             switch self {
             case .normal: nil
@@ -46,9 +37,6 @@ enum ProviderUsagePresentation {
         return percent >= Level.warningPercent ? .warning : .normal
     }
 
-    /// A supported configured row reserves its usage line while the bounded read
-    /// is pending. Once the read settles, the snapshot (or its absence) owns the
-    /// line, so a failed read never leaves a permanent skeleton.
     static func showsUsageLoadingLine(
         snapshot: ProviderUsageSnapshot?,
         configured: Bool,
@@ -60,17 +48,11 @@ enum ProviderUsagePresentation {
         return !readResolved
     }
 
-    /// Keep summary-only states from reserving an empty detail row and its gap.
-    /// The updated line belongs to the summary header, so it is not detail.
     static func hasDetailContent(_ snapshot: ProviderUsageSnapshot) -> Bool {
         guard snapshot.status == .available || snapshot.status == .rateLimited else { return false }
         return !snapshot.windows.isEmpty || !snapshot.balances.isEmpty || retryCopy(snapshot) != nil
     }
 
-    /// The login whose usage a provider borrows, when `source` names another
-    /// provider. OpenAI's ChatGPT sign-in has no usage endpoint of its own, so the
-    /// Gateway reads the same plan through the Codex login (gateway README,
-    /// "Provider account usage").
     static func lenderName(_ snapshot: ProviderUsageSnapshot) -> String? {
         guard snapshot.source == "openai-codex.wham", snapshot.providerId != "openai-codex" else { return nil }
         return "OpenAI Codex (legacy)"
@@ -80,8 +62,6 @@ enum ProviderUsagePresentation {
         summarySegments(snapshot).map(\.text).joined(separator: " · ")
     }
 
-    /// `summary` with each window in its level's accent, so a limit that is
-    /// near or reached stands out of an otherwise healthy line.
     static func styledSummary(_ snapshot: ProviderUsageSnapshot) -> AttributedString {
         var line = AttributedString()
         for (index, segment) in summarySegments(snapshot).enumerated() {
@@ -95,7 +75,6 @@ enum ProviderUsagePresentation {
 
     private static func summarySegments(_ snapshot: ProviderUsageSnapshot) -> [WindowPart] {
         guard snapshot.status == .available || snapshot.status == .rateLimited else {
-            // The borrowing provider is connected; only the lender's login is missing.
             if snapshot.status == .unconfigured, let lender = lenderName(snapshot) {
                 return [WindowPart(text: "Sign in to \(lender) to view plan usage", usedPercent: nil)]
             }
@@ -110,49 +89,28 @@ enum ProviderUsagePresentation {
         return parts
     }
 
-    /// One summarized usage window (or the balance a balance-only provider
-    /// shows in its place): its copy, its used percent when it has one, and
-    /// how close it is to its limit.
     struct WindowPart: Equatable {
         let text: String
         let usedPercent: Double?
         var level = Level.normal
     }
 
-    /// The windows `summary` lists, each on its own, so a surface can lay them
-    /// out as separate columns (the Home usage card). Empty when the snapshot
-    /// has no usage to show; `summary` then owns the copy. `columns` drops the
-    /// "used" the card's bars already show, so a plan's three windows fit
-    /// beside its name on one line: "42% (5h)".
     static func windowParts(_ snapshot: ProviderUsageSnapshot, columns: Bool = false) -> [WindowPart] {
         guard snapshot.status == .available || snapshot.status == .rateLimited else { return [] }
         var parts: [WindowPart] = []
         let windows = summaryWindows(snapshot.windows)
         for (index, window) in windows.enumerated() {
             guard let value = windowSummary(window, columns: columns) else { continue }
-            // A provider can expose both a short window and a weekly quota. Keep
-            // both labels so the primary row never hides the meaningful limit.
-            // A lone window is labeled only when its duration names a cadence
-            // (Codex's single weekly window), not a generic "Primary"/"Usage".
             let shouldLabel = windows.count > 1 || index > 0 || cadenceLabel(window.windowSeconds) != nil
-            // The value leads and the window label trails in parentheses: "3% used (5h)".
             let text = shouldLabel ? "\(value) (\(summaryLabel(window.label, windowSeconds: window.windowSeconds)))" : value
             parts.append(WindowPart(text: text, usedPercent: window.usedPercent, level: level(window)))
         }
         if parts.isEmpty, let balance = snapshot.balances.first {
-            // A balance-only provider still presents like its window peers: the
-            // localized primary amount followed by its label, e.g. "$0.03 Available".
             parts.append(WindowPart(text: "\(currency(balance.amount, code: balance.currency)) \(balance.label)", usedPercent: nil))
         }
         return parts
     }
 
-    /// The windows compact surfaces summarize: the first window of each
-    /// cadence, plus uncadenced windows among the first two. Any of a plan's
-    /// distinct windows (OpenCode Go's 5h, weekly and monthly) can block
-    /// requests on its own, so none may be hidden; repeats of a cadence
-    /// (Anthropic's per-model weekly limits) would read as a second "Weekly"
-    /// column, so they and later uncadenced extras stay in the detail sheet.
     static func summaryWindows(_ windows: [UsageWindow]) -> [UsageWindow] {
         var shown: [UsageWindow] = []
         var cadences = Set<String>()
@@ -166,8 +124,6 @@ enum ProviderUsagePresentation {
         return shown
     }
 
-    /// Status a column layout shows beside its window columns: rate limiting
-    /// and stale data, which `summary` folds into its line.
     static func windowPartsNote(_ snapshot: ProviderUsageSnapshot) -> String? {
         var notes: [String] = []
         if snapshot.status == .rateLimited { notes.append(statusCopy(snapshot.status)) }
@@ -180,8 +136,6 @@ enum ProviderUsagePresentation {
         if let percent = window.usedPercent {
             return "\(number(percent))%\(used)"
         }
-        // Only a positive denominator supports a percentage. Amount-only spend
-        // rows stay amount-only rather than implying a quota.
         if let usedAmount = window.used, let limit = window.limit, limit > 0 {
             return "\(amount(usedAmount))/\(amount(limit))\(window.unit.map { " \($0)" } ?? "")\(used)"
         }
@@ -201,7 +155,6 @@ enum ProviderUsagePresentation {
     static func quantityDetail(_ window: UsageWindow) -> String? {
         let unit = window.unit.map { " \($0)" } ?? ""
         var parts: [String] = []
-        // Percentage summaries must not hide the provider's actual quota amounts.
         if window.usedPercent != nil {
             if let used = window.used { parts.append("\(amount(used))\(unit) used") }
             if let limit = window.limit { parts.append("Limit \(amount(limit))\(unit)") }
@@ -255,11 +208,6 @@ enum ProviderUsagePresentation {
         return "Retry after \(date.formatted(date: .abbreviated, time: .shortened))"
     }
 
-    /// The share of the primary balance a secondary balance represents on the
-    /// 0-100 progress scale. Only a positive primary and a non-negative,
-    /// same-currency balance can be expressed as a share; a cash deficit is
-    /// presented as such instead. The ratio is clamped so an inconsistent
-    /// snapshot cannot overflow the bar.
     static func balanceShare(_ balance: UsageBalance, of primary: UsageBalance) -> Double? {
         guard primary.amount > 0, balance.amount >= 0,
               balance.currency.caseInsensitiveCompare(primary.currency) == .orderedSame else { return nil }
@@ -270,9 +218,6 @@ enum ProviderUsagePresentation {
         "\(number(share))% of \(primary.label.lowercased())"
     }
 
-    /// Secondary balance copy when a share cannot be expressed. A negative
-    /// balance is a deficit (the provider withheld or owes funds) rather than a
-    /// 0% share of the primary.
     static let balanceDeficitCopy = "Deficit"
 
     static func showsLocalUnlimited(
@@ -285,10 +230,6 @@ enum ProviderUsagePresentation {
         return !isLoading
     }
 
-    /// Currency copy for balance amounts. ICU's currency style supplies the
-    /// locale's exact presentation for a reported ISO code ($49.59, CN¥12.50);
-    /// anything outside that shape keeps its raw code so an unexpected value is
-    /// visible instead of silently re-labeled.
     static func currency(_ amount: Double, code: String) -> String {
         guard code.count == 3, code.allSatisfy({ $0.isASCII && $0.isLetter }) else {
             return "\(Self.amount(amount)) \(code)"
@@ -325,9 +266,6 @@ struct ProviderUsageSummaryView: View {
     var includeSummary: Bool = true
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
-    /// Account usage detail copy uses the app's standard secondary sub-text
-    /// treatment: the settings-adjusted secondary size in the reading family
-    /// with the standard secondary color. Caption scale was too small here.
     private var detailFont: Font {
         TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment)
     }
@@ -375,9 +313,6 @@ struct ProviderUsageSummaryView: View {
                         }
                         .font(detailFont)
                         .foregroundStyle(Color.tronTextSecondary)
-                        // The primary balance is the headline; every later
-                        // balance is presented as its share so the group reads
-                        // like the window rows above it.
                         if index > 0, let primaryBalance {
                             if let share = ProviderUsagePresentation.balanceShare(balance, of: primaryBalance) {
                                 ProviderUsageProgress(percent: share, accent: .tronEmerald)
@@ -397,18 +332,12 @@ struct ProviderUsageSummaryView: View {
                         .font(detailFont)
                         .foregroundStyle(Color.tronTextSecondary)
                 }
-                // Gateway message is retained only as the bounded wire field;
-                // presentation uses fixed local status copy and never renders
-                // upstream error text.
             }
         }
         .fixedSize(horizontal: false, vertical: true)
     }
 }
 
-/// Usage headline with its "Updated" sub-text. The 2pt gap matches the
-/// provider row's line spacing so the header reads as one unit, which the
-/// detail sheet centers its refresh control against.
 struct ProviderUsageSummaryHeader: View {
     let snapshot: ProviderUsageSnapshot
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
@@ -436,12 +365,8 @@ struct ProviderUsageProgress: View {
 
     let percent: Double
     let accent: Color
-    /// The hosted layout journey's key for the fill's frame; nothing otherwise.
     var fillProbe: String? = nil
 
-    /// A capsule narrower than it is tall loses its rounded ends, so any
-    /// non-zero fill is at least one bar height wide: a small share reads as a
-    /// round dot with the same left end as every other bar. Zero stays empty.
     static func fillWidth(percent: Double, trackWidth: CGFloat, height: CGFloat = height) -> CGFloat {
         let clamped = min(max(percent, 0), 100)
         guard clamped > 0, trackWidth > 0 else { return 0 }
@@ -462,8 +387,6 @@ struct ProviderUsageProgress: View {
     }
 }
 
-/// Breathing opacity for the usage skeleton. Kept as pure math so the bounded
-/// range is testable without rendering.
 enum ProviderUsageLoadingLineEngine {
     static let cycleDuration: Double = 1.8
     static let minimumOpacity: Double = 0.32
@@ -476,10 +399,6 @@ enum ProviderUsageLoadingLineEngine {
     }
 }
 
-/// Placeholder for the provider row's usage line. It renders the exact usage
-/// line layout (same font, same single-line text) with redacted skeleton bars,
-/// so the row holds its height while the snapshot is in flight and the resolved
-/// text can crossfade in without a layout jump.
 struct ProviderUsageLoadingLine: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
@@ -492,8 +411,6 @@ struct ProviderUsageLoadingLine: View {
     }
 }
 
-/// One animation/material owner for Providers row subtext and dashboard columns.
-/// The caller supplies its final layout so loading never replaces the whole row.
 struct ProviderUsageLoadingPlaceholder<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

@@ -1,8 +1,5 @@
 import Foundation
 
-/// The SCK adapter's sole native start/Stop/callback state. SDK calls are supplied
-/// at the boundary so offline tests exercise this same retirement path, not an
-/// alternate stream that simply returns an expected join result.
 internal final class WindowCaptureStreamLifetime: @unchecked Sendable {
     private let condition = NSCondition()
     private var closed = false
@@ -26,8 +23,6 @@ internal final class WindowCaptureStreamLifetime: @unchecked Sendable {
 
     func requestStop() { condition.withLock { closed = true } }
 
-    /// Ordinary output closes immediately. A terminal receipt remains eligible
-    /// during uncertain Stop, but never after the final callback-retirement seal.
     @discardableResult
     func withCallback(terminal: Bool = false, _ body: (_ mayPublish: Bool) -> Void) -> Bool {
         let admission: Bool? = condition.withLock {
@@ -51,8 +46,6 @@ internal final class WindowCaptureStreamLifetime: @unchecked Sendable {
         return true
     }
 
-    /// The containing owner serializes this once, after the actual start call has
-    /// returned, including failed starts. An error is not terminal native evidence.
     func stopAndJoin(stop: @Sendable () async throws -> Void,
                      removeOutput: @Sendable () throws -> Void,
                      sampleQueue: DispatchQueue) async -> NativeWindowCaptureJoin {
@@ -79,8 +72,6 @@ internal final class WindowCaptureStreamLifetime: @unchecked Sendable {
                 sampleQueue.sync {}
                 condition.lock()
                 while callbacks != 0 { condition.wait() }
-                // No terminal callback can enter between the zero observation
-                // and completion: checking and sealing use the same gate.
                 retired = true
                 condition.unlock()
                 continuation.resume()

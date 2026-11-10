@@ -2,8 +2,6 @@
 import Foundation
 import TronMobileCore
 
-/// Wire input only. Cache storage, catalog reduction and checkpoint scheduling
-/// are the real app owners; this peer never answers persistence assertions.
 actor SnapshotCacheFixtureGateway {
     static let transcriptMarker = "ASSISTANT_TRANSCRIPT_NOT_A_CACHE_DOCUMENT"
     static let time = "2026-01-01T00:00:00Z"
@@ -31,7 +29,7 @@ actor SnapshotCacheFixtureGateway {
     func response(_ method: String) throws -> JSONValue? {
         switch method {
         case "session.list":
-            if offline { return nil } // retain the real loaded cache; never replace it with a fake page
+            if offline { return nil }
             return .object(["sessions": try JSONValue.encode([Self.row()]), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("cache:1"), "archivedCount": .number(7)])
         case "session.open":
@@ -86,8 +84,6 @@ actor SnapshotCacheFixtureSocket: GatewaySocketConnection {
     func receive() async throws -> Data {
         if !hello {
             hello = true
-            // The factory is synchronous. Bind before exposing hello instead
-            // of spawning an unowned initialization task that can race events.
             await gateway.attach(self)
             return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"cache-fixture-machine","machineName":"Cache fixture","gatewayChannel":"stable","capabilities":["sessions.v1","session-archive.v1"]}"#.utf8)
         }
@@ -106,8 +102,6 @@ actor SnapshotCacheFixtureSocket: GatewaySocketConnection {
     func close() async { closed = true; frames.removeAll(); cancelReceive() }
 }
 
-/// Only the existing summary-delay clock port is held. Cancellation releases
-/// every waiter; no process signal, real filesystem replacement or private state.
 actor SnapshotCacheFixtureDelay {
     nonisolated let entries: AsyncStream<Void>
     private let entered: AsyncStream<Void>.Continuation
@@ -135,10 +129,6 @@ actor SnapshotCacheFixtureDelay {
     }
 }
 
-/// A run-local observer gate at the existing synchronous cache-save signpost
-/// boundary. The native app's UI remains live while its real cache actor waits.
-/// The test must release it in teardown; its owning process also has a finite
-/// native-run deadline. This does not freeze Gateway/agent processes.
 final class SnapshotCacheFixtureSaveGate: PerformanceSignposting, @unchecked Sendable {
     let entries: AsyncStream<Void>
     let completions: AsyncStream<Void>

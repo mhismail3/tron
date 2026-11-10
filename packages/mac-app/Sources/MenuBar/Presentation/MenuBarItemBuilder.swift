@@ -1,7 +1,5 @@
 import Foundation
 
-/// Menu row content produced from a status snapshot. The controller renders
-/// the associated values directly into native `NSMenuItem` instances.
 enum MenuItemDescriptor: Equatable {
     case header(MenuHeaderContent)
     case action(title: String, isEnabled: Bool, action: MenuBarAction)
@@ -27,7 +25,6 @@ enum DebugGatewayMenuState: Equatable, Sendable {
 }
 
 enum MenuBarItemBuilder {
-    /// Builds the menu sequence for a given snapshot.
     static func build(
         snapshot: ServerStatusSnapshot,
         tronHome: URL,
@@ -112,8 +109,6 @@ enum MenuBarItemBuilder {
     }
 }
 
-/// State-owned visual classification shared by the menu icon and header.
-/// Each renderer maps the tone to its own context-appropriate color.
 enum MenuBarTone: Equatable, Sendable {
     case running
     case attention
@@ -209,9 +204,6 @@ enum ServerStatusState: Equatable, Sendable {
 
 }
 
-/// Snapshot consumed by `MenuBarItemBuilder` and produced by
-/// `ServerStatusPoller`. Probe credentials remain with the health and pairing
-/// owners and never enter this presentation value.
 struct ServerStatusSnapshot: Equatable {
     var state: ServerStatusState
     var tailscaleIP: String?

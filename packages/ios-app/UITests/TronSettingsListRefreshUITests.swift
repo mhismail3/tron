@@ -51,8 +51,6 @@ final class TronSettingsListRefreshUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Remove alpha"].exists)
     }
 
-    /// A saved list must not reopen on its superseded value while the canonical
-    /// read that reflects the Save is still in flight.
     @MainActor
     func testSavedListReopensOnlyOnItsAcceptedValue() throws {
         continueAfterFailure = false

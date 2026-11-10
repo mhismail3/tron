@@ -79,7 +79,7 @@ struct SubprocessTests {
         }
         let pid = await fixture.readyPID()
         #expect(pid != nil)
-        if accepted { pending.cancel() } // accepted work keeps its own deadline
+        if accepted { pending.cancel() }
         let result = await pending.value
         #expect(result.exitCode != 0)
         #expect(started.duration(to: .now) < .seconds(7))
@@ -96,7 +96,6 @@ struct SubprocessTests {
         #expect(result.exitCode != 0)
         #expect(started.duration(to: .now) < .seconds(3))
         #expect(!fixture.watchdogFired)
-        // The fixture, not the runner, owns this separate background holder.
         fixture.release()
         #expect(await fixture.waitForDone())
     }
@@ -247,14 +246,11 @@ struct SubprocessTests {
     }
 }
 
-/// FIFO readiness is emitted by the actual child before cancellation. The
-/// watchdog releases only owned fixtures; it cannot satisfy boundedness tests.
 private actor ProbeCalls {
     private(set) var count = 0
     func record() { count += 1 }
 }
 
-// Shared by observation-owner tests; each instance owns its helper and FIFOs.
 final class SubprocessFixture: @unchecked Sendable {
     let shell: URL
     let root: URL
@@ -296,8 +292,6 @@ final class SubprocessFixture: @unchecked Sendable {
         if let customScript {
             script = customScript
         } else if inheritedWriter {
-            // After the runner returns, the fixture releases this holder. A
-            // failed write independently proves the runner's read end closed.
             let destination = stderr ? ">&2" : ""
             script = "(trap '' PIPE; read value < \"$1/release\"; if printf '%4096s' x \(destination) 2>/dev/null; then state=open; else state=done; fi; printf '%s\\n' \"$state\" > \"$1/ready\") & exit 0"
         } else {

@@ -18,7 +18,6 @@ struct ToolDetailNavigationPresentation: Equatable, Sendable {
 struct ToolDetailNavigationTitle: View {
     let tool: ChatToolPresentation
 
-    /// The title's tint, which the sheet's toolbar actions share (#963).
     static func accent(for tool: ChatToolPresentation) -> Color {
         if tool.error { return .tronError }
         if ["report", "checkin"].contains(tool.toolName ?? tool.title) { return .tronPrimary }
@@ -36,9 +35,6 @@ struct ToolDetailNavigationTitle: View {
 }
 
 extension View {
-    /// Tool-owned sheets use principal toolbar titles. Explicit inline mode
-    /// prevents NavigationStack from reserving an empty large-title region
-    /// above the first scroll row on physical devices.
     func tronToolDetailNavigationChrome() -> some View {
         navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)

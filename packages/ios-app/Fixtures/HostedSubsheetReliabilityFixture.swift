@@ -1,12 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
 
-/// `-tron-subsheet-reliability-fixture` (#1695): one managed parent sheet whose
-/// rows open an item child and a Boolean child through the shared presenters.
-/// The child's controls stand in for requests the user cannot time by touch:
-/// re-requesting a child N ms into its dismissal, requesting the parent's
-/// other presenter while a child still covers it (UIKit defers that
-/// presentation), and closing the parent before a deferred child appears.
 struct HostedSubsheetReliabilityFixture: View {
     @State private var activity = PresentationActivityCoordinator()
     @State private var parent = false

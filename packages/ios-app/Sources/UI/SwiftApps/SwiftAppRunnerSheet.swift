@@ -1,17 +1,6 @@
 import SwiftUI
 import TronSwiftAppEngine
 
-/// Experimental gate for running displayed `.swift` files (#889), an
-/// iPhone-only preference. Off by default, so normal use never shows the
-/// control. Settings › System › Experimental owns the switch; launching
-/// with `-tron.experimental.swiftApps YES|NO` sets the same stored choice, so
-/// a device launched through `devicectl`/`simctl` keeps it across later normal
-/// launches.
-///
-/// Reads go through this observable owner, never straight to `UserDefaults`:
-/// a launch argument shadows the stored value for the whole process, which
-/// would hide a later Settings change, and observation lets an open document
-/// sheet gain or lose its run control as soon as the switch changes.
 @MainActor
 @Observable
 final class SwiftAppExperiment {
@@ -44,9 +33,7 @@ struct SwiftAppLaunch: Identifiable {
     let id = UUID()
     let name: String
     let source: String
-    /// The paired Gateway's host: the only host the program's links may open (#1160).
     let linkHost: String?
-    /// Only an installed launch supplies this Gateway-owned state projection.
     let installed: InstalledSwiftAppSession?
 
     init(name: String, source: String, linkHost: String?, installed: InstalledSwiftAppSession? = nil) {
@@ -57,15 +44,6 @@ struct SwiftAppLaunch: Identifiable {
     }
 }
 
-/// Runs one interpreted single-file SwiftUI app in a large sheet. Dismissing
-/// discards the program and @State; accepted installed-state writes retain their owner.
-///
-/// The program is hosted in Tron's shared `TronDocumentSheet` (#909): detents,
-/// sheet material, tint and typography. Its first real view sits in a
-/// `SwiftAppHostStack` with the shared sheet chrome (title, Done); a root
-/// TabView gets one per tab. Tron's theme is the environment default, so plain
-/// SwiftUI looks like Tron, and anything the program sets explicitly is applied
-/// closer to its views and wins.
 struct SwiftAppRunnerSheet: View {
     let launch: SwiftAppLaunch
     @PresentationState private var runtime: Result<SwiftAppRuntime, Error>
@@ -105,7 +83,6 @@ struct SwiftAppRunnerSheet: View {
             TronDocumentSheet(title: fileTitle, hostsNavigation: false) {
                 refreshableRunning(runtime)
                     .onDisappear { runtime.stopAllTimers() }
-                    // An install opens at once: iOS asks before installing.
                     .onChange(of: runtime.pendingLink) { _, link in
                         guard let link, !link.needsConfirmation else { return }
                         runtime.pendingLink = nil
@@ -183,13 +160,9 @@ struct SwiftAppRunnerSheet: View {
     private func running(_ runtime: SwiftAppRuntime) -> some View {
         if let root = runtime.rootDeclaration {
             SwiftAppCustomView(runtime: runtime, node: SwiftAppViewNode(name: root.name, arguments: [], declaration: root))
-                // A refreshed interpreter has new globals/persistence slots.
-                // Never carry a prior program's @State scopes into that runtime.
                 .id(ObjectIdentifier(runtime))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .environment(\.swiftAppHostChrome, SwiftAppHostChrome(title: fileTitle))
-                // Lists and Forms show the shared sheet material, like Tron's
-                // own sheets; a program's own scrollContentBackground wins.
                 .scrollContentBackground(.hidden)
                 .overlay(alignment: .bottom) {
                     if let message = activeSession?.failure ?? runtime.actionError {
@@ -212,8 +185,6 @@ struct SwiftAppRunnerSheet: View {
                         .frame(width: 1, height: 1)
                 }
 #endif
-                // No identifier here: on a container SwiftUI pushes it onto
-                // every child, replacing the program's own identifiers.
         }
     }
 }

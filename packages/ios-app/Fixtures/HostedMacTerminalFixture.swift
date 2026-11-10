@@ -4,19 +4,7 @@ import os
 import SwiftUI
 import TronMobileCore
 
-/// The real Settings root with a synthetic Gateway that answers Mac Terminal's
-/// two enrollment calls, for `TronMacTerminalUITests`. Everything after
-/// enrollment is real: the app's Secure Enclave-or-Simulator key, its
-/// MacTerminalSSH client, and a real OpenSSH sshd on this Mac's Tailscale
-/// address that `scripts/ios-mac-terminal-journey` starts and describes in the
-/// JSON file named by `TRON_MAC_TERMINAL_FIXTURE`. The synthetic Gateway writes
-/// the enrolled key into that sshd's authorized_keys, as the real Gateway's
-/// `MacTerminalKeys` does (proved by packages/gateway `npm run test:mac-terminal`),
-/// and stops for good on the `…mac-terminal.stop-gateway` Darwin notification
-/// to prove the shell does not need it.
 struct HostedMacTerminalFixture: View {
-    // SwiftUI re-runs this initializer whenever the App body re-evaluates;
-    // the model and its Gateway are kept from the first run only.
     @State private var model: AppModel
     @State private var gateway: MacTerminalFixtureGateway
     private let profile = GatewayProfile(id: "mac-terminal", label: "Fixture Mac", host: "mac-terminal.example.test",
@@ -45,11 +33,8 @@ struct HostedMacTerminalFixture: View {
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "mac-terminal-fixture"))))
     }
 
-    /// Each launch starts unenrolled (no key, no cached enrollment), once.
     @MainActor private static let startUnenrolled: Void = {
         try? MacTerminalEnrollmentStore().remove(machineID: "mac-terminal-machine")
-        // Each app launch owns a fresh unenrolled fixture: an earlier case's key
-        // may remain in the shared native daemon’s test file.
         if let path = ProcessInfo.processInfo.environment["TRON_MAC_TERMINAL_FIXTURE"],
            let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
            let configuration = try? JSONDecoder().decode(MacTerminalFixtureConfiguration.self, from: data) {
@@ -65,7 +50,6 @@ struct HostedMacTerminalFixture: View {
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-mac-terminal-light") ? .light : .dark)
         .environment(\.colorScheme, ProcessInfo.processInfo.arguments.contains("-mac-terminal-light") ? .light : .dark)
         .task {
-            // The test posts this while the Mac Terminal sheet covers the screen.
             let gateway = gateway
             DarwinTrigger.observe("com.tron.mobile.fixture.mac-terminal.stop-gateway") { Task { await gateway.stop() } }
             for (suffix, profileID) in [("select-a", "mac-terminal"), ("select-b", "mac-terminal-b")] {
@@ -90,7 +74,6 @@ private struct MacTerminalFixtureConfiguration: Decodable {
     let port: Int
     let username: String
     let hostKeys: [String]
-    /// A valid host key that is not the sshd's, for the mismatch scenario.
     let otherHostKey: String
     let authorizedKeys: String
 
@@ -100,8 +83,6 @@ private actor MacTerminalFixtureGateway {
     private let scenario: String
     private let configuration: MacTerminalFixtureConfiguration?
     private var sockets: [MacTerminalFixtureSocket] = []
-    /// Read synchronously by each new socket, so once stopped no socket ever
-    /// says hello again: the Gateway is gone, not flapping.
     private let stopped = OSAllocatedUnfairLock(initialState: false)
     nonisolated var isStopped: Bool { stopped.withLock { $0 } }
     private var serverEnabled = false
@@ -116,7 +97,6 @@ private actor MacTerminalFixtureGateway {
 
     func attach(_ socket: MacTerminalFixtureSocket) { sockets.append(socket) }
 
-    /// The Gateway goes away: open sockets close and new ones are refused.
     func stop() async {
         stopped.withLock { $0 = true }
         for socket in sockets { await socket.close() }
@@ -127,7 +107,6 @@ private actor MacTerminalFixtureGateway {
         if isStopped { return (nil, failure("The Gateway is stopped")) }
         switch method {
         case "macTerminal.status" where scenario == "loading":
-            // The Mac never answers: the sheet stays on its loading state.
             try? await Task.sleep(for: .seconds(600))
             return (nil, failure("The fixture held its status"))
         case "macTerminal.status":
@@ -151,8 +130,6 @@ private actor MacTerminalFixtureGateway {
                 return (nil, failure("Unexpected settings change"))
             }
             if scenario == "remove-profile-switch", change["op"]?.stringValue == "unset" {
-                // Hold the real controller’s wire request until the UI has
-                // closed, selected B and reopened. Failed revocation changes no key.
                 await withCheckedContinuation { continuation in
                     pendingRemoval = continuation
                     let root = URL(fileURLWithPath: configuration.authorizedKeys).deletingLastPathComponent()

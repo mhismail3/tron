@@ -1,10 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Pause, resume and disable, the last section of Home Settings. It owns its own
-/// `home.status` read, fenced to the Home Settings surface, and re-reads after each
-/// command; receipted commands stay with `HomeMutationCoordinator`. Disable needs
-/// confirmation; an unresolved command leaves only the completion check.
 struct HomeControlsSection: View {
     let profileID: String
     @Environment(AppModel.self) private var model
@@ -46,7 +42,6 @@ struct HomeControlsSection: View {
         .task(id: TaskID(identity: identity, request: requestID, active: active)) {
             guard active, let identity, let coordinator else { owner.retireLoading(); return }
             let currentID = requestID
-            // Uncovering keeps the installed status; only a new request reads again.
             if owner.holds(requestID: currentID, identity: identity) { return }
             await owner.load(requestID: currentID, identity: identity, coordinator: coordinator,
                              isCurrent: { self.identity == identity && self.requestID == currentID }) {
@@ -65,14 +60,10 @@ struct HomeControlsSection: View {
         }
         .onPresentationRetire { owner.retire() }
         #if HOSTED_TEST
-        // Retains the mounted pause action so hosted journeys can invoke it after
-        // a route replacement; the identity fences inside `perform` must refuse it.
         .onAppear { hostedActionProbe?.pause = { perform(.pauseMemory) } }
         #endif
     }
 
-    /// Pause reads as a neutral, reversible hold in the paused-state slate;
-    /// Disable keeps its destructive red.
     private func controls(_ status: HomeStatusDTO) -> some View {
         let unresolved = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
         let mutating = model.homeMutations.isRunning(profileID: profileID)
@@ -130,8 +121,6 @@ struct HomeControlsSection: View {
         .accessibilityIdentifier("home-settings-controls")
     }
 
-    /// Accepted domain commands keep the chat's authority rules: acquire once
-    /// for the mounted profile, then let the coordinator own receipt resolution.
     private func admitControl() -> HomeControlAdmission? {
         guard let identity, let coordinator, active,
               let authority = try? model.homeMutations.authority(profileID: profileID) else { return nil }

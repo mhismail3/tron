@@ -1,18 +1,6 @@
 import Foundation
 
-/// Local session-title search shared by the dashboard's search field and the
-/// Home View All sheets. It is a pure, synchronous ranking over titles the
-/// dashboard already holds, so it needs no Gateway and stays cheap per keystroke.
-///
-/// Matching is case- and diacritic-insensitive and treats punctuation as word
-/// breaks. Every query word must match the title; a title's rank is its
-/// weakest word's tier: the whole title or a title prefix beats every word
-/// starting a title word, which beats a word inside one, which beats a
-/// tolerant fuzzy match (letters in order from a word start, or one typo
-/// in a word of four or more letters).
-/// Equal ranks keep the caller's order, so recency ordering survives.
 enum SessionTitleSearch {
-    /// A prepared query. Build it once per query, then test every title.
     struct Query {
         let normalized: String
         let tokens: [String]
@@ -24,14 +12,11 @@ enum SessionTitleSearch {
         }
     }
 
-    /// Lower ranks match better. `nil` from `rank` means no match.
     enum Tier: Int, Comparable {
         case exact = 0, prefix, wordPrefix, substring, fuzzy
         static func < (lhs: Tier, rhs: Tier) -> Bool { lhs.rawValue < rhs.rawValue }
     }
 
-    /// The items whose title matches, best first; ties keep the input order.
-    /// An empty query returns the input unchanged.
     static func filter<Item>(_ items: [Item], query raw: String, title: (Item) -> String) -> [Item] {
         let query = Query(raw)
         guard !query.isEmpty else { return items }
@@ -61,15 +46,12 @@ enum SessionTitleSearch {
     private static func tokenTier(_ token: String, words: [Substring], normalized: String) -> Tier? {
         if words.contains(where: { $0.hasPrefix(token) }) { return .wordPrefix }
         if normalized.contains(token) { return .substring }
-        // A one- or two-letter fragment that is not a word start is noise.
         guard token.count >= 3 else { return nil }
         if isAbbreviation(token, of: words) { return .fuzzy }
         if token.count >= 4, words.contains(where: { withinOneEdit(token, prefixOf: $0) }) { return .fuzzy }
         return nil
     }
 
-    /// Lowercased, diacritic-folded, with every non-alphanumeric run reduced to
-    /// one space.
     static func normalize(_ text: String) -> String {
         let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
         var result = ""
@@ -87,8 +69,6 @@ enum SessionTitleSearch {
         return result
     }
 
-    /// The token's letters appear in order from the start of some title word
-    /// onward ("simlan" finds "Simulator lane"), never from mid-word noise.
     private static func isAbbreviation(_ token: String, of words: [Substring]) -> Bool {
         guard let first = token.first else { return false }
         for start in words.indices where words[start].first == first {
@@ -101,8 +81,6 @@ enum SessionTitleSearch {
         return false
     }
 
-    /// Whether the token is one substitution, insertion or deletion away from
-    /// the start of the word (a typo in a word being typed).
     private static func withinOneEdit(_ token: String, prefixOf word: Substring) -> Bool {
         let a = Array(token), b = Array(word)
         guard b.count >= a.count - 1 else { return false }

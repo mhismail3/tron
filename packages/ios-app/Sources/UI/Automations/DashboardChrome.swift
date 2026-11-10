@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Only the title and backdrop observe scroll geometry. Catalogue inputs and
-/// row identity never depend on this per-frame presentation state.
 @MainActor @Observable
 final class DashboardHeaderState {
     static let blurFadeDistance: CGFloat = 80
@@ -10,14 +8,10 @@ final class DashboardHeaderState {
     static let titleSize: CGFloat = 34
     static let inlineTitleSize: CGFloat = 22
     private(set) var offset: CGFloat = 0
-    /// The system window controls' footprint in the top-leading corner
-    /// (`containerCornerInsets`, which only a windowed iPad scene reports); zero
-    /// full screen and on iPhone. Windowed, the title sits inline beside the lights.
     private(set) var windowControls: CGSize = .zero
 
     var isInline: Bool { windowControls.height > 0 }
 
-    /// The window's top safe-area inset, which the inline row starts below.
     private(set) var safeTop: CGFloat = 0
 
     func update(windowControls: CGSize, safeTop: CGFloat) {
@@ -36,7 +30,6 @@ final class DashboardHeaderState {
         reduceMotion || isInline ? 0 : Self.initialDrop * (1 - Self.ease(progress))
     }
 
-    // Two base font points of shrink, or at most six percent of pull stretch.
     func titleScale(reduceMotion: Bool) -> CGFloat {
         guard !reduceMotion, !isInline else { return 1 }
         let pull = max(0, -offset / Self.stretchDistance)
@@ -44,8 +37,6 @@ final class DashboardHeaderState {
     }
 
     private static func ease(_ value: CGFloat) -> CGFloat {
-        // Continuous slope at rest and at both caps, with no delayed animation
-        // competing against the scroll view's own deceleration/rubber band.
         value * value * (3 - 2 * value)
     }
 
@@ -59,15 +50,11 @@ final class DashboardHeaderState {
     }
 }
 
-/// The Sessions dashboard's chrome: title, top blur and the one floating
-/// button. Content and accepted actions remain with the dashboard.
 struct DashboardChrome<Content: View>: View {
     let header: DashboardHeaderState
     let onOpenAutomations: @MainActor () -> Void
     let onOpenApps: @MainActor () -> Void
     let actions: DashboardMenuActions
-    /// Set where the dashboard offers Home: its one button then opens Home on a
-    /// tap and the dashboard menu on touch and hold.
     let home: DashboardHomeControl?
     private let content: Content
 
@@ -97,10 +84,6 @@ struct DashboardChrome<Content: View>: View {
                 actions: actions,
                 home: home
             )
-            // UIKit owns the touch, tap/hold and menu; the icon swaps through
-            // the shared indicator transition, so Home's states morph in place.
-            // It sits behind the transparent button: SwiftUI content layered
-            // above a UIKit view takes its touches.
             .background {
                 DashboardIndicatorSwap(state: home?.state ?? .resting) { state in
                     HomeButtonIndicator(state: state, accent: .tronPrimary)
@@ -121,8 +104,6 @@ struct DashboardChrome<Content: View>: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             DashboardTitleRow(state: header)
         }
-        // Read at the chrome's own top-leading corner, outside the title row's
-        // safe-area inset, so the footprint is the window's, not shrunk by the row.
         .onGeometryChange(for: DashboardWindowCorner.self) { geometry in
             var controls = geometry.containerCornerInsets.topLeading
             #if HOSTED_TEST
@@ -140,8 +121,6 @@ struct DashboardWindowCorner: Equatable {
     var safeTop: CGFloat
 
     #if HOSTED_TEST
-    /// Layout fixture: a simulator window cannot be put in Stage Manager, so a
-    /// test supplies the corner footprint the system would report.
     static let fixtureControls: CGSize? = {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "-tron-window-controls-inset"), arguments.indices.contains(index + 1) else { return nil }
@@ -151,18 +130,12 @@ struct DashboardWindowCorner: Equatable {
     #endif
 }
 
-/// The title's row. Full screen and on iPhone it is the large header. Windowed,
-/// the system draws its window controls over the top-leading corner; the title
-/// then sits inline to the right of the lights, vertically centred with them,
-/// and no extra inset is reserved above it.
 private struct DashboardTitleRow: View {
     let state: DashboardHeaderState
 
     var body: some View {
         if state.isInline {
             let controls = state.windowControls
-            // The row's own footprint ends at the lights' bottom edge; the title is
-            // drawn from the window's top edge, above the safe-area inset.
             Color.clear
                 .frame(height: max(controls.height - state.safeTop, 0))
                 .overlay(alignment: .topLeading) {
@@ -189,8 +162,6 @@ struct DashboardTitle: View {
             .foregroundStyle(Color.tronPrimary)
             .lineLimit(1)
             .minimumScaleFactor(0.5)
-            // Fit long names before applying the small visual transform;
-            // motion never changes the header's measured layout footprint.
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("dashboard.title")
             .scaleEffect(state.titleScale(reduceMotion: reduceMotion), anchor: .topLeading)
@@ -214,8 +185,6 @@ private struct DashboardScrollModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            // A constant content margin scrolls away naturally. Translating the
-            // UIScrollView itself changes UIKit's safe-area insets mid-gesture.
             .contentMargins(.top, topMargin + (reduceMotion || header.isInline ? 0 : DashboardHeaderState.initialDrop), for: .scrollContent)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 DashboardHeaderState.boundedOffset(geometry.contentOffset.y + geometry.contentInsets.top)
@@ -229,15 +198,10 @@ private struct DashboardInitialOffset: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        // Loading placeholders have no scroll content margin yet.
         content.offset(y: reduceMotion ? 0 : DashboardHeaderState.initialDrop)
     }
 }
 
-/// The floating search control of a dashboard list sheet: a circular button in
-/// the sheet's bottom-trailing corner that expands into the search pill.
-/// Scrolling the results dismisses the keyboard; only an empty query closes
-/// the pill with it.
 struct DashboardFloatingSearch: View {
     @Binding var text: String
     @Binding var isPresented: Bool
@@ -274,7 +238,6 @@ struct DashboardFloatingSearch: View {
     }
 }
 
-/// One floating circular action in a dashboard list sheet's bottom-trailing corner.
 struct DashboardFloatingButton: View {
     let symbol: String
     let accent: Color
@@ -301,15 +264,12 @@ struct DashboardFloatingButton: View {
 }
 
 extension View {
-    /// The dashboard's one floating circular button chrome.
     func tronDashboardFloatingCircle(accent: Color) -> some View {
         frame(width: 56, height: 56)
             .contentShape(Circle())
             .glassEffect(.regular.tint(accent.opacity(0.22)).interactive(), in: .circle)
     }
 
-    /// Attach to the concrete List/ScrollView, not a parent containing several
-    /// scroll owners. Normalize the resting offset by its real safe-area inset.
     func tronDashboardScroll(_ header: DashboardHeaderState, topMargin: CGFloat = 0) -> some View {
         modifier(DashboardScrollModifier(header: header, topMargin: topMargin))
     }

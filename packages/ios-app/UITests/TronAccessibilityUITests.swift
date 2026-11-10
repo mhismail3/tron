@@ -1,7 +1,5 @@
 import XCTest
 
-/// SwiftUI semantics are queried through XCTest's real accessibility client,
-/// not uninitialized NSObject proxies in a hosted test process.
 @MainActor
 final class TronAccessibilityUITests: XCTestCase {
     private func launch(_ arguments: [String] = []) -> XCUIApplication {
@@ -42,11 +40,8 @@ final class TronAccessibilityUITests: XCTestCase {
         XCTAssertGreaterThan(frames[2].minY, frames[0].maxY)
         XCTAssertGreaterThan(frames[4].width, frames[0].width * 1.5)
         XCTAssertGreaterThan(frames[4].minY, frames[2].maxY)
-        // Never invoke lifecycle actions: these are inert fixture closures.
     }
 
-    // A phantom second column must not steal width from the lone trailing
-    // action. Paired actions, shared hit targets and large-text layout stay intact.
     func testLoneMaintenanceActionUsesFullContentWidth() {
         for arguments in [[], ["-fixture-light"], ["-fixture-large-type"]] {
             let app = launch(["-fixture-lone-maintenance"] + arguments)
@@ -71,15 +66,10 @@ final class TronAccessibilityUITests: XCTestCase {
                 XCTAssertTrue(app.buttons[label].isHittable)
                 XCTAssertGreaterThanOrEqual(app.buttons[label].frame.height, 44)
             }
-            // Never tap these actions: their fixture callbacks are inert and
-            // the production lifecycle is outside this layout acceptance.
             app.terminate()
         }
     }
 
-    /// The Mac replacement journal (#984) in the shared Settings rows: path and
-    /// reason, every step with its timing, the exact error and log, the
-    /// rollback, and the stopped workers with in-place Resume.
     func testMacReplacementJournalRows() {
         for arguments in [[], ["-fixture-large-type"]] {
             let app = launch(arguments)
@@ -116,8 +106,6 @@ final class TronAccessibilityUITests: XCTestCase {
             XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 3), app.debugDescription)
         }
         XCTAssertTrue(app.staticTexts["DETAILS"].exists)
-        // XCUI exposes label/value/type, not accessibilityHint. Verify the
-        // promised action itself rather than incorrectly treating hint as label.
         app.buttons["Active Async Capacity, Object, 2 fields"].tap()
         XCTAssertTrue(app.buttons["Max, Number, 4"].waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(app.buttons["Mode, Text, single"].exists)
@@ -174,7 +162,6 @@ final class TronAccessibilityUITests: XCTestCase {
             menu.tap()
             XCTAssertFalse(app.buttons["Search"].exists)
             XCTAssertFalse(app.buttons["Filter"].exists)
-            // Sessions is the only dashboard: the menu offers no dashboard switch.
             let titles = ["Settings", "Automations", "Apps", "New Session"]
             for label in titles { XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 3)) }
             XCTAssertFalse(app.buttons["Sessions"].exists, "The menu has no Sessions entry")
@@ -182,7 +169,6 @@ final class TronAccessibilityUITests: XCTestCase {
             for (before, after) in zip(frames, frames.dropFirst()) { XCTAssertLessThan(before.midY, after.midY) }
             XCTAssertLessThanOrEqual(frames.last!.maxY, menuFrame.maxY + 1)
             XCTAssertTrue(app.buttons["New Session"].isHittable, "Creation must not require scrolling the popup")
-            // Dismiss the native menu outside it, leaving the dashboard as it was.
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
             XCTAssertTrue(app.buttons["Automations"].waitForNonExistence(timeout: 3), app.debugDescription)
             let scroll = app.collectionViews.firstMatch
@@ -208,8 +194,6 @@ final class TronAccessibilityUITests: XCTestCase {
             waitForFrame(title, y: expanded.minY, height: expanded.height)
             XCTAssertEqual(title.frame.height, expanded.height, accuracy: 0.5)
             XCTAssertEqual(title.frame.minY, expanded.minY, accuracy: 0.5)
-            // Exercise UIKit's actual gesture/release, not an animated command
-            // issued while a fixture has forced an out-of-range contentOffset.
             scroll.swipeDown()
             waitForFrame(title, y: expanded.minY, height: expanded.height)
             XCTAssertEqual(devicePixels(scroll.frame, scale: scale), devicePixels(viewport, scale: scale))
@@ -260,7 +244,6 @@ final class TronAccessibilityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Visible Servers"].waitForExistence(timeout: 3), app.debugDescription)
         let done = try XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.first(where: \.isHittable))
         done.tap()
-        // Progressive destinations share the root Settings Done owner.
         app.buttons["settings-done"].tap()
         XCTAssertTrue(menu.waitForExistence(timeout: 3))
         XCTAssertTrue(menu.isHittable, "Done returns to the dashboard, not a duplicate Settings owner")
@@ -298,17 +281,12 @@ final class TronAccessibilityUITests: XCTestCase {
         }
     }
 
-    /// Device pixels per point: the screen raster's width over the full-screen
-    /// app's width in points.
     private func devicePixelScale(_ app: XCUIApplication) -> CGFloat {
         let scale = CGFloat(XCUIScreen.main.screenshot().image.cgImage?.width ?? 0) / app.frame.width
         XCTAssertGreaterThan(scale, 0, "No screen raster to measure device pixels")
         return scale
     }
 
-    /// A frame in whole device pixels. UIKit's coordinate conversion carries
-    /// float residue (5e-15pt at iOS 27's 108.667pt list inset), but only whole
-    /// pixels reach the screen, so a one-pixel layout error still differs.
     private func devicePixels(_ frame: CGRect, scale: CGFloat) -> [Int] {
         [frame.minX, frame.minY, frame.width, frame.height].map { Int(($0 * scale).rounded()) }
     }

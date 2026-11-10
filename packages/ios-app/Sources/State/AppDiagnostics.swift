@@ -16,11 +16,6 @@ private struct DiagnosticExportResponse: Decodable {
     let exportedAt: String
 }
 
-/// Owns the iOS client diagnostic ring, its bounded persistence, and the
-/// multi-source Logs collection and diagnostic export. Lifecycle, the selected
-/// profile, and the dashboard pool stay authoritative: this owner reads them live
-/// through the references it is given and never snapshots connection or
-/// readiness state.
 @MainActor
 final class AppDiagnostics {
     private let lifecycle: GatewayLifecycleCoordinator
@@ -53,7 +48,6 @@ final class AppDiagnostics {
         self.diagnosticStore = diagnosticStore
     }
 
-    /// Start at the original app-initialization cut, after MetricKit registration.
     func restorePersistedRecords() {
         if let diagnosticStore {
             Task { @MainActor [weak self, diagnosticStore] in
@@ -69,8 +63,6 @@ final class AppDiagnostics {
         scheduleDiagnosticPersistence()
     }
 
-    /// Persists the current ring and waits for the store, so teardown leaves
-    /// the retained incident evidence on disk.
     func flushPersistence() async {
         scheduleDiagnosticPersistence()
         await diagnosticStore?.flush()
@@ -165,8 +157,6 @@ final class AppDiagnostics {
             lastObservedAt: observedAt
         )
         eventConsumerDiagnostics[key] = updated
-        // First slow completion per window plus rotations/retirement preserve a
-        // useful prelude without turning normal event handling into log I/O.
         if slow, prior.slowCount == 0 { diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(updated)) }
     }
 
@@ -181,8 +171,6 @@ final class AppDiagnostics {
         return try await diagnostics.logs(limit: limit)
     }
 
-    /// `diagnosticsAreReady` is sampled once, after every local and transport
-    /// read has suspended, so it decides remote admission for the current epoch.
     func loadGatewayLogsResult(
         limit: Int,
         includeRemote: Bool,
@@ -205,9 +193,6 @@ final class AppDiagnostics {
             IOSClientDiagnosticBuffer.logRecord($0)
         })
         loaded.append(contentsOf: chatInteractionTrace.diagnosticRecords(limit: limit))
-        // Local evidence must remain available during a stalled handshake.
-        // Never send diagnostic RPCs into an epoch that is still connecting;
-        // mark remote buckets unavailable so the view retains their last rows.
         guard includeRemote, diagnosticsAreReady() else {
             for profile in profileSnapshot { sourceStatuses[profile.id] = "not-requested-retained" }
             return GatewayLogsLoadResult(
@@ -248,8 +233,6 @@ final class AppDiagnostics {
         diagnosticsAreReady: () -> Bool,
         currentDestination: () -> KnowledgeDestinationIdentity
     ) async throws -> DiagnosticExportResult {
-        // Preparation can suspend before this facade is entered. The gesture's
-        // stable Mac namespace, not the live selection, owns this file write.
         guard currentDestination() == destination else { throw CancellationError() }
         if diagnosticsAreReady(), lifecycle.gatewayInfo?.capabilities.contains("diagnostic-export.v1") == true,
            let connectionID = lifecycle.connectionID {

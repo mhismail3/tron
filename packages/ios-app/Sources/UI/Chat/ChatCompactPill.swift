@@ -3,8 +3,6 @@ import UIKit
 
 @MainActor
 extension ChatNotificationTone {
-    /// Small compact-pill text uses contrast-safe foregrounds independently of
-    /// the brighter semantic surface tint.
     var primaryColor: Color {
         switch self {
         case .accent: .tronAccentText
@@ -54,8 +52,6 @@ extension ChatNotificationTone {
     }
 }
 
-/// Compact-pill foregrounds are built once: tone colors are read in transcript
-/// and tool-row bodies, and a fresh dynamic color per read re-parses its hex.
 private enum ChatCompactPillPalette {
     static let commandPrimary = Color(lightHex: "#4338CA", darkHex: "#C7D2FE")
     static let informationPrimary = Color(lightHex: "#0369A1", darkHex: "#38BDF8")
@@ -76,10 +72,6 @@ private enum ChatCompactPillPalette {
     static let neutralSecondary = Color(lightHex: "#334155", darkHex: "#E2E8F0")
 }
 
-/// Stable semantic palette for compact transcript chrome. Producer identity is
-/// text; the message category owns color, never the producer's origin kind, and
-/// warning/error may override that category. Prompt templates share the
-/// command resource identity; generic inbound context stays neutral.
 enum ChatSemanticPillRole: Hashable, Sendable {
     case command
     case prompt
@@ -135,8 +127,6 @@ struct ChatCompactPillTitleMeasurementKey: PreferenceKey {
 enum ChatCompactPillLayoutPolicy {
     static let horizontalPadding: CGFloat = 10
     static let verticalPadding: CGFloat = 6
-    /// Matches the compact metadata-pill gap between the icon's visible edge
-    /// and its label. Every chat pill/chip uses this one leading rhythm.
     static let itemSpacing: CGFloat = 5
     static let standardIconSize: CGFloat = 13
     static let toolIconSize: CGFloat = 13
@@ -150,9 +140,6 @@ enum ChatCompactPillLayoutPolicy {
     }
 }
 
-/// Shared visual primitive for compact transcript activity. Alignment and
-/// interaction remain with the role-specific owner; this type owns only shape,
-/// spacing, material, and state crossfades.
 struct ChatCompactPillSurface<Content: View>: View {
     let tone: ChatNotificationTone
     let material: ChatNotificationMaterial
@@ -187,13 +174,7 @@ struct ChatCompactPillSurface<Content: View>: View {
             style: .continuous
         )
         let surfaceAccent = accentOverride ?? tone.surfaceColor
-        // Sheet-opening pills always use the shared interactive glass treatment;
-        // flat material remains available only to informational, non-tappable pills.
         let isGlass = interactive || material == .glass
-        // One structure at every material: a value change from flat to glass
-        // must not remount the pill (a remount showed the flat frame before the
-        // measured glass one). The unused half of each pair is inert — a clear
-        // background and stroke, or an identity glass effect.
         content
             .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
             .padding(.vertical, verticalPadding)
@@ -212,21 +193,11 @@ struct ChatCompactPillSurface<Content: View>: View {
 private struct ChatCompactPillInteractionModifier: ViewModifier {
     let accessibilityLabel: String
     let accessibilityValue: String?
-    /// Whether the pill is a control. A pill that owns no action keeps its own
-    /// accessibility element and label without the button trait.
     let addsButtonTrait: Bool
-    /// The pill's own action, or nil for an informational pill. The interactive
-    /// half is attached at every value: a conditional here switched the pill's
-    /// structure and re-showed its flat frame across the truncation measurement
-    /// (F10, measured as two pill instances for one notice). A pill that owns no
-    /// action instead declares that it does not respond to user interaction, so
-    /// no activation is offered for a control the reader cannot act on.
     let action: (() -> Void)?
 
     func body(content: Content) -> some View {
         content
-            // The interactive glass surface remains the only visual press
-            // owner. A wrapping Button would add a second touch-down phase.
             .onTapGesture { action?() }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityLabel)
@@ -254,8 +225,6 @@ extension View {
 }
 
 enum ChatToolChipShapePolicy {
-    /// Status and failure tint changes are shallow. The Liquid Glass geometry
-    /// never switches shape while a mounted tool run settles.
     static let cornerRadius = ChatCompactPillLayoutPolicy.capsuleCornerRadius
 }
 
@@ -264,8 +233,6 @@ enum ChatCompactPillDetailStyle {
     case summary
 }
 
-/// A shallow animation key: transitions never compare raw request/result JSON,
-/// output bodies, or summary payloads on the render path.
 struct ChatCompactPillVisualState: Hashable, Sendable {
     let id: String
     let title: String
@@ -358,8 +325,6 @@ struct ChatCompactPillLeadingIcon: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.82)))
             }
         }
-        // Keep vertical pill geometry stable without reserving horizontal
-        // whitespace between the symbol's visible edge and its label.
         .frame(minHeight: max(iconSize, ChatCompactPillLayoutPolicy.progressIconSize))
         .accessibilityHidden(true)
     }
@@ -502,16 +467,13 @@ enum ChatPromptContainerStyle {
 }
 
 enum UserPromptTextLayoutPolicy {
-    static let maximumWidth: CGFloat = 364 // 30% narrower than the prior 520-point bound.
+    static let maximumWidth: CGFloat = 364
     static let fontScale: CGFloat = 1
 
     static func fittedWidth(measured: CGFloat, proposed: CGFloat) -> CGFloat {
         min(max(0, measured), max(0, proposed))
     }
 
-    /// Chooses one stable intrinsic-or-wrapped container width. Flexible
-    /// children (for example a queued-card header spacer) receive only this
-    /// resolved proposal and therefore cannot expand every short card to the cap.
     static func boundedContainerWidth(
         intrinsic: CGFloat,
         proposed: CGFloat,
@@ -524,9 +486,6 @@ enum UserPromptTextLayoutPolicy {
         return intrinsic
     }
 
-    /// The prompt block remains right-anchored by SwiftUI. Lines read from the
-    /// logical leading edge inside that narrower block instead of stretching
-    /// inter-word spacing to full justification.
     static func alignment(layoutDirection: LayoutDirection) -> NSTextAlignment {
         layoutDirection == .rightToLeft ? .right : .left
     }
@@ -534,7 +493,6 @@ enum UserPromptTextLayoutPolicy {
 
 enum UserPromptTextTone: Hashable {
     case user
-    /// Body text in a sheet container: the standard primary text, never a producer's tint.
     case standard
 
     @MainActor var color: Color {
@@ -545,16 +503,12 @@ enum UserPromptTextTone: Hashable {
     }
 }
 
-/// UIKit/TextKit retains deterministic wrapping and Dynamic Type while SwiftUI
-/// owns the narrower right-anchored prompt block.
 struct UserPromptText: View {
     let text: String
     var tone: UserPromptTextTone = .user
     @State private var fontSettings = FontSettings.shared
 
     var body: some View {
-        // Reading the selected family and axes makes Observation invalidate this
-        // wrapper when the app's live typography settings change.
         let family = fontSettings.selectedFamily
         let weight = fontSettings.axisValue(for: family, axis: .weight)
         let casual = fontSettings.axisValue(for: family, axis: .casual)

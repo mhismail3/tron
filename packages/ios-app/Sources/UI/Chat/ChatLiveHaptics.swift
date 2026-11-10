@@ -1,12 +1,7 @@
 import SwiftUI
 import TronMobileCore
 
-/// What the mounted chat's live haptics key on, read from its authoritative
-/// snapshot on every render. Streaming text never changes these facts.
 struct ChatLiveHapticFacts: Equatable {
-    /// One uninterrupted live view of the chat: its presentation, the installed
-    /// Gateway subscription (a reconnect installs a new one) and an active,
-    /// uncovered, ready surface. Nil while any of those is missing.
     struct Epoch: Equatable {
         let generation: Int
         let subscription: String
@@ -15,21 +10,15 @@ struct ChatLiveHapticFacts: Equatable {
     let epoch: Epoch?
     let phase: SessionPhase?
     let tailID: String?
-    /// The pending question whose sheet the chat presents now.
     let questionID: String?
 }
 
-/// Turns changes the chat observes live into at most one haptic each. Every
-/// new epoch adopts what is on screen as its baseline, so an opened, restored,
-/// reconnected or re-foregrounded chat plays nothing for what it already
-/// shows, and older history paged in above the tail is never "new".
 struct ChatLiveHapticLedger {
     private var epoch: ChatLiveHapticFacts.Epoch?
     private var tailID: String?
     private var watchingRun = false
     private var runStartTailID: String?
     private var settlePending = false
-    /// Event identities already played (or adopted), most recent last.
     private var played: [String] = []
 
     mutating func observe(_ facts: ChatLiveHapticFacts, transcript: [TranscriptItem]) -> TronHaptic? {
@@ -58,7 +47,6 @@ struct ChatLiveHapticLedger {
             if watchingRun { settlePending = true }
             watchingRun = false
         } else {
-            // An interrupted session did not settle normally.
             watchingRun = false
             settlePending = false
         }
@@ -67,8 +55,6 @@ struct ChatLiveHapticLedger {
         if let question = facts.questionID, admit("question:\(question)") {
             haptic = .questionPresented
         }
-        // The run's final assistant message can land with the idle phase or
-        // just after it; Stop and failures end with `aborted`/`error`.
         if settlePending,
            let final = Self.items(after: runStartTailID, in: transcript)
                .last(where: { $0.kind == .message && $0.role == .assistant }) {
@@ -83,8 +69,6 @@ struct ChatLiveHapticLedger {
         return haptic
     }
 
-    /// A Home worker's result or a subagent's message (its row's subagent
-    /// tone), never other producer context such as per-prompt extension input.
     static func isWorkerMessage(_ item: TranscriptItem) -> Bool {
         guard item.kind == .customMessage, item.semantic?.direction != .hiddenInternal else { return false }
         return item.customType == "tron.home-task-result.v1" || InboundContextMessagePresentation(
@@ -92,8 +76,6 @@ struct ChatLiveHapticLedger {
         ).tone == .subagent
     }
 
-    /// Items after `id`, scanning from the tail; everything when there was no
-    /// tail, nothing when the tail is no longer in this window.
     private static func items(after id: String?, in transcript: [TranscriptItem]) -> ArraySlice<TranscriptItem> {
         guard let id else { return transcript[...] }
         guard let index = transcript.lastIndex(where: { $0.id == id }) else { return [] }
@@ -108,7 +90,6 @@ struct ChatLiveHapticLedger {
     }
 }
 
-/// Plays the mounted chat's live haptics; shared by Home and every session chat.
 struct ChatLiveHapticsModifier: ViewModifier {
     let facts: ChatLiveHapticFacts
     let transcript: () -> [TranscriptItem]

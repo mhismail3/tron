@@ -20,7 +20,6 @@ enum NativeCaptureHostError: String, Error, Sendable {
 struct NativeCaptureRequest: Decodable, Equatable, Sendable {
     let version: Int
     let operation: String
-    /// Control commands have receipts; disposable pulls use readSequence only.
     let commandID: UUID?
     let loadID: UUID
     let bootID: UUID?

@@ -1,7 +1,5 @@
 import SwiftUI
 
-// Visual proposal only. The installed version will receive declared ios-builds
-// values from the Gateway; this file deliberately has no network/install access.
 @main
 struct BuildsApp: App {
     var body: some Scene { WindowGroup { BuildsView() } }

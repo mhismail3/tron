@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Secret drafts are always empty on entry. Only the replacement goes to the
-/// mutation owner; the resolver's redacted display is never treated as a value.
 struct SettingsSecretEditor: View {
     let title: String
     let help: String
@@ -37,16 +35,11 @@ struct SettingsSecretEditor: View {
     }
 }
 
-/// String values keep stable local row identity while editing, in the order the
-/// Gateway stores them; each row can move earlier or later. The Gateway alone
-/// validates item syntax, count and allowed values on Save.
 struct SettingsListEditor: View {
     private struct Item: Identifiable { let id = UUID(); var text: String }
     let title: String
     let help: String
-    /// The schema's guidance for one new value: its format and a realistic example.
     let entry: SettingsEntryGuidance?
-    /// Catalog-backed lists add through the shared picker, never free-form model IDs.
     let entryPicker: ((@escaping (String) -> Void) -> AnyView)?
     let onChange: (JSONValue?) -> Void
     @PresentationState private var items: [Item]
@@ -56,7 +49,6 @@ struct SettingsListEditor: View {
     init(title: String, help: String, entry: SettingsEntryGuidance?, values: [String],
          entryPicker: ((@escaping (String) -> Void) -> AnyView)? = nil, onChange: @escaping (JSONValue?) -> Void) {
         self.title = title; self.help = help; self.entry = entry; self.entryPicker = entryPicker; self.onChange = onChange
-        // Seed once for this presentation, not again when canonical settings refresh.
         _items = PresentationState(wrappedValue: values.map { Item(text: $0) })
     }
 
@@ -66,8 +58,6 @@ struct SettingsListEditor: View {
                 TronSettingsGroup(title) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         if index > 0 { TronSettingsDivider() }
-                        // One control per action. Direct buttons, not a Menu: SwiftUI menus
-                        // fail to open in a sheet presented from another sheet (#877).
                         TronSettingsRow(icon: nil, title: item.text) {
                             HStack(spacing: 0) {
                                 if items.count > 1 {
@@ -112,7 +102,6 @@ struct SettingsListEditor: View {
         .tronSaveToolbar { onChange(.array(items.map { .string($0.text) })); dismiss() }
     }
 
-    /// Done on the keyboard adds what was typed, like the Add button; Save still commits the list.
     private func add() {
         guard !next.isEmpty else { return }
         items.append(Item(text: next)); next = ""
@@ -123,7 +112,6 @@ struct SettingsListEditor: View {
         items.swapAt(index, index + offset)
     }
 
-    /// The queued-message vocabulary: Move earlier / Move later with arrow icons.
     private func moveButton(_ item: String, earlier: Bool, enabled: Bool, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: earlier ? "arrow.up" : "arrow.down")

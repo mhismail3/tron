@@ -1,8 +1,6 @@
 import Foundation
 import XCTest
 
-/// Production pages → real socket → lifecycle owner/Git/trust store. No scripted
-/// responses; every decision is a separate toolbar tap.
 extension RealGatewayPairAndChatUITests {
     @MainActor
     func testProjectLifecycleApproveCreatesUntrustsAndTrusts() throws {
@@ -12,7 +10,6 @@ extension RealGatewayPairAndChatUITests {
         defer { app.terminate() }
         let source = URL(fileURLWithPath: fixture.workspace).appendingPathComponent("lifecycle-approved")
         try lifecycleCreate(app, name: source.lastPathComponent)
-        // The review alone has no effects: only the exact tap creates and trusts.
         XCTAssertFalse(FileManager.default.fileExists(atPath: source.path), "The review alone must not create the project")
         XCTAssertNil(try lifecycleTrust(fixture, path: source.path), "The review alone must not record trust")
         lifecycleDecide(app, approve: true)
@@ -24,7 +21,6 @@ extension RealGatewayPairAndChatUITests {
         lifecycleTap(app, "project-lifecycle-untrust")
         lifecycleDecide(app, approve: true)
         XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == false })
-        // Approve retires the review and returns to the requesting details page.
         lifecycleTap(app, "Request Trust")
         lifecycleDecide(app, approve: true)
         XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == true })
@@ -45,8 +41,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertNil(try lifecycleTrust(fixture, path: source.path), "A cancelled Create must record no trust")
         lifecycleClose(app)
         lifecycleBackToList(app)
-        // A real repository, explicitly untrusted through its own exact tap,
-        // must survive a denied trust request with no new authority.
         try lifecycleCreate(app, name: source.lastPathComponent)
         lifecycleDecide(app, approve: true)
         XCTAssertTrue(waitUntil(timeout: 15) { (try? self.lifecycleTrust(fixture, path: source.path)) == true })
@@ -64,9 +58,6 @@ extension RealGatewayPairAndChatUITests {
         keepScreenshot(app, name: "2023-real-gateway-denied-trust")
     }
 
-    /// #2206: a confirmed action the Gateway refuses right away (the path appeared
-    /// after review) is reported on the requesting page even though its review
-    /// card is still closing; nothing is created or trusted.
     @MainActor
     func testProjectLifecycleRefusedApprovalShowsItsReason() throws {
         continueAfterFailure = false
@@ -76,7 +67,6 @@ extension RealGatewayPairAndChatUITests {
         let source = URL(fileURLWithPath: fixture.workspace).appendingPathComponent("lifecycle-raced")
         try lifecycleCreate(app, name: source.lastPathComponent)
         XCTAssertFalse(FileManager.default.fileExists(atPath: source.path), "The review alone must not create the project")
-        // Another writer takes the reviewed path before the exact tap.
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
         app.buttons["change-review-approve"].tap()
         let refusal = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "already exists")).firstMatch
@@ -167,7 +157,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(app.buttons.matching(identifier: "Add Project").allElementsBoundByIndex.contains(where: { $0.isHittable }), app.debugDescription)
     }
 
-    /// The canonical Project trust store; an absent file holds no decision.
     private func lifecycleTrust(_ fixture: RealGatewayUIFixture, path: String) throws -> Bool? {
         let store = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).appendingPathComponent("trust.json")
         guard FileManager.default.fileExists(atPath: store.path) else { return nil }

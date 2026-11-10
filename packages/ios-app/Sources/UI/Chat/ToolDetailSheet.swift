@@ -8,7 +8,6 @@ struct ToolDetailSheet: View {
     @PresentationState private var fullText: ToolFullText?
     @PresentationState private var showingChanges = false
     @PresentationState private var selectedNestedCall: NestedToolCallPresentation?
-    /// A Home tool's text opened whole in the shared reader.
     @PresentationState private var reading: HomeTextReading?
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.displayPresentationHandler) private var presentDisplay
@@ -49,8 +48,6 @@ struct ToolDetailSheet: View {
                     diffSection(presentation)
                 }
             }
-            // Custom Home, search and generic rows share Settings subtitle sizing.
-            // Keep code readers, metadata chips and headings on their own tokens.
             .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
             .padding(.horizontal, 16)
             .padding(.top, 2)
@@ -227,8 +224,6 @@ struct ToolDetailSheet: View {
         } else if let preview = presentation.readableResultPreview, !preview.text.isEmpty {
             VStack(alignment: .leading, spacing: 7) {
                 sectionLabel(tool.isRunning ? "Live output" : "Result")
-                // Tool output is literal data, including extension/subagent
-                // output. All tool result containers share the code typography.
                 Text(verbatim: preview.text)
                     .font(TronTypography.code(size: TronTypography.sizeBodySM))
                     .foregroundStyle(Color.tronTextSecondary)
@@ -250,8 +245,6 @@ struct ToolDetailSheet: View {
         }
     }
 
-    /// A codemode text (script or result): its opening lines, and a row that
-    /// opens the whole text when the preview had to stop.
     @ViewBuilder
     private func codemodeTextSection(title: String, text: String?) -> some View {
         if let text, !text.isEmpty {
@@ -288,7 +281,6 @@ struct ToolDetailSheet: View {
         if !presentation.nestedCalls.isEmpty {
         VStack(alignment: .leading, spacing: 7) {
             sectionLabel("Calls · \(presentation.nestedCalls.count)")
-            // Up to 256 rows; only the visible ones are built.
             LazyVStack(alignment: .leading, spacing: 7) {
             ForEach(presentation.nestedCalls) { call in
                 Button { selectedNestedCall = call } label: {
@@ -449,8 +441,6 @@ private func nestedStatusIcon(_ status: NestedToolCallPresentation.Status) -> St
     }
 }
 
-/// Section layout shared by the tool detail descendants so they read as
-/// continuations of the parent sheet: same insets, labels and code surfaces.
 private struct ToolDetailSection<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
@@ -478,13 +468,10 @@ struct ToolDetailCodeBlock: View {
             .padding(12)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Code is an inset, never another backdrop filter inside a card.
             .background(accent.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
-/// Shared chat-detail shell for provider errors and nested tool calls: inline
-/// title, Done, native detents, top chrome and the standard content insets.
 struct ChatDetailSheet<Content: View>: View {
     let title: String
     var icon: String?
@@ -525,15 +512,12 @@ struct ChatDetailSheet<Content: View>: View {
     }
 }
 
-/// One full text a tool detail previews, opened in its own sheet.
 struct ToolFullText: Identifiable, Hashable {
     let title: String
     let text: String
     var id: String { title }
 }
 
-/// The whole of a previewed tool text, titled by what it is and shown directly
-/// in the same selectable, scrollable code view as the Request JSON sheet.
 struct ToolTextSheet: View {
     let title: String
     let text: String
@@ -580,7 +564,6 @@ struct NestedToolCallDetailSheet: View {
         }
     }
 
-    /// Arguments other than the one already shown as the primary value.
     private var remainingArguments: JSONValue? {
         guard let arguments = call.arguments else { return nil }
         guard let primary = call.primary, let object = arguments.objectValue else { return arguments }
@@ -624,8 +607,6 @@ struct NestedToolCallDetailSheet: View {
                     .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextSecondary)
             }
-            // Only each nested call's request, status and timing are recorded;
-            // its output reaches the user through the script's own result.
             Text("This call's output is part of the codemode script's result.")
                 .font(TronTypography.settingsRowSubtext)
                 .foregroundStyle(Color.tronTextMuted)
@@ -790,8 +771,6 @@ private struct ToolStatusChip: View {
         return ToolStatusChipPresentation.make(tool: tool, elapsedMilliseconds: elapsed)
     }
 
-    /// Only the chip's duration changes while it runs, so the schedule follows
-    /// the elapsed value alone.
     private var timelineSchedule: ToolElapsedTimelineSchedule {
         let tool = tool
         let localClock = localClock

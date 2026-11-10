@@ -102,9 +102,6 @@ enum MacAppStartupMaintenance {
             guard reason == .versionAlreadyRecorded else { return .skipped(reason) }
             let runtime = await setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
             let currentVariant = setup.runtimeVariant
-            // Ownership admission is authoritative for the currently selected
-            // payload. Syntactic command-line checks accept any valid payload and
-            // therefore cannot justify a same-version skip.
             let ownershipHealthy = await setup.runtimeOwnershipHealthy()
             let registrationNeedsRepair =
                 LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
@@ -123,8 +120,6 @@ enum MacAppStartupMaintenance {
                 pingServer: setup.pingServer
             )
             if case .success = health, ownershipHealthy, !registrationNeedsRepair { return .skipped(reason) }
-            // A same-version wrapper launch still repairs a stale, unsupervised,
-            // or unhealthy LaunchAgent; the version marker is not a health assertion.
         }
 
         await MainActor.run {
@@ -181,7 +176,6 @@ enum MacAppStartupMaintenance {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: stderrLog.path),
               let size = attributes[.size] as? NSNumber,
               size.intValue > gatewayStderrMaxBytes else { return }
-        // Launcher and Node abort text is rare and small; this file is not the canonical, volume-heavy Gateway JSONL stream.
         try? Data().write(to: stderrLog)
     }
 

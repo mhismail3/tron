@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Memory and Tasks: newest-first feeds that load 20 more before the reader
-/// reaches the bottom. Each read is an authoritative bounded read fenced to the
-/// sheet's identity; detail destinations keep their own RPC admission.
 struct HomePagedListSheet: View {
     let destination: HomeSheetDestination
     let profileID: String
@@ -18,8 +15,6 @@ struct HomePagedListSheet: View {
     @PresentationState private var child: HomeSheetDestination?
     @PresentationState private var filter: HomeTaskFilter = .open
 
-    /// A new canonical Home snapshot retires every old cursor and resolution marker.
-    /// The feed remains the sole read owner; no polling or second memory cache.
     private struct ReadIdentity: PresentationReadIdentity, Hashable {
         let admission: HomeSheetReadIdentity
         let sourceRevision: Int?
@@ -175,7 +170,6 @@ struct HomePagedListSheet: View {
         }
     }
 
-    /// A settled read with no rows: the feed gives way to its centred empty state.
     private var isEmpty: Bool {
         store.error == nil && !store.loading && next == nil && (isMemory ? memoryRows.isEmpty : isHistory ? historyRows.isEmpty : taskRows.isEmpty)
     }
@@ -300,7 +294,6 @@ struct HomePagedListSheet: View {
 }
 
 extension HomeMemoryPresentation {
-    /// Kind stays in the symbol and label; all Memory icons share the primary role.
     static func kind(_ line: HomeMemoryViewDTO.Line) -> (icon: String, tone: Color, label: String) {
         guard let item = line.item else { return ("square.stack.3d.up", .tronPrimary, "Summary") }
         if item.isToolActivity {
@@ -328,7 +321,6 @@ extension HomeMemoryPresentation {
 }
 
 extension HomeTaskPresentation {
-    /// The task's one status pill.
     static func status(_ row: HomeTaskPageDTO.Row) -> TronListStatus {
         switch row.lifecycle {
         case .pending: return TronListStatus(text: "Pending", tone: .tronSlate)
@@ -346,7 +338,6 @@ extension HomeTaskPresentation {
         }
     }
 
-    /// The latest check-in, or what the task waits for.
     static func subtext(_ row: HomeTaskPageDTO.Row) -> String? {
         if let checkin = row.checkins?.last {
             if let blocker = checkin.blocker, !blocker.isEmpty { return "\(checkin.step) — blocked: \(blocker)" }

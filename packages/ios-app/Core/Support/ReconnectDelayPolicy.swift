@@ -10,8 +10,6 @@ package struct ReconnectDelayPolicy: Sendable {
     )
 
     package let initialSeconds: Double
-    /// Read by the dashboard pool, which builds its own deterministic curves
-    /// from the selected profile's progression.
     package let multiplier: Double
     package let maximumSeconds: Double
     let jitterFraction: Double
@@ -48,7 +46,6 @@ package struct ReconnectDelayPolicy: Sendable {
         min(current * multiplier, maximumSeconds)
     }
 
-    /// Reuses the connection backoff curve without taking ownership of a caller's retry budget.
     package func delay(forFailureAttempt attempt: Int) -> Duration {
         var nominal = initialSeconds
         for _ in 1..<max(1, attempt) {
@@ -59,7 +56,6 @@ package struct ReconnectDelayPolicy: Sendable {
     }
 }
 
-/// Owns the one pending reconnect delay for one connection executor.
 @MainActor
 package final class GatewayReconnectSchedule {
     private let clock: MonotonicClock
@@ -74,7 +70,6 @@ package final class GatewayReconnectSchedule {
         self.nominalDelay = delayPolicy.initialSeconds
     }
 
-    /// A profile-owned counter may supply its delay; otherwise this executor owns the curve.
     package func afterFailure(delay: Duration? = nil) async -> Bool {
         cancelPending(resume: false)
         let delay = delay ?? delayPolicy.delay(nominalSeconds: nominalDelay)
@@ -100,11 +95,6 @@ package final class GatewayReconnectSchedule {
         resume(true)
     }
 
-    /// A path change re-routes the next attempt (C-3): cancel the pending wait
-    /// so the loop attempts at once, and restart the curve so the new path's
-    /// first retry is the base interval rather than the interval the old path's
-    /// failures had grown to. Repeated failures on an unchanged path keep the
-    /// capped, jittered curve `accelerate()` leaves alone.
     package func restartForPathChange() {
         accelerate()
         nominalDelay = delayPolicy.initialSeconds

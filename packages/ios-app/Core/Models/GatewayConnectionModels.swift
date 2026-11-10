@@ -317,15 +317,7 @@ package struct GatewayInfo: Codable, Hashable, Sendable {
     package let sourceRevision: String?
     let buildFingerprint: String?
     package let runtimeEpoch: String?
-    /// The Gateway runtime's advertised grant projection revision: it changes
-    /// whenever the grants this Gateway stores change, including when the relay
-    /// disables one at runtime. A reconnect re-sends its registration while
-    /// this differs from the revision that registration was acknowledged with.
     package let pushRegistrationRevision: String?
-    /// The LAN lane the Gateway advertised on this connection (E-3b), carried on
-    /// the hello projection so the connection owner can store it with the
-    /// profile. A Gateway that advertises nothing leaves both at their defaults
-    /// (`system.info` never carries them).
     package let lanEndpoints: [GatewayLanEndpoint]
     package let lanPin: String?
 
@@ -615,7 +607,6 @@ package struct GatewayNoPathPresentation: Equatable, Sendable {
 
     package var label: String {
         guard let interface else { return "Mac unreachable" }
-        // Failed handshakes prove failed reachability, not absence of an OS route.
         return "Mac unreachable over \(interface)"
     }
 

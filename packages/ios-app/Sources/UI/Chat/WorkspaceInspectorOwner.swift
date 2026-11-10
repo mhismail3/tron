@@ -84,10 +84,6 @@ final class WorkspaceInspectorOwner {
     var errorMessage: String? { directoryError ?? historyError ?? inspectionError }
     var hasLoadedHistory: Bool { historyRevision != nil }
 
-    /// Activates the inspector for the tab the surface is actually showing.
-    /// Files keeps the existing parallel inspection + directory latency
-    /// contract; a History or Changes activation must not also read an
-    /// unrelated directory.
     func loadInitial(
         service: WorkspaceInspectionService,
         sessionID: String,

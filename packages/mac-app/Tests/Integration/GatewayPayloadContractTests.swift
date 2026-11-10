@@ -2,10 +2,6 @@ import Foundation
 import Testing
 @testable import TronMac
 
-/// The payload manifest and selection formats are written by
-/// `scripts/gateway-payload-deploy.mjs` and `bundle-gateway.sh`, and read by the C
-/// launcher and this store. Each side's tests assert its own literals against the
-/// one shared contract, `packages/mac-app/scripts/gateway-payload-contract.json`.
 struct GatewayPayloadContractTests {
     private struct Contract: Decodable {
         let schema: Int

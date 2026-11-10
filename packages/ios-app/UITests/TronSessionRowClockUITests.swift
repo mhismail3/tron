@@ -1,16 +1,10 @@
 import XCTest
 
-/// The session row's relative-time label (#975): never future-tense, and the
-/// same laid-out width while it ticks, so the row title keeps one truncation
-/// point. Drives the real `HistoricalSessionRow` and `SessionRowRelativeTime`.
 final class TronSessionRowClockUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
     }
 
-    /// #1762: the actual shared row's context and clock must lay out with the
-    /// selected code family, independent of the selected reading family. Narrow
-    /// and wide glyphs catch proportional text (mono digits alone cannot pass).
     @MainActor
     func testDashboardMetadataUsesSharedCodeTypography() {
         continueAfterFailure = true
@@ -43,7 +37,6 @@ final class TronSessionRowClockUITests: XCTestCase {
         app.launchArguments = ["-tron-session-row-clock-fixture"]
         app.launch()
 
-        // Rows at a gateway clock 3s ahead, just now, 12s and 47m ago.
         let rows = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label BEGINSWITH %@", "Refactor the gateway reconnect handshake so phones resume cleanly, "))
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10))
@@ -54,7 +47,6 @@ final class TronSessionRowClockUITests: XCTestCase {
         let rowTimes = rows.allElementsBoundByIndex.map { $0.label.components(separatedBy: ", ").last ?? "" }
         XCTAssertEqual(rowTimes, ["now", "now", "12s ago", "47m ago"])
 
-        // Step the real label through future, zero and past values.
         let label = app.descendants(matching: .any)["row-clock-label"]
         XCTAssertTrue(label.waitForExistence(timeout: 5))
         let width = app.staticTexts["row-clock-label-width"]

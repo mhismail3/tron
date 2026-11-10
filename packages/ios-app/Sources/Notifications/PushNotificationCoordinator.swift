@@ -12,9 +12,6 @@ enum PushRoute: String, Codable, Sendable {
     case productionSandbox = "production-sandbox"
     case production
 
-    /// The route is emitted into the app's Info.plist by the active xcconfig.
-    /// Signed artifact metadata is authoritative; missing or malformed metadata
-    /// fails closed. Passing a bundle is the deterministic test seam.
     static func current(bundle: Bundle = .main) -> Self? {
         guard let raw = bundle.object(forInfoDictionaryKey: "TRONPushRoute") as? String else {
             return nil
@@ -34,8 +31,6 @@ enum PushReadiness: Equatable, Sendable {
     case pending
 }
 
-/// Fixed, privacy-safe registration stages for local troubleshooting. Values
-/// deliberately contain no service, device, profile, credential, or proof data.
 enum PushRegistrationDiagnostic: String, Equatable, Sendable {
     case idle = "Idle"
     case waitingForToken = "Waiting for APNs"
@@ -63,15 +58,6 @@ struct PushGrant: Codable, Equatable, Sendable {
     let tokenHash: String
     var relayOrigin: String? = nil
     var route: PushRoute? = nil
-    /// The Gateway runtime (`machineId` plus its `runtimeEpoch`) that confirmed
-    /// this exact grant, and the grant projection revision that runtime
-    /// advertised. A reconnect re-sends the registration only while the stored
-    /// grant matches the current device token, route and relay origin and both
-    /// of these still describe the connected Gateway (G-7): the revision is
-    /// derived from the grants the Gateway stores, so it is what makes a grant
-    /// the Gateway disabled at runtime (a relay rejection) or retired on a
-    /// restart visible to the phone, and the identity keeps an acknowledgement
-    /// from crossing to a different Gateway or payload.
     var acknowledgedRuntime: String? = nil
     var acknowledgedRegistrationRevision: String? = nil
 }
@@ -80,8 +66,6 @@ struct PushCredentialDocument: Codable, Equatable, Sendable {
     var appAttestKeyID: String?
     var apnsToken: String?
     var grants: [String: PushGrant]
-    /// A fresh attestation was definitively rejected. Keep its key for
-    /// diagnostics, but do not reinterpret it as an assertion key on reconcile.
     var appAttestKeyRejected: Bool? = nil
 
     static let empty = PushCredentialDocument(appAttestKeyID: nil, apnsToken: nil, grants: [:])
@@ -325,10 +309,6 @@ struct PushWorkerClient: Sendable {
         acceptedStatus: Int,
         as type: Response.Type
     ) async throws -> Response {
-        // The one-time App Attest installation carries a certificate chain and
-        // crosses the Durable Object verification boundary. Keep ordinary
-        // challenge admission tight while allowing that non-blocking bootstrap
-        // to finish on a cold mobile/Worker path.
         let timeout: TimeInterval = path == "/v3/installations" ? 60 : 15
         var request = URLRequest(url: configuration.endpoint(path), timeoutInterval: timeout)
         request.httpMethod = "POST"
@@ -386,15 +366,7 @@ final class PushNotificationCoordinator {
     private struct Context: Sendable {
         let profile: GatewayProfile
         let client: GatewayClient
-        /// `machineId:runtimeEpoch` of the connected Gateway runtime, or nil
-        /// when it advertises no runtime epoch. It names the Gateway whose
-        /// acknowledgement is stored, so a different Gateway or a rebuilt
-        /// payload never inherits it.
         let runtimeIdentity: String?
-        /// The grant projection revision the connected Gateway advertises. A
-        /// stored acknowledgement is only current while this still matches it:
-        /// the Gateway can disable a grant at runtime (a relay rejection) with
-        /// no event and no restart, and only a re-sent registration learns it.
         let registrationRevision: String?
     }
 
@@ -452,8 +424,6 @@ final class PushNotificationCoordinator {
             self.document = try credentials.load() ?? .empty
             self.credentialLoadFailed = false
         } catch {
-            // Never overwrite an unreadable Keychain document with an empty
-            // replacement. The ordinary Gateway remains usable while push fails closed.
             self.document = .empty
             self.credentialLoadFailed = true
         }
@@ -510,9 +480,6 @@ final class PushNotificationCoordinator {
                   context?.profile.id == profile.id else { return }
         }
         guard status == .allowed else {
-            // Denial first retires proof and transfer ownership. Revocation may
-            // suspend, but no continuation from the retired generation can
-            // persist or publish registration state afterward.
             invalidateRegistration(admission: false)
             let denialGeneration = registrationGeneration
             readiness = .denied
@@ -609,9 +576,6 @@ final class PushNotificationCoordinator {
         )
     }
 
-    /// Explicit recovery after the operator corrects the relay's relying-party
-    /// configuration. Rotate only the rejected App Attest key; the APNs token,
-    /// endpoint grants, pairings, and every unrelated Keychain value survive.
     func retryRejectedRegistration() throws {
         guard canRetryRejectedRegistration else { return }
         registrationGeneration &+= 1
@@ -650,11 +614,8 @@ final class PushNotificationCoordinator {
     }
 
     private enum ProofMode: String { case attestation, assertion }
-    // Proof registration retries require a fresh challenge and remain independent of socket recovery.
     private static let retryBackoffs: [Duration] = [.milliseconds(250), .milliseconds(750)]
 
-    /// One bounded operation owns all proof recovery. Every retry starts with a
-    /// fresh challenge and generates a fresh proof; neither value is replayed.
     private func registerCurrent(generation: Int) async throws {
         guard let admittedContext = context, let worker, let token = document.apnsToken else {
             throw PushRegistrationError.unavailable
@@ -669,12 +630,6 @@ final class PushNotificationCoordinator {
            grant.tokenHash == tokenHash,
            grant.relayOrigin == worker.relayOrigin,
            grant.route == PushRoute.current {
-            // The Gateway confirmed this exact grant during its current run and
-            // nothing it stores about the grant has changed since
-            // (`pushRegistrationRevision` is derived from the stored grants, so
-            // a relay-rejected grant disabled at runtime moves it). A Gateway
-            // that advertises no revision cannot make that claim, so the
-            // registration is always sent.
             if let runtimeIdentity = admittedContext.runtimeIdentity,
                let registrationRevision = admittedContext.registrationRevision,
                grant.acknowledgedRuntime == runtimeIdentity,
@@ -840,11 +795,8 @@ final class PushNotificationCoordinator {
                     mode = .attestation
                     continue
                 } catch PushRegistrationError.persistence {
-                    // A local commit failure says nothing about key validity.
                     throw PushRegistrationError.persistence
                 } catch {
-                    // An attestation request may have crossed the service boundary.
-                    // Its persisted key can only continue with a new assertion.
                     if mode == .attestation, Self.isRetryable(error) {
                         mode = .assertion
                     } else if mode == .attestation {
@@ -987,21 +939,11 @@ final class PushNotificationCoordinator {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            // GatewayClient cancellation and transport failures do not share an
-            // error type. Revalidate after every suspension before converting a
-            // current failure into pending readiness.
             try validateRegistration(generation: generation, profileID: profileID, token: token)
             return .unavailable
         }
     }
 
-    /// Records that the Gateway runtime that admitted this transfer confirmed
-    /// the exact grant the phone holds, which is what lets the next reconnect
-    /// skip the registration. The identity and revision come from the admitted
-    /// context, so a completion that lands after a reconnect records the
-    /// runtime that answered instead of whichever one is current. The write is
-    /// local credential state, so a failure is reported like every other
-    /// credential write instead of claiming readiness.
     private func acknowledgeRegistration(
         _ grant: PushGrant,
         profileID: String,
@@ -1035,20 +977,11 @@ final class PushNotificationCoordinator {
         generation: Int
     ) async {
         guard var grant = document.grants[profile.id] else { return }
-        // The acknowledgement is dropped and persisted before the request: a
-        // lost response means the Gateway may already have removed the grant, so
-        // a later re-allowed permission must re-register instead of trusting an
-        // acknowledgement that describes a grant the Gateway no longer holds.
         if grant.acknowledgedRuntime != nil || grant.acknowledgedRegistrationRevision != nil {
             grant.acknowledgedRuntime = nil
             grant.acknowledgedRegistrationRevision = nil
             var cleared = document
             cleared.grants[profile.id] = grant
-            // The stored acknowledgement is only a hint that lets the next
-            // reconcile skip the registration, so a failed save is reported and
-            // never a reason to leave the Gateway holding a grant the user just
-            // turned off. The in-memory copy drops it either way: a claim this
-            // phone could not persist must not be trusted as current.
             document = cleared
             do { try credentials.save(cleared) }
             catch {
@@ -1064,15 +997,13 @@ final class PushNotificationCoordinator {
             guard registrationGeneration == generation,
                   !registrationAdmitted,
                   context?.profile.id == profile.id else { return }
-            _ = result.removed // false is an idempotent already-absent acknowledgement.
+            _ = result.removed
             var updated = document
             updated.grants.removeValue(forKey: profile.id)
             try credentials.save(updated)
             document = updated
             readiness = .denied
         } catch {
-            // Permission denial remains authoritative locally. The next connected
-            // reconciliation retries removal without blocking chat or pairing.
         }
     }
 

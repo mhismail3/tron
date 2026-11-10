@@ -8,9 +8,6 @@ enum ToolExecutionStatePolicy {
         shouldReplace(current, with: candidate) ? mergingLiveEvidence(from: current, into: candidate) : current
     }
 
-    /// Live progress is a current display frame, not an append-only log. Install
-    /// the latest nonempty frame in place while preserving the prior readable
-    /// frame across empty advisory updates. Terminal nonempty output is authoritative.
     static func mergingLiveEvidence(
         from current: ToolExecutionState,
         into candidate: ToolExecutionState
@@ -28,17 +25,12 @@ enum ToolExecutionStatePolicy {
             order: candidate.order,
             status: candidate.status,
             arguments: candidate.arguments,
-            // An empty terminal frame is an update to status, not proof that
-            // previously readable live/partial evidence was withdrawn.
             partialResult: candidate.partialResult ?? current.partialResult,
             result: candidate.result ?? current.result,
             nestedCalls: candidate.nestedCalls ?? current.nestedCalls,
             output: output,
             outputTruncated: outputTruncated,
             isError: candidate.isError,
-            // One exact call ID has one execution interval. Sparse or late
-            // frames may enrich it, but must not restart it or reduce an already
-            // accepted monotonic duration sample.
             startedAt: current.startedAt,
             updatedAt: candidate.updatedAt,
             lastProgressAt: candidate.lastProgressAt ?? current.lastProgressAt,
@@ -72,8 +64,6 @@ enum ToolExecutionStatePolicy {
     }
 
     static func orderedBefore(_ left: ToolExecutionState, _ right: ToolExecutionState) -> Bool {
-        // Runtime order is identity/protocol evidence. Timestamps are mutable
-        // freshness metadata and must not relocate or group invocations.
         if left.groupFinalized == true, right.groupFinalized == true,
            left.groupId == right.groupId,
            let leftIndex = left.groupIndex, let rightIndex = right.groupIndex,

@@ -2,15 +2,10 @@
 import Foundation
 import TronMobileCore
 
-/// `-history-large` (#1691): Session History over 6,733 canonical entries, served
-/// in the Gateway's real 100-entry cursor pages, so the shared feed's
-/// auto-loading, position chip and scrolling are exercised at scale.
-/// Synthetic values only; one minute apart, newest now.
 enum HostedLargeHistory {
     static let enabled = ProcessInfo.processInfo.arguments.contains("-history-large")
     static let total = 6_733
     static let pageSize = 100
-    /// Every read, so a test can prove pages load on demand rather than all at once.
     nonisolated(unsafe) static var reads = 0
 
     static var leafID: String { id(total - 1) }
@@ -39,7 +34,6 @@ enum HostedLargeHistory {
             childCount: ordinal == total - 7 ? 2 : 0, isCurrentPath: ordinal % 97 != 3)
     }
 
-    /// The newest page, or the page strictly older than an `older` cursor.
     static func page(_ params: [String: JSONValue], runtime: String) throws -> JSONValue {
         reads += 1
         let cursor = try params["cursor"].map { try $0.decode(SessionHistoryCursor.self) }

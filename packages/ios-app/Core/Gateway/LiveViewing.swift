@@ -1,15 +1,11 @@
 import Foundation
 
 extension GatewayClient {
-    /// A disposable viewer owns its original request/credential and transport.
-    /// Cleanup must not consult the subsequently selected Gateway profile.
     package actor LiveLease {
         let leaseId: String
         let descriptor: LiveViewDescriptor
         private let request: URLRequest
         private let transport: BoundedHTTPDataTransport
-        /// The pin every request this lease makes must trust, carried from the
-        /// lane that admitted it (E-3c).
         private let pin: String?
         private var closeTask: Task<Void, Never>?
 
@@ -39,10 +35,8 @@ extension GatewayClient {
             var request = request
             request.url = request.url?.appendingPathComponent("frame")
             request.httpMethod = "GET"
-            request.timeoutInterval = 3 // Cached-frame reads; keep the retry budget below the lease idle bound.
+            request.timeoutInterval = 3
             request.setValue(String(sequence), forHTTPHeaderField: "X-Tron-Live-After")
-            // Only idempotent frame GETs retry, on this exact lease. Admission
-            // POST, native start, source loss and malformed frames never replay.
             for attempt in 0..<3 {
                 try Task.checkCancellation()
                 guard closeTask == nil else { throw CancellationError() }
@@ -71,8 +65,6 @@ extension GatewayClient {
             throw LiveError.connectionInterrupted
         }
 
-        /// Join cancellation-independent teardown. The caller may already be
-        /// cancelled; cancelling DELETE with it would abandon the remote lease.
         package func close() async {
             if let closeTask { await closeTask.value; return }
             var closing = request
@@ -126,8 +118,6 @@ extension GatewayClient {
             let error: Body
         }
         static func response(_ data: Data, status: Int) -> Self {
-            // Never render server exception messages/details: only this finite
-            // classification is allowed to become user-facing text.
             guard data.count <= 8_192 else { return .invalidResponse }
             let error = try? JSONDecoder().decode(Envelope.self, from: data).error
             switch error?.details?.liveViewFailure {

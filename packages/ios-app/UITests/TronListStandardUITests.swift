@@ -1,7 +1,5 @@
 import XCTest
 
-/// The shared list standard (#1691) across the eight Manage Home and Manage
-/// Session list sheets, driven through their real fixtures.
 final class TronListStandardUITests: XCTestCase {
     @MainActor func testCaptureHomeSheetsLight() { captureHome(dark: false) }
     @MainActor func testCaptureHomeSheetsDark() { captureHome(dark: true) }
@@ -35,7 +33,6 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
-    /// Capture the nested Manage Session route, not only the direct fixture presenter.
     @MainActor func testCaptureManagedSubagentHistory() {
         for mode in ["light", "dark"] {
             let app = XCUIApplication()
@@ -60,7 +57,6 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
-    /// Resources' per-kind section tints and an empty Subagent History (#1704), light and dark.
     @MainActor func testCaptureResourcesAndEmptySubagentHistory() {
         for mode in ["light", "dark"] {
             let app = XCUIApplication()
@@ -92,8 +88,6 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
-    /// The Instructions overview and its Tools, Rules and Skills subsheets, light and
-    /// dark at standard text and at XXXL.
     @MainActor func testCaptureInstructionRows() {
         for (mode, extra) in [("light", [String]()), ("dark", ["-home-dark"]),
                               ("xxxl", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"])] {
@@ -160,7 +154,6 @@ final class TronListStandardUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         shot("tasks-top-\(mode)")
         for _ in 0..<4 { app.swipeUp() }
-        // The fixture refuses the first older page once: the feed keeps its rows and offers Retry.
         if element(app, "feed-retry").waitForExistence(timeout: 5) {
             shot("tasks-error-\(mode)")
             element(app, "feed-retry").tap()
@@ -200,7 +193,6 @@ final class TronListStandardUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         shot("history-menu-\(mode)")
         XCTAssertTrue(app.buttons["Fork New Session"].exists, app.debugDescription)
-        // Dismiss the menu without choosing an action.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
         Thread.sleep(forTimeInterval: 1)
         row.tap()
@@ -224,11 +216,6 @@ final class TronListStandardUITests: XCTestCase {
         shot("resources-bottom-\(mode)")
     }
 
-    // MARK: Behaviour
-
-    /// A feed row's anatomy on the real Session History fixture: the kind icon is
-    /// centred on the row, the one status pill sits top-right, and actions come
-    /// from the detail and an identical long-press menu, never a ⋯ button.
     @MainActor func testFeedRowAnatomyAndActions() {
         let app = openLargeHistory()
         let row = app.buttons["history-row-h-6732"]
@@ -259,9 +246,6 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
-    /// The feed pages itself while the reader scrolls (no Older/Newer buttons),
-    /// the pinned chip names the visible range of the whole feed, and tapping the
-    /// chip returns to the newest entry.
     @MainActor func testFeedAutoLoadsAndChipJumpsToNewest() {
         let app = openLargeHistory()
         XCTAssertFalse(app.buttons["history-older-top"].exists, "No explicit paging control")
@@ -278,8 +262,6 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(waitFor(app.buttons["history-row-h-6732"], "hittable == true", timeout: 5), "The chip jumps to the newest entry")
     }
 
-    /// Grouped lists: a status row's pill is top-right, ordinal rows centre their
-    /// number, and rows without kind carry no leading icon.
     @MainActor func testGroupedRowAnatomy() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -301,8 +283,6 @@ final class TronListStandardUITests: XCTestCase {
         ring.tap()
         let chapters = element(app, "home-manage-chapters")
         XCTAssertTrue(chapters.waitForExistence(timeout: 10), app.debugDescription)
-        // XCTest calls a row hittable when a sliver shows at the medium sheet's bottom
-        // edge, where a tap lands on the sheet edge; bring the whole row into view.
         let window = app.windows.firstMatch.frame
         for _ in 0..<6 where !(chapters.isHittable && chapters.frame.maxY <= window.maxY - 40) { app.swipeUp() }
         chapters.tap()
@@ -315,9 +295,6 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertFalse(element(app, "home-chapter-1-leading").exists, "Chapters carry no repeated icon")
     }
 
-    /// Stacked groups (#1700): every titled section of a grouped list is its own
-    /// container, apart from the next, with its header and count above it on the
-    /// container's edges, on both sheets that stack groups (Profile, Resources).
     @MainActor func testGroupedSectionsAreSeparateContainersWithHeadersAbove() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -349,8 +326,6 @@ final class TronListStandardUITests: XCTestCase {
         assertSeparateSections(app, list: "project-resource-groups", titles: ["Skills", "Subagents"], row: "project-resource-skills-0")
     }
 
-    /// Each Resources kind keeps its own tint on its section (#1704): no two section
-    /// headers are inked alike, so a sheet theme flattening them all to one accent fails.
     @MainActor func testResourceSectionsKeepDistinctKindTints() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -376,8 +351,6 @@ final class TronListStandardUITests: XCTestCase {
         } }
     }
 
-    /// An empty Subagent History centres the shared placeholder in the sheet below its
-    /// caption, at the medium and large detents (#1704), rather than heading the feed.
     @MainActor func testEmptySubagentHistoryCentresItsPlaceholder() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -390,8 +363,6 @@ final class TronListStandardUITests: XCTestCase {
                                 viewport: "process-history-feed", caption: "Newest first")
     }
 
-    /// Every empty feed sheet uses the same centred empty state (#1704): Session
-    /// History, and Manage Home's Profile, Memory and Tasks.
     @MainActor func testEmptyFeedSheetsCentreTheirPlaceholders() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -430,8 +401,6 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
-    /// The placeholder sits centred between the caption and the bottom of the visible
-    /// sheet, at medium and then large.
     @MainActor private func assertCentredEmptyState(_ app: XCUIApplication, title: String, placeholder text: String,
                                                     viewport: String, caption captionText: String) {
         let placeholder = app.descendants(matching: .any)
@@ -472,9 +441,6 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(first.frame.contains(firstRow.frame.insetBy(dx: 1, dy: 1)), "The first row is inside the first container")
     }
 
-    /// A fixed-set row without status or time carries its tags top-right on the
-    /// title line (#1702), and an Instructions entry centres its icon on the whole
-    /// row, even when its description wraps.
     @MainActor func testInstructionRowsCarryTagsOnTitleLineAndCentreEntryIcons() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -495,8 +461,6 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertEqual(icon.frame.midY, entry.frame.midY, accuracy: 2, "The icon is centred vertically in the row")
     }
 
-    /// Tasks page themselves; a refused page keeps the rows and offers Retry, and
-    /// the feed ends with an explicit end row.
     @MainActor func testTaskFeedRetriesAndEnds() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -524,8 +488,6 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertEqual(app.buttons.matching(identifier: "home-task-paged-44").count, 1)
     }
 
-    /// Scrolling a loaded feed back up settles: the lazy feed must reach idle after
-    /// every swipe (a pinned chip once re-placed rows without end).
     @MainActor func testLoadedFeedSettlesWhileScrollingBackUp() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -538,7 +500,6 @@ final class TronListStandardUITests: XCTestCase {
         ring.tap()
         let memory = element(app, "home-manage-memory-browser")
         XCTAssertTrue(memory.waitForExistence(timeout: 10), app.debugDescription)
-        // At its large detent Manage Home shows Memory without a scroll whose momentum can eat the tap (#1699).
         expandSheet(app, title: "Manage Home")
         memory.tap()
         XCTAssertTrue(app.buttons["home-memory-row-39"].waitForExistence(timeout: 10), app.debugDescription)
@@ -556,9 +517,6 @@ final class TronListStandardUITests: XCTestCase {
         }
     }
 
-    /// The position chip floats bottom-centred over the stacked Memory sheet: its
-    /// whole 44-pt target takes every touch (never the row beneath), rows beside it
-    /// stay live, and the end of the feed scrolls clear of it.
     @MainActor func testBottomChipTakesItsTouchesAndClearsTheLastRow() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -582,8 +540,6 @@ final class TronListStandardUITests: XCTestCase {
         let detail = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'home-sheet-done-memory-'"))
         let window = app.windows.firstMatch.frame
         let end = element(app, "feed-end")
-        /// Scrolls a little at a time, away from whichever edge is in view, until a
-        /// row lies under the chip.
         func rowUnderChip() -> XCUIElement {
             for _ in 0..<8 {
                 Thread.sleep(forTimeInterval: 1)
@@ -606,17 +562,14 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(chip.frame.height, 44, "The chip's target is at least 44 pt")
         XCTAssertTrue(covered.frame.intersects(chip.frame))
 
-        // A long press at the target's top edge, outside the drawn capsule, is the chip's.
         chip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).press(forDuration: 1.0)
         Thread.sleep(forTimeInterval: 1)
         XCTAssertEqual(detail.count, 0, "A long press on the chip never reaches the row beneath\n\(app.debugDescription)")
-        // So is a tap at its corner: it jumps to the newest entry and opens nothing.
         _ = rowUnderChip()
         chip.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.94)).tap()
         XCTAssertTrue(waitFor(newest, "hittable == true", timeout: 5), "A tap anywhere on the chip jumps to the newest entry")
         XCTAssertEqual(detail.count, 0, "A tap on the chip never reaches the row beneath\n\(app.debugDescription)")
 
-        // Beside the chip, the same row still takes taps.
         let beside = rowUnderChip()
         XCTAssertLessThan(beside.frame.minX + 16, chip.frame.minX - 8)
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: beside.frame.minX + 16, dy: chip.frame.midY)).tap()
@@ -624,7 +577,6 @@ final class TronListStandardUITests: XCTestCase {
         detail.firstMatch.tap()
         XCTAssertTrue(waitFor(detail.firstMatch, "exists == false", timeout: 8))
 
-        // The end of the feed scrolls fully clear of the chip, and its last row opens.
         let retry = app.buttons["feed-retry"]
         for _ in 0..<14 where !end.exists {
             if retry.exists && retry.isHittable { retry.tap() }
@@ -656,8 +608,6 @@ final class TronListStandardUITests: XCTestCase {
         return app
     }
 
-    // MARK: Helpers
-
     @MainActor private func shot(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
@@ -665,10 +615,6 @@ final class TronListStandardUITests: XCTestCase {
         add(attachment)
     }
 
-    /// Scrolls until `element` is hittable. XCTest raises instead of answering while an
-    /// existing element has no frame yet (a sheet still presenting), so such an element
-    /// is given its layout before hittability is asked; a lazy row that does not exist
-    /// yet is scrolled toward, as before.
     @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication, swipes: Int) {
         for _ in 0..<swipes {
             let laidOut = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !element.exists || !element.frame.isEmpty }, object: nil)
@@ -686,7 +632,6 @@ final class TronListStandardUITests: XCTestCase {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
-    /// Brings a sheet to its large detent by dragging its title toward the top.
     @MainActor private func expandSheet(_ app: XCUIApplication, title text: String) {
         let title = app.navigationBars.staticTexts.matching(NSPredicate(format: "label == %@", text)).firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 8), app.debugDescription)

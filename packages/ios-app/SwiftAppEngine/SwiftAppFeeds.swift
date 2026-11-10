@@ -1,7 +1,5 @@
 import Foundation
 
-/// Immutable, read-only input from the installed app's declared Gateway feed.
-/// Not program globals, persisted state, network access or a refresh cache.
 package struct SwiftAppIOSBuildsFeed: Codable, Sendable {
     package let status: String
     package let builds: [SwiftAppIOSBuildRecord]
@@ -42,7 +40,6 @@ package struct SwiftAppIOSBuildRecord: Codable, Sendable {
     package let installURL: String
 
     func admit() throws {
-        // The publisher retains timestamp/commit releases alongside UUID releases.
         guard id.range(of: #"^[0-9]{8}T[0-9]{6}Z-(?:[a-f0-9]{32}-)?[a-f0-9]{7,9}$"#, options: .regularExpression) != nil,
               !title.isEmpty, title.utf8.count <= 256, notes.utf8.count <= 4_096,
               !branch.isEmpty, branch.utf8.count <= 256, time.utf8.count <= 64,

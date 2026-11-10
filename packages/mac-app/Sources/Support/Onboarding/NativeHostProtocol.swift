@@ -1,8 +1,6 @@
 import Foundation
 import Security
 
-/// Wrapper-only setup and service retirement. The separate capture listener
-/// cannot request permissions or authorize service retirement.
 @objc(NativeHostPermissionService)
 protocol NativeHostPermissionService {
     func probePermissions(withReply reply: @escaping @Sendable ([String: String]) -> Void)
@@ -29,9 +27,6 @@ enum NativeHostTrust {
     static let captureMachServiceName = "com.tron.mac.native-host.capture"
     static let launchAgentPlistName = "com.tron.mac.native-host.plist"
 
-    // Both sides enforce the requirement. The team and fixed identifiers bind
-    // the peer to this product's signed composition; PID, model fields, and
-    // a Mach service name are never treated as authentication.
     static var wrapperCodeSigningRequirement: String {
         get throws { try requirement(identifier: "com.tron.mac", team: Bundle.main.object(forInfoDictionaryKey: "TronSigningTeam") as? String) }
     }
@@ -46,8 +41,6 @@ enum NativeHostTrust {
 }
 enum NativeHostTrustError: Error { case invalidIdentity }
 
-/// Host-main-queue owned receipts, not a permission cache. A replay returns the
-/// original command result; callers still probe current TCC state afterward.
 struct NativePermissionRequestReceipts {
     private var order: [UUID] = []
     private var receipts: [UUID: (permission: NativeHostPermission, status: String)] = [:]

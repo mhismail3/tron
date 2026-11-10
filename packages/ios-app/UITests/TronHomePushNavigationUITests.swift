@@ -1,14 +1,8 @@
 import XCTest
 
-/// A push tapped as the scene returns to the foreground (#1684, #1686). With Home
-/// presented, the tap arrives while the mounted Home chat is restoring its open on
-/// the replacement connection — the device journey that showed "The conversation
-/// changed while opening".
 final class TronHomePushNavigationUITests: XCTestCase {
     private enum Presented { case home, dashboard, ordinaryChat }
 
-    /// A push for Home's own chapter keeps the Home chat: it settles without an
-    /// error and still sends through `home.prompt`.
     @MainActor
     func testPushTapForPresentedHomeChapterKeepsHomeOpen() {
         continueAfterFailure = false
@@ -19,8 +13,6 @@ final class TronHomePushNavigationUITests: XCTestCase {
         keep("1684-home-push-tap-kept-home")
     }
 
-    /// A push for Home's chapter tapped from the dashboard opens Home itself, not
-    /// the chapter as an ordinary chat (#1686).
     @MainActor
     func testPushTapForHomeChapterFromDashboardOpensHome() {
         continueAfterFailure = false
@@ -31,8 +23,6 @@ final class TronHomePushNavigationUITests: XCTestCase {
         keep("1686-home-push-tap-from-dashboard-opened-home")
     }
 
-    /// A push for Home's chapter tapped over another chat replaces it with Home
-    /// itself, not the chapter as an ordinary chat (#1686).
     @MainActor
     func testPushTapForHomeChapterOverOtherChatOpensHome() {
         continueAfterFailure = false
@@ -43,8 +33,6 @@ final class TronHomePushNavigationUITests: XCTestCase {
         keep("1686-home-push-tap-over-chat-opened-home")
     }
 
-    /// A push for another chat replaces Home only after Home's chat retires, so the
-    /// restoring Home open cannot take the target's presentation authority.
     @MainActor
     func testPushTapForOtherChatReplacesRestoringHome() {
         continueAfterFailure = false
@@ -88,8 +76,6 @@ final class TronHomePushNavigationUITests: XCTestCase {
         return app
     }
 
-    /// The tap is consumed and the chat settles; a benign open never reports the
-    /// conversation as changed.
     @MainActor
     private func assertSettledWithoutOpenFailure(_ app: XCUIApplication) {
         let push = app.staticTexts["fixture.home-push"]
@@ -100,7 +86,6 @@ final class TronHomePushNavigationUITests: XCTestCase {
         XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 10), app.debugDescription)
     }
 
-    /// The presented chat is Home: it manages Home and sends through `home.prompt`.
     @MainActor
     private func assertHomeSendsThroughHomePrompt(_ app: XCUIApplication) {
         XCTAssertTrue(waitFor(app.buttons["session-context-button"], "label CONTAINS 'Manage Home'"),

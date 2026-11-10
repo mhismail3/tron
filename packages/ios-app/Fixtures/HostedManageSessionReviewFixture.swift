@@ -2,10 +2,6 @@
 import Foundation
 import TronMobileCore
 
-/// `-manage-session-review` (#1655): the Manage Session fixture with reported
-/// usage, a Git workspace, a trusted project and resources of every kind and
-/// source, so its top card, Workspace row, folded Project section, Resources
-/// tags and resource bodies render at realistic lengths. Synthetic values only.
 enum HostedManageSessionReview {
     static let enabled = ProcessInfo.processInfo.arguments.contains("-manage-session-review")
 
@@ -19,7 +15,6 @@ enum HostedManageSessionReview {
          "git.inspect", "trust.inspect"].contains(method)
     }
 
-    /// A command source longer than the preview, so only View All shows its end.
     static let commandBody = (["import type { ExtensionAPI } from \"@earendil-works/pi-coding-agent\";", "",
         "export default function review(pi: ExtensionAPI) {",
         "  pi.registerCommand(\"review\", {",

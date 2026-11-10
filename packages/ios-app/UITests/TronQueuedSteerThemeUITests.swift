@@ -1,9 +1,6 @@
 import XCTest
 import UIKit
 
-/// The real queue card and its editor must render the selected primary theme.
-/// Native Manage Home glass is the reference for the separate surface pigment;
-/// testing only ink would miss dark Burgundy's lifted-ink/deep-wine distinction.
 @MainActor final class TronQueuedSteerThemeUITests: XCTestCase {
     func testQueuedCardAndEditorFollowPrimaryTheme() throws {
         for theme in ["burgundy", "emerald", "oliveGold"] {
@@ -24,8 +21,6 @@ import UIKit
                 XCTAssertTrue(arrowButton.waitForExistence(timeout: 5), app.debugDescription)
                 let cardShot = app.screenshot()
                 keep(cardShot, "queued-\(theme)-\(mode)-card")
-                // AX exposes the message text, not the whole glass card. Its
-                // leading padding is empty pigment, away from antialiased text.
                 let fill = try pigment(cardShot, app: app, frame: row.frame, leadingInset: -6)
                 assertTheme(fill, theme: theme, context: "\(mode) queued card glass")
                 let arrow = try XCTUnwrap(sheetInk(cardShot.image, arrowButton.frame,
@@ -58,8 +53,6 @@ import UIKit
                 let reference = try pigment(referenceShot, app: app, frame: model.frame)
                 print("QUEUED_THEME \(theme)-\(mode) card=\(fill) arrow=\(arrow) sheet=\(surface) reference=\(reference)")
                 if theme == "burgundy", mode == "dark" {
-                    // Same native glass oracle and chroma allowance as the Manage
-                    // container boundary test: ignore neutral material brightness.
                     XCTAssertEqual(surface[0] - surface[1], reference[0] - reference[1], accuracy: 5,
                         "Queued editor must share Manage Home's deep-wine surface, not lifted primary ink")
                 }
@@ -70,8 +63,6 @@ import UIKit
 
     private func assertTheme(_ color: [Double], theme: String, context: String,
                              file: StaticString = #filePath, line: UInt = #line) {
-        // Channel ordering is invariant under neutral glass blending and glyph
-        // antialiasing; no golden image or brightness-sensitive color literal.
         switch theme {
         case "burgundy":
             XCTAssertGreaterThan(color[0], color[2], context, file: file, line: line)

@@ -1,14 +1,6 @@
 import XCTest
 
-/// Chat haptics (#1562) and sheet presentation haptics (#1599), read from the
-/// hosted probe of every haptic the app played (XCUITest cannot feel the
-/// Taptic Engine). The fixtures are the real chat route, composer and
-/// attachment strip, and the real Settings root, over scripted Gateways.
 final class TronChatHapticsUITests: XCTestCase {
-    /// Each live event plays its own haptic exactly once: one tick per pasted
-    /// photo, the accepted send, the settled run, a worker result and a
-    /// presented question. A rejected send plays an error; re-presentation,
-    /// form cancellation and a stopped run play none.
     @MainActor func testLiveEventsPlayTheirHapticOnce() {
         continueAfterFailure = false
         let app = launch(photos: 3); defer { app.terminate() }
@@ -32,7 +24,6 @@ final class TronChatHapticsUITests: XCTestCase {
         XCTAssertTrue(waitHaptics(app, expected), "the question sheet plays one attention haptic: \(haptics(app))")
         keep(app, "1562-question-presented")
 
-        // Reopening the chat presents the still-pending question again, silently.
         app.buttons["fixture.reopen-chat"].tap()
         XCTAssertTrue(cancel.waitForExistence(timeout: 20), app.debugDescription)
         cancel.tap()
@@ -44,7 +35,6 @@ final class TronChatHapticsUITests: XCTestCase {
         keep(app, "1562-answered-question-read-only")
         app.buttons["Done"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForNonExistence(timeout: 10), app.debugDescription)
-        // The answered question's tool sheet gets the shared medium impact.
         expected += ",sheetPresented"
         assertHaptics(app, expected, "re-presenting and answering the question play nothing; its tool sheet taps once")
 
@@ -53,7 +43,6 @@ final class TronChatHapticsUITests: XCTestCase {
         expected += ",actionFailed"
         assertHaptics(app, expected, "a rejected send plays one error, never a success tap")
 
-        // The rejected draft is restored, so this sends it with `slow` added.
         send("slow", app, composer)
         expected += ",promptSent"
         XCTAssertTrue(waitGateway(app, "phase:running"), gateway(app))
@@ -66,7 +55,6 @@ final class TronChatHapticsUITests: XCTestCase {
         assertHaptics(app, expected, "a stopped run plays no completion")
     }
 
-    /// One photo is one tick; a large batch caps at six ticks.
     @MainActor func testAttachmentTicksAreOnePerPhotoAndCapped() {
         continueAfterFailure = false
         for (photos, ticks) in [(1, 1), (9, 6)] {
@@ -78,9 +66,6 @@ final class TronChatHapticsUITests: XCTestCase {
         }
     }
 
-    /// History already holding a finished run, a worker result and a pending
-    /// question plays nothing when the chat opens, and a run that settles
-    /// while the app is in the background plays nothing on return.
     @MainActor func testRestoredAndBackgroundEventsPlayNone() {
         continueAfterFailure = false
         let app = launch(photos: 0, ["-chat-haptics-history"]); defer { app.terminate() }
@@ -102,8 +87,6 @@ final class TronChatHapticsUITests: XCTestCase {
         assertHaptics(app, "promptSent", "a run settled in the background plays nothing on return")
     }
 
-    /// A tool detail sheet plays one impact per presentation, never
-    /// on dismissal, and the restored question beneath it plays nothing.
     @MainActor func testToolSheetPlaysOneImpactPerPresentation() {
         continueAfterFailure = false
         let app = launch(photos: 0, ["-chat-haptics-history"]); defer { app.terminate() }
@@ -127,9 +110,6 @@ final class TronChatHapticsUITests: XCTestCase {
         keep(app, "1599-tool-sheet")
     }
 
-    /// A Settings section sheet and the model picker nested on it each
-    /// play one impact per presentation; a detent change and each
-    /// dismissal play nothing.
     @MainActor func testSettingsAndNestedSheetsPlayOneImpactEach() {
         continueAfterFailure = false
         let app = launchSettings([]); defer { app.terminate() }
@@ -167,9 +147,6 @@ final class TronChatHapticsUITests: XCTestCase {
         assertHaptics(app, "sheetPresented,sheetPresented,sheetPresented", "dismissing both sheets plays nothing")
     }
 
-    /// A sheet already presented when its shared presenter mounts (as on
-    /// launch, reconnect or a rebuilt parent) plays nothing, nor does its
-    /// dismissal (#1599).
     @MainActor func testSheetPresentedAtMountPlaysNone() {
         continueAfterFailure = false
         let app = launchSettings(["-sheet-haptics-restored"]); defer { app.terminate() }
@@ -210,8 +187,6 @@ final class TronChatHapticsUITests: XCTestCase {
         assertHaptics(app, "questionPresented,answerSubmitted", "replayed answers are silent")
     }
 
-    // MARK: - Helpers
-
     @MainActor private func launchSettings(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extra
@@ -219,8 +194,6 @@ final class TronChatHapticsUITests: XCTestCase {
         return app
     }
 
-    /// Dismisses the frontmost sheet by its own Done; covered sheets' Done
-    /// buttons are not hittable.
     @MainActor private func closeTopSheet(_ app: XCUIApplication) {
         let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.last { $0.isHittable }
         XCTAssertNotNil(done, app.debugDescription)
@@ -274,7 +247,6 @@ final class TronChatHapticsUITests: XCTestCase {
         wait(app.staticTexts["fixture.gateway"], NSPredicate(format: "label CONTAINS %@", fragment))
     }
 
-    /// Holds long enough for a late or duplicate haptic to show.
     @MainActor private func assertHaptics(_ app: XCUIApplication, _ played: String, _ message: String) {
         sleep(2)
         XCTAssertEqual(haptics(app), "haptics:\(played)", message)

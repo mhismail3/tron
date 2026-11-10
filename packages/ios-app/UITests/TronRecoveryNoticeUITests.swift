@@ -1,8 +1,5 @@
 import XCTest
 
-/// #2273: within one recovery episode the recovery notice is posted again only when its
-/// text changes. A newly classified failure with the same words, after the first notice
-/// expired, leaves the title's Retry uncovered instead of posting an identical copy.
 final class TronRecoveryNoticeUITests: XCTestCase {
     @MainActor
     func testAnIdenticalRecoveryNoticeIsNotPostedAgainAfterItExpires() {
@@ -16,12 +13,9 @@ final class TronRecoveryNoticeUITests: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 60), "the recovery episode never posted its notice: \(app.debugDescription)")
         XCTAssertTrue(card.label.contains("Gateway connection unavailable"), card.label)
         XCTAssertTrue(status.waitForExistence(timeout: 10), "the route never showed its recovery status: \(app.debugDescription)")
-        // The second never-opened failure reclassifies the episode as Mac unreachable and
-        // updates the notice in place; that is the text a later same-class failure repeats.
         XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Mac unreachable"),
                                                                         object: card)], timeout: 20) == .completed,
                       "the notice never read Mac unreachable before it expired: \(card.label)")
-        // The notice expires on its own lifetime; the title keeps the lasting reason.
         XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: card)],
                                        timeout: 20) == .completed, "the recovery notice never expired")
         XCTAssertTrue(waitForHittable(status, timeout: 10), "Retry is not reachable after the notice expired: \(app.debugDescription)")
@@ -36,9 +30,6 @@ final class TronRecoveryNoticeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Retries 1"].waitForExistence(timeout: 5), "Retry did not receive the tap")
     }
 
-    /// #2296 item 15: a launch whose Keychain cannot be read yet (before the
-    /// first unlock) keeps its paired Mac offline with the reason instead of
-    /// offering setup, and the next foreground reads the token and reconnects.
     @MainActor
     func testUnreadableKeychainAtLaunchStaysPairedAndRetriesOnForeground() {
         let app = XCUIApplication()
@@ -59,8 +50,6 @@ final class TronRecoveryNoticeUITests: XCTestCase {
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(app.wait(for: .runningBackgroundSuspended, timeout: 10) || app.state == .runningBackground)
         app.activate()
-        // The fixture Mac never resolves, so a read token starts a reconnect
-        // that fails for a network reason, never the Keychain one.
         XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "label != %@ AND label != %@", unreadable, "unpaired"), object: state)],
                                        timeout: 20) == .completed,

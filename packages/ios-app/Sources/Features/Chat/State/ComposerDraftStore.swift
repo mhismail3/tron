@@ -3,7 +3,6 @@ import Foundation
 
 enum ComposerDraftStorePolicy {
     static let version = 1
-    /// Kept equal to ComposerDraftCoordinator.maxInactiveDrafts.
     static let maximumDraftCount = 24
     static let maximumTextBytes = 256 * 1_024
     static let maximumManifestBytes = 128 * 1_024
@@ -12,8 +11,6 @@ enum ComposerDraftStorePolicy {
     static let maximumDiskBytes = 256 * 1_048_576
 }
 
-/// A bounded, local owner for unsent composer input. This store contains no
-/// transcript, Gateway snapshot, credentials, upload identifiers, or source paths.
 actor ComposerDraftStore {
     struct Attachment: Sendable, Equatable {
         let name: String
@@ -40,11 +37,6 @@ actor ComposerDraftStore {
         let payload: String
     }
 
-    /// The attachments of the one directory this actor last wrote or fully
-    /// verified, with the payload file identities it left there. A save whose
-    /// attachments equal them, while every payload is still that exact file,
-    /// replaces only the manifest. Holding one draft bounds the retained bytes
-    /// to one attachment budget, usually shared with the composer's own copy.
     private struct PersistedAttachments {
         let scope: ComposerDraftScope
         let attachments: [Attachment]
@@ -52,7 +44,6 @@ actor ComposerDraftStore {
         let payloadIdentities: [PayloadIdentity]
     }
 
-    /// Any rewrite, replacement or link swap of a payload changes one of these.
     private struct PayloadIdentity: Equatable {
         let fileNumber: UInt64
         let modificationDate: Date
@@ -60,9 +51,6 @@ actor ComposerDraftStore {
     }
 
     private let root: URL
-    /// Recovered from every valid manifest at first use in this process, then
-    /// advanced in memory: this actor is the only writer of `root`, so no other
-    /// manifest can move ahead of it until the next process recovers again.
     private var logicalClock: UInt64 = 0
     private var hasRecoveredLogicalClock = false
     private var persistedAttachments: PersistedAttachments?
@@ -148,9 +136,6 @@ actor ComposerDraftStore {
             ).map(\.lastPathComponent))
             guard actualNames == expectedNames else { throw CocoaError(.fileReadCorruptFile) }
 
-            // A successful read is an LRU access, not a passive observation.
-            // Advance the persisted logical clock before returning so restart
-            // cannot forget that this scope was most recently used.
             logicalClock = try nextLogicalClock()
             let refreshedManifest = Manifest(
                 version: manifest.version,
@@ -202,14 +187,9 @@ actor ComposerDraftStore {
             if ownsProfileDirectory(scope.profileID) {
                 try? FileManager.default.removeItem(at: staging)
             }
-            // The previous complete directory, if any, remains the last checkpoint.
         }
     }
 
-    /// Writes every payload and the manifest into a fresh hidden staging
-    /// directory, then swaps it in for the draft directory, so a crash leaves
-    /// either the previous or the new complete directory plus abandoned
-    /// staging that recovery and accounting remove.
     private func writeDraftDirectory(
         _ value: Value,
         scope: ComposerDraftScope,
@@ -217,8 +197,6 @@ actor ComposerDraftStore {
         staging: URL
     ) throws {
         let profileDirectory = directory.deletingLastPathComponent()
-        // A link or file where a directory belongs is removed as an entry,
-        // never followed, before the replacement is created beside it.
         Self.removeNonDirectoryEntry(at: profileDirectory)
         try FileManager.default.createDirectory(
             at: profileDirectory,
@@ -299,11 +277,6 @@ actor ComposerDraftStore {
             : nil
     }
 
-    /// Typing changes only the manifest. When `value` carries exactly the
-    /// attachments this actor last wrote or verified for `scope`, and the draft
-    /// directory still holds exactly those payload files, the new manifest
-    /// replaces the old one in one rename and no payload is rewritten. Returns
-    /// false, having touched nothing, whenever that cannot be shown.
     private func replaceManifestKeepingPayloads(
         _ value: Value,
         scope: ComposerDraftScope,
@@ -335,11 +308,6 @@ actor ComposerDraftStore {
         return true
     }
 
-    /// Replaces `directory/manifest.json` with one rename(2). The new bytes are
-    /// written beside the draft directories, never inside one: until the
-    /// rename the draft still holds its previous complete manifest, and an
-    /// interrupted write leaves only an unhashed profile-level file that
-    /// recovery and accounting remove.
     private func replaceManifest(_ data: Data, in directory: URL) throws {
         let temporary = directory.deletingLastPathComponent().appending(
             path: ".manifest-\(UUID().uuidString)",
@@ -377,8 +345,6 @@ actor ComposerDraftStore {
     }
 
     private static func isOwnedDirectory(_ url: URL) -> Bool {
-        // Inspect the directory entry itself, without cached URL resource values
-        // or following a link into another in-sandbox owner during cleanup.
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         return attributes?[.type] as? FileAttributeType == .typeDirectory
     }
@@ -446,9 +412,6 @@ actor ComposerDraftStore {
         return data
     }
 
-    /// Accounting reads manifests and payload file sizes only. Payload digests
-    /// are verified at first use in each process and by `load` before any
-    /// restore; every structural fault is still removed here.
     private func enforceGlobalBounds(preserving preserved: URL) throws {
         var entries = try validatedEntries(cleaningInvalid: true, verifyingPayloads: false)
         entries.sort {
@@ -478,8 +441,6 @@ actor ComposerDraftStore {
         let bytes: Int
     }
 
-    /// The persisted clock is recovered from every valid manifest so a new
-    /// process cannot make a recently edited draft look older than prior data.
     private func absorbRecoveredClock(_ entries: [Entry]) {
         logicalClock = max(logicalClock, entries.map(\.updatedAt).max() ?? 0)
         hasRecoveredLogicalClock = true
@@ -490,9 +451,6 @@ actor ComposerDraftStore {
         return logicalClock + 1
     }
 
-    /// Validates the complete on-disk shape while collecting LRU accounting.
-    /// Hidden crash-staging directories and every non-hash path are removed so
-    /// neither corruption nor abandoned payloads can escape the global bound.
     private func validatedEntries(cleaningInvalid: Bool, verifyingPayloads: Bool) throws -> [Entry] {
         let profileURLs = try FileManager.default.contentsOfDirectory(
             at: root,
@@ -602,10 +560,6 @@ actor ComposerDraftStore {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Hash the exact logical prefix and payload without allocating their
-    /// concatenation. The prefix is intentionally still included in every
-    /// attachment digest so duplicate bytes at different indexes retain
-    /// distinct, restart-stable filenames.
     private static func digest(prefix: Data, body: Data) -> String {
         var hasher = SHA256()
         hasher.update(data: prefix)

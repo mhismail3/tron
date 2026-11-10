@@ -38,9 +38,6 @@ struct AutomationDetailView: View {
     @PresentationState private var isExecutingAction = false
     @PresentationState private var confirmation: AutomationDetailConfirmation?
     @PresentationState private var loadRevision = 0
-    /// The name of a target the dashboard projection cannot hold: an archived
-    /// row is excluded from it by contract, so the owning Gateway's archived
-    /// projection supplies the name instead of an invalid target.
     @PresentationState private var archivedTargetTitle: String?
     @PresentationState private var runLoadGeneration = 0
     @PresentationState private var presentationReadGeneration = 0
@@ -66,8 +63,6 @@ struct AutomationDetailView: View {
             endpointAvailable: client != nil,
             hasAutomationCapability: endpoint.profile.capabilities.contains(AutomationAdmissionPolicy.capability),
             recordLoaded: record != nil,
-            // The record read is authoritative. Catalog projections can lag or
-            // omit this row; the Gateway fences mutations by expectedRevision.
             isBusy: isExecutingAction
         )
     }
@@ -163,8 +158,6 @@ struct AutomationDetailView: View {
         recentRuns
     }
 
-    /// Every action this detail holds, as Manage Home's control rows: a run in
-    /// flight first, Delete last and red.
     private func controls(_ record: GatewayAutomationRecord) -> some View {
         let outcomeUnknown = record.blockedReason == "outcome-unknown"
         return TronSettingsGroup(
@@ -300,8 +293,6 @@ struct AutomationDetailView: View {
                   presentationGeneration == presentationReadGeneration,
                   presentationActivity.allowsPresentationPublication,
                   scenePhase == .active else { return }
-            // Install this read's related values atomically. The RPCs are not a
-            // server transaction; later catalog invalidations trigger a new read.
             record = loadedRecord
             runs = loadedRuns
             if case let .existingSession(sessionID) = loadedRecord.target {
@@ -368,10 +359,6 @@ struct AutomationDetailView: View {
         })?.title
     }
 
-    /// Resolves the archived target's name through the owning Gateway, under the
-    /// same read fences as the record it belongs to. A target that is not
-    /// archived inside the bounded page walk, a retired read, or an incapable
-    /// Gateway keeps the existing ID fallback rather than inventing a name.
     private func resolveArchivedTargetTitle(
         sessionID: String,
         generation: Int,
@@ -396,8 +383,6 @@ struct AutomationDetailView: View {
     }
 
     private func openExecutionSession(_ sessionID: String) {
-        // The parent dashboard owns navigation. This view only forwards the
-        // exact Gateway/profile/session identity from the authoritative run.
         onOpenSession?(selection.profileID, sessionID)
     }
 

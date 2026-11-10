@@ -1,11 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Bind only user controls through this adapter. Installing projections and
-/// switching scopes use the underlying state directly, so reads never write.
-/// A patch maps schema keys to their new values (`null` unsets a key); each entry
-/// is one `settings.change` at the target's own layer. Batches merge as JSON, so
-/// only scalar or choice keys may be autosaved here.
 @MainActor
 enum SettingsAutosave {
     static func binding<Draft: Equatable>(
@@ -18,8 +13,6 @@ enum SettingsAutosave {
         let profile = model.profileRevision
         let inputGeneration = model.configurationAutosave.inputGeneration
         let scopeGeneration = store.wrappedValue.scopeGeneration
-        // The setter holds `model` strongly; the submitted work closures hold it
-        // weakly so the autosave queue the model owns never retains its owner.
         return Binding(get: { draft.wrappedValue }, set: { [model] next in
             guard let target, admits(), model.profileRevision == profile,
                   model.configurationAutosave.inputGeneration == inputGeneration,
@@ -87,8 +80,6 @@ private struct SettingsAutosaveLifetime<Draft: Equatable>: ViewModifier {
     }
 }
 
-/// Failures remain visible on re-entry, while successful autosave adds no
-/// transient row or scroll movement. Retry is an explicit mutation intent.
 struct SettingsAutosaveNotice: View {
     let key: ConfigurationAutosaveCoordinator.Key
     @Environment(AppModel.self) private var model

@@ -1,19 +1,12 @@
 import SwiftUI
 import TronMobileCore
 
-/// A displayed `.swift` file that this iPhone may run as a mini-app (#1339):
-/// a completed `code` display whose artifact is a `.swift` file, with the
-/// experimental runner switched on. Everything else stays an ordinary code
-/// display, so turning the switch off restores the source card at once.
 enum SwiftAppDisplay {
     @MainActor static func runs(_ display: DisplayProjection) -> Bool {
         guard display.kind == .code, let artifact = display.artifact else { return false }
         return SwiftAppExperiment.shared.canRun(fileNamed: artifact.name)
     }
 
-    /// The one preparation both the card and the runner use, so the runner
-    /// reuses the card's retained value for the same artifact identity instead
-    /// of fetching it again.
     static func prepare(
         _ artifact: DisplayArtifactDescriptor
     ) -> @Sendable (ChatMediaPayload) async throws -> PreparedAttachmentFilePreview {
@@ -23,8 +16,6 @@ enum SwiftAppDisplay {
         }
     }
 
-    /// The complete source, or why it cannot run. A preview cut at the text
-    /// bound never runs: it would execute a different program.
     enum Readiness {
         case runnable(String)
         case tooLarge
@@ -39,11 +30,6 @@ enum SwiftAppDisplay {
     static let tooLargeMessage = "This app is larger than the \(AttachmentFilePreviewPolicy.maximumTextBytes.formatted())-byte limit for running Swift files. View Source shows its first part."
 }
 
-/// The inline chat card for a runnable `.swift` display: the app's title and
-/// caption with an open control, in the inline display card's lavender glass.
-/// The source stays one tap away in its context menu. The card loads the same
-/// bounded artifact as an inline code card so it can tell, before the tap,
-/// whether the file can run.
 struct SwiftAppDisplayCard: View {
     let sessionID: String?
     let display: DisplayProjection
@@ -142,8 +128,6 @@ struct SwiftAppDisplayCard: View {
             if case .runnable = SwiftAppDisplay.readiness(of: preview) { return .ready }
             return .tooLarge
         }
-        // A missing identity while connecting is still preparing; only a
-        // failed load or a display without an artifact is unavailable.
         return failed || display.artifact == nil ? .unavailable : .preparing
     }
 
@@ -169,8 +153,6 @@ struct SwiftAppDisplayCard: View {
         phase == .ready ? "Runs the app in a sheet" : "Shows the source"
     }
 
-    /// A runnable app opens; anything else opens its source sheet, which shows
-    /// the truncation notice or the display's fallback text.
     private func activate() {
         switch phase {
         case .ready: onOpenApp?()
@@ -202,7 +184,6 @@ struct SwiftAppDisplayCard: View {
             loadedIdentity = identity
             loadedPreview = value
         } catch is CancellationError {
-            // The next activation asks again.
         } catch {
             guard !Task.isCancelled, presentationActivity.allowsPresentationPublication,
                   mediaIdentity == identity else { return }
@@ -211,10 +192,6 @@ struct SwiftAppDisplayCard: View {
     }
 }
 
-/// The display sheet for a mini-app route: loads the displayed artifact through
-/// the same bounded inline loader as its card, then hosts the unchanged
-/// `SwiftAppRunnerSheet`. The program and its state live only as long as this
-/// managed sheet; reopening the card starts a fresh run.
 struct SwiftAppDisplayRunner: View {
     let route: DisplayRoute
 

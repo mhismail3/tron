@@ -3,7 +3,6 @@ import Foundation
 import SwiftUI
 import UIKit
 
-/// Opt-in investigation instrumentation, never compiled into the shipping app.
 @MainActor enum ForegroundSheetProbe {
     private static var count = 0
     private static var stack: [String] = []
@@ -61,7 +60,6 @@ import UIKit
     }
 }
 
-/// Keep the opt-in observation wiring with its fixture owner.
 struct ForegroundSheetProbeOverlay: View {
     let model: AppModel
     init(model: AppModel) {
@@ -77,8 +75,6 @@ struct ForegroundSheetProbeOverlay: View {
     }
 }
 
-/// Passive, test-only observation of the actual UIKit presentation chain on
-/// rendered frames. AX reads the live value without causing SwiftUI renders.
 struct ForegroundNativeStackProbe: UIViewRepresentable {
     let foreground: @MainActor () -> Int
     func makeUIView(context: Context) -> Probe { Probe(foreground: foreground) }

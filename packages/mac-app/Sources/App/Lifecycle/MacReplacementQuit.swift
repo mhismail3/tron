@@ -1,9 +1,6 @@
 import Darwin
 import Foundation
 
-/// Replacement owns this private handoff; ordinary Quit has no receipt or
-/// replacement authority. Fixed paths, exact app identity and a fresh nonce keep
-/// an interrupted runner's request from changing a later app's Quit behavior.
 struct MacReplacementQuit: Decodable, Sendable {
     let version: Int
     let id: UUID
@@ -20,7 +17,6 @@ struct MacReplacementQuit: Decodable, Sendable {
     }
 
     func publish(directory: URL, state: String, detail: String) throws {
-        // Never publish a delayed predecessor over a newer request's result.
         guard let current: Self = Self.readPrivate(directory.appendingPathComponent("request.json")),
               current.id == id else { return }
         let data = try JSONSerialization.data(withJSONObject: [
@@ -31,8 +27,6 @@ struct MacReplacementQuit: Decodable, Sendable {
     }
 
     private static func readPrivate<T: Decodable>(_ url: URL) -> T? {
-        // The handoff never follows directory/file links or admits another user's
-        // or group-writable file. A FIFO cannot block the termination callback.
         for parent in [url.deletingLastPathComponent(), url.deletingLastPathComponent().deletingLastPathComponent(),
                        url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()] {
             var info = stat()

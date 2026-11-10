@@ -2,8 +2,6 @@ import Foundation
 import Security
 
 public enum NativeCodeSigning {
-    /// Pin messages to the actual signed bundled build, not another installed
-    /// app with the same team/identifier serving the registered Mach name.
     public static func pin(_ base: String, to bundle: URL) throws -> String {
         var code: SecStaticCode?
         var requirement: SecRequirement?

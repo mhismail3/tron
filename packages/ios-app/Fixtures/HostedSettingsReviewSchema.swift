@@ -2,8 +2,6 @@
 import Foundation
 import TronMobileCore
 
-/// Shared synthetic values for visual review of the production settings renderer.
-/// Editors still consume the typed values; labels/counts mirror Gateway declarations.
 enum HostedSettingsReviewSchema {
     static let sections: [JSONValue] = [
         section("model", "Model", 10, inline: true),
@@ -65,7 +63,6 @@ enum HostedSettingsReviewSchema {
             help: "Lets this paired iPhone open a shell on the Mac over Tailscale through Remote Login, even when the Gateway is not running.")]
     }()
 
-    /// Agent Behavior review includes the restored queues, not the retired-editor preview.
     static var agentBehaviorKeys: [JSONValue] {
         additionalKeys.map { value in
             guard var row = value.objectValue, row["key"]?.stringValue?.hasPrefix("model.queue[") == true,
@@ -79,8 +76,6 @@ enum HostedSettingsReviewSchema {
             + sheetThemeKeys.filter { $0.objectValue?["key"]?.stringValue == "permissions.floor" }
     }
 
-    /// `-settings-scope-review`: the overridden Home, Session and Project values
-    /// reported after three-layer settings (#1651), at their real lengths.
     static let scopeReview = ProcessInfo.processInfo.arguments.contains("-settings-scope-review")
 
     static let tools = ["ask_user", "display", "notify", "read", "bash", "edit", "write", "web_search", "fetch_content", "knowledge", "computer", "schedule", "connections", "settings", "zoom"]

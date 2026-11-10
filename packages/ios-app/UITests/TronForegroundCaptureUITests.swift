@@ -1,8 +1,5 @@
 import XCTest
 
-/// UI-port foreground regressions, added after personal native visual acceptance.
-/// The synthetic Gateway is a real socket peer; UIKit lifetime, visible data,
-/// read demand and post-reveal command admission are independent oracles.
 final class TronForegroundCaptureUITests: XCTestCase {
     @MainActor func testHomeMemoryRetainsNativeStackAndPageLight() throws { try captureHome(dark: false) }
     @MainActor func testHomeMemoryRetainsNativeStackAndPageDark() throws { try captureHome(dark: true) }
@@ -54,15 +51,12 @@ final class TronForegroundCaptureUITests: XCTestCase {
         let memory = app.descendants(matching: .any)["home-manage-memory-browser"].firstMatch
         reveal(memory, in: app); memory.tap()
         XCTAssertTrue(app.buttons["home-sheet-done-memory"].waitForExistence(timeout: 20))
-        // The feed loads the older page itself as the reader scrolls toward it.
         let olderPage = app.descendants(matching: .any)["home-memory-summary-0-16"].firstMatch
         reveal(olderPage, in: app)
         try capture(app, name: "memory-\(dark ? "dark" : "light")", reads: ["home.memory.view": 1],
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "settings.resolve", "home.status", "home.taskList"])
         XCTAssertTrue(olderPage.isHittable, "Foreground preserves the current page, not merely a cached first page")
         let item = app.descendants(matching: .any)["home-memory-row-34"].firstMatch
-        // Back toward the newest rows, clear of the title bar.
-        // Scroll the feed itself: a swipe at the screen centre misses a medium-detent sheet's list.
         let viewport = app.descendants(matching: .any)["home-memory-viewport"].firstMatch
         for _ in 0..<12 where !(item.isHittable && item.frame.minY > 140) { viewport.swipeDown(velocity: .slow) }
         reveal(item, in: app)
@@ -76,7 +70,6 @@ final class TronForegroundCaptureUITests: XCTestCase {
         app.buttons["home-sheet-done-memory-item"].tap(); app.buttons["home-sheet-done-memory"].tap()
         try capture(app, name: "manage-revealed-\(dark ? "dark" : "light")",
                     reads: ["home.status": 1, "home.context": 1, "home.chapterList": 1, "home.profileList": 1, "home.taskList": 1,
-                            // The on-screen Manage Home model card is a foremost SettingsRendererView: one read.
                             "settings.resolve": 1],
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "home.memory.view"])
         app.buttons["home-sheet-done-manage"].tap(); app.buttons["Back"].tap()
@@ -123,8 +116,6 @@ final class TronForegroundCaptureUITests: XCTestCase {
             } else {
                 XCTAssertEqual(editor.value as? String, draft, "A newer queue revision must not erase the local draft")
                 XCTAssertTrue(app.keyboards.firstMatch.exists, "The native editor keeps its keyboard across foregrounding")
-                // Type into the application's existing first responder without
-                // tapping/refocusing any element; the exact editor must receive it.
                 app.typeText(" focus survived")
                 var expected = draft
                 expected.insert(contentsOf: " focus survived", at: caret)
@@ -160,9 +151,6 @@ final class TronForegroundCaptureUITests: XCTestCase {
         evidence(app, name: "deferred-chat-ready")
     }
 
-    /// Foregrounding an open, unchanged chat reconnects its transport but keeps
-    /// the installed transcript on screen: the chat never re-enters its opening
-    /// cover (a ready exit) and the rows stay where they were.
     @MainActor func testForegroundKeepsUnchangedOpenChatTranscriptOnScreen() throws {
         continueAfterFailure = false
         let app = try launch(false, arguments: ["-home-tool-transcript"]); defer { app.terminate() }
@@ -173,7 +161,6 @@ final class TronForegroundCaptureUITests: XCTestCase {
             && app.textViews["Message input"].exists }, "The chat never became ready: \(app.debugDescription)")
         Thread.sleep(forTimeInterval: 1)
         let opened = try XCTUnwrap(lifecycle.value as? String)
-        // A transcript label shown once, so the row found after foreground is the same row.
         let before = try transcriptTexts(app)
         let (rowLabel, rowFrame) = try XCTUnwrap(before.last { label, _ in before.filter { $0.0 == label }.count == 1 },
                                                  "The open chat shows no transcript row: \(app.debugDescription)")
@@ -186,8 +173,6 @@ final class TronForegroundCaptureUITests: XCTestCase {
         XCTAssertEqual(settled.1.minY, rowFrame.minY, accuracy: 2, "The transcript moved on foreground")
     }
 
-    /// Visible transcript text between the navigation bar and the composer, read
-    /// from one accessibility snapshot.
     @MainActor private func transcriptTexts(_ app: XCUIApplication) throws -> [(String, CGRect)] {
         let composerTop = app.textViews["Message input"].frame.minY
         var texts: [(String, CGRect)] = []
@@ -239,7 +224,6 @@ final class TronForegroundCaptureUITests: XCTestCase {
         evidence(app, name: "\(name)-before")
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(app.wait(for: .runningBackground, timeout: 15))
-        // A controlled background dwell is the stimulus, not a success oracle.
         Thread.sleep(forTimeInterval: 1)
         print("FOREGROUND_CAPTURE activate \(name) \(Date().timeIntervalSince1970)")
         app.activate()

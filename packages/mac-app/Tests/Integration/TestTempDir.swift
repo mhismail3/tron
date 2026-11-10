@@ -1,7 +1,5 @@
 import Foundation
 
-/// Creates a throwaway directory under `NSTemporaryDirectory()` for an
-/// integration test. The caller removes it with `cleanup` in a `defer`.
 enum TestTempDir {
     static func make() -> URL {
         let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)

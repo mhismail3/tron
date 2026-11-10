@@ -7,8 +7,6 @@ import SwiftUI
 import TronMobileCore
 import TronSwiftAppEngine
 
-/// Actual chat/preview surfaces; only the Gateway/media bytes and native
-/// evidence recorder are scripted. Scene transitions use the production owner.
 struct HostedReadonlyAttachmentFixture: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: AppModel
@@ -53,25 +51,18 @@ struct HostedReadonlyAttachmentFixture: View {
         NavigationStack {
             VStack(spacing: 0) {
                 if !pendingStrip.isEmpty {
-                    // The composer's own pending strip inside a chat route's
-                    // presentation surface, as above the input bar (#1656).
                     ChatPendingAttachmentStrip(attachments: pendingStrip, reduceMotion: true,
                                                submissionTransitionActive: false, onRemove: { _ in })
                         .tronPresentationSurface(id: "chat.fixture.pending-strip")
                 } else if let localAttachment {
                     HostedLocalAttachmentChip(attachment: localAttachment, onRemove: { self.localAttachment = nil }).equatable()
                 } else if ready, scenario == "multi-image" {
-                    // Production chat routes mount inside a presentation surface,
-                    // which gives every presenter in the transcript one shared
-                    // presentation-state scope (#1652).
                     ChatView(sessionID: sessionID)
                         .tronPresentationSurface(id: "chat.fixture.\(sessionID)", dependencies: [.session(sessionID)])
                 } else if ready {
                     ChatView(sessionID: sessionID)
                         .id("\(model.knowledgeDestinationIdentity):\(sessionID)")
                 }
-                // The production Settings sheet, for journeys that change an
-                // iPhone preference and then use it on a displayed file.
                 if scenario.contains("settings") {
                     Button("Open Settings") { showsSettings = true }.accessibilityIdentifier("fixture.open-settings")
                 }
@@ -82,13 +73,9 @@ struct HostedReadonlyAttachmentFixture: View {
                 Text("\(model.connectionState) socket:\(model.knowledgePresentationIdentity.connectionID.map(String.init) ?? "none")")
                     .font(.caption2).accessibilityIdentifier("fixture.preview-connection")
             }
-            // Local-chip journeys still own a full native viewport; do not
-            // center their evidence beneath the presented medium photo sheet.
             .frame(maxHeight: localAttachment == nil && pendingStrip.isEmpty ? nil : .infinity, alignment: .top)
         }
         .tronManagedSheet(isPresented: $showsSettings, identity: "fixture.settings") { SettingsView() }
-        // The real openURL boundary a running Swift app reaches (#1160),
-        // recorded instead of leaving the app.
         .environment(\.openURL, OpenURLAction { url in
             SwiftAppLinkTestProbe.shared.opened.append(url.absoluteString)
             return .handled
@@ -137,7 +124,6 @@ struct HostedReadonlyAttachmentFixture: View {
                         fullPreviewData: scenario == "pending-local" ? data : nil, preparedThumbnail: thumbnail)
                 }
                 if scenario == "pending-multi" {
-                    // Distinct full-image heights identify which chip's photo a preview shows.
                     for index in 0..<3 {
                         let data = ReadonlyAttachmentGateway.image(height: 300 + index * 10)
                         let thumbnail = await ComposerAttachmentPreviewPolicy.prepare(data)
@@ -154,8 +140,6 @@ struct HostedReadonlyAttachmentFixture: View {
     }
 }
 
-/// Recording zoom must not rebuild an unchanged chip's UIImage wrapper on every
-/// display-link sample. The fixture observes the viewport; it is not a new input.
 private struct HostedLocalAttachmentChip: View, Equatable {
     let attachment: PendingAttachment
     let onRemove: () -> Void
@@ -194,16 +178,12 @@ private actor ReadonlyAttachmentGateway {
             artifact["kind"] = "text"; artifact["name"] = "readonly.txt"; artifact["mimeType"] = "text/plain"
             display["artifact"] = artifact; rows[1]["display"] = display
         } else if let swiftFile = HostedSwiftAppFixtureSource.file(for: scenario) {
-            // A displayed single-file SwiftUI app for the #889 run journeys.
             var display = rows[1]["display"] as! [String: Any]
             display["kind"] = "code"; display["title"] = swiftFile.name
             display["altText"] = "\(swiftFile.name), a single-file SwiftUI app"
             display["eligibleSurfaces"] = ["sheet", "inline"]
-            // `-inline` scenarios request the inline surface: the mini-app card (#1339).
             display["presentation"] = ["requestedSurface": scenario.contains("-inline") ? "inline" : "sheet", "inlineTapAction": "sheet"]
             if scenario.contains("builds-preview-inline") {
-                // What an agent presenting the recovered preview would say: an
-                // app title and an honest historical caption, never "live".
                 display["title"] = "Tron builds"
                 display["caption"] = "Historical preview · Oct 16 snapshot, not live"
             }
@@ -246,8 +226,6 @@ private actor ReadonlyAttachmentGateway {
             UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: height / 2, width: 160, height: height / 2))
         }.pngData()!
     }
-    /// Same dimensions and component depth as the reported contact sheet;
-    /// generated pixels keep private review captures out of the repository.
     private static func highDepthImage() -> Data {
         let context = CGContext(data: nil, width: 2400, height: 4000, bitsPerComponent: 16,
             bytesPerRow: 2400 * 8, space: CGColorSpaceCreateDeviceRGB(),
@@ -290,7 +268,6 @@ private actor ReadonlyAttachmentGateway {
             for row in 0..<64 {
                 for column in 0..<64 {
                     let offset = row * stride + column * 4
-                    // A hard vertical edge makes the hosted screenshot sensitive to blur.
                     let isLeftBand = column < 32
                     base[offset] = isLeftBand ? 224 : 32
                     base[offset + 1] = isLeftBand ? 220 : 48
@@ -366,7 +343,6 @@ private actor ReadonlyAttachmentGateway {
             ? ChatMediaPayload(data: file, mimeType: "text/plain")
             : ChatMediaPayload(data: image, mimeType: "image/png")
     }
-    /// `multi-image` blobs are distinguishable by their decoded pixel height.
     static let multiImageCount = 5
     static func multiImageHeight(_ blobID: String) -> Int? {
         guard blobID.hasPrefix("multi-image-"), let index = Int(blobID.dropFirst("multi-image-".count)) else { return nil }
@@ -439,8 +415,6 @@ private actor ReadonlyAttachmentSocket: GatewaySocketConnection {
     private func deliver(_ data: Data) { if let receiver { self.receiver = nil; receiver.resume(returning: data) } else { inbound.append(data) } }
 }
 
-/// Bounded, HOSTED_TEST-only physical evidence. No selection/text/image bytes
-/// are copied; a display boundary observes the actual mounted UIKit viewport.
 private struct ReadonlyPreviewNativeRecorder: UIViewRepresentable {
     let update: (String) -> Void
     func makeUIView(context: Context) -> Recorder { Recorder(update: update) }

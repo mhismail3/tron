@@ -2,8 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Real sheet/child controls and accepted create consumer; only transport and
-/// the precise typed-result boundary are held. No production lifecycle hooks.
 struct HostedNewSessionFixture: View {
     @Environment(\.scenePhase) private var phase
     @State private var activity = PresentationActivityCoordinator()
@@ -174,8 +172,6 @@ private actor NewSessionFixtureGateway {
     func handle(_ method: String, params: [String: JSONValue], replacement: Bool) async -> JSONValue? {
         switch method {
         case "settings.resolve":
-            // A slow repository read: the sheet's initial pulse is visible long
-            // enough to observe, then its content is revealed.
             if scenario == "project-settings-slow", params["target"]?.objectValue?["kind"]?.stringValue == "project" {
                 try? await Task.sleep(for: .seconds(2.5))
             }
@@ -223,7 +219,6 @@ private actor NewSessionFixtureGateway {
         case "session.list", "session.listUpdated": return .object(["sessions": .array([])])
         case "system.metadata": return .object([:])
         case "attention.list": return .object(["items": .array([])])
-        // The provider catalog the shared model picker presents the served choice from.
         case "provider.list":
             return .object(["providers": .array([.object(["id": .string("fixture"), "name": .string("Fixture"),
                 "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(1)])])])

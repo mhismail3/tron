@@ -1,10 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// The learned profile: what Home has saved about the maintainer as Knowledge
-/// notes, grouped by personal area and exact scope rather than instruction kind. The
-/// maintainer confirms, edits, replaces and retires items here; every change goes
-/// through the settings change path, shows in Changes and can be undone.
 extension HomeSheet {
     func profile(_ list: HomeProfileListDTO) -> some View {
         let active = list.active
@@ -12,7 +8,6 @@ extension HomeSheet {
         return TronSettingsSections(alignment: .leading, spacing: 18) {
             profileHeader(list)
             if active.isEmpty { profileEmptyPlaceholder }
-            // Shared sections preserve row/sheet identity while placement changes.
             if !list.items.isEmpty {
                 TronListGroup(sections: HomeProfilePresentation.groups(active).map {
                     TronListSection(title: $0.title, rows: $0.items)
@@ -29,7 +24,6 @@ extension HomeSheet {
         }
     }
 
-    /// A profile with no items at all: the shared centred empty state.
     func emptyProfile(_ list: HomeProfileListDTO) -> some View {
         TronFeedEmptyState(identifier: "home-profile-viewport") {
             TronSettingsSections(alignment: .leading, spacing: 18) {
@@ -92,8 +86,6 @@ extension HomeSheet {
         }
     }
 
-    /// Confirm, Edit and Retire. Edit and Retire open the Settings value-editor
-    /// pattern: a progressive sheet with Save (or Retire) in its toolbar.
     private func profileItemActions(_ item: HomeProfileListDTO.Item) -> some View {
         TronSettingsGroup("Change", accent: accent) {
             VStack(spacing: 0) {
@@ -133,12 +125,9 @@ extension HomeSheet {
         }
     }
 
-    /// The last change made here, with Undo, and a refused change. Shared by the
-    /// Profile sheet and an item's sheet.
     @ViewBuilder func profileEditNotices() -> some View {
         if let undo = profileEdit.undo {
             TronGlassCard(accent: accent) {
-                // Undo sits beside the row, not in it: the row reads as one element.
                 HStack(spacing: 0) {
                     TronSettingsRow(icon: "checkmark.circle", title: undo.summary,
                                     subtitle: "Applies from Home's next activation", accent: accent)
@@ -165,8 +154,6 @@ extension HomeSheet {
                       done: "Confirmed: \(HomeChapterPresentation.topicPreview(item.text, limit: 60))")
     }
 
-    /// One accepted profile command: it runs under the admission the tap captured and
-    /// publishes only while this sheet still shows that profile.
     func changeProfile(_ changes: [HomeProfileChange], done summary: String) {
         guard let admission = profileAdmission() else { return }
         profileEdit.working = true
@@ -182,7 +169,6 @@ extension HomeSheet {
                 profileEdit.working = false
                 if !(error is CancellationError) { profileEdit.failure = .init(title: "Profile not changed", error: error) }
             }
-            // A refusal can mean Home changed the item: re-read either way.
             refreshAfterMutation()
             onChanged?()
         }
@@ -208,9 +194,6 @@ extension HomeSheet {
         }
     }
 
-    /// A profile command is admitted from this sheet or from the editor or confirmation
-    /// it presents: while that child covers it, this sheet still publishes data, so the
-    /// child's Save runs under this sheet's identity and authority.
     private func profileAdmission() -> HomeControlAdmission? {
         guard let identity, let coordinator, coordinator.activity(for: identity.surfaceToken).allowsDataPublication,
               let authority = try? model.homeMutations.authority(profileID: profileID) else { return nil }
@@ -221,7 +204,6 @@ extension HomeSheet {
         identity == admission.identity && admission.coordinator.activity(for: admission.identity.surfaceToken).allowsDataPublication
     }
 
-    /// The item as the latest profile read lists it; the row's copy until that read lands.
     func loadedProfileItem(_ carried: HomeProfileListDTO.Item) -> HomeProfileListDTO.Item {
         switch owner.state {
         case .loaded(let read, .profile(let list)), .loading(let read, .some(.profile(let list))):
@@ -233,8 +215,6 @@ extension HomeSheet {
     }
 }
 
-/// A Profile or item sheet's edit state: the change in flight, the last change it
-/// made (for Undo), and a refusal.
 struct HomeProfileEditState {
     struct Undo: Equatable { let changeID: String; let summary: String }
     struct Failure: Equatable {
@@ -242,7 +222,6 @@ struct HomeProfileEditState {
         let message: String
         init(title: String, error: any Error) {
             self.title = title
-            // An undo refused because Home changed the item names what it holds now.
             if let failure = error as? GatewayFailure, failure.code == "conflict",
                case .object(let details)? = failure.details, case .object(let display)? = details["display"],
                case .string(let current)? = display["current"] {
@@ -257,9 +236,6 @@ struct HomeProfileEditState {
     var failure: Failure?
 }
 
-/// Edits an item's text and kind, the Settings value-editor way: Save in the
-/// toolbar, Done to leave. Saving changes the item in place (a refine); with
-/// Replace on, it saves a new item and keeps this one as superseded.
 struct HomeProfileItemEditor: View {
     let item: HomeProfileListDTO.Item
     let onSave: (HomeProfileChange, String) -> Void
@@ -277,7 +253,6 @@ struct HomeProfileItemEditor: View {
         _kind = PresentationState(wrappedValue: item.kind)
     }
 
-    /// The item is one line: line breaks typed here become spaces.
     private var line: String {
         text.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
     }
@@ -333,8 +308,6 @@ struct HomeProfileItemEditor: View {
     }
 }
 
-/// Retires an item with an optional reason, recorded in Changes. Retire sits where
-/// Save does, in the destructive role.
 struct HomeProfileRetireEditor: View {
     let item: HomeProfileListDTO.Item
     let onRetire: (String?) -> Void
@@ -385,8 +358,6 @@ struct HomeProfileRetireEditor: View {
     }
 }
 
-/// One owner of the profile rows' derived text, shared by the Manage Home row,
-/// the Profile sheet and the `profile` tool's detail.
 enum HomeProfilePresentation {
     struct Group { let title: String; let items: [HomeProfileListDTO.Item] }
 
@@ -415,7 +386,6 @@ enum HomeProfilePresentation {
         }
     }
 
-    /// The Gateway's kind label as the `profile` tool sends it (`standing-decision`).
     static func kindTitle(wire: String) -> String {
         HomeProfileListDTO.Item.Kind(rawValue: wire).map(kindTitle) ?? wire
     }
@@ -461,8 +431,6 @@ enum HomeProfilePresentation {
         }
     }
 
-    /// Each row only opens its item; Confirm, Edit and Retire live in the item's
-    /// sheet. The note ID and dates stay in the detail.
     static func rowContent(_ item: HomeProfileListDTO.Item) -> TronListRowContent {
         TronListRowContent(title: HomeChapterPresentation.topicPreview(item.text, limit: 160), preview: true,
                            status: TronListStatus(text: stateLabel(item), tone: stateAccent(item)),

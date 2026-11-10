@@ -1,33 +1,17 @@
 import SwiftUI
 import TronMobileCore
 
-// A sheet a transcript row asked to present. The row cannot own it: the
-// transcript's own lazy window discards a row while streaming pushes it out of
-// realization, and a row-owned sheet is dismissed with the row that presented
-// it. The transcript owns the route instead, exactly as the display sheet is
-// owned above the rows.
-
-/// One tool run's detail. It carries what identifies the run — its calls and the
-/// state the row resolved when the user asked for it — so the host can refresh it
-/// from the projection the host itself owns.
 struct ChatToolRunSheetRoute: Equatable, Sendable {
     let runID: String
     let toolIDs: [String]
     let state: ToolRunResolvedState
 }
 
-/// One wrapped thinking trace's full detail. The route carries the trace's
-/// identity and the content the row resolved; the host resolves the trace again
-/// from the install it owns, so a trace that is still arriving keeps growing in
-/// the sheet that outlives its row.
 struct ChatThinkingTraceSheetRoute: Equatable, Sendable {
     let identity: String
     let opened: ChatThinkingTraceContent
 }
 
-/// One transcript event's detail, with the identity its diagnostics carry. The
-/// event's own presentation is resolved from the current install for the same
-/// reason: a notice whose body is still arriving keeps filling the open sheet.
 struct ChatNotificationDetailSheetRoute: Equatable, Sendable {
     let eventID: String
     let detailID: UUID
@@ -55,8 +39,6 @@ enum ChatTranscriptSheetRoute: Equatable, Identifiable {
     }
 }
 
-/// The route owner a row presents through. One instance belongs to one rendered
-/// transcript, so a row is never able to outlive its own sheet's owner.
 @MainActor
 @Observable
 final class ChatTranscriptSheetRouteOwner {
@@ -76,27 +58,16 @@ private struct ChatTranscriptSheetRouteOwnerKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    /// The owner a row asks to present its detail sheet, or nil when the row is
-    /// rendered outside a transcript host (a bare preview or fixture), where the
-    /// detail action is simply unavailable.
     var chatTranscriptSheetRoutes: ChatTranscriptSheetRouteOwner? {
         get { self[ChatTranscriptSheetRouteOwnerKey.self] }
         set { self[ChatTranscriptSheetRouteOwnerKey.self] = newValue }
     }
 }
 
-/// Presents the route a row asked for, above the rows that asked for it.
-/// `resolveToolRun` re-resolves a tool run from the projection this host owns —
-/// the same capability the row had, moved to the boundary that survives the row.
-/// A run that no longer resolves retires its route instead of presenting stale
-/// content, which is what the row did when it refreshed its own details.
 struct ChatTranscriptSheetHost: ViewModifier {
     let routes: ChatTranscriptSheetRouteOwner
     var installationTag: ChatTranscriptProjectionTag?
     var resolveToolRun: (([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?)?
-    /// Resolves a detail route's own content from the install this transcript
-    /// owns. The row presents an identity; the sheet reads the current content,
-    /// so an open detail follows what the transcript installs next.
     var resolveThinkingTrace: ((String) -> ChatThinkingTraceContent?)?
     var resolveNotificationDetail: ((String) -> ChatNotificationPresentation?)?
 
@@ -122,13 +93,8 @@ struct ChatTranscriptSheetHost: ViewModifier {
                 sheetContent(route)
             }
             .onChange(of: routes.route) { _, route in
-                // A new presentation supersedes any intent the previous one left
-                // behind. A dismissal is not a cancellation: the sheet completes
-                // its own handoff as it goes away.
                 guard let route else { return }
                 displayHandoff.cancel()
-                // The opened run's own resolution stays the fallback while the
-                // sheet dismisses and its handoff completes.
                 if let opened = route.toolRun { toolRun = opened.state }
             }
             .onChange(of: installationTag) { previous, current in
@@ -180,8 +146,6 @@ struct ChatTranscriptSheetHost: ViewModifier {
             routes.dismiss()
             return
         }
-        // The opened run keeps its identity; only the install's generation and
-        // the resolved payloads move with the projection the host owns.
         toolRun = ToolRunResolvedState(
             installationTag: installationTag,
             run: route.state.run,
@@ -201,8 +165,6 @@ struct ChatTranscriptSheetHost: ViewModifier {
         routes.dismiss()
     }
 
-    /// The detail source establishes authority; the visible projection also
-    /// includes admitted history pages, not just the 512-item gateway tail.
     private func completeDisplayHandoff() {
         guard let state = toolRun,
               let currentInstallation = model.presentationGeneration(
@@ -225,18 +187,10 @@ struct ChatTranscriptSheetHost: ViewModifier {
     }
 }
 
-/// A row's thinking detail, rendered from the content the transcript's current
-/// install owns. The row presents only the trace's identity, so a trace that is
-/// still arriving keeps growing in the sheet that outlives the row that opened
-/// it — the tail-follow the compact row cannot own.
 private struct LiveThinkingTraceSheet: View {
     let identity: String
     let opened: ChatThinkingTraceContent
     let resolve: ((String) -> ChatThinkingTraceContent?)?
-    /// The last content the install resolved. A bounded source window can drop
-    /// the row that opened the sheet while the sheet is still up; the sheet then
-    /// keeps following the trace it has rather than reverting to what the row
-    /// knew when it presented it.
     @State private var followed: ChatThinkingTraceContent?
 
     var body: some View {
@@ -254,8 +208,6 @@ private struct LiveThinkingTraceSheet: View {
     }
 }
 
-/// A row's event detail, rendered the same way: the pill presents its event's
-/// identity, and the sheet renders whatever the current install publishes for it.
 private struct LiveNotificationDetailSheet: View {
     let eventID: String
     let detailID: UUID

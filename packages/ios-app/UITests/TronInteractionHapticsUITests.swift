@@ -1,7 +1,5 @@
 import XCTest
 
-/// Real shared controls and copy surfaces. The hosted probe observes semantic
-/// output, while values/clipboard affordances prove the interaction occurred.
 final class TronInteractionHapticsUITests: XCTestCase {
     @MainActor func testControlsTickOnlyOnDeliberateChanges() {
         continueAfterFailure = false

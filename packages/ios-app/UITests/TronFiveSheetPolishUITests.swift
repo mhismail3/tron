@@ -2,8 +2,6 @@ import XCTest
 import UIKit
 import Vision
 
-/// Real hosted sheets, unchanged fixture workload on base and candidate. Screenshots
-/// are review evidence, not goldens. Geometry assertions exercise the reported seams.
 @MainActor final class TronFiveSheetPolishUITests: XCTestCase {
     func testNumericKeyboardToolbar() {
         for mode in ["light", "dark"] {
@@ -66,7 +64,6 @@ import Vision
             expand(app, done: "home-sheet-done-task")
             let card = e(app, "home-task-checkin")
             reveal(card, app: app)
-            // Scroll until the complete latest snapshot and its following row are visible.
             let next = e(app, "home-task-checkin-next")
             reveal(next, app: app)
             let title = e(app, "home-task-checkin-summary-title")
@@ -100,7 +97,6 @@ import Vision
                 if boundary.exists && boundary.isHittable && boundary.frame.maxY < app.frame.maxY - 180 { break }
                 app.swipeUp(velocity: .slow)
             }
-            // Frame both neighbours without pressing a tappable memory card.
             if boundary.frame.minY < app.frame.height * 0.30 {
                 app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.40))
                     .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.65)))

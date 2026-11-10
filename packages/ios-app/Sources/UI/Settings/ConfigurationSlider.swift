@@ -1,14 +1,11 @@
 import SwiftUI
 import TronMobileCore
 
-/// One host admits one exact editor. Replacement, cancellation and completion
-/// retire its input authority synchronously, before another animation callback.
 @MainActor @Observable
 final class ConfigurationSliderPresentation {
     struct Session: Equatable {
         let id = UUID()
         let owner: UUID
-        // Pinned at admission; completion cannot substitute a newer generation.
         let surface: PresentationSurfaceToken?
     }
     private(set) var session: Session?
@@ -92,13 +89,9 @@ struct ConfigurationSliderPreference: PreferenceKey {
 }
 
 extension View {
-    /// Install outside scrolling content: choices use one overlay and
-    /// cannot relayout rows, leak outside taps, or leave a hidden second editor.
     @ViewBuilder
     func tronConfigurationSliderHost(_ presentation: ConfigurationSliderPresentation,
                                      inheriting inherited: ConfigurationSliderPresentation? = nil) -> some View {
-        // An embedded renderer must use the sheet's viewport-wide host. A second
-        // host confines its editor to the model card and duplicates preferences.
         if inherited != nil { self }
         else { modifier(ConfigurationSliderHost(presentation: presentation)) }
     }
@@ -139,8 +132,6 @@ struct ConfigurationSliderActions {
     let focus: AccessibilityFocusState<Bool>.Binding
 }
 
-/// Shared motion, header, focus and dismissal lifecycle. Domain editors own
-/// their local drafts; this container never stores a canonical setting.
 struct ConfigurationSliderContainer<Content: View>: View {
     let title: String
     let value: String
@@ -172,7 +163,6 @@ struct ConfigurationSliderContainer<Content: View>: View {
     }
 
     private var motion: Animation {
-        // A finite curve cannot bounce across the clamped interaction boundary.
         reduceMotion ? .easeOut(duration: 0.12) : .easeInOut(duration: 0.28)
     }
 
@@ -186,16 +176,12 @@ struct ConfigurationSliderContainer<Content: View>: View {
             admitsInput: { admitsPresentation && presentation.admitsInput(anchor.session) }, dismiss: close, focus: $sliderFocused
         )
         ZStack(alignment: .topLeading) {
-            // An embedded section's host is only that section's frame (#1573):
-            // catch outside taps across the whole surface, not only the host.
             Color.clear.ignoresSafeArea().contentShape(Rectangle().inset(by: -10_000))
                 .onTapGesture { close() }.accessibilityHidden(true)
             ConfigurationSliderSurface(
                 source: source, target: target, fraction: expanded ? 1 : 0,
                 reduceMotion: reduceMotion, accent: anchor.accent
             ) {
-                // Keep one content tree. Fitting content centers; large text
-                // or a short viewport can scroll without duplicating glass.
                 ScrollView { panel(actions).frame(minHeight: target.height) }
                     .scrollBounceBehavior(.basedOnSize)
                     .scrollIndicatorsFlash(onAppear: true)
@@ -226,8 +212,6 @@ struct ConfigurationSliderContainer<Content: View>: View {
             sliderFocused = false
             presentation.beginMeasurement(.configurationSliderCollapse, for: anchor.session, recorder: signposts)
             withAnimation(motion, completionCriteria: .logicallyComplete) { expanded = false } completion: {
-                // Read the owning surface registry again: retirement can precede
-                // SwiftUI's next onChange/onDisappear pass.
                 guard admitsPresentation else { presentation.cancel(anchor.session); return }
                 presentation.finish(anchor.session, commit: finish)
             }
@@ -268,8 +252,6 @@ struct ConfigurationSliderContainer<Content: View>: View {
     }
 }
 
-/// One rail/knob and gesture owner for continuous tokens and discrete levels.
-/// The editor supplies domain mapping; raw finger movement is never persisted.
 struct ConfigurationSliderTrack: View {
     let progress: Double
     let stops: [Double]
@@ -290,8 +272,6 @@ struct ConfigurationSliderTrack: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     nonisolated static let inset: CGFloat = 22
 
-    // The rail is assembled from typed helpers: as one GeometryReader closure
-    // its literal-heavy layout arithmetic took ~3.5 s to type-check (#1066).
     var body: some View {
         GeometryReader { geometry in
             trackSurface(width: max(1, geometry.size.width - Self.inset * 2))

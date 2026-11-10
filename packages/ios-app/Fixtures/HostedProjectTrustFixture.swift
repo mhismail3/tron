@@ -2,8 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Directly mounted real Project Trust controls. Only the synthetic transport
-/// delays replies; canonical fake decisions/events/reads remain independent.
 struct HostedProjectTrustFixture: View {
     @Environment(\.scenePhase) private var phase
     @State private var model: AppModel
@@ -127,7 +125,6 @@ private actor ProjectTrustFixtureGateway {
         streams.forEach { $0.yield(counts + " | " + trace.joined(separator: " > ")) }
     }
     private func inspection() -> JSONValue {
-        // A chat in a subdirectory: the Gateway records the decision for its Project root.
         .object(["cwd": .string("/fixture/project"), "projectDir": .string("/fixture"), "requiresDecision": .bool(true),
                  "savedDecision": decision.map(JSONValue.bool) ?? .null,
                  "defaultDecision": .string("ask"), "effectiveDecision": decision.map(JSONValue.bool) ?? .null])
@@ -174,8 +171,6 @@ private actor ProjectTrustFixtureGateway {
             decision = change.decision
             let canonical = inspection()
             let result = fixtureSettingsChangeResult(key: "permissions.projectTrust", result: canonical)
-            // The real TrustService mutex protects application/commit, not
-            // network response delivery. No await separates these fake commits.
             receipts[commandID] = result
             let isFirst = receipts.count == 1
             record("commit:\(decision.map(String.init) ?? "nil"):\(commandID)")
@@ -221,8 +216,6 @@ private actor ProjectTrustFixtureSocket: GatewaySocketConnection {
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data).objectValue ?? [:]
         guard frame["type"] == .string("request"), let id = frame["id"]?.stringValue,
               let method = frame["method"]?.stringValue else { return }
-        // Independent request dispatch matches the transport. Holding a reply
-        // must not hold the client's sender or the fake canonical mutation lane.
         Task {
             let reply = await gateway.handle(method, params: frame["params"]?.objectValue ?? [:])
             sendReply(id: id, reply: reply)
@@ -256,14 +249,12 @@ private actor ProjectTrustFixtureSocket: GatewaySocketConnection {
     }
 }
 
-/// Reads a fixture `settings.change` that changes project trust.
 func fixtureTrustChange(_ params: [String: JSONValue]) -> (cwd: JSONValue?, decision: Bool?, isTrust: Bool) {
     let change = params["changes"]?.arrayValue?.first?.objectValue
     let isTrust = change?["key"]?.stringValue == "permissions.projectTrust"
     return (params["target"]?.objectValue?["cwd"], change?["op"]?.stringValue == "set" ? change?["value"]?.boolValue : nil, isTrust)
 }
 
-/// A fixture `settings.change` outcome for one applied change.
 func fixtureSettingsChangeResult(key: String, result: JSONValue? = nil, revision: Int? = nil) -> JSONValue {
     var change: [String: JSONValue] = ["changeId": .string("fixture-change"), "key": .string(key), "status": .string("applied"), "tier": .string("quiet")]
     if let result { change["result"] = result }

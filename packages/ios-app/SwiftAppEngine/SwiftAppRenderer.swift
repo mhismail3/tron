@@ -1,10 +1,5 @@
 import SwiftUI
 
-/// Conversions from interpreted values to native SwiftUI values and children
-/// (#889). The app's node views (`Sources/UI/SwiftApps/SwiftAppNodeViews.swift`)
-/// render every node as a real SwiftUI view with them; custom view structs
-/// become `SwiftAppCustomView`, whose SwiftUI identity owns the interpreted
-/// `@State`.
 @MainActor
 package enum SwiftAppRenderer {
     package static var builderGroup: String { "_ViewBuilderGroup" }
@@ -36,8 +31,6 @@ package enum SwiftAppRenderer {
     package static func number(_ value: SwiftAppValue?) -> CGFloat? {
         switch value?.symbol {
         case .member("infinity", _)?: .infinity
-        // Finite sizes are clamped so a program cannot request a gigantic
-        // frame, padding or font whose rendering exhausts memory.
         case let value?: (try? value.asDouble()).flatMap { $0.isNaN ? nil : CGFloat(min(max($0, -10_000), 10_000)) }
         default: nil
         }
@@ -147,12 +140,9 @@ package enum SwiftAppRenderer {
         }
     }
 
-    // MARK: Children
-
     package struct Item: Identifiable {
         package let id: String
         package let node: SwiftAppViewNode
-        /// The ForEach element, used as the implicit `tag` for pickers.
         package let element: SwiftAppValue?
 
         package init(id: String, node: SwiftAppViewNode, element: SwiftAppValue?) {
@@ -162,7 +152,6 @@ package enum SwiftAppRenderer {
         }
     }
 
-    /// The builder content of a container: its eager children or its content closure.
     package static func content(of node: SwiftAppViewNode, runtime: SwiftAppRuntime, label: String? = nil) throws -> [SwiftAppViewNode] {
         if let children = node.children { return children }
         let closure = label.flatMap { name in node.closures.first(where: { $0.label == name })?.closure }

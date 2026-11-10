@@ -38,8 +38,6 @@ struct SessionSearchToolPresentation {
             hits = parsed
             return
         }
-        // Historical calls have readable output only. Parse complete hit pairs;
-        // unknown formats retain the standard raw-result sheet instead of guessing.
         let lines = tool.content.components(separatedBy: "\n")
         guard let first = lines.first, first.hasPrefix("coverage="),
               let rankRange = first.range(of: " ranking=") else { return nil }

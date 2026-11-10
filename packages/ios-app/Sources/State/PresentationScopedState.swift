@@ -1,27 +1,6 @@
 import Observation
 import SwiftUI
 
-// Presentation-scoped state (#1073).
-//
-// On iOS 26.4 and later SwiftUI rebuilds the content of a presented sheet when
-// the app returns from the background, with fresh `@State`, while the sheet
-// itself stays on screen (#932, #1073). Anything a sheet's content keeps in
-// `@State` - a typed draft, a terminal's connection and emulator, a nested
-// sheet's presentation flag - is silently reset, and `onDisappear`/`task`
-// hooks on that content run as if the sheet had closed and reopened.
-//
-// The owner of a presentation's lifetime is therefore the managed sheet
-// modifier, not its content: `tronManagedSheet` gives every presentation one
-// `PresentationStateScope`, kept in the scene's `PresentationStateStore` under
-// the presentation's identity path, and retires it only when the sheet is
-// actually dismissed. Content declares the state that must outlive a rebuild
-// with `@PresentationState` instead of `@State`, and puts teardown that must run
-// only on dismissal in `PresentationScopedResource.presentationDidRetire()`
-// instead of `onDisappear`.
-
-/// A value a presentation scope tears down when its sheet is dismissed (a
-/// shell connection, a terminal attachment), never when SwiftUI merely
-/// rebuilds the sheet's content.
 @MainActor
 protocol PresentationScopedResource: AnyObject {
     func presentationDidRetire()
@@ -34,8 +13,6 @@ final class PresentationStateBox<Value> {
     init(_ value: Value) { self.value = value }
 }
 
-/// The state of one presentation (one presented sheet) and of everything its
-/// content declared with `@PresentationState`.
 @MainActor
 final class PresentationStateScope {
     let path: String
@@ -52,8 +29,6 @@ final class PresentationStateScope {
         return box
     }
 
-    /// The latest teardown a view at `key` registered; it runs once, when the
-    /// sheet is dismissed.
     fileprivate func onRetire(_ key: String, perform action: @escaping () -> Void) {
         guard !isRetired else { return }
         retirements[key] = action
@@ -64,7 +39,6 @@ final class PresentationStateScope {
         HostedPresentationProbe.record?("scope-retire", path)
         #endif
         guard !isRetired else { return }
-        // Teardown reads the presentation's state, so it runs before the state goes.
         let actions = retirements.values
         retirements.removeAll()
         for action in actions { action() }
@@ -80,28 +54,17 @@ final class PresentationStateScope {
 @MainActor private protocol PresentationStateBoxValue { var anyValue: Any { get } }
 extension PresentationStateBox: PresentationStateBoxValue { var anyValue: Any { value } }
 
-/// The scene-wide owner of presentation scopes. It outlives every sheet's
-/// content, so a rebuilt sheet finds its scope again by identity path.
 @MainActor
 final class PresentationStateStore {
-    /// Live scopes beyond this many report a leak. Scopes are never evicted:
-    /// evicting a live one would retire a sheet's state while it stays on
-    /// screen and orphan its native canvas, so its rows play the presentation
-    /// request but nothing appears (#1695). Dismissal, presenter removal and
-    /// the enclosing surface own retirement.
     static let leakReportThreshold = 256
 
     private var scopes: [String: PresentationStateScope] = [:]
     private var order: [String] = []
 
-    /// A presentation's place in the stack of presentations: its presenter's
-    /// scope path (empty at a scene root) and its own identity.
     static func path(parent: PresentationStateScope?, identity: String) -> String {
         (parent?.path ?? "") + "/" + identity
     }
 
-    /// The scope for a presentation that is (still) presented: a rebuilt
-    /// sheet's content adopts the same one.
     func scope(path: String) -> PresentationStateScope {
         if let scope = scopes[path] { return scope }
         let scope = PresentationStateScope(path: path)
@@ -119,8 +82,6 @@ final class PresentationStateStore {
         for scope in live { scope.retire() }
     }
 
-    /// The sheet was dismissed, or a fresh presentation replaces a stale one:
-    /// its scope and every scope presented from inside it are torn down.
     func retire(path: String) {
         let prefix = path + "/"
         let retired = order.filter { $0 == path || $0.hasPrefix(prefix) }
@@ -144,22 +105,17 @@ extension EnvironmentValues {
         set { self[PresentationStateStoreKey.self] = newValue }
     }
 
-    /// The innermost presented sheet's scope; nil outside any managed sheet.
     var tronPresentationStateScope: PresentationStateScope? {
         get { self[PresentationStateScopeKey.self] }
         set { self[PresentationStateScopeKey.self] = newValue }
     }
 }
 
-/// This token is owned by the scene's SwiftUI state, never by the environment
-/// retained in native anchors. Scene destruction therefore breaks those graphs.
 @MainActor private final class PresentationStateLifetime {
     let store = PresentationStateStore()
     isolated deinit { store.retireAll() }
 }
 
-/// Installs the scene's one presentation-state store and iPad sheet mode.
-/// Scene roots apply it once.
 struct TronPresentationStateRoot: ViewModifier {
     @State private var lifetime = PresentationStateLifetime()
 
@@ -170,12 +126,6 @@ struct TronPresentationStateRoot: ViewModifier {
     }
 }
 
-/// `@State` for a sheet's content that survives SwiftUI rebuilding that content
-/// while the sheet stays presented (#1073). Inside a managed sheet the value
-/// lives in the sheet's presentation scope, keyed by its declaration site (or
-/// an explicit key for a view that appears more than once in one sheet), and
-/// is discarded when the sheet is dismissed. Outside a managed sheet it is
-/// ordinary view-local state.
 @MainActor
 @propertyWrapper
 struct PresentationState<Value>: DynamicProperty {
@@ -189,8 +139,6 @@ struct PresentationState<Value>: DynamicProperty {
         key = "\(fileID):\(line):\(column)"
     }
 
-    /// For a view that can appear more than once in one sheet: `key` names
-    /// this instance (for example by the row's identity).
     init(wrappedValue: @autoclosure @escaping () -> Value, key: String,
          fileID: String = #fileID, line: Int = #line, column: Int = #column) {
         initial = wrappedValue
@@ -215,8 +163,6 @@ struct PresentationState<Value>: DynamicProperty {
         return box
     }
 
-    /// View-local storage for use outside a managed sheet. Not observed itself:
-    /// the box it holds is.
     @MainActor
     final class LocalBox {
         var box: AnyObject?
@@ -238,9 +184,6 @@ private struct PresentationRetireModifier: ViewModifier {
 }
 
 extension View {
-    /// Teardown for state a sheet's content keeps in `@PresentationState`: it
-    /// runs when the sheet is dismissed, never when SwiftUI merely rebuilds the
-    /// content (#1073). Outside a managed sheet it is `onDisappear`.
     func onPresentationRetire(fileID: String = #fileID, line: Int = #line,
                               perform action: @escaping () -> Void) -> some View {
         modifier(PresentationRetireModifier(key: "\(fileID):\(line)", action: action))

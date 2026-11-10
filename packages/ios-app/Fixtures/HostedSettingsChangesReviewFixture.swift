@@ -2,21 +2,14 @@
 import Foundation
 import TronMobileCore
 
-/// `-settings-changes-review`: Global Settings' Changes feed over realistic audit
-/// rows (long values, every status, workers with and without a known task title,
-/// new and old) and two full Gateway-sized pages, for visual review and the
-/// Filters interaction measurement. Rows are dated relative to launch. Every
-/// entry point is inert without the argument.
 enum HostedSettingsChangesReview {
     static let enabled = ProcessInfo.processInfo.arguments.contains("-settings-changes-review")
     static let pageSize = 50
 
-    /// The last look sits between the new and the old rows.
     static var lastLook: String? {
         enabled ? ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3 * 3600)) : nil
     }
 
-    /// The app's session catalog, which supplies worker task titles, as it is in production.
     @MainActor static func prepare(_ model: AppModel) async {
         if enabled { _ = await model.refreshSessions() }
     }
@@ -27,7 +20,6 @@ enum HostedSettingsChangesReview {
     static let workerTaskID = "task_01J9ZQ8K2M4R7XWV"
     static let workerSessionID = "worker-session-restructure"
 
-    /// One worker session the catalog knows, so its task's title is available.
     static var sessions: JSONValue {
         let worker = SessionSummary(id: workerSessionID, name: "Restructure 0.4: compare ownership metadata",
             cwd: "/workspace/tron", parentSessionId: nil, homeTaskId: workerTaskID, createdAt: iso(-7200), updatedAt: iso(-3600),
@@ -79,14 +71,12 @@ enum HostedSettingsChangesReview {
 
     private static func entry(_ index: Int) -> JSONValue {
         let sample = samples[index % samples.count]
-        // Minutes, hours, then days: the first rows are new since the last look (3 h).
         let age: TimeInterval = index == 0 ? 2 * 3600 : index == 1 ? 20 * 60 : index == 2 ? 26 * 3600
             : index == 3 ? 3 * 86400 : index == 4 ? 5 * 60 : Double(index) * 4 * 3600
         let target: JSONValue = sample.target == "project"
             ? .object(["kind": .string("project"), "cwd": .string("/fixture/project")])
             : sample.target == "session" ? .object(["kind": .string("session"), "sessionId": .string("fixture-chat")])
             : .object(["kind": .string(sample.target)])
-        // Home's saved settings are its Session scope.
         let layer = sample.target == "home" ? "session" : sample.target
         var object: [String: JSONValue] = [
             "changeId": .string("review-\(index)"), "at": .string(iso(-age)), "actor": .object(sample.actor),

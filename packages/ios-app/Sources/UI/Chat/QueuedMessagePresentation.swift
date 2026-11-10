@@ -18,9 +18,6 @@ struct QueuedMessageManagementCommit: Equatable, Sendable {
     let items: [SessionSnapshot.QueuedMessage]
 }
 
-/// One-shot suspension point for projection installers that encounter the one
-/// locally admitted queue mutation. Every waiter is resumed on command outcome
-/// or lifecycle retirement; cancellation removes only that caller's waiter.
 @MainActor
 final class ChatQueueMutationResolutionOwner {
     typealias Token = UInt64
@@ -119,8 +116,6 @@ enum ChatQueueMutationProjectionPolicy {
         case failure
     }
 
-    /// Defers only evidence whose suppression meaning depends on the unresolved
-    /// local command. Ordinary transcript streaming continues to install.
     static func shouldDefer(
         affectedOperationIDs: Set<String>,
         receiptOperationID: String?,
@@ -136,8 +131,6 @@ enum ChatQueueMutationProjectionPolicy {
             && fallbackHandoffWithExclusions == nil
     }
 
-    /// A successful local edit/removal retires the affected lineage. Failure
-    /// restores the pre-command settlement interpretation of the deferred fact.
     static func exclusions(
         for outcome: Outcome,
         affectedOperationIDs: Set<String>
@@ -145,9 +138,6 @@ enum ChatQueueMutationProjectionPolicy {
         outcome == .success ? affectedOperationIDs : []
     }
 
-    /// Newer queue authority retires mutation controls only after the command
-    /// outcome is known. A frame racing ahead of the response cannot discard
-    /// the lineage exclusions needed to interpret that response correctly.
     static func shouldRetirePresentationState(
         commandIsPending: Bool,
         expectedRevision: Int?,
@@ -172,9 +162,6 @@ enum QueuedMessageManagementPolicy {
         return queueRevision != nil && hasAuthoritativeItems ? .available : .invalidProjection
     }
 
-    /// Queue mutations must be prepared from one immutable installed commit.
-    /// In particular, a capability-only replacement can revoke management
-    /// while an editor is still presenting the previous commit.
     static func installedCommit(
         for installed: InstalledChatTranscript?
     ) -> QueuedMessageManagementCommit? {
@@ -188,8 +175,6 @@ enum QueuedMessageManagementPolicy {
         )
     }
 
-    /// Returns only operations whose content/behavior changed or whose row was
-    /// removed. Pure reordering preserves causal settlement lineage.
     static func changedOperationIDs(
         from previous: [SessionSnapshot.QueuedMessage],
         to next: [SessionSnapshot.QueuedMessage]
@@ -241,9 +226,6 @@ enum QueuedMessageAttachmentPresentation {
     }
 
     static func chips(for attachments: [PendingAttachment]) -> [QueuedMessageAttachmentChip] {
-        // Match the Gateway's bounded typed-count projection exactly: photos
-        // precede files, while exact upload identities survive reordering and
-        // optimistic → authoritative replacement.
         let admitted = attachments.filter { $0.transportBlobID != nil }
         guard admitted.count == attachments.count,
               Set(admitted.compactMap(\.transportBlobID)).count == admitted.count else { return [] }
@@ -360,7 +342,6 @@ struct QueuedMessageAttachmentChipRow: View {
         .accessibilityLabel(QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips))
         .tronManagedSheet(
             item: $previewRequest,
-            // Rows repeat per queued/outgoing message; their chips name the row.
             instance: chips.map(\.id).joined(separator: ","),
             identity: { "chat.queued-attachment.\($0.id)" }
         ) { request in
@@ -403,8 +384,6 @@ struct QueuedMessageRow: View {
     let canMoveEarlier: Bool
     let canMoveLater: Bool
     let onMove: (Int) -> Void
-    /// True while the session compacts; the Gateway delivers queued messages
-    /// only after the summary settles.
     var waitsForCompaction = false
 
     private var isManageable: Bool { managementAvailability.isManageable }
@@ -425,9 +404,6 @@ struct QueuedMessageRow: View {
     }
 
     var body: some View {
-        // Queue cards use the same single bounded layout as prompt bubbles;
-        // switching between intrinsic and wrapped ViewThatFits branches after
-        // a large queued prompt arrives causes a visible container flash.
         card.fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
         .modifier(ChatMessageCopyMenu(text: ChatAnnotationEnvelope.body(of: displayText), mutationIdentity: message.id, actions: menuActions))

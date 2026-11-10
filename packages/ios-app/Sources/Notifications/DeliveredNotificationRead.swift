@@ -1,8 +1,6 @@
 import Foundation
 @preconcurrency import UserNotifications
 
-/// Disposable native delivery cut, not canonical inbox/read state. Removing only
-/// captured IDs (and deliveries preceding visibility) leaves later pushes alone.
 @MainActor
 struct DeliveredNotificationRead {
     private struct Delivery {

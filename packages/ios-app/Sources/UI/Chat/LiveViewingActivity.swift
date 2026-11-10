@@ -2,9 +2,6 @@ import Observation
 import SwiftUI
 import UIKit
 
-/// The mounted UIKit view supplies the exact scene, not an arbitrary connected
-/// scene or a captured SwiftUI phase. Native transitions fence awaits immediately;
-/// the generation also restarts a task after coalesced inactive/active transitions.
 @MainActor
 @Observable
 final class LiveViewingActivity {

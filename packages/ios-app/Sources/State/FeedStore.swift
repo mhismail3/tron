@@ -1,10 +1,6 @@
 import Foundation
 import Observation
 
-/// One disposable, accumulating feed read: the newest page first, older pages
-/// appended as the reader scrolls, any installed page re-read in place. Each
-/// read is fenced to the current identity and the latest request; a failed read
-/// keeps every installed row and the scroll position.
 @MainActor @Observable
 final class FeedStore<Page, Cursor: Equatable & Sendable, Identity: PresentationReadIdentity> {
     struct Installed {
@@ -13,18 +9,14 @@ final class FeedStore<Page, Cursor: Equatable & Sendable, Identity: Presentation
     }
 
     enum Request: Equatable {
-        /// Replace the feed with its newest page.
         case reset
-        /// Append the page at this (older) cursor.
         case append(Cursor)
-        /// Re-read the installed page at this index in place.
         case refresh(Int)
     }
 
     private(set) var pages: [Installed] = []
     private(set) var loading = false
     private(set) var error: String?
-    /// The request that failed, so Retry repeats exactly it.
     private(set) var failed: Request?
     private(set) var identity: Identity?
     private var generation = 0
@@ -32,9 +24,6 @@ final class FeedStore<Page, Cursor: Equatable & Sendable, Identity: Presentation
 
     var hasPage: Bool { !pages.isEmpty }
 
-    /// What a (re)activated presentation reads: nothing when current; the newest
-    /// page in place when the new identity retains this content (foreground,
-    /// reconnect), so later pages and the scroll position stay; else the feed afresh.
     func request(for identity: Identity) -> Request? {
         guard let installed = self.identity, hasPage else { return .reset }
         if installed == identity { return nil }
@@ -47,7 +36,6 @@ final class FeedStore<Page, Cursor: Equatable & Sendable, Identity: Presentation
     func load(_ request: Request, identity: Identity, isCurrent: @MainActor () -> Bool,
               fetch: (sending Cursor?) async throws -> Page) async -> Bool {
         guard !Task.isCancelled, isCurrent() else { return false }
-        // One read at a time; a reset or another identity supersedes it.
         if loading, self.identity == identity, request != .reset { return false }
         if loading, inFlight == request, self.identity == identity { return false }
         let cursor: Cursor?

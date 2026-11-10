@@ -1,8 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// The single scene-level notice surface. A dedicated non-key window keeps
-/// cards in app coordinates while sheets animate independently underneath it.
 struct InAppNoticeHost: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -14,8 +12,6 @@ struct InAppNoticeHost: View {
             ZStack(alignment: .topLeading) {
                 InAppNoticeStack(notices: model.noticeCenter.notices, reduceMotion: reduceMotion)
                     .frame(width: proxy.size.width)
-                    // Anchor by the top so multiline cards grow downward,
-                    // rather than moving their first line into the status area.
                     .offset(y: InAppNoticeLayout.topEdge(
                         safeAreaTop: proxy.safeAreaInsets.top,
                         toolbarCenterY: toolbarCenterY,
@@ -35,18 +31,13 @@ struct InAppNoticeHost: View {
 
 enum InAppNoticeLayout {
     static let cornerRadius: CGFloat = 24
-    // Leaves enough room for the shell's leading/trailing toolbar controls.
     static let horizontalControlReservation: CGFloat = 80
     static let fallbackToolbarHalfHeight: CGFloat = 22
     static let safeAreaSpacing: CGFloat = 8
 
-    /// Uses the compact card height as the toolbar reference. This stays
-    /// stable when the foremost card gains body lines.
     static func topEdge(safeAreaTop: CGFloat, toolbarCenterY: CGFloat?, accessibilitySize: Bool = false) -> CGFloat {
         let toolbarAlignedTop = (toolbarCenterY ?? safeAreaTop + fallbackToolbarHalfHeight)
             - fallbackToolbarHalfHeight
-        // Larger type uses the available width below, rather than between,
-        // toolbar controls so ordinary words need not wrap mid-word.
         return max(safeAreaTop + safeAreaSpacing, toolbarAlignedTop)
             + (accessibilitySize ? fallbackToolbarHalfHeight * 2 : 0)
     }
@@ -112,12 +103,8 @@ private struct InAppNoticeStack: View {
                 if let notice = notices.first {
                     InAppNoticeCard(notice: notice, reduceMotion: reduceMotion)
                         .id(notice.id)
-                        // Let SwiftUI retire the outgoing card visually; the center
-                        // still removes its authority and hit target immediately.
                         .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                         .background {
-                            // Pending notices are silhouettes, never competing text.
-                            // The foreground card owns their geometry, including Dynamic Type.
                             ForEach(0..<min(2, max(0, notices.count - 1)), id: \.self) { index in
                                 RoundedRectangle(cornerRadius: InAppNoticeLayout.cornerRadius, style: .continuous)
                                     .fill(Color.tronSurfaceElevated)

@@ -43,9 +43,6 @@ final class TronChatProviderErrorStyleUITests: XCTestCase {
         XCTAssertTrue(single.waitForExistence(timeout: 10), "Done must return to the unchanged transcript")
     }
 
-    /// The semantic hit target spans the transcript width, so its AX frame
-    /// cannot detect left-aligned ink. Read the actual rendered error ink in
-    /// that row instead; no stored pixel golden or absolute screen position.
     @MainActor private func assertCenteredInk(_ pill: XCUIElement, in app: XCUIApplication,
                                               file: StaticString = #filePath, line: UInt = #line) {
         let bounds = pill.frame.intersection(app.frame)

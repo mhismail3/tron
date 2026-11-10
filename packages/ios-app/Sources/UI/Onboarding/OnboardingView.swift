@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Paged first-run sheet. The session shell remains mounted underneath, matching
-/// Tron's established onboarding presentation while gateway state changes.
 struct OnboardingView: View {
     enum Mode: Hashable {
         case setup
@@ -494,7 +492,6 @@ struct OnboardingView: View {
         }
     }
 
-    /// The Mac-layer Chat model default, as the generic renderer serves it.
     private func configuredDefaultModel() async -> ModelRef? {
         do {
             let resolution = try await model.resolveSettingsForRenderer(

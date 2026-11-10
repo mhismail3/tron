@@ -1,10 +1,9 @@
 import XCTest
 
-/// Production Settings -> Agent Behavior -> native lifecycle sheet over the hosted socket.
 @MainActor
 final class TronAgentBehaviorRegressionUITests: XCTestCase {
     func testNumericMapsShowValuesWithoutRoutineEditors() {
-        continueAfterFailure = true // Record every appearance; any assertion still fails the case.
+        continueAfterFailure = true
         for home in [false, true] {
             for (mode, dark, large) in [("light", false, false), ("dark", true, false), ("light-xxxl", false, true), ("dark-xxxl", true, true)] {
                 let app = XCUIApplication()
@@ -118,7 +117,6 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
         tap(app, "settings-link-Agent Behavior")
         expand(app, "Agent Behavior")
         tap(app, "Trusted Projects")
-        // Exercise the real client's existing 30-second request deadline, not a test-only timer.
         XCTAssertTrue(app.buttons["Retry"].waitForExistence(timeout: 45), app.debugDescription)
         capture(app, "projects-missing-response-error")
         app.buttons["Retry"].tap()
@@ -172,8 +170,6 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
         }
     }
 
-    /// Agent Behavior follows the primary theme (#2370); under Burgundy its Trusted Projects
-    /// sub-sheet shares that tint.
     func testTrustedProjectsInheritsAgentBehaviorTheme() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
@@ -193,13 +189,11 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
             guard let parentInk = sheetInk(XCUIScreen.main.screenshot().image, parentTitle.frame, window: window) else {
                 XCTFail("No ink in the Agent Behavior title"); return
             }
-            // Burgundy ink keeps red over blue over green through glass and antialiasing.
             XCTAssertGreaterThan(parentInk[0], parentInk[2], "\(mode): Agent Behavior \(parentInk) must be the Burgundy theme")
             XCTAssertGreaterThan(parentInk[2], parentInk[1], "\(mode): Agent Behavior \(parentInk) must be the Burgundy theme")
             tap(app, "Trusted Projects")
             XCTAssertTrue(app.buttons["Example"].waitForExistence(timeout: 15), app.debugDescription)
             capture(app, "burgundy-trusted-\(mode)")
-            // Title, section header and the Add Project glyph are inked in the presenting sheet's tint.
             let screenshot = XCUIScreen.main.screenshot().image
             let title = app.navigationBars.staticTexts["Trusted Projects"].firstMatch
             let header = app.staticTexts.matching(identifier: "Projects").allElementsBoundByIndex.last { $0.frame.minY > title.frame.maxY }
@@ -250,9 +244,6 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
         var previous: CGRect?
         for _ in 0..<12 {
             let frame = button.exists ? button.frame : nil
-            // The band keeps the tap clear of the navigation bar and bottom edge. A
-            // sheet's last row cannot scroll into it: once a drag no longer moves a
-            // fully visible, hittable row, it is as far in as the sheet allows.
             let settled = frame.map { $0 == previous && window.contains($0) && $0.minY > 140 } ?? false
             if let frame, button.isHittable,
                settled || (frame.minY > 140 && frame.maxY < window.height - 70) {

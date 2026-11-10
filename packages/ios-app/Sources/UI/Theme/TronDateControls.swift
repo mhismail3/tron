@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// A date and a time are separate presentation identities even when they edit
-/// the same draft. Automations and Home share this exact value/picker treatment.
 enum TronDateComponent: String, Identifiable {
     case date, time
     var id: String { rawValue }
@@ -26,8 +24,6 @@ struct TronDateValueButton: View {
     }
 }
 
-/// Extracted from the Automations editor without changing its picker chrome.
-/// Callers retain draft and managed-sheet ownership; Home also bounds expiry.
 struct TronDatePickerSheet: View {
     let title: String
     let component: TronDateComponent

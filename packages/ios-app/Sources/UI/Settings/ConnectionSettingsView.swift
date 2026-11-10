@@ -52,10 +52,6 @@ struct GatewayConnectionStatusBadge: View {
 }
 
 enum AuthorizedDevicePresentationPolicy {
-    /// Keep the selected detail alive while the connection switch replaces the
-    /// bounded device list. If the device is still present, use its refreshed
-    /// value; if the transient refresh omits it, retain the last authoritative
-    /// detail rather than letting a list projection dismiss the sheet.
     static func selection(
         current: GatewayAuthorizedDevice?,
         refreshedDevices: [GatewayAuthorizedDevice]
@@ -258,8 +254,6 @@ struct ConnectionsSettingsView: View {
                 refreshedDevices: loadedDevices
             )
         } catch {
-            // A retired or canceled read keeps the previously published list;
-            // unreachable profiles were already skipped by the read owner.
             return
         }
     }
@@ -362,8 +356,6 @@ enum GatewayUpdatePollingDecision: Equatable {
 }
 
 enum GatewayConnectionDetailPresentation {
-    /// What a paired server reports about itself. This is the `Gateway Info`
-    /// table of the server info sheet.
     static func metadata(info: GatewayInfo?) -> [TronTechnicalMetadataItem] {
         guard let info else { return [] }
         return [
@@ -380,8 +372,6 @@ enum GatewayConnectionDetailPresentation {
         ]
     }
 
-    /// Opaque runtime and payload identities. They stay in the info sheet's
-    /// runtime table rather than the server sheet's visible surface.
     static func technicalDetails(
         info: GatewayInfo?,
         updateStatus: GatewayUpdateStatus?
@@ -461,8 +451,6 @@ enum GatewayUpdateIntent: Identifiable, Equatable {
         if status.candidateOrigin == "debug" {
             return status.debugPromotionCandidate.map(GatewayUpdateIntent.debug)
         }
-        // Generic artifact availability is informational only. The generic
-        // action exists solely for an explicitly configured source build.
         return config == nil ? nil : .source
     }
 }
@@ -502,10 +490,6 @@ struct GatewayConnectionDetailView: View {
 
     private var statusColor: Color { status.color }
 
-    /// This profile's own stop reason, whichever profile it is. A non-retryable
-    /// stop carries the message that names the build to update (an outdated app
-    /// or Mac), and the transient notice is not a durable place to read it
-    /// (F-3).
     private var profileStopReason: String? {
         model.dashboardConnectionStopReason(for: currentProfile.id)
     }
@@ -813,8 +797,6 @@ struct GatewayConnectionDetailView: View {
             accent: snapshot.phase == .failed ? .tronError : .tronAmber
         ) {
             if snapshot.phase == .preparing || snapshot.phase == .waiting {
-                // The standard trailing settings pill; the confirmation sheet
-                // carries the destructive semantics of skipping the drain.
                 Button { confirmingRestartNow = true } label: {
                     TronInlineActionLabel("Restart Now", accent: .tronPrimary)
                         .fixedSize(horizontal: true, vertical: false)
@@ -838,8 +820,6 @@ struct GatewayConnectionDetailView: View {
         }
     }
 
-    /// The lifecycle actions as the grid sees them: what this server currently
-    /// admits, in one order, with their owners' commands attached.
     private var lifecycleActions: [GatewayMaintenanceAction] {
         var actions: [GatewayMaintenanceAction] = []
         if let updateStatus,
@@ -912,23 +892,16 @@ struct GatewayConnectionDetailView: View {
         }
         updateConfig = await model.loadGatewayUpdateConfig(for: currentProfile)
         guard admitsInfoLoad(generation) else { return }
-        // While a command is tracked, the polling lane is the sole writer of
-        // update status. This prevents an older multi-await detail load from
-        // overwriting newer helper progress.
         guard activeUpdateCommandID == nil else { return }
         let loadedStatus = await model.loadGatewayUpdateStatus(for: currentProfile)
         guard admitsInfoLoad(generation), activeUpdateCommandID == nil else { return }
         updateStatus = loadedStatus
         if loadedStatus?.isActive == true, let commandID = loadedStatus?.commandId {
-            // A sheet reopened during an accepted update adopts its bounded
-            // command identity and resumes polling replacement truth.
             activeUpdateCommandID = commandID
             acceptedOperationLabel = nil
         }
     }
 
-    /// A multi-await detail read may only publish while it is still the newest
-    /// request for a live, uncovered surface with this task uncancelled.
     private func admitsInfoLoad(_ generation: Int) -> Bool {
         generation == infoLoadGeneration
             && !Task.isCancelled
@@ -945,9 +918,6 @@ struct GatewayConnectionDetailView: View {
                let latest = await model.loadGatewayUpdateStatus(for: currentProfile) {
                 switch GatewayUpdatePollingDecision.decide(latest, commandID: commandID) {
                 case .waitingForCommand:
-                    // Helper admission and its first durable progress write are
-                    // asynchronous. An older command marker must not cancel the
-                    // newly acknowledged observer before that write appears.
                     break
                 case .active:
                     updateStatus = latest
@@ -964,9 +934,6 @@ struct GatewayConnectionDetailView: View {
                     return
                 }
             }
-            // Keep one view-owned observer alive through the planned socket
-            // replacement. It resumes authoritative reads as soon as the
-            // lifecycle owner admits the replacement connection.
             do { try await Task.sleep(for: status == .connected ? .seconds(1) : .milliseconds(250)) }
             catch { return }
         }
@@ -1024,7 +991,6 @@ struct GatewayConnectionDetailView: View {
 
 }
 
-/// A maintenance action retains its owner's command; the shared view owns styling.
 struct GatewayMaintenanceAction: Identifiable {
     let id: String
     let title: String
@@ -1032,7 +998,6 @@ struct GatewayMaintenanceAction: Identifiable {
     let perform: () -> Void
 }
 
-/// Lifecycle actions inherit the sheet theme; irreversible pairing stays semantic red.
 struct GatewayMaintenanceActions: View {
     let lifecycle: [GatewayMaintenanceAction]
     let destructive: GatewayMaintenanceAction
@@ -1040,7 +1005,6 @@ struct GatewayMaintenanceActions: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Eager rows keep the short action list fully materialized and individually labelled.
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: 12) {
                     ForEach(row) { action in
@@ -1075,9 +1039,6 @@ struct GatewayMaintenanceActions: View {
     }
 }
 
-/// The server sheet's info destination. Both tables use the shared metadata
-/// component, so the gateway facts and the opaque runtime identities read the
-/// same as every other technical table in the app.
 struct GatewayServerInfoSheet: View {
     @Environment(\.dismiss) private var dismiss
     let metadata: [TronTechnicalMetadataItem]
@@ -1130,7 +1091,6 @@ struct GatewayServerInfoSheet: View {
     }
 }
 
-/// Imports a session export into a new session in the default workspace.
 struct ImportSessionRow: View {
     @Environment(AppModel.self) private var model
     let onImported: (AppModel.SessionNavigationRoute) -> Void

@@ -5,9 +5,6 @@ enum NativeHostServiceState: Sendable, Equatable {
     case needsRegistration, needsApproval, enabled, unavailable
 }
 
-/// Read-only status is not an activation attempt. macOS can return notFound
-/// for a valid bundled agent that has never been registered. After validating
-/// the bundled helper, an explicit Enable must attempt registration in both cases.
 enum NativeHostRegistrationPolicy {
     static func shouldRegister(_ status: SMAppService.Status) throws -> Bool {
         switch status {
@@ -18,9 +15,6 @@ enum NativeHostRegistrationPolicy {
     }
 }
 
-/// ServiceManagement status is not generic native-quiescence evidence. Only the
-/// existing no-registration policy skips a join; missing/unknown metadata refuses
-/// the operation rather than probing or implicitly enabling a helper to proceed.
 enum NativeHostStartupPolicy {
     static func shouldRestore(state: NativeHostServiceState) -> Bool { state == .enabled }
 }
@@ -36,8 +30,6 @@ enum NativeHostRetirementPolicy {
     }
 }
 
-/// Real platform operations are injected at one boundary. Tests never register
-/// services, create XPC connections or ask the operating system for consent.
 struct NativeHostOperations: Sendable {
     let state: @Sendable () async -> NativeHostServiceState
     let enable: @Sendable () async throws -> Void
@@ -54,8 +46,6 @@ struct NativeHostOperations: Sendable {
     }()
 }
 
-/// Service activation and TCC consent are explicit separate setup phases. Each
-/// accepted command is retained independently of whichever view is waiting.
 actor NativeHostCoordinator {
     static let shared = NativeHostCoordinator(operations: .live)
     private let operations: NativeHostOperations
@@ -142,7 +132,7 @@ private struct NativeHostPlatform: Sendable {
         if try NativeHostRegistrationPolicy.shouldRegister(service.status) { try service.register() }
         if service.status == .requiresApproval {
             SMAppService.openSystemSettingsLoginItems()
-            return // The UI explicitly shows approval as an unfinished first phase.
+            return
         }
         guard service.status == .enabled else { throw NativeHostError.serviceUnavailable }
     }
@@ -159,17 +149,13 @@ private struct NativeHostPlatform: Sendable {
         ) {
             let connection = try connect()
             defer { connection.invalidate() }
-            // nil is a received true confirmation; otherwise the exact reason it was not.
             let reply = NativeHostReply<String?>()
             guard let service = connection.service(onError: { error in
                 let error = error as NSError
                 reply.resolve("xpc-error \(error.domain) \(error.code)")
             }) else { throw NativeHostError.retirementFailed }
             service.prepareForServiceRetirement { reply.resolve($0 ? nil : "helper-reported-unjoined-capture") }
-            // No timeout, forced kill, or cancellation can stand in for native join.
             if let failure = await reply.value() {
-                // An XPC error here (rather than an unjoined report) means the reply
-                // was lost or refused; the system log names any signature refusal.
                 TronLog.shared.record(.error, event: "native-host.retirement-unconfirmed", source: "native-host",
                                       message: "Native helper retirement was not confirmed; no service change was made",
                                       why: failure, outcome: "blocked")
@@ -206,7 +192,6 @@ private struct NativeHostPlatform: Sendable {
         let failure = ("", PermissionStatus.probeUnavailable.rawValue)
         guard let service = connection.service(onError: { _ in reply.resolve(failure) }) else { return .probeUnavailable }
         service.requestPermission(native.rawValue, requestID: id.uuidString) { reply.resolve(($0, $1)) }
-        // No UI timeout cancels an accepted native consent command.
         let value = await reply.value()
         guard value.0 == id.uuidString else { return .probeUnavailable }
         return PermissionStatus(rawValue: value.1) ?? .probeUnavailable
@@ -222,8 +207,6 @@ private struct NativeHostPlatform: Sendable {
     }
 }
 
-/// NSXPC queues messages/invalidation internally. Cancellation closes only this
-/// immutable handle's disposable observation, never a consent connection.
 private final class NativeHostConnection: @unchecked Sendable {
     private let connection: NSXPCConnection
     init(_ connection: NSXPCConnection) { self.connection = connection }

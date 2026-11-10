@@ -1,7 +1,5 @@
 import Foundation
 
-/// Additive Gateway lifecycle facts. The coarse tool status remains available
-/// for old Gateways, while this record owns native admission and recency.
 package enum ExtensionActivityLifecycleState: String, Codable, CaseIterable, Sendable {
     case queued, running, paused, completed, failed, stopped, rejected, unknown
     var isTerminal: Bool { switch self { case .completed, .failed, .stopped, .rejected: true; default: false } }
@@ -50,8 +48,6 @@ package struct ExtensionActivityOmissions: Codable, Hashable, Sendable {
     let reason: String
 }
 
-/// Strict, bounded admission is separate from Codable so optional malformed
-/// activity rows can be omitted without rejecting the entire session snapshot.
 package enum ExtensionActivityAdmissionPolicy {
     static let maximumActivities = 32
     static let maximumChildren = 32
@@ -136,7 +132,6 @@ package enum ExtensionActivityAdmissionPolicy {
         if let revision = snapshot.liveActivityRevision, revision < 0 { return false }
         if let asOf = snapshot.extensionActivityAsOf,
            !validTimestamp(asOf) { return false }
-        // New Gateway facts are an atomic pair. Older snapshots may omit both.
         guard (snapshot.liveActivityRevision == nil) == (snapshot.extensionActivityAsOf == nil) else { return false }
         if let activities = snapshot.extensionActivities,
            admitted(activities).count != activities.filter(admits).count {
@@ -193,8 +188,6 @@ package enum ExtensionActivityAdmissionPolicy {
             return status == .failed && visibility != .current
                 && (visibility == .recent ? remainingMs.map { $0 > 0 } == true : remainingMs == nil || remainingMs == 0)
         case .stopped, .rejected:
-            // The rolling status vocabulary represents both terminal outcomes
-            // as completed; the lifecycle label remains authoritative.
             return status == .completed && visibility != .current
                 && (visibility == .recent ? remainingMs.map { $0 > 0 } == true : remainingMs == nil || remainingMs == 0)
         case .unknown:
@@ -228,9 +221,6 @@ package enum ExtensionActivityAdmissionPolicy {
         bounded(value, 128) && GatewayTimestamp.parse(value) != nil
     }
 
-    /// Terminal receipt facts must never describe a lifecycle that runs
-    /// backwards. This covers both versioned Gateway rows and legacy rows
-    /// without a lifecycle wrapper.
     private static func validReceiptTimeline(_ activity: ExtensionRunActivity) -> Bool {
         guard let terminalAt = activity.lifecycle?.terminalAt ?? activity.completedAt else { return true }
         guard let started = GatewayTimestamp.parse(activity.startedAt),

@@ -7,8 +7,6 @@ enum DisplayFloatingLayoutPolicy {
     static let controlTouchTarget: CGFloat = 44
     static let minimumUsableHeight = controlTouchTarget + 16
     static let minimumUsableWidth = controlTouchTarget * 3 + 36
-    // A short, bounded release projection gives a flick direction without an
-    // independent deceleration simulation or a second animation clock.
     static let releaseProjectionDuration: CGFloat = 0.15
 
     static func panelSize(
@@ -25,15 +23,9 @@ enum DisplayFloatingLayoutPolicy {
             return CGSize(width: width, height: min(preferredHeight, availableHeight))
         }
 
-        // Both live producers use the same 4:3 pre-frame fallback.
-        // Once a renderable frame is admitted, fit its pixels to the native
-        // proposal. Controls still own a minimum panel, so extreme ratios
-        // letterbox rather than shrinking the 44-point hit targets.
         let ratio = liveAspectRatio.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? (4.0 / 3.0)
         let fittedWidth = min(width, availableHeight * ratio)
         let fittedHeight = min(availableHeight, width / ratio)
-        // Control minima bound the panel, not the image. Do not expand a wide
-        // image to full container width merely to make room for its controls.
         return CGSize(width: max(min(minimumUsableWidth, availableWidth), fittedWidth),
                       height: max(min(minimumUsableHeight, availableHeight), fittedHeight))
     }
@@ -58,7 +50,7 @@ enum DisplayFloatingLayoutPolicy {
         guard matchesLiveSource(source, route: route, profileID: profileID, surface: surface) else { return false }
         if let geometry = update.geometry {
             guard geometry.aspectRatio != nil, allowsPublication else { return false }
-        } // A nil update retires geometry; it never admits pixels.
+        }
         if let previousSource,
            previousSource.sessionID == source.sessionID,
            previousSource.profileID == source.profileID,
@@ -71,8 +63,6 @@ enum DisplayFloatingLayoutPolicy {
         return true
     }
 
-    // Native proposals already exclude toolbar, keyboard and composer.
-    // Subtracting GeometryProxy.safeAreaInsets here would count them twice.
     static func safeCenterRect(container: CGSize, panelSize: CGSize) -> CGRect {
         let minX = panelSize.width / 2 + panelEdgeInset
         let minY = panelSize.height / 2 + panelEdgeInset
@@ -99,8 +89,6 @@ enum DisplayFloatingLayoutPolicy {
 
     static func anchor(for point: CGPoint, in rect: CGRect, retaining previous: UnitPoint) -> UnitPoint {
         let point = clamped(point, to: rect)
-        // A squeezed axis has no placement information. Retain the preference
-        // so a bottom-docked window returns with the composer when space grows.
         return UnitPoint(x: rect.width > 0 ? (point.x - rect.minX) / rect.width : previous.x,
                          y: rect.height > 0 ? (point.y - rect.minY) / rect.height : previous.y)
     }
@@ -126,8 +114,6 @@ struct ChatFloatingDisplayHost: View {
                 }, onClose: {
                     if self.route?.id == route.id { self.route = nil }
                 })
-                // Placement and gestures belong to this exact window, not a
-                // successor selected while the outgoing window is retiring.
                 .id(route.id)
             }
         }
@@ -149,8 +135,6 @@ private struct FloatingDisplayWindow: View {
     @Environment(AppModel.self) private var model
     @State private var anchor: UnitPoint = .topTrailing
     private struct Drag {
-        // The glass handle keeps its native size; its grab offset must not
-        // scale with the image's changing aspect ratio.
         let grabPoint: CGPoint
         var globalLocation: CGPoint
     }
@@ -170,14 +154,10 @@ private struct FloatingDisplayWindow: View {
             liveAspectRatio: currentLiveAspectRatio
         )
         let safeRect = DisplayFloatingLayoutPolicy.safeCenterRect(container: container.size, panelSize: size)
-        // Held gestures render from the actual touch, not a delayed geometry
-        // repair. This also covers a moving/resizing native container.
         let center = drag.map {
             DisplayFloatingLayoutPolicy.draggedCenter(globalLocation: $0.globalLocation, grabPoint: $0.grabPoint,
                                                        container: container, panelSize: size, in: safeRect)
         } ?? DisplayFloatingLayoutPolicy.center(for: anchor, in: safeRect)
-        // An impossibly small region retains route and placement, not a hidden
-        // capture lease or controls painted over the composer.
         if size.width >= DisplayFloatingLayoutPolicy.minimumUsableWidth,
            size.height >= DisplayFloatingLayoutPolicy.minimumUsableHeight {
             floatingPanel(size: size, safeRect: safeRect)
@@ -187,9 +167,6 @@ private struct FloatingDisplayWindow: View {
                 .position(center)
                 .transition(reduceMotion ? .opacity : .scale(scale: 0.96).combined(with: .opacity))
         }
-        // Layout follows the existing native/structural clock, not a second
-        // animation on geometry samples. Only insertion and docking own local
-        // animation; neither changes the renderer's identity.
     }
 
     private func floatingPanel(size: CGSize, safeRect: CGRect) -> some View {
@@ -291,8 +268,6 @@ private struct FloatingDisplayWindow: View {
     private func handlePan(_ sample: FloatingWindowPanGesture.Sample, size: CGSize, safeRect: CGRect) {
         switch sample.state {
         case .began, .changed:
-            // The first grab publication must itself cancel the old dock; an
-            // equal second assignment can be elided before its transaction runs.
             guard let grabPoint = sample.state == .began ? sample.locationInWindow : drag?.grabPoint else { return }
             let next = Drag(grabPoint: grabPoint,
                             globalLocation: CGPoint(x: sample.location.x + container.minX,
@@ -307,8 +282,6 @@ private struct FloatingDisplayWindow: View {
             let projected = CGPoint(x: current.x + sample.velocity.x * duration,
                                     y: current.y + sample.velocity.y * duration)
             let destination = DisplayFloatingLayoutPolicy.snappedToNearestHorizontalEdge(projected, in: safeRect)
-            // Only one visible position changes. Clearing grab metadata cannot
-            // expose the pre-drag anchor or inject a separate reset transaction.
             move(DisplayFloatingLayoutPolicy.anchor(for: destination, in: safeRect, retaining: anchor))
         default:
             break

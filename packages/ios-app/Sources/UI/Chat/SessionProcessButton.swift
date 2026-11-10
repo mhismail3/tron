@@ -20,8 +20,6 @@ enum SessionProcessButtonPolicy {
     ) -> String? {
         guard overview?.visibility == .recent else { return nil }
         guard retentionMinutes > 0 else { return nil }
-        // The button outlives the last eligible row, not the first one. The
-        // overview's nearestExpiry is a refresh boundary, not an all-done date.
         guard let expiry = (activities ?? [])
             .compactMap({ recentExpiry(for: $0, retentionMinutes: retentionMinutes) }).max() else { return nil }
         return GatewayTimestamp.preciseString(from: expiry)

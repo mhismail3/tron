@@ -1,13 +1,6 @@
 import Foundation
 import XCTest
 
-/// Measurement-path self-test for `scripts/tron-profile ios --self-test`.
-///
-/// `control` runs a fixed synthetic workload; each variant adds one known cost
-/// on top of it. The profiler fails unless every variant regresses its target
-/// metric beyond the report's noise bound, so a broken counter, a lost
-/// xcresult value, or an extraction bug is caught before anyone trusts a
-/// product scenario. These workloads exist only in the hosted test bundle.
 @MainActor
 final class ProfileControlScenarioTests: XCTestCase {
     func testControl() throws {
@@ -31,12 +24,9 @@ final class ProfileControlScenarioTests: XCTestCase {
 private final class ProfileControlRun: ProfileScenarioRun {
     enum Extra { case cpu, disk, wakeups }
 
-    /// 10 Hz ticks of fixed arithmetic: a small, steady main-thread workload.
     static let tick = Duration.milliseconds(100)
     static let workPerTick = 400_000
-    /// The disk variant writes and syncs this much per tick.
     static let bytesPerTick = 256 * 1_024
-    /// The wakeup variant adds a 200 Hz main-run-loop timer.
     static let extraTimerInterval: TimeInterval = 0.005
 
     private let extra: Extra?
@@ -107,11 +97,6 @@ private final class ProfileControlRun: ProfileScenarioRun {
         try? FileManager.default.removeItem(at: directory)
     }
 
-    /// The CPU variant's known cost as its own frame: `--self-test --trace
-    /// time-profiler` fails unless attribution ranks this symbol among the top
-    /// self-time symbols (CONTROL_WORKLOAD_SYMBOL in scripts/tron-profile-ios).
-    /// Its loop differs from `arithmetic` on purpose: an identical body would
-    /// be merged or tail-called by the optimizer, and this frame would vanish.
     @inline(never)
     static func controlExtraCPUWorkload(seed: UInt64, rounds: Int) -> UInt64 {
         var state = seed | 1
@@ -123,7 +108,6 @@ private final class ProfileControlRun: ProfileScenarioRun {
         return state
     }
 
-    /// Fixed xorshift rounds; the result feeds `ProfileSink` so -O keeps it.
     private static func arithmetic(seed: UInt64, rounds: Int) -> UInt64 {
         var state = seed | 1
         for _ in 0..<rounds {

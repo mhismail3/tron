@@ -1,22 +1,14 @@
 import Foundation
 
-/// Where a staged annotation was selected. Presentation-only: it drives the
-/// transcript highlight for the exact assistant text block and is never sent.
 struct ChatAnnotationAnchor: Hashable, Sendable {
     let itemID: String
-    /// `ChatAnnotationSource.blockKey`: the text part plus a Markdown block or
-    /// a contiguous selectable prose run.
     let blockKey: String
-    /// UTF-16 range in the rendered block or prose run.
     let location: Int
     let length: Int
 
     var range: NSRange { NSRange(location: location, length: length) }
 }
 
-/// One quoted passage of an assistant response and the maintainer's comment.
-/// Staged annotations belong to the composer draft scope; sent annotations are
-/// recovered from the canonical prompt text by `ChatAnnotationEnvelope`.
 struct ChatAnnotation: Identifiable, Hashable, Sendable {
     let id: String
     let quote: String
@@ -31,12 +23,6 @@ struct ChatAnnotation: Identifiable, Hashable, Sendable {
     }
 }
 
-/// The prompt-text contract for annotations. The model receives each one as a
-/// tagged Markdown blockquote of its own words followed by the comment, ahead
-/// of the typed message. No Gateway or protocol field is involved: the
-/// canonical user message stores exactly this text, and the app recovers the
-/// structure from it for display. Anything that does not parse exactly is
-/// shown as ordinary prompt text.
 enum ChatAnnotationEnvelope {
     static let open = "<annotation>"
     static let close = "</annotation>"
@@ -62,7 +48,6 @@ enum ChatAnnotationEnvelope {
         let body: String
     }
 
-    /// Returns nil unless the text begins with at least one well-formed block.
     static func parse(_ text: String) -> Parsed? {
         guard text.hasPrefix(open + "\n") else { return nil }
         var remainder = Substring(text)
@@ -97,7 +82,6 @@ enum ChatAnnotationEnvelope {
         return Parsed(annotations: annotations, body: String(remainder))
     }
 
-    /// Display text for surfaces that show only the typed message.
     static func body(of text: String) -> String {
         parse(text)?.body ?? text
     }

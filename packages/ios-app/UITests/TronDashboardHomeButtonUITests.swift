@@ -1,7 +1,5 @@
 import XCTest
 
-/// The Home dashboard's one Tron-branded button (#1461): a quick tap opens Home,
-/// a 0.2 s hold opens the dashboard menu with one haptic and never also opens Home.
 final class TronDashboardHomeButtonUITests: XCTestCase {
     @MainActor
     private func launch(_ extra: [String] = []) -> XCUIApplication {
@@ -27,7 +25,6 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             let feedback = app.staticTexts["fixture.menu-feedback"]
             XCTAssertEqual(feedback.label, "menu-feedback:0")
 
-            // Just over the 0.2 s menu hold and under UIKit's ~0.5 s context-menu hold.
             button.press(forDuration: 0.3)
             let settings = app.buttons["Settings"]
             XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
@@ -36,15 +33,12 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             XCTAssertFalse(app.textViews["Message input"].exists, "Releasing a hold does not open Home")
             XCTAssertTrue(waitFor(feedback, "label == 'menu-feedback:1'"), "The menu opening plays one haptic")
 
-            // Dismiss by tapping outside: the menu closes and Home still does not open.
             let outside = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2))
             outside.tap()
             XCTAssertTrue(settings.waitForNonExistence(timeout: 5), app.debugDescription)
             XCTAssertFalse(app.textViews["Message input"].waitForExistence(timeout: 2), "Dismissing the menu does not open Home")
             keep("1461-home-button-\(appearance)-menu-dismissed")
 
-            // A natural hold, past UIKit's own context-menu hold, still opens the
-            // menu through the 0.2 s hold and its haptic (#1480).
             button.press(forDuration: 1.2)
             XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertTrue(waitFor(feedback, "label == 'menu-feedback:2'"), "A long hold plays the haptic: \(feedback.label)")
@@ -58,7 +52,6 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
         }
     }
 
-    /// The menu keeps every action, including Settings, and opens Settings.
     @MainActor
     func testHeldMenuOpensSettings() {
         continueAfterFailure = false
@@ -73,8 +66,6 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
         XCTAssertFalse(app.textViews["Message input"].exists)
     }
 
-    /// Working and Waiting morph in place through the shared indicator swap;
-    /// frames are sampled across real fixture status changes (ready → working → waiting).
     @MainActor
     func testStatusTransitionsMorphInPlace() {
         continueAfterFailure = false
@@ -82,7 +73,6 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
         let button = app.buttons["dashboard.menu"]
         XCTAssertTrue(button.waitForExistence(timeout: 15), app.debugDescription)
         for (state, name) in [("Working", "working"), ("Waiting for you", "waiting"), ("Ready", "ready")] {
-            // Sample frames until the next status lands, then keep the settled state.
             var frames: [XCUIScreenshot] = []
             let deadline = Date().addingTimeInterval(12)
             while Date() < deadline, (button.value as? String) != state {

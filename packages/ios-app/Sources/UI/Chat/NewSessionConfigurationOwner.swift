@@ -24,8 +24,6 @@ struct NewSessionConfigurationReadID: Hashable {
 }
 
 enum NewSessionTrustPolicy {
-    /// The Project root a trust decision is recorded for, when it is not the
-    /// workspace itself (a chat in a subdirectory of a Git worktree).
     static func sharedProjectRoot(_ inspection: JSONValue?) -> String? {
         guard let value = inspection?.objectValue, let root = value["projectDir"]?.stringValue,
               root != value["cwd"]?.stringValue else { return nil }
@@ -38,8 +36,6 @@ enum NewSessionTrustPolicy {
             && value["effectiveDecision"] == .null
     }
 
-    /// An unresolved prompt defaults to blocking project-local resources. The
-    /// explicit Trust action replaces this fallback before session creation.
     static func decisionBeforeCreation(_ inspection: JSONValue?) -> Bool? {
         requiresDecision(inspection) ? false : nil
     }
@@ -98,8 +94,6 @@ struct NewSessionCreationOwner: Equatable {
         isCreating = false
     }
 
-    /// Typed success is not a disposable read. Hold one original route until
-    /// its foreground caller is admitted; dismissal never forces it to reopen.
     mutating func retain(route: AppModel.SessionNavigationRoute, scope: NewSessionModelScope) -> Bool {
         guard isCreating, !isRetired, pendingRoute == nil else { return false }
         pendingRoute = route
@@ -132,35 +126,21 @@ struct NewSessionCreationOwner: Equatable {
     }
 }
 
-/// The configuration scope a model choice belongs to. A choice overrides the
-/// default of exactly one original profile/lifecycle/workspace namespace.
 struct NewSessionModelScope: Hashable, Sendable {
     let profileID: String?
     let workspace: String
     let lifecycleGeneration: Int
 }
 
-/// Explicit model intent for one configuration scope.
-///
-/// The sheet re-runs its configuration task whenever a revision input changes —
-/// profile revision, trust invalidation, or presentation activity — and those
-/// re-runs happen without any user action (a profile switch completing in the
-/// background, or a `trust.changed` event). Re-deriving the selection on every
-/// run silently replaced a model the user had just picked with the scope default.
-/// Keeping the choice here means a revision-only re-run re-derives the default
-/// but never discards explicit intent; only leaving the scope it was made in does.
 struct NewSessionModelChoice: Equatable, Sendable {
     private(set) var model: ModelRef?
     private(set) var scope: NewSessionModelScope?
 
-    /// Records the user's selection for the scope it was made in.
     mutating func choose(_ model: ModelRef?, scope: NewSessionModelScope) {
         self.model = model
         self.scope = scope
     }
 
-    /// Returns the choice for this scope, dropping it when the sheet has moved to
-    /// a different profile or workspace.
     mutating func retain(in scope: NewSessionModelScope) -> ModelRef? {
         guard self.scope == scope else {
             model = nil
@@ -170,8 +150,6 @@ struct NewSessionModelChoice: Equatable, Sendable {
         return model
     }
 
-    /// Explicit intent, else the scope default, else the provider's preferred
-    /// available model.
     func effective(configured: ModelRef?, preferred: ModelRef?) -> ModelRef? {
         model ?? configured ?? preferred
     }

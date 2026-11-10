@@ -1,14 +1,6 @@
 import Darwin
 import Foundation
 
-/// Fast, non-prompting TCC probes owned by the wrapper app.
-///
-/// The server is launched through the bundled `com.tron.server`
-/// LaunchAgent with the wrapper bundle IDs in `AssociatedBundleIdentifiers`.
-/// macOS therefore surfaces this permission under the responsible wrapper
-/// app (`Tron.app` in Release, `TronMac.app` in Debug). Probing from this
-/// process keeps the wizard, System Settings row, and launchd attribution
-/// aligned without creating a disabled `Tron Agent.app` entry.
 enum MacPermissionProbe {
     enum FileProbeOutcome: Equatable {
         case readable
@@ -25,9 +17,6 @@ enum MacPermissionProbe {
         case .fullDiskAccess:
             return await probeFullDiskAccess()
         case .accessibility, .screenRecording:
-            // These permissions belong to the signed Aqua host. Keeping this
-            // owner FDA-only prevents a wrapper Boolean from becoming GUI
-            // permission authority.
             return .probeUnavailable
         }
     }

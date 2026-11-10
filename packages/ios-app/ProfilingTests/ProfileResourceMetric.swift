@@ -3,15 +3,6 @@ import Foundation
 import Synchronization
 import XCTest
 
-/// In-process resource counters for `scripts/tron-profile ios`.
-///
-/// Every value below is the delta over the one window the iteration accepted
-/// (`ProfileMeasuredWindow`), which XCTest's `stopMeasuring()` hands to this
-/// metric through `didStopMeasuring`. The profiler reads the values back
-/// from the xcresult by their `com.tron.profile.` identifiers; the suffix is
-/// the report metric id. A counter the kernel does not provide in this process
-/// is omitted rather than reported as zero, so a report never contains a
-/// fabricated measurement.
 final class ProfileResourceMetric: NSObject, XCTMetric {
     static let identifierPrefix = "com.tron.profile."
 
@@ -42,9 +33,6 @@ final class ProfileResourceMetric: NSObject, XCTMetric {
             values.append(Self.measurement("cpu.main_thread_time", "Main-thread CPU time", Double(after &- before), "ns"))
         }
         if let before = start.usage, let after = end.usage {
-            // Zero lifetime instructions means this process has no per-task
-            // performance counters (a kernel or virtualization limit), not
-            // that it retired none.
             if after.ri_instructions > 0 {
                 values.append(Self.measurement("cpu.instructions", "Instructions retired", Double(after.ri_instructions &- before.ri_instructions), "instructions"))
                 values.append(Self.measurement("cpu.cycles", "Cycles", Double(after.ri_cycles &- before.ri_cycles), "cycles"))
@@ -85,9 +73,6 @@ final class ProfileResourceMetric: NSObject, XCTMetric {
     }
 }
 
-/// The measured window of the current iteration. The harness brackets each
-/// attempted window with `begin`/`end` and accepts it only after its render
-/// check passed, so a discarded window never reaches the metric.
 final class ProfileMeasuredWindow: Sendable {
     struct Sample {
         var start: ProfileResourceSample
@@ -141,9 +126,6 @@ final class ProfileMeasuredWindow: Sendable {
     }
 }
 
-/// One reading of the process counters. Every source is read directly from the
-/// kernel for this process; the simulator app is an ordinary host process, so
-/// these are host-CPU values, not device battery measurements.
 struct ProfileResourceSample {
     let wallNanoseconds: UInt64
     let processCPUNanoseconds: UInt64
@@ -161,8 +143,6 @@ struct ProfileResourceSample {
         )
     }
 
-    // libproc is not in the iOS SDK. Resolve the host's C entry points at run
-    // time with their C calling convention instead of declaring Swift symbols.
     private typealias ProcPIDRusage = @convention(c) (Int32, Int32, UnsafeMutableRawPointer) -> Int32
     private typealias ProcResetFootprintInterval = @convention(c) (Int32) -> Int32
 
@@ -197,8 +177,6 @@ struct ProfileResourceSample {
         return status == KERN_SUCCESS ? value : nil
     }
 
-    /// XCTest may call metric hooks off the main thread, so the main thread's
-    /// port is captured on it once, before any measurement.
     nonisolated(unsafe) private static var mainThreadPort: mach_port_t?
 
     @MainActor
@@ -222,10 +200,6 @@ struct ProfileResourceSample {
     }
 }
 
-/// Workload counters a scenario records while it runs (frames and bytes its
-/// scripted transport delivered, RPCs it answered, resynchronizations it
-/// observed). The metric reports their deltas over the measured window so a
-/// report proves the workload was applied, not only that time passed.
 final class ProfileScenarioLedger: Sendable {
     static let shared = ProfileScenarioLedger()
 
@@ -239,8 +213,6 @@ final class ProfileScenarioLedger: Sendable {
 
     func reset() { counters.withLock { $0.removeAll() } }
 
-    /// Report metric ids are lowercase: `session.toolProgress` becomes
-    /// `session.tool_progress`.
     static func metricID(_ name: String) -> String {
         name.reduce(into: "") { result, character in
             if character.isUppercase { result += "_" + character.lowercased() } else { result.append(character) }

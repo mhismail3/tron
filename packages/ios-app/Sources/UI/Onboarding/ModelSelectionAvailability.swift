@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Value-only presentation of the owning session's admission/receipt state.
-/// It never infers settlement or changes mutation admission.
 enum ModelSelectionAvailability: Equatable {
     case ready
     case blocked(String)
@@ -19,8 +17,6 @@ enum ModelSelectionAvailability: Equatable {
     }
 }
 
-/// Lock explanations use the ordinary progressive information sheet, reachable
-/// by touch and VoiceOver, instead of inserting status copy into model content.
 struct ModelSelectionLockInfoLink: View {
     let reason: String
     var body: some View {

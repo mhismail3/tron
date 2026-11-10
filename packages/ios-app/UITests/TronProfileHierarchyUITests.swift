@@ -1,7 +1,5 @@
 import XCTest
 
-/// Actual simulator captures of the shipping Profile sheet, not an alternate preview UI.
-/// All data is synthetic. Existing Home mutation journeys keep their default fixture.
 final class TronProfileHierarchyUITests: XCTestCase {
     @MainActor
     func testNativeHierarchyReviewMatrix() {
@@ -48,13 +46,10 @@ final class TronProfileHierarchyUITests: XCTestCase {
         let rowHeight = life.frame.height
         life.tap()
         XCTAssertTrue(element(app, "home-profile-item-detail").waitForExistence(timeout: 5))
-        // Positive control: the same edit identifier exists on a writable-placement item.
         XCTAssertTrue(element(app, "home-profile-item-edit").exists)
         app.buttons["home-sheet-done-profile-item"].tap()
         XCTAssertTrue(element(app, "home-profile-items").waitForExistence(timeout: 5))
 
-        // Overlapping native viewports retain every section for visual sign-off.
-        // The terminal note is the fixture's inactive row, not a guessed scroll count.
         let inactive = element(app, "home-profile-item-3f3264c8-5ad4-44bd-853b-c0b3a2008196")
         keep("\(prefix)-00")
         for page in 1...8 {
@@ -64,7 +59,6 @@ final class TronProfileHierarchyUITests: XCTestCase {
         }
         XCTAssertTrue(inactive.isHittable, "The bounded review reached the inactive note")
 
-        // Historical organization can be read but cannot be edited or confirmed.
         let prior = element(app, "home-profile-item-profile-hierarchy-example-6")
         for _ in 0..<3 where !prior.isHittable { app.swipeDown(velocity: .slow) }
         XCTAssertTrue(prior.isHittable)
@@ -88,12 +82,9 @@ final class TronProfileHierarchyUITests: XCTestCase {
         guard done.frame.minY > 120 else { return }
         let window = app.windows.firstMatch
         let origin = window.coordinate(withNormalizedOffset: .zero)
-        // Home's scroll view can scroll while still at medium. Drag the actual
-        // navigation title, between the toolbar controls, instead of its content.
         origin.withOffset(CGVector(dx: window.frame.midX, dy: done.frame.midY))
             .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.frame.midX, dy: 20)),
                    withVelocity: .fast, thenHoldForDuration: 0)
-        // CGRect's minY is a Swift computation, not a KVC property for a string predicate.
         let expanded = XCTWaiter.wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)], timeout: 8) == .completed
         if !expanded { keep("failed-expand-\(id)") }

@@ -1,8 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
 
-/// Real pagination controls and dashboard overlay at the end of a scrollable
-/// workspace. The fixture owns only synthetic row counts; no session is opened.
 struct HostedSessionPaginationFixture: View {
     @State private var count = 10
     @State private var header = DashboardHeaderState()

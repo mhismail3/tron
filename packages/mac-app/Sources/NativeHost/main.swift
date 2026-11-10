@@ -5,8 +5,6 @@ import CoreGraphics
 import Foundation
 import Darwin
 
-/// XPC delivers on connection queues. Marshal every GUI/TCC operation to the
-/// main queue; no permission state is shared across those queues or persisted.
 private final class NativePermissionService: NSObject, NativeHostPermissionService, @unchecked Sendable {
     private var receipts = NativePermissionRequestReceipts()
     private let retirement: NativeHostServiceRetirement
@@ -39,8 +37,6 @@ private final class NativePermissionService: NSObject, NativeHostPermissionServi
                 _ = AXIsProcessTrustedWithOptions(options)
             case .screenRecording: _ = CGRequestScreenCaptureAccess()
             }
-            // A false request/preflight is not proof of explicit denial: AX may
-            // have just opened Settings. Always report the current native state.
             let status = Self.snapshot()[permission.rawValue] ?? NativeHostPermissionStatus.probeUnavailable.rawValue
             self.receipts.record(status, for: permission, id: id)
             reply(requestID, status)
@@ -105,7 +101,7 @@ private enum NativeHostMain {
             let app = NSApplication.shared
             app.setActivationPolicy(.accessory)
             let cua = CuaProcessOwner(bundle: parentBundle)
-            cua.start() // The permission-bearing app is established before its child.
+            cua.start()
             let delegate = NativeHostDelegate(requirement: requirement, captures: captures, cua: cua)
             let teamRequirement = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\""
             let captureListener = NSXPCListener(machServiceName: NativeHostTrust.captureMachServiceName)
@@ -118,8 +114,6 @@ private enum NativeHostMain {
             listener.setConnectionCodeSigningRequirement(requirement)
             listener.activate()
             captureListener.activate()
-            // launchd owns the service name and process singleton. Mach rights
-            // are never encoded into a file, and no endpoint cleanup can race.
             withExtendedLifetime((listener, delegate, captureListener, captureDelegate, cua)) { app.run() }
         } catch {
             FileHandle.standardError.write(Data("Tron Native Host could not start its authenticated services.\n".utf8))

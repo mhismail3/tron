@@ -8,7 +8,6 @@ private final class CaptureMarkerView: NSView {
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
-        // Deliberately independent of the JPEG oracle's numeric expectations.
         let colors: [NSColor]
         switch stage {
         case .initial: colors = [.init(srgbRed: 1, green: 0, blue: 0, alpha: 1),
@@ -50,23 +49,17 @@ private final class CaptureFixtureWindow: NSPanel {
 
     func present(_ stage: CaptureQualificationStage) {
         marker.stage = stage
-        // Fixture geometry is independent of the evidence oracle's point sizes.
         switch stage {
         case .initial, .changed: setContentSize(NSSize(width: 320, height: 200))
         case .resized, .sourceCloseBaseline: setContentSize(NSSize(width: 200, height: 320))
         }
         marker.needsDisplay = true
-        // Ordering only this non-key, nonactivating panel never activates an app
-        // or restores another application's focus. Actual pixels, not this call's
-        // return or a rendering delay, establish the qualification stage.
         orderFrontRegardless()
         marker.display()
         displayIfNeeded()
     }
 }
 
-/// Cancellation closes admission without cancelling/abandoning the native join.
-/// It also fences the gap around selection and between the two stream lifetimes.
 private final class CaptureQualificationControl: @unchecked Sendable {
     private let lock = NSLock()
     private var active: NativeWindowCapture?
@@ -95,16 +88,12 @@ private final class CaptureQualificationControl: @unchecked Sendable {
 
 @MainActor
 final class CaptureQualificationLifecycle {
-    // If the producer reports failed removal, the app stays alive retaining the
-    // exact failed resource. Only the parent can decide containment; process exit
-    // or a timer cannot manufacture joined native retirement.
     private var retainedProducers: [NativeWindowCapture] = []
     private var inspectedFrames = 0
 
     static func preflight() -> CaptureQualificationReport {
         var report = CaptureQualificationReport(mode: "preflight")
         if #available(macOS 15.2, *) { report.supportedSystem = true }
-        // Never call a request API, SCK enumeration, NSApplication, or a stream.
         report.screenRecordingPreflight = CGPreflightScreenCaptureAccess()
         if !report.supportedSystem { report.failure = .unsupportedSystem }
         else if !report.screenRecordingPreflight { report.failure = .permissionUnavailable }
@@ -168,8 +157,6 @@ final class CaptureQualificationLifecycle {
             active = nil; control.detach()
             try control.check()
 
-            // A stopped stream cannot prove source-close behavior. Start a second
-            // single-use producer on the SAME retained, own-window selection.
             secondLifetime = true
             let source = NativeWindowCapture(selection: selection, limits: try .init())
             active = source; retainedProducers.append(source); control.attach(source)
@@ -203,7 +190,7 @@ final class CaptureQualificationLifecycle {
         }
         fixture?.close()
         deadline.cancel()
-        await deadline.value // Freeze flags only after the timer's actual completion.
+        await deadline.value
         let state = control.snapshot
         report.deadlineTriggered = state.deadline; report.cancellationObserved = state.cancelled || Task.isCancelled
         if state.deadline { report.failure = .deadline }
@@ -235,8 +222,6 @@ final class CaptureQualificationLifecycle {
                     try images?.write(frame.jpeg, stage: stage)
                     return evidence
                 }
-                // An earlier complete frame may precede the controlled redraw.
-                // It cannot pass the new marker oracle and is discarded, not kept.
             }
             try await Task.sleep(for: .milliseconds(50))
         }
@@ -248,7 +233,7 @@ final class CaptureQualificationLifecycle {
             try control.check()
             do { _ = try producer.takeLatestFrame(generation: generation) }
             catch let error as NativeWindowCaptureError {
-                try control.check() // A deadline-induced Stop is NOT source-close evidence.
+                try control.check()
                 switch error {
                 case .sourceUnavailable, .streamFailed: return error
                 default: throw CaptureQualificationFailure.sourceCloseNotObserved

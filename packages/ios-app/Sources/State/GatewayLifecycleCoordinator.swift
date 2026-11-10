@@ -8,8 +8,6 @@ enum GatewayConnectionState: Equatable {
 }
 
 typealias GatewayPairingCommit = @MainActor @Sendable (GatewayProfile, String) throws -> Void
-/// Returns nil when the profile has no stored token, and throws when the
-/// Keychain cannot be read right now (for example before the first unlock).
 typealias GatewayProfileTokenLookup = @MainActor @Sendable (GatewayProfile) throws -> String?
 
 @MainActor
@@ -46,13 +44,6 @@ final class GatewayLifecycleCoordinator {
         let connectionID: Int?
     }
 
-    /// A parked episode — foreground, disconnected, with nothing in flight or
-    /// scheduled because the last path hint said unsatisfied — resumes after
-    /// this bound even when the next path callback and the next foreground
-    /// activation never arrive. The bound exists because a missed callback was
-    /// one of the 2026-09-27 silent gaps; 30 s is short enough that the phone is
-    /// never quiet for long and far longer than one backoff interval, so a
-    /// healthy loop never reaches it.
     static let parkedRetryBound = Duration.seconds(30)
 
     private struct PairingAttempt {
@@ -90,8 +81,6 @@ final class GatewayLifecycleCoordinator {
     private let pairingCommit: GatewayPairingCommit
     private let pairingCommitWithoutSelection: GatewayPairingCommit?
     private let profileTokenLookup: GatewayProfileTokenLookup
-    /// Phone connection records: one `gateway.attempt` per attempt, one
-    /// `connection.episode` per outage, plus the stall/main-actor watchdogs.
     @ObservationIgnored let recorder: GatewayConnectionEpisodeRecorder
 
     weak var delegate: (any GatewayLifecycleProjectionDelegate)?
@@ -100,9 +89,6 @@ final class GatewayLifecycleCoordinator {
     private(set) var hasResolvedLaunchState = false
     private(set) var gatewayInfo: GatewayInfo?
     private(set) var connectionID: Int?
-    /// The exact socket whose receive/event delivery loop has been activated.
-    /// `connectionID` is installed slightly earlier so the first buffered event
-    /// can be admitted; route work must wait for this stronger boundary.
     private var activatedConnectionID: Int?
 
     private var phase: Phase = .active(0)
@@ -111,41 +97,22 @@ final class GatewayLifecycleCoordinator {
     private var transitionWaiters: [Int: [CheckedContinuation<Void, Never>]] = [:]
     private var transitionTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
-    /// The bound that resumes recovery parked by an unsatisfied path hint.
     private var parkedRetryTask: Task<Void, Never>?
     private var parkedRetryGeneration = 0
-    /// One `reconnect.skipped` record per refusal cause: a 100 ms readiness
-    /// poll that cannot schedule must not write a record every iteration.
     private var lastReconnectRefusalReason: String?
     private var committedConnectionTask: Task<Void, Never>?
-    /// The loop whose transport attempt is in flight, or `nil` while none is.
-    /// It is an identity, not a flag: a cancelled predecessor must not clear the
-    /// marker its replacement set.
     @ObservationIgnored private var reconnectAttemptInFlightLoop: String?
-    /// The loop `reconnectTask` currently owns, so only the live loop's marker
-    /// is consulted and a retired loop cannot park the watchdog at `nil`.
     @ObservationIgnored private var reconnectLoopID: String?
-    /// Covers initial connect as well as replacement entrypoints. Path and
-    /// foreground hints may accelerate this owner, never create a peer socket.
     private var connectionAdmissionTask: Task<Void, Never>?
     private var connectionAdmissionGeneration = 0
     private var reconnectAttemptGeneration = 0
     private var reconnectCanBeAccelerated = false
-    /// A real path change that arrived while a transport attempt was on the wire.
-    /// The attempt keeps its own bound and no second socket is opened, so the
-    /// loop consumes this mark when that attempt ends and retries at once (C-3).
     @ObservationIgnored private var reconnectPathChangedDuringAttempt = false
     private var restartRequested = false
     private var restartWatchdogTask: Task<Void, Never>?
     private var pairingAttempt: PairingAttempt?
     private var foregroundReconciliationTask: Task<Void, Never>?
-    /// Projection refresh/restoration may continue after transport readiness
-    /// for profile switches so dashboard navigation can hand ChatView an
-    /// admitted route without waiting on unrelated slow work.
     private var deferredProjectionTask: Task<Void, Never>?
-    /// The admission the deferred projection is reconciling, while its task
-    /// exists. Cancelling the projection settles this admission, because a
-    /// cancelled task publishes no result of its own.
     private var deferredProjectionAdmission: Admission?
     private var foregroundReconciliationGeneration = 0
     private var backgroundRetirementTask: Task<Void, Never>?
@@ -153,10 +120,6 @@ final class GatewayLifecycleCoordinator {
     private var projectionFailureGeneration: Int?
     private var nonRetryableRecoveryFailure = false
     private var networkPathSatisfied = true
-    /// The monitored route's own identity — the interfaces the current path uses
-    /// — when the observer can read one. It is what separates a real path change
-    /// from a notice about the route the phone is already on; `nil` while no
-    /// caller has supplied one.
     private var networkPathSignature: String?
     private var connectionFailureClassifier = GatewayConnectionFailureClassifier()
 
@@ -189,29 +152,18 @@ final class GatewayLifecycleCoordinator {
         self.recorder = GatewayConnectionEpisodeRecorder(
             clock: clock,
             appLog: appLog,
-            // Watchdog ticks never ride the injected lifecycle clock: a test
-            // that drives the timeline manually must not have to service them.
             watchdogClock: watchdogClock,
             networkInterfaces: networkInterfaces
         )
-        // `self` must be unwrapped first: folding `self?.reconnectStallGuard`
-        // into one optional would turn the 'recovery is progressing' nil into
-        // `other` and report a stall whenever an episode is open.
         self.recorder.stallGuard = { [weak self] in
             guard let self else { return nil }
             return self.reconnectStallGuard
         }
     }
 
-    /// Why no attempt is in flight or scheduled, for the stall watchdog. `nil`
-    /// means recovery is progressing: an attempt is running, waiting in its
-    /// bounded backoff, or already scheduled by the parked bound. A parked
-    /// episode is therefore named by `reconnect.parked`, never as a stall.
     var reconnectStallGuard: GatewayReconnectStallGuard? {
         if reconnectLoopID != nil, reconnectAttemptInFlightLoop == reconnectLoopID { return nil }
         if reconnectTask != nil, reconnectCanBeAccelerated { return nil }
-        // An unsatisfied path hint parks the loop, but `parkRecovery` schedules
-        // the attempt that probes it, so recovery is still on a timeline.
         if parkedRetryTask != nil { return nil }
         if !networkPathSatisfied { return .pathUnsatisfied }
         if nonRetryableRecoveryFailure { return .nonRetryable }
@@ -241,8 +193,6 @@ final class GatewayLifecycleCoordinator {
     }
 
     var admitsWork: Bool { phase.admitsWork && !sceneIsBackgrounded }
-    /// Foreground routing must not start until an already-scheduled background
-    /// socket retirement has finished and queued its replacement reconnect.
     var routeActivationRequiresRetirementBarrier: Bool { backgroundRetirementTask != nil }
 
     func admits(_ admission: Admission) -> Bool {
@@ -276,9 +226,6 @@ final class GatewayLifecycleCoordinator {
 
     static let unreadableTokenReason = "This iPhone's Keychain cannot be read yet. Unlock it to reconnect."
 
-    /// A missing token means unpaired. A Keychain that cannot be read right now
-    /// is not: the profile stays paired and offline, and the next foreground
-    /// or reconnect reads it again.
     private func readToken(_ profile: GatewayProfile) -> TokenRead {
         do {
             guard let token = try profileTokenLookup(profile) else { return .missing }
@@ -333,8 +280,6 @@ final class GatewayLifecycleCoordinator {
                       self.phase.generation == generation,
                       self.foregroundReconciliationGeneration == activationGeneration else { return }
                 self.backgroundRetirementTask = nil
-                // Foreground is the app's own proof that it just woke: probe the
-                // possibly stale path hint rather than parking again (C-1).
                 self.requestReconnect(immediate: true, replaceExisting: true, ignoresPathHint: true)
             }
         }
@@ -343,10 +288,6 @@ final class GatewayLifecycleCoordinator {
             switch connectionState {
             case .offline, .reconnecting, .restarting:
                 guard !nonRetryableRecoveryFailure else { return nil }
-                // Foreground is the app's own proof that it just woke: a path
-                // hint that still reads unsatisfied is stale, and no further
-                // callback is coming while the scene is already active, so the
-                // parked episode resumes with one probe attempt (C-1).
                 requestReconnect(immediate: true, replaceExisting: true, ignoresPathHint: true)
                 return reconnectTask
             case .unpaired, .unauthorized, .connecting, .connected:
@@ -379,18 +320,9 @@ final class GatewayLifecycleCoordinator {
         return task
     }
 
-    /// A transport-only recovery request from a caller that saw one request fail
-    /// but did not move the scene (the workspace browser's transient retry). It
-    /// mirrors `becameActive()`'s non-scene branch exactly: it revives a parked
-    /// `offline`/`reconnecting`/`restarting` route and does nothing else. A
-    /// rejected credential is not retried, a live socket is not replaced, and
-    /// foreground reconciliation never runs, so a failed read cannot change
-    /// reconnect behaviour.
     @discardableResult
     func requestTransportRecovery() -> Task<Void, Never>? {
         guard phase.admitsWork, !sceneIsBackgrounded else { return nil }
-        // A background retirement barrier owns the next socket; a read failure
-        // must not start a peer while the old epoch is still retiring.
         guard backgroundRetirementTask == nil,
               connectionAdmissionTask == nil,
               committedConnectionTask == nil else { return nil }
@@ -404,13 +336,7 @@ final class GatewayLifecycleCoordinator {
         }
     }
 
-    /// A suspended app cannot service the shared event stream reliably. Retire
-    /// the transport epoch before suspension, discard its queued deliveries, and
-    /// let the next active scene perform one authoritative reconnect.
     func enteredBackground() {
-        // A backgrounded app parks recovery; the episode it was explaining ends
-        // here, so no episode record ever spans a suspension. The episode keeps
-        // its own profile: a selection change is not this transition.
         recorder.endEpisode(.background)
         let backgroundConnectionID = connectionID
         foregroundReconciliationGeneration &+= 1
@@ -472,9 +398,6 @@ final class GatewayLifecycleCoordinator {
         defer {
             if pairingAttempt?.id == attemptID {
                 pairingAttempt = nil
-                // A pairing that ended without a socket (its connect failed on a
-                // known-down route) parks the stale hint like the other attempt
-                // owners do: foreground and disconnected is still on a timeline.
                 parkUnsatisfiedPathWhenIdle()
             }
         }
@@ -592,28 +515,14 @@ final class GatewayLifecycleCoordinator {
     ) async {
         guard admitsEvent(connectionID: deliveredConnectionID) else { return }
         let code = GatewayDiagnosticFailure.normalizedCode(reason)
-        // Every admitted loss opens the episode, whether or not it counts as a
-        // transport failure: a Gateway restart is a loss too, and the gap from it
-        // to the first reconnect has to be measurable. A restart whose first
-        // reconnect succeeds would otherwise leave no episode at all. The
-        // episode carries the loss's own code as its cause, so a disconnect
-        // whose first reconnect succeeds still names what ended the connection
-        // instead of reporting `causes=none`.
         recorder.noteDisconnected(
             profileID: profiles.selected?.id,
             lifecycleGeneration: phase.generation,
             foreground: !sceneIsBackgrounded,
             cause: countsAsTransportFailure ? code : "restart"
         )
-        // The projection that ran beneath the lost socket belongs to it: cancel
-        // it so its late result cannot publish over the replacement and settle
-        // its reconciliation aggregate, and let the event owner's request start
-        // the next attempt at once instead of waiting for restoration the dead
-        // socket no longer admits.
         cancelDeferredProjection()
         if countsAsTransportFailure {
-            // An established socket loss starts a recovery episode; it does not
-            // classify a failed reconnect attempt as having opened its transport.
             delegate?.lifecycleConnectionFailurePresentationDidChange()
             delegate?.lifecycleRecordDiagnostic(event: "reconnect.failure", message: "code=\(code)")
         }
@@ -641,19 +550,6 @@ final class GatewayLifecycleCoordinator {
         }
     }
 
-    /// Path hints only gate replacement attempts. They never establish endpoint
-    /// reachability or revoke a currently viable socket. A satisfied hint may
-    /// revive a parked episode even when the missed callback left no task, and an
-    /// unsatisfied one arms the bound that probes the path without a callback.
-    ///
-    /// `signature` is the current route's interface identity when the caller can
-    /// read one. A scene activation re-reads the monitor, and a status, flag or
-    /// cost-only update fires it without re-routing, so only the signature
-    /// changing (or the path going unsatisfied and back) is a path change; a
-    /// caller that supplies none is reporting the route it was already on. The
-    /// distinction is C-3's: the path that came back is attempted at once and
-    /// from the base interval, while repeated failures on an unchanged path keep
-    /// the capped, jittered curve.
     func notePathHint(satisfied: Bool, signature: String? = nil) {
         let pathChanged = networkPathSatisfied != satisfied
             || (signature != nil && signature != networkPathSignature)
@@ -668,35 +564,21 @@ final class GatewayLifecycleCoordinator {
             return
         }
         guard !nonRetryableRecoveryFailure, connectionAdmissionTask == nil, committedConnectionTask == nil else { return }
-        // NWPathMonitor can deliver before startup or pairing. A path hint may
-        // revive recovery, but cannot bypass initial profile/cache admission or
-        // turn an unpaired/unauthorized selection into a transport failure.
         switch connectionState {
         case .offline, .reconnecting, .restarting: break
         case .unpaired, .unauthorized, .connecting, .connected: return
         }
         if reconnectTask != nil, reconnectCanBeAccelerated {
-            // The notice is this owner's only path signal: cancel the pending wait
-            // so the loop attempts at once. Only a real path change restarts the
-            // curve, so the route that just came back is not delayed by the wait
-            // the route that went away had grown (C-3).
             if pathChanged { reconnectSchedule.restartForPathChange() } else { reconnectSchedule.accelerate() }
             return
         }
         if reconnectTask != nil {
-            // An attempt is in flight: it keeps its own bound and this owner
-            // never puts a second socket on the wire beside it. A real path change
-            // is recorded for the loop instead, which consumes it when that
-            // attempt ends, so the retry is not left waiting the interval the
-            // closed route had grown (C-3).
             if pathChanged {
                 reconnectPathChangedDuringAttempt = true
                 reconnectSchedule.restartForPathChange()
             }
             return
         }
-        // Nothing is waiting, so the restart only has to drop the curve the
-        // closed route had grown before the attempt that follows.
         if pathChanged { reconnectSchedule.reset() }
         requestReconnect(immediate: true, replaceExisting: false)
     }
@@ -710,10 +592,6 @@ final class GatewayLifecycleCoordinator {
             recordReconnectRefusal("scene-retired")
             return
         }
-        // These three refusals keep the state that explains them, and none of
-        // them may publish a recovery state: `.offline` is the only status that
-        // offers Retry, so a non-retryable stop turned into `.reconnecting`
-        // would leave the phone with neither recovery nor a way to start one.
         if nonRetryableRecoveryFailure {
             recordReconnectRefusal("nonRetryable")
             return
@@ -731,9 +609,6 @@ final class GatewayLifecycleCoordinator {
             return
         }
         guard networkPathSatisfied || ignoresPathHint else {
-            // A lost socket on a known-down route is the parked episode: name it
-            // and arm the bound that resumes it, instead of returning silently
-            // the way the 2026-09-27 gap did (C-1). Parking owns the state.
             if connectionID == nil { parkRecovery(reason: "pathUnsatisfied") }
             return
         }
@@ -753,8 +628,6 @@ final class GatewayLifecycleCoordinator {
         scheduleReconnect(immediate: immediate, ignoresPathHint: ignoresPathHint)
     }
 
-    /// Explicit user retry clears a nonretryable stop and reconnects only the
-    /// selected profile. Transport mutations and receipt ownership never call it.
     func retryReconnect() {
         guard phase.admitsWork, !sceneIsBackgrounded,
               reconnectTask == nil || reconnectCanBeAccelerated,
@@ -770,15 +643,9 @@ final class GatewayLifecycleCoordinator {
             return
         }
         cancelReconnect()
-        // A stopped profile switch may never have configured this client's
-        // endpoint. Rebind the exact selected profile, not its previous socket.
         continueCommittedConnection(profile: profile, token: token, generation: phase.generation)
     }
 
-    /// Waits only for an exact activated transport on the requested profile.
-    /// Unlike public `.connected` readiness, this does not wait for dashboard,
-    /// settings, device, terminal, or mounted-presentation reconciliation.
-    /// Notification routing uses this narrow boundary before `session.open`.
     func waitForRouteConnection(
         profileID: String,
         until deadline: ContinuousClock.Instant,
@@ -830,9 +697,6 @@ final class GatewayLifecycleCoordinator {
                 let activeConnectionID = await client.activeConnectionID()
                 guard !Task.isCancelled, admitsGeneration(admission.generation) else { return false }
                 if let connectionID, activeConnectionID == connectionID { return true }
-                // The client actor can observe transport death before its
-                // MainActor event is reduced. Close that race synchronously so
-                // a user mutation never receives a false connected admission.
                 connectionID = nil
                 connectionState = .reconnecting
             }
@@ -904,8 +768,6 @@ final class GatewayLifecycleCoordinator {
             connectionState = previousConnectionState
             return
         }
-        // Credential commit is the point of no return. The lifecycle must leave
-        // transition state even when the presenting task is cancelled afterward.
         let generation = await beginTransition(invalidatePairing: false)
         guard phase.generation == generation,
               pairingAttempt?.id == attemptID else { throw CancellationError() }
@@ -967,10 +829,6 @@ final class GatewayLifecycleCoordinator {
         backgroundRetirementTask = nil
         foregroundReconciliationGeneration &+= 1
         cancelParkedRetry()
-        // A profile switch, pairing or teardown stops the episode this lifecycle
-        // was explaining; the new generation will open its own if it fails. The
-        // episode keeps its own profile and generation: the transition that
-        // ended it is not necessarily the one it was about.
         recorder.endEpisode(.stopped)
         reconnect?.cancel()
         committedConnection?.cancel()
@@ -1030,8 +888,6 @@ final class GatewayLifecycleCoordinator {
         guard admits(admission), connectionAdmissionTask == nil else { return }
         connectionAdmissionGeneration &+= 1
         let admissionGeneration = connectionAdmissionGeneration
-        // Claim the whole operation before cache I/O yields. Startup, path,
-        // foreground, and profile-switch work must not create a peer hello.
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.delegate?.lifecycleLoadCache(profileID: profile.id, admission: admission)
@@ -1095,8 +951,6 @@ final class GatewayLifecycleCoordinator {
             restartRequested = false
             delegate?.lifecycleInvalidateSessionConnectionOwnership()
             delegate?.lifecycleBeginReconciliationAggregate(admission: connectedAdmission)
-            // A live socket is not parked recovery: drop any bound the loss that
-            // preceded this connect armed, and any loop that somehow survived it.
             cancelParkedRetry()
             cancelReconnect()
             beginDeferredProjection(admission: connectedAdmission)
@@ -1185,12 +1039,6 @@ final class GatewayLifecycleCoordinator {
         }
     }
 
-    /// Mounted restoration, refresh and terminal reattachment run beneath the
-    /// connection they were admitted for, owned by the presentation that
-    /// implements them. No connection task awaits them: slow projection work
-    /// must not delay a replacement attempt, and the socket's loss cancels the
-    /// projection instead of letting a late result publish over the replacement
-    /// (C-1).
     private func beginDeferredProjection(admission: Admission) {
         cancelDeferredProjection()
         deferredProjectionAdmission = admission
@@ -1200,8 +1048,6 @@ final class GatewayLifecycleCoordinator {
             async let restore = self.delegate?.lifecycleRestoreMountedPresentation(admission: admission) ?? true
             let (_, restored) = await (refresh, restore)
             guard !Task.isCancelled, self.admits(admission) else { return }
-            // The event reducer can lag transport retirement: consult the client
-            // before publishing a projection for a socket that is already gone.
             let activeConnectionID = await self.client.activeConnectionID()
             guard !Task.isCancelled, self.admits(admission) else { return }
             guard activeConnectionID == admission.connectionID else {
@@ -1221,16 +1067,10 @@ final class GatewayLifecycleCoordinator {
                 admission: admission,
                 succeeded: succeeded
             )
-            // Projection failure leaves the live socket usable; only transport
-            // failure may recycle it.
             self.deferredProjectionTask = nil
         }
     }
 
-    /// Cancelling a projection settles the admission it was reconciling: the
-    /// cancelled task returns before publishing a result, and an aggregate left
-    /// open keeps `isReconcilingForeground` true, which freezes the mounted chat
-    /// and blocks uploads for the whole outage.
     private func cancelDeferredProjection() {
         deferredProjectionTask?.cancel()
         deferredProjectionTask = nil
@@ -1281,29 +1121,11 @@ final class GatewayLifecycleCoordinator {
         task?.cancel()
     }
 
-    /// Recovery is parked: foreground, disconnected, and nothing in flight or
-    /// scheduled because the last path hint said unsatisfied. The bound makes
-    /// recovery scheduled instead of silent, so a missed callback cannot leave
-    /// the phone quiet in the foreground (C-1), and the stall watchdog reads a
-    /// parked episode as progressing rather than stalled. Parking owns the state
-    /// it publishes: a park that is refused (a stop the user must clear, an
-    /// attempt already owns the timeline, or a bound already armed) must not
-    /// leave a recovery status behind that no user action can leave.
     private func parkRecovery(reason: String) {
         guard phase.admitsWork, !sceneIsBackgrounded, !nonRetryableRecoveryFailure,
               profiles.selected != nil, parkedRetryTask == nil else { return }
-        // An in-flight initial connect, committed replacement attempt or pairing
-        // owns the attempt: parking would publish `.reconnecting` over its
-        // `.connecting` and arm a bound that outlives its result (`connect`
-        // returns silently on a state mismatch, so a pairing would report
-        // success with no socket). Its own retryable-failure branch schedules
-        // recovery; whoever releases the attempt re-parks a stale unsatisfied
-        // hint (`parkUnsatisfiedPathWhenIdle`).
         guard connectionAdmissionTask == nil, committedConnectionTask == nil,
               pairingAttempt == nil else { return }
-        // `.offline`, `.unpaired` and `.unauthorized` are stops with their own
-        // surface (the first is the only one that offers Retry); a lost socket
-        // whose status still reads connected is stale bookkeeping and is parked.
         switch connectionState {
         case .offline, .unpaired, .unauthorized: return
         case .connected, .connecting, .reconnecting, .restarting: break
@@ -1321,8 +1143,6 @@ final class GatewayLifecycleCoordinator {
                 event: "reconnect.parked-resume",
                 message: "reason=\(reason) boundMs=\(diagnosticMilliseconds(Self.parkedRetryBound))"
             )
-            // The hint is stale: one attempt proves the path either way, and a
-            // failing one parks recovery again.
             self.requestReconnect(immediate: true, ignoresPathHint: true)
         }
         delegate?.lifecycleRecordDiagnostic(
@@ -1337,20 +1157,11 @@ final class GatewayLifecycleCoordinator {
         parkedRetryTask = nil
     }
 
-    /// A connect that owns the attempt cannot park itself (`parkRecovery`
-    /// refuses an in-flight admission), and its retryable-failure branch runs
-    /// while it still owns it. Whoever releases the task parks a stale
-    /// unsatisfied hint here, so a route the initial connect could not reach
-    /// still has its bound instead of waiting for a callback that may never come
-    /// (C-1). A released attempt that left another attempt running is that
-    /// attempt's timeline, not this one's.
     private func parkUnsatisfiedPathWhenIdle() {
         guard connectionID == nil, !networkPathSatisfied, reconnectTask == nil else { return }
         parkRecovery(reason: "pathUnsatisfied")
     }
 
-    /// Every early return of `requestReconnect`/`scheduleReconnect` names the
-    /// guard that refused it, so a silent park is impossible to reintroduce.
     private func recordReconnectRefusal(_ reason: String) {
         guard lastReconnectRefusalReason != reason else { return }
         lastReconnectRefusalReason = reason
@@ -1381,10 +1192,6 @@ final class GatewayLifecycleCoordinator {
         reconnectAttemptInFlightLoop = nil
     }
 
-    /// The furthest handshake stage an attempt reached. The client's own
-    /// handshake diagnostic is authoritative when it has one; otherwise an
-    /// epoch means the hello was accepted, and only this client's own transport
-    /// codes mean the attempt never got past opening the socket.
     private static func attemptStage(
         diagnostic: GatewayConnectionDiagnostic?,
         establishedConnection: Bool,
@@ -1402,7 +1209,6 @@ final class GatewayLifecycleCoordinator {
         }
     }
 
-    /// One `gateway.attempt` record, plus the episode bookkeeping it implies.
     private func recordAttempt(
         attemptID: String,
         retry: Int,
@@ -1465,9 +1271,6 @@ final class GatewayLifecycleCoordinator {
         let reconnectSchedule = self.reconnectSchedule!
         reconnectCanBeAccelerated = !immediate
         reconnectPathChangedDuringAttempt = false
-        // A probe loop starts one attempt despite a stale unsatisfied hint; from
-        // its second iteration the hint gates it again, so a path that is still
-        // down parks recovery rather than spinning (C-1).
         var pathHintRequired = !ignoresPathHint
         let loopID = UUID().uuidString
         reconnectLoopID = loopID
@@ -1478,10 +1281,6 @@ final class GatewayLifecycleCoordinator {
             message: "immediate=\(immediate) attempt=\(attemptGeneration) lifecycle=\(lifecycleGeneration) loop=\(loopID) scheduledDelayMs=\(diagnosticMilliseconds(initialDelay)) cause=\(restartRequested ? "restart" : "connection-unavailable")"
         )
         reconnectTask = Task { [weak self] in
-            // Whatever ends this loop — success, a state mismatch that returns
-            // early, a path park or cancellation — a later drop must not read a
-            // dead loop's marker as an attempt in flight. The identity check
-            // keeps a replaced loop from clearing its successor's marker.
             defer {
                 if let self, self.reconnectAttemptInFlightLoop == loopID {
                     self.reconnectAttemptInFlightLoop = nil
@@ -1503,9 +1302,6 @@ final class GatewayLifecycleCoordinator {
                         lifecycleGeneration: lifecycleGeneration,
                         attemptGeneration: attemptGeneration
                     ) else { return }
-                    // A path can become unsatisfied while the predecessor socket
-                    // is still active. Once that attempt retires, park until the
-                    // next path callback instead of retrying on a known-down route.
                     guard self.networkPathSatisfied || !pathHintRequired else {
                         self.finishReconnect(
                             lifecycleGeneration: lifecycleGeneration,
@@ -1518,9 +1314,6 @@ final class GatewayLifecycleCoordinator {
                     self.connectionState = self.restartRequested ? .restarting : .reconnecting
                     retry += 1
                     let startedAt = clock.now()
-                    // The loop is inside one transport attempt until this
-                    // attempt ends; the stall watchdog reads this identity to
-                    // tell a running attempt from a parked loop.
                     self.reconnectAttemptInFlightLoop = loopID
                     self.delegate?.lifecycleRecordDiagnostic(
                         event: "reconnect.attempt",
@@ -1546,9 +1339,6 @@ final class GatewayLifecycleCoordinator {
                         return
                     }
                     do {
-                        // Background may retire startup before its first hello
-                        // configured the client. The lifecycle's selected profile
-                        // owns replacement credentials, not a predecessor socket.
                         let connection = try await self.client.reconnectForLifecycle(
                             profile: profile, token: token, attemptID: loopID
                         )
@@ -1578,11 +1368,6 @@ final class GatewayLifecycleCoordinator {
                         )
                         self.gatewayInfo = connection.info
                         reconnectSchedule.reset()
-                        // Authenticated handshake plus event activation is the
-                        // connection boundary, including after system.stopping.
-                        // Projection owners reconcile beneath this usable socket;
-                        // slow or failed projection work cannot strand a healthy
-                        // replacement in Restarting.
                         self.restartWatchdogTask?.cancel()
                         self.restartWatchdogTask = nil
                         self.restartRequested = false
@@ -1598,12 +1383,6 @@ final class GatewayLifecycleCoordinator {
                             gatewayConnectionID: connection.gatewayConnectionID,
                             connectionID: connection.id
                         )
-                        // The transport attempt ends here: an authenticated
-                        // socket plus its event stream is the connection
-                        // boundary. Projection work runs beneath it, owned by the
-                        // presentation, so a slow mounted restoration can never
-                        // park this loop, and a drop under projection starts the
-                        // next attempt at once instead of waiting it out (C-1).
                         self.reconnectAttemptInFlightLoop = nil
                         self.delegate?.lifecycleBeginReconciliationAggregate(admission: admission)
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
@@ -1733,8 +1512,6 @@ final class GatewayLifecycleCoordinator {
                             connectionID: establishedConnectionID,
                             diagnostic: diagnostic
                         )
-                        // The attempt is over; the loop now waits in its bounded
-                        // backoff, which the stall watchdog reads as progressing.
                         self.reconnectAttemptInFlightLoop = nil
                         if self.connectionFailureClassifier.failedAttempt(
                             diagnostic,
@@ -1748,23 +1525,12 @@ final class GatewayLifecycleCoordinator {
                                 lifecycleGeneration: lifecycleGeneration,
                                 attemptGeneration: attemptGeneration
                             )
-                            // A probe attempt that failed on a known-down route
-                            // parks like the loop's own path check: the hint may
-                            // still be stale, and only the bound brings the next
-                            // attempt without a callback (C-1). Ending the loop
-                            // here without a park is the silent gap again.
                             self.parkRecovery(reason: "pathUnsatisfied")
                             return
                         }
                         self.reconnectCanBeAccelerated = true
                         delayStartedAt = clock.now()
                         if self.reconnectPathChangedDuringAttempt {
-                            // The route changed while this attempt was on the wire:
-                            // the loop consumes that change and attempts at once,
-                            // from the curve the notice already restarted, instead
-                            // of waiting the interval the closed route had grown.
-                            // The attempt record's own `actualDelayMs` is ~0 for
-                            // it, which is what this record reports.
                             self.reconnectPathChangedDuringAttempt = false
                             self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.delay",
                                 message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry + 1) cause=pathChanged")

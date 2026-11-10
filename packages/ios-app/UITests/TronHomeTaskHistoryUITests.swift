@@ -1,6 +1,5 @@
 import XCTest
 
-/// Real hosted app/socket journeys. PNGs are synthetic simulator proof, not device captures.
 final class TronHomeTaskHistoryUITests: XCTestCase {
     @MainActor func testBeforeLight() { before(dark: false) }
     @MainActor func testBeforeDark() { before(dark: true) }
@@ -121,9 +120,6 @@ final class TronHomeTaskHistoryUITests: XCTestCase {
     @MainActor private func open(_ app: XCUIApplication, _ id: String, ready: String, done: String) {
         let row = element(app, id)
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
-        // XCUI scrolls a row below the bottom edge into view itself, and the tap that follows
-        // appears to be absorbed by the settling list. Drag the list up first, as the Manage Home
-        // medium-detent smoke test does, then tap the row's centre.
         let window = app.windows.firstMatch
         for _ in 0..<3 where row.frame.maxY > window.frame.height - 60 {
             window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))

@@ -1,6 +1,5 @@
 import SwiftUI
 
-// Name resolution, members, assignment and construction for SwiftAppRuntime.
 extension SwiftAppRuntime {
     private static let stateWrappers: Set<String> = ["State", "StateObject", "ObservedObject", "Published", "AppStorage", "Persisted"]
 
@@ -16,7 +15,6 @@ extension SwiftAppRuntime {
         throw SwiftAppRuntimeError("Unknown name '\(name)'")
     }
 
-    /// A member visible through `self`, or nil when the type has none.
     func member(of receiver: SwiftAppSelf, _ name: String) throws -> SwiftAppValue? {
         let declaration = receiver.declaration
         switch receiver {
@@ -35,7 +33,6 @@ extension SwiftAppRuntime {
                 case "Environment":
                     switch property.environmentKey {
                     case "dismiss": return .dismiss(instance.dismiss)
-                    // Opening is checked against the paired host (#1160).
                     case "openURL": return .builtin("openURL", nil)
                     case let key: throw SwiftAppRuntimeError("@Environment(\\.\(key ?? "?")) is not supported")
                     }
@@ -58,7 +55,6 @@ extension SwiftAppRuntime {
         if let value = staticStorage["\(declaration.name).\(name)"] { return value }
         if let body = declaration.computed[name] {
             try requireInitializedReceiver(receiver)
-            // A computed property is a call: `var x: Int { x }` must hit the depth limit.
             try enterCall()
             defer { leaveCall() }
             return try run(body, in: SwiftAppScope(parent: globals, selfReference: receiver))
@@ -97,9 +93,6 @@ extension SwiftAppRuntime {
             case .object(let object) where object.fields[name] == nil:
                 throw SwiftAppRuntimeError("\(object.typeName) has no stored property '\(name)'")
             case .record, .object:
-                // Validate the stored field before projection, without invoking a
-                // computed getter. Native reads may outlive this rendering scope.
-                // `$item.done` projects a binding to the field.
                 return .binding(SwiftAppBinding(
                     get: { [weak self] in (try? self?.property(of: binding.get(), name)) ?? .nilValue },
                     set: { [weak self] newValue in
@@ -150,7 +143,6 @@ extension SwiftAppRuntime {
             if let declaration = program.types[value.typeName],
                let result = try member(of: .enumCase(declaration, base), name) { return result }
             if Self.optionalMethods.contains(name) { return .builtin(name, base) }
-            // `.title.bold()` beside `enum Field { case title }` stays a native refinement.
             if value.arguments.isEmpty { return .builtin(name, base.symbol) }
             throw SwiftAppRuntimeError("\(value.typeName) has no member '\(name)'")
         case .dictionary(let entries):
@@ -207,17 +199,12 @@ extension SwiftAppRuntime {
             if let element = elements.first(where: { $0.label == name }) { return element.value }
             if let index = Int(name), elements.indices.contains(index) { return elements[index].value }
         case .nilValue:
-            // Optional.map/flatMap on nil is nil; any other member is
-            // optional chaining, which reads through nil.
             return Self.optionalMethods.contains(name) ? .builtin(name, base) : .nilValue
         default:
             break
         }
-        // Anything else is a method that must be called.
         return .builtin(name, base)
     }
-
-    // MARK: Bindings and assignment
 
     func binding(named name: String, in scope: SwiftAppScope) throws -> SwiftAppBinding {
         if let box = scope.local("$" + name), case .binding(let binding) = box.value { return binding }
@@ -253,8 +240,6 @@ extension SwiftAppRuntime {
     typealias Location = (root: LocationRoot, path: [PathComponent])
     typealias Access = (get: () throws -> SwiftAppValue, location: Location?)
 
-    /// Operation-local control, never a stored value or a runtime-wide skip flag.
-    /// Only the syntactic chain boundary (or its assignment) consumes it.
     enum ChainControl: Error { case skipped }
 
     private func once(_ work: @escaping () throws -> SwiftAppValue) -> () throws -> SwiftAppValue {
@@ -272,16 +257,11 @@ extension SwiftAppRuntime {
     }
 
     private func extending(_ base: Access, value: SwiftAppValue, by component: PathComponent) -> Location? {
-        // References returned by a computed receiver remain writable without
-        // rerunning the receiver or redirecting the write to a replacement object.
         if case .object(let object) = value.resolved { return (.object(object), [component]) }
         guard let location = base.location else { return nil }
         return (location.root, location.path + [component])
     }
 
-    /// One receiver-first resolution for reads, calls and writes. The final
-    /// getter stays lazy so plain assignment never evaluates a missing default.
-    /// Intermediate receivers/keys and compound getters run exactly once.
     func access(_ expression: SwiftAppExpr, in scope: SwiftAppScope) throws -> Access {
         try tick()
         switch expression {
@@ -342,7 +322,6 @@ extension SwiftAppRuntime {
             return
         }
         let updated = try setting(current, path: path, to: newValue)
-        // Objects are references: their fields already changed in place.
         if case .object = current { return }
         if case .expression(let expression) = root { try assignRoot(expression, updated, in: scope) }
     }
@@ -367,11 +346,9 @@ extension SwiftAppRuntime {
             return .array(values)
         case (.dictionary(var entries), .element(let index, let fallback)):
             let key = try dictionaryKey(index)
-            // Only the optional subscript's direct nil assignment removes a key.
-            // A nested nil field (or a default subscript storing nil) is a value.
             let removes = rest.isEmpty && fallback == nil && value.isNone
             if !removes && entries[key] == nil { try checkDictionaryCount(entries.count + 1) }
-            try tick(entries.count + 1) // value-semantic writeback may copy all entries
+            try tick(entries.count + 1)
             if removes { entries.removeValue(forKey: key) }
             else if rest.isEmpty { entries[key] = value }
             else {
@@ -436,8 +413,6 @@ extension SwiftAppRuntime {
         }
     }
 
-    // MARK: Calls
-
     func evaluateCall(_ callee: SwiftAppExpr, _ argumentExpressions: [SwiftAppArgument], in scope: SwiftAppScope) throws -> SwiftAppValue {
         func arguments() throws -> [SwiftAppLabeledValue] {
             try argumentExpressions.map { SwiftAppLabeledValue(label: $0.label, value: try evaluate($0.value, in: scope)) }
@@ -446,7 +421,6 @@ extension SwiftAppRuntime {
             let target = try access(base, in: scope)
             let receiver = try target.get()
             let resolved = receiver.resolved
-            // These names denote properties without arguments, methods with them.
             if !argumentExpressions.isEmpty, ["first", "last"].contains(name) {
                 switch resolved {
                 case .array, .range: return try apply(.builtin(name, resolved), arguments())
@@ -490,8 +464,6 @@ extension SwiftAppRuntime {
         }
     }
 
-    /// Builder content is explicit at the SwiftUI boundary, never inherited by
-    /// a value helper or an action merely because it was declared in a body.
     package func renderContent(_ value: SwiftAppValue, arguments: [SwiftAppValue] = []) throws -> SwiftAppValue {
         try entered {
             switch value.resolved {
@@ -560,8 +532,6 @@ extension SwiftAppRuntime {
         return .enumeration(SwiftAppEnumValue(typeName: type, name: name, arguments: payloads, depth: depth))
     }
 
-    /// Containers cannot hide an unbounded enum chain. References are leaves;
-    /// immutable enum values carry their validated depth without retraversal.
     private func payloadDepth(_ value: SwiftAppValue, level: Int = 0) throws -> Int {
         try tick()
         guard level < 64 else { throw SwiftAppRuntimeError("Enum payloads are nested too deeply") }
@@ -654,8 +624,6 @@ extension SwiftAppRuntime {
         }
     }
 
-    // MARK: View instances
-
     package func initialState(for declaration: SwiftAppTypeDeclaration, arguments: [SwiftAppLabeledValue]) throws -> SwiftAppStateStore {
         try transaction { try entered { try initialStateEntered(for: declaration, arguments: arguments) } }
     }
@@ -715,8 +683,6 @@ extension SwiftAppRuntime {
         return try entered { try run(body, in: SwiftAppScope(parent: globals, selfReference: .view(instance)), viewBuilder: true) }
     }
 
-    /// Optional's own methods. Values carry no Optional wrapper, so these
-    /// apply to nil and to values that have no `map` of their own.
     static let optionalMethods: Set<String> = ["map", "flatMap"]
 
     private static let builtinTypes: Set<String> = [

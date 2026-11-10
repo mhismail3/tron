@@ -26,16 +26,11 @@ enum NotificationInboxPresentationPolicy {
         Array(notifications.prefix(recentLimit))
     }
 
-    /// View More opens the full bounded history when the current filter has more
-    /// rows than its recent prefix, or when its server window still has older
-    /// pages that the prefix does not show.
     static func showsHistoryLink(rowCount: Int, hasOlderPages: Bool) -> Bool {
         rowCount > recentLimit || hasOlderPages
     }
 }
 
-/// Settings → Notifications: the primary sheet. It renders the selected
-/// filter's server window and opens the shared history list for the rest.
 struct NotificationInboxView: View {
     let onOpenSession: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
@@ -184,13 +179,6 @@ struct NotificationInboxView: View {
     }
 }
 
-/// The one row list both inbox sheets mount: the selected filter's server
-/// window, its loading/empty states, and — for full history — one keyset page
-/// trigger per profile. The primary sheet passes its recent prefix; history
-/// passes the whole window. Rows follow the coordinator live: the inbox owner
-/// applies `notification.inbox.changed` and reconnects, so neither sheet has
-/// its own refresh or connection treatment (connection state is the app-global
-/// reconnect notice's).
 struct NotificationInboxRowList: View {
     let notifications: [NotificationInboxItem]
     let filter: NotificationInboxFilter
@@ -239,8 +227,6 @@ struct NotificationInboxRowList: View {
             if pagesOlderRows {
                 ForEach(model.notificationInbox.olderPageTriggers(filter: filter), id: \.self) { trigger in
                     NotificationInboxOlderPageRow(isLoading: model.notificationInbox.isLoadingOlder(trigger))
-                        // The cursor is part of the identity, so a completed page
-                        // re-arms the trigger instead of stalling on one fetch.
                         .task(id: PresentationActivityTaskID(
                             source: trigger,
                             presentationActive: presentationActivity.allowsPresentationPublication
@@ -356,10 +342,6 @@ private struct NotificationInboxHistoryView: View {
     }
 }
 
-/// A row is titled by its chat, so the kind appears once (the row's icon).
-/// The Gateway's own title is the fallback when the chat is not in the loaded
-/// catalog: Home's rows are titled "Home"; an ask's title is its kind, which
-/// the icon already shows.
 enum NotificationInboxRowTitle {
     static func title(for notification: GatewayNotificationInboxItem, sessionTitle: String?) -> String {
         if let sessionTitle { return sessionTitle }
@@ -367,11 +349,6 @@ enum NotificationInboxRowTitle {
     }
 }
 
-/// The inbox rows' relative time, identical to formatting with a new default
-/// `RelativeDateTimeFormatter` for every row on every tick. A new formatter
-/// snapshots the current locale (its calendar follows the current one), so the
-/// shared formatter is rebuilt whenever the current locale or calendar differs
-/// from the one it was built under.
 @MainActor
 enum NotificationInboxRelativeTime {
     private static var shared: (locale: Locale, calendar: Calendar, formatter: RelativeDateTimeFormatter)?
@@ -390,11 +367,6 @@ enum NotificationInboxRelativeTime {
     }
 }
 
-/// One inbox row on the shared settings row's feed variant: the chat and time
-/// on the title line (the Gateway beside the time only when more than one is
-/// paired), one line of message below, and the kind as the icon. Every row sits
-/// on the shared Liquid Glass row surface; read rows are clear glass and unread
-/// rows add the accent tint on top (#956).
 private struct NotificationInboxRow: View {
     let item: NotificationInboxItem
     let title: String

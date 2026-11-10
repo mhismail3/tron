@@ -2,13 +2,6 @@ import Foundation
 import Observation
 import TronMobileCore
 
-/// Owns settings and trust request admission. Gateway settings and trust state
-/// remain canonical; settings are read and written through `settings.resolve` and
-/// `settings.change`. The one projection kept here is each target's last served
-/// resolution with its rows' options (`SettingsSnapshot`): every settings surface
-/// for a target reads the same snapshot, so a sheet opened from another never
-/// re-reads what its parent shows. It is bounded, dropped with the profile, and
-/// replaced whenever a settings event or foregrounding makes it stale.
 @MainActor
 @Observable
 final class SettingsTrustCoordinator {
@@ -22,7 +15,6 @@ final class SettingsTrustCoordinator {
 
     private var profileGeneration = 0
     private(set) var snapshots: [JSONValue: SettingsSnapshot] = [:]
-    /// Most recently refreshed last, so the bound evicts the least recent target.
     private var snapshotOrder: [JSONValue] = []
     private var refreshes: [JSONValue: SnapshotRefresh] = [:]
     private static let snapshotLimit = 16
@@ -46,7 +38,6 @@ final class SettingsTrustCoordinator {
         self.uuidSource = uuidSource
     }
 
-    /// Native project reads are disposable; every await remains profile-fenced.
     func listProjects() async throws -> ProjectLifecycleListing {
         let admission = profileGeneration
         var cursor: String?, rows: [ProjectLifecycleRow] = []
@@ -73,8 +64,6 @@ final class SettingsTrustCoordinator {
         return try value.decode(ProjectLifecycleRow.self)
     }
 
-    /// The exact review of one typed project action. The Gateway plans it without
-    /// effects; only `confirmProject` with this review's digest and intent applies it.
     func reviewProject(_ operation: ProjectLifecycleOperation, name: String) async throws -> ProjectLifecycleReview {
         let admission = profileGeneration
         let params: [String: JSONValue] = ["action": .string(operation.rawValue), "name": .string(name),
@@ -88,8 +77,6 @@ final class SettingsTrustCoordinator {
         return ProjectLifecycleReview(params: params, review: planned.review, intent: planned.intent)
     }
 
-    /// The maintainer's tap on the exact card: the Gateway revalidates canonical
-    /// filesystem, Git and trust state against the digest before any effect.
     func confirmProject(_ reviewed: ProjectLifecycleReview) async throws {
         let admission = profileGeneration
         var params = reviewed.params
@@ -120,10 +107,6 @@ final class SettingsTrustCoordinator {
         return value
     }
 
-    /// Trust for one project is the Mac-layer key `permissions.projectTrust`
-    /// qualified by that project; it changes through `settings.change`, whose
-    /// outcome carries the resulting trust inspection. The maintainer's own tap is
-    /// the paired-native authority, so the Gateway applies it directly.
     func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
@@ -147,7 +130,6 @@ final class SettingsTrustCoordinator {
         return inspection
     }
 
-    /// What Mac Terminal enrollment pins and dials (`macTerminal.status`).
     func macTerminalStatus() async throws -> MacTerminalStatus {
         let admittedProfileGeneration = profileGeneration
         let value = try await client.requestValue("macTerminal.status", JSONValue.object([:]))
@@ -155,10 +137,6 @@ final class SettingsTrustCoordinator {
         return try value.decode(MacTerminalStatus.self)
     }
 
-    /// This iPhone's Mac Terminal key is the Mac-layer key
-    /// `permissions.macTerminalKey` qualified by its device; enrolling and
-    /// revoking are ordinary logged changes, and the maintainer's tap that
-    /// sends one is its authority.
     func setMacTerminalKey(device: String, publicKey: String?) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
@@ -185,8 +163,6 @@ final class SettingsTrustCoordinator {
         settingsInvalidationGeneration &+= 1
     }
 
-    /// One bounded audit page. Empty pages may still carry a cursor; callers
-    /// advance until it is absent rather than treating an empty page as EOF.
     func settingsHistory(cursor: String?, actor: String?, layer: String?, section: String?, key: String?, status: String?) async throws -> SettingsChangeHistoryPage {
         let admittedProfileGeneration = profileGeneration
         var params: [String: JSONValue] = ["limit": .number(100)]
@@ -201,9 +177,6 @@ final class SettingsTrustCoordinator {
         return try value.decode(SettingsChangeHistoryPage.self)
     }
 
-    /// Undo is an accepted domain mutation and must use the shared receipt owner.
-    /// Apply again (settings-model.md 5.6): the Gateway re-writes the value an outside
-    /// change replaced, as an ordinary audited change; never automatic.
     func applySettingsChangeAgain(_ changeID: String) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
@@ -231,8 +204,6 @@ final class SettingsTrustCoordinator {
         noteSettingsChanged()
     }
 
-    /// Brings a target's snapshot up to `freshness`. A current snapshot is not read
-    /// again, and concurrent callers for one target share one read.
     func refreshSnapshot(target: JSONValue, freshness: SettingsFreshness) async throws {
         if snapshots[target]?.freshness == freshness { return }
         if let running = refreshes[target], running.freshness == freshness { return try await running.task.value }
@@ -253,8 +224,6 @@ final class SettingsTrustCoordinator {
         try await task.value
     }
 
-    /// The options each editable control of a resolution needs, read with it. A
-    /// source that cannot answer leaves its row read-only; other rows are unaffected.
     private func options(for resolution: SettingsResolution, target: JSONValue) async -> [String: SettingsOptionsResponse] {
         let sourced = resolution.keys.filter { setting in
             setting.presentation.optionsSource != nil
@@ -279,8 +248,6 @@ final class SettingsTrustCoordinator {
         return try await client.requestValue("settings.options", JSONValue.object(params)).decode(SettingsOptionsResponse.self)
     }
 
-    /// `settings.resolve` for the generic renderer: the controls it implements are
-    /// named so the Gateway negotiates each key's control (docs/settings-model.md 7.5).
     func resolveForRenderer(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
         let admittedProfileGeneration = profileGeneration
         var params: [String: JSONValue] = [
@@ -296,7 +263,6 @@ final class SettingsTrustCoordinator {
         return try value.decode(SettingsResolution.self)
     }
 
-    /// `settings.options`: one page of the choices a key's control offers.
     func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
         let admittedProfileGeneration = profileGeneration
         var params: [String: JSONValue] = ["target": target, "key": .string(key)]
@@ -307,8 +273,6 @@ final class SettingsTrustCoordinator {
         return try value.decode(SettingsOptionsResponse.self)
     }
 
-    /// A dry run of one change to a target: its exact review, any `confirm` text and
-    /// any refusal. Nothing is applied; the caller decides what a refusal shows.
     func previewChange(target: JSONValue, change: JSONValue, fence: JSONValue? = nil) async throws -> SettingsChangeResult {
         let admittedProfileGeneration = profileGeneration
         var params: [String: JSONValue] = [
@@ -321,8 +285,6 @@ final class SettingsTrustCoordinator {
         return try value.decode(SettingsChangeResult.self)
     }
 
-    /// One change to a target through the confirmed mutation path. A refusal the
-    /// Gateway returns in its outcome is thrown, so nothing reads as applied.
     func change(target: JSONValue, change: JSONValue, fence: JSONValue? = nil, confirmationDigest: String? = nil, admitSend: (() -> Bool)? = nil) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
@@ -345,7 +307,6 @@ final class SettingsTrustCoordinator {
         settingsInvalidationGeneration &+= 1
     }
 
-    /// Synchronously revokes every suspended operation owned by the retired profile.
     func clearProfile() {
         profileGeneration &+= 1
         snapshots = [:]
@@ -360,13 +321,11 @@ final class SettingsTrustCoordinator {
     }
 }
 
-/// When a snapshot was read: the settings events and foregrounding it reflects.
 struct SettingsFreshness: Hashable, Sendable {
     let invalidation: Int
     let foreground: Int
 }
 
-/// A target's resolution and the options its rows' controls offer, read together.
 struct SettingsSnapshot {
     let resolution: SettingsResolution
     let options: [String: SettingsOptionsResponse]

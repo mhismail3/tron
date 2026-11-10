@@ -29,9 +29,6 @@ struct ChatMessageCopyMenu: ViewModifier {
     }
 }
 
-/// A native container is necessary: a background interaction loses hits to the
-/// glass surface, while an overlay steals attachment taps. Owning the ancestor
-/// preserves descendant controls and gives UIKit the actual bubble as a preview.
 private struct ChatMessageContextMenuSurface<Content: View>: UIViewControllerRepresentable {
     let content: Content
     let text: String
@@ -43,8 +40,6 @@ private struct ChatMessageContextMenuSurface<Content: View>: UIViewControllerRep
     func makeUIViewController(context: Context) -> UIHostingController<ChatMessageNativeContent<Content>> {
         let host = UIHostingController(rootView: ChatMessageNativeContent(content: content, values: context.environment))
         host.safeAreaRegions = []
-        // Loaded media changes inside this nested host without a representable
-        // update. Propagate its new ideal size to the outer SwiftUI row too.
         host.sizingOptions = .intrinsicContentSize
         host.view.backgroundColor = .clear
         context.coordinator.attach(to: host.view)
@@ -76,8 +71,6 @@ private struct ChatMessageNativeContent<Content: View>: View {
     var body: some View { content.environment(\.self, values) }
 }
 
-/// One UIKit interaction owns an immutable open menu. SwiftUI updates configure
-/// future requests only, never call updateVisibleMenu during a Siri handoff.
 final class ChatMessageContextMenuOwner: NSObject, UIContextMenuInteractionDelegate {
     var text = ""
     var mutationIdentity: String?
@@ -112,8 +105,6 @@ final class ChatMessageContextMenuOwner: NSObject, UIContextMenuInteractionDeleg
             let id = action.id
             items.append(UIAction(title: action.title, image: UIImage(systemName: action.icon),
                                   attributes: action.destructive ? .destructive : []) { [weak self] _ in
-                // Retained menu commands must recheck live authority after a
-                // queue update, row reuse, or removal; Copy retains its text.
                 guard let self, self.source?.window != nil, let identity,
                       self.mutationIdentity == identity,
                       let current = self.actions.first(where: { $0.id == id }) else { return }
@@ -127,8 +118,6 @@ final class ChatMessageContextMenuOwner: NSObject, UIContextMenuInteractionDeleg
                                 configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
         guard let source, source.window != nil, source.bounds.contains(location),
               let menu = makeMenu() else { return nil }
-        // Omit suggestedActions rather than filtering localized Siri titles or
-        // reaching into Apple's private identifiers/responder implementation.
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menu }
     }
 
@@ -147,8 +136,6 @@ final class ChatMessageContextMenuOwner: NSObject, UIContextMenuInteractionDeleg
         let parameters = UIPreviewParameters()
         parameters.backgroundColor = .clear
         parameters.visiblePath = UIBezierPath(roundedRect: source.bounds, cornerRadius: ChatPromptContainerStyle.cornerRadius)
-        // The nearest scroll ancestor can be reflected. UIKit must animate the
-        // upright source in window space, never inherit that ancestor's flip.
         let center = source.convert(CGPoint(x: source.bounds.midX, y: source.bounds.midY), to: window)
         return UITargetedPreview(view: source, parameters: parameters,
             target: UIPreviewTarget(container: window, center: center, transform: .identity))

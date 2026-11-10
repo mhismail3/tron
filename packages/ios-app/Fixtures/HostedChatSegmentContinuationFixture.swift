@@ -2,11 +2,6 @@
 import Foundation
 
 extension HostedChatDisplayFixture {
-    /// One tool segment over two assistant messages (#1486). The first holds a
-    /// finalized group whose display call splits away from its read call; the
-    /// second continues the segment with its own one-call group. Assembly
-    /// merges the group back into the display row, leaving the continuation
-    /// row behind with only its own call.
     static let segmentContinuationTranscriptData = Data(#"""
         [
           {"id":"segment-request","parentId":null,"presentationId":"segment-request","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"segment-shot-content","ordinal":0,"type":"toolCall","toolCallId":"segment-shot","name":"display","arguments":{"presentation":{"surface":"inline"}},"toolSegmentId":"segment-1","groupId":"segment-group","groupIndex":0,"groupCount":2,"groupFinalized":true},{"id":"segment-read-content","ordinal":1,"type":"toolCall","toolCallId":"segment-read","name":"read","arguments":{"path":"README.md"},"toolSegmentId":"segment-1","groupId":"segment-group","groupIndex":1,"groupCount":2,"groupFinalized":true}]},

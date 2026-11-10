@@ -2,8 +2,6 @@
 import Foundation
 import TronMobileCore
 
-/// Gateway-shaped, already classified fixture data. The real Gateway test owns
-/// classification; this UI fixture exercises wire decoding and shared ChatView.
 enum HostedChatErrorScenarioFixture {
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-chat-provider-errors") }
     static func error(_ id: String, mixed: Bool = false) -> JSONValue {

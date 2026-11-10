@@ -1,11 +1,6 @@
 import Foundation
 import TronMobileCore
 
-/// Frozen canonical rows inside one complete installed transcript. The revision
-/// is local structural lineage: an unchanged canonical identity/membership spine
-/// reuses it across live payload updates, while any canonical append, prepend,
-/// replacement, or tool-membership change advances it exactly once. A cold owner
-/// starts at one deterministically from the authoritative snapshot.
 struct ChatCommittedLedger: Hashable, Sendable {
     let revision: UInt64
     let items: [ChatTranscriptRenderItem]
@@ -22,9 +17,6 @@ struct ChatCommittedLedger: Hashable, Sendable {
         guard let previous else { return Self(items: items) }
         guard previous.items != items else { return previous }
         if hasSameStructuralSpine(previous.items, items) {
-            // Canonical rows can be enriched by disposable execution timing,
-            // output, and status. Install the newest value without claiming a
-            // canonical append/prepend or replaying scroll/entrance ownership.
             return Self(items: items, revision: previous.revision)
         }
         let nextRevision = previous.revision == .max ? UInt64.max : previous.revision + 1
@@ -51,9 +43,6 @@ struct ChatCommittedLedger: Hashable, Sendable {
     }
 }
 
-/// Mutable-tail facts of the same atomic installed commit. This is a bounded
-/// value projection, not a store or cache. Replacing it cannot advance the
-/// committed ledger revision.
 struct ChatLiveRegion: Hashable, Sendable {
     let items: [ChatTranscriptRenderItem]
     let handoff: ChatTranscriptHandoffCommit
@@ -74,9 +63,6 @@ struct ChatLiveRegion: Hashable, Sendable {
     }
 }
 
-/// Exact payload identity for one tool row. Unlike an installation tag or a
-/// whole-index counter, unrelated authority and other tool updates do not
-/// invalidate this row.
 struct ChatToolPayloadRevision: Hashable, Sendable {
     struct Entry: Hashable, Sendable {
         let callID: String

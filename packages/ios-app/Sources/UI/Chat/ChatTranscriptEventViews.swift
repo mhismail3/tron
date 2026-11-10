@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Remove only repeated turn clearance inside contiguous event runs. Each event
-/// keeps its own identity and 44-point target; prose/tools end the run.
 enum ChatNotificationRunSpacing {
     nonisolated static func compactIDs<S: Sequence>(in items: S) -> Set<String> where S.Element == ChatTranscriptRenderItem {
         var result = Set<String>()
@@ -16,9 +14,6 @@ enum ChatNotificationRunSpacing {
     }
 }
 
-/// Shared compact visual treatment for transcript navigation actions.
-/// The glass remains content-sized while the owning button supplies a separate
-/// 44-point semantic target.
 struct ChatTranscriptPillModifier: ViewModifier {
     var tone: ChatNotificationTone = .accent
 
@@ -40,10 +35,6 @@ extension View {
     }
 }
 
-/// One visual language for transcript events that are not conversation turns.
-/// Detail-bearing events are buttons with Liquid Glass; informational events
-/// remain noninteractive and flat. Provider errors share interactive glass
-/// while retaining their semantic red tint and centered alignment.
 struct ChatNotificationView: View {
     let presentation: ChatNotificationPresentation
     @Environment(AppModel.self) private var model
@@ -57,17 +48,8 @@ struct ChatNotificationView: View {
     }
 
     var body: some View {
-        // One structure at every value. A truncated notice's material is decided
-        // by a measurement that arrives after the first layout pass; switching
-        // between an interactive glass pill and a plain one remounted the pill
-        // and showed one flat frame before the measured glass one. Hit testing,
-        // the button trait, the 44-point target and the detail action are chosen
-        // by the value instead: an informational notice owns no action, so it
-        // offers none.
         let detailAction: (() -> Void)? = showsDetailAction ? { showDetail() } : nil
         return pill
-            // The semantic target includes its clearance, not only the visible
-            // glass. Adjacent notification rows can then meet without overlap.
             .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
             .chatCompactPillInteraction(
@@ -79,11 +61,6 @@ struct ChatNotificationView: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
             .accessibilityIdentifier(presentation.errorRun.map { "chat-error-run-\($0.occurrences[0].id)" } ?? "")
             .contentTransition(.interpolate)
-            // A runtime notification that stops showing progress is the one
-            // notification change that animates. The transcript row renders
-            // straight from its input now, so this view owns the transition: a
-            // row-host animation would be suppressed by the projection's own
-            // transaction below it.
             .animation(
                 ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion),
                 value: presentation.showsProgress
@@ -102,8 +79,6 @@ struct ChatNotificationView: View {
             }
     }
 
-    /// The detail sheet belongs to the transcript, not to this pill: a lazy
-    /// window change discards the row, and the sheet must outlive it.
     private func showDetail() {
         guard showsDetailAction else { return }
         let detailID = UUID()
@@ -133,8 +108,6 @@ struct ChatNotificationView: View {
                 showsProgress: presentation.showsProgress,
                 titleWeight: presentation.errorRun == nil ? .semibold : .bold,
                 detailStyle: presentation.hasDetailSheet ? .summary : .status,
-                // Strong error ink stays readable over the brighter red glass;
-                // the surface keeps the existing semantic error tint.
                 foregroundOverride: presentation.errorRun == nil ? nil : presentation.tone.secondaryColor
             ) {
                 if let run = presentation.errorRun, run.occurrences.count > 1 {
@@ -153,8 +126,6 @@ struct ChatNotificationView: View {
 
 }
 
-/// The full text of one transcript event, in the standard sheet chrome. It is
-/// rendered by the transcript's sheet host from the route a pill presented.
 struct ChatNotificationDetailSheet: View {
     let presentation: ChatNotificationPresentation
     let detailID: UUID

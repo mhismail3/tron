@@ -1,9 +1,5 @@
 import XCTest
 
-/// Catch up from far back in the origin-anchored transcript (#330), on the
-/// real ChatView over the haptics fixture socket. The staged frame must show
-/// the reveal's gap above the newest end before the smooth final step, with
-/// the keyboard up and with it down; the landing reaches the newest reply.
 final class TronChatCatchUpUITests: XCTestCase {
     @MainActor func testStagedCatchUpKeepsItsRevealGapWithAndWithoutTheKeyboard() {
         continueAfterFailure = false
@@ -16,9 +12,6 @@ final class TronChatCatchUpUITests: XCTestCase {
         let status = app.staticTexts["fixture.gateway"]
         XCTAssertTrue(wait(status, "opens:1"), status.label)
 
-        // Enough wrapped prompts and replies that the reader can scroll more than
-        // the staged threshold (80% of the visible height, at least 320 points)
-        // away from the newest end.
         for index in 1...16 {
             composer.tap()
             composer.typeText("Catch-up prompt \(index): a long wrapped request that fills several lines of the transcript so the reader has history to scroll back through, well past the staged threshold of the catch-up control.")
@@ -32,17 +25,12 @@ final class TronChatCatchUpUITests: XCTestCase {
         let readout = app.descendants(matching: .any)["chat.hosted.catch-up-staged-gap"]
         XCTAssertTrue(readout.waitForExistence(timeout: 5), app.debugDescription)
         if app.keyboards.firstMatch.exists {
-            // The transcript dismisses the keyboard interactively.
             let window = app.windows.firstMatch
             window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
                 .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
         }
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10), "the keyboard is dismissed")
         for keyboardUp in [false, true] {
-            // Read back with the keyboard down: an interactive drag over the
-            // keyboard would dismiss it. The keyboard then opens over the
-            // reader's position, which keeps Catch up.
-            // The transcript fills the window between the title bar and the composer.
             let window = app.windows.firstMatch
             let from = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
             let to = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
@@ -66,7 +54,6 @@ final class TronChatCatchUpUITests: XCTestCase {
             XCTAssertGreaterThan(requested, 320, "the reader was not far enough back to stage: \(after)")
             let gap = Int(after.components(separatedBy: "staged=").last ?? "")
             XCTAssertNotNil(gap, "Catch up did not stage its reveal: \(after)")
-            // The reveal is 18% of the visible height, clamped to 80...140 points.
             XCTAssertGreaterThanOrEqual(gap ?? 0, 79,
                 "keyboard \(keyboardUp ? "shown" : "hidden"): the staged frame lost its reveal gap to the bottom obstruction (\(after))")
             XCTAssertLessThanOrEqual(gap ?? .max, 141, "the staged frame is the reveal above the newest end (\(after))")

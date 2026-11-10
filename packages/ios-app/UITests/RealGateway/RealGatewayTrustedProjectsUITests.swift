@@ -1,13 +1,6 @@
 import Foundation
 import XCTest
 
-/// #1517/#2010: Global Settings › Agent Behavior against the real Gateway.
-/// The Trusted Projects sheet owns the default policy and saved decisions;
-/// the Connection group repeats neither. Project buttons open detail sheets.
-/// Choosing an existing folder only inspects it (including nested folders),
-/// preserving every trust record. A new project receives trust only after
-/// the separate canonical approval tap. A per-model key's all-models instance
-/// is titled "All models", never by its fixed `role=chat` qualifier.
 extension RealGatewayPairAndChatUITests {
     @MainActor
     func testTrustedProjectsListsAndAddsProjectsUntrusted() throws {
@@ -19,10 +12,7 @@ extension RealGatewayPairAndChatUITests {
         let parent = root.appendingPathComponent("blocked-parent")
         let nested = parent.appendingPathComponent("nested-project")
         for folder in [added, seeded, nested] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-        // A saved decision the Gateway reads from its own trust store.
         let trustStore = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).appendingPathComponent("trust.json")
-        // The fixture workspace is already canonical (realpath), as the Gateway records
-        // projects; Foundation's symlink resolution would drop /private and miss it.
         let parentPath = parent.path
         try JSONSerialization.data(withJSONObject: [seeded.resolvingSymlinksInPath().path: true, parentPath: false])
             .write(to: trustStore)
@@ -96,9 +86,8 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertEqual(stored("trusted-project"), true, "adding must not change another project's decision")
         keepScreenshot(app, name: "after-trusted-projects-default-policy")
 
-        try closeSheet() // Selected folder inspection.
-        try closeSheet() // Add Project, back to the project list.
-        // A folder inside a listed (blocked) project can also be inspected.
+        try closeSheet()
+        try closeSheet()
         revealBelowNavigationBar(app, add)
         add.tap()
         app.buttons["project-lifecycle-existing"].tap()
@@ -120,8 +109,6 @@ extension RealGatewayPairAndChatUITests {
         try closeSheet()
         try closeSheet()
 
-        // Exercise the actual native review route, not a settings write: the
-        // review creates nothing, and only the card's digest tap creates and trusts.
         add.tap()
         app.buttons["Create Project"].tap()
         let field = app.textFields["project-lifecycle-name"]
@@ -140,9 +127,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertEqual(stored("blocked-parent"), false)
     }
 
-    /// #1570: New Session › Project Settings shows a blocked project's trust and
-    /// its row opens the project's trust editor, whose Trust Project records
-    /// `true` for that project in the Gateway's trust store.
     @MainActor
     func testProjectSettingsTrustRowTrustsABlockedProject() throws {
         continueAfterFailure = false

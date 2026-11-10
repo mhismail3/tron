@@ -24,11 +24,6 @@ enum ChatTranscriptLayoutConstants {
     static let tailAffordanceHeight: CGFloat = 12
 }
 
-/// One queued card with every queue-relative fact captured from the projection
-/// that built it. The replacement host can keep rendering a departed card as
-/// its overlay after a newer projection has shortened or emptied the queue, so
-/// the row must never re-read position or neighbours from the installed queue
-/// (#624: a stale index trapped after Stop redelivered two steers).
 struct ChatQueuedMessageRenderEntry: Identifiable, Hashable {
     let id: String
     let index: Int
@@ -48,9 +43,6 @@ struct ChatQueuedMessageRenderEntry: Identifiable, Hashable {
     }
 }
 
-/// One bounded physical row namespace for canonical, live/runtime, local
-/// submission, and authoritative queue presentation. `id` is SwiftUI identity;
-/// `semanticID` remains the canonical anchor/geometry identity.
 struct ChatPhysicalTranscriptRow: Identifiable, Hashable {
     enum Content: Hashable {
         case transcript(ChatTranscriptRenderItem)
@@ -64,23 +56,16 @@ struct ChatPhysicalTranscriptRow: Identifiable, Hashable {
     let content: Content
 }
 
-/// Zero-copy row spine. Ordinary body evaluation constructs only this small
-/// adapter; committed/live arrays stay in their installed projection storage.
 struct ChatPhysicalTranscriptRows: RandomAccessCollection {
     typealias Index = Int
 
     let installed: InstalledChatTranscript
     let canonicalAliases: [String: String]
-    /// The newest row: the row the pinned transcript anchors, and the row a
-    /// send's transition belongs to.
     var newest: ChatPhysicalTranscriptRow? { first }
 
     private var canonicalCount: Int { installed.committedLedger.items.count }
     private var liveCount: Int { installed.liveRegion.items.count }
 
-    /// Canonical and live authority remain separate in `InstalledChatTranscript`.
-    /// The installed commit precomputes its one optional display-only boundary
-    /// composition so collection indexing stays O(1).
     private var boundaryFusion: ChatPhysicalToolRunFusion? { installed.toolBoundaryFusion }
     private var hasBoundaryFusion: Bool { installed.toolBoundaryFusion != nil }
 
@@ -176,8 +161,6 @@ struct ChatPhysicalToolRunFusion: Hashable {
               Self.segmentID(for: live) == segment else { return nil }
         var tools = canonical.tools
         let canonicalIDs = Set(tools.map(\.id))
-        // Canonical descriptors win for a handoff duplicate. New live calls
-        // retain their exact order after the canonical membership.
         tools.append(contentsOf: live.tools.filter { !canonicalIDs.contains($0.id) })
         guard !tools.isEmpty else { return nil }
         canonicalRenderedID = canonical.id
@@ -210,8 +193,6 @@ enum ChatPhysicalTranscriptRowPolicy {
         )
     }
 
-    /// Empty aliases take the O(1) path. Nonempty aliases are page-bounded and
-    /// validated through the installed projection's prebuilt identity indexes.
     static func admittedAliases(
         installed: InstalledChatTranscript,
         candidates: [String: String]
@@ -277,12 +258,7 @@ enum ChatPhysicalTranscriptReplacementPolicy {
     }
 }
 
-/// A queued-card prompt replacement interpolates the row height only for a
-/// bounded change on a visible surface. Very large changes install atomically,
-/// like large streaming backlogs.
 enum ChatPromptReplacementHeightPolicy {
-    /// Reduce Motion keeps the cross-fade but installs the height at once,
-    /// matching incremental growth.
     static func animates(from: CGFloat, to: CGFloat, surfaceActive: Bool, reduceMotion: Bool) -> Bool {
         guard from.isFinite, to.isFinite, surfaceActive, !reduceMotion else { return false }
         let delta = abs(to - from)
@@ -291,11 +267,6 @@ enum ChatPromptReplacementHeightPolicy {
 }
 
 private extension ChatPhysicalTranscriptRow {
-    /// True only while the row renders the taller `ChatPromptCard` visual, which
-    /// is the one lifecycle appearance that differs from the canonical user
-    /// row. An ordinary outgoing or pending row renders the same Liquid Glass
-    /// bubble as the canonical row, so it must replace atomically: cross-fading
-    /// two identical layers dims the prompt.
     var usesQueuedCardVisual: Bool {
         switch content {
         case .pending(let pending): pending.usesQueuedCardVisual
@@ -316,8 +287,6 @@ private extension ChatTranscriptRenderItem {
     }
 }
 
-/// A unified ForEach preserves this host while runtime/local content becomes
-/// canonical. Exact physical row identity owns admitted in-place updates.
 private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     let row: ChatPhysicalTranscriptRow
     let reduceMotion: Bool
@@ -326,11 +295,6 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     let onPromptEntranceSettled: (String) -> Void
     @ViewBuilder let content: (ChatPhysicalTranscriptRow, Bool, Bool) -> Content
 
-    /// The queued card being replaced by its canonical row, and the cross-fade
-    /// progress between them. Nothing mirrors the row input: the row renders
-    /// straight from `row`, so an update costs one body evaluation instead of one
-    /// stale and one fresh, and the outgoing card is the only snapshot this host
-    /// keeps.
     @State private var outgoingPrompt: ChatPhysicalTranscriptRow?
     @State private var promptReplacementProgress = 1.0
     @State private var replacedPromptSemanticID: String?
@@ -360,8 +324,6 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     }
 
     var body: some View {
-        // `row.id` owns structural continuity. Descendants animate admitted
-        // lifecycle and payload values within this persistent host.
         renderedContent
             #if HOSTED_TEST
             .background {
@@ -393,10 +355,6 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         }
     }
 
-    /// The canonical row and, only while a queued card is handing off, that card.
-    /// `ReplacementHeightLayout` measures both in the pass that places them, so
-    /// the row's height follows the cross-fade exactly instead of waiting for the
-    /// incoming content's next measurement.
     private var replacementContent: some View {
         ReplacementHeightLayout(
             progress: promptReplacementProgress,
@@ -407,10 +365,6 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
                 .opacity(promptReplacementProgress)
             if let outgoingPrompt {
                 content(outgoingPrompt, true, true)
-                    // The outgoing card keeps its natural layout but is clipped to
-                    // the row's interpolated height (horizontal glass and shadow
-                    // overflow stay visible). Only this transient layer is
-                    // clipped, so ordinary rows carry no clip.
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.horizontal, ChatEntranceGrowthPolicy.effectOverflow)
                     .clipShape(Rectangle())
@@ -429,18 +383,8 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     ) {
         switch ChatPhysicalTranscriptReplacementPolicy.replacement(from: previous, to: next) {
         case .notification:
-            // A runtime notification that stops showing progress is the one
-            // notification change that animates, and the notification's own view
-            // owns that content transition (`ChatNotificationView`). Its mirrored
-            // row here existed only to carry the animation through the
-            // projection's animation-suppressing transaction, which the row's own
-            // `.animation(value:)` does below that boundary.
             break
         case .promptContent:
-            // Only a queued-card row looks different from the canonical row, so
-            // only it cross-fades. Keep the physical host, row geometry, and
-            // consumed entrance lease; the two contents fade inside that owner
-            // while the layout interpolates the row's height with the same curve.
             onPromptContentReplacement(next.semanticID)
             replacedPromptSemanticID = next.semanticID
             promptReplacementRevision &+= 1
@@ -463,10 +407,6 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
                 withTransaction(settle) { outgoingPrompt = nil }
             }
         case .none:
-            // Every other payload replaces atomically, including an ordinary
-            // prompt lifecycle row whose content matches the canonical row.
-            // Stable physical identity prevents a second entrance and the
-            // scroll owner retains its geometry.
             promptReplacementRevision &+= 1
             var transaction = Transaction()
             transaction.disablesAnimations = true
@@ -478,18 +418,8 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     }
 }
 
-/// The prompt replacement host's height: the outgoing queued card and the
-/// canonical row, both measured in the pass that places them. `progress` is the
-/// cross-fade and the height interpolation together, so the row shrinks or grows
-/// under the same curve as its cross-fade and never holds a stale height waiting
-/// for a measurement.
 private struct ReplacementHeightLayout: Layout, Animatable {
-    /// 1 = the canonical row, 0 = the outgoing card.
     var progress: CGFloat
-    /// `ChatPromptReplacementHeightPolicy`'s own inputs; the policy decides with
-    /// the heights the layout measures. A replacement that may not interpolate
-    /// (Reduce Motion, a covered surface, or a change too large to animate)
-    /// installs the incoming height at once.
     var reduceMotion: Bool
     var surfaceActive: Bool
 
@@ -507,8 +437,6 @@ private struct ReplacementHeightLayout: Layout, Animatable {
     func makeCache(subviews: Subviews) -> Cache { Cache() }
 
     func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        // Card payloads and Dynamic Type change both heights; animating
-        // `progress` alone does not, so a real change re-measures.
         cache = Cache()
     }
 
@@ -535,7 +463,6 @@ private struct ReplacementHeightLayout: Layout, Animatable {
             proposal: ProposedViewSize(width: bounds.width, height: measured.incoming)
         )
         guard subviews.count > 1 else { return }
-        // The outgoing layer is clipped to the row's current height.
         subviews[1].place(
             at: CGPoint(x: bounds.minX, y: bounds.minY),
             anchor: .topLeading,
@@ -583,8 +510,6 @@ private struct ReplacementHeightLayout: Layout, Animatable {
     }
 }
 
-/// The single physical transcript scroll owner renders one installed commit and
-/// publishes native and semantic evidence.
 struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let transcriptPresentation: ChatTranscriptPresentationStore
     let scrollCoordinator: ChatScrollCoordinator
@@ -604,7 +529,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let responseState: ChatResponseState?
     let mutatingQueuedMessageIDs: Set<String>
     let orientation: ChatTranscriptOrientation
-    /// An annotation sheet revealing its source over the transcript.
     let revealSheetTop: CGFloat?
     @State private var viewportGeometry = ChatTranscriptViewportGeometry()
     @Binding var scrollPosition: ScrollPosition
@@ -655,14 +579,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 onExecuteCommand()
             }
         }
-        // The flip belongs on the scroll view itself, outside the sheet host and
-        // geometry observations. The owner reads safe areas before the flip;
-        // newest clearance is animated layout inside the lazy content.
         .chatTranscriptViewport(orientation, safeAreaInsets: safeAreaInsets)
-        // The sheet a row asked for is presented here, outside the lazy stack, so
-        // streaming a row out of realization cannot dismiss it. The resolver is
-        // the same installed projection the rows are rendered from, so the
-        // detail follows later installs without the row that opened it.
         .modifier(ChatTranscriptSheetHost(
             routes: transcriptPresentation.sheetRoutes,
             installationTag: installed?.tag,
@@ -676,12 +593,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 transcriptPresentation.resolveNotificationDetail(eventID)
             }
         ))
-        // Pinned presentations are anchored at the newest end even when the
-        // transcript is empty or shorter than the viewport. Anchored readers
-        // retain their semantic position through the coordinator's restore
-        // transaction.
-        // Native size-change anchoring owns ordinary pinned layout changes.
-        // ScrollPosition remains target-free outside bounded explicit commands.
         .chatTranscriptScrollBehavior(
             orientation,
             sizeChangesPinned: scrollCoordinator.usesPinnedSizeChangeAnchor,
@@ -742,13 +653,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             releaseCommandTarget: onReleaseCommandTarget,
             automaticProjectionIntakeAvailable: onAutomaticProjectionIntakeAvailable
         ))
-        // The opening overlay may already be fading during `.presented`;
-        // native scrolling remains disabled until the reveal owner publishes
-        // the first fully ready frame.
         .scrollDisabled(!isReady)
         .scrollDismissesKeyboard(.interactively)
-        // The unread-response observer lives in
-        // ChatTranscriptCoordinatorObservationModifier above; one owner only.
         .overlay { openingSurface() }
     }
 
@@ -773,13 +679,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         }
     }
 
-    /// The transcript's scrollable content. The tail affordance and the
-    /// earlier-messages row each sit at one of the transcript's visual ends,
-    /// which are the content origin and the far end of the origin-anchored
-    /// order. Every element applies the orientation modifier as its outermost
-    /// modifier: that counter-flip leaves the element's own content upright —
-    /// entrance rise, streaming growth, context menu, selection — while its
-    /// position stays in the transcript's order.
     @ViewBuilder
     private func transcriptContent(
         installed: InstalledChatTranscript?,
@@ -789,13 +688,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         clearance: EdgeInsets
     ) -> some View {
         let hasEarlierMessages = (installed?.sourceWindow.originalStart ?? 0) > 0
-        // The accessibility order of the transcript's elements. VoiceOver reads
-        // the accessibility tree's own order, which follows the view order: the
-        // origin-anchored spine's view order is its visual order reversed, so
-        // every element takes the priority the owner computes for its position.
-        // Enumerate the installed spine directly rather than building an ID map;
-        // the row ID remains the ForEach identity while its current position
-        // supplies the orientation owner's accessibility order.
         VStack(alignment: .leading, spacing: 0) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ChatTranscriptClearance(height: clearance.top)
@@ -820,9 +712,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             installed: installed,
                             terminalMaterializationID: terminalMaterializationID
                         )
-                        // Older history appends at the far end, where an estimate
-                        // only sizes the scroll range: a page load moves nothing
-                        // on screen.
                         .chatTranscriptOrientation(orientation)
                         .chatTranscriptVoiceOverOrder(
                             orientation,
@@ -834,17 +723,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     .id("transcript-oldest-obstruction")
             }
         }
-        // Register the complete transcript layout once. Independent row
-        // and marker registrations can disagree as lazy estimates settle.
         .scrollTargetLayout()
         .padding(orientation.paddingEdgeSet(.top), 12)
         .chatStableTranscriptUpdates(projectionIdentity: installed?.tag)
-        // Physical lift settlement remains hidden. Once settled, one
-        // covered `.presenting` frame installs a separate visual entrance;
-        // `.presented` then fades/rises the immutable commit without
-        // changing its scroll geometry or admitting concurrent input. The lift
-        // is a layout offset inside the flipped transcript, so it negates its
-        // sign to stay an upward rise on screen.
         .offset(y: orientation.screenOffset(
             forLayoutRise: hasSettledOpeningOffset || reduceMotion ? 0 : 8
         ))
@@ -856,8 +737,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .allowsHitTesting(isReady)
     }
 
-    /// The earlier-messages row: the transcript's oldest end, where older history
-    /// appends once the order is origin-anchored.
     private func earlierMessagesRow(
         installed: InstalledChatTranscript,
         terminalMaterializationID: String?,
@@ -1118,12 +997,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             terminalPhysicalID: isReplacementOverlay ? nil : (physicalID == terminalMaterializationID ? physicalID : nil),
             publishesGeometry: !isReplacementOverlay
         ) {
-            // One structure for every transcript row. A canonical submission's
-            // entrance state is already forced to `.none` above, and a `.none`
-            // entrance row is layout-neutral, so membership in
-            // `canonicalSubmissionIDs` no longer selects between two structures:
-            // that selection remounted the prompt subtree, including its native
-            // context-menu interaction, when the handoff added the ID.
             if isReplacementOverlay {
                 renderRow(item, installed: installed)
                     .padding(.bottom, installed.compactNotificationSpacingIDs.contains(item.id) ? 0 : ChatTranscriptLayoutConstants.rowSpacing)
@@ -1163,7 +1036,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         )
         .equatable()
         .environment(\.displayTranscriptReady, isReady && permitsAsynchronousContent)
-        // The row's detail sheets are presented above the rows, not inside them.
         .environment(\.chatTranscriptSheetRoutes, transcriptPresentation.sheetRoutes)
         .chatStableTranscriptUpdates(projectionIdentity: installed.tag)
     }
@@ -1281,8 +1153,6 @@ private struct ChatTranscriptCoordinatorObservationModifier: ViewModifier {
                 applyViewportMode(mode)
             }
             .onChange(of: coordinator.targetReleaseGeneration) { _, _ in
-                // Cleanup consumes the current exact target lease, not captured
-                // geometry. It remains admitted while the viewport is covered.
                 guard coordinator.consumeTargetRelease() else { return }
                 releaseCommandTarget()
                 if coordinator.admitsViewportCallback(capturedActivation: viewportActivation) {

@@ -8,8 +8,6 @@ extension EnvironmentValues {
     @Entry var hostedDiagnosticsCapture: (@MainActor @Sendable (URL) async -> Void)? = nil
 }
 
-/// Real Logs, preparation, export and native share consumers. Only synthetic
-/// transports and an explicitly test-only preparation suspension are supplied.
 struct HostedDiagnosticsExportFixture: View {
     @Environment(\.scenePhase) private var phase
     @State private var model: AppModel
@@ -72,8 +70,6 @@ struct HostedDiagnosticsExportFixture: View {
                         Button("Replace Mac") {
                             Task {
                                 try! model.profiles.save(replacement, token: "fixture-only-successor-token", selecting: false)
-                                // Auxiliary source reads must not open real sockets. The
-                                // fake original token is retired with its authority.
                                 try! store.delete(profileID: original.id)
                                 await model.switchGateway(replacement)
                             }
@@ -138,8 +134,6 @@ struct HostedDiagnosticsExportFixture: View {
                 }
             }
             if scenario == "local-held-failure" {
-                // The production artifact store must hit a real filesystem refusal,
-                // not an injected writer error, after its preparation is released.
                 try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
                 try! Data("fixture-not-a-directory".utf8).write(to: root.appending(path: "artifacts"))
             }

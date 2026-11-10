@@ -1,6 +1,5 @@
 import XCTest
 
-/// Production Appearance persistence and shared section anatomy through a native app process.
 @MainActor
 final class TronAppearanceBehaviorUITests: XCTestCase {
     func testThemeSelectionPersistsAcrossProcessRelaunch() {
@@ -63,8 +62,6 @@ final class TronAppearanceBehaviorUITests: XCTestCase {
         app.terminate()
     }
 
-    /// The three themes are one row of third-width tiles, each a 44pt+ target
-    /// that VoiceOver reads as the theme's name with only the chosen one selected.
     private func assertThemeRow(_ app: XCUIApplication, selected: String) {
         let themes = [("emerald", "Emerald"), ("burgundy", "Deep Burgundy"), ("oliveGold", "Olive Gold")]
         let tiles = themes.map { app.buttons["theme-color-\($0.0)"] }

@@ -1,7 +1,5 @@
 import Foundation
 
-/// Bounded handoff to the incident store. Producers never await disk or enqueue
-/// one Task per record; a stalled writer retains the newest records by occurrence.
 final class IOSDiagnosticMailbox: @unchecked Sendable {
     private let lock = NSLock()
     private var pending: [(GatewayProfileLogRecord, Int)] = []

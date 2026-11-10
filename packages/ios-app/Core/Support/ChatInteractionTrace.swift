@@ -1,16 +1,10 @@
 import Foundation
 import OSLog
 
-/// Privacy-safe, bounded causal evidence for intermittent chat opening and
-/// submission viewport failures. Records contain only closed event names,
-/// booleans, counts, generations, and geometry scalars—never protocol IDs,
-/// prompts, transcript text, paths, filenames, or model/provider names.
 package final class ChatInteractionTrace: @unchecked Sendable {
     package init() {}
     package static let maximumRecords = 256
 
-    /// Profile identity these records carry in the Logs surface, so the
-    /// diagnostic export can select exactly the trace it must always carry.
     package static let diagnosticProfileID = "ios-client:chat-trace"
 
     package enum OpeningStage: String, Sendable {
@@ -104,8 +98,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         case openingViewportDisplaced = "opening-viewport-displaced"
     }
 
-    /// Closed, content-free inputs explain a disabled control without logging
-    /// the command, draft, provider error, or canonical session identity.
     package struct Availability: Equatable, Sendable {
         var connected: Bool
         var reconciling: Bool
@@ -164,19 +156,14 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         var isPastBottomEdge: Bool?
         var tailClassification: ChatPhysicalTailClassification?
         var tailDisplacement: CGFloat?
-        /// Pending command publication and an already-applied native target are
-        /// separate leases and must never share one ambiguous diagnostic bit.
         var hasCommand: Bool?
         var hasAppliedTarget: Bool?
         var hasPendingRelease: Bool?
         var geometryRevision: Int?
         var semanticRevision: Int?
         var markerRevision: Int?
-        /// Signed physical row index relative to the installed terminal row;
-        /// this is not a transcript ordinal or an identity token.
         var requestedRowOffsetFromTerminal: Int?
         var nativeTailEvidence: Bool?
-        /// Local bounded identity ordinals, not IDs or reversible hashes.
         package var physicalRowToken: Int?
         package var semanticRowToken: Int?
 
@@ -224,8 +211,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         let message: String
     }
 
-    /// Composer availability is edge-triggered evidence, so an unchanged repeat
-    /// carries nothing a reader of the ring does not already have.
     private struct AvailabilityRecordSignature: Equatable {
         var context: Int
         var event: String
@@ -312,8 +297,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
             level: "info",
             event: blockedAction ? "composer.admission-blocked" : "composer.availability",
             details: values.joined(separator: " "),
-            // A blocked admission is one discrete user action; only the
-            // repeated availability sample is dropped when nothing changed.
             deduplicatingAvailability: !blockedAction
         )
     }
@@ -463,9 +446,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    /// Records classification edges from SwiftUI marker observations, not proof
-    /// of a painted frame. The caller excludes user-owned scrolling; ordinary
-    /// geometry stays thresholded while unexpected loss survives ring pressure.
     package func tailEdge(
         _ stage: TailEdgeStage,
         context: Int,
@@ -546,12 +526,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         )
         records.append(record)
         while records.count > Self.maximumRecords {
-            // Evict repetitive samples before causal lifecycle edges, and spend
-            // the availability samples before the geometry samples: a lost
-            // composer flag is re-derived by the next edge, while geometry is
-            // the only record of a viewport that displaced itself. Keep context
-            // starts, commands, failures, and warnings long enough to interpret
-            // the bounded suffix without retaining private content.
             let evictionIndex = records.firstIndex {
                 $0.level == "info" && $0.event == "chat.composer.availability"
             } ?? records.firstIndex {
@@ -610,9 +584,6 @@ package final class ChatInteractionTrace: @unchecked Sendable {
         if let value = state.nativeTailEvidence { values.append("tailEvidence=\(value ? "swiftui-marker" : "missing")") }
     }
 
-    /// At most 64 short identities are retained in memory, never exported.
-    /// Evicted identities get new ordinals rather than false continuity. Cost
-    /// does not scale with transcript history or streamed text.
     package func identityToken(_ value: String?) -> Int? {
         guard let value, !value.isEmpty, value.utf8.prefix(257).count <= 256 else { return nil }
         lock.lock()
@@ -709,9 +680,6 @@ package enum ChatInteractionAnomalyPolicy {
               geometry.isValid else { return false }
         let markerIsDisplaced = tailClassification == .aboveViewport
             || tailClassification == .belowViewport
-        // A short/empty transcript intentionally fills only the viewport above
-        // the composer inset. Its marker can differ by that exact inset while
-        // native bottom geometry remains correctly installed.
         if geometry.isNativeUnderflow,
            geometry.isAtCatchUpBoundary,
            !geometry.isPastBottomEdge {
@@ -723,8 +691,6 @@ package enum ChatInteractionAnomalyPolicy {
     }
 }
 
-/// Non-observable per-view bookkeeping keeps tracing from invalidating the
-/// transcript or participating in the layout race it is observing.
 @MainActor
 package final class ChatInteractionTraceLedger {
     package init() {}
@@ -756,8 +722,6 @@ package final class ChatInteractionTraceLedger {
     }
 
     package func retire() {
-        // Retain the ended context so late cancellation callbacks cannot create
-        // a second owner after the view has disappeared.
         isActive = false
         activeSubmissionToken = nil
     }

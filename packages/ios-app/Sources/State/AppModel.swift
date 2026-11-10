@@ -65,7 +65,6 @@ private struct GatewayUpdateAcknowledgement: Codable {
 }
 
 enum PushNavigationConnectionPolicy {
-    // Bound how long a user-initiated route waits to restore its live Gateway authority.
     static let readinessDeadline: Duration = .seconds(15)
 }
 
@@ -94,12 +93,7 @@ final class AppModel {
         let sessionID: String
         let editorText: String?
         let initialModel: ModelRef?
-        /// Optional exact history entry requested by an evidence citation. It
-        /// is route identity so a second citation cannot reuse a mounted chat.
         let initialHistoryEntryID: String?
-        /// The Home conversation's logical route. Its `sessionID` is the physical
-        /// chapter it currently opens; sends go through `home.prompt`, and the
-        /// route follows Home to the chapter Home names next.
         let isHome: Bool
         fileprivate let gatewayProfileID: String?
         fileprivate let gatewayLifecycleGeneration: Int?
@@ -110,8 +104,6 @@ final class AppModel {
             return [base, home, history].compactMap { $0 }.joined(separator: ":")
         }
 
-        /// Whether this route already shows `other`'s conversation: the same
-        /// Gateway profile and session, whatever its Home or history entry.
         func showsConversation(of other: SessionNavigationRoute) -> Bool {
             gatewayProfileID == other.gatewayProfileID && sessionID == other.sessionID
         }
@@ -174,7 +166,6 @@ final class AppModel {
         let connectionID: Int
     }
 
-    // Delay outage copy to suppress brief loss without delaying reconnect or read admission.
     private static let recoveryPresentationGrace: Duration = .seconds(2)
 
     private let lifecycle: GatewayLifecycleCoordinator
@@ -189,7 +180,6 @@ final class AppModel {
     let performanceSignposts: any PerformanceSignposting
     let appLog: AppLog
     var diagnosticConnectionID: Int? { gatewayConnectionID }
-    /// Backgrounding and socket replacement retire reads, not the form's Mac.
     var knowledgeDestinationIdentity: KnowledgeDestinationIdentity {
         KnowledgeDestinationIdentity(profileID: lifecycle.selectedProfileID,
                                      lifecycleGeneration: lifecycle.currentLifecycleGeneration)
@@ -213,49 +203,25 @@ final class AppModel {
     let installedApps: InstalledSwiftApps
     private let diagnostics: AppDiagnostics
     private let metricKitDiagnostics: IOSMetricKitDiagnostics?
-    /// Bounded, content-free causal trace for intermittent chat viewport and
-    /// opening failures. It is merged into Logs on demand and never persisted.
     let chatInteractionTrace: ChatInteractionTrace
     let chatMedia: ChatMediaLoader
     private let chatMediaMemoryPressureObserver: ChatMediaMemoryPressureObserver
 
     var connectionState: ConnectionState { lifecycle.connectionState }
-    /// False only while the first launch credential/connection decision is
-    /// unresolved. The UI must not infer "unpaired" from the temporary default.
     var hasResolvedLaunchState: Bool { lifecycle.hasResolvedLaunchState }
     var gatewayInfo: GatewayInfo? { lifecycle.gatewayInfo }
-    /// Disposable transport identity for presentation attempts; never command authority.
     var gatewayConnectionID: Int? { lifecycle.connectionID }
     private var sessionCatalog = SessionCatalogCoordinator()
     private let dashboardConnections: DashboardGatewayConnectionPool
     let automationCatalog: AutomationCatalogCoordinator
-    /// Focused-profile, disposable Home status; never a mirror of Home storage.
     let homeStatus = HomeStatusPresentationOwner()
-    /// Mac Terminal's shells outlive its sheet (#1075), so their controller is
-    /// app-scoped; the shells themselves live on the Mac.
     let macTerminal = MacTerminalController()
-    /// Owns idempotent Home designation receipts independently of dashboard reads.
     let homeMutations: HomeMutationCoordinator
-    /// Read-side projections and owner-routed connection-instance mutations.
     private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
     private var dashboardStatesByProfile: [String: DashboardServerConnectionState] = [:]
-    /// Gateway-owned archived-session counts, one per profile whose count is
-    /// known. Absent means unknown, which is never presented as zero.
     private var dashboardArchivedCountsByProfile: [String: Int] = [:]
-    /// The message of the non-retryable failure that stopped one background
-    /// profile, keyed by profile. The pool's entry owns the fact; this holds the
-    /// last one it published so a device detail can show why that profile is
-    /// offline for any profile, not only the selected one (F-3).
     private var dashboardStopReasonsByProfile: [String: String] = [:]
-    /// Advances when a Gateway's archive projection changes: an authoritative
-    /// dashboard page for the focused profile, or a background profile's own
-    /// authoritative page or retired connection. The archived container is its
-    /// only consumer, and it refreshes from this rather than from the
-    /// dashboard's summary stream.
     private(set) var archiveProjectionRevision = 0
-    /// Per-profile, per-surface latest-request fences for archived reads. A
-    /// container pass and the automation form's target lookup never retire each
-    /// other's read.
     private var archivedSessionsReadGenerations: [SessionArchiveReadKey: Int] = [:]
     private var dashboardCacheLoadGeneration = 0
     var sessions: [SessionSummary] {
@@ -271,16 +237,12 @@ final class AppModel {
     var packageInvalidationGeneration: Int { packageConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
     var pairedDevices: [PairedDevice] = []
-    // Invalidates surface-owned device reads without blocking control-event intake.
     var deviceCatalogRevision = 0
-    /// Invalidates the MCP server surface when an `mcp.json` changes, from Tron or outside it.
     var mcpConfigurationRevision = 0
     let notificationInbox: NotificationInboxCoordinator
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
-    /// Lease-scoped invalidation for a mounted read-only subagent transcript.
-    /// This does not participate in the parent session event cursor.
     private var processTranscriptInvalidationSinks: [UUID: (ProcessTranscriptChanged) -> Void] = [:]
     var actionablePushNavigationRequest: PushNavigationRequest? {
         guard didStart, sceneAllowsCatalogRefresh, pushNavigationActivationReady else { return nil }
@@ -290,8 +252,6 @@ final class AppModel {
     private var pushNavigationActivationGeneration = 0
     private var pushNavigationActivationReady = false
     private var didStart = false
-    /// GatewayProfileStore owns transactional persistence; this revision makes
-    /// profile metadata changes observable to SwiftUI without duplicating it.
     private(set) var profileRevision = 0
     private(set) var dashboardPresentationRevision = 0
     var workspace: WorkspaceListing?
@@ -324,23 +284,14 @@ final class AppModel {
     var sessionTree: [SessionTreeNode] { sessionPresentation.sessionTree }
     var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
     var transcriptLoadState: SessionTranscriptLoadState { sessionPresentation.transcriptLoadState }
-    /// Foreground reconciliation is an aggregate install, not a live insertion
-    /// stream; mounted chats use this fact to suppress entrance replay. The
-    /// generation remains stable until its first aggregate projection installs,
-    /// even if the network task finishes before projection preparation does.
     private(set) var isReconcilingForeground = false
     private(set) var foregroundReconciliationGeneration = 0
     private var reconciliationAggregateAdmission: GatewayLifecycleCoordinator.Admission?
-    /// Advances only after an admitted Gateway projection is ready for bounded
-    /// on-demand diagnostics such as Logs. Views key refresh work to completion,
-    /// never raw scene activation, a transient connected state, or reconciliation start.
     private(set) var diagnosticsReadinessGeneration = 0
     private(set) var diagnosticsAreReady = false
     var commands: [CommandInfo] { sessionPresentation.commands }
     var commandCatalogTarget: SessionPresentationIdentity? { sessionPresentation.commandCatalogTarget }
     var resources: JSONValue? { sessionPresentation.resources }
-    /// Keeps the root setup sheet from reacting to the transient connection
-    /// state used while the Connections sheet adds a secondary server.
     var isAddingServer = false
     var setupComplete: Bool {
         get { UserDefaults.standard.bool(forKey: "tronSetupComplete.v1") }
@@ -348,9 +299,6 @@ final class AppModel {
     }
 
     private var eventTask: Task<Void, Never>?
-    // Notification invalidations are optional projection work. Keep one pass and
-    // one pending bit per profile so an inbox read cannot hold the serial event
-    // consumer or fan out one task per burst.
     private var extensionEditorSyncTasks: [SessionPresentationIdentity: Task<Void, Never>] = [:]
     private var extensionEditorPendingText: [SessionPresentationIdentity: String] = [:]
     private var extensionEditorPendingRevisions: [SessionPresentationIdentity: Int] = [:]
@@ -435,8 +383,6 @@ final class AppModel {
     private var sceneAllowsCatalogRefresh = true
     private var cacheCheckpointTask: Task<Void, Never>?
     private var cacheCheckpointTaskGeneration = 0
-    /// Present only while a trailing summary checkpoint waits for its window
-    /// and no save is draining; `startCacheCheckpointDrain` retires it.
     private var cacheCheckpointDelayTask: Task<Void, Never>?
     private var cacheCheckpointDelayGeneration = 0
     private var cacheCheckpointGeneration = 0
@@ -446,8 +392,6 @@ final class AppModel {
     private var recoveryDisplayProfileID: String?
     private var recoveryDisplayTask: Task<Void, Never>?
     private var recoveryDisplayNoticeEpisode: Int?
-    /// The recovery notice text this episode last posted. The title status carries
-    /// the lasting reason; a notice is posted again only when its text changes (#2273).
     private var recoveryDisplayNoticeText: [String]?
 #if HOSTED_TEST
     var hostedDisplayArtifactFile: (@Sendable (String, String, String, Int, Int64) async throws -> URL)?
@@ -464,13 +408,7 @@ final class AppModel {
     #endif
 
     @ObservationIgnored private var recordedSceneTransition: AppScenePhase = .active
-    /// Whether `recordedSceneTransition` came from a real transition. The launch
-    /// seed may only fill in the scene's starting point while nothing has moved:
-    /// a transition that arrived during startup is newer than the phase the
-    /// launch sampled, and overwriting it would suppress the next record.
     @ObservationIgnored private var hasRecordedSceneTransition = false
-    /// Scene records are chained so their order in the log is the order the
-    /// scene moved, not the order three tasks happened to reach the log actor.
     @ObservationIgnored private var sceneRecordTask: Task<Void, Never>?
 
     init(
@@ -615,8 +553,6 @@ final class AppModel {
                     capabilities = Set(lifecycle.gatewayInfo?.capabilities ?? [])
                 } else {
                     state = dashboardConnections.state(for: profile.id) ?? .stale
-                    // Only an authenticated, identity-checked pool handshake may
-                    // advertise a background Gateway capability.
                     capabilities = Set(dashboardConnections.infoSnapshot(for: profile.id)?.capabilities ?? [])
                 }
                 let connectionID = profile.id == lifecycle.selectedProfileID
@@ -745,11 +681,6 @@ final class AppModel {
     }
 }
 
-// Behavior lives in this extension, not the class body: @Observable expands its
-// member-attribute macro once per class member, and each expansion carries the
-// whole class body, so every compile job that references AppModel paid ~2 s
-// while the 5,000-line implementation sat inside it (#1066). Stored properties
-// and the designated initializer must stay in the class.
 extension AppModel {
     func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
         sessionPresentation.authoritativeSnapshot(for: sessionID)
@@ -806,8 +737,6 @@ extension AppModel {
         try await client.openLiveView(kind: kind, viewId: viewId, generation: generation, sessionID: sessionID, profileID: profileID)
     }
 
-    /// Readonly selection belongs to the destination, not foreground read
-    /// admission. Fetch/preparation still uses chatMediaIdentity and its loader.
     func chatMediaDestinationIdentity(blobID: String, sessionID: String? = nil) -> ChatMediaIdentity? {
         guard let profileID = lifecycle.selectedProfileID else { return nil }
         return ChatMediaIdentity(profileID: profileID, lifecycleGeneration: lifecycle.currentLifecycleGeneration,
@@ -936,10 +865,6 @@ extension AppModel {
         sessionPresentation.owns(target)
     }
 
-    /// Ordinary live commands require exact mounted authority. Stop deliberately
-    /// bypasses this presentation gate: its route session ID and optional
-    /// operation ID are fenced again by the Gateway, and the confirmed executor
-    /// can carry that escape hatch through a short transport handoff.
     func hasMountedSessionAuthority(_ target: SessionPresentationTarget) -> Bool {
         SessionMountedAuthorityPolicy.admits(
             ownsPresentation: ownsPresentation(target),
@@ -949,23 +874,17 @@ extension AppModel {
         )
     }
 
-    /// Upload staging needs live mounted authority, not prompt/scroll readiness.
-    /// Accepted uploads remain with the draft coordinator across UI coverage.
     func admitsLiveSessionUploads(_ target: SessionPresentationTarget) -> Bool {
         connectionState == .connected
             && !isReconcilingForeground
             && hasMountedSessionAuthority(target)
     }
 
-    /// Commands additionally respect the current serialized command owner.
     func admitsLiveSessionCommands(_ target: SessionPresentationTarget) -> Bool {
         guard connectionState == .connected,
               !isReconcilingForeground,
               hasMountedSessionAuthority(target),
               let snapshot = authoritativeSnapshot(for: target.sessionID) else { return false }
-        // Extension interactions remain independently answerable, but another
-        // composer mutation must not queue invisibly behind a command handler
-        // that is running or waiting for input on the serialized session lane.
         return !snapshot.transcript.contains { item in
             guard item.semantic?.kind == .command else { return false }
             switch item.semantic?.lifecycle {
@@ -1002,18 +921,10 @@ extension AppModel {
     }
 
     var admitsSessionPresentationOpen: Bool {
-        // A new authoritative open is itself a projection-recovery operation.
-        // Once the replacement transport is active it must not wait behind
-        // unrelated mounted/catalog reconciliation from the prior epoch.
         connectionState == .connected
             && lifecycle.admission?.connectionID != nil
     }
 
-    /// Whether the selected Mac's missing transport has outlived the recovery
-    /// grace. The app-scoped recovery episode is the one owner of that decision;
-    /// a mounted chat reads it rather than raw admission, so the reconnect every
-    /// foreground performs after background retirement is not shown as an
-    /// outage (#878).
     var isConnectionRecoveryVisible: Bool { recoveryDisplayNoticeEpisode != nil }
 
     func sessionContextRevision(for sessionID: String) -> Int {
@@ -1032,8 +943,6 @@ extension AppModel {
         providerAuth.catalog(for: target)
     }
 
-    /// Gateway-recorded recently used models for the active profile. The picker
-    /// projects them; the Gateway owns the history.
     var recentModels: [RecentModelRef] { providerAuth.recentModels }
 
     func refreshRecentModels() async {
@@ -1044,9 +953,6 @@ extension AppModel {
         providerAuth.preferredAvailableModel(for: target)
     }
 
-    /// Explicit user retry clears a nonretryable stop only for the selected or
-    /// secondary profile. Accepted domain mutations and receipts never use this
-    /// transport control.
     func retryGatewayConnection(for profile: GatewayProfile) {
         guard profiles.profiles.contains(where: { $0.id == profile.id }) else { return }
         if profiles.selected?.id == profile.id {
@@ -1062,19 +968,10 @@ extension AppModel {
         }
     }
 
-    /// A workspace read that failed because the transport was unavailable asks
-    /// recovery for one immediate attempt on the selected profile. The scene did
-    /// not move, so this is not a scene activation: it writes no scene record,
-    /// mints no navigation activation, and runs no foreground reconciliation. It
-    /// only revives recovery the lifecycle already owns: a parked
-    /// `offline`/`reconnecting`/`restarting` route. A rejected credential, a
-    /// connecting route and a live connection are left exactly as they are, so a
-    /// failed read can never change reconnect behaviour.
     func recoverTransientTransportFailure() {
         lifecycle.requestTransportRecovery()
     }
 
-    /// Last authenticated success of a secondary profile, never a guessed last-seen time.
     func dashboardLastConnectedAt(for profileID: String) -> Date? {
         _ = profileRevision
         guard profiles.profiles.contains(where: { $0.id == profileID }) else { return nil }
@@ -1082,7 +979,6 @@ extension AppModel {
         return dashboardConnections.lastConnectedAt(for: profileID)
     }
 
-    /// A selected profile's stop belongs to its lifecycle; a secondary stop belongs to its pool.
     func dashboardConnectionStopReason(for profileID: String) -> String? {
         _ = profileRevision
         guard let profile = profiles.profiles.first(where: { $0.id == profileID }) else { return nil }
@@ -1141,9 +1037,6 @@ extension AppModel {
         return SessionSummary.orderedForDashboard(SessionSummary.dashboardSessions(values))
     }
 
-    /// Archived-session count across archive-capable profiles. `nil` until a
-    /// capable profile publishes a count, so a partially visible dashboard
-    /// never claims a fabricated zero.
     var archivedSessionCount: Int? {
         _ = profileRevision
         let capableProfileIDs = Set(profiles.profiles.map(\.id)).filter { supportsSessionArchive(profileID: $0) }
@@ -1153,9 +1046,6 @@ extension AppModel {
         )
     }
 
-    /// Archive controls stay hidden unless the owning Gateway advertises the
-    /// contract. Only a live handshake counts; neither the cache nor a paired
-    /// profile's stored metadata is evidence of support.
     func supportsSessionArchive(profileID: String?) -> Bool {
         guard let profileID else { return false }
         let capabilities = profileID == lifecycle.selectedProfileID
@@ -1164,15 +1054,6 @@ extension AppModel {
         return capabilities?.contains(SessionArchiveCapability.name) == true
     }
 
-    /// One bounded page of a profile's archived sessions for the dashboard's
-    /// archived container. The dashboard bucket excludes archived rows by
-    /// contract, so this read is their only authority. It is a disposable
-    /// presentation read: no state is mutated before the response, and the
-    /// caller's managed activity plus this owner's exact latest-request fence
-    /// (one per purpose) are rechecked after the await, so a page that a newer
-    /// archive toggle or a surface exit already invalidated returns `.retired`
-    /// instead of rows. Every admitted row is qualified by the Gateway that owns
-    /// it, because two servers can own equal session IDs.
     func loadArchivedSessions(
         profileID: String,
         cursor: String?,
@@ -1241,13 +1122,6 @@ extension AppModel {
         ))
     }
 
-    /// Names a session the dashboard projection cannot: an archived row is
-    /// excluded from it by contract, so an automation that targets one would
-    /// otherwise show an empty target. The name comes only from the owning
-    /// Gateway's archived projection, bounded to the newest `maximumPages`
-    /// pages, and it carries the caller's real presentation activity; callers
-    /// re-check their own generation after this read before publishing the
-    /// name.
     func archivedSessionSummary(
         profileID: String,
         sessionID: String,
@@ -1273,9 +1147,6 @@ extension AppModel {
         return nil
     }
 
-    /// Invalidates in-flight archived reads for one profile. An archive toggle
-    /// or a deletion must never be overwritten by a page already in flight, and
-    /// any surface's read can be stale, so this retires all of them.
     func invalidateArchivedSessionsReads(profileID: String?) {
         guard let profileID else { return }
         for purpose in SessionArchiveReadPurpose.allCases {
@@ -1308,9 +1179,6 @@ extension AppModel {
         selectedSessions: [SessionSummary],
         buckets: [String: [SessionSummary]]
     ) -> [SessionSummary] {
-        // A selected profile without an installed bucket is still authoritative;
-        // retain background buckets without letting them hide its rows. Merge by
-        // source-qualified dashboard identity so equal session IDs stay distinct.
         guard let selectedProfileID, buckets[selectedProfileID] == nil else {
             return buckets.values.flatMap { $0 }.isEmpty ? selectedSessions : buckets.values.flatMap { $0 }
         }
@@ -1395,11 +1263,7 @@ extension AppModel {
 
     private func postRecoveryNotice() {
         let title = lifecycle.noPathPresentation?.label ?? "Gateway connection unavailable"
-        // App-scoped recovery may appear during a first open, before
-        // this route ever received a transcript. Do not promise retention.
         let message = "Retry Connection and Logs are available in Settings."
-        // A changed failure classification can repeat the same words; an identical
-        // notice would only cover the title's Retry again after the first expired.
         guard recoveryDisplayNoticeText != [title, message] else { return }
         recoveryDisplayNoticeText = [title, message]
         noticeCenter.post(
@@ -1468,12 +1332,6 @@ extension AppModel {
     }
 
     func start(scenePhase: AppScenePhase = .active) async {
-        // The launch phase is the scene's real starting point: a cold launch into
-        // the background must not later report `from=active`, and a backgrounded
-        // launch must not be labelled a foreground transition. Seed it before
-        // the first await, so a scene change during startup cannot be overwritten
-        // by the phase the launch sampled, and only while the scene has not
-        // moved yet.
         seedLaunchScenePhase(scenePhase)
         await client.installAppLog(appLog)
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
@@ -1494,8 +1352,6 @@ extension AppModel {
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
         noticeCenter.setBackgrounded(true)
-        // The app switcher can terminate an inactive scene without a background
-        // transition, so a trailing catalog checkpoint is written now.
         startCacheCheckpointDrain()
     }
 
@@ -1510,9 +1366,6 @@ extension AppModel {
         let requiresRetirementBarrier = lifecycle.routeActivationRequiresRetirementBarrier
         let lifecycleTask = lifecycle.becameActive()
         return Task { @MainActor [weak self] in
-            // A true background transition must first finish retiring the old
-            // socket; an inactive/active transition already has a safe route
-            // transport and must not wait for full foreground reconciliation.
             if requiresRetirementBarrier, let lifecycleTask { await lifecycleTask.value }
             guard let self else { return }
             guard self.sceneAllowsCatalogRefresh,
@@ -1525,9 +1378,6 @@ extension AppModel {
         }
     }
 
-    /// The app's scene phase. One type names the phase a scene record moved `from`
-    /// and the phase it moved to, including the launch phase, which the scene
-    /// reports through its first callback rather than through a transition.
     enum AppScenePhase: String, Sendable {
         case active
         case inactive
@@ -1536,28 +1386,14 @@ extension AppModel {
         var isActive: Bool { self == .active }
     }
 
-    /// Records the scene's own transitions once, at the instant each happened.
-    /// `.inactive` arriving from `.background` is the scene re-entering the
-    /// foreground, not the app backgrounding; recording that as
-    /// `app.backgrounded` is why exports showed a background immediately before
-    /// a resume. The scene timestamp travels with the record because the log's
-    /// own write time can trail the transition.
-    /// Seeds the scene's starting point from the phase the launch observed,
-    /// writing no record: the launch phase is where the scene starts, not a
-    /// transition. A transition that already happened wins over the seed.
     private func seedLaunchScenePhase(_ phase: AppScenePhase) {
         guard !hasRecordedSceneTransition else { return }
         recordedSceneTransition = phase
-        // Scene callbacks also own admission. Seed it before startup suspends,
-        // and never overwrite a transition that already won the launch seed.
         sceneAllowsCatalogRefresh = phase.isActive
         pushNavigationActivationReady = phase.isActive
     }
 
     private func recordSceneTransition(to transition: AppScenePhase, flush: Bool = false) {
-        // Every observed transition spends the launch seed, including one that
-        // matches the phase already recorded: the scene has moved on its own, so
-        // the phase the launch sampled is stale and must not overwrite it.
         hasRecordedSceneTransition = true
         guard transition != recordedSceneTransition else { return }
         let previous = recordedSceneTransition
@@ -1596,25 +1432,14 @@ extension AppModel {
         reconciliationAggregateAdmission = nil
         isReconcilingForeground = false
         dashboardConnections.retire()
-        // The canonical session may still be running on the Gateway, but this
-        // mobile projection is intentionally retiring its transport lease.
         sessionCatalog.markDisconnected()
         let draftCheckpoint = composerDrafts.checkpointDrafts()
         lifecycle.enteredBackground()
-        // A backgrounded scene is not an outage, and a grace that elapsed while
-        // suspended must not surface the instant the scene returns.
         finishRecoveryDisplayEpisode()
-        // Intervals still open when the scene retires end as `backgrounded`, not
-        // as the failure their eventual cancellation would otherwise report.
         performanceSignposts.endOpenIntervalsAtBackground()
         catalogInvalidationGeneration &+= 1
         cancelCatalogRefresh()
-        // Provider login is stable-device-owned on the Gateway. Retire only
-        // this transport delivery epoch and retain the operation for auth.resume.
         providerAuth.retireConnection()
-        // Summary checkpoints trail their burst; write the pending one inside
-        // the same background assertion so a later cold start restores today's
-        // rows. Expiration cancels both writes.
         guard let cacheCheckpoint = startCacheCheckpointDrain() else { return draftCheckpoint }
         return Task { @MainActor in
             await withTaskCancellationHandler {
@@ -1635,10 +1460,6 @@ extension AppModel {
                 name: "pairing.result", outcome: "failure", level: "warning",
                 details: "code=\((error as? GatewayFailure)?.code ?? "unknown")"
             )
-            // The credential commit can succeed immediately before a later
-            // handshake/projection failure. Reconcile the old pool even when
-            // pairing reports failure so two same-machine profiles never stay
-            // live after a partial selection transition.
             profileRevision &+= 1
             reconcileDashboardConnections()
             throw error
@@ -1674,9 +1495,6 @@ extension AppModel {
     }
 
     private func clearGatewayProjection() {
-        // Preserve the focused catalog as a bounded stale dashboard bucket
-        // before clearing the live projection. Selecting another server must
-        // not make the previous server's sessions disappear from All servers.
         clearLiveConnectionProjection()
         sessionCatalog.clear()
         sessionPresentation.clearProfile()
@@ -1692,10 +1510,6 @@ extension AppModel {
     }
 
     func switchGateway(_ profile: GatewayProfile) async {
-        // Keep the target's last bounded dashboard bucket while its focused
-        // connection transitions. The authoritative catalog replaces it after
-        // the switch; deleting it here exposes an avoidable empty/reordered
-        // projection beneath translucent sheets.
         await lifecycle.switchGateway(profile)
         profileRevision &+= 1
         reconcileDashboardConnections()
@@ -1722,8 +1536,6 @@ extension AppModel {
         setGatewayEnabled(false, profile: profile)
     }
 
-    /// Disposable per-Gateway projections retire with the Gateway itself, and so
-    /// does the profile's pending Home receipt: its Gateway can no longer be checked.
     private func forgetProfileCaches(_ profileID: String) async {
         homeMutations.forgetProfile(profileID)
         await composerDrafts.removeProfile(profileID).value
@@ -1926,16 +1738,6 @@ extension AppModel {
                 self.catalogRefreshTask = nil
                 self.catalogRefreshKey = nil
                 if self.currentCatalogLoadKey() == key {
-                    // A deferred follow-up means a newer invalidation arrived
-                    // while the final traversal was still reading — an archive,
-                    // rename, delete, or any other list change. That traversal
-                    // can therefore have been retired by the very change it was
-                    // meant to publish, so its page never became the catalog.
-                    // Honor the follow-up whenever the lease ended without a
-                    // genuine failure; after a failure the retry path below owns
-                    // the next attempt. The flag is only set by an invalidation
-                    // that arrived during that final traversal, so this bounded
-                    // catch-up cannot spin.
                     if needsFollowUp && !result.genuineFailure {
                         _ = self.startCatalogRefresh(key: key, trigger: "invalidation-follow-up")
                     } else {
@@ -1944,10 +1746,6 @@ extension AppModel {
                             self.catalogFailureNoticeOwner = nil
                             self.removeNotice(.sessionCatalogCatchUp, scope: .app)
                         } else if result.genuineFailure {
-                            // Only a current-owner request failure consumes the
-                            // warning budget. Stale admission, cancellation,
-                            // and revision churn intentionally retain the last
-                            // complete projection without surfacing a warning.
                             self.catalogRefreshFailedAttempts = min(
                                 DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures,
                                 self.catalogRefreshFailedAttempts + 1
@@ -1959,11 +1757,6 @@ extension AppModel {
                             self.catalogFailureNoticeOwner = key
                             self.showCatalogFailure(ownedBy: key, result: result)
                         }
-                        // A catalog that moved during both bounded traversal
-                        // attempts is expected convergence churn, not a
-                        // request failure. Leave it retained and wait for the
-                        // next authoritative list-change event rather than
-                        // creating an unbounded self-refresh loop.
                         guard result.genuineFailure,
                               DashboardCatalogRetryPolicy.shouldRetry(
                                   isRetryableFailure: result.retryableFailure,
@@ -2031,9 +1824,6 @@ extension AppModel {
             let dirtied = catalogInvalidationGeneration > observedInvalidation
             guard dirtied else { return result }
             if traversal == 1 {
-                // Bound immediate catch-up under an event burst. Completion
-                // hands one dirty bit to a new shared lease rather than
-                // spinning forever inside this owner.
                 catalogDeferredFollowUpKey = key
                 return result
             }
@@ -2070,8 +1860,6 @@ extension AppModel {
                 }
                 reconcileSelection()
                 installSelectedDashboardCatalog()
-                // An authoritative page is the archive projection's own list
-                // change, so the archived container re-reads from here.
                 archiveProjectionRevision &+= 1
                 scheduleCacheCheckpoint()
                 return CatalogTraversalResult(
@@ -2081,15 +1869,6 @@ extension AppModel {
                     revision: revision
                 )
             case let .unchanged(revision):
-                // The Gateway confirmed these rows. Nothing is republished, so
-                // selection, scroll and chat identity are untouched; the
-                // traversal still counts as a complete authoritative read.
-                // A confirmation that revives a retired projection must still
-                // rebuild the dashboard's row snapshot: the view derives a
-                // row's activity from the catalog's liveness, so a snapshot
-                // taken while the projection was retired has every non-idle
-                // row reading "resuming". A page read rebuilds it, and this
-                // answer does the same without touching the rows themselves.
                 let wasLive = sessionCatalog.freshness == .live
                 guard sessionCatalog.confirmUnchanged(admission: admission) else {
                     return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
@@ -2212,8 +1991,6 @@ extension AppModel {
     func refreshDevices() async {
         struct Response: Decodable { let devices: [PairedDevice] }
         guard !Task.isCancelled else { return }
-        // Advance the read owner before the first suspension. A newer read may
-        // enter while the client actor supplies the captured epoch.
         deviceLoadGeneration &+= 1
         let generation = deviceLoadGeneration
         let connection = await client.activeConnectionAdmission()
@@ -2250,8 +2027,6 @@ extension AppModel {
     }
 
     func loadGatewayUpdateConfig(for profile: GatewayProfile) async -> GatewayUpdateConfig? {
-        // Update metadata is control-plane state. Never reading it may change
-        // the focused chat server; the user must explicitly choose this server.
         guard profiles.selected?.id == profile.id,
               let admission = lifecycle.generationAdmission else { return nil }
         do {
@@ -2318,8 +2093,6 @@ extension AppModel {
     }
 
     func loadGatewayUpdateStatus(for profile: GatewayProfile) async -> GatewayUpdateStatus? {
-        // See loadGatewayUpdateConfig: status reads must not retarget the
-        // focused profile as a side effect.
         guard profiles.selected?.id == profile.id,
               let admission = lifecycle.generationAdmission else { return nil }
         do {
@@ -2412,10 +2185,6 @@ extension AppModel {
             }
             try acknowledgement.require(commandID: commandID)
             try requireLifecycle(admission)
-            // The helper acknowledgement only means the detached updater was
-            // admitted. Enter restarting when the Gateway emits
-            // system.stopping, so an accepted update cannot make iOS look
-            // offline while the old process is still serving sessions.
             postNotice("Gateway update accepted. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .standard, priority: .low)
             return commandID
         } catch {
@@ -2460,8 +2229,6 @@ extension AppModel {
         capabilities.contains("mac-replace.v1")
     }
 
-    /// Disposable read of the Mac replacement journal (#984); nil when this
-    /// Gateway cannot project one or the focused profile changed.
     func loadMacReplacementStatus(for profile: GatewayProfile) async -> MacReplacementStatus? {
         guard profiles.selected?.id == profile.id, connectionState == .connected,
               Self.supportsMacReplacement(capabilities: gatewayInfo?.capabilities ?? []),
@@ -2476,8 +2243,6 @@ extension AppModel {
         }
     }
 
-    /// The path a replacement would take now, and why. Errors (no source
-    /// repository, unreadable checkout) come back as the unavailable reason.
     func loadMacReplacementPlan(for profile: GatewayProfile) async -> Result<MacReplacementPlan, GatewayFailure>? {
         guard profiles.selected?.id == profile.id, connectionState == .connected,
               Self.supportsMacReplacement(capabilities: gatewayInfo?.capabilities ?? []),
@@ -2517,7 +2282,6 @@ extension AppModel {
         }
     }
 
-    /// Resume one worker the replacement stopped, in place on its own session.
     func resumeMacReplacementWorker(for profile: GatewayProfile, operationID: String, taskID: String) async -> Bool {
         guard profiles.selected?.id == profile.id,
               let admission = lifecycle.generationAdmission else { return false }
@@ -2559,18 +2323,12 @@ extension AppModel {
         try await diagnostics.writeLocalDiagnosticArtifact(text)
     }
 
-    /// Aggregate device read across every configured profile. Cancellation is
-    /// propagated instead of surfacing as an empty or truncated list, so a
-    /// suspended read can never replace the published list with partial data.
-    /// A profile whose device list genuinely cannot be read is still skipped.
     func loadAuthorizedDevices() async throws -> [GatewayAuthorizedDevice] {
         guard !Task.isCancelled else { throw CancellationError() }
         let profileSnapshot = profiles.profiles
         let selectedID = profiles.selected?.id
         if selectedID != nil {
             await refreshDevices()
-            // The selected profile changed while its authoritative list was
-            // loading, so this read no longer describes the requested identity.
             guard profiles.selected?.id == selectedID else { throw CancellationError() }
         }
 
@@ -2827,13 +2585,11 @@ extension AppModel {
     func ownsNavigationRoute(_ route: SessionNavigationRoute) -> Bool {
         switch (route.gatewayProfileID, route.gatewayLifecycleGeneration) {
         case (nil, nil):
-            // Bounded hosted/local routes have no transport owner.
             return true
         case let (gatewayProfileID?, generation?):
             return profiles.selected?.id == gatewayProfileID
                 && lifecycle.admits(.init(generation: generation, connectionID: nil))
         default:
-            // Partial ownership metadata is never a valid navigation grant.
             return false
         }
     }
@@ -2850,14 +2606,10 @@ extension AppModel {
         for profile in enabled { await scheduleNotificationInboxRefresh(profile: profile).value }
     }
 
-    /// The chat a notification belongs to, named as the dashboard names it; nil
-    /// when that chat is not in the profile's loaded catalog (Home, archived, or
-    /// not loaded yet).
     func notificationSessionTitle(profileID: String, sessionID: String) -> String? {
         dashboardSessionsByProfile[profileID]?.first { $0.id == sessionID }?.title
     }
 
-    /// Inbox rows name their Gateway only when more than one Mac feeds the inbox.
     var notificationInboxSpansMultipleGateways: Bool { notificationInboxProfiles().count > 1 }
 
     func loadMoreNotificationHistory(profileID: String, filter: NotificationInboxFilter) async {
@@ -2895,7 +2647,6 @@ extension AppModel {
             }
             return page
         }
-        // The history moved under the loaded window; the refresh merge owns repair.
         if needsRefresh { scheduleNotificationInboxRefresh(profile: profile) }
     }
 
@@ -2955,7 +2706,6 @@ extension AppModel {
             }
             await scheduleNotificationInboxRefresh(profile: profile).value
         } catch {
-            // Push navigation remains useful even if read-state reconciliation is temporarily offline.
         }
     }
 
@@ -2987,8 +2737,6 @@ extension AppModel {
         guard profiles.selected?.id == selectedProfileID,
               profiles.profiles.first(where: { $0.id == profile.id }) == profile else { return }
         do {
-            // Both server windows refresh together: `all` is the shared row
-            // source and `unread` is the only source for the Unread filter.
             func page(_ filter: NotificationInboxFilter) async throws -> NotificationInboxGatewayClient.Snapshot {
                 usesSelectedClient
                     ? try await NotificationInboxGatewayClient.list(
@@ -3018,10 +2766,6 @@ extension AppModel {
                 generation: generation
             )
         } catch {
-            // The inbox keeps its last rows. An offline Gateway is the app-global
-            // reconnect notice's to present, and its reconnect (or the next
-            // `notification.inbox.changed`) schedules the next read; the
-            // refresh owner clears this generation's loading flag.
         }
     }
 
@@ -3087,9 +2831,6 @@ extension AppModel {
         )
     }
 
-    /// Opens an authoritative session returned by an Automation run. The
-    /// profile is part of the route identity because the same session ID may
-    /// exist on multiple Gateways; no dashboard cache lookup is used here.
     func navigationRoute(profileID: String, sessionID: String, historyEntryID: String? = nil) async throws -> SessionNavigationRoute {
         let owner = try await activateDashboardProfile(profileID)
         guard !sessionID.isEmpty else { throw CancellationError() }
@@ -3115,9 +2856,6 @@ extension AppModel {
         guard didStart, sceneAllowsCatalogRefresh, pushNavigationActivationReady else {
             throw CancellationError()
         }
-        // A selected profile may already be publishing its replacement socket
-        // after foreground activation. Join that handoff; switching the same
-        // profile would cancel the useful reconnect and start a second one.
         if profiles.selected?.id != profile.id {
             await switchGateway(profile)
         }
@@ -3136,8 +2874,6 @@ extension AppModel {
                 details: nil
             )
         }
-        // The payload carries the admitted canonical identity; `session.open`, not a paginated
-        // dashboard catalog, checks it. Home's chapter opens Home itself, by the Gateway's own status.
         acknowledgePushNavigation(tap)
         let home = try await (lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true ? HomeStatusDTO.decode(lifecycle.client.requestValue(
             "home.status", JSONValue.object([:]), expectedConnection: GatewayConnectionAdmission(connectionID: routeAdmission.connectionID))) : nil)
@@ -3164,8 +2900,6 @@ extension AppModel {
         return try await performOnGateway(owner, operation: operation)
     }
 
-    /// The same ownership guarantee for a caller that addresses a session by ID
-    /// on a named profile instead of carrying its dashboard row.
     private func performOnOwningGateway<Value>(
         profileID: String?,
         operation: @escaping @MainActor () async throws -> Value
@@ -3218,16 +2952,12 @@ extension AppModel {
         #if HOSTED_TEST
         await hostedAfterSessionCreateResult?()
         #endif
-        // The receipt owner returned typed success. Background/socket retirement
-        // suspends navigation, not the original profile's accepted create result.
         try Task.checkCancellation()
         guard lifecycle.currentLifecycleGeneration == admission.generation,
               profiles.selected?.id == profileID else { throw CancellationError() }
         guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
         defaultWorkspace = cwd
         UserDefaults.standard.set(cwd, forKey: "defaultWorkspace.v1")
-        // Creation is authoritative before the dashboard catalog's next list
-        // traversal. Reconcile in the shared lease without delaying navigation.
         scheduleSessionListRefresh()
         return SessionNavigationRoute(
             sessionID: sessionID,
@@ -3237,17 +2967,10 @@ extension AppModel {
         )
     }
 
-    /// Starts a new mounted chat presentation. Unlike reconnect synchronization,
-    /// this always installs a fresh authoritative bounded tail and never carries
-    /// an explicitly paged prefix across navigation lifetimes.
     func openSessionPresentation(
         _ id: String,
         composerScope suppliedScope: ComposerDraftScope? = nil
     ) async throws -> Int {
-        // A foreground scene can become active before background transport
-        // retirement and reconnect have published their replacement socket.
-        // Never start session.open against that target-free interval, even if
-        // the last public connection state still reads as connected.
         guard let admission = lifecycle.admission,
               admission.connectionID != nil,
               let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
@@ -3279,10 +3002,6 @@ extension AppModel {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            // The presentation owner rewords a typed open failure as its own
-            // `sync_failed`, so this record carries both: the phone-side wording
-            // in `code`, and `gatewayCode` for what the Gateway itself answered
-            // (`conflict`, `busy`, …) when it answered at all.
             await appLog.recordCausal(
                 name: "session.open.failure", outcome: "failure",
                 profileID: profileID, connectionID: admission.connectionID,
@@ -3293,10 +3012,6 @@ extension AppModel {
         }
     }
 
-    /// Replaces one transiently malformed mounted projection with a fresh
-    /// authoritative synchronization cut without changing route ownership.
-    /// Chat presentation bounds this recovery to one attempt; persistent
-    /// malformed authority still fails closed.
     func resynchronizeSessionPresentation(_ id: String, generation: Int) async throws {
         guard sessionPresentation.presentationGeneration(for: id) == generation else {
             throw CancellationError()
@@ -3337,9 +3052,6 @@ extension AppModel {
     private func invalidateSessionConnectionOwnership() {
         homeStatus.connectionRetired()
         cancelAllExtensionEditorSynchronization()
-        // Transcript media is profile/lifecycle-owned HTTP state. A disposable
-        // WebSocket epoch handoff must not cancel an open preview or evict its
-        // thumbnail flight.
         sessionPresentation.retireConnection()
     }
 
@@ -3370,8 +3082,6 @@ extension AppModel {
             || composerDrafts.scope(for: target).map {
                 composerDrafts.selectedResources(for: $0).contains { $0.source == .skill }
             } == true
-        // Capability is command authority, not a side effect of asynchronous
-        // picker cleanup. Reject before the draft or submission ledger changes.
         guard !invokesSkill || gatewayInfo?.capabilities.contains("skill-prompt.v1") == true else {
             throw GatewayFailure(code: "unsupported", message: "This Mac does not support skill prompts.", retryable: false, details: nil)
         }
@@ -3444,8 +3154,6 @@ extension AppModel {
     func clearQueue(sessionID: String) async throws {
         guard let target = presentationTarget(for: sessionID),
               admitsLiveSessionCommands(target) else { throw CancellationError() }
-        // The confirmed response proves command completion, not the sequenced
-        // queue projection. Gateway snapshot/event authority clears the rows.
         try await sessionMutations.clearQueue(sessionID: sessionID)
     }
 
@@ -3529,19 +3237,12 @@ extension AppModel {
                 throughCompletionRevision: session.completionRevision
             )
         }
-        // The response is authoritative for cold rows where Gateway cannot
-        // broadcast a full summary. Apply it monotonically; unknown rows remain
-        // absent until a catalog admission publishes them.
         if sessionCatalog.applyAttention(sessionID: session.id, projection) {
             installSelectedDashboardCatalog()
             scheduleCacheCheckpoint()
         }
     }
 
-    /// Archive state is Gateway-owned display state. The response is the only
-    /// authority applied here: nothing is optimistic, and the count is not
-    /// adjusted locally because a concurrent change on another device can move
-    /// it. The Gateway's own list change converges both the row and the count.
     func setSessionArchived(_ session: SessionSummary, archived: Bool) async throws {
         let state = try await performOnOwningGateway(session) {
             try await self.sessionMutations.setArchived(sessionID: session.id, archived: archived)
@@ -3549,9 +3250,6 @@ extension AppModel {
         applyArchiveResponse(state, sessionID: session.id)
     }
 
-    /// The chat's Manage surface knows the presented session ID and the profile
-    /// whose Gateway owns it, not a dashboard row an archived session no longer
-    /// has. The response is applied exactly like the row-addressed toggle.
     func setSessionArchived(sessionID: String, profileID: String?, archived: Bool) async throws {
         let state = try await performOnOwningGateway(profileID: profileID) {
             try await self.sessionMutations.setArchived(sessionID: sessionID, archived: archived)
@@ -3559,14 +3257,6 @@ extension AppModel {
         applyArchiveResponse(state, sessionID: sessionID)
     }
 
-    /// Applies one authoritative `session.archive.set` response: the archive
-    /// mark and the reads it invalidates. The owning profile is selected by
-    /// then, so `sessionCatalog` is that profile's catalog. A chat reads the
-    /// state from its own Gateway snapshot instead, which the Gateway
-    /// republishes for this exact change. Both directions ask for an
-    /// authoritative list read: the row's membership and the Gateway-owned
-    /// count are the page's to publish, and the read this mutation just retired
-    /// cannot be the only one that was going to carry them.
     private func applyArchiveResponse(_ state: SessionArchiveState, sessionID: String) {
         if state.archived {
             sessionCatalog.markArchived(sessionID: sessionID)
@@ -3592,9 +3282,6 @@ extension AppModel {
     ) async throws -> SessionNavigationRoute {
         guard let admission = lifecycle.generationAdmission,
               let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
-        // Fence the exact source before transport. Pi rekeys during the mutation,
-        // so waiting for the response is too late to stop a structure event from
-        // launching an obsolete tree/context read.
         let sourceTarget = sessionPresentation.presentationTarget(for: sessionID)
         if let sourceTarget,
            !sessionPresentation.beginForkTransition(sourceTarget) {
@@ -3611,19 +3298,12 @@ extension AppModel {
             if let sourceTarget { sessionPresentation.cancelForkTransition(sourceTarget) }
             throw error
         }
-        // Canonical success permanently retires only the captured source target;
-        // a same-session remount that raced the request has a different generation
-        // and must not be revoked by this completion.
         if let sourceTarget {
             sessionPresentation.commitForkTransition(sourceTarget)
             cancelExtensionEditorSynchronization(for: sourceTarget)
             composerDrafts.revoke(sourceTarget)
         }
-        // Catalog convergence is authoritative but independent. Retain the
-        // invalidation even if lifecycle replacement makes this route stale.
         scheduleSessionListRefresh()
-        // The command receipt proves canonical creation, but it cannot authorize
-        // navigation through a replacement connection or selected Gateway.
         try requireLifecycle(admission)
         guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
         postNotice("Session forked", replacing: .sessionForked, role: .success)
@@ -3767,8 +3447,6 @@ extension AppModel {
             await composerDrafts.removeSession(profileID: profileID, sessionID: id).value
         }
         sessionCatalog.remove(id)
-        // Deletion removes the Gateway's archive record too, so an archived page
-        // already in flight must not publish the deleted row.
         invalidateArchivedSessionsReads(profileID: lifecycle.selectedProfileID)
         installSelectedDashboardCatalog()
         scheduleCacheCheckpoint()
@@ -3893,9 +3571,6 @@ extension AppModel {
         _ callback: ProviderOAuthCapturedCallback,
         operationID: String
     ) async throws {
-        // Capture first even if the socket was replaced while the system
-        // browser was open. ProviderAuthCoordinator keeps one memory-only
-        // callback and submits it after auth.resume on the same profile.
         try await providerAuth.submitBrowserCallback(callback, operationID: operationID)
     }
 
@@ -3975,12 +3650,10 @@ extension AppModel {
         }
     }
 
-    /// The generic settings renderer's reads and writes, for any target (settings-model.md 7.5).
     func resolveSettingsForRenderer(target: JSONValue, keys: [String]? = nil) async throws -> SettingsResolution {
         try await settingsTrust.resolveForRenderer(target: target, keys: keys)
     }
 
-    /// The shared snapshot every settings surface for `target` reads.
     func settingsSnapshot(for target: JSONValue) -> SettingsSnapshot? { settingsTrust.snapshots[target] }
 
     var settingsFreshness: SettingsFreshness {
@@ -3991,7 +3664,6 @@ extension AppModel {
         try await settingsTrust.refreshSnapshot(target: target, freshness: settingsFreshness)
     }
 
-    /// A settings change this app made: every surface's snapshot is stale.
     func noteSettingsChanged() { settingsTrust.noteSettingsChanged() }
 
     func settingsOptions(target: JSONValue, key: String, qualifiers: [String: String]?, cursor: String? = nil) async throws -> SettingsOptionsResponse {
@@ -4011,8 +3683,6 @@ extension AppModel {
         }
     }
 
-    /// Presentation reads the same session admission as a renderer mutation;
-    /// it never decides that an uninstalled or retired snapshot is writable.
     func rendererConfigurationLockedReason(target: JSONValue) -> String? {
         guard target.objectValue?["kind"]?.stringValue == "session",
               let sessionID = target.objectValue?["sessionId"]?.stringValue else { return nil }
@@ -4191,14 +3861,10 @@ extension AppModel {
         extensionEditorOperationReceipts.removeAll()
     }
 
-    /// Debounces composer echoes into one target-scoped serialized worker.
     func scheduleExtensionEditorUpdate(target: SessionPresentationIdentity, text: String) {
         guard ownsPresentation(target),
               let presentation = authoritativeSnapshot(for: target.sessionID)?.extensionPresentation,
               !presentation.hostEpoch.isEmpty else { return }
-        // The editor and ordinary prompt RPCs share the Gateway's 192 KiB
-        // UTF-8 boundary. Do not enqueue a request the Gateway must reject;
-        // retain the complete local draft so the user can shorten it.
         guard SharedContentAdmissionPolicy.admitsPrompt(text) else {
             extensionEditorPendingText[target] = nil
             extensionEditorPendingRevisions[target] = nil
@@ -4238,7 +3904,6 @@ extension AppModel {
             } catch is CancellationError {
                 return
             } catch {
-                // Connection lifecycle presents transport state.
             }
             if self.extensionEditorSyncGenerations[target] == generation {
                 self.extensionEditorSyncTasks[target] = nil
@@ -4290,17 +3955,10 @@ extension AppModel {
         )
     }
 
-    /// The visible Home owner registers only authenticated focused-Gateway
-    /// status reads. This is disposable presentation work, never a mutation.
     func mountHomeStatus(surfaceToken: PresentationSurfaceToken, activityCoordinator: PresentationActivityCoordinator) {
         installHomeStatus(surfaceToken: surfaceToken, activityCoordinator: activityCoordinator, cadence: .mounted)
     }
 
-    /// A chat takes the status surface from the covered dashboard. A known status
-    /// decides by the route's key alone, so a chat the status does not present
-    /// never reads. Before any status is known, the chat's probe decides by its
-    /// first published read (see `HomeStatusPresentationOwner.Cadence`). Returns
-    /// whether the chat now owns the status surface.
     func mountHomeStatusForChat(
         surfaceToken: PresentationSurfaceToken,
         activityCoordinator: PresentationActivityCoordinator,
@@ -4322,8 +3980,6 @@ extension AppModel {
         cadence: HomeStatusPresentationOwner.Cadence
     ) {
         foregroundPresentationActivity = activityCoordinator
-        // The read belongs to the surface, not to a selected profile: a dashboard
-        // mounted before pairing reads Home as soon as pairing configures it.
         homeStatus.mountSurface(token: surfaceToken, coordinator: activityCoordinator, cadence: cadence) { [weak self] fence in
             guard let self,
                   self.lifecycle.selectedProfileID == fence.profileID,
@@ -4347,8 +4003,6 @@ extension AppModel {
         homeStatus.configure(profileID: profileID, connectionID: connectionID, capabilityEnabled: capable)
     }
 
-    /// Sheet reads share lifecycle authority, but not the covered chat's status
-    /// cadence. Each managed sheet owns and retires its bounded page.
     func homeSheetReadIdentity(profileID: String, surfaceToken: PresentationSurfaceToken?) -> HomeSheetReadIdentity? {
         guard let surfaceToken, lifecycle.selectedProfileID == profileID,
               let admission = lifecycle.admission, lifecycle.admits(admission),
@@ -4361,8 +4015,6 @@ extension AppModel {
     func readHomeSheet(_ query: HomeSheetReadQuery, identity: HomeSheetReadIdentity, isCurrent: @escaping @MainActor () -> Bool) async throws -> HomeSheetContent {
         guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
               !Task.isCancelled, isCurrent() else { throw CancellationError() }
-        // Every request is fenced by the same identity and sheet currency before it is
-        // sent and again before its answer is published.
         func read(_ method: String, _ params: JSONValue = .object([:])) async throws -> JSONValue {
             guard homeSheetReadIdentity(profileID: identity.profileID, surfaceToken: identity.surfaceToken) == identity,
                   !Task.isCancelled, isCurrent() else { throw CancellationError() }
@@ -4372,8 +4024,6 @@ extension AppModel {
                   !Task.isCancelled, isCurrent() else { throw CancellationError() }
             return value
         }
-        // Each task sheet consumes status first, so a recovery refusal remains
-        // visible without attempting a fenced task/authorization read.
         func readTaskStatus() async throws -> HomeStatusDTO {
             try HomeStatusDTO.decode(try await read("home.status"))
         }
@@ -4398,22 +4048,16 @@ extension AppModel {
         }
         switch query {
         case .manage:
-            // Independent reads share one round trip instead of queuing behind each
-            // other (each is individually fenced). Task reads still wait for status,
-            // which decides whether they may be attempted at all.
             let readsChapters = chapterListCapable()
             async let statusValue = read("home.status")
             async let contextValue = read("home.context")
             async let chapterValue: JSONValue? = readsChapters ? read("home.chapterList") : nil
-            // The profile belongs to Knowledge, not the designation: a refused read leaves
-            // its row "Unavailable" and never fails Manage Home.
             async let profileList: HomeProfileListDTO? = profileListCapable()
                 ? optionalRead { try HomeProfileListDTO.decode(try await read("home.profileList")) } : nil
             let status = try HomeStatusDTO.decode(try await statusValue)
             let context = try HomeContextDTO.decode(try await contextValue)
             let chapterJSON = try await chapterValue
             let chapters = try chapterJSON.map { try HomeChapterListDTO.decode($0) }
-            // A refused task or permission read leaves its row "Unavailable"; the sheet still loads.
             var tasks: HomeTaskPageDTO?
             var permissions: HomeTaskPermissionsDTO?
             if status.admitsTaskReads {
@@ -4479,10 +4123,6 @@ extension AppModel {
         homeStatus.retireSurface(surfaceToken)
     }
 
-    /// A profile-fenced ordinary route to one Home chapter or its worker chat, opened
-    /// from Manage Home: sealed chapters refuse mutation at the Gateway, and an
-    /// ordinary chat on a Home chapter neither claims the Home status nor sends
-    /// through `home.prompt`. A stale tap can never switch profiles.
     func navigationRouteForHomeSession(profileID: String, sessionID: String) throws -> SessionNavigationRoute {
         guard lifecycle.selectedProfileID == profileID,
               connectionState == .connected,
@@ -4495,8 +4135,6 @@ extension AppModel {
         )
     }
 
-    /// Forms a profile-qualified route only from the current authenticated Home
-    /// projection; it never switches profiles based on a stale row tap.
     func navigationRouteForHome(profileID: String, status: HomeStatusDTO) throws -> SessionNavigationRoute {
         guard lifecycle.selectedProfileID == profileID,
               connectionState == .connected,
@@ -4515,9 +4153,6 @@ extension AppModel {
         )
     }
 
-    /// The Home route's next chapter, or nil when the route already opens the
-    /// chapter Home names. The route's unsent text moves with it to that chapter's
-    /// draft (see `ComposerDraftCoordinator.carryDraft`).
     func followedHomeRoute(
         from route: SessionNavigationRoute,
         profileID: String,
@@ -4532,25 +4167,18 @@ extension AppModel {
         return next
     }
 
-    /// Home control effects belong to the receipt owner, not the mounted read.
-    /// A fresh projection is requested only after accepted terminal completion.
     func performHomeControl(_ command: HomeMutationCoordinator.Command, authority: HomeMutationCoordinator.Authority) async throws {
         guard command != .designate else { throw CancellationError() }
         _ = try await homeMutations.perform(command, authority: authority)
         await homeStatus.refreshMounted()
     }
 
-
-    /// The maintainer's learned-profile change through the Home command owner; the
-    /// answer names the record entries `undoHomeProfileChange` reverts.
     func changeHomeProfile(_ changes: [HomeProfileChange], authority: HomeMutationCoordinator.Authority) async throws -> HomeProfileChangeResultDTO {
         let value = try await homeMutations.perform(.changeProfile(changes), authority: authority)
         await homeStatus.refreshMounted()
         return try value.decode(HomeProfileChangeResultDTO.self)
     }
 
-    /// Undo of a profile change is the settings path's own undo: it reverts the change's
-    /// whole group, refused with a conflict when Home changed an item since.
     func undoHomeProfileChange(_ changeID: String, authority: HomeMutationCoordinator.Authority) async throws {
         let value = try await homeMutations.perform(.undoProfileChange(changeID), authority: authority)
         try value.decode(SettingsChangeResult.self).throwIfRefused()
@@ -4565,8 +4193,6 @@ extension AppModel {
         await homeStatus.refreshMounted()
     }
 
-    /// A receipt that proves a Home change was not applied leaves the projection
-    /// the user is looking at stale; reload it before reporting that outcome.
     private func refreshingHomeStatusIfNotApplied<Value>(
         _ operation: () async throws -> Value
     ) async throws -> Value {
@@ -4577,8 +4203,6 @@ extension AppModel {
         }
     }
 
-    /// Designates Home through the mutation receipt owner, then requires a fresh
-    /// mounted `home.status` projection before exposing its session route.
     func designateHomeAndRefreshStatus(authority: HomeMutationCoordinator.Authority) async throws -> HomeStatusDTO {
         let designation = try await refreshingHomeStatusIfNotApplied {
             try await homeMutations.designate(authority: authority)
@@ -4627,9 +4251,6 @@ extension AppModel {
 
     func lifecycleNotePathHint(satisfied: Bool, signature: String? = nil) {
         lifecycle.notePathHint(satisfied: satisfied, signature: signature)
-        // Path facts are advisory projections for every admitted secondary;
-        // each pool entry applies its own profile/generation fence. The pool's
-        // own gate is the satisfied/unsatisfied transition.
         let selectedID = profiles.selected?.id
         for profile in profiles.profiles where profile.id != selectedID {
             dashboardConnections.notePathHint(profileID: profile.id, satisfied: satisfied)
@@ -4649,15 +4270,9 @@ extension AppModel {
                 reason: event.payload.objectValue?["reason"]?.stringValue ?? "disconnected",
                 countsAsTransportFailure: event.topic != "system.stopping"
             )
-            // Authentication belongs to the paired device identity, not this
-            // disposable socket. Retire prompt delivery while retaining the
-            // operation ID/target for an exact auth.resume after reconnect.
             providerAuth.retireConnection()
             lifecycleInvalidateSessionConnectionOwnership()
             sessionCatalog.markDisconnected()
-            // An established mobile connection ending is already the first
-            // failure signal. Retry once immediately; the reconnect loop keeps
-            // its bounded jittered backoff if the Gateway is genuinely down.
             lifecycle.requestReconnect(immediate: true, replaceExisting: event.topic == "system.stopping")
             diagnostics.scheduleDiagnosticPersistence()
         case "transport.resyncRequired":
@@ -4667,9 +4282,6 @@ extension AppModel {
                 Task { @MainActor [weak self] in await self?.homeStatus.invalidateMounted(sessionID: sessionID) }
             }
             guard case .sessionSummary(let update) = event.preparation else {
-                // A malformed or newer summary must not silently leave a row's
-                // icon stale. The authoritative catalog is the recovery path;
-                // it is bounded and admission-fenced like every other refresh.
                 scheduleSessionListRefresh()
                 return
             }
@@ -4696,8 +4308,6 @@ extension AppModel {
         case "models.recentChanged":
             providerAuth.noteRecentModelsChanged()
         case "notification.inbox.changed":
-            // The payload is Gateway authority for the bell; only an unread
-            // revision is a real invalidation of this projection.
             if let profile = profiles.selected,
                notificationInbox.applyInboxChanged(
                    profileID: profile.id,
@@ -4739,9 +4349,6 @@ extension AppModel {
         case .stale:
             return
         case .unknownSession:
-            // The ID has no row: an archived session, or one the Gateway has
-            // not listed yet. A summary never materializes a row, so the
-            // authoritative list read is the only way back to the dashboard.
             scheduleSessionListRefresh()
         case .updated:
             installSelectedDashboardCatalog()
@@ -4757,8 +4364,6 @@ extension AppModel {
         dashboardSessionsByProfile[profile.id] = sessionCatalog.sessions.map {
             $0.withGatewaySource(id: profile.id, label: profile.label)
         }
-        // The Gateway-owned count is part of that same bounded projection: a
-        // `nil` count stays absent rather than being presented as zero.
         dashboardArchivedCountsByProfile[profile.id] = sessionCatalog.archivedCount
         dashboardPresentationRevision &+= 1
     }
@@ -4775,20 +4380,10 @@ extension AppModel {
             try profiles.update(updated)
             profileRevision &+= 1
         } catch {
-            // Group identity is a presentation-side safety hint. Keep the
-            // authenticated runtime usable if metadata repair is unavailable.
             surface(error)
         }
     }
 
-    /// Store the LAN endpoints and pin the hello advertised with the profile
-    /// this connection is authenticated for (E-3b). The hello is the only
-    /// source of `GatewayInfo`, so every connect and reconnect refreshes them:
-    /// a Mac whose private address moved, or whose lane was switched off,
-    /// corrects the stored profile before the LAN race (E-3c) can dial a stale
-    /// endpoint. The admission that gates this call already fences the
-    /// connection to the selected profile, so no machine identity precondition
-    /// is needed here.
     private func adoptConnectedGatewayLanAdvertising() {
         guard let profile = profiles.selected, let info = gatewayInfo else { return }
         do {
@@ -4798,8 +4393,6 @@ extension AppModel {
                 for: profile.id
             )
         } catch {
-            // The advertisement is an optimization over the saved endpoint.
-            // Keep the authenticated runtime usable if metadata repair fails.
             surface(error)
         }
     }
@@ -4905,8 +4498,6 @@ extension AppModel {
         admission: GatewayLifecycleCoordinator.Admission
     ) async {
         let value = await cache.load(profileID: profileID)
-        // Background can cancel startup without changing the profile generation;
-        // its late disk read must not replace the resumed authoritative catalog.
         guard !Task.isCancelled, admitsLifecycle(admission), profiles.selected?.id == profileID else { return }
         sessionCatalog.installCached(value.sessions, archivedCount: value.archivedCount)
         reconcileSelection()
@@ -4914,9 +4505,7 @@ extension AppModel {
     }
 
     private enum CacheCheckpointTiming {
-        /// Authoritative pages and user mutation responses write at once.
         case immediate
-        /// Live summaries coalesce inside `SnapshotCachePolicy.summaryCheckpointDelay`.
         case trailing
     }
 
@@ -4933,8 +4522,6 @@ extension AppModel {
         case .immediate:
             startCacheCheckpointDrain()
         case .trailing:
-            // A draining save writes the newest pending checkpoint next, and an
-            // armed window already covers it; neither is extended.
             guard cacheCheckpointTask == nil, cacheCheckpointDelayTask == nil else { return }
             cacheCheckpointDelayGeneration &+= 1
             let delayGeneration = cacheCheckpointDelayGeneration
@@ -4946,8 +4533,6 @@ extension AppModel {
         }
     }
 
-    /// Writes any pending checkpoint now, ending a trailing window early.
-    /// Returns the save that owns the newest checkpoint, if any.
     @discardableResult
     private func startCacheCheckpointDrain() -> Task<Void, Never>? {
         cancelCacheCheckpointDelay()
@@ -4979,11 +4564,6 @@ extension AppModel {
         cacheCheckpointDelayTask = nil
     }
 
-    /// Profile retirement keeps the immediate-save contract: an in-flight save
-    /// finishes and a checkpoint queued behind it is dropped. A checkpoint still
-    /// inside its trailing window stands where an immediate save would already
-    /// be in flight, so it is written before the retirement completes. A later
-    /// `SnapshotCache.remove` still deletes it and tombstones the profile.
     private func retireCacheCheckpoints() -> Task<Void, Never>? {
         let inFlight = cacheCheckpointTask
         let deferred = cacheCheckpointDelayTask == nil ? nil : pendingCacheCheckpoint
@@ -5026,8 +4606,6 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
     }
 
     func dashboardPoolDidUpdateArchivedCount(profileID: String, count: Int?) {
-        // A retired secondary cannot republish its count after the same profile
-        // acquired its replacement socket; the newer entry owns the value.
         guard profileID != profiles.selected?.id,
               profiles.profiles.contains(where: { $0.id == profileID }) else { return }
         guard dashboardArchivedCountsByProfile[profileID] != count else { return }
@@ -5035,9 +4613,6 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         dashboardPresentationRevision &+= 1
     }
 
-    /// One background profile's catalog authority advanced. Its archived rows
-    /// come from that same page, so the container re-reads here too — a renamed
-    /// archived session changes rows and not the count.
     func dashboardPoolDidPublishAuthoritativeCatalog(profileID: String) {
         guard profileID != profiles.selected?.id,
               profiles.profiles.contains(where: { $0.id == profileID }) else { return }
@@ -5050,13 +4625,8 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         state: DashboardServerConnectionState,
         stopReason: String?
     ) {
-        // A retired secondary cannot invalidate the focused owner's rows after
-        // the same profile has acquired its replacement socket.
         guard profileID != profiles.selected?.id,
               profiles.profiles.contains(where: { $0.id == profileID }) else { return }
-        // A stop message is retained only while its entry is stopped: a
-        // reconnect or a retired entry clears it, so the detail view never shows
-        // a reason for a profile that is retrying again (F-3).
         let publishedStopReason = stopReason.flatMap { $0.isEmpty ? nil : $0 }
         let stopReasonChanged = dashboardStopReasonsByProfile[profileID] != publishedStopReason
         dashboardStopReasonsByProfile[profileID] = publishedStopReason
@@ -5064,8 +4634,6 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         if dashboardStatesByProfile[profileID] != state {
             automationCatalog.invalidate(profileID: profileID)
         }
-        // Inbox changes published while this Gateway was unreachable never
-        // reached this device, so its reconnect is a real inbox demand.
         if state == .connected, previousState != .connected,
            let profile = notificationInboxProfiles().first(where: { $0.id == profileID }) {
             scheduleNotificationInboxRefresh(profile: profile)
@@ -5113,8 +4681,6 @@ extension AppModel: SessionPresentationStoreDelegate {
             var sessions: Set<String> = [target.sessionID]
             if read.hasOtherSessions(than: target.sessionID),
                self.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true {
-                // The ledger, not names or dashboard rows, owns Home membership.
-                // An unavailable ledger must never widen this exact-chat cleanup.
                 if let value = try? await self.lifecycle.client.requestValue("home.chapterList", JSONValue.object([:]),
                     expectedConnection: GatewayConnectionAdmission(connectionID: connectionID)),
                    let chapters = try? HomeChapterListDTO.decode(value),
@@ -5167,11 +4733,6 @@ extension AppModel: SessionPresentationStoreDelegate {
         _ = composerDrafts.mountPreparedPresentation(target)
         Task { [weak self] in
             guard let self else { return }
-            // SessionPresentationStore owns the command catalog read after it
-            // installs the exact subscription target, and it initiates the
-            // cross-client attention acknowledgement before notifying this
-            // delegate, so catalog discovery here cannot delay it. Keep provider
-            // refresh independent; it has a separate catalog owner and admission.
             _ = await self.refreshProviders(target: .session(id: target.sessionID))
         }
     }
@@ -5272,10 +4833,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     }
 
     func lifecycleRecordDiagnostic(event: String, message: String) {
-        // Every scheduled reconnect starts the grace, including the one each
-        // foreground performs after background retirement (which emits no
-        // transport loss of its own): a replacement that outlives the grace is
-        // shown on one schedule, and a fast one never is (#878).
         if event == "reconnect.scheduled" || event == "reconnect.failure"
             || event == "reconnect.exhausted" || event == "reconnect.stopped" {
             beginRecoveryDisplayEpisodeIfNeeded()
@@ -5312,8 +4869,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         guard admitsLifecycle(admission) else { return }
         reconciliationAggregateAdmission = admission
         isReconcilingForeground = true
-        // Admission proves the replacement transport, not the mounted chat.
-        // Remove its outage warning without releasing rendering/Send fences.
         if admission.connectionID != nil { finishRecoveryDisplayEpisode() }
     }
 
@@ -5326,8 +4881,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         isReconcilingForeground = false
         if succeeded { foregroundReconciliationGeneration &+= 1 }
         if succeeded || connectionState == .connected {
-            // A responsive transport is not an outage. The mounted owner keeps
-            // failed synchronization fenced; Manage Session owns Retry Conversation.
             finishRecoveryDisplayEpisode()
         } else {
             beginRecoveryDisplayEpisodeIfNeeded()
@@ -5338,8 +4891,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         guard !Task.isCancelled, admitsLifecycle(admission) else { return }
         lifecycleRefreshHomeStatus(admission: admission)
         adoptConnectedGatewayIdentity()
-        // No revision is bumped for the advertisement: nothing presents it yet,
-        // and the profile's dial endpoint did not change.
         adoptConnectedGatewayLanAdvertising()
         refreshForemostSessionCatalog()
         guard admitsLifecycle(admission) else { return }
@@ -5359,14 +4910,10 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         let mountedTarget = sessionPresentation.mountedTarget
         let restored = await restoreForemostPresentationAfterReconnect()
         guard admitsLifecycle(admission), sessionPresentation.mountedTarget == mountedTarget else {
-            // A route replacement owns the newer presentation; its late
-            // reconnect result must not poison the lifecycle generation.
             return true
         }
         if let mountedTarget, !sessionPresentation.owns(mountedTarget) { return true }
         guard restored else { return false }
-        // Photos whose transfer the outage interrupted upload again; staged
-        // ones are reused on this same Mac (#916).
         if let mountedTarget { composerDrafts.resumeUnstagedUploads(for: mountedTarget) }
         let activeConnectionID = await client.activeConnectionID()
         guard admitsLifecycle(admission), activeConnectionID == admission.connectionID else { return true }
@@ -5406,8 +4953,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         let mountedRestored = await restoreForemostPresentationAfterReconnect()
         try requireLifecycle(admission)
         guard sessionPresentation.mountedTarget == mountedTarget else {
-            // The mounted route changed while this foreground pass was away;
-            // the newer presentation owns reconciliation.
             return
         }
         if let mountedTarget, !sessionPresentation.owns(mountedTarget) { return }
@@ -5423,13 +4968,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         reconcileDashboardConnections()
         try requireLifecycle(admission)
         refreshForemostSessionCatalog()
-        // The inbox coordinator owns this optional read. Reconnect needs fresh
-        // demand without an invalidation, but readiness must not await its RPC.
         if let profile = profiles.selected, profile.isEnabled {
             scheduleNotificationInboxRefresh(profile: profile)
         }
-        // Mounted restoration publishes readiness independently of optional
-        // catalog/settings reads; those owners retain their own freshness.
         completed = true
         diagnosticsReadinessGeneration &+= 1
         diagnosticsAreReady = true
@@ -5437,7 +4978,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleRetireProjection(final: Bool) async {
         diagnosticsAreReady = false
-        // Revoke connection-bound owners before this transition can suspend or fail.
         invalidateSessionConnectionOwnership()
         homeStatus.profileRetired()
         mountedOptionalRefreshTask?.cancel()
@@ -5455,8 +4995,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
 
         invalidateProfileScopedLoads()
-        // A profile switch, pairing or teardown retires the pool's projections
-        // because the transition stopped them, not because the scene did.
         dashboardConnections.retire(endedBy: .stopped)
         notificationInbox.cancelRefreshes()
         await dashboardConnections.waitForRetirement()

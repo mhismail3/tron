@@ -1,8 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
 
-/// Hosted tests invoke the same mounted callback supplied to the control.
-/// This is not touch/VoiceOver automation and is absent from application builds.
 @MainActor
 final class HostedToolActionProbe {
     private var actions: [String: (UUID, () -> Void)] = [:]

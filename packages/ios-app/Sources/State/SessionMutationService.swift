@@ -13,16 +13,12 @@ struct ExtensionEditorUpdateResult: Codable, Equatable, Sendable {
     var operationID: String? = nil
 }
 
-/// Owns explicit session command construction. Canonical session state remains
-/// Gateway-owned; projection and navigation effects stay with their domain owners.
 @MainActor
 final class SessionMutationService {
     private struct SessionIDResponse: Codable { let sessionId: String }
     private struct MutationResponse: Codable {
         let updated: Bool
     }
-    /// `settings.change`'s answer for one Chat-layer key: the applied change
-    /// and, for model, thinking and context window, the session revision.
     private struct SettingsChangeResponse: Codable {
         struct Change: Codable { let changeId: String; let revision: Int? }
         let status: String
@@ -37,8 +33,6 @@ final class SessionMutationService {
         }
     }
 
-    /// One Chat-layer change through the settings model's single change path
-    /// (gateway docs/settings-model.md 5.2), fenced to the runtime the client read.
     private static func chatChange(
         sessionID: String, commandID: String, key: String, op: String = "set", value: JSONValue?,
         qualifiers: [String: JSONValue]? = nil, fence: [String: JSONValue]?
@@ -133,9 +127,6 @@ final class SessionMutationService {
         return response.operationId
     }
 
-    /// Sends a composer submission through the logical route it was admitted
-    /// for. A Home submission never names a physical chapter: `home.prompt`
-    /// resolves the current one when the prompt is sent.
     func submitComposer(
         _ text: String,
         route: ComposerSubmissionRoute,
@@ -507,8 +498,6 @@ final class SessionMutationService {
         }
     }
 
-    /// Archive state is Gateway-owned display state. The response is the
-    /// authority for the row's membership; nothing here is applied optimistically.
     func setArchived(sessionID: String, archived: Bool) async throws -> SessionArchiveState {
         struct Params: Codable { let sessionId: String; let archived: Bool; let commandId: String }
         let commandID = uuidSource.next().uuidString

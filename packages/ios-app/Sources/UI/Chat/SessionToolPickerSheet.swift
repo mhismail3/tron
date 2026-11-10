@@ -1,18 +1,14 @@
 import SwiftUI
 import TronMobileCore
 
-/// One tool the user can turn on or off for this chat.
 struct AvailableToolRow: Identifiable, Equatable, Sendable {
     let name: String
     let title: String
     let detail: String?
-    /// The runtime's tool record, shown in full by the detail sheet.
     let value: JSONValue
     var id: String { name }
 }
 
-/// Tools of one origin: Pi's built-ins, Tron's own modules, one installed
-/// package, local extensions, or one MCP server.
 struct AvailableToolGroup: Identifiable, Equatable, Sendable {
     enum Origin: Hashable, Sendable {
         case builtIn, tron, package(String), local, mcp(String)
@@ -42,9 +38,6 @@ struct AvailableToolGroup: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Projects `session.resources` tool rows into the Available Tools groups.
-/// Pi sends `namespace` as an object (`{ name: "mcp__server", description }`),
-/// never a string; an MCP namespace names the server group.
 enum AvailableToolsPresentation {
     static func groups(from resources: JSONValue?) -> [AvailableToolGroup] {
         let values = resources?.objectValue?["tools"]?.arrayValue ?? []
@@ -88,8 +81,6 @@ enum AvailableToolsPresentation {
         }
     }
 
-    /// MCP tools are registered as `mcp__<server>__<tool>`; within their
-    /// server group only the tool part is meaningful.
     private static func title(name: String, value: JSONValue) -> String {
         let title = ProjectResourceTitlePresentation.title(kind: .tools, value: value)
         guard name.hasPrefix("mcp__"), let range = name.range(of: "__", range: name.index(name.startIndex, offsetBy: 5)..<name.endIndex)
@@ -100,7 +91,6 @@ enum AvailableToolsPresentation {
             : title
     }
 
-    /// `npm:@scope/name@1.2.3` → `@scope/name`; `git:github.com/o/repo@sha` → `repo`.
     static func packageName(_ source: String) -> String {
         var spec = source
         for prefix in ["npm:", "git:", "github:", "https://", "http://"] where spec.hasPrefix(prefix) {
@@ -115,8 +105,6 @@ enum AvailableToolsPresentation {
     }
 }
 
-/// The grouped tools surface used by the settings renderer.
-/// The caller owns selection and mutation.
 struct AvailableToolsList: View {
     let groups: [AvailableToolGroup]
     let active: Set<String>

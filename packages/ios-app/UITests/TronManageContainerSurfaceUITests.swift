@@ -1,8 +1,6 @@
 import XCTest
 import UIKit
 
-/// Samples the actual sheet's empty glass edges, not tokens or fixture probes.
-/// The model card is the existing primary-surface reference.
 @MainActor final class TronManageContainerSurfaceUITests: XCTestCase {
     func testPrimaryContainersShareSurfaceAndKeepTerminalNeutral() {
         for theme in ["burgundy", "emerald", "oliveGold"] {
@@ -35,8 +33,6 @@ import UIKit
                 let setting = pigment(bottom, app: app, frame: settings.frame)
                 print("MANAGE_SURFACE \(theme)-\(mode) model=\(reference) usage=\(summary) navigation=\(navigation) settings=\(setting)")
                 if theme == "burgundy", mode == "dark" {
-                    // Chroma removes neutral material brightness. The lifted ink
-                    // pigment has substantially more red/green separation than wine.
                     for (name, color) in [("usage", summary), ("navigation", navigation), ("settings", setting)] {
                         XCTAssertEqual(color[0] - color[1], reference[0] - reference[1], accuracy: 5,
                             "\(name) must share the model card's deep-wine glass, not use lifted ink")
@@ -56,7 +52,6 @@ import UIKit
     private func pigment(_ screenshot: XCUIScreenshot, app: XCUIApplication, frame: CGRect) -> [Double] {
         guard let image = screenshot.image.cgImage else { XCTFail("Missing native pixels"); return [0, 0, 0] }
         let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
-        // A narrow, empty edge patch avoids labels, glyphs and corner highlights.
         let area = CGRect(x: frame.minX + 6, y: frame.midY - 2, width: 3, height: 4)
         XCTAssertTrue(app.windows.firstMatch.frame.contains(area), "Surface sample must be on screen: \(area)")
         guard let crop = image.cropping(to: area.applying(CGAffineTransform(scaleX: scale, y: scale))) else {

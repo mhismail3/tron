@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// The Gateway's attributed projection of the prompt the model receives
-/// (`session.context` → `instructions`). The Gateway owns splitting and
-/// attribution; this type only decodes it.
 struct AgentInstructionsProjection: Equatable {
     struct Source: Equatable {
         let kind: String
@@ -31,7 +28,6 @@ struct AgentInstructionsProjection: Equatable {
 
     struct Section: Identifiable, Equatable {
         let id: String
-        /// Added at the start of each turn rather than stored in the session.
         let perTurn: Bool
         let text: String
         let source: Source?
@@ -72,8 +68,6 @@ struct AgentInstructionsProjection: Equatable {
     }
 }
 
-/// Wording for each section and source. Section ids and source kinds are the
-/// Gateway's `agent-instructions.ts` contract.
 enum AgentInstructionsPresentation {
     struct SectionCopy: Equatable {
         let title: String
@@ -125,7 +119,6 @@ enum AgentInstructionsPresentation {
         }
     }
 
-    /// One-line row summary so the overview says what each section holds.
     static func summary(for section: AgentInstructionsProjection.Section) -> String {
         switch section.id {
         case "tools": return count(section.entries.count, "tool")
@@ -160,7 +153,6 @@ enum AgentInstructionsPresentation {
         }
     }
 
-    /// The Gateway reports Mac paths; shorten the home folder for a phone.
     static func displayPath(_ path: String) -> String {
         path.replacingOccurrences(of: #"^/Users/[^/]+"#, with: "~", options: .regularExpression)
     }
@@ -171,7 +163,6 @@ enum AgentInstructionsPresentation {
 }
 
 struct AgentInstructionsSheet: View {
-    /// The one label of this sheet's title and the Manage Session row that opens it.
     static let title = "Instructions"
     let sessionID: String
     @Environment(AppModel.self) private var model
@@ -207,10 +198,6 @@ struct AgentInstructionsSheet: View {
     }
 }
 
-/// Shared chrome for the overview and each section sheet: the standard
-/// medium-first, large-capable sheet with a themed title and icon-only Done.
-/// Every instructions sheet, row and source tag takes Manage Session's emerald
-/// sheet theme; the source is named by its tag, not by a color.
 private struct AgentInstructionsListSheet<Content: View>: View {
     let title: String
     private var accent: Color { .tronPrimary }
@@ -243,15 +230,12 @@ private struct AgentInstructionsListSheet<Content: View>: View {
     }
 }
 
-/// A document opened from the overview or a section: the full prompt, a long
-/// section body, or one included file.
 private struct AgentInstructionsReading: Identifiable {
     let id: String
     let title: String
     let text: String
 }
 
-/// The nested markdown reader, sized like every other instructions sheet.
 private struct AgentInstructionsReader: View {
     let reading: AgentInstructionsReading
 
@@ -264,8 +248,6 @@ private struct AgentInstructionsReader: View {
     }
 }
 
-/// Sections in the order the model reads them. Each glass row opens its own
-/// sheet so the structure stays visible before any long body.
 struct AgentInstructionsOverview: View {
     let projection: AgentInstructionsProjection
     @State private var selection: AgentInstructionsProjection.Section?
@@ -273,8 +255,6 @@ struct AgentInstructionsOverview: View {
 
     var body: some View {
         ScrollView {
-            // A dozen rows at most; eager layout keeps every row addressable
-            // while the sheet rests at its medium detent.
             TronSettingsSections(alignment: .leading, spacing: 18) {
                 TronSettingsCaption("The model reads these sections in this order for every turn. Open one to see where it comes from.").containerValue(\.tronSettingsSection, false)
                     .padding(.bottom, -8)
@@ -319,7 +299,6 @@ struct AgentInstructionsOverview: View {
 }
 
 extension AgentInstructionsPresentation {
-    /// A section row: its reading-order number, title, what it holds, and where it comes from.
     static func rowContent(_ section: AgentInstructionsProjection.Section, number: Int) -> TronListRowContent {
         let copy = copy(for: section)
         var sources = section.source.map { [sourceTag($0)] } ?? []
@@ -335,12 +314,10 @@ extension AgentInstructionsPresentation {
     }
 }
 
-/// One section's purpose, source, and content, presented from its overview row.
 private struct AgentInstructionsSectionSheet: View {
     let section: AgentInstructionsProjection.Section
     @PresentationState private var reading: AgentInstructionsReading?
 
-    /// Long bodies are laid out only in the document reader.
     private static let inlineLimit = 2_400
 
     private var copy: AgentInstructionsPresentation.SectionCopy { AgentInstructionsPresentation.copy(for: section) }
@@ -429,12 +406,9 @@ private struct AgentInstructionsSectionSheet: View {
         }
     }
 
-    /// Rules can run to dozens of entries, so the group uses the static
-    /// scroll surface rather than one very tall glass filter.
     private var entryGroup: some View {
         TronSettingsGroup(
             entryGroupTitle,
-            // Only Rules says more than its count: how many came from tools.
             detail: section.id == "rules" ? AgentInstructionsPresentation.summary(for: section) : nil,
             accent: accent,
             surfaceStyle: .scrollOptimized
@@ -463,7 +437,6 @@ private struct AgentInstructionsSectionSheet: View {
         }
     }
 
-    /// Whole files: name the file and open it rather than inlining pages.
     private func fileRow(_ entry: AgentInstructionsProjection.Entry) -> some View {
         let path = entry.path.map(AgentInstructionsPresentation.displayPath)
         return Button {
@@ -481,9 +454,6 @@ private struct AgentInstructionsSectionSheet: View {
     }
 }
 
-/// One attributed tool, rule, or skill as a settings row: its icon centred on
-/// the row and its source tag trailing. A named entry leads with its name, an
-/// unnamed rule leads with its text.
 private struct AgentInstructionsEntryRow: View {
     let entry: AgentInstructionsProjection.Entry
     let icon: String
@@ -498,17 +468,12 @@ private struct AgentInstructionsEntryRow: View {
             .textSelection(.enabled)
     }
 
-    /// Contributing tools for a rule; otherwise where a non-Pi entry comes from.
     private var attribution: String? {
         if !entry.tools.isEmpty { return "from \(entry.tools.joined(separator: ", "))" }
         return entry.source.kind == "pi" ? nil : AgentInstructionsPresentation.sourceDetail(entry.source)
     }
 }
 
-/// One detached parser for the mounted instruction document, keyed on the exact
-/// source so a completed document is reused across activations instead of
-/// re-parsing the whole prompt on the main thread. Mirrors the transcript
-/// detail reader and keeps the same predecessor-drain and cancellation owner.
 struct PreparedAgentInstructions: View {
     let instructions: String
     @Environment(AppModel.self) private var model
@@ -544,8 +509,6 @@ struct PreparedAgentInstructions: View {
     }
 
     private func record(_ message: String) {
-        // Reuses the existing lifecycle diagnostic vocabulary; the message
-        // identifies this surface.
         model.lifecycleRecordDiagnostic(
             event: "detail.preparation",
             message: "surface=agent-instructions \(message)"

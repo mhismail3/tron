@@ -3,9 +3,6 @@ import UIKit
 import TronMobileCore
 @preconcurrency import AVFoundation
 
-/// The camera sheet's feed state (#937). Only `starting` shows the shared
-/// sheet loading pulse: switching cameras and retaking hold the last frame,
-/// blurred, over the still-mounted preview until the next feed is live.
 enum CameraFeedPhase: String, Sendable {
     case starting, live, switching, captured, resuming, denied, unavailable
 }
@@ -17,9 +14,7 @@ final class CameraModel {
     private(set) var device: CameraDevice?
     private(set) var isTorchOn = false
     private(set) var isCapturing = false
-    /// The captured photo, shown sharp while `captured`.
     private(set) var capturedImage: UIImage?
-    /// The outgoing camera's last frame, or the discarded photo on retake.
     private(set) var frozenFrame: UIImage?
     #if HOSTED_TEST
     private(set) var phaseHistory: [CameraFeedPhase] = [.starting]
@@ -30,8 +25,6 @@ final class CameraModel {
     var showsLoading: Bool { phase == .starting }
     var showsFeed: Bool { phase != .denied && phase != .unavailable }
     var canCapture: Bool { phase == .live && !isCapturing }
-    /// Controls keep their enabled look through a switch or retake so the row
-    /// does not dim and brighten; the model ignores taps until the feed is live.
     var controlsLookEnabled: Bool {
         [.live, .switching, .resuming].contains(phase) && !isCapturing
     }
@@ -51,8 +44,6 @@ final class CameraModel {
         self.sessions = sessions
     }
 
-    /// The process's camera model: the hosted UI fixture substitutes scripted
-    /// camera hardware; every other build uses the system camera.
     static func forCurrentProcess() -> CameraModel {
         #if HOSTED_TEST
         if let hosted = HostedCameraFixture.model() { return hosted }
@@ -66,7 +57,6 @@ final class CameraModel {
             start()
         case .notDetermined:
             let granted = await authorization.requestAccess()
-            // A dismissed sheet must not publish a partial permission state.
             guard active, !Task.isCancelled else { return }
             if granted { start() } else { transition(to: .denied) }
         case .denied, .restricted:
@@ -83,7 +73,6 @@ final class CameraModel {
         sessions.start(position: position, token: token)
     }
 
-    /// Sheet dismissal: ends the session and cancels an in-flight capture.
     func stopSession() {
         active = false
         isCapturing = false
@@ -116,7 +105,6 @@ final class CameraModel {
         sessions.capturePhoto { [weak self] image in
             guard let self, active, isCapturing, captureToken == self.captureToken else { return }
             isCapturing = false
-            // A failed capture keeps the live feed, as before.
             guard let image else { return }
             capturedImage = image
             isTorchOn = false
@@ -127,7 +115,6 @@ final class CameraModel {
 
     func retake() {
         guard active, phase == .captured else { return }
-        // The discarded photo stays on screen, blurred, until the feed is back.
         frozenFrame = capturedImage
         capturedImage = nil
         transition(to: .resuming)
@@ -185,10 +172,6 @@ private final class CameraPreviewUIView: UIView {
     required init?(coder: NSCoder) { nil }
 }
 
-/// Immersive camera capture restored from the pre-gateway app: the live camera
-/// owns the full sheet while flashlight, shutter/confirm, and flip/retake keep
-/// one stable morphing control row. The preview layer stays mounted for the
-/// sheet's life; switches and retakes cross-fade from a blurred still (#937).
 struct CameraCaptureSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -231,8 +214,6 @@ struct CameraCaptureSheet: View {
         }
     }
 
-    /// Black, then the one preview layer, then the held still. Only the still
-    /// and the preview's opacity change between phases; nothing is remounted.
     private var cameraSurface: some View {
         ZStack {
             Color.black
@@ -241,8 +222,6 @@ struct CameraCaptureSheet: View {
                     .opacity(cameraModel.showsLoading ? 0 : 1)
             }
             if let still = cameraModel.capturedImage ?? cameraModel.frozenFrame {
-                // One identity for the captured photo and the frozen frame, so a
-                // retake animates the same image from sharp to blurred.
                 Image(uiImage: still)
                     .resizable()
                     .scaledToFill()
@@ -273,8 +252,6 @@ struct CameraCaptureSheet: View {
             .multilineTextAlignment(.center)
             .padding(.horizontal, 32)
         case .starting:
-            // The shared sheet loading state; when #890's surface-hosted
-            // `TronSheetLoadingState` lands this call site becomes that type.
             TronLoadingState(label: "Opening camera")
                 .accessibilityIdentifier("sheet-loading")
                 .transition(.opacity)
@@ -287,8 +264,6 @@ struct CameraCaptureSheet: View {
         HStack(alignment: .center, spacing: CameraControlMetrics.captureSpacing) {
             cameraIconButton(
                 systemImage: cameraModel.isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill",
-                // Follows the camera actually feeding the preview: a switch to a
-                // camera without a torch disables it until that feed is live.
                 isEnabled: cameraModel.phase == .live && cameraModel.hasTorch && !cameraModel.isCapturing,
                 isActive: cameraModel.isTorchOn,
                 isVisible: !showingPreview,

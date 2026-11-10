@@ -1,7 +1,5 @@
 import Foundation
 
-/// Human-readable labels only; selections and canonical history keep their
-/// original provider/runtime values on the wire.
 enum ThinkingLevelPresentation {
     static func title(_ level: String) -> String {
         let trimmed = level.trimmingCharacters(in: .whitespacesAndNewlines)

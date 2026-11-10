@@ -2,9 +2,6 @@ import Foundation
 import Observation
 import TronMobileCore
 
-/// Owns only the presentation lifecycle of one bounded provider-usage read.
-/// Runtime authority and caching remain in the Gateway; this owner rejects late
-/// results when the target, profile, foreground lease, or mounted surface changes.
 struct ProviderUsageReadIdentity: Equatable, Sendable {
     let target: ProviderCatalogTarget
     let providerID: String?
@@ -22,9 +19,6 @@ final class ProviderUsageReadController {
     private(set) var snapshots: [String: ProviderUsageSnapshot] = [:]
     private(set) var isLoading = false
     private(set) var didFail = false
-    /// True once the current read has settled (succeeded or failed). Rows use it
-    /// to stop reserving their usage line after a failed read instead of leaving
-    /// a permanent loading placeholder.
     private(set) var hasResolved = false
     private(set) var requestGeneration = 0
     private var activeIdentity: ProviderUsageReadIdentity?

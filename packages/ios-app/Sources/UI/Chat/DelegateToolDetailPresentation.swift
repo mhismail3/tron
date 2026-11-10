@@ -1,8 +1,6 @@
 import Foundation
 import TronMobileCore
 
-// MARK: - delegate
-
 extension HomeToolDetailPresentation {
     static func delegate(_ call: Call) -> HomeToolDetailPresentation? {
         guard let taskID = call.string("taskId"), let intent = call.string("intent") else { return nil }

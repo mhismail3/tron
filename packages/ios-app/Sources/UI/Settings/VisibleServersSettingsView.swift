@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// A focused multi-selection reader over the dashboard's existing device-local
-/// preference. Offline paired sources remain selectable by their stable IDs.
 struct VisibleServersSettingsView: View {
     let settings: AppLocalBehaviorSettings
     @Environment(AppModel.self) private var model

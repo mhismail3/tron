@@ -2,9 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Design-only proposal for #2076. Synthetic catalog, no installed-app RPCs,
-/// disk mutations, migration, hosting or production Apps entry. All geometry,
-/// typography, glass, tags and navigation belong to existing shared components.
 struct HostedAppsDesignFixture: View {
     @State private var presented = false
     private var dark: Bool { ProcessInfo.processInfo.arguments.contains("-apps-design-dark") }
@@ -27,8 +24,6 @@ struct HostedAppsDesignFixture: View {
 }
 
 private enum AppsDesignReview {
-    /// Capture the expanded presentation without claiming that a still image
-    /// proves the native medium-to-large drag. Normal interaction starts medium.
     static var detent: PresentationDetent {
         ProcessInfo.processInfo.arguments.contains("-apps-design-expanded") ? .large : .medium
     }
@@ -106,8 +101,6 @@ private struct AppsDesignList: View {
     }
 
     private func open(_ item: AppsDesignItem) {
-        // The only executable proposal is a Swift fixture. Other kinds remain
-        // visibly design-only rather than pretending an HTML bridge exists.
         if item.kind == "Swift app" {
             launch = SwiftAppLaunch(name: item.name, source: """
                 import SwiftUI

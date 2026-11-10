@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Catalog entry into the same review/receipt owner used by the inline offer.
-/// The row grants nothing: every open re-acquires the canonical artifact/source.
 struct SwiftAppPendingOfferReview: View {
     let offer: SwiftAppInstallOffer
     let profileID: String
@@ -63,8 +61,6 @@ struct SwiftAppPendingOfferReview: View {
     }
 }
 
-/// One Settings-style shell owns preparation and review, so resolving the offer
-/// never replaces navigation chrome or changes the sheet's initial detent.
 struct SwiftAppInstallReviewSheet: View {
     let installation: SwiftAppInstallation?
     let source: String

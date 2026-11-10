@@ -1,14 +1,6 @@
 import XCTest
 
-/// A row that opens a managed sub-sheet always opens it, and the sheet haptic
-/// plays once per presentation that actually happens, never for a request
-/// UIKit has not presented (#1695). The fixture drives the shared presenters
-/// with requests a finger cannot time; Manage Home › Profile covers the
-/// production rows.
 final class TronSubsheetReliabilityUITests: XCTestCase {
-    /// Requesting the parent's other presenter while a child covers it is
-    /// deferred by UIKit until the child leaves: silent until it appears, then
-    /// exactly one impact.
     @MainActor func testDeferredPresentationPlaysWhenItAppears() {
         continueAfterFailure = false
         let app = launchFixture(); defer { app.terminate() }
@@ -25,8 +17,6 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         assertSheetHaptics(app, 3, "the deferred sheet plays once it appears")
     }
 
-    /// A request that is torn down before it ever appears plays nothing and
-    /// reports `managed-sheet.never-appeared`.
     @MainActor func testRequestThatNeverAppearsIsSilentAndReported() {
         continueAfterFailure = false
         let app = launchFixture(); defer { app.terminate() }
@@ -40,15 +30,12 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         XCTAssertTrue(waitFor(app.staticTexts["fixture.never-appeared"], "label == 'never-appeared:1'"),
                       app.staticTexts["fixture.never-appeared"].label)
         assertSheetHaptics(app, 2, "a request that never appeared plays nothing", probe: "fixture.root-sheet-haptics")
-        // The presenters are not left holding the stale request.
         app.buttons["fixture.open-parent"].tap()
         app.buttons["fixture.flag-row"].tap()
         XCTAssertTrue(waitFor(title, "label == 'Flag'"), app.debugDescription)
         assertSheetHaptics(app, 4, "parent and flag")
     }
 
-    /// Re-requesting a child 0–700 ms into its dismissal, for the item and the
-    /// Boolean presenter, always presents it with exactly one impact.
     @MainActor func testRequestDuringDismissalAlwaysPresentsOnce() {
         continueAfterFailure = false
         let app = launchFixture(); defer { app.terminate() }
@@ -70,9 +57,6 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         }
     }
 
-    /// Manage Home › Profile: every item row reopens its sheet after a button
-    /// close, an interactive swipe and a background/foreground cycle, with one
-    /// impact per presentation.
     @MainActor func testProfileRowsReopenAfterEveryDismissal() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -91,7 +75,7 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         let ids = Array(rows.allElementsBoundByIndex.map(\.identifier).filter { !$0.contains("detail") }.prefix(2))
         XCTAssertEqual(ids.count, 2)
         let feedback = app.staticTexts["fixture.sheet-feedback"]
-        var played = 2 // Manage Home and Profile
+        var played = 2
         XCTAssertTrue(waitFor(feedback, "label == 'sheet-feedback:\(played)'"), feedback.label)
         let detail = element(app, "home-profile-item-detail")
         let window = app.windows.firstMatch
@@ -119,9 +103,6 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         XCTAssertEqual(feedback.label, "sheet-feedback:\(played)", "dismissal, swipe and foreground play nothing")
     }
 
-    /// Fresh destinations must work without closing/reopening their parent or
-    /// retrying the row. These are production Manage Home presenters, not a
-    /// synthetic binding-only fixture.
     @MainActor func testFirstTapInFreshManageHomeSubSheets() {
         continueAfterFailure = false
         let app = launchManageHome(); defer { app.terminate() }
@@ -199,8 +180,6 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         return app
     }
 
-    // MARK: - Helpers
-
     @MainActor private func launchFixture() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-subsheet-reliability-fixture"]
@@ -212,7 +191,6 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         return app
     }
 
-    /// Waits for the count, then holds it: no late or duplicate impact.
     @MainActor private func assertSheetHaptics(_ app: XCUIApplication, _ count: Int, _ message: String,
                                                probe id: String = "fixture.sheet-haptics") {
         let probe = app.staticTexts[id]

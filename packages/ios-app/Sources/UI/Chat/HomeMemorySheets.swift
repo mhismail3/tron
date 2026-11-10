@@ -1,12 +1,7 @@
 import SwiftUI
 import TronMobileCore
 
-/// The memory browser: the lines Home's memory view holds, newest first. Recent
-/// messages are their own lines; older ranges are summary lines that open into the
-/// two halves they cover, down to single messages. A message opens its detail and
-/// exact evidence. Rows are standard settings rows in Manage Home's accent.
 extension HomeSheet {
-    /// The chapter a memory browser is filtered to, when it was opened from a chapter.
     var memoryFilter: String? {
         switch destination {
         case .memory(let sessionID, _), .memorySummary(_, let sessionID): sessionID
@@ -29,8 +24,6 @@ extension HomeSheet {
         }
     }
 
-    /// One line of the view: a message with its speaker and time, or a summary with
-    /// the number of messages it covers and their dates.
     func memoryLineRow(_ line: HomeMemoryViewDTO.Line) -> some View {
         Button {
             if let item = line.item { present(.memoryItem(item)) }
@@ -49,7 +42,6 @@ extension HomeSheet {
         .accessibilityIdentifier(line.isSummary ? "home-memory-summary-\(line.start)-\(line.span)" : "home-memory-row-\(line.start)")
     }
 
-    /// One summary line: its text whole, then the two lines under it.
     private func memorySummary(_ line: HomeMemoryViewDTO.Line, halves: [HomeMemoryViewDTO.Line]) -> some View {
         TronSettingsSections(alignment: .leading, spacing: 18) {
             TronGlassCard(accent: accent) {
@@ -69,8 +61,6 @@ extension HomeSheet {
         .imageScale(.small)
     }
 
-    /// A message: who said it and when, the message as Home recorded it, what Home
-    /// remembers of it when that differs, and the canonical evidence behind it.
     func memoryDetail(_ item: HomeMemoryItemDTO) -> some View {
         let message = item.projection.text
         let remembered = item.summary.map { HomeMemoryPresentation.strip($0.text) }
@@ -113,7 +103,6 @@ extension HomeSheet {
         .imageScale(.small)
     }
 
-    /// The canonical history of one memory entry, paged in bounded characters.
     func evidenceSheet(_ page: HomeMemoryEvidencePageDTO) -> some View {
         TronSettingsSections(alignment: .leading, spacing: 18) {
             Text(page.text)
@@ -135,8 +124,6 @@ extension HomeSheet {
         }
     }
 
-    /// Only facts this browser actually carries; never imply a model or timestamp
-    /// that the memory store did not record.
     var memoryMetadata: [TronTechnicalMetadataItem]? {
         switch destination {
         case .memoryItem(let item):
@@ -176,7 +163,6 @@ extension HomeSheet {
         }
     }
 
-    /// Memory text is Home's own words, often markdown: the chat renderer shows it.
     func markdownText(_ text: String) -> some View {
         TronMarkdownView(text: text, streaming: false)
             .textSelection(.enabled)
@@ -184,7 +170,6 @@ extension HomeSheet {
             .padding(16)
     }
 
-    /// A standard action row for paging.
     func pageRow(title: String, icon: String, id: String, action: @escaping () -> Void) -> some View {
         TronGlassCard(accent: accent) {
             Button(action: action) {
@@ -221,7 +206,6 @@ extension HomeMemoryItemDTO {
     }
 }
 
-/// One owner of the memory lines' derived text, so rows and details agree.
 @MainActor
 enum HomeMemoryPresentation {
     static func icon(_ line: HomeMemoryViewDTO.Line) -> String {
@@ -249,12 +233,10 @@ enum HomeMemoryPresentation {
         return [tool + count, display?.target].compactMap { $0 }.joined(separator: " · ")
     }
 
-    /// A message's relative time; a summary's date range.
     static func when(_ line: HomeMemoryViewDTO.Line, now: Date = .now) -> String? {
         line.isSummary ? HomeSheetTime.range(line.firstAt, line.lastAt) : HomeSheetTime.relative(line.firstAt, now: now)
     }
 
-    /// Memory node text without the `user:`/`talk:`/`echo:`/`event:` kind prefix on each line.
     static func strip(_ text: String) -> String {
         text.split(separator: "\n", omittingEmptySubsequences: true).map { line in
             for prefix in ["user: ", "talk: ", "echo: ", "event: "] where line.hasPrefix(prefix) {
@@ -264,7 +246,6 @@ enum HomeMemoryPresentation {
         }.joined(separator: " ")
     }
 
-    /// Whether a remembered line says something the message itself does not.
     static func differs(_ remembered: String, from message: String) -> Bool {
         let normalize = { (value: String) in value.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ") }
         let a = normalize(remembered), b = normalize(message)
@@ -272,21 +253,18 @@ enum HomeMemoryPresentation {
     }
 }
 
-/// Relative time for the Home rows, from the Gateway's ISO timestamps.
 enum HomeSheetTime {
     static func relative(_ timestamp: String?, now: Date = .now) -> String? {
         guard let timestamp, let date = GatewayTimestamp.parse(timestamp) else { return nil }
         return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: now)
     }
 
-    /// "Oct 13, 2026 at 10:30 PM · 2 days ago", for a detail row that names one instant.
     static func absolute(_ timestamp: String, now: Date = .now) -> String {
         guard let date = GatewayTimestamp.parse(timestamp) else { return timestamp }
         let when = date.formatted(date: .abbreviated, time: .shortened)
         return "\(when) · \(RelativeDateTimeFormatter().localizedString(for: date, relativeTo: now))"
     }
 
-    /// "Mar 3 – Mar 9", or one date when the range is a single day.
     static func range(_ first: String?, _ last: String?) -> String? {
         let dates = [first, last].compactMap { $0.flatMap(GatewayTimestamp.parse) }
         guard let start = dates.first else { return nil }

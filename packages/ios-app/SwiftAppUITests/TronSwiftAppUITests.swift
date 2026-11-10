@@ -1,11 +1,7 @@
 import XCTest
 import UIKit
 
-/// Displayed `.swift` files that run as interpreted apps (#889, #1006) through the
-/// readonly attachment fixture in the `TronSwiftAppUITests` target.
 final class TronSwiftAppUITests: XCTestCase {
-    /// #889: a displayed `.swift` file runs as a native, interactive app only
-    /// behind the experimental flag.
     @MainActor func testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag() {
         continueAfterFailure = false
         let app = launchSwift("display-swift", flag: true); defer { app.terminate() }
@@ -25,10 +21,6 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertEqual(genericComparison.label, "Less than one: true", "The comparison operator remains an expression, not a generic clause")
         XCTAssertTrue(app.staticTexts["4 day streak"].exists)
         keepScreenshot(app, "889-2-app-running")
-        // #909: the runner hosts the program in the shared document sheet
-        // chrome. The program's root navigationTitle is the shared sheet title
-        // and Done is inked in that title's tint (TronSheetTitle +
-        // tronToolbarAction); a runner with its own chrome fails here.
         assertToolbarTint(app, title: "Habits")
 
         app.buttons["Complete Drink water"].tap()
@@ -52,14 +44,11 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertTrue(wait(summary, predicate: "label == '1 of 4 done today'"))
         keepScreenshot(app, "889-4-app-after-add")
 
-        // #909: the shared Done closes the runner, back to the document sheet.
         app.navigationBars.containing(.staticText, identifier: "Habits").buttons["Done"].firstMatch.tap()
         XCTAssertTrue(wait(summary, predicate: "exists == false"), "Done closes the runner")
         XCTAssertTrue(run.waitForExistence(timeout: 5), "Closing the runner returns to the .swift document sheet")
     }
 
-    /// #1319: the recovered remote-build design remains an honest offline app,
-    /// delivered through the same chat artifact and managed runner as user files.
     @MainActor func testRecoveredBuildsPreviewFiltersSearchesAndReopens() {
         continueAfterFailure = false
         let app = launchSwift("display-swift-builds-preview", flag: true); defer { app.terminate() }
@@ -101,8 +90,6 @@ final class TronSwiftAppUITests: XCTestCase {
         search.typeText("-no-match")
         XCTAssertTrue(app.staticTexts["No builds"].waitForExistence(timeout: 5))
         keepScreenshot(app, "1319-builds-empty")
-        // Native iOS search temporarily replaces the navigation bar. Close it
-        // through its observed control before using the runner's Done action.
         app.buttons["close"].tap()
         app.segmentedControls.buttons["Fast debug"].tap()
         XCTAssertFalse(optimized.exists)
@@ -120,10 +107,6 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertTrue(run.waitForExistence(timeout: 5), "The chat artifact reopens after both sheets close")
     }
 
-    /// #1339: an inline `.swift` display is a small app card. A tap runs the
-    /// app in the managed runner; Done discards it, the card reopens a fresh run,
-    /// View Source keeps the file reachable, and a cold relaunch replays the card
-    /// without opening anything by itself. Light first, then dark after relaunch.
     @MainActor func testInlineSwiftAppCardOpensRunnerAndReplays() {
         continueAfterFailure = false
         var app = launchSwift("display-swift-builds-preview-inline-light", flag: true)
@@ -166,8 +149,6 @@ final class TronSwiftAppUITests: XCTestCase {
         closeDocument(app)
         app.terminate()
 
-        // Cold replay: a new process reads the same transcript and renders the
-        // card again; nothing opens until it is tapped.
         app = launchSwift("display-swift-builds-preview-inline", flag: true); defer { app.terminate() }
         let replayed = app.buttons["swiftApp.card"]
         XCTAssertTrue(replayed.waitForExistence(timeout: 15))
@@ -181,10 +162,6 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertTrue(replayed.waitForExistence(timeout: 5))
     }
 
-    /// #1339: the card never runs what it cannot run completely. A truncated
-    /// file opens its source with the truncation notice; unsupported Swift runs
-    /// into the runner's contained diagnostic; without the switch the display is
-    /// the ordinary inline code card.
     @MainActor func testInlineSwiftAppCardStatesStayBounded() {
         continueAfterFailure = false
         let truncated = launchSwift("display-swift-truncated-inline", flag: true)
@@ -223,11 +200,8 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertTrue(wait(done, predicate: "exists == false"), "Done closes the runner")
     }
 
-    /// #889: without the flag a `.swift` display is an ordinary document
-    /// sheet, and even with it a truncated preview never runs.
     @MainActor func testSwiftRunControlRequiresFlagAndCompletePreview() {
         continueAfterFailure = false
-        // The flag is sticky across launches, so the control turns it off explicitly.
         let control = launchSwift("display-swift", flag: false); defer { control.terminate() }
         openSwiftDisplay(control, named: "Habits.swift")
         let done = control.buttons["Done"]
@@ -247,8 +221,6 @@ final class TronSwiftAppUITests: XCTestCase {
         keepScreenshot(truncated, "889-5-truncated-no-run")
     }
 
-    /// #1136: erased protocol requirements dispatch concrete existential values;
-    /// native geometry updates on resize and exposes no writable/global proxy.
     @MainActor func testDisplayedSwiftProtocolsAndGeometryUseConcreteValues() {
         continueAfterFailure = false
         let app = launchSwift("display-swift-type-features", flag: true); defer { app.terminate() }
@@ -305,8 +277,6 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Must not run"].exists, "A discarded default implementation must refuse the program")
     }
 
-    /// #1038: a real hosted source app exercises grouped dictionary values,
-    /// enum keys, mapValues and tuple-key lookup in the interpreter.
     @MainActor func testDisplayedSwiftDictionaryAppGroupsAndTalliesItems() {
         continueAfterFailure = false
         let app = launchSwift("display-swift-dictionary", flag: true); defer { app.terminate() }
@@ -348,10 +318,6 @@ final class TronSwiftAppUITests: XCTestCase {
         keepScreenshot(app, "1038-dictionary-limit-rollback")
     }
 
-    /// #1142: a nil optional-chain receiver skips the rest of its postfix chain
-    /// (arguments, later indexes, lazy defaults, closure calls and assignment
-    /// right-hand sides); a present receiver runs normally, and parentheses end
-    /// the chain, so a nil group is an operand error rather than a skip.
     @MainActor func testDisplayedSwiftOptionalChainSkipsMissingLinks() {
         continueAfterFailure = false
         let app = launchSwift("display-swift-optional-chain", flag: true); defer { app.terminate() }
@@ -466,7 +432,6 @@ final class TronSwiftAppUITests: XCTestCase {
         keepScreenshot(app, "1146-enum-payloads")
     }
 
-    /// #1036: a hosted stopwatch advances from its view-lifetime timer.
     @MainActor func testDisplayedSwiftTimerTicksAndStopsWithRunner() {
         continueAfterFailure = false
         let app = launchSwift("display-swift-timer", flag: true); defer { app.terminate() }
@@ -494,9 +459,6 @@ final class TronSwiftAppUITests: XCTestCase {
         app.navigationBars.containing(.staticText, identifier: "Stopwatch").buttons["Done"].firstMatch.tap()
     }
 
-    /// #889: a second app style — a shared ObservableObject store passed
-    /// through environmentObject, a TabView, Lists, an enum switch and
-    /// String(format:) — keeps one store across tabs.
     @MainActor func testDisplayedSwiftStoreAppSharesStateAcrossTabs() {
         continueAfterFailure = false
         let app = launchSwift("display-swift-budget", flag: true); defer { app.terminate() }
@@ -506,8 +468,6 @@ final class TronSwiftAppUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Groceries"].waitForExistence(timeout: 10), "The App's WindowGroup renders the first tab")
         XCTAssertTrue(app.staticTexts["$42.50"].exists, "String(format:) formats currency")
-        // #909: a root TabView gets the shared chrome per tab, and the tab's own
-        // toolbar stays beside Done (a stack around the TabView would hide it).
         assertToolbarTint(app, title: "Expenses", excluding: ["Plan trip", "Leave app"])
         let expensesBar = app.navigationBars.containing(.staticText, identifier: "Expenses").firstMatch
         XCTAssertTrue(expensesBar.buttons["Plan trip"].exists, "The tab keeps its toolbar under the shared chrome")
@@ -520,7 +480,6 @@ final class TronSwiftAppUITests: XCTestCase {
         let total = app.staticTexts["budget.total"]
         XCTAssertTrue(total.waitForExistence(timeout: 5), "The TabView switches to the second tab")
         assertToolbarTint(app, title: "Summary")
-        // Optional.map: applied to a value, and nil stays nil for `??`.
         XCTAssertTrue(app.staticTexts["Latest: New food"].exists, "Optional.map applies its closure to a value")
         XCTAssertTrue(app.staticTexts["No big expense"].exists, "Optional.map on nil is nil")
         XCTAssertEqual(total.label, "Total $72.75 across 3 expenses", "The other tab reads the same environment object")
@@ -529,9 +488,6 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["budget.fun"].label, "0.00")
         keepScreenshot(app, "889-7-budget-summary")
 
-        // #1027: dismiss() closes the presentation the program created, and
-        // only that: a pushed destination pops, a sheet closes after its save,
-        // and in the program's root it never closes the runner itself.
         app.buttons["Biggest expense"].tap()
         let back = app.buttons["Back to summary"]
         XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
@@ -551,9 +507,6 @@ final class TronSwiftAppUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertTrue(app.staticTexts["New travel"].exists, "dismiss() in the program's root never closes the runner sheet")
 
-        // #1160: Link and openURL reach the host's real openURL only for an
-        // install manifest or a page on the paired Gateway's host. The fixture
-        // records what its OpenURLAction receives in the runner's link probe.
         app.buttons["Summary"].tap()
         app.buttons["Statements"].tap()
         let reset = app.buttons["Reset statement"], resets = app.staticTexts["budget.resets"]
@@ -605,10 +558,6 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertFalse(confirm.exists)
     }
 
-    /// #889: unsupported Swift shows a line-numbered diagnostic; runaway loops,
-    /// recursion and growth stop at the runtime limits; hostile arithmetic,
-    /// formats and self-containing views cannot crash the app, which stays
-    /// responsive throughout.
     @MainActor func testSwiftAppFailuresStayContainedInTheRunner() {
         continueAfterFailure = false
         let broken = launchSwift("display-swift-broken", flag: true); defer { broken.terminate() }
@@ -624,7 +573,6 @@ final class TronSwiftAppUITests: XCTestCase {
                        "Supported payload cases do not create obsolete warnings")
         broken.terminate()
 
-        // Nesting deep enough to overflow a recursive parser stops at the parser limit.
         let deep = launchSwift("display-swift-deep", flag: true)
         openSwiftDisplay(deep, named: "Deep.swift")
         let runDeep = deep.buttons["Run Deep.swift"]
@@ -638,8 +586,6 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
         let taps = app.staticTexts["limits.taps"]
         XCTAssertTrue(taps.waitForExistence(timeout: 10))
-        // #909: a program with no NavigationStack or title still gets the
-        // shared chrome, titled with the file name.
         assertToolbarTint(app, title: "Limits")
         XCTAssertTrue(diagnostic(app, "Unknown name 'Map'").exists, "An unsupported view renders an inline diagnostic beside working views")
 
@@ -650,7 +596,6 @@ final class TronSwiftAppUITests: XCTestCase {
             ("Grow forever", "string grew past"),
             ("Read itself", "recursion is too deep"),
             ("Overflow", "Integer overflow"),
-            // 2^40 shared leaves: comparison is budgeted, not exponential.
             ("Compare shared", "ran too long"),
         ] {
             app.buttons[button].tap()
@@ -672,12 +617,9 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertTrue(wait(app.staticTexts["limits.state"], predicate: "label == %@", value: "State: 2/5/2/1"),
                       "A successful action commits all writes and recomputes derived state")
 
-        // A program-chosen format never reaches Foundation with a mismatched
-        // argument: %s and %@ print the value instead of reading memory.
         app.buttons["Hostile format"].tap()
         XCTAssertTrue(wait(app.staticTexts["limits.note"], predicate: "label == %@", value: "\(expectedTaps)|2.5|  3.0"))
 
-        // Describing the same shared value is bounded, not 2^40 elements long.
         app.buttons["Describe shared"].tap()
         XCTAssertTrue(wait(app.staticTexts["limits.note"], predicate: "label BEGINSWITH '[[[[' AND label ENDSWITH '…'"))
 
@@ -747,9 +689,6 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertFalse(malformedGeneric.staticTexts["Must not run"].exists, "Malformed generic syntax never executes a partial app")
     }
 
-    /// The shared info card uses neutral primary copy and a separate semantic
-    /// error icon. Catch a regression to the old all-red, ad-hoc Label using
-    /// rendered ink rather than asserting production source text.
     @MainActor private func assertSwiftDiagnosticStyle(_ app: XCUIApplication, _ message: XCUIElement) {
         XCTAssertTrue(message.isHittable, "The full error is readable over the runner")
         let frame = message.frame
@@ -779,9 +718,6 @@ final class TronSwiftAppUITests: XCTestCase {
                           "Diagnostic text must use shared primary ink, not an all-red custom label")
     }
 
-    /// #1006: the Settings › System › Experimental switch turns the run
-    /// control on and off live, without a relaunch, and it wins over the
-    /// launch argument that started this process with the runner off.
     @MainActor func testSettingsSwitchAddsAndRemovesSwiftRunControlLive() {
         continueAfterFailure = false
         let app = launchSwift("display-swift-settings", flag: false); defer { app.terminate() }
@@ -810,7 +746,6 @@ final class TronSwiftAppUITests: XCTestCase {
     @MainActor private func setSwiftRunner(_ app: XCUIApplication, on: Bool) {
         let open = app.buttons["fixture.open-settings"]
         XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
-        // #1325 combined the Experimental route into Setup.
         let experimental = app.buttons["settings-link-Setup"]
         XCTAssertTrue(experimental.waitForExistence(timeout: 10))
         for _ in 0..<12 where !experimental.isHittable { app.swipeUp() }
@@ -838,7 +773,6 @@ final class TronSwiftAppUITests: XCTestCase {
         launch(scenario, extraArguments: ["-tron.experimental.swiftApps", flag ? "YES" : "NO"])
     }
 
-    /// The canonical tools/web BuildsPreview.swift this bundle carries (#1339).
     private var canonicalBuildsPreviewSource: String {
         let url = Bundle(for: Self.self).url(forResource: "BuildsPreview", withExtension: "swift", subdirectory: "builds-preview")!
         return try! String(contentsOf: url, encoding: .utf8)

@@ -101,9 +101,6 @@ enum ModelCatalogPolicy {
     }
 }
 
-/// Admission for the Gateway's bounded recent-model history. The Gateway caps
-/// its own store; the client bounds again so a malformed or oversized response
-/// can never inflate the picker's Recent rail.
 enum RecentModelCatalogPolicy {
     static let maximumItems = 12
     static let maximumStringBytes = 512
@@ -128,7 +125,6 @@ enum RecentModelCatalogPolicy {
 
 struct ModelCatalogAccumulator {
     private(set) var models: [ModelSummary] = []
-    // Local schema paths/reasons only: never catalog values or provider names.
     private(set) var rejection: String?
     private var identities = Set<ModelRef>()
     private var pageCount = 0
@@ -148,8 +144,6 @@ struct ModelCatalogAccumulator {
             guard pageIdentities.insert(model.ref).inserted, !identities.contains(model.ref) else {
                 throw invalidPagination(reason: "duplicate_identity", path: path)
             }
-            // Pi virtual routers use zero for an unspecified capacity; the
-            // physical model supplies it at routing time. Never invent limits.
             let minimum = model.virtual == true ? 0 : 1
             guard model.contextWindow >= minimum else {
                 throw invalidPagination(reason: "invalid_token_limit", path: "\(path).contextWindow")
@@ -196,8 +190,6 @@ struct ModelCatalogAccumulator {
     }
 }
 
-/// Owns disposable provider/model projections and operation-keyed provider
-/// authentication state. Gateway provider state remains canonical.
 @MainActor
 @Observable
 final class ProviderAuthCoordinator {
@@ -206,7 +198,6 @@ final class ProviderAuthCoordinator {
     private struct ProviderResponse: Decodable { let providers: [ProviderSummary] }
     private struct ModelResponse: Decodable { let models: [ModelSummary]; let nextCursor: String? }
     private struct RecentModelsResponse: Decodable { let models: [RecentModelRef] }
-    /// `model.recent` is global: it carries no session scope.
     private struct RecentModelsParams: Codable { }
     private struct BeginParams: Codable {
         let providerId, authType: String
@@ -214,9 +205,6 @@ final class ProviderAuthCoordinator {
         let commandId: String
         let replaceOperationId: String?
     }
-    /// `recovered` is additive: the Gateway recovers the active operation for
-    /// the same device/provider/auth-method/target instead of admitting another.
-    /// Its absence means a new admission, and Restart is offered only when true.
     private struct BeginResponse: Decodable { let operationId: String; let recovered: Bool? }
     private struct RespondParams: Codable { let operationId, promptId, value: String }
     private struct RespondResponse: Decodable { let answered: Bool }
@@ -302,8 +290,6 @@ final class ProviderAuthCoordinator {
     private var authTypeByAuthOperation: [String: String] = [:]
     private var activeAuthOperationID: String?
     private var recoveredAuthOperationID: String?
-    /// Cancellations whose acknowledgement was lost in transit. They are
-    /// retried on reconnect so an explicit Cancel is not silently dropped.
     private var pendingCancellationOperationIDs: [String] = []
     private static let maximumPendingCancellations = 4
     private var answeringPromptID: String?
@@ -332,9 +318,6 @@ final class ProviderAuthCoordinator {
         let promptID: String
         let value: String
     }
-    // One unsent value, confined to this authority's live auth operation. A
-    // retired socket hides it; only the broker's same challenge can re-admit
-    // it. Never persist, log, or automatically submit this sensitive memory.
     private var promptInputDraft: PromptInputDraft?
     private(set) var prompt: ProviderAuthPromptState? {
         didSet {
@@ -374,16 +357,11 @@ final class ProviderAuthCoordinator {
     }
 }
 
-// Behavior stays out of the @Observable class body; see AppModel (#1066).
 extension ProviderAuthCoordinator {
     func catalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
         catalogByTarget[target]
     }
 
-    /// Reads the Gateway's recent-model history for the current profile.
-    /// Auxiliary presentation data: a failure — including a Gateway that
-    /// predates `model.recent` — keeps the last projection and surfaces no
-    /// error, because the picker's Recent rail must never block selection.
     func loadRecentModels() async {
         let admittedProfileGeneration = profileGeneration
         let admittedLoadGeneration = recentModelsLoadGeneration
@@ -395,23 +373,17 @@ extension ProviderAuthCoordinator {
             guard profileGeneration == admittedProfileGeneration,
                   recentModelsLoadGeneration == admittedLoadGeneration else { return }
             let admitted = RecentModelCatalogPolicy.admit(response.models)
-            // Observation notifies on every write; an unchanged list must not
-            // rebuild an open picker mid-presentation.
             if admitted != recentModels { recentModels = admitted }
         } catch is CancellationError {
         } catch {
         }
     }
 
-    /// The Gateway recorded a new recent model. Generation fencing discards a
-    /// read that loses the race with this one.
     func noteRecentModelsChanged() {
         recentModelsLoadGeneration &+= 1
         Task { await loadRecentModels() }
     }
 
-    /// The active operation when the Gateway recovered it for a fresh begin, so
-    /// the presentation can offer Continue, Restart, or Cancel.
     var activeRecoveredOperationID: String? {
         guard let activeAuthOperationID, recoveredAuthOperationID == activeAuthOperationID else { return nil }
         return activeAuthOperationID
@@ -470,8 +442,6 @@ extension ProviderAuthCoordinator {
             guard admits(admission) else { return false }
             try ProviderCatalogPolicy.validate(providers)
             catalogByTarget[target] = ProviderCatalog(providers: providers, models: accumulator.models)
-            // Warm the picker's Recent rail with the catalog so the first open
-            // does not grow the sheet when a late rail arrives.
             if recentModels.isEmpty { Task { await loadRecentModels() } }
             return true
         } catch {
@@ -485,9 +455,6 @@ extension ProviderAuthCoordinator {
         }
     }
 
-    /// Begins, recovers, or (with `replacing`) restarts one provider login. A
-    /// fresh command is safe after an uncertain response: the Gateway recovers
-    /// the same-key operation, and a stale replacement ID recovers the successor.
     func beginAuth(
         providerID: String,
         authType: String,
@@ -499,8 +466,6 @@ extension ProviderAuthCoordinator {
         let admittedBeginGeneration = authBeginGeneration
         inFlightAuthBeginGenerations.insert(admittedBeginGeneration)
         defer { finishAuthBegin(admittedBeginGeneration) }
-        // Beginning a newer operation synchronously revokes any suspended
-        // completion's authority to publish an error for the previous UI.
         authPresentationGeneration &+= 1
         let response: BeginResponse = try await client.request(
             "auth.begin",
@@ -513,8 +478,6 @@ extension ProviderAuthCoordinator {
             )
         )
         try requireProfile(admittedProfileGeneration)
-        // Retain every operation target admitted by this profile so even a
-        // superseded operation can refresh its exact scope when it completes.
         targetByAuthOperation[response.operationId] = target
         providerByAuthOperation[response.operationId] = providerID
         authTypeByAuthOperation[response.operationId] = authType
@@ -550,7 +513,6 @@ extension ProviderAuthCoordinator {
         }
     }
 
-    /// Holds early auth events while `mcp.auth.start` is awaiting its RPC result.
     func beginMCPAuthAdmission() -> Int {
         authBeginGeneration &+= 1
         let generation = authBeginGeneration
@@ -558,8 +520,6 @@ extension ProviderAuthCoordinator {
         return generation
     }
 
-    /// Attaches the returned MCP OAuth operation to the same operation-keyed
-    /// presentation stream used by provider authentication.
     func adoptMCPAuthOperation(operationID: String, target: ProviderCatalogTarget, admission: Int) {
         authPresentationGeneration &+= 1
         targetByAuthOperation[operationID] = target
@@ -591,15 +551,10 @@ extension ProviderAuthCoordinator {
         finishAuthBegin(admission)
     }
 
-    /// Releases local UI ownership after the MCP-specific cancel RPC has
-    /// already canceled the Gateway operation.
     func finishMCPAuthOperation(operationID: String) {
         retireAuthPresentation(operationID: operationID)
     }
 
-    /// Explicitly replaces the named active operation with the same provider
-    /// method. The Gateway retires it (invalidating its authorization link)
-    /// before starting the successor; a stale ID sends nothing.
     func restartAuth(operationID: String) async throws {
         guard operationID == activeAuthOperationID,
               let providerID = providerByAuthOperation[operationID],
@@ -627,20 +582,12 @@ extension ProviderAuthCoordinator {
                 )
             )
         } catch let failure as GatewayFailure where failure.code == "not_found" {
-            // A reconnect or transport replacement can retire the broker
-            // operation between presenting the prompt and submitting its value.
-            // Never surface the broker's misleading operation-not-found popup;
-            // retire only this stale presentation and let the provider catalog
-            // refresh on the next authoritative connection.
             guard profileGeneration == admittedProfileGeneration else { return }
             retireAuthPresentation(operationID: admittedPrompt.operationId)
             return
         }
         try requireProfile(admittedProfileGeneration)
         guard response.answered else {
-            // The Gateway may have already completed or retired this prompt
-            // before a duplicate UI submission reached it. Do not turn that
-            // benign race into a user-facing operation-not-found error.
             if prompt?.operationId == admittedPrompt.operationId, prompt?.id == admittedPrompt.id {
                 prompt = nil
             }
@@ -674,12 +621,8 @@ extension ProviderAuthCoordinator {
         do {
             try await submitPendingBrowserCallback(operationID: operationID)
         } catch let failure as GatewayFailure where failure.retryable {
-            // The callback remains memory-only and is retried after auth.resume.
             return
         } catch is GatewayPossiblySentError {
-            // The Gateway may already have delivered the one-use callback.
-            // Resume first; its latest event/completion decides whether a retry
-            // remains admissible.
             return
         } catch is CancellationError {
             guard activeAuthOperationID == operationID else { throw CancellationError() }
@@ -703,9 +646,6 @@ extension ProviderAuthCoordinator {
         } catch let failure as GatewayFailure where failure.code == "not_found" {
             retireAuthPresentation(operationID: operationID)
         } catch {
-            // Reconnect reconciliation owns the next retry. Keep the bounded
-            // operation identity rather than turning transport loss into OAuth
-            // cancellation.
         }
     }
 
@@ -768,8 +708,6 @@ extension ProviderAuthCoordinator {
         do {
             response = try await client.request("auth.cancel", CancelParams(operationId: id))
         } catch let failure as GatewayFailure where !failure.retryable {
-            // A definite rejection (including an already-retired operation)
-            // settles this cancellation; only uncertain delivery is retried.
             response = nil
         } catch {
             response = nil
@@ -796,8 +734,6 @@ extension ProviderAuthCoordinator {
     private func recordPendingCancellation(_ operationID: String) {
         pendingCancellationOperationIDs.removeAll { $0 == operationID }
         pendingCancellationOperationIDs.append(operationID)
-        // The Gateway timeout remains the final bound for an operation whose
-        // cancellation this bounded retry list had to drop.
         if pendingCancellationOperationIDs.count > Self.maximumPendingCancellations {
             pendingCancellationOperationIDs.removeFirst()
         }
@@ -828,8 +764,6 @@ extension ProviderAuthCoordinator {
             try await client.request("models.refresh", params, timeout: GatewayRequestTimeout.modelCatalogRefresh)
         }
         try requireProfile(admittedProfileGeneration)
-        // Pi retains prior provider entries when one network refresh fails. Reload
-        // first so successful provider updates and cached fallbacks remain visible.
         _ = await refreshCatalog(target: target)
         try requireProfile(admittedProfileGeneration)
         if response.aborted {
@@ -888,9 +822,6 @@ extension ProviderAuthCoordinator {
         }
     }
 
-    /// Commit exact terminal ownership before returning to global intake. Only
-    /// the optional catalog refresh is deferred, with one worker and one latest
-    /// pending active presentation; repeated/unowned events cannot queue tasks.
     func dispatchCompletion(_ payload: JSONValue) {
         guard let completion = parseCompletion(payload) else { return }
         guard activeAuthOperationID == completion.operationID
@@ -921,15 +852,12 @@ extension ProviderAuthCoordinator {
         invalidationGeneration &+= 1
     }
 
-    /// Release-date changes invalidate the model catalog projection, including an open picker.
     func noteModelCatalogChanged() {
         for target in Array(catalogByTarget.keys) {
             Task { await refreshCatalog(target: target, reportErrors: false) }
         }
     }
 
-    /// Revokes disposable transport work while retaining the stable-device-owned
-    /// provider operation so a replacement socket can rebind with auth.resume.
     func retireConnection() {
         let retainedInput = promptInputDraft
         revokeConnectionOwnership(clearCatalogs: false, preserveActiveAuth: true)
@@ -938,7 +866,6 @@ extension ProviderAuthCoordinator {
         }
     }
 
-    /// Synchronously revokes suspended work and disposes all profile projections.
     func clearProfile() {
         revokeConnectionOwnership(clearCatalogs: true, preserveActiveAuth: false)
     }
@@ -957,7 +884,6 @@ extension ProviderAuthCoordinator {
         if clearCatalogs {
             catalogByTarget.removeAll()
             recentModels.removeAll()
-            // Pending cancellations belong to the retired profile's Gateway.
             pendingCancellationOperationIDs.removeAll()
         }
         if preserveActiveAuth, let activeAuthOperationID {

@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Presentation of one Mac replacement journal (#984): which path ran and why,
-/// each step with its timing, the exact failure and log path, the rollback,
-/// and the workers it stopped with an in-place Resume.
 enum MacReplacementPresentation {
     static func stepIcon(_ step: MacReplacementStep) -> String {
         switch step.state {
@@ -55,7 +52,6 @@ enum MacReplacementPresentation {
         }
     }
 
-    /// The plan's reason without the path title the row already shows.
     static func reasonDetail(_ reason: String) -> String {
         for prefix in ["Full signed build: ", "Quick rebuild: "] where reason.hasPrefix(prefix) {
             let rest = reason.dropFirst(prefix.count)
@@ -83,8 +79,6 @@ struct MacReplacementSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    /// The focused server whose journal this sheet follows; nil renders a
-    /// fixed journal (the hosted accessibility fixture) without reading.
     let profile: GatewayProfile?
     @PresentationState private var status: MacReplacementStatus?
     @PresentationState private var resuming: Set<String> = []
@@ -143,8 +137,6 @@ struct MacReplacementSheet: View {
             source: "\(profile?.id ?? "fixed"):\(connected):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
-            // Poll while visible. While the Gateway is down for the swap the
-            // last journal stays on screen; reconnecting restarts this task.
             while !Task.isCancelled, presentationActivity.allowsPresentationPublication, scenePhase == .active {
                 await load()
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }

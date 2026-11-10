@@ -3,8 +3,6 @@ import TronMobileCore
 
 struct ProjectTrustSummary: Equatable, Sendable {
     let cwd: String
-    /// The Project root the decision is recorded for (the Git worktree root, else
-    /// the workspace itself). A chat in a subdirectory shares its root's decision.
     let projectDir: String
     let requiresDecision: Bool
     let savedDecision: Bool?
@@ -334,8 +332,6 @@ struct TrustSettingsView: View {
         let activity = presentationActivity
         guard activity.allowsPresentationPublication, !Task.isCancelled,
               let target else { return }
-        // Event reads and accepted-command reconciliation share this exact
-        // leaf lane; cancelling a presentation task cannot cancel the latter.
         trustLoadGeneration &+= 1
         let ticket = trustLoadGeneration
         do {
@@ -367,8 +363,6 @@ struct TrustSettingsView: View {
                 guard presentationActivity.allowsPresentationPublication,
                       model.knowledgePresentationIdentity == requestIdentity,
                       target == self.target else { return }
-                // The receipt confirms this decision, not the latest trust
-                // record after another accepted decision or change event.
                 await load()
             } catch is CancellationError {
                 return

@@ -2,7 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Real chat and media loader for out-of-process menu/status-bar gestures.
 @MainActor
 struct HostedChatDisplayFixture: View {
     static let imageTranscriptData = Data(#"""
@@ -11,8 +10,6 @@ struct HostedChatDisplayFixture: View {
           {"id":"image-result","parentId":"image-request","presentationId":"image-result","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"image-result-text","ordinal":0,"type":"text","text":"Displayed Orientation Image."}],"toolCallId":"image-call","toolName":"display","isError":false,"display":{"schema":"tron.display.v1","displayId":"orientation-image","revision":1,"title":"Orientation Image","altText":"Red above blue, with the close badge at top right.","kind":"image","presentation":{"requestedSurface":"inline","inlineTapAction":"sheet"},"eligibleSurfaces":["sheet","inline","floating"],"fallbackText":"Orientation Image","artifact":{"id":"6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc40","name":"orientation.png","mimeType":"image/png","size":1024,"kind":"image"}}}
         ]
         """#.utf8)
-    /// Finalized parallel groups: four sheet photos and a PDF, then a mixed run whose
-    /// generic calls keep their grouped chip around a row of display thumbnails.
     static let groupedDisplayTranscriptData = Data(#"""
         [
           {"id":"displays-request","parentId":null,"presentationId":"displays-request","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"shot-1-content","ordinal":0,"type":"toolCall","toolCallId":"shot-1","name":"display","arguments":{"presentation":{"surface":"sheet"}},"groupId":"display-group","groupIndex":0,"groupCount":5,"groupFinalized":true},{"id":"shot-2-content","ordinal":1,"type":"toolCall","toolCallId":"shot-2","name":"display","arguments":{"presentation":{"surface":"sheet"}},"groupId":"display-group","groupIndex":1,"groupCount":5,"groupFinalized":true},{"id":"shot-3-content","ordinal":2,"type":"toolCall","toolCallId":"shot-3","name":"display","arguments":{"presentation":{"surface":"sheet"}},"groupId":"display-group","groupIndex":2,"groupCount":5,"groupFinalized":true},{"id":"shot-4-content","ordinal":3,"type":"toolCall","toolCallId":"shot-4","name":"display","arguments":{"presentation":{"surface":"sheet"}},"groupId":"display-group","groupIndex":3,"groupCount":5,"groupFinalized":true},{"id":"shot-5-content","ordinal":4,"type":"toolCall","toolCallId":"shot-5","name":"display","arguments":{"presentation":{"surface":"sheet"}},"groupId":"display-group","groupIndex":4,"groupCount":5,"groupFinalized":true}]},
@@ -29,9 +26,6 @@ struct HostedChatDisplayFixture: View {
           {"id":"mix-bash-result","parentId":"mixed-request","presentationId":"mix-bash-result","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"toolResult","content":[{"id":"mix-bash-result-text","ordinal":0,"type":"text","text":"ok"}],"toolCallId":"mix-bash","toolName":"bash","isError":false}
         ]
         """#.utf8)
-    /// A finalized parallel group of inline image displays, the shape an agent
-    /// produces when it shows several screenshots at once. Each completed
-    /// inline image stays visible as a thumbnail inside the grouped row.
     static let inlineGroupTitles = [
         "Home dashboard after the fix", "Usage sheet with rounded rows",
         "Settings: This iPhone switch", "Worker list scrolled to the end",
@@ -73,10 +67,6 @@ struct HostedChatDisplayFixture: View {
     private let snapshot: SessionSnapshot
     private let socket: HostedChatDisplaySocket
     private let probe = ChatHostedProbe()
-    /// `-chat-display-inline-group` reopens a chat whose grouped inline displays
-    /// are already in history; `-chat-display-inline-group-live` opens the chat
-    /// without them and delivers the call, then its results, as live
-    /// `session.snapshot` events on the same mounted transcript.
     private static var inlineGroupLive: Bool { ProcessInfo.processInfo.arguments.contains("-chat-display-inline-group-live") }
     private static var inlineGroup: Bool {
         inlineGroupLive || ProcessInfo.processInfo.arguments.contains("-chat-display-inline-group")
@@ -169,8 +159,6 @@ struct HostedChatDisplayFixture: View {
         }
     }
 
-    /// The call arrives first (its displays still preparing), then every result,
-    /// each as the Gateway's live snapshot event for the open session.
     private func deliverInlineGroupLive() async throws {
         var live = snapshot
         for appended in [[Self.inlineGroupCall()], Self.inlineGroupResults()] {
@@ -186,10 +174,6 @@ struct HostedChatDisplayFixture: View {
     }
 }
 
-/// Holds each presentation-loading `home.taskList` read (one per Manage Home or
-/// Tasks sheet load) until the UI test releases it. Each Darwin notification
-/// grants one read, so a release posted before its read arrives is kept, not
-/// lost; the hold has no deadline of its own.
 @MainActor
 enum HostedHomeTaskListRelease {
     private static var permits = 0
@@ -207,7 +191,6 @@ enum HostedHomeTaskListRelease {
     }
 }
 
-/// Retains the actual mounted Manage Home action to exercise a callback after route replacement.
 @MainActor
 final class HostedHomeActionProbe {
     var pause: (() -> Void)?
@@ -268,9 +251,6 @@ struct HostedHomeDashboardFixture: View {
             let secondary = arguments.contains("-home-dashboard-secondary") && request.url?.host == "other.example.test"
             return HostedHomeShellSocket(gateway: gateway, machineID: secondary ? "other-machine" : "home-shell-fixture")
         })
-        // Each launch is a different scripted catalog. A secondary profile's retained offline
-        // cache from a prior journey is valid production state, but must not seed this unrelated
-        // synthetic scenario; nor may a draft one journey typed appear in the next launch (#1669).
         let cacheRoot = FileManager.default.temporaryDirectory.appending(path: "home-shell-fixture")
         try? FileManager.default.removeItem(at: cacheRoot)
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
@@ -339,7 +319,6 @@ struct HostedHomeDashboardFixture: View {
                                         try model.profiles.save(other, token: "other-fixture-token")
                                         try await model.connectHostedGateway(profile: other, token: "other-fixture-token")
                                         callback?()
-                                        // Allow the menu's task and fixture count observer to settle.
                                         try await Task.sleep(for: .seconds(1))
                                         staleActionFinished = true
                                     } catch { self.error = error.localizedDescription }
@@ -357,8 +336,6 @@ struct HostedHomeDashboardFixture: View {
         .preferredColorScheme(arguments.contains("-home-dark") ? .dark : .light)
         .dynamicTypeSize(arguments.contains("-home-profile-hierarchy") ? HostedProfileHierarchyFixture.typeSize
                          : arguments.contains("-home-accessibility-type") ? .accessibility3 : .large)
-        // Forward scene transitions as production does: background retires the
-        // connection that a mounted Home sheet's identity names, and foreground reconnects.
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .inactive: model.becameInactive()
@@ -409,10 +386,6 @@ struct HostedHomeDashboardFixture: View {
                     await gateway.changeDashboard()
                     await model.refreshSessions()
                 }
-                // Home dispatches a worker after the view loaded: its catalog row
-                // arrives carrying `homeTaskId`, as the Gateway projects it.
-                // `-late` holds the new worker until the view's sections revealed
-                // and settled, so a journey observes the live update separately.
                 if firstRevealAt == nil, !TronDashboardRevealProbe.shared.reveals.isEmpty { firstRevealAt = Date() }
                 let newWorkerDue = !arguments.contains("-home-dashboard-new-worker-late")
                     || firstRevealAt.map { Date().timeIntervalSince($0) > 9 } == true
@@ -421,10 +394,6 @@ struct HostedHomeDashboardFixture: View {
                     newWorkerAdded = true
                     model.sessions = model.sessions + [HostedHomeDashboardWorkers.newWorker.withGatewaySource(id: profile.id, label: profile.label)]
                 }
-                // Requested once. A hosted reconnect is a new connection identity, which the mounted
-                // sheet must observe by re-reading, so it fires after the second read (Manage Home's,
-                // then the Tasks sheet's). A profile switch fires after the first task read (opening a
-                // task from the Tasks sheet), so a test can observe the presented sheet first.
                 if !reconnectRequested {
                     if arguments.contains("-home-switch-profile-after-task-open"), taskStatusReads >= 1 {
                         reconnectRequested = true
@@ -467,11 +436,8 @@ private actor HostedHomeShellGateway {
     private var refusedTaskPage = false
     private var taskListReads = 0
     private var taskStatusReads = 0
-    // Sheet-only reads (never polled by the shell), so their overlap proves the
-    // Manage Home load sends independent reads together rather than in series.
     private var sheetReadsInFlight = 0
     private var sheetReadPeak = 0
-    /// The background model queue the fixture's last accepted change set, `provider/id` in order.
     private var configuredModels: [String] = HostedSettingsReviewSchema.scopeReview
         ? ["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"] : []
     private var foreground = HostedForegroundSheetScenario()
@@ -508,22 +474,16 @@ private actor HostedHomeShellGateway {
             }
             return .object(value)
         }
-        // Deliberately small pages exercise the real AppModel catalog loader;
-        // no fixture writes the finished projection into the model in this mode.
         let end = min(offset + 3, rows.count)
         return .object(["sessions": .array(Array(rows[offset..<end])),
             "nextCursor": end < rows.count ? .string(String(end)) : .null,
             "listRevision": .number(Double(dashboardRevision)),
             "projectionToken": .string("dashboard:\(dashboardRevision)"), "archivedCount": .number(1)])
     }
-    /// The learned profile as the fixture Gateway holds it, changed by `home.profileChange`
-    /// and restored by `settings.undo`, with its record entries for Changes.
     private var profileItems: [HostedProfileItem] = HostedHomeToolFixture.profileItems
     private var profileEntries: [JSONValue] = []
     private var profileUndo: [String: (before: [HostedProfileItem], after: [HostedProfileItem])] = [:]
     private var profileChangeCount = 0
-    /// Home's own learn of the first item, recorded as the Gateway records Home's
-    /// profile tool: undoing it retires the item.
     private func seedHomeProfileEntry() {
         guard profileEntries.isEmpty, let index = profileItems.firstIndex(where: { $0.id == "9a364c45-34fe-4f0a-93e6-fc507e2b0bdc" }) else { return }
         var retired = profileItems
@@ -604,8 +564,6 @@ private actor HostedHomeShellGateway {
     func capabilities() -> [String] { foreground.capabilities(capabilityEnabled ? (sheetState == "dashboard-workers" ? [ProviderUsageCapability.name] : []) + ["sessions.v1", "home.v1", "home-chapter-list.v1", "home-profile-list.v1", "home-profile-edit.v1", "context-window.v1", "skill-prompt.v1"] + (sheetState == "browser-unsupported" ? [] : ["home-memory-view.v1"]) : ["sessions.v1"]) }
 
     private var homeReads: [String: Int] = [:]
-    /// Publishes each count before the read is answered, so the label is current
-    /// by the time the sheet shows the content (no poll delay).
     private var onHomeRead: (@MainActor @Sendable (String) -> Void)?
     func observeHomeReads(_ observer: @escaping @MainActor @Sendable (String) -> Void) { onHomeRead = observer }
     func homeReadSummary() -> String {
@@ -613,8 +571,6 @@ private actor HostedHomeShellGateway {
             .map { "\($0)=\(homeReads[$0, default: 0])" }.joined(separator: ",")
     }
 
-    /// The Gateway's profile change semantics on fixture data: the maintainer's edits are
-    /// confirmed, a stale revision is a conflict, and each request is one undoable group.
     private func profileChange(_ params: [String: JSONValue]) -> (JSONValue?, JSONValue?) {
         guard params["commandId"]?.stringValue != nil, case .array(let changes)? = params["changes"], !changes.isEmpty else { return taskRefusal() }
         profileChangeCount += 1
@@ -708,7 +664,6 @@ private actor HostedHomeShellGateway {
             let row = SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace", parentSessionId: nil,
                 createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,
                 firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1)
-            // Home's chapters are never ordinary rows: the Gateway's user list omits them.
             let workers = sheetState == "dashboard-workers" ? HostedHomeDashboardWorkers.sessions : []
             return (.object(["sessions": .array(([row] + workers).map { try! JSONValue.encode($0) }), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
@@ -717,7 +672,6 @@ private actor HostedHomeShellGateway {
         case "provider.list" where sheetState == "dashboard-workers":
             return (foreground.providers(HostedHomeDashboardWorkers.providers), nil)
         case "provider.usage":
-            // Holds the usage card on its loading pulse long enough to see it.
             if ProcessInfo.processInfo.arguments.contains("-home-dashboard-usage-delay") {
                 try await Task.sleep(for: .seconds(6))
             }
@@ -740,7 +694,6 @@ private actor HostedHomeShellGateway {
                         "actor": .string("Worker"), "layer": .string("Session"), "section": .string("model"),
                         "display": .object(["before": .string("Off"), "after": .string("High")])])])
             ] : []
-            // The feed's default filter is agents and outside, as the Gateway's is.
             let profile = profileEntries.reversed().filter { entry in
                 params["actor"]?.stringValue != "agents" || entry.objectValue?["actor"]?.objectValue?["kind"]?.stringValue != "ui"
             }
@@ -758,9 +711,6 @@ private actor HostedHomeShellGateway {
                 let active = HostedHomeTaskHistoryFixture.row(taskSummary("active"))
                 return (.object(["items": .array(params["filter"]?.stringValue == "finished" ? [] : [active])]), nil)
             }
-            // Hold the real sheet's read at the socket boundary, not its view state,
-            // until the test has observed the loading layout and releases it; a
-            // wall-clock hold expires mid-assertion on a loaded host (#2410).
             if sheetState == "presentation-loading" { await HostedHomeTaskListRelease.wait() }
             if sheetState == "tasks-error", taskListReads == 2 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Task list unavailable"), "retryable": .bool(true)]))
@@ -801,7 +751,6 @@ private actor HostedHomeShellGateway {
             return (taskRecord(id), nil)
         case "home.taskPermissions":
             if sheetState == "tasks-empty" {
-                // A real refusal takes a round trip; the embedded section re-reads it every 5 s.
                 try? await Task.sleep(for: .seconds(1))
                 return (nil, .object(["code": .string("conflict"), "message": .string("Home task permissions refused"), "retryable": .bool(false),
                                       "details": .object(["reason": .string("not-initialized")])]))
@@ -852,9 +801,6 @@ private actor HostedHomeShellGateway {
             else { result["previousOffset"] = .number(0) }
             return (.object(result), nil)
         case "home.prompt":
-            // Composer resources ride the logical route as the Gateway's ordered
-            // `resourceInvocations`; the route records exactly which, in order,
-            // and the message text that follows them (#311).
             if let resources = params["resourceInvocations"]?.arrayValue, !resources.isEmpty {
                 let names = resources.compactMap { $0.objectValue }.map {
                     "\($0["source"]?.stringValue ?? "?"):\($0["name"]?.stringValue ?? "?")"
@@ -864,8 +810,6 @@ private actor HostedHomeShellGateway {
                 return (.object(["logicalSessionId": .string("home"), "homeId": .string("home-fixture"), "bindingRevision": .number(1),
                     "sessionId": .string("home-session"), "operationId": .string("resource-operation")]), nil)
             }
-            // The rollover journey: the logical route materializes the reserved
-            // successor, and only the route's text is admitted.
             promptRoutes.append("home.prompt")
             guard params["commandId"]?.stringValue != nil, params["text"]?.stringValue == "After rollover" else { return taskRefusal() }
             materialized = true
@@ -875,9 +819,7 @@ private actor HostedHomeShellGateway {
             promptRoutes.append("session.prompt:\(params["sessionId"]?.stringValue ?? "none")")
             return (nil, .object(["code": .string("conflict"), "message": .string("Sealed chapter refused"), "retryable": .bool(false)]))
         case "home.status":
-            homeStatusCount += 1; if ProcessInfo.processInfo.arguments.contains("-home-status-cycle") { phase = homeStatusCount % 3 == 1 ? "ready" : "active" } // ready → working → waiting
-            // Hold the actual response across native back navigation so a transient
-            // loading replacement cannot disappear before XCTest observes it.
+            homeStatusCount += 1; if ProcessInfo.processInfo.arguments.contains("-home-status-cycle") { phase = homeStatusCount % 3 == 1 ? "ready" : "active" }
             if sheetState == "navigation-refresh", homeStatusCount > 1 {
                 try await Task.sleep(for: .seconds(4))
             }
@@ -981,8 +923,6 @@ private actor HostedHomeShellGateway {
         case "session.sync": return (.object(["synchronized": .bool(true)]), nil)
         case "session.close": return (.object(["closed": .bool(true)]), nil)
         case "session.commands":
-            // Home's catalog as the Gateway serves it: user-level skills and
-            // prompt templates only, never project resources.
             func user(_ name: String, _ source: String, _ description: String, hint: String? = nil, title: String? = nil) -> JSONValue {
                 let row: [String: JSONValue?] = ["name": .string(name), "source": .string(source), "description": .string(description),
                     "resourceSource": .string("auto"), "resourceScope": .string("user"), "resourceOrigin": .string("top-level"),
@@ -1052,11 +992,9 @@ private actor HostedHomeShellGateway {
                 && !id.hasPrefix("tools.codemode") && !id.hasPrefix("tools.shell")
                 && !["model.thinking[role=summarizer]", "run.cacheWarming"].contains(id)
         }
-        // The reported Home: overridden model and every model queue (#1651).
         let reviewKeys = HostedSettingsReviewSchema.scopeReview ? [HostedSettingsReviewSchema.key("model.queue[role=subagent]", "workers", "Subagent models",
             .array(["anthropic/claude-haiku-5-5", "openai/gpt-6-luna", "opencode-go/deepseek-v4.1-flash"].map(JSONValue.string)), "3 models",
             order: 42, essential: true, layer: "session")] : []
-        // Match the negotiated production ordered-choice contract, including alternatives.
         var thinkingKey = HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
             order: 20, essential: true, layer: "session", options: ["low", "medium", "high"].map {
                 .object(["value": .string($0), "label": .string($0.capitalized)])
@@ -1064,7 +1002,6 @@ private actor HostedHomeShellGateway {
         var thinkingPresentation = thinkingKey["presentation"]!.objectValue!
         thinkingPresentation["valueKind"] = .string("orderedChoice")
         thinkingKey["presentation"] = .object(thinkingPresentation)
-        // The shared Home model card requests Context window with Model and Effort (ManageModelConfigurationCard).
         let contextWindowKey = HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true,
             qualifiers: ["model": "anthropic/\(settingsModelOverridden ? "claude-opus-5-5" : "claude-haiku-5-5")"])
         let profileKeys = reviewKeys + (configuredModels.isEmpty ? [] : [memoryKey]) + [modelKey, .object(thinkingKey), contextWindowKey,
@@ -1073,7 +1010,6 @@ private actor HostedHomeShellGateway {
         let presented = profileKeys.map { value -> JSONValue in
             guard var row = value.objectValue, row["key"]?.stringValue?.hasPrefix("model.queue[") == true,
                   var presentation = row["presentation"]?.objectValue else { return value }
-            // Home owns editable queues; Session launch inputs keep their own fixture contract.
             presentation["control"] = .string("list")
             presentation["valueKind"] = .string("stringList")
             presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
@@ -1085,8 +1021,6 @@ private actor HostedHomeShellGateway {
 
     private func homeSettingsOptions(_ params: [String: JSONValue]) throws -> JSONValue {
         if params["key"]?.stringValue == "tools.active" {
-            // Match Home's real catalog: identity belongs to the option, and its
-            // detail is the first sentence of the live chapter's tool definition.
             return .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
                 "dependsOn": .array([]), "options": .array(Self.defaultHomeTools.map { name in
                     var option: [String: JSONValue] = ["value": .string(name), "label": .string(name), "resource": .object([:])]
@@ -1121,7 +1055,6 @@ private actor HostedHomeShellGateway {
     private func taskSummary(_ id: String) -> JSONValue {
         let terminal = id == "terminal"
         let paddingReview = ProcessInfo.processInfo.arguments.contains("-home-task-padding-review")
-        // The Gateway sends whole epoch milliseconds; the task DTOs decode them as Int.
         let now = nowMilliseconds()
         let created = id == "active" ? now - 2 * 3_600_000 : now - 86_400_000
         let updated = id == "active" ? now - 6 * 60_000 : now - 3 * 3_600_000
@@ -1178,7 +1111,6 @@ private actor HostedHomeShellGateway {
     private func taskPermissions() -> JSONValue {
         let ids = ["request-existing", "request-approve", "request-deny"]
         let binding = taskBinding()
-        // A grant's expiry must equal its decision's exactly; read the clock once.
         let expiresAt = nowMilliseconds() + 604_800_000
         let decisions: [JSONValue] = [.object(["id": .string("existing-decision"), "requestId": .string("request-existing"),
             "decidedAt": .number(1000), "approved": .bool(true), "expiresAt": .number(expiresAt)])]
@@ -1207,8 +1139,6 @@ private actor HostedHomeShellGateway {
                  "input": .array([.string("text")]), "contextWindow": .number(Double(window)), "maxTokens": .number(64_000),
                  "available": .bool(true), "virtual": .bool(false)])
     }
-    /// The Home chat's own configuration, as a real session reports it: its model,
-    /// thinking, context window usage, token totals and cost, and its window policy.
     private func applyHomeChatConfiguration(to snapshot: inout SessionSnapshot) {
         let model = ModelRef(provider: "anthropic", id: "claude-opus-5-5")
         snapshot.model = model
@@ -1223,21 +1153,16 @@ private actor HostedHomeShellGateway {
             "maximum": .number(1_000_000), "default": .number(200_000), "effective": .number(1_000_000), "override": .null,
             "source": .string("model"), "warning": .null]).decode(ContextWindowPolicy.self)
     }
-    /// An ISO timestamp the given seconds before now, so fixture rows read as recent.
     private func nowMilliseconds() -> Double {
         (Date.now.timeIntervalSince1970 * 1000).rounded(.down)
     }
     private func isoAgo(_ seconds: TimeInterval) -> String {
         ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-seconds))
     }
-    /// The exact evidence of one memory message, in the chapter that holds it.
     private func evidence(index: Int = 0, sessionID: String = "home-chapter-sealed") -> JSONValue {
         .object(["index": .number(Double(index)), "sessionId": .string(sessionID), "entryId": .string("source-entry"),
                  "sourceDigest": .string(String(repeating: "a", count: 64))])
     }
-    /// Home's memory view over 40 messages: chapter 1 (sealed) holds messages 0–31
-    /// and chapter 2 (active) 32–39. Older ranges are summary lines (`0+16`, `16+8`,
-    /// `24+4`, `28+4`, `32+2`); the six newest messages are their own lines.
     private var memoryAdvanced = false
     private var memorySnapshot: SessionSnapshot?
     private var pendingMemorySnapshot: SessionSnapshot?
@@ -1322,12 +1247,8 @@ private actor HostedHomeShellGateway {
         return .object(line)
     }
 
-    /// `home.memory.view`: newest first; the whole view pages ten lines then the rest,
-    /// a chapter answers its own lines, and a part answers its two halves.
     private func memoryView(_ params: [String: JSONValue], empty: Bool) -> JSONValue {
         let revision = JSONValue.string(String(repeating: memoryAdvanced ? "b" : "a", count: 64))
-        // An old chapter's catalog addresses differ from both its message count
-        // and its displayed summary count; exercise the real sheet over RPC.
         if ProcessInfo.processInfo.arguments.contains("-memory-position-regression") {
             let scoped = params["sessionId"]?.stringValue == "home-chapter-sealed"
             let count = scoped ? 32 : 40
@@ -1343,8 +1264,6 @@ private actor HostedHomeShellGateway {
         }
         if let part = params["part"]?.objectValue, let start = part["start"]?.intValue, let span = part["span"]?.intValue {
             let result = view([memoryLine(start: start, span: span / 2), memoryLine(start: start + span / 2, span: span / 2)])
-            // A new activation rerenders memory while its reader is covered by a detail.
-            // Send the real socket event, not a direct AppModel/store mutation.
             if ProcessInfo.processInfo.arguments.contains("-memory-boundary-regression"), !memoryAdvanced,
                var snapshot = memorySnapshot {
                 memoryAdvanced = true
@@ -1365,8 +1284,6 @@ private actor HostedHomeShellGateway {
         return params["cursor"] == nil ? view(Array(lines.prefix(10)), next: "fixture-next") : view(Array(lines.dropFirst(10)))
     }
 
-    /// `home.context`: the activation's request sizes with the body-free breakdown
-    /// (sections sum to the effective tokens; the chapter section takes the remainder).
     private func contextProjection() -> JSONValue {
         if emptyContext { return .object(["available": .bool(false)]) }
         return .object(["available": .bool(true), "activationStartEntryId": .string("activation-entry"), "activationOpen": .bool(true),
@@ -1385,9 +1302,6 @@ private actor HostedHomeShellGateway {
             ])])
     }
 
-    /// The Gateway's rollover shape: the reserved successor is named but absent.
-    /// The sealed predecessor is the openable route until a logical prompt
-    /// materializes the successor.
     private var hostPressure: JSONValue {
         let args = ProcessInfo.processInfo.arguments
         let level = args.contains("-host-critical") ? "critical" : args.contains("-host-elevated") ? "elevated" : "normal"
@@ -1531,9 +1445,6 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
     }
 }
 
-/// Home's workers for the Home dashboard view journeys: running, waiting,
-/// recently completed and explicitly unread workers carrying the Gateway's
-/// `homeTaskId`, ordinary read/unread chats, and usage-capable providers.
 enum HostedHomeDashboardWorkers {
     private static func iso(_ secondsAgo: TimeInterval) -> String {
         ISO8601DateFormatter().string(from: Date().addingTimeInterval(-secondsAgo))
@@ -1565,7 +1476,6 @@ enum HostedHomeDashboardWorkers {
         worker("worker-unread-3", "Photo library dedupe plan", cwd: "/work/home", ago: 1_209_600, unread: true),
         worker("worker-unread-4", "Insurance renewal comparison", cwd: "/work/finance", ago: 1_500_000, unread: true),
         worker("worker-unread-5", "Router firmware notes", cwd: "/work/home", ago: 1_600_000, unread: true),
-        // An ordinary unread chat has no task identity, regardless of its title.
         worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true, isWorker: false),
     ]
 
@@ -1581,13 +1491,8 @@ enum HostedHomeDashboardWorkers {
 
     static let newWorker = worker("worker-new", "Freshly dispatched worker", cwd: "/work/tron", ago: 5, phase: .running)
 
-    /// `-home-usage-long-name` adds a single-window provider with a long name.
     private static var longName: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-long-name") }
-    /// `-home-usage-scoped-weekly` gives that provider Anthropic's no-5h shape:
-    /// its account weekly window, then an active per-model weekly limit.
     private static var scopedWeekly: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-scoped-weekly") }
-    /// `-home-usage-opencode-go` adds OpenCode Go's three plan windows: 5h idle,
-    /// weekly past the warning level and the monthly limit reached (#1163).
     private static var openCodeGo: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-opencode-go") }
 
     static var providers: JSONValue {

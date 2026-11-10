@@ -2,10 +2,6 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Image formats every model provider accepts inline. A photo in any other
-/// format (an iPhone copies HEIC) is re-encoded as JPEG here on the device,
-/// because the Gateway's model runtime cannot decode HEIC and a rejected inline
-/// image breaks every later turn of its session (#407).
 enum ProviderImageFormat {
     static let accepted: [UTType] = [.jpeg, .png, .gif, .webP]
 
@@ -13,9 +9,6 @@ enum ProviderImageFormat {
         accepted.contains { type.conforms(to: $0) }
     }
 
-    /// Full-resolution JPEG with the source orientation applied to the pixels
-    /// (EXIF orientation and other metadata are not carried over), or nil when
-    /// the bytes cannot be decoded.
     static func jpeg(from data: Data) -> Data? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -38,9 +31,6 @@ enum ProviderImageFormat {
     }
 }
 
-/// Clipboard representations become the same upload candidates as PhotosPicker.
-/// Read temporary provider files inside their callback lifetime, before admitting
-/// any bytes to the draft; no full-resolution UIImage decoding is needed here.
 enum ComposerPastedImages {
     static func containsImages(_ providers: [NSItemProvider]) -> Bool {
         providers.contains { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) }
@@ -51,7 +41,6 @@ enum ComposerPastedImages {
         guard maximumBytes > 0 else { throw ImportError.tooLarge }
         let images = provider.registeredTypeIdentifiers.compactMap(UTType.init)
             .filter { $0.conforms(to: .image) && $0.preferredMIMEType != nil }
-        // Prefer a representation the provider can already use over transcoding.
         guard let type = images.first(where: ProviderImageFormat.isAccepted) ?? images.first,
               let mimeType = type.preferredMIMEType else { throw ImportError.unsupported }
         let load = ProviderLoad()
@@ -96,8 +85,6 @@ enum ComposerPastedImages {
         }
     }
 
-    /// NSItemProvider can complete synchronously, or after cancellation. Retire
-    /// the continuation exactly once and cancel even a late-installed Progress.
     private final class ProviderLoad: @unchecked Sendable {
         private let lock = NSLock()
         private var continuation: CheckedContinuation<Data, Error>?

@@ -1,13 +1,6 @@
 import Combine
 import SwiftUI
 
-/// Tree-walking evaluator for one parsed single-file SwiftUI program (#889).
-/// It has no file, network, process or native-call surface: programs can only
-/// build interpreted views and mutate their own interpreted state. Every entry
-/// from SwiftUI (a body, an action, a container's content) gets one bounded
-/// work budget: steps, wall-clock time, call depth, native stack headroom and
-/// allocated collection size. Exhausting any of them is a diagnostic, never a
-/// hang or a crash (docs/swift-apps.md, "Runtime and safety").
 @MainActor @Observable
 package final class SwiftAppRuntime {
     enum Flow {
@@ -27,9 +20,7 @@ package final class SwiftAppRuntime {
     static let stepBudget = 2_000_000
     static let timeBudget: Duration = .seconds(2)
     static let depthBudget = 160
-    /// Largest collection (including dictionary entries) one value may hold.
     static let maximumCollectionCount = 100_000
-    /// Largest string, in UTF-8 bytes, one value may hold.
     static let maximumStringBytes = 1_000_000
     static let tooLong = "Stopped: the program ran too long (possible infinite loop)"
     static let tooDeep = "Stopped: recursion is too deep"
@@ -57,11 +48,9 @@ package final class SwiftAppRuntime {
     package var hostedTimerCallbackCount = 0
     package var hostedTimerSubscriptionCount = 0
 #endif
-    /// The latest action failure, shown over the running app.
     package var actionError: String?
     @ObservationIgnored package let linkPolicy: SwiftAppLinkPolicy
     @ObservationIgnored let feeds: [String: SwiftAppIOSBuildsFeed]?
-    /// A committed link request the runner sheet opens (#1160).
     package var pendingLink: SwiftAppLinkPolicy.Link?
 
     package init(source: String, linkPolicy: SwiftAppLinkPolicy, persistence: SwiftAppPersistence? = nil, feeds: [String: SwiftAppIOSBuildsFeed]? = nil) throws {
@@ -92,7 +81,6 @@ package final class SwiftAppRuntime {
         }
     }
 
-    /// The `@main` App when present, else `ContentView`, else the first View.
     package var rootDeclaration: SwiftAppTypeDeclaration? {
         let ordered = program.typeOrder.compactMap { program.types[$0] }
         return ordered.first(where: \.isApp)
@@ -100,9 +88,6 @@ package final class SwiftAppRuntime {
             ?? ordered.first(where: \.isView)
     }
 
-    /// Runs one entry from SwiftUI under a fresh work budget. Nested entries
-    /// (a content closure evaluated inside a body) share the outer budget, so
-    /// SwiftUI cannot refill it from inside one runaway evaluation.
     func entered<T>(_ work: () throws -> T) rethrows -> T {
         if activeEntries == 0 {
             steps = 0
@@ -116,9 +101,6 @@ package final class SwiftAppRuntime {
         return try work()
     }
 
-    /// Spends `cost` steps. The clock and native stack are the backstops for
-    /// work whose per-step cost is high (copying large values) and for
-    /// recursion that does not pass through `call`, such as computed properties.
     func tick(_ cost: Int = 1) throws {
         steps += cost
         if steps > Self.stepBudget { entryExhausted = true; throw SwiftAppRuntimeError(Self.tooLong) }
@@ -129,9 +111,6 @@ package final class SwiftAppRuntime {
         if !SwiftAppStackGuard.hasHeadroom() { throw SwiftAppRuntimeError(Self.tooDeep) }
     }
 
-    /// Admits a newly produced value: enforces the per-value size limits and
-    /// charges its size to the step budget, which bounds what one evaluation
-    /// can allocate.
     @discardableResult
     func admit(_ value: SwiftAppValue) throws -> SwiftAppValue {
         switch value {
@@ -155,12 +134,8 @@ package final class SwiftAppRuntime {
         return value
     }
 
-    /// Runs a user action (button, toggle side effect, gesture) and reports
-    /// failures over the app instead of terminating it.
     @discardableResult
     package func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = [], userInitiated: Bool = false) -> Bool {
-        // SwiftUI actions are synchronous. Nested interpreted calls share this
-        // journal and budget; only the outer action commits or rolls back.
         precondition(actionJournal == nil)
         userInitiatedAction = userInitiated
         defer { userInitiatedAction = false }
@@ -174,15 +149,11 @@ package final class SwiftAppRuntime {
         }
     }
 
-    /// Construction outside an action also needs rollback. Nested constructors
-    /// share the existing first-write journal; no independent commit can escape it.
     func transaction<T>(_ body: () throws -> T) throws -> T {
         if actionJournal != nil { return try body() }
         actionJournal = [:]
         do {
             let result = try body()
-            // Serialization is part of the action: an unsupported or over-bound
-            // value rolls every write back before a host can receive any batch.
             let writes = try persistence?.writes(for: persistentKeys, program: program) ?? []
             actionJournal = nil
             persistentKeys = []
@@ -196,7 +167,6 @@ package final class SwiftAppRuntime {
             actionJournal = nil
             persistentKeys = []
             committedEffects = []
-            // Raw restoration must work even after budget exhaustion.
             if let journal { for restore in journal.values { restore() } }
             throw error
         }
@@ -244,8 +214,6 @@ package final class SwiftAppRuntime {
         for id in Array(timers.keys) { stopTimer(id) }
     }
 
-    /// Snapshot the first write to each owned slot, not just the root value:
-    /// arrays/records have value semantics, but objects may be shared or cyclic.
     private func beforeWrite(_ owner: AnyObject, _ field: String, snapshot: () -> (() -> Void)) {
         guard actionJournal != nil else { return }
         let key = WriteKey(owner: ObjectIdentifier(owner), field: field)
@@ -263,8 +231,6 @@ package final class SwiftAppRuntime {
     func set(_ state: SwiftAppStateStore, _ name: String, to value: SwiftAppValue) {
         if let slot = state.persistent[name] {
             if actionJournal == nil {
-                // Native controls write bindings outside perform(_:). They need
-                // the same journal and commit boundary as interpreted actions.
                 do {
                     try transaction { setPersistent(slot, to: value) }
                     actionError = nil
@@ -304,16 +270,12 @@ package final class SwiftAppRuntime {
         staticStorage[name] = value
     }
 
-    /// A dismissed native presentation cannot be restored from interpreted
-    /// state. Delay it until commit, so a later throw leaves it open.
     func dismissAfterCommit(_ action: DismissAction?) {
         guard let action else { return }
         if actionJournal != nil { committedEffects.append { action() } }
         else { action() }
     }
 
-    /// `openURL(url)` and a tapped `Link`. A refused URL throws, rolling the
-    /// action back; an admitted one is handed to the runner only on commit.
     func openLinkAfterCommit(_ value: SwiftAppValue) throws {
         guard case .record(let record) = value.resolved, record.typeName == "URL",
               case .string(let text)? = record.fields["absoluteString"] else {
@@ -326,8 +288,6 @@ package final class SwiftAppRuntime {
         if actionJournal != nil { committedEffects.append { [weak self] in self?.pendingLink = link } }
         else { pendingLink = link }
     }
-
-    // MARK: Calls
 
     func call(_ closure: SwiftAppClosure, _ arguments: [SwiftAppValue], viewBuilder: Bool = false) throws -> SwiftAppValue {
         try entered { try callClosure(closure, arguments, viewBuilder: viewBuilder) }
@@ -354,7 +314,6 @@ package final class SwiftAppRuntime {
         return try run(closure.literal.body, in: scope, viewBuilder: viewBuilder)
     }
 
-    /// Counts one interpreted call frame; callers pair it with `leaveCall()`.
     func enterCall() throws {
         depth += 1
         if depth > Self.depthBudget {
@@ -378,7 +337,6 @@ package final class SwiftAppRuntime {
             } else if parameter.label != nil, let index = remaining.firstIndex(where: {
                 if case .closure = $0.value { true } else { false }
             }) {
-                // A trailing closure fills the last closure parameter.
                 scope.declare(parameter.name, remaining.remove(at: index).value)
             } else {
                 throw SwiftAppRuntimeError("Missing argument '\(parameter.label ?? parameter.name)' for \(function.name)")
@@ -394,8 +352,6 @@ package final class SwiftAppRuntime {
         return try run(function.body, in: scope, viewBuilder: viewBuilder)
     }
 
-    /// A body's value: an explicit `return`, the views a builder produced, or
-    /// the value of a single-expression body.
     func run(_ body: [SwiftAppStmt], in scope: SwiftAppScope, viewBuilder: Bool = false) throws -> SwiftAppValue {
         let collector = Collector(isViewBuilder: viewBuilder)
         if case .returned(let value) = try execute(body, in: scope, collector: collector) { return value }
@@ -408,8 +364,6 @@ package final class SwiftAppRuntime {
         return .void
     }
 
-    // MARK: Statements
-
     func execute(_ statements: [SwiftAppStmt], in scope: SwiftAppScope, collector: Collector?) throws -> Flow {
         for statement in statements {
             do {
@@ -417,15 +371,11 @@ package final class SwiftAppRuntime {
                 let flow = try execute(statement, in: scope, collector: collector)
                 if case .normal = flow {} else { return flow }
             } catch {
-                // Only native view-builder entry points opt in. Actions and
-                // value helpers must still throw, preserving transaction rollback.
                 guard let collector, collector.isViewBuilder else { throw error }
                 collector.views.append(SwiftAppViewNode(
                     name: SwiftAppRenderer.diagnostic,
                     arguments: [SwiftAppLabeledValue(label: nil, value: .string(String(describing: error)))]
                 ))
-                // Keep completed siblings, but never refill an exhausted entry
-                // just to try later siblings (or iterate a runaway builder).
                 if entryExhausted { return .normal }
             }
         }
@@ -448,8 +398,6 @@ package final class SwiftAppRuntime {
                 }
             case .assignment(let target, let op, let expression, let line):
                 do {
-                    // The outer chain controls this assignment, including its RHS.
-                    // A nested (parenthesized) chain resolves to an ordinary nil value.
                     let place: Access
                     if case .chain(let inner) = target { place = try access(inner, in: scope) }
                     else { place = try access(target, in: scope) }
@@ -549,7 +497,6 @@ package final class SwiftAppRuntime {
     private func matchingScope(_ patterns: [SwiftAppPattern]?, _ subject: SwiftAppValue, in scope: SwiftAppScope) throws -> SwiftAppScope? {
         guard let patterns else { return SwiftAppScope(parent: scope) }
         for pattern in patterns {
-            // A failed nested alternative must not leak bindings into another.
             let branch = SwiftAppScope(parent: scope)
             if try matches(pattern, subject, in: branch) { return branch }
         }
@@ -572,19 +519,15 @@ package final class SwiftAppRuntime {
                 if let number = try? subject.asDouble() { return number >= lower && number <= upper }
                 return false
             case .enumConstructor(let type, let name):
-                // Qualified case-only `case Event.count:` ignores payloads.
                 guard case .enumeration(let value) = subject.resolved else { return false }
                 return value.typeName == type && value.name == name
             default: return try equal(value, subject)
             }
         case .enumeration(let type, let name, let patterns):
-            // Native SwiftUI symbolic cases remain distinct from owned enums.
             if case .member(let symbol, nil) = subject, type == nil, patterns == nil { return symbol == name }
             guard case .enumeration(let value) = subject else { throw SwiftAppRuntimeError("Enum pattern requires an enum value") }
             if let type, type != value.typeName { return false }
             guard let labels = program.types[value.typeName]?.payloads[name] else { throw SwiftAppRuntimeError("Unknown enum case '\(name)'") }
-            // Case-only syntax intentionally ignores payloads. An explicit list
-            // still validates even on a nonmatching case: malformed is not absent.
             guard let patterns else { return value.name == name }
             guard !labels.isEmpty else { throw SwiftAppRuntimeError("Case '\(name)' has no payload patterns") }
             guard patterns.count == labels.count else { throw SwiftAppRuntimeError("Expected \(labels.count) payload pattern(s) for \(name)") }
@@ -608,8 +551,6 @@ package final class SwiftAppRuntime {
         default: nil
         }
     }
-
-    // MARK: Expressions
 
     func evaluate(_ expression: SwiftAppExpr, in scope: SwiftAppScope) throws -> SwiftAppValue {
         try tick()
@@ -764,7 +705,6 @@ package final class SwiftAppRuntime {
         }
     }
 
-    /// Every hash lookup pays for its scalar key, including long strings.
     func dictionaryKey(_ value: SwiftAppValue) throws -> SwiftAppDictionaryKey {
         try tick()
         switch value.resolved {
@@ -780,8 +720,6 @@ package final class SwiftAppRuntime {
         }
     }
 
-    /// Dictionary sequence/projection allocation is owned here, never by the
-    /// unmetered value conversion used for array bindings in the renderer.
     func collection(_ value: SwiftAppValue) throws -> [SwiftAppValue] {
         guard case .dictionary(let entries) = value.resolved else { return try value.resolved.asArray() }
         try tick(entries.count * 3)
@@ -792,8 +730,6 @@ package final class SwiftAppRuntime {
         .tuple([SwiftAppLabeledValue(label: "key", value: key.value), SwiftAppLabeledValue(label: "value", value: value)])
     }
 
-    /// Structural equality. Each visited node is a step, so comparing large
-    /// or deeply shared values stays inside the work budget.
     func equal(_ a: SwiftAppValue, _ b: SwiftAppValue) throws -> Bool {
         try tick()
         switch (a.resolved, b.resolved) {
@@ -843,16 +779,11 @@ package final class SwiftAppRuntime {
     }
 }
 
-/// Native stack headroom for the interpreter and parser. Both recurse on the
-/// main thread, whose stack is 1 MB on device, and recursion that does not go
-/// through `call` (deep expressions, computed properties) must stop before it
-/// overflows. The reserve leaves room for SwiftUI to render the diagnostic.
 enum SwiftAppStackGuard {
     static let reserveBytes = 256 * 1_024
 
     static func hasHeadroom() -> Bool {
         let thread = pthread_self()
-        // Darwin reports the highest address; the stack grows down from it.
         let top = UInt(bitPattern: pthread_get_stackaddr_np(thread))
         let size = UInt(pthread_get_stacksize_np(thread))
         var marker: UInt8 = 0

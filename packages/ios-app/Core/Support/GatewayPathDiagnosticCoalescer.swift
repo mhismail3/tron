@@ -1,8 +1,5 @@
 import Foundation
 
-/// Admission happens on the producer queue before scheduling a MainActor
-/// callback. One pending delivery can carry a fresh reactivation value, but
-/// scene retirement clears any value captured while the old scene was active.
 package final class GatewayPathDiagnosticCoalescer: @unchecked Sendable {
     private let lock = NSLock()
     private let clock: MonotonicClock

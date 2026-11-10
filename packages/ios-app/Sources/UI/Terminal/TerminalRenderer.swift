@@ -4,7 +4,6 @@ import UIKit
 import TronMobileCore
 
 extension Array where Element == TerminalChunk {
-    /// Chunks are ordered within one emulator generation; locate the unread suffix.
     func replaySuffix(after lastSequence: Int) -> ArraySlice<TerminalChunk> {
         var low = startIndex
         var high = endIndex
@@ -142,18 +141,10 @@ struct TerminalExtendedKey: Equatable {
     ]
 }
 
-/// The emulator one terminal sheet shows, owned by the sheet's presentation
-/// scope (`@PresentationState`) rather than by the view: when SwiftUI rebuilds
-/// the sheet's content (iOS 26.4+ on return from the background, #1073), the
-/// rebuilt `NativeTerminal` adopts this same SwiftTerm view, so its screen,
-/// scrollback, scroll position and selection stay as they were and no output
-/// is replayed. A new `identity` (another terminal, or output the owner
-/// discarded) gets a fresh emulator.
 @MainActor
 final class TerminalEmulatorHost {
     private(set) var view: TronNativeTerminalView?
     private var identity: AnyHashable?
-    /// The last output sequence fed to `view`.
     var lastSequence = 0
 
     func adopt(identity: AnyHashable) -> TronNativeTerminalView? {
@@ -231,8 +222,6 @@ struct NativeTerminal: UIViewRepresentable {
     }
 
     private func applyColors(to view: TronNativeTerminalView) {
-        // SwiftTerm converts UIColor to RGB; resolve against the sheet's
-        // scheme, not UIKit's pre-attachment trait collection.
         let traits = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
         let foreground = UIColor.label.resolvedColor(with: traits)
         if view.nativeForegroundColor != foreground { view.nativeForegroundColor = foreground }
@@ -248,9 +237,6 @@ struct NativeTerminal: UIViewRepresentable {
         if context.coordinator.isInteractive != isInteractive {
             context.coordinator.isInteractive = isInteractive
             if !isInteractive {
-                // SwiftTerm stops its caret animation when the native view loses
-                // first responder. A terminal that has exited must not retain a
-                // blinking cursor while its output remains visible.
                 view.stopCursorBlinking()
                 keyboard.dismissKeyboard()
             }
@@ -262,8 +248,6 @@ struct NativeTerminal: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ view: TronNativeTerminalView, coordinator: Coordinator) {
-        // A rebuilt sheet's terminal may already have adopted this view, in
-        // either order; it then owns the delegate and the keyboard.
         guard view.terminalDelegate === coordinator else { return }
         if !coordinator.emulator.owns(view) { _ = view.resignFirstResponder() }
         coordinator.keyboard.detach(view)
@@ -289,21 +273,14 @@ struct NativeTerminal: UIViewRepresentable {
         var onSend: (ArraySlice<UInt8>) -> Void
         var onResize: (Int, Int) -> Void
         var chunks: [TerminalChunk] = []
-        /// Output is fed only once the emulator has its real width. A replay
-        /// fed into the zero-frame view is laid out at a default width and then
-        /// reflowed, which misplaces the shell's own line-editing output when
-        /// a reopened sheet replays it. An adopted emulator is already laid out.
         var isLaidOut = false
 
-        /// Feeds what the presentation's emulator has not shown yet.
         @MainActor func feed(_ view: TronNativeTerminalView) {
             for chunk in chunks.replaySuffix(after: emulator.lastSequence) {
                 view.feed(byteArray: Array(chunk.data.utf8)[...])
                 emulator.lastSequence = chunk.sequence
             }
             #if HOSTED_TEST
-            // Journeys read the displayed buffer, including tmux's alternate screen,
-            // so a test proves output survived, not only that a shell answered.
             view.accessibilityIdentifier = "terminal-emulator"
             view.accessibilityValue = String(String(decoding: view.getTerminal().getBufferAsData(kind: .active), as: UTF8.self).suffix(4_000))
             #endif
@@ -442,7 +419,6 @@ struct TerminalControlBar: View {
 final class TronNativeTerminalView: TerminalView {
     var focusDidChange: ((Bool) -> Void)?
     var allowsTerminalInput = true
-    /// After each layout with a real size (SwiftTerm has applied it).
     var didLayout: (() -> Void)?
 
     override func layoutSubviews() {
@@ -462,9 +438,6 @@ final class TronNativeTerminalView: TerminalView {
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         #if HOSTED_TEST
-        // A blinking caret is a repeating Core Animation, so XCUI never sees
-        // the app idle and every query in a live-shell journey would wait out
-        // its quiescence timeout. Hosted journeys keep the caret steady.
         getTerminal().setCursorStyle(.steadyBlock)
         #endif
         if result { focusDidChange?(true) }

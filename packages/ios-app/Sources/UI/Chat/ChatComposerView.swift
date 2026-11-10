@@ -4,8 +4,6 @@ import TronMobileCore
 import UIKit
 #endif
 
-/// Value-driven composer presentation. Draft, route, transport, and canonical
-/// ownership remain outside this view and enter only through bindings/intents.
 struct ChatComposerView: View {
     let sessionFacts: ChatVisibleSessionFacts?
     let processOverview: SessionProcessOverview?
@@ -30,7 +28,6 @@ struct ChatComposerView: View {
     let isEditable: Bool
     let keyboardAppearance: UIKeyboardAppearance
     let contextProgress: SessionContextProgressPresentation
-    /// The ring opens Manage Home in a chat that claims the Home status (#748).
     let contextOpensManageHome: Bool
     let trailingMode: ComposerTrailingMode?
     let isSending: Bool
@@ -65,8 +62,6 @@ struct ChatComposerView: View {
     let onComposerHeightSettled: (CGFloat) -> Void
 
     var body: some View {
-        // Sample one selection for both the rendered child and its animation
-        // key; a deadline must not split those reads across different states.
         let activityKind = activityButtonKind
         ChatComposerStructuralHost(
             accessoryIdentity: ChatComposerAccessoryLayoutIdentity(
@@ -102,15 +97,10 @@ struct ChatComposerView: View {
                     }
                 }
                 .animation(ChatMotion.composerStructuralResize(reduceMotion: reduceMotion), value: showsCatchUp)
-                // Visibility and glyph changes animate at the shared layout
-                // owner so the input bar participates in the glass morph too.
                 .animation(ChatMotion.composerStructuralResize(reduceMotion: reduceMotion), value: activityKind)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
-            // Structural height remains atomic in ChatComposerStructuralHost.
-            // These value-scoped transactions animate only newly inserted or
-            // removed child surfaces inside the already-installed space.
             .animation(
                 submissionTransitionID == nil
                     ? ChatMotion.attachmentArrive(reduceMotion: reduceMotion)
@@ -144,8 +134,6 @@ struct ChatComposerView: View {
                 try? await Task.sleep(for: .milliseconds(milliseconds))
             }
             guard !Task.isCancelled else { return }
-            // One managed deadline wakes an otherwise idle composer. Identity
-            // fencing prevents an older task from hiding newer process evidence.
             locallyExpiredRecentExpiry = expiryText
         }
         .background(alignment: .bottom) {
@@ -162,9 +150,6 @@ struct ChatComposerView: View {
         }
         let recentAvailable = if let expiryText = recentExpiryIdentity,
                                   locallyExpiredRecentExpiry != expiryText {
-            // Reject elapsed retained input before the deadline task runs.
-            // The common container animates this same selection whether expiry
-            // is first observed during a data update or by the deadline task.
             GatewayTimestamp.parse(expiryText).map { $0 > .now } == true
         } else {
             false
@@ -193,8 +178,6 @@ struct ChatComposerView: View {
         )
     }
 
-    /// Staged chips share one horizontally scrolling strip: the selected
-    /// resources in pick order, then annotations in the order they were made.
     @ViewBuilder
     private var selectedResourceStrip: some View {
         if !selectedResources.isEmpty || !annotations.isEmpty {
@@ -277,7 +260,6 @@ struct ChatComposerView: View {
                         keyboardVisible: keyboardVisible
                     ),
                     onPasteImages: attachmentActionsEnabled ? onPasteImages : nil,
-                    // iPad keyboards send on Return; iPhone Return stays a newline.
                     onReturn: UIDevice.current.userInterfaceIdiom == .pad ? sendFromReturn : nil
                 )
                 .padding(.horizontal, 2)
@@ -322,7 +304,6 @@ struct ChatComposerView: View {
         isSending || submissionPending || hasActiveUploads || !isCommandReady
     }
 
-    /// Return does exactly what tapping an enabled Send does, and nothing else.
     private func sendFromReturn() {
         guard trailingMode == .send, !isSendDisabled else { return }
         onSend(nil)
@@ -347,8 +328,6 @@ struct ChatComposerView: View {
             )
             .frame(width: ComposerControlMetrics.hitTarget, height: ComposerControlMetrics.hitTarget)
             .id(attachmentMenuState.identity)
-            // SwiftUI also applies enabled state to the represented UIButton;
-            // keep its environment aligned with the same authority admission.
             .disabled(!attachmentActionsEnabled)
             .accessibilityLabel("Add attachment")
         }
@@ -382,13 +361,9 @@ struct ChatComposerView: View {
     }
 }
 
-/// The empty, unfocused composer's prompt. It exists only while visible, so
-/// its state is recreated each time it reappears (after a send or clearing the
-/// draft): each appearance picks one random line and keeps it until hidden.
 private struct ComposerPlaceholder: View {
     @State private var line = DecorativeRandom.element(of: ComposerPlaceholder.lines) ?? "Ask anything"
 
-    /// Keep lines short enough for one line beside the composer's buttons.
     static let lines = [
         "Ask anything",
         "Begin",
@@ -415,7 +390,6 @@ private struct ComposerPlaceholder: View {
     var body: some View {
         Text(line)
             .font(TronTypography.input)
-            // All composers share the placeholder role: the primary ink, dimmed.
             .foregroundStyle(Color.inputPlaceholder)
             .lineLimit(1)
     }

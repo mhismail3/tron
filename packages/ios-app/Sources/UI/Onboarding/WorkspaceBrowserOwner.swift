@@ -62,9 +62,6 @@ final class WorkspaceBrowserOwner {
         navigating = false
         submittingFolder = true
         do {
-            // Folder creation may already have crossed the possibly-sent mutation
-            // boundary, so presentation replacement gates its UI effects but does
-            // not cancel the mutation task.
             try await operation()
             guard self.generation == generation else { return }
             errorMessage = nil

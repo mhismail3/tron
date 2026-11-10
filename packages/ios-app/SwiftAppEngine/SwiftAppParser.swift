@@ -1,15 +1,9 @@
 import Foundation
 
-/// Recursive-descent parser for the experimental SwiftUI subset (#889).
-/// Type annotations are read and discarded: the runtime is dynamically typed.
 struct SwiftAppParser {
     private var tokens: [SwiftAppToken]
     private var position = 0
-    /// `if`/`for`/`while`/`switch` heads cannot take trailing closures, as in Swift.
     private var forbidTrailingClosure = false
-    /// Syntax nesting so far. It bounds the AST depth, which bounds the
-    /// evaluator's recursion and the recursive release of the tree; the stack
-    /// guard bounds the parser's own recursion.
     private var nesting = 0
     private var unsupported: [SwiftAppSyntaxError] = []
     static let maximumNesting = 256
@@ -23,8 +17,6 @@ struct SwiftAppParser {
         var parser = SwiftAppParser(tokens: try SwiftAppLexer.tokenize(source))
         do { return try parser.parseProgram() }
         catch let error as SwiftAppSyntaxError {
-            // A fatal syntax error ends recovery, but must not erase the
-            // independent unsupported constructs already found before it.
             guard !parser.unsupported.isEmpty else { throw error }
             throw SwiftAppUnsupportedSyntax(diagnostics: parser.unsupported + [error], reachedLimit: false)
         }
@@ -44,8 +36,6 @@ struct SwiftAppParser {
         return arguments
     }
 
-    // MARK: Token helpers
-
     private var current: SwiftAppToken { tokens[position] }
     private var atEnd: Bool { if case .end = current.kind { true } else { false } }
     private func peek(_ offset: Int) -> SwiftAppToken { tokens[min(position + offset, tokens.count - 1)] }
@@ -53,7 +43,6 @@ struct SwiftAppParser {
     private func error(_ message: String) -> SwiftAppSyntaxError {
         SwiftAppSyntaxError(message: message, line: current.line)
     }
-    /// Enters one nesting level; callers pair it with `nesting -= 1`.
     private mutating func nest() throws {
         guard nesting < Self.maximumNesting, SwiftAppStackGuard.hasHeadroom() else {
             throw error("Code is nested too deeply")
@@ -85,8 +74,6 @@ struct SwiftAppParser {
         }
     }
 
-    /// Recovery is grammar-owned: callers consume a known complete construct.
-    /// Malformed input, lexer errors and nesting exhaustion still fail closed.
     private mutating func recordUnsupported(_ message: String, line: Int) throws {
         unsupported.append(SwiftAppSyntaxError(message: message, line: line))
         if unsupported.count == 10 {
@@ -111,8 +98,6 @@ struct SwiftAppParser {
         }
     }
 
-    /// Generic types are retained only as syntax documentation. Recursive
-    /// parsing keeps malformed delimiters and nesting exhaustion fatal.
     private mutating func parseGenericType() throws {
         try nest()
         defer { nesting -= 1 }
@@ -141,8 +126,6 @@ struct SwiftAppParser {
         while consumeSymbol("&") { try parseGenericType() }
     }
 
-    /// Parses declaration parameters and explicit specializations while erasing
-    /// their type metadata; malformed clauses remain fatal.
     private mutating func parseGenericParameterClause() throws {
         try nest()
         defer { nesting -= 1 }
@@ -182,7 +165,6 @@ struct SwiftAppParser {
         if requiresBody, !current.isSymbol("{") { throw error("Malformed where constraints") }
     }
 
-    /// Reads and discards a type, returning its leading name.
     @discardableResult
     private mutating func skipType() throws -> String? {
         try nest()
@@ -211,8 +193,6 @@ struct SwiftAppParser {
         if current.isSymbol("("), !current.spaceBefore { try skipBalanced(open: "(", close: ")") }
     }
 
-    // MARK: Declarations
-
     private static let declarationModifiers: Set<String> = [
         "private", "fileprivate", "public", "internal", "open", "final", "nonisolated", "lazy",
         "weak", "override", "required", "convenience", "indirect", "dynamic",
@@ -228,7 +208,6 @@ struct SwiftAppParser {
                 continue
             }
             if current.isSymbol("#") {
-                // `#Preview { … }` and other macros are design-time only.
                 advance(); _ = try expectIdentifier()
                 if current.isSymbol("(") { try skipBalanced(open: "(", close: ")") }
                 if current.isSymbol("{") { try skipBalanced(open: "{", close: "}") }
@@ -275,8 +254,6 @@ struct SwiftAppParser {
         return attributes
     }
 
-    /// Attributes of a stored property, keeping `@Environment(\.name)`'s key:
-    /// each environment value has its own meaning (`dismiss`, `openURL`).
     private mutating func parsePropertyAttributes() throws -> (names: [String], environmentKey: String?, persistenceKey: String?) {
         var names: [String] = []
         var environmentKey: String?
@@ -324,7 +301,6 @@ struct SwiftAppParser {
         let declaration: SwiftAppTypeDeclaration
         if keyword == "extension" {
             guard let existing = program.types[name] else {
-                // Never silently erase default implementations or forward extensions.
                 try recordUnsupported("Extensions require a previously declared concrete type ('\(name)')", line: line)
                 while !current.isSymbol("{"), !atEnd { advance() }
                 try skipBalanced(open: "{", close: "}")
@@ -411,8 +387,6 @@ struct SwiftAppParser {
             case "init", "deinit":
                 try recordUnsupported("Custom initializers/deinitializers are not supported (\(word)); use property defaults", line: current.line)
                 advance()
-                // The signature and body have explicit delimiters. Do not
-                // guess a new declaration boundary after malformed syntax.
                 _ = consumeSymbol("?") || consumeSymbol("!")
                 if current.isSymbol("(") { try skipBalanced(open: "(", close: ")") }
                 while current.isIdentifier("throws") || current.isIdentifier("async") { advance() }
@@ -430,7 +404,6 @@ struct SwiftAppParser {
                 if consumeSymbol("=") { initial = try parseExpression() }
                 if current.isSymbol("{") {
                     if initial != nil {
-                        // didSet/willSet observers are outside the subset.
                         try skipBalanced(open: "{", close: "}")
                     } else {
                         declaration.computed[propertyName] = try parseComputedBody()
@@ -473,12 +446,10 @@ struct SwiftAppParser {
         return try parseBlock()
     }
 
-    /// Requirements are syntax-only metadata. Parse their structure rather than
-    /// skipping a body, so executable/default implementations cannot disappear.
     private mutating func parseProtocol() throws {
         try nest()
         defer { nesting -= 1 }
-        advance() // protocol
+        advance()
         _ = try expectIdentifier()
         if current.isSymbol("<") { try parseGenericParameterClause() }
         if consumeSymbol(":") { repeat { try skipType() } while consumeSymbol(",") }
@@ -517,7 +488,7 @@ struct SwiftAppParser {
     }
 
     private mutating func parseFunctionSignature(requiresBody: Bool, initializer: Bool = false) throws -> (name: String, parameters: [SwiftAppParameter]) {
-        advance() // func or init
+        advance()
         let name = initializer ? "init" : try expectIdentifier()
         if current.isSymbol("<") { try parseGenericParameterClause() }
         try expectSymbol("(")
@@ -546,14 +517,11 @@ struct SwiftAppParser {
         return (name, parameters)
     }
 
-    // MARK: Statements
-
     private mutating func parseBlock() throws -> [SwiftAppStmt] {
         try expectSymbol("{")
         return try parseBlockBody()
     }
 
-    /// Statements up to and including the closing brace of an opened block.
     private mutating func parseBlockBody() throws -> [SwiftAppStmt] {
         try nest()
         defer { nesting -= 1 }
@@ -713,8 +681,6 @@ struct SwiftAppParser {
             }
         }
         let pattern = SwiftAppPattern.enumeration(typeName, caseName, arguments)
-        // `case self.target:` or `case Limits.max:` is a value. Only a qualified
-        // case that binds or ignores a payload needs pattern semantics.
         if typeName != nil, !binds, !pattern.bindsOrIgnores {
             position = start
             return .value(try parseExpression())
@@ -730,8 +696,6 @@ struct SwiftAppParser {
         }
         return .expression(expression, line: line)
     }
-
-    // MARK: Expressions
 
     mutating func parseExpression() throws -> SwiftAppExpr {
         try nest()
@@ -772,7 +736,6 @@ struct SwiftAppParser {
         var chained = 0
         defer { nesting -= chained }
         while let op = current.symbol, Self.precedence[level].contains(op), !(op == "<" && !current.spaceBefore) {
-            // Each operator in a chain deepens the left-nested tree.
             try nest(); chained += 1
             advance()
             left = .binary(op, left, try parseBinary(level: level + 1))
@@ -801,7 +764,6 @@ struct SwiftAppParser {
         var chained = 0
         defer { nesting -= chained }
         while true {
-            // Each member, call or subscript wraps the expression once more.
             try nest(); chained += 1
             if case .identifier(let name, _) = expression,
                current.isSymbol("<"), !current.spaceBefore,
@@ -903,7 +865,6 @@ struct SwiftAppParser {
         var parameters: [String] = []
         var hasSignature = false
         if current.isSymbol("[") {
-            // Capture lists only matter for reference cycles, which this runtime does not have.
             try? skipBalanced(open: "[", close: "]")
         }
         if current.isIdentifier("in") {

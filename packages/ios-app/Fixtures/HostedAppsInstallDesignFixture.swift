@@ -3,8 +3,6 @@ import SwiftUI
 import CryptoKit
 import TronMobileCore
 
-/// Approval-only composition. No RPC, persistence, displayed-artifact grant,
-/// catalog, OS install or live feed is simulated as a successful operation.
 struct HostedAppsInstallDesignFixture: View {
     @PresentationState private var launch: SwiftAppLaunch?
     @PresentationState private var review = false

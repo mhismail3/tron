@@ -2,9 +2,6 @@ import Foundation
 import Observation
 import TronMobileCore
 
-/// The Gateway-bound installed-app catalog and its retained sessions. Reads are
-/// disposable and fenced to the latest request; accepted writes belong to a
-/// session, not to a sheet or its task cancellation.
 @MainActor @Observable
 final class InstalledSwiftApps {
     struct Ports {
@@ -25,7 +22,6 @@ final class InstalledSwiftApps {
     private(set) var pending: [SwiftAppInstallOffer] = []
     var isEmpty: Bool { apps.isEmpty && pending.isEmpty }
     private(set) var phase: Phase = .idle
-    /// Bumped when a retained session is dropped, so rows showing its status refresh.
     private(set) var revision = 0
     @ObservationIgnored private let ports: Ports
     @ObservationIgnored private var sessions: [UUID: InstalledSwiftAppSession] = [:]
@@ -48,13 +44,9 @@ final class InstalledSwiftApps {
         return try value.admitted(source: value.source, reference: reference)
     }
 
-    /// The catalog owns accepted installation work, not the review sheet. A
-    /// repeated tap or presentation reuses the immutable command and its result.
     func installation(review: SwiftAppInstallReview, profileID: String) throws -> SwiftAppInstallation {
         let identity = "\(profileID)/\(review.offer.id)/\(review.installed?.instanceId ?? "v1")/\(review.installed?.revision ?? 0)"
         if let retained = installations[identity], !(retained.installed != nil && review.installed == nil) { return retained }
-        // A fresh authoritative review can observe removal by another client.
-        // A settled success is not permission to present Open for a missing app.
         if installations[identity] == nil, installations.count >= 200 {
             installations = installations.filter { $0.value.installed == nil }
         }
@@ -64,7 +56,6 @@ final class InstalledSwiftApps {
         }, didInstall: { [weak self] manifest in
             guard let self else { return }
             self.retireClean(appID: manifest.id, profileID: profileID)
-            // A pre-install catalog read cannot republish this offer as pending.
             self.listRequest = nil
             self.pending.removeAll { $0.appId == manifest.id }
             self.phase = .loaded
@@ -80,8 +71,6 @@ final class InstalledSwiftApps {
         try requireNoUnsaved(appID: appID, profileID: profileID)
     }
 
-    /// A disposable read of the Gateway's catalog. A later request or sheet
-    /// dismissal supersedes it; a failure keeps the last list visible.
     func reload(profileID: String) async {
         let request = UUID()
         listRequest = request
@@ -104,8 +93,6 @@ final class InstalledSwiftApps {
         }
     }
 
-    /// The only way to give up accepted-but-unsaved work, and only on request: the
-    /// retained session (with its failure) is dropped so the next open reads the Gateway.
     func discardUnsaved(appID: String, profileID: String) {
         sessions = sessions.filter { !matches($0.value, appID: appID, profileID: profileID) }
         revision &+= 1
@@ -128,16 +115,11 @@ final class InstalledSwiftApps {
         defer { if requests[key] == request { requests.removeValue(forKey: key) } }
         let snapshot = try await ports.open(profileID, appID).admitted(appID: appID)
         guard !Task.isCancelled, requests[key] == request else { throw CancellationError() }
-        // A write accepted during this await owns this identity. A disposable
-        // load cannot replace its unsaved projection with an older snapshot.
         if let retained = retained(appID: appID, profileID: profileID) { return retained }
         try makeRoom()
         let session = try InstalledSwiftAppSession(snapshot: snapshot, profileID: profileID,
             commit: { [ports] command in try await ports.commit(profileID, command) },
             onFailure: { [weak self] error in self?.onFailure?(error) })
-        // Runtime admission belongs before publication: a failed refresh cannot
-        // orphan the still-presented writer. Presented versions remain owned
-        // until their views close, even if another reader opens the same app.
         try prepare?(session)
         sessions[session.id] = session
         return session
@@ -156,8 +138,6 @@ final class InstalledSwiftApps {
         replace(manifest)
     }
 
-    /// Clearing data discards unsent changes only after the owner has been told
-    /// there are none; unsaved or failed writes block the destructive action.
     func resetData(appID: String, profileID: String) async throws {
         try requireNoUnsaved(appID: appID, profileID: profileID)
         let revision = try await ports.state(profileID, appID)
@@ -245,9 +225,6 @@ final class InstalledSwiftAppSession {
         self.onFailure = onFailure
     }
 
-    /// The engine already admits JSON and whole-state bounds before calling
-    /// this port. Coalesce only unsent key values; a dispatched command remains
-    /// immutable under its stable command ID until its receipt settles.
     func accept(_ writes: [String: Data]) {
         for (key, value) in writes {
             entries[key] = value
@@ -257,7 +234,6 @@ final class InstalledSwiftAppSession {
         task = Task { [self] in await drain() }
     }
 
-    /// Await existing work, never cancel or replay it on presentation changes.
     func settle() async { await task?.value }
 
     private func drain() async {
@@ -280,8 +256,6 @@ final class InstalledSwiftAppSession {
                 revision = result.revision
                 pending = nil
             } catch {
-                // Both the exact command and newer dirty values remain owned.
-                // No automatic reload/retry may discard or double-apply them.
                 let message = "Changes are not saved. \(error.localizedDescription)"
                 failure = message
                 onFailure(InstalledSwiftAppFailure("\(snapshot.app.name): \(message)"))

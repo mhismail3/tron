@@ -1,8 +1,6 @@
 import XCTest
 import UIKit
 
-/// Rendered ink, not a reported token: the actual dashboard and composer must
-/// match their primary-colored title/plus through all selectable themes.
 @MainActor final class TronActivityPrimaryColorUITests: XCTestCase {
     func testActivityInkFollowsPrimaryThemeLightAndDark() {
         for theme in ["burgundy", "emerald", "oliveGold"] {
@@ -40,8 +38,6 @@ import UIKit
         }
     }
 
-    /// The composer placeholder is the primary ink, dimmed (not grey): its ink has the
-    /// same hue as the composer's plus glyph, in every selectable theme.
     func testComposerPlaceholderIsDimmedPrimaryInk() {
         for theme in ["burgundy", "emerald"] {
             for mode in ["light", "dark"] {
@@ -91,9 +87,6 @@ import UIKit
             "\(name): rendered activity ink \(actual) must match primary reference \(expected)")
     }
 
-    /// Subtract the neutral channel so anti-aliasing and per-dot opacity do not
-    /// change hue. Ignore low-chroma neutral glass, rather than accepting a
-    /// correctly tinted container with incorrectly green glyph ink.
     private func inkChroma(_ image: CGImage, area: CGRect, scale: CGFloat) -> [Double]? {
         guard let crop = image.cropping(to: area.applying(CGAffineTransform(scaleX: scale, y: scale))) else { return nil }
         var pixels = [UInt8](repeating: 0, count: crop.width * crop.height * 4)

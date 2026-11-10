@@ -2,11 +2,6 @@ import Combine
 import Observation
 import SwiftUI
 
-// Dynamic values of the experimental single-file SwiftUI runtime (#889).
-
-/// Immutable local coordinates only; the native proxy never enters the interpreter.
-/// Derived size/rect/point values stay read-only rather than becoming inconsistent
-/// mutable records (for example a rect whose width disagrees with size.width).
 package enum SwiftAppGeometryValue: Equatable {
     case proxy(Double, Double), size(Double, Double), rect(Double, Double), origin
 
@@ -62,8 +57,6 @@ package struct SwiftAppTimer {
     func autoconnect() -> SwiftAppTimer { SwiftAppTimer(interval: interval, autoconnected: true) }
 }
 
-/// Stable native lifecycle identity owned by the SwiftUI modifier, not by the
-/// interpreted publisher value which may be reconstructed during body updates.
 @MainActor
 package final class SwiftAppTimerSubscription {
     package let id = UUID()
@@ -82,7 +75,6 @@ package final class SwiftAppTimerTestProbe {
     package var activeSubscriptions = 0
 }
 
-/// URLs the hosted fixture's `OpenURLAction` received from running programs.
 @MainActor @Observable
 package final class SwiftAppLinkTestProbe {
     private static let instance = SwiftAppLinkTestProbe()
@@ -102,24 +94,19 @@ package struct SwiftAppLabeledValue {
     package let value: SwiftAppValue
 }
 
-/// Owned case identity and immutable payloads, distinct from native SwiftUI symbols.
 package struct SwiftAppEnumValue {
     package let typeName: String
     package let name: String
     let arguments: [SwiftAppLabeledValue]
-    /// Construction validates retained value depth once, including containers.
     let depth: Int
 }
 
-/// A value-typed struct instance. Field order follows the declaration.
 package struct SwiftAppRecord {
     package let typeName: String
     var keys: [String]
     package var fields: [String: SwiftAppValue]
 }
 
-/// A class instance. Observation makes mutations re-render every reader,
-/// which is how `ObservableObject` stores and `@Published` behave in the subset.
 @MainActor @Observable
 package final class SwiftAppObject {
     package let typeName: String
@@ -157,9 +144,7 @@ package struct SwiftAppViewNode {
     package let name: String
     package var arguments: [SwiftAppLabeledValue]
     package var modifiers: [(name: String, arguments: [SwiftAppLabeledValue])] = []
-    /// Eagerly built children, used for groups produced by view builders.
     package var children: [SwiftAppViewNode]? = nil
-    /// The user type for custom views.
     package var declaration: SwiftAppTypeDeclaration? = nil
 
     package init(name: String, arguments: [SwiftAppLabeledValue],
@@ -183,8 +168,6 @@ package struct SwiftAppViewNode {
     }
 }
 
-/// Only immutable scalar keys enter native hashing. The tags preserve dynamic
-/// key identity (in particular Bool and Int); values retain Swift copy-on-write.
 package enum SwiftAppDictionaryKey: Hashable {
     case string(String), int(Int), bool(Bool), enumeration(String, String)
 
@@ -212,15 +195,11 @@ package indirect enum SwiftAppValue {
     case object(SwiftAppObject)
     case enumeration(SwiftAppEnumValue)
     case enumConstructor(String, String)
-    /// Native symbolic members (`.red`, `.title`) and calls (`.system(size: 20)`).
     case member(String, [SwiftAppLabeledValue]?)
     case view(SwiftAppViewNode)
     case closure(SwiftAppClosure)
     case function(SwiftAppFunction, SwiftAppSelf?)
     case builtin(String, SwiftAppValue?)
-    /// `@Environment(\.dismiss)`: closes the presentation the program
-    /// created around this view, or nothing (nil) in the program's root,
-    /// so a program can never close the runner sheet itself.
     case dismiss(DismissAction?)
     case timer(SwiftAppTimer)
     case geometry(SwiftAppGeometryValue)
@@ -235,8 +214,6 @@ package indirect enum SwiftAppValue {
 
     var isNone: Bool { if case .nilValue = self { true } else { false } }
 
-    /// Composite values (arrays, records, tuples) print at most this many
-    /// characters, so describing a large or deeply shared value is bounded.
     static let compositeDisplayLimit = 10_000
 
     package var display: String {
@@ -286,7 +263,6 @@ package indirect enum SwiftAppValue {
         case .string(let v): append(quoted ? "\"\(v)\"" : v)
         case .array(let values): list("[", "]", values.map { (nil, $0) })
         case .dictionary(let entries):
-            // Stream into the shared description budget, without tuple allocation.
             if entries.isEmpty { append("[:]") }
             else {
                 append("[")
@@ -370,21 +346,16 @@ package indirect enum SwiftAppValue {
         }
     }
 
-    /// The value as seen by a reader: bindings read through.
     package var resolved: SwiftAppValue {
         if case .binding(let binding) = self { return binding.get().resolved }
         return self
     }
 
-    /// A native SwiftUI argument as seen by a reader. Without contextual types,
-    /// `.title` beside `enum Field { case title }` resolves to the owned case;
-    /// SwiftUI parameters still read a payload-free case as its symbol.
     package var symbol: SwiftAppValue {
         if case .enumeration(let value) = resolved, value.arguments.isEmpty { return .member(value.name, nil) }
         return resolved
     }
 
-    /// Stable identity for `ForEach` and `Identifiable` rows.
     package func identity(keyPath: [String]?) -> String {
         if let keyPath, keyPath != ["self"] {
             var value = self
@@ -407,8 +378,6 @@ package indirect enum SwiftAppValue {
         return debugDisplay
     }
 
-    /// Equality of non-composite values; `SwiftAppRuntime.equal` owns
-    /// arrays and records so their traversal is budgeted.
     static func equalScalars(_ a: SwiftAppValue, _ b: SwiftAppValue) -> Bool {
         switch (a, b) {
         case (.nilValue, .nilValue): true
@@ -439,8 +408,6 @@ package indirect enum SwiftAppValue {
     }
 }
 
-/// Observable per-instance `@State` storage. SwiftUI owns the lifetime of the
-/// hosting view, so interpreted state follows real SwiftUI identity.
 @MainActor @Observable
 package final class SwiftAppStateStore {
     var values: [String: SwiftAppValue]
@@ -456,7 +423,6 @@ package final class SwiftAppStateStore {
     }
 }
 
-/// One custom view instance: the props its parent passed plus its own state.
 @MainActor
 package final class SwiftAppViewInstance {
     let declaration: SwiftAppTypeDeclaration

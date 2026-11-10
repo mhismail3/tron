@@ -301,10 +301,6 @@ final class ProviderOAuthLoopbackListener: @unchecked Sendable {
         finishStoppingIfPossible()
     }
 
-    /// Network.framework rejects a fixed `requiredLocalEndpoint` listener with
-    /// POSIX EINVAL on physical iPhone. A directly bound POSIX socket gives the
-    /// callback an actual loopback-only local address instead of exposing the
-    /// one-shot HTTP endpoint on Wi-Fi, cellular, or Tailscale interfaces.
     static func makeBoundSocket(family: Int32, port: UInt16) throws -> Int32 {
         guard family == AF_INET || family == AF_INET6 else { throw ListenerError.unavailable }
         let fileDescriptor = Darwin.socket(family, SOCK_STREAM, IPPROTO_TCP)
@@ -634,9 +630,6 @@ final class ProviderOAuthBrowserSession: NSObject, ASWebAuthenticationPresentati
         }
     }
 
-    /// Listeners retired by any browser session in this process. A restarted
-    /// login gets a new view-owned session that may bind the same fixed provider
-    /// port, so every start joins earlier retirements before binding.
     private static var retiringListeners: [ObjectIdentifier: ProviderOAuthLoopbackListener] = [:]
 
     static func retire(_ listener: ProviderOAuthLoopbackListener) {

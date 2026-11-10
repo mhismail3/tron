@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Disposable presentation data. The lifecycle read owner must supply canonical
-/// paths, effective trust and refusal reasons; these views never infer eligibility.
 struct ProjectLifecycleProject: Identifiable {
     let name: String
     let path: String
@@ -13,8 +11,6 @@ struct ProjectLifecycleProject: Identifiable {
     var id: String { path }
 }
 
-/// The approved list anatomy and sheet routes, independent of the native RPC.
-/// Destinations and effects are required inputs: there is no production fallback.
 @MainActor
 struct ProjectLifecycleProjectsPage<ProjectDestination: View, AddDestination: View>: View {
     let projects: [ProjectLifecycleProject]

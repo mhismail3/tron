@@ -1,10 +1,5 @@
 import XCTest
 
-/// A finalized parallel group of display calls renders each display as the
-/// lone inline display's thumbnail card (`DisplayThumbnailButton`, identifier
-/// `display-inline-thumbnail`) in one horizontal row, never as a tool chip, and
-/// a thumbnail opens its preview directly instead of going through the grouped
-/// tool sheet. Generic calls in a mixed group keep their grouped chip.
 final class TronChatDisplayStripUITests: XCTestCase {
 
     @MainActor func testGroupedDisplaysRenderAsInlineThumbnailRowThatOpensPreviewDirectly() {
@@ -20,7 +15,6 @@ final class TronChatDisplayStripUITests: XCTestCase {
         XCTAssertFalse(grouped.exists, "Display calls must not collapse into a grouped tools chip: \(grouped.exists ? grouped.label : "")\n\(app.debugDescription)")
         let second = thumbnail(app, titles[1])
         XCTAssertTrue(second.exists)
-        // Each display is the shared inline thumbnail card, not its tool chip.
         for title in titles {
             XCTAssertFalse(app.buttons["\(title), Open, Opens sheet"].exists, "\(title) must not render as a tool chip")
         }
@@ -34,8 +28,6 @@ final class TronChatDisplayStripUITests: XCTestCase {
         XCTAssertGreaterThan(second.frame.minX, first.frame.maxX, "Chips run left to right in invocation order")
         keepScreenshot(app, "998-display-thumbnail-row")
 
-        // The row scrolls horizontally: the trailing non-image display starts
-        // off screen and is reached by dragging the row itself.
         let last = thumbnail(app, titles[3])
         XCTAssertTrue(last.exists)
         let document = app.buttons["Open Release notes"]
@@ -49,14 +41,12 @@ final class TronChatDisplayStripUITests: XCTestCase {
         XCTAssertTrue(waitHittable(document), "The last thumbnail scrolls into reach")
         XCTAssertLessThan(first.frame.minX, 0, "The row, not the transcript, scrolled")
         XCTAssertEqual(document.frame.midY, first.frame.midY, accuracy: 1)
-        // A non-image display keeps the same card with its kind's face.
         XCTAssertEqual(document.identifier, "display-inline-thumbnail")
         XCTAssertEqual(document.frame.width, Self.thumbnailSide, accuracy: 1)
         XCTAssertEqual(document.frame.height, Self.thumbnailSide, accuracy: 1)
         XCTAssertTrue(waitHittable(last))
         keepScreenshot(app, "998-display-thumbnail-row-scrolled")
 
-        // One tap opens that display's preview sheet; no grouped tool sheet.
         last.tap()
         XCTAssertTrue(app.images["Settings row"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'tool-run-summary-'")).firstMatch.exists,
@@ -73,13 +63,11 @@ final class TronChatDisplayStripUITests: XCTestCase {
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.images["Settings row"].waitForNonExistence(timeout: 10))
 
-        // Mixed group: the display run is split out; generic calls keep chips.
         let mixedOne = thumbnail(app, "Mixed photo one")
         let mixedTwo = thumbnail(app, "Mixed photo two")
         XCTAssertTrue(mixedOne.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(mixedOne.frame.midY, mixedTwo.frame.midY, accuracy: 1)
         XCTAssertEqual(mixedOne.identifier, "display-inline-thumbnail")
-        // Each generic stretch counts only its own call, not the group's four.
         let read = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Read file, Completed'")).firstMatch
         let bash = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Run command, Completed'")).firstMatch
         XCTAssertTrue(read.exists, app.debugDescription)
@@ -92,11 +80,6 @@ final class TronChatDisplayStripUITests: XCTestCase {
         XCTAssertTrue(app.images["Mixed two"].waitForExistence(timeout: 10), app.debugDescription)
     }
 
-    /// A chat reopened from history with a grouped run of inline image displays
-    /// lays its cards out exactly as the live chat that produced them: each
-    /// card's slot is the card itself, so the row's spacing (`ChatChipStrip`,
-    /// 8 pt) separates every pair. No collapse state survives a preview round
-    /// trip because inline thumbnails are always visible (#1012, #1302).
     @MainActor func testReopenedInlineDisplayGroupKeepsLiveCardSpacingAndOpensExactCallDetails() {
         continueAfterFailure = false
         let reopened = launch("-chat-display-inline-group")
@@ -134,9 +117,6 @@ final class TronChatDisplayStripUITests: XCTestCase {
         }
     }
 
-    /// A tool segment that continues past a display-split group (#1486) opens:
-    /// the continuation row keeps its own identity after the group's calls
-    /// merge back into the display row, instead of failing the chat closed.
     @MainActor func testSegmentContinuationAfterSplitDisplayGroupOpens() {
         continueAfterFailure = false
         let app = launch("-chat-display-segment-continuation")
@@ -152,7 +132,6 @@ final class TronChatDisplayStripUITests: XCTestCase {
         keepScreenshot(app, "1486-segment-continuation-opens")
     }
 
-    /// The grouped inline cards' frames, asserting the row is tight and even.
     @MainActor private func inlineCardFrames(_ app: XCUIApplication, name: String) -> [CGRect] {
         let titles = Self.inlineTitles
         let first = thumbnail(app, titles[0])
@@ -193,10 +172,8 @@ final class TronChatDisplayStripUITests: XCTestCase {
 
     static let inlineTitles = ["Home dashboard after the fix", "Usage sheet with rounded rows",
                                "Settings: This iPhone switch", "Worker list scrolled to the end"]
-    /// `ChatChipStrip`'s spacing between row items.
     static let rowSpacing: CGFloat = 8
 
-    /// `DisplayInlineLayoutPolicy.imageChipSide`: the attachment preview side × 1.45.
     static let thumbnailSide: CGFloat = 64 * 1.45
 
     @MainActor private func thumbnail(_ app: XCUIApplication, _ title: String) -> XCUIElement {

@@ -1,22 +1,15 @@
 #if HOSTED_TEST
 import Foundation
 
-/// The single-file SwiftUI apps the #889 run journeys display and run. They
-/// are ordinary SwiftUI source, the kind an agent writes and presents with
-/// `display`; docs/swift-apps.md describes the supported subset.
 package enum HostedSwiftAppFixtureSource {
-    /// Carries a canonical app source from the UI test bundle into the app.
     package static let canonicalSourceEnvironmentKey = "TRON_HOSTED_SWIFT_APP_SOURCE"
 
-    /// The file a `display-swift…` scenario displays: its name and source.
     package static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
         if scenario.contains("install-review") {
             return ("Builds.swift", "import SwiftUI\nstruct ContentView: View { var body: some View { Text(\"Fixture app\") } }")
         }
         if scenario.contains("builds-preview") {
-            // The canonical tools/web/apps/builds-preview/BuildsPreview.swift,
-            // byte for byte: the UI test bundle carries it and hands it over.
             guard let source = ProcessInfo.processInfo.environment[canonicalSourceEnvironmentKey] else {
                 fatalError("\(scenario) needs \(canonicalSourceEnvironmentKey) from the UI test bundle")
             }
@@ -56,7 +49,6 @@ package enum HostedSwiftAppFixtureSource {
         if scenario.contains("optional-chain") { return ("OptionalChain.swift", optionalChain) }
         if scenario.contains("broken") { return ("Broken.swift", broken) }
         if scenario.contains("deep") {
-            // Nesting past the parser limit, on line 3.
             let nested = String(repeating: "(", count: 2_000) + "1" + String(repeating: ")", count: 2_000)
             return ("Deep.swift", "import SwiftUI\n\nlet depth = \(nested)\n\nstruct ContentView: View {\n    var body: some View { Text(\"Deep\") }\n}\n")
         }
@@ -73,14 +65,12 @@ package enum HostedSwiftAppFixtureSource {
         if scenario.contains("diagnostics") { return ("Diagnostics.swift", diagnostics) }
         if scenario.contains("limits") { return ("Limits.swift", limits) }
         if scenario.contains("truncated") {
-            // Past the document sheet's text preview limit, so the preview is truncated.
             let padding = (0..<6_000).map { "// Padding line \($0) keeps this file past the preview limit." }
             return ("Habits.swift", habits + "\n" + padding.joined(separator: "\n"))
         }
         return ("Habits.swift", habits)
     }
 
-    /// #1146: model construction shares action rollback and refuses missing slots.
     static let modelInitializers = #"""
     import SwiftUI
     struct Ticket {
@@ -121,7 +111,6 @@ package enum HostedSwiftAppFixtureSource {
     }
     """#
 
-    /// Payloads remain values; switches bind only the selected alternative.
     static let modelPayloads = #"""
     import SwiftUI
     indirect enum Event: Hashable {
@@ -391,9 +380,6 @@ package enum HostedSwiftAppFixtureSource {
     }
     """#
 
-    /// #1142: a nil optional-chain receiver skips the rest of its postfix chain
-    /// (arguments, later indexes, lazy defaults and assignment right-hand sides);
-    /// a present receiver runs normally, and `??` and parentheses end the chain.
     static let optionalChain = #"""
     import SwiftUI
 
@@ -681,9 +667,6 @@ package enum HostedSwiftAppFixtureSource {
     }
     """#
 
-    /// A second app style: a shared `ObservableObject` store passed through
-    /// `environmentObject`, a `TabView`, `List`s, an enum `switch` and
-    /// `String(format:)`.
     static let budget = #"""
     import SwiftUI
 
@@ -882,8 +865,6 @@ package enum HostedSwiftAppFixtureSource {
     }
     """#
 
-    /// Supported dictionaries, protocol requirements and enum payloads beside
-    /// an unsupported custom View initializer; only the latter diagnoses.
     static let broken = #"""
     import SwiftUI
 
@@ -904,8 +885,6 @@ package enum HostedSwiftAppFixtureSource {
     protocol HasValue { var value: Int { get } }
     """#
 
-    /// One invalid child must not erase earlier/later siblings or swallow an
-    /// error in a value helper called by an action.
     static let diagnostics = #"""
     import SwiftUI
     struct ContentView: View {
@@ -938,8 +917,6 @@ package enum HostedSwiftAppFixtureSource {
     protocol Marker {}
     """#
 
-    /// Runaway and hostile programs and an unsupported view. Each must end
-    /// in a diagnostic or a safe value while the rest of the app keeps working.
     static let limits = #"""
     import SwiftUI
 

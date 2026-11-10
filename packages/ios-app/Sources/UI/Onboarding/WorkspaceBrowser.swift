@@ -8,8 +8,6 @@ struct WorkspaceShortcut: Identifiable, Hashable, Sendable {
     var id: String { path }
 }
 
-/// Gateway-backed port of Tron's historical workspace selector. The Mac
-/// filesystem remains authoritative; this view only owns navigation state.
 struct WorkspaceBrowser: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -74,9 +72,6 @@ struct WorkspaceBrowser: View {
                 }
             }
             .task { await load(path: initialPath) }
-            // Hidden entries already arrive in the listing, so visibility is a
-            // local projection. Re-requesting the directory here would repeat a
-            // Gateway filesystem read for data this view already holds.
             .onDisappear { loadOwner.cancel() }
         }
         .tronTopBlur(.sheet)
@@ -258,8 +253,6 @@ struct WorkspaceBrowser: View {
         await loadOwner.load(
             navigation: navigation,
             operation: { try await model.loadWorkspace(path: path) },
-            // A transient connection error is not a scene activation: ask the
-            // transport owner for an attempt, not for a scene transition.
             onTransientError: { model.recoverTransientTransportFailure() }
         )
     }
@@ -272,9 +265,6 @@ struct WorkspaceBrowser: View {
             await loadOwner.createFolder(
                 operation: { try await model.createFolder(parent: parent, name: name) },
                 onSuccess: { cancelFolder() },
-                // A transient connection error is not a scene activation: ask
-                // the transport owner for an attempt, not for a scene
-                // transition.
                 onTransientError: { model.recoverTransientTransportFailure() }
             )
         }

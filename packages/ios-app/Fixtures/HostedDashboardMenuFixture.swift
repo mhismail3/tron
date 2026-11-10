@@ -1,7 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
 
-/// Real native menu with controlled parent updates; no Gateway or persisted data.
 struct HostedDashboardMenuFixtureView: View {
     @State private var revision = 0
     @State private var selected = false
@@ -26,9 +25,6 @@ struct HostedDashboardMenuFixtureView: View {
         .background(Color.tronBackground)
         .task(id: updating) {
             guard updating else { return }
-            // Start only after the real menu has rendered. Starting at the
-            // tap lets XCTest's idle wait outlast the updates, which would
-            // falsely pass without exercising menu replacement.
             let deadline = Date().addingTimeInterval(10)
             while !menuIsRendered {
                 guard Date() < deadline else { return }

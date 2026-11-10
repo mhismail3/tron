@@ -2,9 +2,6 @@ import AppKit
 import Foundation
 import SwiftUI
 
-/// Owns the menu-bar status item, the periodic poller, and the menu
-/// itself. Created by `AppDelegate` once the wizard has completed (or
-/// at launch when the `.onboarded` sentinel exists).
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let setup: EnvironmentSetup
@@ -23,8 +20,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private(set) var debugGatewayAdmission: DebugGatewayObserver.Admission?
     private(set) var debugPairingWindowAdmission: DebugGatewayObserver.Admission?
 
-    /// Most-recent status snapshot, written by the poller and read by
-    /// `rebuildMenu()`.
     private(set) var snapshot: ServerStatusSnapshot
 
     init(setup: EnvironmentSetup, debugSetup: EnvironmentSetup = .debug) {
@@ -51,7 +46,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         rebuildMenu()
         refreshDebugGatewayState()
 
-        // Start polling - emits a snapshot every 30 s.
         pollerTask = Task { [weak self] in
             guard let self else { return }
             for await snapshot in self.poller.snapshots() {
@@ -76,10 +70,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         statusItem = nil
     }
 
-    /// Pushes an out-of-band snapshot into the menu bar (used by
-    /// `MenuBarActionHandler` after a Gateway restart/pause/resume so
-    /// the icon + menu items refresh immediately rather than waiting for
-    /// the next 30s poll).
     func applySnapshot(_ snapshot: ServerStatusSnapshot) {
         if self.snapshot.state != snapshot.state {
             TronLog.shared.record(
@@ -94,10 +84,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         rebuildMenu()
     }
 
-    /// Applies a snapshot produced by passive polling. Poll/menu refreshes
-    /// must not overwrite an explicit in-flight action such as "Restarting";
-    /// the action handler applies its own final snapshot when the command
-    /// exits.
     func applyPolledSnapshot(_ snapshot: ServerStatusSnapshot) {
         guard !self.snapshot.state.isBusy else { return }
         applySnapshot(snapshot)
@@ -207,10 +193,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    /// The full fail-closed probe for an explicit user action (menu open, or a
-    /// post-action refresh). It shares the poller's admission cache, so a
-    /// failure it finds is recorded and cannot be overwritten by the next 30 s
-    /// cycle's reused admission.
     func explicitStatusSnapshot() async -> ServerStatusSnapshot {
         await poller.explicitSnapshot()
     }
@@ -252,8 +234,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    // MARK: - Menu
-
     private func rebuildMenu() {
         guard let menu = statusItem?.menu else { return }
         let items = MenuBarItemBuilder.build(
@@ -277,7 +257,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             let item = NSMenuItem()
             let view = MenuBarHeaderView(content: content)
             item.view = view
-            item.representedObject = view // keep closures alive
+            item.representedObject = view
             item.isEnabled = false
             item.image = nil
             return item
@@ -290,7 +270,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             }
             let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "")
             item.target = wrapper
-            item.representedObject = wrapper // keep alive
+            item.representedObject = wrapper
             item.isEnabled = isEnabled
             normalizeMenuItem(item)
             return item
@@ -304,7 +284,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             let wrapper = ActionWrapper { ApplicationTermination.request() }
             let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "")
             item.target = wrapper
-            item.representedObject = wrapper // keep alive
+            item.representedObject = wrapper
             normalizeMenuItem(item)
             return item
         }

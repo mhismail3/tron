@@ -15,8 +15,6 @@ struct SessionHistoryPage: Codable, Sendable {
     let newer: SessionHistoryCursor?
     let totalEntries: Int
 
-    /// One-based canonical append ordinals, not a page number inferred from a
-    /// moving total. Appends can leave a cursor window off a 100-row boundary.
     var entryRange: ClosedRange<Int>? {
         guard !nodes.isEmpty, totalEntries >= nodes.count else { return nil }
         let upper: Int
@@ -135,9 +133,6 @@ final class SessionHistoryEntryStore {
         requestedOffset = initialPage?.offset ?? 0
     }
 
-    /// Builds the existing history row shape from canonical entry metadata;
-    /// the displayed body remains the admitted SessionHistoryEntryPage, never
-    /// a reduced citation DTO or a first-page cache lookup.
     static func node(for page: SessionHistoryEntryPage) -> SessionTreeNode {
         let metadata = page.metadata.objectValue ?? [:]
         let role = metadata["role"]?.stringValue.flatMap(TranscriptItem.Role.init(rawValue:))
@@ -150,7 +145,6 @@ final class SessionHistoryEntryStore {
         )
     }
 
-    /// An entry's whole text for Copy, read part by part (at most 40 parts of 24,000 characters).
     static func fullText(identity: SessionHistoryReadIdentity, entryID: String,
                          request: @Sendable (String, JSONValue) async throws -> JSONValue) async throws -> String {
         var text = ""

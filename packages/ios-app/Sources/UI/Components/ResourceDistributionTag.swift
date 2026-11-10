@@ -1,11 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// The one distribution tag for a resource row. The Gateway derives
-/// `distribution` from Pi's sourceInfo; Pi built-ins carry none, so those rows
-/// show no tag. A user-authored (`local`) file outside the project is Global
-/// (the agent directory's skills, prompts, extensions and agents); a project's
-/// own file shows only the Project scope badge beside it.
 struct ResourceDistributionTag: View {
     let distribution: ResourceDistribution?
     var scope: CommandInfo.ResourceScope?

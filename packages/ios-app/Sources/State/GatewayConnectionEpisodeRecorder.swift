@@ -1,9 +1,6 @@
 import Foundation
 import TronMobileCore
 
-/// Which lifecycle guard is holding recovery while an episode has no attempt in
-/// flight or scheduled. `GatewayLifecycleCoordinator` answers with the guard it
-/// is actually holding, so one field names the cause of a stalled episode.
 enum GatewayReconnectStallGuard: String, Sendable {
     case pathUnsatisfied
     case nonRetryable
@@ -13,26 +10,17 @@ enum GatewayReconnectStallGuard: String, Sendable {
     case other
 }
 
-/// How an episode ended. `connected` recovered the connection; `background` is
-/// scene retirement, which parks recovery until the next foreground; `stopped`
-/// is any terminal stop (a non-retryable failure, a profile switch, teardown).
 enum GatewayEpisodeEnd: String, Sendable {
     case connected
     case background
     case stopped
 }
 
-/// Which owner made an attempt. Both write to the one always-on log, and a
-/// profile switch moves a profile between them, so the profile ID alone cannot
-/// say which one an attempt came from.
 enum GatewayConnectionAttemptOwner: String, Sendable {
     case selected
     case pool
 }
 
-/// One finished connection attempt, in exactly the fields `gateway.attempt`
-/// records. `stageReached` is the furthest handshake stage it reached;
-/// `delayBeforeMs` is the wait between scheduling it and starting it.
 struct GatewayConnectionAttempt: Sendable {
     let owner: GatewayConnectionAttemptOwner
     let profileID: String?
@@ -51,41 +39,19 @@ struct GatewayConnectionAttempt: Sendable {
     let succeeded: Bool
 }
 
-/// Aggregates phone reconnect attempts into one `gateway.attempt` record each
-/// and one `connection.episode` record when the outage ends, and owns the two
-/// watchdogs that run only while an episode is open in the foreground:
-/// `reconnect.stalled` (no attempt in flight or scheduled for the stall bound)
-/// and `app.main-stall` (the main actor did not answer a ping inside its bound).
-/// Recording only: it never schedules, cancels or accelerates recovery.
 @MainActor
 final class GatewayConnectionEpisodeRecorder {
-    /// An episode with no attempt in flight or scheduled for this long is
-    /// stalled. Attempts in flight and pending backoff waits both read as
-    /// progress, so a healthy retry holds no guard at all; the bound only has
-    /// to exceed the longest single wait a healthy timeline can have, which is
-    /// the 15 s backoff cap.
     static let reconnectStallBound = Duration.seconds(20)
-    /// A main actor that cannot answer a ping within this bound is stalled.
     static let mainStallBound = Duration.seconds(2)
-    /// Both watchdogs tick on this grid; the logging contract forbids samplers
-    /// faster than 1 s.
     static let watchdogInterval = Duration.seconds(1)
-    /// A distinct cause per attempt is enough to attribute an episode; more
-    /// would only lengthen the record.
     static let maximumRecordedCauses = 6
 
     nonisolated let clock: MonotonicClock
     nonisolated let appLog: AppLog
-    /// When the watchdog checks run. It is separate from `clock` so a test that
-    /// drives the lifecycle timeline on a manual clock does not have to service
-    /// watchdog ticks; every bound is still measured on `clock`. Production
-    /// passes the same wall clock for both.
     nonisolated let watchdogClock: MonotonicClock
     private let networkInterfaces: @Sendable () -> String?
     private let mainStallPing: @Sendable () async -> Void
 
-    /// Answers which guard is holding recovery, or `nil` while an attempt is in
-    /// flight or scheduled. The lifecycle owner sets it; the watchdog only reads.
     var stallGuard: @MainActor () -> GatewayReconnectStallGuard? = { nil }
 
     private struct Episode {
@@ -94,11 +60,7 @@ final class GatewayConnectionEpisodeRecorder {
         let profileID: String?
         let lifecycleGeneration: Int
         var attempts = 0
-        /// When recovery last made progress: the episode's open and every
-        /// attempt start. The stall bound measures from here.
         var lastProgressAt: ContinuousClock.Instant
-        /// When the current holding guard began holding, or nil while recovery
-        /// is progressing.
         var guardHeldSince: ContinuousClock.Instant?
         var maximumGapMs = 0
         var causes: [String] = []
@@ -107,8 +69,6 @@ final class GatewayConnectionEpisodeRecorder {
 
     private var episode: Episode?
     private var watchdogTask: Task<Void, Never>?
-    /// Records are chained through one task so an attempt is always written
-    /// before the episode it belongs to, whatever order the log actor serves.
     private var pendingRecord: Task<Void, Never>?
 
     init(
@@ -125,11 +85,6 @@ final class GatewayConnectionEpisodeRecorder {
         self.mainStallPing = mainStallPing
     }
 
-    /// Opens an episode at the moment a transport loss is admitted, so the
-    /// silent gap before the first attempt is measurable even when no attempt
-    /// ever starts. A foreground scene owns the episode; a backgrounded app
-    /// parks recovery and has nothing to explain. `cause` names a loss that
-    /// produced no failed handshake of its own, such as a Gateway restart.
     func noteDisconnected(
         profileID: String?,
         lifecycleGeneration: Int,
@@ -143,8 +98,6 @@ final class GatewayConnectionEpisodeRecorder {
     }
 
     deinit {
-        // The watchdogs hold the recorder weakly, so they outlive it unless the
-        // owning recorder cancels them here.
         watchdogTask?.cancel()
     }
 
@@ -185,8 +138,6 @@ final class GatewayConnectionEpisodeRecorder {
         endEpisode(.connected, connectionID: attempt.connectionID)
     }
 
-    /// Ends an open episode with the attempt count, causes and gaps it
-    /// accumulated. Called with each terminal transition of the episode.
     func endEpisode(
         _ endedBy: GatewayEpisodeEnd,
         connectionID: Int? = nil,
@@ -209,8 +160,6 @@ final class GatewayConnectionEpisodeRecorder {
                 "endedAt=\(GatewayTimestamp.preciseString(from: Date()))",
                 "attempts=\(finished.attempts)",
                 "causes=\(finished.causes.isEmpty ? "none" : finished.causes.joined(separator: ","))",
-                // Episodes only exist in the foreground: a background transition
-                // ends them, so the foreground share is the whole duration.
                 "foregroundMs=\(durationMs)",
                 "maxGapBetweenAttemptsMs=\(finished.maximumGapMs)",
                 "endedBy=\(endedBy.rawValue)",
@@ -225,10 +174,6 @@ final class GatewayConnectionEpisodeRecorder {
         cause: String? = nil
     ) {
         let openedAt = startedAt ?? clock.now()
-        // The wall-clock start is `now` minus the time the monotonic clock has
-        // already counted: an attempt failure opens the episode at that
-        // attempt's own start, so writing `Date()` here would date the episode's
-        // start up to a whole transport deadline after its first attempt.
         let elapsedMs = max(0, diagnosticMilliseconds(openedAt.duration(to: clock.now())))
         episode = Episode(
             startedAt: openedAt,
@@ -260,22 +205,6 @@ final class GatewayConnectionEpisodeRecorder {
         episode = current
     }
 
-    /// Both watchdogs share one task: the stall check reads the guard on the
-    /// main actor, and a main-stall ping is measured across the hop off it, so
-    /// one grid serves both and one cancellation stops both. The task keeps the
-    /// recorder weakly, so a recorder freed with an episode still open leaves
-    /// nothing ticking.
-    ///
-    /// The task is detached on purpose, and the loop runs in a `nonisolated`
-    /// function reached through a closure with no main-actor access at all. A
-    /// task created from this `@MainActor` owner otherwise inherits main-actor
-    /// isolation — closure isolation is inferred from what the body touches, and
-    /// travels with the closure even when it is typed `@Sendable` — so the
-    /// watchdog's own wake-up would queue behind the very block the ping exists
-    /// to measure: it would only start timing after the block ended and report
-    /// microseconds. Off the main actor, it keeps ticking while the main actor is
-    /// blocked and hops to it only for the guard check (and, through the default
-    /// ping, to be delayed).
     private func startWatchdogs(profileID: String?, lifecycleGeneration: Int) {
         stopWatchdogs()
         let tickClock = watchdogClock
@@ -286,8 +215,6 @@ final class GatewayConnectionEpisodeRecorder {
             profileID: profileID, lifecycleGeneration: lifecycleGeneration,
             boundMilliseconds: boundMilliseconds
         )
-        // The owner is re-acquired weakly on every tick, so a recorder freed with
-        // an episode still open leaves nothing ticking.
         let owner: @Sendable () -> GatewayConnectionEpisodeRecorder? = { [weak self] in self }
         let loop: @Sendable () async -> Void = {
             await Self.runWatchdogs(
@@ -298,8 +225,6 @@ final class GatewayConnectionEpisodeRecorder {
         watchdogTask = Task.detached(operation: loop)
     }
 
-    /// The shared 1 s grid, off the main actor: it measures the main-stall ping
-    /// across its hop, then asks the owner which guard is holding recovery.
     nonisolated private static func runWatchdogs(
         owner: @escaping @Sendable () -> GatewayConnectionEpisodeRecorder?,
         tickClock: MonotonicClock,
@@ -311,7 +236,6 @@ final class GatewayConnectionEpisodeRecorder {
         while !Task.isCancelled {
             do { try await tickClock.sleep(interval) } catch { return }
             guard !Task.isCancelled else { return }
-            // The owner is gone; there is nothing left to report for.
             guard let recorder = owner() else { return }
             let pingStartedAt = tickClock.now()
             await ping()
@@ -360,10 +284,6 @@ final class GatewayConnectionEpisodeRecorder {
         )
     }
 
-    /// A main-stall ping is measured between two reads of `clock`, so a stalled
-    /// main actor is reported with the block it actually served. The watchdog
-    /// task runs off the main actor, so it can measure the block and report it
-    /// once the actor answers; it exists only while an episode is open.
     nonisolated private func mainStallReport(
         profileID: String?,
         lifecycleGeneration: Int,

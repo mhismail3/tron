@@ -1,11 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// A top-heavy backdrop blur that eases into the unmodified transcript.
-///
-/// Local device builds use the technique demonstrated by
-/// https://github.com/jtrivedi/VariableBlurView. Distribution builds compile
-/// only the public gradient-masked `UIVisualEffectView` fallback.
 enum TronTopBlurStyle {
     case chat
     case dashboard
@@ -38,9 +33,6 @@ struct TronTopBlurOverlay: View {
 
     var body: some View {
         ZStack {
-            // Keep the native/variable backdrop blur and radius unchanged.
-            // Dark mode uses a dark material plus black tint so it stays soft
-            // without the regular UIBlurEffect's gray lift.
             ChatTopVariableBlur(maxBlurRadius: style.radius, darkMode: colorScheme == .dark)
             TronEdgeBlurTint(edge: .top)
         }
@@ -53,11 +45,8 @@ struct TronTopBlurOverlay: View {
     }
 }
 
-/// The background-colored ramp that integrates an edge blur with the surface.
-/// Top and bottom chat edges share it so both read as one treatment.
 private struct TronEdgeBlurTint: View {
     let edge: VerticalEdge
-    /// Scales every stop of the ramp; the top edge uses the full ramp.
     var strength: Double = 1
     @Environment(\.colorScheme) private var colorScheme
 
@@ -85,15 +74,10 @@ private struct TronEdgeBlurTint: View {
 }
 
 enum ChatBottomActivityBlurLayout {
-    /// One geometry with or without the keyboard: the blur rises above the
-    /// input bar and extends below it to the screen edge (home indicator) or
-    /// behind the keyboard.
     static let height: CGFloat = 124
     static let translation: CGFloat = 44
 }
 
-/// The chat's bottom edge blur. It mirrors the top chat blur (same variable
-/// backdrop radius and background tint ramp) so both edges match.
 struct ChatBottomActivityBlur: View {
     let isActive: Bool
     var height: CGFloat = ChatBottomActivityBlurLayout.height
@@ -132,9 +116,6 @@ private struct TronTopBlurModifier: ViewModifier {
     let style: TronTopBlurStyle
 
     func body(content: Content) -> some View {
-        // The concrete ScrollView/List consumes this value inside the
-        // NavigationStack. Global notices are owned by the scene-level window,
-        // not by this visual styling modifier or a presented sheet.
         content.environment(\.tronTopBlurStyle, style)
     }
 }
@@ -144,9 +125,6 @@ private struct TronTopBlurSurfaceModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            // The native scroll viewport can fill a sheet while SwiftUI offers
-            // its overlay only the loading row's ideal width. Establish surface
-            // width before attaching chrome; never paint a content-sized column.
             .frame(maxWidth: .infinity)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
             .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
@@ -156,9 +134,6 @@ private struct TronTopBlurSurfaceModifier: ViewModifier {
     }
 }
 
-/// Native document readers own their initial text inset and need their host to
-/// extend beneath the custom navigation blur. Keep that underlap explicit so
-/// form/detail surfaces retain SwiftUI's normal safe-area placement.
 private struct TronDocumentTopBlurSurfaceModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
@@ -172,13 +147,10 @@ extension View {
         modifier(TronTopBlurModifier(style: style))
     }
 
-    /// Use for NavigationStack content without a concrete SwiftUI scroll owner.
     func tronTopBlurSurface() -> some View {
         modifier(TronTopBlurSurfaceModifier())
     }
 
-    /// Use only when a native document reader owns its initial inset and must
-    /// scroll beneath the custom top blur after the initial position.
     func tronDocumentTopBlurSurface() -> some View {
         modifier(TronDocumentTopBlurSurfaceModifier())
     }
@@ -290,9 +262,6 @@ final class VariableBackdropBlurView: UIVisualEffectView {
         layer.mask = edgeMask
     }
 
-    // The whole effect fades to fully transparent before its view boundary.
-    // This masks the CABackdropLayer's rectangular sampling edge in addition
-    // to varying the private filter's radius.
     private static let edgeMaskColors = [
         UIColor.white.cgColor,
         UIColor.white.cgColor,

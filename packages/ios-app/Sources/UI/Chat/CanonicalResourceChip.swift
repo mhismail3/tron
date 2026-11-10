@@ -70,10 +70,7 @@ enum CanonicalResourceChipPresentation {
     }
 }
 
-/// The skills and prompts one message invoked, in order, wrapping like tool
-/// chips. An extension command owns its own command row, so it never shows here.
 struct CanonicalResourceChips: View, Equatable {
-    /// The message row's identity: each chip's detail presenter is distinct per row.
     let owner: String
     let resources: [ComposerResourceInvocation]
 
@@ -92,7 +89,6 @@ struct CanonicalResourceChips: View, Equatable {
         (resources ?? []).filter { !$0.isExtensionCommand }
     }
 
-    /// "Skill Review, Prompt Tests" for a row's combined accessibility label.
     static func accessibilityLabel(_ resources: [ComposerResourceInvocation]?) -> String? {
         let shown = messageResources(resources)
         guard !shown.isEmpty else { return nil }
@@ -102,9 +98,6 @@ struct CanonicalResourceChips: View, Equatable {
     }
 }
 
-/// Stable metadata chip for a canonical user message bound to one Gateway
-/// resource invocation. Transcript identity and scrolling stay with the row;
-/// the chip owns only its detail-sheet route.
 struct CanonicalResourceChip: View, Equatable {
     let instance: String
     let resource: ComposerResourceInvocation

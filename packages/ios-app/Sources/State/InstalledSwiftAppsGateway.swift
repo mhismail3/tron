@@ -2,9 +2,6 @@ import Foundation
 import TronMobileCore
 
 extension InstalledSwiftApps {
-    /// The one composition of the selected Gateway's installed-app ports. Every
-    /// read pins the selected profile and connection epoch and requires that
-    /// admission after its await; every mutation is a stable-command receipt.
     @MainActor
     static func gateway(
         client: GatewayClient,

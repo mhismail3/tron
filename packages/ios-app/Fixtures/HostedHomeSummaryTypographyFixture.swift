@@ -2,9 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Real Home summary beside an independent code-style reference. Both receive
-/// the same available text width so XCUI can compare glyph advances and line
-/// metrics, including wrapping, without a font-name diagnostic or golden.
 struct HostedHomeSummaryTypographyFixture: View {
     private let cardWidth: CGFloat = 370
     private var textWidth: CGFloat {

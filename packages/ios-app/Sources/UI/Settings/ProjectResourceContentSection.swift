@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// A resource's body in its detail sheet. Commands and subagents preview it in
-/// a glass card whose View All opens the shared document reader (#1655);
-/// prompts and skills read in full. The sheet owns loading and the reader.
 struct ProjectResourceContentSection: View {
     let selection: ProjectResourceSelection
     let detail: CommandResourceDetail?
@@ -11,18 +8,14 @@ struct ProjectResourceContentSection: View {
     let loadError: String?
     let accent: Color
     let retry: () -> Void
-    /// The sheet presents the reader, so it stays mounted above this lazy row.
     let read: (ProjectResourceReading) -> Void
 
     private var readsInReader: Bool { selection.kind == .commands || selection.kind == .subagents }
 
-    /// A subagent's body is its definition's Markdown; a command's is its source.
     private var bodySource: CommandInfo.Source {
         selection.kind == .subagents ? .prompt : selection.commandInfo?.source ?? .extension
     }
 
-    /// The source excerpt (480 characters or ten lines), ended at a whole line
-    /// so a Markdown body never stops mid-word; View All shows the rest.
     private static func excerpt(_ text: String) -> String {
         let preview = ComposerResourceContentPresentation.preview(text, source: .extension, sourceTruncated: false)
         guard preview.isTruncated, let lineEnd = preview.text.range(of: "\n", options: .backwards) else { return preview.text }
@@ -98,7 +91,6 @@ struct ProjectResourceContentSection: View {
     }
 }
 
-/// A command's or subagent's whole body, opened from its View All row.
 struct ProjectResourceReading: Identifiable {
     let id: String
     let title: String
@@ -107,8 +99,6 @@ struct ProjectResourceReading: Identifiable {
     let truncated: Bool
 }
 
-/// The shared document reader every instructions and Home text reader uses,
-/// with the resource's own body renderer.
 struct ProjectResourceReader: View {
     let reading: ProjectResourceReading
 

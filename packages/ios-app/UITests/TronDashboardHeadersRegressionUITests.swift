@@ -1,6 +1,5 @@
 import XCTest
 
-/// Restores the approved dashboard and top-level settings section anatomy.
 @MainActor
 final class TronDashboardHeadersRegressionUITests: XCTestCase {
     func testDashboardHeadersAndSpacing() {

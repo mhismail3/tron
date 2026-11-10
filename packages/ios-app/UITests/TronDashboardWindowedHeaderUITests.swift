@@ -1,10 +1,5 @@
 import XCTest
 
-/// The dashboard header windowed versus full screen. A simulator window cannot
-/// enter Stage Manager, so the windowed case feeds the layout the corner
-/// footprint the system reports (`-tron-window-controls-inset W,H`, hosted
-/// builds only); detection itself reads `containerCornerInsets`, which only a
-/// windowed iPad scene fills.
 @MainActor
 final class TronDashboardWindowedHeaderUITests: XCTestCase {
     private func launch(_ extra: [String], _ orientation: UIDeviceOrientation = .landscapeLeft) -> XCUIApplication {

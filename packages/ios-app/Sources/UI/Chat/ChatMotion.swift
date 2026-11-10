@@ -2,10 +2,7 @@ import SwiftUI
 import TronMobileCore
 import UIKit
 
-/// Named chat-owned motion curves. Distinct values remain separate until a
-/// frame-verified product decision explicitly unifies them.
 enum ChatMotion {
-    // Arrive
     static let transcriptRevealDuration: TimeInterval = 0.18
     static let promptArriveDuration: TimeInterval = 0.28
     static func transcriptReveal(reduceMotion: Bool) -> Animation {
@@ -30,14 +27,12 @@ enum ChatMotion {
         reduceMotion ? nil : .smooth(duration: 0.18)
     }
 
-    // Replace
     static func queuedPromptReplace(reduceMotion: Bool) -> Animation? {
         reduceMotion ? .linear(duration: 0.10) : .smooth(duration: 0.16)
     }
     static func toolValueReplace(reduceMotion: Bool) -> Animation {
         reduceMotion ? .linear(duration: 0.10) : .smooth(duration: 0.20)
     }
-    // Resize
     static let streamingResize = Animation.smooth(duration: 0.16)
     static let composerAccessoryResize = Animation.smooth(duration: 0.24)
     static func composerSurfaceResize(reduceMotion: Bool) -> Animation {
@@ -47,12 +42,10 @@ enum ChatMotion {
         reduceMotion ? .easeOut(duration: 0.12) : composerStructuralSpring
     }
 
-    // Move
     static let floatingDisplayMove = Animation.smooth(duration: 0.28)
     static let cameraControl = Animation.smooth(duration: 0.28)
     static let floatingDisplayInstall = Animation.linear(duration: 0)
 
-    // Control
     static let composerStructuralSpring = Animation.spring(response: 0.32, dampingFraction: 0.82)
     static let composerControlSpring = Animation.spring(response: 0.35, dampingFraction: 0.8)
     static let composerModeSpring = Animation.spring(response: 0.22, dampingFraction: 0.72)
@@ -61,13 +54,11 @@ enum ChatMotion {
         reduceMotion ? nil : .easeInOut(duration: 0.20)
     }
     static let questionProgressControl = Animation.snappy(duration: 0.24)
-    /// Ask Question page change: a slide, or a short crossfade under Reduce Motion.
     static func questionPageTurn(reduceMotion: Bool) -> Animation {
         reduceMotion ? .easeOut(duration: 0.12) : questionProgressControl
     }
     static let extensionSelectionControl = Animation.smooth(duration: 0.24)
 
-    // Scroll positioning remains owned by ChatScrollCoordinator, not row motion.
     static func catchUpScroll(reduceMotion: Bool) -> ChatScrollAnimation {
         reduceMotion ? .disabled : .smooth(duration: 0.30)
     }
@@ -75,7 +66,6 @@ enum ChatMotion {
         reduceMotion ? .disabled : .smooth(duration: 0.30)
     }
 
-    // ChatLayoutTransaction keeps its geometry/keyboard API and uses these values.
     static let layoutSmoothDuration: TimeInterval = 0.34
     static let processOrbModeDuration: TimeInterval = 0.34
     static func processOrbMode(reduceMotion: Bool) -> Animation {

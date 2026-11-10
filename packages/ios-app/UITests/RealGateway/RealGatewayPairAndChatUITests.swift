@@ -2,58 +2,17 @@ import Foundation
 import UIKit
 import XCTest
 
-/// Real-UI journeys against the real Gateway fixture.
-///
-/// The app under test is launched with no fixture argument, so the hosted app's
-/// no-fixture arm renders `ProductionSceneRoot`: the production scene, its
-/// lifecycle modifiers and a real `AppModel` with a real `GatewayClient`. The
-/// invitation link points at the fixture's fault-proxy port, so every byte of
-/// the journey crosses the harness proxy. `scripts/ios-gateway-e2e-test run-ui`
-/// patches `TRON_E2E_*` into this UI-test runner and refuses to report a journey
-/// green unless exactly one case executed and passed.
-///
-/// Failure modes these journeys target, written before the code:
-///
-/// 1. The production pairing path accepts a code the Gateway rejects, so the
-///    negative control would pass too and prove nothing.
-/// 2. The scene renders a placeholder instead of the fixture's reply; the faux
-///    provider's unique text makes that observable from the real interface.
-/// 3. The scene's background transition does not retire the device's socket, or
-///    the foreground does not reconnect: the harness asserts the Gateway's own
-///    log shows a second connection for the journey that backgrounds the app.
-/// 4. A background/foreground round trip loses the conversation the Gateway owns.
-/// 5. The journey cannot reach the fixture at all and skips, which the harness
-///    must not accept as a passing cross-layer receipt.
-///
-/// Pairing uses the production invitation link (`tron://pair?…`) through
-/// `XCUIApplication.open`, the path a QR code or a shared link takes. The link is
-/// handled by the shared production scene, so it is available with or without a
-/// fixture argument.
 final class RealGatewayPairAndChatUITests: XCTestCase {
-    /// The prompt this journey sends; its text is asserted from the transcript.
     private let prompt = "Fixture journey: verify the real Gateway round trip\n"
         + (1...18).map { "Continuity anchor line \($0): keep this conversation visible." }.joined(separator: "\n")
-    /// The first tokens the faux provider streams, so the reply is readable while
-    /// the fixture is still delivering it.
     private let replyPrefix = "Streaming response starts now"
-    /// The last tokens of the fixture's first faux response.
     private let replyCompletion = "Detached response complete"
 
     override func tearDown() {
-        // A journey pairs the app for real, and the lane's app container is
-        // shared with the hosted UI lane in this worktree: a pairing left
-        // behind makes the next hosted run's mounted-view tests time out waiting
-        // for requests they never issue (A/B/A measured on the lane). The app's
-        // own HOSTED_TEST reset returns it to the unpaired launch state every
-        // hosted UI test already starts from, after a pass and after a failure.
         MainActor.assumeIsolated(RealGatewayUIHost.resetHostedAppState)
         super.tearDown()
     }
 
-    /// #931: real home.status bytes cross the socket and the production DTO into
-    /// the pinned row, even before Home is designated. This fixture starts no
-    /// workers; the actual Mac's pressure is intentionally not forced or loaded.
-    /// Hosted Home journeys separately distinguish all three pressure levels.
     @MainActor
     func testHomeStatusShowsHostPressureAndWorkers() throws {
         continueAfterFailure = false
@@ -89,29 +48,17 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
         composer.tap()
         composer.typeText(prompt)
-        // The trailing control becomes the send action only once the composer
-        // holds sendable content, so it appears after the prompt is typed.
         let send = app.buttons["Send message"]
         XCTAssertTrue(send.waitForExistence(timeout: 60), "the send control never appeared: \(app.debugDescription)")
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the prompt: \(app.debugDescription)")
         send.tap()
 
-        // The overflow preview is a reader button, not StaticText. Require the
-        // whole accepted prompt so a generated navigation title cannot satisfy
-        // retention; the response below remains selectable text.
         let sent = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", prompt)).firstMatch
         XCTAssertTrue(sent.waitForExistence(timeout: 60), "the sent prompt is not in the transcript: \(app.debugDescription)")
 
-        // The fixture streams a few tokens a second, so the reply is read while
-        // the fixture is still delivering it and again when it completes. The
-        // transcript's partial label is not a stable XCUI observation - one poll
-        // can land only on the completed row - so the trace is retained as
-        // evidence instead of being asserted, and the reply the fixture sent must
-        // be rendered.
         var observations: [String] = []
         let deadline = Date().addingTimeInterval(180)
         while Date() < deadline {
-            // A streaming reply is a static text until it completes.
             let completed = assistantReply(app, containing: replyPrefix)
             let element = completed.exists ? completed
                 : app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyPrefix)).firstMatch
@@ -131,8 +78,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )
         keepScreenshot(app, name: "424-real-ui-pair-prompt-streamed-reply")
 
-        // Keep this route mounted: unlike navigating back to the dashboard,
-        // retiring its transport must not retire the last installed transcript.
         let sameRouteReply = assistantReply(app, containing: replyCompletion)
         composer.tap()
         var unsentDraft = "Unsent recovery draft: keep every word and the keyboard."
@@ -165,8 +110,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(sameRouteReply.isHittable, "recovery must not cover the retained reply")
         try setProxyMode(fixture, mode: "pass")
         try setProxyMode(fixture, mode: "hold-open")
-        // Foreground admission owns an immediate attempt; the response barrier
-        // below proves that the new subscription has not finished installing.
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(waitForBackground(app, timeout: 60))
         app.activate()
@@ -185,8 +128,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "the held replacement open must preserve the active composer keyboard")
         XCTAssertEqual(composer.frame.minY, composerFrameBeforeLoss.minY, accuracy: 3)
         XCTAssertEqual(composer.frame.height, composerFrameBeforeLoss.height, accuracy: 3)
-        // Type without refocusing: a visible keyboard alone does not prove the
-        // same draft still owns its responder/caret after replacement.
         app.typeText(" Still editing.")
         unsentDraft += " Still editing."
         XCTAssertEqual(composer.value as? String, unsentDraft)
@@ -195,9 +136,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "replacement authority did not become ready")
         XCTAssertFalse(waitingStatus.exists, "the replacement connection left its recovery status behind")
 
-        // #878: a background transition intentionally retires the transport, so
-        // every foreground reconnects. An ordinary reconnect is not an outage and
-        // must stay quiet for the whole foreground, not flash recovery chrome.
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(waitForBackground(app, timeout: 60))
         app.activate()
@@ -218,9 +156,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.exists,
                       "an ordinary foreground must preserve the active composer keyboard")
 
-        // A foreground reconnect whose handshake is still in flight stays quiet
-        // through the app's recovery grace, then names the delay honestly in
-        // the route chrome without covering rows or disturbing the draft.
         let replyFrameBeforeForeground = sameRouteReply.frame
         try setProxyMode(fixture, mode: "hold-hello")
         XCUIDevice.shared.press(.home)
@@ -228,10 +163,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let activationRequestedAt = Date()
         app.activate()
         XCTAssertTrue(waitForForeground(app, timeout: 90))
-        // The scene became active no earlier than the request, so a status seen
-        // inside this window predates the app's two-second recovery grace.
-        // Activation normally returns in about one second; a slower runner
-        // records the window rather than asserting against a legitimate status.
         let insideGrace = Date().timeIntervalSince(activationRequestedAt)
         let shownInsideGrace = waitingStatus.exists
         keepScreenshot(app, name: "878-simulator-foreground-handshake-held")
@@ -250,8 +181,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(statusAppearedAfter, 2,
                                     "recovery appeared before the reconnect outlived the recovery grace")
         keepScreenshot(app, name: "878-simulator-delayed-foreground-status")
-        // The app-scoped recovery card arrives with the same grace and briefly
-        // covers the bar; the persistent status must remain after it retires.
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: transientNotice
         )], timeout: 20), .completed)
@@ -269,8 +198,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )], timeout: 30), .completed, "a finished reconnect left its recovery status behind")
         XCTAssertEqual(composer.value as? String, unsentDraft)
 
-        // A definitive answer from the real Gateway is not transport loss. The
-        // proxy asks for an absent session, then forwards the actual rejection.
         try setProxyMode(fixture, mode: "reject-open")
         try setProxyMode(fixture, mode: "close", code: 1012)
         try setProxyMode(fixture, mode: "await-intercepted")
@@ -296,15 +223,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             predicate: NSPredicate(format: "exists == false"), object: unavailableStatus
         )], timeout: 30), .completed, "a successful Retry left its failure status behind")
 
-        // A real reader detaches from the tail; this is not a short transcript
-        // that happens to fit in the viewport. Scrolling intentionally dismisses
-        // the keyboard, separately from the pinned keyboard-preservation checks.
         let transcriptScroll = app.scrollViews.containing(
             NSPredicate(format: "label CONTAINS %@", "real Gateway round trip")
         ).firstMatch
         XCTAssertTrue(transcriptScroll.exists)
-        // The separate status-bar scroll owner is a 1-point UIScrollView; target
-        // the actual conversation and keep the gesture above the keyboard.
         let readerStart = transcriptScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
         let readerEnd = transcriptScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
         readerStart.press(forDuration: 0.1, thenDragTo: readerEnd)
@@ -314,10 +236,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "the reader did not leave the pinned tail: \(app.debugDescription)")
         XCTAssertTrue(sent.isHittable)
         let anchorFrame = sent.frame
-        // The prompt is one accessibility element taller than the viewport;
-        // XCUI clips its frame to the visible region beneath the bar, and that
-        // clipped edge follows the title view while recovery replaces it. The
-        // rendered rows are the reader's position, so qualify their pixels too.
         let rowsBeforeLoss = transcriptRows(app)
         try setProxyMode(fixture, mode: "blackhole")
         XCTAssertTrue(waitingStatus.waitForExistence(timeout: 60))
@@ -341,8 +259,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                        "replacement open repinned the anchored reader")
         XCTAssertEqual(composer.value as? String, unsentDraft)
         XCTAssertFalse(app.otherElements["Opening conversation"].exists)
-        // Retire an in-flight replacement before its held answer can install.
-        // The replacement transport must win without publishing a stale failure.
         try setProxyMode(fixture, mode: "replace-held-open")
         try setProxyMode(fixture, mode: "await-intercepted")
         keepScreenshot(app, name: "393-simulator-replacement-transport-open-held")
@@ -359,10 +275,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         app.buttons["Catch up"].tap()
         XCTAssertTrue(waitForHittable(sameRouteReply, timeout: 30))
 
-        // A real background and foreground, the transitions a phone performs.
-        // The app must reach a background session before it is activated again,
-        // which is what retires the socket and reconnects (the harness asserts
-        // that second connection from the Gateway's own log).
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(
             waitForBackground(app, timeout: 60),
@@ -384,10 +296,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )
         keepScreenshot(app, name: "424-real-ui-conversation-after-background")
 
-        // Reopen the same retained session from the dashboard after the real
-        // transport is gone. This exercises a fresh ChatView opening while the
-        // Gateway lifecycle is disconnected, not the already-open blackhole
-        // control (which is covered separately and passes unchanged main).
         app.buttons["Back"].tap()
         let sessionRow = app.buttons.matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")
@@ -395,8 +303,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForHittable(sessionRow, timeout: 60), app.debugDescription)
         try setProxyMode(fixture, mode: "blackhole")
         defer { try? setProxyMode(fixture, mode: "pass") }
-        // Open immediately, before the liveness deadline retires the socket. The
-        // opening's actual Gateway request is then interrupted by the path loss.
         sessionRow.tap()
         let opening = app.otherElements["Opening conversation"]
         XCTAssertTrue(opening.waitForExistence(timeout: 15),
@@ -415,8 +321,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(opening.exists,
                        "Retry while disconnected must not replace recovery with an opening spinner")
         XCTAssertTrue(app.staticTexts["Waiting for connection"].exists)
-        // Navigation intentionally retired the old snapshot; this new route
-        // cannot claim a retained transcript until it synchronizes.
         try setProxyMode(fixture, mode: "pass")
         let retainedReply = assistantReply(app, containing: replyCompletion)
         XCTAssertTrue(retainedReply.waitForExistence(timeout: 60),
@@ -424,9 +328,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Waiting for connection"].exists)
         keepScreenshot(app, name: "393-simulator-reconnected-without-retry")
 
-        // #878 at accessibility text size: relaunch the same paired app (no
-        // reset) and require the persistent status and Retry to stay inside the
-        // navigation chrome, reachable, without covering the retained reply.
         app.terminate()
         let largeText = XCUIApplication()
         largeText.launchArguments = [
@@ -460,16 +361,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )], timeout: 90), .completed, "the large-text route did not reconnect on its own")
     }
 
-    /// #935: reopening a running session whose agent waits on `ask_user`
-    /// presents the form as soon as the transcript crosses its first ready
-    /// frame. Sending the answers must leave that mounted transcript alone: no
-    /// second opening attempt, no hidden-then-revealed transcript (the reported
-    /// flicker and reload), the same rows, and the newest reply visible at the
-    /// tail. A loaded phone can commit the form's cover before the opening
-    /// task has drained; the hosted hold argument keeps that tail alive for a
-    /// bounded number of frames so the journey always takes that order. The
-    /// hosted lifecycle element is a monotonic per-route counter, so a
-    /// transient reopen cannot slip between two polls.
     @MainActor
     func testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted() throws {
         continueAfterFailure = false
@@ -483,9 +374,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )
         createSession(firstRun, inWorkspace: fixture.workspace)
 
-        // One completed turn persists the session, so the dashboard lists it
-        // while the next turn is still running (a session whose first turn is
-        // still running can be missing from the catalog: #944).
         let composer = firstRun.textViews["Message input"]
         XCTAssertTrue(composer.waitForExistence(timeout: 60), firstRun.debugDescription)
         composer.tap()
@@ -499,7 +387,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             "the first turn never completed: \(firstRun.debugDescription)"
         )
 
-        // The fixture model answers this marker with an ask_user call and waits.
         composer.tap()
         composer.typeText("Fixture ask journey: ask me where to deploy.")
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "the composer never accepted the ask prompt: \(firstRun.debugDescription)")
@@ -507,9 +394,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(firstRun.buttons["Submit all answers"].waitForExistence(timeout: 90),
                       "the running agent's ask_user form never appeared: \(firstRun.debugDescription)")
 
-        // Leave the question pending and the agent running, then open the
-        // running session again from the dashboard of the relaunched,
-        // still-paired app. The hold argument applies to this launch only.
         firstRun.terminate()
         let app = launchApp(resettingState: false, additionalArguments: ["--tron-hosted-hold-opening-tail"])
         defer { app.terminate() }
@@ -538,7 +422,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let reply = assistantReply(app, containing: "Ask journey answered")
         XCTAssertTrue(reply.waitForExistence(timeout: 90),
                       "the agent's reply to the answer never reached the transcript: \(app.debugDescription)")
-        // Still pinned to the newest content, without any user scroll.
         XCTAssertTrue(waitForHittable(reply, timeout: 30),
                       "the transcript left the tail after the answer: \(app.debugDescription)")
         keepScreenshot(app, name: "935-answered-ask-user-transcript-mounted")
@@ -548,8 +431,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["Opening conversation"].exists)
     }
 
-    /// Completed answers must survive a genuine runtime eviction and canonical
-    /// reload, not merely a remounted phone looking at a live tool-origin map.
     @MainActor
     func testCompletedAskUserColdReplayRetainsSelectedAnswers() throws {
         continueAfterFailure = false
@@ -582,10 +463,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let originalRowID = originalRow.identifier
         originalRow.tap()
 
-        // #1302: retire the actual runtime, not just the phone's row. This
-        // journey has capacity one; a second persisted conversation evicts the
-        // unobserved completed first session. Reopening must reconstruct its
-        // question and selected answers from canonical JSONL without live origin.
         app.buttons["Back"].tap()
         XCTAssertTrue(waitForHittable(app.buttons[originalRowID], timeout: 60), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
@@ -601,7 +478,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let original = app.buttons[originalRowID]
         XCTAssertTrue(waitForHittable(original, timeout: 60), app.debugDescription)
         original.tap()
-        // The transcript chip uses the canonical friendly tool identity (ToolDetailPresentation).
         let ask = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ask user, Completed")).firstMatch
         XCTAssertTrue(waitForHittable(ask, timeout: 60), app.debugDescription)
         ask.tap()
@@ -654,9 +530,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             }
         }
 
-        // An independent owner-side oracle: the same session was evicted and
-        // subsequently loaded; its durable tool-result contains exactly those
-        // answers. Keep both facts as a reproducible result-bundle attachment.
         let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
         let log = try String(contentsOf: agent.deletingLastPathComponent().appending(path: "tron/logs/gateway.jsonl"), encoding: .utf8)
         let events = try log.split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
@@ -690,11 +563,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         add(evidence)
     }
 
-    /// The Mac replacement (#984) as Connections shows it from the real Gateway:
-    /// the Replace Mac App row follows a running journal, its progress sheet
-    /// lists every step and updates live as the orchestrator writes, then shows
-    /// the settled result. The journal is written where the Gateway reads it,
-    /// beside the fixture's Tron home, exactly as the Mac-side orchestrator does.
     @MainActor
     func testMacReplacementRowAndProgressFollowTheJournal() throws {
         continueAfterFailure = false
@@ -739,7 +607,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<20 where !link.isHittable { app.swipeDown() }
         link.tap()
 
-        // The row sits in Quick Rebuild with the rebuild rows and follows the running step.
         let progress = app.buttons["Show Mac app replacement progress"]
         for _ in 0..<8 where !progress.isHittable { app.swipeUp() }
         XCTAssertTrue(progress.waitForExistence(timeout: 30), app.debugDescription)
@@ -754,7 +621,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Full signed build"].exists)
         keepScreenshot(app, name: "984-progress-running")
 
-        // The orchestrator advances: the open sheet follows without reopening.
         try writeJournal(state: "running", current: "swap-app", done: 5)
         XCTAssertTrue(app.staticTexts["Step 6 of 9"].waitForExistence(timeout: 15), app.debugDescription)
         try writeJournal(state: "succeeded", current: nil, done: 9)
@@ -762,17 +628,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "984-progress-succeeded")
         dismissTopSheet(app)
 
-        // Settled, the row offers the next replacement's plan and keeps the last journal one tap away.
         let replace = app.buttons["Replace Mac app"]
         XCTAssertTrue(replace.waitForExistence(timeout: 15), app.debugDescription)
         keepScreenshot(app, name: "984-connections-row-settled")
     }
 
-    /// A photo-only message sent while a turn runs is queued as a steer, and
-    /// once Pi delivers it the "Steer next" card leaves the composer, also
-    /// after the session is reopened (#974). Failure mode: Pi dequeued a
-    /// delivered message only when it had text, so the Gateway kept projecting
-    /// the delivered photo as queued forever.
     @MainActor
     func testImageOnlySteerLeavesTheQueueOnceDelivered() throws {
         continueAfterFailure = false
@@ -783,8 +643,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForHittable(firstRun.buttons["dashboard.menu"], timeout: 90), firstRun.debugDescription)
         createSession(firstRun, inWorkspace: fixture.workspace)
 
-        // One completed turn persists the session, so the relaunched dashboard
-        // lists it (a session created by a held first turn can be missing: #944).
         let composer = firstRun.textViews["Message input"]
         XCTAssertTrue(composer.waitForExistence(timeout: 60), firstRun.debugDescription)
         composer.tap()
@@ -798,7 +656,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             "the first turn never completed: \(firstRun.debugDescription)"
         )
 
-        // The fixture model holds this turn until the phone queues a message.
         composer.tap()
         composer.typeText("Fixture steer journey: wait for my photo.")
         XCTAssertTrue(waitForEnabled(send, timeout: 60), firstRun.debugDescription)
@@ -806,7 +663,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(firstRun.buttons["Stop Tron"].waitForExistence(timeout: 60),
                       "the held turn never started: \(firstRun.debugDescription)")
 
-        // A photo with no text, pasted into the composer and sent as the default steer.
         UIPasteboard.general.image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64)).image { context in
             UIColor.systemTeal.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
@@ -822,7 +678,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "the pasted photo never became sendable: \(firstRun.debugDescription)")
         send.tap()
 
-        // The queued card's delivery detail, "After the current turn · 1 of 1".
         let queuedSteer = firstRun.descendants(matching: .any).matching(
             NSPredicate(format: "label CONTAINS %@", "After the current turn")
         ).firstMatch
@@ -836,8 +691,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "the delivered photo is still shown as a queued steer: \(firstRun.debugDescription)")
         keepScreenshot(firstRun, name: "974-image-only-steer-delivered")
 
-        // Reopen the session in a relaunched, still-paired app: the Gateway's
-        // snapshot must not bring the delivered steer back.
         firstRun.terminate()
         let app = launchApp(resettingState: false)
         defer { app.terminate() }
@@ -859,16 +712,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     func testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        // A code of the right shape the Gateway can still refuse: its enrollment
-        // alphabet has no `0`, so this can never be the fixture's own code.
         let wrongCode = String(repeating: "0", count: fixture.code.count)
         let app = launchApp()
         defer { app.terminate() }
         open(fixture.invitationLink(code: wrongCode))
-        // The refusal is a transient card, so it is read as it appears; the
-        // assertion then names what the app actually told the user. The card is
-        // the app's own report of a refused pairing, and only a refused pairing
-        // produces it: an accepted code would pair instead and never show it.
         let refusal = firstNoticeLabel(app, timeout: 60)
         XCTAssertEqual(
             refusal, "Pairing code is invalid",
@@ -876,10 +723,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         )
         keepScreenshot(app, name: "424-real-ui-wrong-pairing-code")
 
-        // The same link and address with the fixture's own code must then pair,
-        // so the control cannot pass by being a broken address: a paired device
-        // that has not finished setup leaves the pairing step for its workspace
-        // step, which only a connected Gateway reaches.
         open(fixture.invitationLink())
         XCTAssertTrue(
             app.buttons["Choose workspace"].waitForExistence(timeout: 90),
@@ -888,10 +731,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "424-real-ui-accepted-code-pairs")
     }
 
-    /// A question `ask_user` asks from inside codemode opens from the running codemode
-    /// row and accepts an answer (#929). Failure mode: the row only matched a form to a
-    /// top-level `ask_user` row, so tapping the codemode row opened its details and the
-    /// question stayed invisible until the run was stopped.
     @MainActor
     func testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer() throws {
         continueAfterFailure = false
@@ -906,32 +745,23 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let composer = app.textViews["Message input"]
         XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
         composer.tap()
-        // The fixture's provider answers this marker with a codemode call that asks.
         composer.typeText("CODEMODE-ASK-USER-JOURNEY: ask from inside codemode")
         let send = app.buttons["Send message"]
         XCTAssertTrue(waitForEnabled(send, timeout: 60), app.debugDescription)
         send.tap()
 
-        // A question arriving while the chat is open presents itself. Closing it keeps it
-        // pending; from then on the codemode row that asked it is the way back to it, as
-        // when the maintainer opens a worker whose question is already waiting.
         let submit = app.buttons["Submit all answers"]
         XCTAssertTrue(submit.waitForExistence(timeout: 90), "the codemode question was never presented: \(app.debugDescription)")
-        // Swiping the sheet down is the local close (#1123).
         let window = app.windows.firstMatch
         window.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: window.frame.midX, dy: submit.frame.midY))
             .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
         XCTAssertTrue(waitForNonExistence(submit, timeout: 10), app.debugDescription)
-        // The chip reads "Codemode, Invocation" until it runs, then "Builtin Codemode · Codemode, 1 nested, …".
         let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Codemode,", "Builtin Codemode")).firstMatch
         XCTAssertTrue(waitForHittable(row, timeout: 30), "the running codemode row is not tappable: \(app.debugDescription)")
         row.tap()
-        // The tap reopens the pending question itself, not the row's details sheet.
         XCTAssertTrue(submit.waitForExistence(timeout: 10),
                       "tapping the running codemode row did not reopen its pending question: \(app.debugDescription)")
-        // The question text renders as selectable Markdown (#947), so the reopened form is
-        // identified by its own option below rather than a static-text lookup.
         XCTAssertTrue(app.buttons["Approve it"].exists, app.debugDescription)
         keepScreenshot(app, name: "929-codemode-ask-user-opened-from-row")
         app.buttons["Approve it"].tap()
@@ -942,11 +772,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "929-codemode-ask-user-answered")
     }
 
-    /// Foreground and Gateway reconnect keep presented sheets and their drafts.
-    /// Mac Terminal's setup panel must not reload; a nested MCP form must retain
-    /// its input and presentation, and the chat composer must retain its draft.
-    /// Real SSH shell/output continuity belongs to TronMacTerminalUITests;
-    /// a new tmux attachment intentionally repaints a fresh emulator.
     @MainActor
     func testForegroundAndReconnectKeepSheetsAndTheirContent() throws {
         continueAfterFailure = true
@@ -965,7 +790,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         composer.typeText(draft)
         XCTAssertEqual(composer.value as? String, draft)
 
-        // 1. Mac Terminal's setup panel over the chat's Settings.
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
@@ -986,10 +810,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         assertStays(app, presented: terminalTitle, never: checking, "Mac Terminal after returning to the app")
         XCTAssertEqual(visibleText(placeholder), macTerminalText, "Mac Terminal reloaded after returning to the app")
         keepScreenshot(app, name: "1073-mac-terminal-after-return")
-        dismissTopSheet(app) // Mac Terminal
+        dismissTopSheet(app)
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 10), "closing Mac Terminal lost Settings: \(app.debugDescription)")
 
-        // 2. A draft in a sheet nested in a Settings sheet.
         guard let mcp = hittableElement(app, identifier: "settings-link-MCP Servers", timeout: 30) else {
             return XCTFail("no MCP Servers row: \(app.debugDescription)")
         }
@@ -1009,20 +832,16 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         assertStays(app, presented: name, never: nil, "Add Server after reconnecting")
         XCTAssertEqual(name.value as? String, "draft-1073", "Add Server lost its draft after reconnecting")
         keepScreenshot(app, name: "1073-mcp-add-after-reconnect")
-        // Add Server has no Done: a drag down closes it.
         let grabber = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
         grabber.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
         XCTAssertTrue(waitForAbsence(name, timeout: 10), "Add Server did not close: \(app.debugDescription)")
-        dismissTopSheet(app) // MCP Servers
-        dismissTopSheet(app) // Settings
+        dismissTopSheet(app)
+        dismissTopSheet(app)
 
-        // 3. The chat itself.
         XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertEqual(composer.value as? String, draft, "the unsent composer draft was lost")
     }
 
-    /// Leaves for Safari and comes back, as a user copying something does: a
-    /// real background and foreground of the scene.
     @MainActor
     func returnFromAnotherApp(_ app: XCUIApplication) {
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
@@ -1034,8 +853,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         safari.terminate()
     }
 
-    /// Cuts the path long enough for the client's liveness deadline to retire
-    /// the socket (ping 10 s + pong 8 s), then lets it reconnect.
     @MainActor
     func forceReconnect(_ fixture: RealGatewayUIFixture) throws {
         try setProxyMode(fixture, mode: "blackhole")
@@ -1044,8 +861,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 10)
     }
 
-    /// Samples for a few seconds: the sheet must stay presented in every sample
-    /// (a close and re-present shows a gap) and its reload state must never show.
     @MainActor
     private func assertStays(_ app: XCUIApplication, presented: XCUIElement, never reload: XCUIElement?,
                              _ what: String, seconds: TimeInterval = 6, file: StaticString = #filePath, line: UInt = #line) {
@@ -1060,22 +875,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertEqual(reloads, 0, "\(what) reloaded (\(reloads) samples showed its loading state)", file: file, line: line)
     }
 
-    /// Every static text inside an element, in order: what the reader sees.
     @MainActor
     private func visibleText(_ element: XCUIElement) -> String {
         element.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: "|")
     }
 
-    /// Settings surfaces serve the schema's keys (docs/settings-model.md 7.7). For
-    /// each surface, every key whose layers include one the surface's target has
-    /// is a reachable row with a layer badge and a value; a key with none of them
-    /// has no row. A layer the surface does not own offers its "Edit at …" path,
-    /// and an accepted edit reads back after reopening, from the Gateway's
-    /// resolution. Expectations come from the fixture Gateway's own schema
-    /// inventory (`TRON_E2E_SETTINGS_INVENTORY`), never from a Swift key list.
-    /// Every settings sheet opens on its content against a real Gateway. A schema
-    /// section sheet reads the snapshot its parent already has, so it never shows a
-    /// loading state; each sheet's first frames are kept to review the rest.
     @MainActor
     func testSettingsSheetsOpenStably() throws {
         continueAfterFailure = true
@@ -1096,7 +900,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             }
         }
         func openSheet(_ identifier: String, _ name: String, section: String? = nil) {
-            // The presenting surface loads its rows; the opened sheet must not.
             _ = app.buttons.matching(identifier: identifier).firstMatch.waitForExistence(timeout: 30)
             guard let button = app.buttons.matching(identifier: identifier).allElementsBoundByIndex.last else {
                 XCTFail("no \(identifier): \(app.debugDescription)"); return
@@ -1111,7 +914,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             burst(name)
         }
 
-        // Manage Session: this chat's settings card.
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(ring.waitForExistence(timeout: 60), app.debugDescription)
         ring.tap()
@@ -1122,23 +924,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openSheet("chat-settings-link", "session-settings")
         let settings = app.descendants(matching: .any)["session-settings-content"]
         XCTAssertFalse(settings.buttons["Switch Model"].exists)
-        // A fresh session serves no session-overridable More Settings keys, so that
-        // destination is absent; its served Tools sheet must still open on content.
         openSheet("settings-section-tools-open", "session-tools", section: "tools")
-        // Session Settings has loaded its served links (beneath the open Tools sheet).
         XCTAssertFalse(app.buttons["settings-section-advanced-open"].exists, "An empty section has no destination")
         dismissTopSheet(app)
-        dismissTopSheet(app) // Session Settings
-        dismissTopSheet(app) // Manage Session
+        dismissTopSheet(app)
+        dismissTopSheet(app)
 
-        // Global Settings.
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
         burst("settings")
         openSheet("settings-link-Agent Behavior", "global-agent-behavior", section: "model")
-        // Run settings are embedded beside Model in the consolidated sheet.
         XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].waitForExistence(timeout: 30))
         dismissTopSheet(app)
         openSheet("settings-section-tools-open", "global-tools", section: "tools"); dismissTopSheet(app)
@@ -1148,11 +945,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
     }
 
-    /// Settings clarity against the real Gateway: consolidated device-local
-    /// destinations remain reachable through the chat gear; a text setting's
-    /// return key reads Done, commits through the change path and dismisses the
-    /// keyboard; an add-value row shows the schema's example and format. The kept
-    /// screenshots are the approval and review evidence for each sheet.
     @MainActor
     func testSettingsSourcesTextDoneAndRoutes() throws {
         continueAfterFailure = false
@@ -1164,8 +956,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         completeFirstRunSetup(app, inWorkspace: fixture.workspace)
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace) {
-            // New Session: Project Settings is a setup card like its neighbours, and the
-            // Model card keeps its value without provenance pills.
             let project = app.buttons["project-settings-link"]
             XCTAssertTrue(project.waitForExistence(timeout: 30), app.debugDescription)
             let projectName = URL(fileURLWithPath: fixture.workspace).lastPathComponent
@@ -1173,15 +963,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertTrue(projectValue.contains(projectName),
                           "New Session must retain its selected repository identity: \(project.label) / \(projectValue)")
             let modelCard = app.buttons["new-session-card.Model"]
-            // It is below Workspace, repository inspection and Source Control.
-            // Materialize the lazy card before inspecting its value, not only
-            // when capturing it afterward.
             for _ in 0..<12 where !modelCard.isHittable || modelCard.frame.maxY > app.frame.maxY - 40 { app.swipeUp() }
             XCTAssertTrue(modelCard.exists, app.debugDescription)
             XCTAssertFalse(provenanceWords.contains { modelCard.staticTexts[$0].exists },
                            "New Session must not reintroduce provenance pills")
-            // Native setup cards combine their rendered text into the button
-            // label; they do not declare a separate accessibility value.
             XCTAssertTrue(modelCard.label.localizedCaseInsensitiveContains("e2e model"),
                           "The fixture Gateway's configured model must remain visible: \(modelCard.label)")
             self.keepScreenshot(app, name: "939-new-session")
@@ -1191,8 +976,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
-        // Reach the consolidated device-local destinations through the actual
-        // chat gear, then return without losing the Global Settings surface.
         for (name, marker) in [("Appearance", app.textFields["Chats per project"]),
                                ("Setup", app.switches["Run Swift files"])] {
             let link = app.buttons["settings-link-" + name]
@@ -1207,7 +990,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         keepScreenshot(app, name: "1325-global-settings-live-routes")
 
-        // MCP Servers: the server rows sit in the shared glass group.
         let mcpLink = app.buttons["settings-link-MCP Servers"]
         for _ in 0..<12 where !mcpLink.isHittable { app.swipeUp() }
         mcpLink.tap()
@@ -1216,7 +998,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "939-mcp-servers")
         dismissTopSheet(app)
 
-        // Extensions: the npm command and a search path say what to enter, with an example.
         let extensionsLink = app.buttons["settings-link-Extensions"]
         for _ in 0..<12 where !extensionsLink.isHittable { app.swipeUp() }
         extensionsLink.tap()
@@ -1224,10 +1005,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             guard let row = hittableElement(app, identifier: settingRowToken(key), timeout: 60) else {
                 XCTFail("Extensions has no \(key) row: \(app.debugDescription)"); return
             }
-            // The row's trailing value pill opens its editor sheet.
             (row.buttons.allElementsBoundByIndex.last ?? row).tap()
-            // The combined add row owns the label. Scope to its mounted native
-            // field rather than matching placeholders across covered surfaces.
             let value = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Add value")).textFields.firstMatch
             XCTAssertTrue(value.waitForExistence(timeout: 15), "the \(key) sheet has no add-value field: \(app.debugDescription)")
             XCTAssertNotEqual(value.placeholderValue ?? "", "Value", "the placeholder must be a real example")
@@ -1248,12 +1026,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             keepScreenshot(app, name: "939-add-value-\(name)")
             dismissTopSheet(app)
         }
-        dismissTopSheet(app) // Extensions
+        dismissTopSheet(app)
 
-        // Connections (Accounts) and Push Notifications (System).
         for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
             let link = app.buttons["settings-link-\(title)"]
-            // A row under the navigation bar reports hittable while a tap lands on the bar.
             revealBelowNavigationBar(app, link)
             link.tap()
             func labelled(_ text: String) -> XCUIElement {
@@ -1263,9 +1039,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             if title == "Connections" {
                 XCTAssertFalse(labelled("Input needed").exists, "push alerts moved to their own sheet")
                 assertToolbarTint(app, title: "Connections")
-                // An authorized device's detail sheet (its row reads "Details for
-                // <device> on <Mac>"): its pencil and Done take the
-                // Connections tint of its title, not a hard-coded green (#963).
                 let device = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for ' AND label CONTAINS ' on '")).firstMatch
                 XCTAssertTrue(device.waitForExistence(timeout: 30), app.debugDescription)
                 let label = device.label.dropFirst("Details for ".count)
@@ -1275,8 +1048,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 assertToolbarTint(app, title: deviceName)
                 keepScreenshot(app, name: "963-device-detail")
                 dismissTopSheet(app)
-                // This Mac's page renders the served Mac Terminal section, including
-                // the private SSH service switch the Global surface check excludes.
                 let server = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Details for ' AND NOT label CONTAINS ' on '")).firstMatch
                 XCTAssertTrue(server.waitForExistence(timeout: 30), app.debugDescription)
                 server.tap()
@@ -1293,8 +1064,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
     }
 
-    /// The real Gateway owns row exposure; an existing zero override is recovery,
-    /// not a second numeric editor. Reset must change the real persisted store.
     @MainActor
     func testRoutineEditorsDisappearAndExplicitGlobalValueResets() throws {
         continueAfterFailure = false
@@ -1345,8 +1114,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
 
-        // Manage Session is reached through the composer's context control; the
-        // chat navigation-bar gear opens Global Settings, not Manage Session.
         let manageSessionButton = app.buttons["session-context-button"]
         XCTAssertTrue(manageSessionButton.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertTrue(manageSessionButton.label.contains("Manage Session"), manageSessionButton.debugDescription)
@@ -1374,8 +1141,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(app.buttons["settings-section-run-open"].exists, "Reopening cannot manufacture an override")
     }
 
-    /// Repository settings are read-only and list only applied values: an untrusted
-    /// repository override is not applied and not offered as an app write surface.
     @MainActor
     func testProjectSettingsExposeReadOnlyOverrides() throws {
         continueAfterFailure = false
@@ -1398,7 +1163,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(none.waitForExistence(timeout: 30), "An untrusted override is not applied: \(app.debugDescription)")
         XCTAssertFalse(row.exists, "An unapplied repository override has no row or mutation route")
         XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes, "Inspection must not change repository bytes")
-        dismissTopSheet(app) // Session Settings; overrides are direct groups.
+        dismissTopSheet(app)
         openProjectCard(app)
         XCTAssertTrue(none.waitForExistence(timeout: 30) && !row.exists, "Reopening reads the same repository state")
         XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes)
@@ -1418,15 +1183,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         createSession(app, inWorkspace: fixture.workspace)
         var coverage: [String: SurfaceCoverage] = [:]
 
-        // Global Settings from the chat navigation-bar gear: one Global key edits and reads back.
         let globalSettingsGear = app.navigationBars.buttons["Settings"]
         func openGlobalSettings() {
             XCTAssertTrue(globalSettingsGear.waitForExistence(timeout: 30), app.debugDescription)
             globalSettingsGear.tap()
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
-        // Global embeds Model, Workers & delegation, Compaction and
-        // Connection in Agent Behavior; only scoped surfaces have More Settings.
         openGlobalSettings(); XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label == %@", "More Settings")).count, 0,
                                              "Global embeds its former More Settings groups in Agent Behavior")
         coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["global"], schema: schema, sectionDestinations: [
@@ -1452,8 +1214,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
         let globalEdit = toggleSetting(app, key: "setup.installTelemetry", confirmingReview: true)
         XCTAssertNotEqual(globalEdit.before, globalEdit.after, "the Global edit was not accepted")
-        dismissTopSheet(app) // Setup Settings
-        dismissTopSheet(app) // Settings
+        dismissTopSheet(app)
+        dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
         openGlobalSettings()
         openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
@@ -1462,15 +1224,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "the reopened Settings must offer the Global reset: \(reopenedTelemetry.debugDescription)")
         XCTAssertEqual(switchValue(reopenedTelemetry), globalEdit.after, "the reopened Global value is not the accepted value")
         keepScreenshot(app, name: "settings-surface-settings-global-edit")
-        dismissTopSheet(app) // Setup Settings
-        dismissTopSheet(app) // Settings
+        dismissTopSheet(app)
+        dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
         attachSettingsCoverage(coverage, schema: schema)
     }
 
-    // Each surface and outside-file reconciliation has its own fresh fixture,
-    // preserving all assertions while keeping each gate shard bounded.
     @MainActor
     func testSettingsOutsideChangesAndBuiltinExtensionPersist() throws {
         continueAfterFailure = false
@@ -1490,20 +1250,15 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openGlobalSettings()
         openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
         let globalEdit = toggleSetting(app, key: "setup.installTelemetry", confirmingReview: true)
-        dismissTopSheet(app) // Setup
-        dismissTopSheet(app) // Settings
+        dismissTopSheet(app)
+        dismissTopSheet(app)
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
-        // An outside edit replaces the value Tron wrote (settings-model.md 5.6): the
-        // reopened row says so and Apply again writes Tron's value back.
         try editGlobalSettingsOutsideTron(fixture.agentDirectory) { document in
             document["enableInstallTelemetry"] = globalEdit.before == "1"
         }
         openGlobalSettings()
         openSettingsSection(app, "setup", linkLabel: "Setup", loneRow: settingRowToken("setup.installTelemetry"))
-        // Outside-change recovery is inline beside the existing control; it no
-        // longer replaces the row with a detail link. Keep the live-value and
-        // receipt-backed Apply again assertions on that same owning row.
         let outsideRow = topSwitchRow(app, key: "setup.installTelemetry")
         XCTAssertEqual(switchValue(outsideRow), globalEdit.before, "the live value must follow the edited store")
         let applyAgain = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-applyAgain", timeout: 120)
@@ -1516,15 +1271,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForNonExistence(app.buttons[settingRowToken("setup.installTelemetry") + "-applyAgain"], timeout: 30),
                       "Apply again must clear the canonical outside-change evidence")
 
-        // Clearing the outside marker removes its detail link and can retire
-        // that child. Return to the actual Settings root, not a fixed sheet count.
         for _ in 0..<3 {
             if app.buttons["settings-done"].isHittable { break }
             dismissTopSheet(app)
         }
         XCTAssertTrue(app.buttons["settings-done"].isHittable, "Apply again must return to Settings")
-        // A hand-built screen on the same change path: Extensions' Built-in switch
-        // writes `sources.extensions` at Global.
         let extensionsLink = app.buttons["settings-link-Extensions"]
         for _ in 0..<40 where !extensionsLink.isHittable { app.swipeDown() }
         extensionsLink.tap()
@@ -1539,13 +1290,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             return entries.contains("-builtin:tool-search") == (toolSearchBefore == "1")
         }, "turning Tool search off must write -builtin:tool-search to the Global settings.json")
         keepScreenshot(app, name: "settings-surface-builtin-extension-switch")
-        // Extensions is a progressive child of Settings: close it, then Settings.
         for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists || app.switches["Tool search"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
-        // MCP servers keep their own owner (settings-model.md 5.6a): a server added to
-        // the Global mcp.json outside Tron while the MCP screen is open reaches it with no
-        // reload (`mcp.changed` from the Gateway's file watch), and Changes records it by name.
         openGlobalSettings()
         let mcpLink = app.buttons["settings-link-MCP Servers"]
         for _ in 0..<20 where !mcpLink.isHittable { app.swipeUp() }
@@ -1559,7 +1306,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "an outside mcp.json addition must reach the open MCP screen without a reload: \(app.debugDescription)")
         keepScreenshot(app, name: "settings-mcp-outside-addition")
         dismissTopSheet(app)
-        // Settings' own row is also titled "MCP Servers": the screen is gone once its server row is.
         XCTAssertTrue(waitUntil(timeout: 15) { !outsideServer.exists && mcpLink.exists }, "dismissing MCP Servers must return to Settings")
         for _ in 0..<40 where !app.buttons["Changes"].isHittable { app.swipeDown() }
         app.buttons["Changes"].tap()
@@ -1571,11 +1317,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
     }
 
-    /// #243: a package whose `engines.node` excludes the Mac Gateway's Node still
-    /// installs and loads (D-2 warns, never refuses), and Extensions says so: the
-    /// Installed row carries the short tag and its detail sheet explains the
-    /// mismatch with the existing notice. A package whose range the runtime meets
-    /// carries no tag. The kept screenshots are the approval evidence.
     @MainActor
     func testExtensionsFlagsAPackageThatNeedsAnotherNode() throws {
         continueAfterFailure = false
@@ -1622,10 +1363,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "extensions-package-needs-node-detail")
     }
 
-    // MARK: - Settings surface helpers
-
-    /// A hand edit of the fixture's Global `settings.json`, as an editor would make
-    /// it: write a sibling file, then rename it over the store.
     private func globalSettingsDocument(_ agentDirectory: String?) throws -> [String: Any] {
         let directory = try XCTUnwrap(agentDirectory)
         let data = try Data(contentsOf: URL(fileURLWithPath: directory).appendingPathComponent("settings.json"))
@@ -1642,8 +1379,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         _ = try FileManager.default.replaceItemAt(store, withItemAt: staged)
     }
 
-    /// A hand edit of the fixture's Global `mcp.json` adding one HTTP server, by rename-replace.
-    /// The loopback port refuses at once, so listing it opens no external connection.
     private func addMcpServerOutsideTron(_ agentDirectory: String?, name: String) throws {
         let directory = try XCTUnwrap(agentDirectory, "run through scripts/ios-gateway-e2e-test run-ui to name the fixture's agent directory")
         let store = URL(fileURLWithPath: directory).appendingPathComponent("mcp.json")
@@ -1660,7 +1395,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
     }
 
-    /// What one surface showed for the schema's keys, attached as the journey's coverage report.
     private struct SurfaceCoverage {
         var served = 0
         var rowsPresent = 0
@@ -1672,13 +1406,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         var customOwnerChecked = 0
     }
 
-    /// Every generic served key has a value and the shared row's presence-based
-    /// provenance: an Overridden pill exactly beside its revert (never at Global);
-    /// native Default Tools ownership is accounted separately. An unserved key
-    /// has no generic row.
-    /// Floor and enrolled-device instances are served by the Global target alone
-    /// (`settings-resolver.ts` `instances`). Global project/device instances exist
-    /// only when a trust decision/enrollment exists; this fixture enrolls no SSH key.
     @MainActor
     private func assertSettingsSurface(_ app: XCUIApplication, name: String, layers: Set<String>,
                                        schema: SettingsSchemaInventory,
@@ -1688,20 +1415,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let surface: XCUIElement = app
         var groups: [String] = []
         for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
-        // Hand-built owners hold these keys on Settings; their own journeys prove the control.
         let customOwners = name == "settings" ? ["permissions.defaultProjectTrust": "Trusted Projects (#1517)",
             "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' npm command card (#1482)",
             "permissions.macTerminalServer": "this Mac's Connections page (testSettingsSourcesTextDoneAndRoutes)"] : [:]
-        // Some schema sections live inside a named destination, not a generic
-        // section link. Follow the surface's explicit route (never a fallback),
-        // then check the same schema rows and sources inside that section alone.
         for group in groups {
-            // A section rendering one row has no container of its own: that row is the section.
             let rendered = schema.keys.filter { $0.group == group && !$0.layers.isDisjoint(with: layers) && customOwners[$0.id] == nil }
             let detail = openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group],
                                                      loneRow: rendered.count == 1 ? settingRowToken(rendered[0].id) : nil)
-            // One accessibility snapshot per destination preserves the same row,
-            // badge and value checks without a remote AX round-trip per descendant.
             let snapshot: XCUIElementSnapshot
             do { snapshot = try (detail ?? surface).snapshot() }
             catch {
@@ -1712,9 +1432,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             for key in schema.keys where key.group == group {
                 var keyElements = elements
                 var instances: XCUIElement?
-                // Large qualified inventories (Global permission floors) have their
-                // own progressive sheet. A link is not a value/source row: enter
-                // it and apply the same assertions to its concrete instances.
                 let instancesLinkID = "settings-instances-\(key.id)-open"
                 if elements.contains(where: { $0.identifier == instancesLinkID }) {
                     let link = hittableElement(app, identifier: instancesLinkID)
@@ -1751,8 +1468,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 }
                 coverage.served += 1
                 if key.id == "tools.codemode.mode" && (name == "settings" || name == "project") {
-                    // Default Tools owns this key at Global/Project scope (#1288).
-                    // Do not count its native control as a generic sourced row.
                     XCTAssertEqual(rows.count, 0, "There must not be a duplicate Code mode editor")
                     let controls = elements.filter { $0.elementType == .button && $0.label == "Other tools with codemode" }
                     XCTAssertEqual(controls.count, 1, "\(name) must expose its owning Default Tools control")
@@ -1784,7 +1499,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 XCTAssertFalse(reverts && provenance.contains("Set by Project settings"),
                                "\(name) row \(key.id) cannot revert a repository value: \(provenance)")
                 coverage.provenanceChecked += 1
-                // A switch's value is part of its button's label, so the value is read from every descendant.
                 let described = children.map(\.label)
                     + children.filter { $0.elementType == .switch }.compactMap { $0.value as? String }
                 XCTAssertTrue(described.contains { !$0.isEmpty && $0 != key.label && !provenanceWords.contains($0) },
@@ -1806,8 +1520,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         snapshot.children.flatMap { [$0] + descendants(of: $0) }
     }
 
-    /// Opens a section's settings sub-sheet from the top-most surface, revealing
-    /// its full-row link first (primary surfaces scroll; links may be above).
     @MainActor
     func openSettingsSection(_ app: XCUIApplication, _ group: String, linkLabel: String? = nil, loneRow: String? = nil) {
         XCTAssertNotNil(openSettingsSectionIfServed(app, group, linkLabel: linkLabel, loneRow: loneRow),
@@ -1820,30 +1532,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let links = linkLabel.map { app.buttons.matching(NSPredicate(format: "label == %@", $0)) }
             ?? app.buttons.matching(identifier: "settings-section-\(group)-open")
         guard links.firstMatch.waitForExistence(timeout: 5) else { return nil }
-        // The top-most surface's link is the last in tree order; a covered surface
-        // beneath (Manage Session under the Project card) can hold the same link.
-        // Scroll toward it: a blind downward swipe at the top of a medium sheet
-        // would drag the sheet itself.
         let link = links.allElementsBoundByIndex.last!
-        // Hittable is not enough: a row under the top-most navigation bar still
-        // reports hittable while a tap there lands on the bar.
         func barBottom() -> CGFloat { app.navigationBars.allElementsBoundByIndex.last?.frame.maxY ?? 0 }
         for _ in 0..<24 where !(link.isHittable && link.frame.minY >= barBottom()) {
             if link.frame.minY < barBottom() + 40 { app.swipeDown() } else { app.swipeUp() }
         }
-        // No reachable link means this surface serves the section nothing, which
-        // the per-key checks then prove.
         guard link.isHittable, link.frame.minY >= barBottom() else { return nil }
         link.tap()
         let details = app.descendants(matching: .any).matching(identifier: "settings-section-\(group)-detail")
-        // A one-row section has no container of its own: its row keeps its
-        // identity and is the section (SettingsRendererView).
         let lone = loneRow.map { app.descendants(matching: .any).matching(identifier: $0) }
         if let linkLabel {
             XCTAssertTrue(app.navigationBars.staticTexts[linkLabel].waitForExistence(timeout: 30),
                           "the \(linkLabel) destination did not open: \(app.debugDescription)")
-            // Extensions embeds Sources below its inventory;
-            // reveal it before demanding its existence, not after that assertion.
             for _ in 0..<24 where !details.firstMatch.exists && lone?.firstMatch.exists != true { app.swipeUp() }
         }
         if let lone, !details.firstMatch.exists, lone.firstMatch.waitForExistence(timeout: 30) {
@@ -1851,13 +1551,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         XCTAssertTrue(details.firstMatch.waitForExistence(timeout: 30),
                       "the \(group) sub-sheet did not open: \(app.debugDescription)")
-        // Its last matching container is the exact newly presented owner.
         let detail = details.element(boundBy: max(details.count - 1, 0))
         return detail
     }
 
-    /// Exact row identifiers: the key's own row, and each qualified instance
-    /// (`<token>_<qualifiers>`). Child identifiers such as `-note` never match.
     @MainActor
     private func settingRows(_ scope: XCUIElement, key: String) -> XCUIElementQuery {
         let token = settingRowToken(key)
@@ -1870,10 +1567,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         app.descendants(matching: .any)[settingRowToken(key)]
     }
 
-    /// Scrolls `element` down into view below the top-most sheet's navigation bar.
-    /// A header row scrolled under that bar still reports itself hittable, but a
-    /// tap there lands on the bar (seen in a gate run: "Review trust" at y 83-131
-    /// under a bar spanning 88-142), so hittability alone is not enough.
     @MainActor
     func revealBelowNavigationBar(_ app: XCUIApplication, _ element: XCUIElement) {
         for _ in 0..<40 {
@@ -1887,10 +1580,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
     }
 
-    /// The switch row of `key` in the top-most presentation, revealed. A covered
-    /// sheet beneath can hold a row with the same identifier (Manage Session under
-    /// the Project card, where a Chat-layer key is editable too); covered rows are
-    /// never hittable, so the first row whose switch is hittable is the top one.
     @MainActor
     private func topSwitchRow(_ app: XCUIApplication, key: String) -> XCUIElement {
         let rows = app.descendants(matching: .any).matching(identifier: settingRowToken(key))
@@ -1903,9 +1592,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return rows.element(boundBy: max(rows.count - 1, 0))
     }
 
-    /// Reveals the first on-screen element matching the predicate in the top-most
-    /// presentation. Covered presentations are not hittable, so a nested sheet's
-    /// rows never resolve to the sheet beneath it.
     @MainActor
     func revealedElement(_ app: XCUIApplication, where predicate: NSPredicate, timeout: TimeInterval = 20) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
@@ -1943,7 +1629,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         done.tap()
     }
 
-    /// The Project section at the end of Manage Session's Session Settings (#1655).
     @MainActor
     private func openProjectCard(_ app: XCUIApplication) {
         let link = app.buttons["chat-settings-link"]
@@ -1956,13 +1641,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<12 where !app.buttons["project-settings-trust"].isHittable { app.swipeUp() }
     }
 
-    /// A switch row's value, read from the row's own switch.
     private func switchValue(_ row: XCUIElement) -> String? {
         row.switches.firstMatch.value.map { String(describing: $0) }
     }
 
-    /// Toggles one row's switch through the shared control and waits for the
-    /// Gateway's accepted state: the value flips and the row offers its revert.
     @MainActor
     private func toggleSetting(_ app: XCUIApplication, key: String, confirmingReview: Bool = false) -> (before: String?, after: String?) {
         XCTAssertTrue(settingRow(app, key: key).waitForExistence(timeout: 15), "\(key) has no row: \(app.debugDescription)")
@@ -1971,8 +1653,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let before = switchValue(row)
         toggle.tap()
         if confirmingReview {
-            // A key whose change needs the maintainer's tap applies only after the
-            // exact native review card's Approve (#2128).
             let approve = app.buttons["change-review-approve"]
             XCTAssertTrue(approve.waitForExistence(timeout: 30), "\(key) must ask for its exact review: \(app.debugDescription)")
             approve.tap()
@@ -1985,15 +1665,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return (before, after)
     }
 
-    /// A value set at the row's own scope: the shared row offers its revert.
     @MainActor
     private func waitForOverride(_ row: XCUIElement, timeout: TimeInterval) -> Bool {
         row.waitForExistence(timeout: timeout)
             && row.buttons.matching(identifier: row.identifier + "-reset").firstMatch.waitForExistence(timeout: timeout)
     }
 
-    /// The shared row's presence-based provenance: its Overridden pill, revert,
-    /// Project link or Apply again, read from one accessibility snapshot.
     @MainActor
     private func rowProvenance(_ row: XCUIElement) -> [String] {
         guard row.exists, let snapshot = try? row.snapshot() else { return [] }
@@ -2035,11 +1712,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return String(decoding: data, as: UTF8.self)
     }
 
-    // MARK: - The production path
-
-    /// Launches the hosted app with no fixture argument and no setup: the state
-    /// a user's first launch has, which the journey then drives through the
-    /// production scene.
     @MainActor
     func launchApp(resettingState: Bool = true, additionalArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
@@ -2051,11 +1723,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return app
     }
 
-    /// First-run setup, driven the way a user drives it: the invitation link has
-    /// already paired the Mac, so the setup sheet stands on its workspace step,
-    /// where the fixture's own folder is chosen from the Mac through the sheet's
-    /// browser. That choice is what teaches the app the workspace a new session
-    /// starts in, so the journey never depends on when a read lands.
     @MainActor
     func completeFirstRunSetup(_ app: XCUIApplication, inWorkspace workspace: String) {
         let choose = app.buttons["Choose workspace"]
@@ -2081,8 +1748,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             app.buttons["Change workspace"].waitForExistence(timeout: 30),
             "the setup sheet did not take the chosen workspace: \(app.debugDescription)"
         )
-        // The fixture workspace holds project resources, so the Gateway asks for
-        // a trust decision; declining keeps project resources out of the journey.
         if app.buttons["Open Without Resources"].waitForExistence(timeout: 10) {
             app.buttons["Open Without Resources"].tap()
         }
@@ -2093,9 +1758,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         finish.tap()
     }
 
-    /// The four setup pages between the workspace step and the model step (the
-    /// workspace step itself, Anthropic, OpenAI and other providers). Each one
-    /// only has to become complete; the fixture has no provider credentials to add.
     @MainActor
     func advanceSetup(_ app: XCUIApplication) {
         for step in 0..<4 {
@@ -2108,18 +1770,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
     }
 
-    /// Hands the running app a link the way the system does, which is the path a
-    /// QR code or a shared invitation takes. Opening it through the system rather
-    /// than `XCUIApplication.open` keeps this launch's arguments, so the state
-    /// above survives the link.
     @MainActor
     func open(_ link: String) {
         XCUIDevice.shared.system.open(URL(string: link)!)
     }
 
-    /// A new session in the workspace first-run setup chose, as the dashboard
-    /// offers it. The setup step assigned that workspace to the model, so the
-    /// sheet starts from it without waiting for any read.
     @MainActor
     func createSession(_ app: XCUIApplication, inWorkspace workspace: String,
                                beforeCreate: (() -> Void)? = nil) {
@@ -2146,9 +1801,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         create.tap()
     }
 
-    /// The first announced notice text, read while the card is still presented.
-    /// Notices auto-dismiss, so a snapshot taken after a bounded wait can no
-    /// longer see them.
     @MainActor
     private func firstNoticeLabel(_ app: XCUIApplication, timeout: TimeInterval) -> String? {
         let deadline = Date().addingTimeInterval(timeout)
@@ -2160,11 +1812,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return nil
     }
 
-    /// Waits for the app to leave the foreground: the system must report a
-    /// background session, not merely an inactive scene, because only the
-    /// background transition retires the device's socket. The state is passively
-    /// monitored, so this waits through an expectation: polling it from here
-    /// would starve the session that reports it.
     @MainActor
     private func waitForBackground(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
         let background = XCTNSPredicateExpectation(
@@ -2192,8 +1839,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return XCTWaiter().wait(for: [absent], timeout: timeout) == .completed
     }
 
-    /// A completed assistant reply: its paragraph inside the message's one
-    /// selectable text view (#1112), typed TextView on iOS 27 (#2321, #2384).
     @MainActor
     func assistantReply(_ app: XCUIApplication, containing text: String) -> XCUIElement {
         app.textViews.matching(identifier: "chat.assistant.selectable-text")
@@ -2205,9 +1850,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return XCTWaiter().wait(for: [enabled], timeout: timeout) == .completed
     }
 
-    /// Waits for an element the user can actually touch. A dashboard control is
-    /// present while a sheet covers it, so this is what separates the paired
-    /// scene from a sheet that is still asking to pair.
     @MainActor
     func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
@@ -2233,16 +1875,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         wait(for: [completed], timeout: timeout)
     }
 
-    /// The route's persistent recovery reason, matched by what it tells the user
-    /// rather than by the control type that happens to render it.
     @MainActor
     private func recoveryStatus(_ app: XCUIApplication, _ label: String) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
     }
 
-    /// Recovery belongs to the route's navigation chrome and is itself the
-    /// Retry control: never a detached control floating over readable
-    /// transcript rows (#878).
     @MainActor
     private func assertRecoveryInChrome(_ app: XCUIApplication, status: XCUIElement,
                                         file: StaticString = #filePath, line: UInt = #line) {
@@ -2256,8 +1893,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       file: file, line: line)
     }
 
-    /// The rendered transcript band between the navigation chrome and the
-    /// composer, excluding the trailing scroll indicator.
     @MainActor
     private func transcriptRows(_ app: XCUIApplication) -> CGImage? {
         let screenshot = app.screenshot().image
@@ -2266,7 +1901,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                                                        width: 330 * scale, height: 260 * scale))
     }
 
-    /// The fraction of pixels whose color moved by more than a rounding step.
     private func changedPixelFraction(_ before: CGImage?, _ after: CGImage?) -> Double {
         guard let before, let after, before.width == after.width, before.height == after.height else { return 1 }
         func pixels(_ image: CGImage) -> [UInt8] {
@@ -2295,11 +1929,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 }
 
-/// The hosted app's own state, for the journeys that leave it paired.
 @MainActor
 private enum RealGatewayUIHost {
-    /// Returns the hosted app to the state a hosted UI test starts from: no
-    /// paired Mac, no completed setup, no workspace default.
     static func resetHostedAppState() {
         let app = XCUIApplication()
         app.launchArguments = ["--tron-reset-ui-test-state", "-ApplePersistenceIgnoreState", "YES"]
@@ -2308,16 +1939,11 @@ private enum RealGatewayUIHost {
     }
 }
 
-/// The real Gateway fixture `scripts/ios-gateway-e2e-test run-ui` provides to
-/// this runner: the fixture's port and one-time code. The journey drives the
-/// app's own state itself, and the harness only returns the app to its unpaired
-/// state when the run ends.
 struct RealGatewayUIFixture {
     let host = "127.0.0.1"
     let port: Int
     let code: String
     let workspace: String
-    /// The fixture Gateway's agent directory on this Mac (its Global settings store).
     var agentDirectory: String? = nil
 
     static func fromEnvironment() throws -> RealGatewayUIFixture {
@@ -2330,18 +1956,11 @@ struct RealGatewayUIFixture {
         return RealGatewayUIFixture(port: port, code: code, workspace: workspace, agentDirectory: environment["TRON_E2E_AGENT_DIR"])
     }
 
-    /// The production invitation link, addressed at the fixture's fault proxy so
-    /// every byte of the pairing and of the session crosses it.
     func invitationLink(code: String? = nil) -> String {
         "tron://pair?host=\(host)&port=\(port)&code=\(code ?? self.code)"
     }
 }
 
-/// The fixture Gateway's settings schema, dumped by the E2E harness from its own
-/// built `settings-schema.ts` (`TRON_E2E_SETTINGS_INVENTORY`): one row per schema
-/// key with the layers it allows, its label and its qualifier, plus the Gateway's
-/// layer labels. Expectations come from it, never from a Swift copy of the keys.
-/// The shared row's provenance words; never a value.
 private let provenanceWords: Set<String> = ["Overridden", "Revert", "Reset", "Set by Project settings", "Apply again"]
 
 private struct SettingsSchemaInventory {
@@ -2374,7 +1993,6 @@ private struct SettingsSchemaInventory {
 
 private enum SettingsInventoryError: Error { case malformed }
 
-/// The accessibility identifier of a settings row, as `SettingsRendererRow` names it.
 private func settingRowToken(_ key: String) -> String {
     "settings-row-" + String(key.unicodeScalars.map { scalar in
         CharacterSet.alphanumerics.contains(scalar) || scalar == "." || scalar == "-" ? Character(scalar) : "_"

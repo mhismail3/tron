@@ -44,9 +44,6 @@ final class ChatKeyboardObserver {
                     ?? UIView.AnimationCurve.easeInOut.rawValue
                 let endFrame = (values[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
                 let isHide = notification.name == UIResponder.keyboardWillHideNotification
-                // The observer is registered on the main queue. Update the
-                // primitive transition in this callback, not in a deferred Task,
-                // so send() can read the UIKit clock after resigning.
                 MainActor.assumeIsolated {
                     self?.receive(
                         endFrame: endFrame,

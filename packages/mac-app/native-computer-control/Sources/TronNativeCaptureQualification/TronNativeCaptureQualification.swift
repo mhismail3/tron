@@ -32,8 +32,6 @@ struct TronNativeCaptureQualification {
         let operation = Task { @MainActor in
             let report = await lifecycle.run(writeImages: writeImages)
             let status = publish(report)
-            // Failed output removal is not permission to abandon its exact owner.
-            // Keep the app and lifecycle alive for parent-directed containment.
             if !report.containmentRequired { exit(status) }
         }
         let signals = [SIGINT, SIGTERM].map { number in
@@ -44,8 +42,6 @@ struct TronNativeCaptureQualification {
             return source
         }
         return withExtendedLifetime((signals, lifecycle)) {
-            // No menu, delegate or command stops this run loop. Even an unexpected
-            // stop must not drop a native owner whose joined cleanup is pending.
             while true { application.run() }
         }
     }

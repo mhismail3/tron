@@ -1,7 +1,5 @@
 import XCTest
 
-/// Select → annotate → chip → edit → send, on the real ChatView over the
-/// annotation fixture socket (#899). Screenshots are kept as attachments.
 final class TronChatAnnotationUITests: XCTestCase {
     @MainActor func testSelectionAcrossMarkdownBlocksCanBeAnnotated() {
         continueAfterFailure = false
@@ -14,8 +12,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(listItem.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertLessThan(heading.frame.midY, listItem.frame.midY, "Heading and list items keep separate accessibility frames")
         let start = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
-        // End inside the next item so the whole first item is selected; the
-        // native end handle settles about a line above a drag's final point.
         let nextItem = assistantBlock(app, containing: "authoritative snapshot")
         let end = nextItem.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9))
         start.press(forDuration: 1.0, thenDragTo: end)
@@ -31,7 +27,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         let chip = app.otherElements.matching(identifier: "composer.staged-chip").firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 5), app.debugDescription)
         chip.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
-        // The sheet's combined quote can surface as either element type.
         let quote = app.descendants(matching: .any)["chat.annotation.quote"]
         XCTAssertTrue(quote.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(quote.label.contains("Retry policy"), quote.label)
@@ -40,12 +35,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         app.buttons["Save annotation"].tap()
         XCTAssertTrue(wait(for: quote, exists: false))
 
-        // Copy the same cross-heading/list range and paste it into the composer
-        // so the journey verifies the plain-text markers and block separation.
-        // Saving hands the keyboard to the composer; put it away first so the
-        // list items are on screen for the drag.
         if app.keyboards.firstMatch.exists {
-            // The transcript dismisses the keyboard interactively.
             let window = app.windows.firstMatch
             window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
                 .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
@@ -75,9 +65,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(); defer { app.terminate() }
 
-        // A short user prompt keeps its ordinary tap and native Copy menu.
-        // Paste through the real composer to prove the copied bytes, then leave
-        // that composer empty for the selection/annotation journey below.
         let short = app.staticTexts["How should the gateway retry dropped connections?"]
         XCTAssertTrue(short.exists, app.debugDescription)
         short.tap()
@@ -98,7 +85,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: copied.count))
         app.swipeDown()
 
-        // Native range selection on a completed assistant paragraph.
         let paragraph = assistantBlock(app, containing: "exponential backoff")
         let start = paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.12))
         let end = paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.83, dy: 0.12))
@@ -108,7 +94,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         keepScreenshot(app, "899-1-selection")
         annotate.tap()
 
-        // The bubble opens with the keyboard up and the quote it annotates.
         let bubble = app.otherElements["chat.annotation.bubble"]
         XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "The comment field takes focus")
@@ -119,7 +104,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         app.buttons["Save annotation"].firstMatch.tap()
         XCTAssertTrue(wait(for: bubble, exists: false))
 
-        // A second annotation from a list item; both become shared staged chips.
         let item = assistantBlock(app, containing: "Accepted prompts continue")
         item.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).press(forDuration: 1.0)
         let second = menuAction(app, "Annotate")
@@ -138,7 +122,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertEqual(first.frame.midY, chips.element(boundBy: 1).frame.midY, accuracy: 1, "Chips share one strip")
         keepScreenshot(app, "899-3-chips")
 
-        // The chip opens the standard sheet: quote, editable comment, save.
         first.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
         let editor = commentField(in: app)
         XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
@@ -146,14 +129,12 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Delete annotation"].exists)
         XCTAssertGreaterThan(app.buttons["Save annotation"].frame.minY, app.windows.firstMatch.frame.height * 0.35, "The sheet opens at medium")
         keepScreenshot(app, "899-4-sheet")
-        // Place the caret after the existing comment.
         editor.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.9)).tap()
         dismissKeyboardTip(app)
         app.typeText(" up to a minute")
         app.buttons["Save annotation"].tap()
         XCTAssertTrue(wait(for: editor, exists: false))
 
-        // Send: the model receives quote+comment context ahead of the message.
         app.textViews["Message input"].tap()
         app.typeText("Please revise the retry section.")
         app.buttons["Send message"].firstMatch.tap()
@@ -164,7 +145,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(prompt.label.hasSuffix("</annotation>\n\nPlease revise the retry section."), prompt.label)
         XCTAssertTrue(wait { chips.count == 0 }, "Sending clears staged annotations")
 
-        // The sent message shows the annotations with the canonical chip and sheet.
         let sent = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'"))
         XCTAssertTrue(wait { sent.count == 2 }, app.debugDescription)
         keepScreenshot(app, "899-5-sent")
@@ -174,8 +154,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         keepScreenshot(app, "899-6-sent-sheet")
     }
 
-    /// A long staged comment flows in the sheet itself (#2370): no fixed-height
-    /// inner box that scrolls on its own while the sheet below stays empty.
     @MainActor func testLongStagedCommentFlowsInTheSheet() {
         continueAfterFailure = false
         let app = launch(); defer { app.terminate() }
@@ -199,14 +177,9 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertEqual(editor.value as? String, comment)
         Thread.sleep(forTimeInterval: 0.6)
         keepScreenshot(app, "2370-long-comment-sheet")
-        // Eight sentences wrap to over ten lines; the old 120-point box (115 at
-        // this sheet's scale) showed five and scrolled the rest inside itself.
         XCTAssertGreaterThan(editor.frame.height, 180, "The comment must take its full height in the sheet: \(editor.frame)")
     }
 
-    /// Saving the bubble hands the keyboard straight to the composer input
-    /// (#1597): the chip appears, the keyboard never drops, and the next
-    /// keystrokes land in the composer.
     @MainActor func testSavingAnnotationKeepsKeyboardInComposer() {
         continueAfterFailure = false
         let app = launch(); defer { app.terminate() }
@@ -225,8 +198,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         app.typeText("Make the cap configurable")
 
         app.buttons["Save annotation"].firstMatch.tap()
-        // Sample from the tap until the chip has settled: the keyboard must be
-        // present at every sample, not merely restored afterwards.
         let chips = app.otherElements.matching(identifier: "composer.staged-chip")
         var keyboardSamples: [Bool] = []
         let deadline = Date().addingTimeInterval(2)
@@ -246,13 +217,8 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertEqual(chips.count, 1)
     }
 
-    /// Selecting message text while the composer holds the keyboard keeps the
-    /// keyboard up and the transcript still, and quotes exactly what the same
-    /// gesture quotes with the keyboard down (the control, annotated first),
-    /// at the default size and at the largest accessibility size.
     @MainActor func testSelectionWithKeyboardUpKeepsKeyboardAndQuotesSelection() {
         continueAfterFailure = false
-        // A line that stays on screen with the keyboard down and up.
         assertKeyboardUpSelectionQuotesSelection(launch(), block: "exponential backoff", line: 0.12)
         assertKeyboardUpSelectionQuotesSelection(
             launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]),
@@ -283,12 +249,10 @@ final class TronChatAnnotationUITests: XCTestCase {
             XCTAssertTrue(wait(for: bubble, exists: false))
         }
 
-        // Control: the keyboard is down.
         XCTAssertFalse(keyboard.exists)
         selectLine()
         annotate("control")
 
-        // Saving hands the keyboard to the composer (#1597).
         XCTAssertTrue(keyboard.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(composer.value(forKey: "hasKeyboardFocus") as? Bool, true)
         RunLoop.current.run(until: Date().addingTimeInterval(1))
@@ -315,11 +279,9 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(control.count > 1 && paragraph.label.contains(control), control)
         XCTAssertEqual(keyboardUp, control, "The keyboard-up selection quotes exactly the selected text")
 
-        // The keyboard-up menu keeps the system Copy, which copies the selection.
         selectLine()
         XCTAssertTrue(menuAction(app, "Annotate").waitForExistence(timeout: 5), app.debugDescription)
         let copy = menuAction(app, "Copy")
-        // At accessibility sizes the menu pages after Annotate.
         if !copy.exists { app.buttons["Next Page"].firstMatch.tap() }
         XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
         copy.tap()
@@ -332,13 +294,6 @@ final class TronChatAnnotationUITests: XCTestCase {
                       String(describing: composer.value))
     }
 
-    /// Tapping the sheet's quote keeps the sheet open and scrolls the transcript
-    /// behind it to the selected range, even when it has scrolled off screen,
-    /// above the sheet, and flashes it; the revealed element clears with the
-    /// flash, plain or under Reduce Motion.
-    /// The sent sheet's comment uses the quote's text size (equal text, equal
-    /// height), at the default size in dark and light and at the largest
-    /// accessibility size.
     @MainActor func testQuoteRevealsSourceAndCommentMatchesQuote() {
         continueAfterFailure = false
         let xxxl = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
@@ -353,8 +308,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         let heading = assistantBlock(app, containing: "Retry policy")
         let bubble = app.otherElements["chat.annotation.bubble"]
         let navigationBottom = app.navigationBars.firstMatch.frame.maxY
-        // Bring the oldest text into view, annotate the heading with its own
-        // words as the comment, then scroll back to the newest end.
         for _ in 0..<4 where heading.frame.minY < navigationBottom { app.swipeDown() }
         heading.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
             .press(forDuration: 1.0, thenDragTo: heading.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
@@ -363,14 +316,12 @@ final class TronChatAnnotationUITests: XCTestCase {
         annotate.tap()
         XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
         dismissKeyboardTip(app)
-        // The comment repeats the quote, so equal sizes give equal heights.
         app.typeText(app.descendants(matching: .any)["chat.annotation.bubble.quote"].label)
         app.buttons["Save annotation"].firstMatch.tap()
         XCTAssertTrue(wait(for: bubble, exists: false))
         let chip = app.otherElements.matching(identifier: "composer.staged-chip").firstMatch
         let catchUp = app.buttons["Catch up"]
         if catchUp.waitForExistence(timeout: 2) { catchUp.tap() }
-        // The fixture fits the screen at the default size; at XXXL the source is off screen.
         if name.hasPrefix("xxxl") {
             XCTAssertTrue(wait { heading.frame.maxY < navigationBottom }, "The source scrolled away: \(heading.frame)")
         }
@@ -385,9 +336,6 @@ final class TronChatAnnotationUITests: XCTestCase {
 
         let quoted = quote.label
         quote.tap()
-        // The highlight and its element last about a second, inside XCUITest's
-        // idle wait after the tap, so the fixture records each reveal's window
-        // frame and its clearing.
         let reveals = app.staticTexts["fixture.reveals"]
         XCTAssertTrue(wait { reveals.label.contains("cleared|") },
                       "The quote reveals its source and clears it with the highlight: \(reveals.label)")
@@ -409,11 +357,9 @@ final class TronChatAnnotationUITests: XCTestCase {
         app.buttons["Save annotation"].tap()
         XCTAssertTrue(wait(for: quote, exists: false))
 
-        // The sent annotation's read-only comment uses the quote's text size.
         app.textViews["Message input"].tap()
         app.typeText("Thanks")
         app.buttons["Send message"].firstMatch.tap()
-        // The revealed source leaves the reader detached from the newest end.
         if catchUp.waitForExistence(timeout: 2) { catchUp.tap() }
         let sent = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch
         XCTAssertTrue(sent.waitForExistence(timeout: 8), app.debugDescription)
@@ -422,16 +368,10 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(sentComment.waitForExistence(timeout: 5), app.debugDescription)
         RunLoop.current.run(until: Date().addingTimeInterval(0.6))
         keepScreenshot(app, "quote-reveal-sent-sheet-\(name)")
-        // Both are selectable Text, whose element frames carry the same inset.
         XCTAssertEqual(sentComment.frame.height, quote.frame.height, accuracy: 1,
                        "The sent comment uses the quote's text size: comment \(sentComment.frame), quote \(quote.frame)")
     }
 
-    /// On iPad, Return in the composer sends exactly like Send, and not while
-    /// the composer is empty (uploads: TronComposerUploadUITests). Hardware
-    /// Shift+Return and a pasted newline still edit. `typeKey("\n")` is a hardware Return
-    /// (XCUIKeyboardKey.return does not reach the field); the on-screen key's
-    /// Return is `typeText("\n")`.
     @MainActor func testPadReturnSendsPromptLikeSend() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPad keyboard behavior")
         continueAfterFailure = false
@@ -463,8 +403,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(wait { (composer.value as? String ?? "").isEmpty }, String(describing: composer.value))
     }
 
-    /// On iPhone, Return keeps inserting a newline in the composer and in the
-    /// annotation comment; only Send sends and only the check saves.
     @MainActor func testPhoneReturnInsertsNewline() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "iPhone keyboard behavior")
         continueAfterFailure = false
@@ -484,8 +422,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(bubble.exists, "Return does not save on iPhone")
     }
 
-    /// On iPad, the on-screen Return in the annotation bubble saves like the
-    /// check and is not kept in the comment.
     @MainActor func testPadReturnSavesAnnotationLikeCheck() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPad keyboard behavior")
         continueAfterFailure = false
@@ -500,9 +436,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         assertStagedComment(app, chips.firstMatch, "make the cap configurable", "Return is not part of the comment")
     }
 
-    /// On iPad, a hardware Shift+Return inserts the multi-line comment's newline
-    /// at the caret and keeps editing; hardware Return then saves. Hardware keys
-    /// go to the first bubble of a launch.
     @MainActor func testPadHardwareShiftReturnAddsLineAndReturnSavesAnnotation() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPad keyboard behavior")
         continueAfterFailure = false
@@ -531,7 +464,6 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertEqual((editor.value as? String)?.lowercased(), expected, message, line: line)
     }
 
-    /// The comment field, in the bubble or the sheet; XCUITest types it TextField or TextView.
     @MainActor private func commentField(in container: XCUIElement) -> XCUIElement {
         container.descendants(matching: .any)
             .matching(NSPredicate(format: "label == 'Annotation comment' AND (elementType == %d OR elementType == %d)",
@@ -561,8 +493,6 @@ final class TronChatAnnotationUITests: XCTestCase {
     }
 
     @MainActor private func assistantBlock(_ app: XCUIApplication, containing text: String) -> XCUIElement {
-        // Each completed assistant block is its own static-text accessibility
-        // element; inside the message's one text view XCUITest types it TextView.
         app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@ AND (elementType == %d OR elementType == %d)",
                                   text, XCUIElement.ElementType.staticText.rawValue, XCUIElement.ElementType.textView.rawValue))
@@ -576,7 +506,6 @@ final class TronChatAnnotationUITests: XCTestCase {
             .firstMatch
     }
 
-    /// The simulator's first-keyboard swipe-typing tip covers the keys.
     @MainActor private func dismissKeyboardTip(_ app: XCUIApplication) {
         let tip = app.buttons["Continue"]
         if tip.waitForExistence(timeout: 1) { tip.tap() }

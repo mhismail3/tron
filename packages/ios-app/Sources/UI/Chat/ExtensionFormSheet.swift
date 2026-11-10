@@ -2,8 +2,6 @@ import SwiftUI
 import TronMobileCore
 import UIKit.UIGestureRecognizerSubclass
 
-/// Native projection of one bounded semantic form. The Gateway owns the
-/// interaction and lifecycle; this view edits a bounded device-local, ID-keyed draft.
 struct ExtensionFormSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -25,9 +23,6 @@ struct ExtensionFormSheet: View {
     @PresentationState private var now = Date()
     @PresentationState private var selectedDetent: PresentationDetent = .medium
     @PresentationState private var pendingOtherFocusQuestionID: String?
-    /// Transient page-drag geometry: the finger's horizontal offset, the
-    /// neighbour it reveals (or the page being settled away) and the width
-    /// one page turn travels.
     @State private var pageDragOffset: CGFloat = 0 // view-local: a rebuilt view has no active finger drag
     @State private var peekQuestionIndex: Int? // view-local: the transient drag neighbour resets with the gesture
     @State private var pageWidth: CGFloat = 0 // view-local: geometry is measured again for the rebuilt view
@@ -49,12 +44,6 @@ struct ExtensionFormSheet: View {
         NavigationStack {
             ZStack {
                 if let form, form.questions.indices.contains(currentQuestionIndex) {
-                    // Each page is one vertical scroll view, as in every other
-                    // sheet. A nested horizontal pager became the sheet's
-                    // tracked scroll view, so vertical drags also drove swipe-
-                    // dismiss and the page jittered (#1123). Instead a
-                    // direction-locked pan offsets the page with the finger and
-                    // mounts only the neighbour it reveals (#1155).
                     ForEach(visiblePageIndices(form), id: \.self) { index in
                         let current = index == currentQuestionIndex
                         questionPage(form.questions[index], index: index, form: form)
@@ -93,10 +82,6 @@ struct ExtensionFormSheet: View {
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: form?.title ?? "Questions", accent: .tronAmber)
                 }
-                // Swiping the sheet down is the local dismissal: the presenting
-                // binding closes only this presentation, the Gateway request
-                // stays pending and the persisted draft is restored on reopen.
-                // Cancel is the only control that resolves the request unanswered.
                 ToolbarItem(placement: .topBarTrailing) {
                     if form != nil {
                         Button(action: submit) {
@@ -118,8 +103,6 @@ struct ExtensionFormSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.hidden)
-        // Content drags scroll the page; the toolbar resizes and dismisses.
-        // Focusing Other selects the large detent itself.
         .presentationContentInteraction(.scrolls)
         .interactiveDismissDisabled(submitting)
         .onAppear { reset() }
@@ -133,8 +116,6 @@ struct ExtensionFormSheet: View {
         }
         .onChange(of: focusedQuestionID) { _, questionID in
             guard questionID != nil else { return }
-            // Give the paged form room before keyboard avoidance compresses
-            // its medium-height viewport. UIKit still owns editor focus.
             withAnimation(reduceMotion ? nil : ChatMotion.extensionSelectionControl) {
                 selectedDetent = .large
             }
@@ -147,10 +128,6 @@ struct ExtensionFormSheet: View {
         }
     }
 
-    /// The visible countdown is a self-updating relative text; this clock only
-    /// drives the one-way expiry transition that disables submission. It must
-    /// therefore never tick without a future deadline, and must stop once the
-    /// form has expired.
     private var expiryClockRuns: Bool {
         PresentationClockPolicy.runs(
             surfaceActive: presentationActivity.allowsPresentationPublication,
@@ -160,8 +137,6 @@ struct ExtensionFormSheet: View {
 
     private func runExpiryClock() async {
         guard expiryClockRuns else { return }
-        // Recompute the wall clock on every activation so a covered, suspended,
-        // or backgrounded form never depends on a timer having fired.
         now = Date()
         while !Task.isCancelled {
             guard ExtensionFormExpiryClockPolicy.ticks(deadline: expiry, now: now) else { return }
@@ -225,13 +200,9 @@ struct ExtensionFormSheet: View {
     ) -> some View {
         ScrollViewReader { proxy in
         ScrollView {
-            // Eager stack: self-sizing selectable Markdown in a lazy stack
-            // re-estimates heights mid-scroll and makes the page jump.
             VStack(alignment: .leading, spacing: 16) {
                 questionStatus(question, index: index, form: form)
 
-                // Agent-authored text may carry URLs, commands and IDs the user
-                // must act on: shared Markdown with native selection and Copy.
                 if let context = question.context, !context.isEmpty {
                     TronMarkdownView(
                         text: context,
@@ -261,8 +232,6 @@ struct ExtensionFormSheet: View {
                     }
                     if question.allowOther { otherRow(question) }
                 }
-                // Reveal target: the content end, so the Other card keeps the
-                // page's bottom margin between itself and the keyboard.
                 Color.clear
                     .frame(height: 0)
                     .id(otherEditorScrollID(question))
@@ -276,9 +245,6 @@ struct ExtensionFormSheet: View {
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
         .accessibilityLabel("Question \(index + 1) of \(form.questions.count)")
-        // Keep the whole Other editor above the keyboard once it has settled
-        // (did-show, never per frame, so interactive dismissal is not fought)
-        // and as multi-line text grows it.
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
             if focusedQuestionID == question.id { revealOtherEditor(question, proxy: proxy, animated: true) }
         }
@@ -294,10 +260,6 @@ struct ExtensionFormSheet: View {
         return [currentQuestionIndex, peek].sorted()
     }
 
-    /// The page follows the finger and reveals the neighbour in the drag's
-    /// direction. Release turns the page when the drag (projected by its
-    /// velocity) passes a third of the width, otherwise it springs back.
-    /// Reduce Motion keeps pages still and crossfades a completed swipe.
     private func trackPageDrag(_ sample: QuestionPagePanGesture.Sample, form: ExtensionFormDescriptor) {
         let dx = sample.translation
         let target = currentQuestionIndex + (dx < 0 ? 1 : -1)
@@ -308,7 +270,6 @@ struct ExtensionFormSheet: View {
             if sample.state == .began { focusedQuestionID = nil }
             let peek = hasTarget ? target : nil
             if peekQuestionIndex != peek { peekQuestionIndex = peek }
-            // Past the first or last page the drag resists like an edge bounce.
             pageDragOffset = hasTarget ? dx : dx / 3
         case .ended:
             let projected = dx + sample.velocity * 0.2
@@ -319,9 +280,6 @@ struct ExtensionFormSheet: View {
                 withAnimation(animation) { currentQuestionIndex = target }
                 return
             }
-            // Re-anchor on the target without moving anything on screen: the
-            // revealed page keeps its identity and position, the old page
-            // becomes the peek, and only the offset animates to rest.
             let previous = currentQuestionIndex
             var transaction = Transaction()
             transaction.disablesAnimations = true
@@ -403,8 +361,6 @@ struct ExtensionFormSheet: View {
                 } else {
                     activeOtherQuestionIDs.insert(question.id)
                     draft.activateOther(for: question)
-                    // Tapping Other means "I want to type": focus its editor.
-                    // A newly revealed editor takes focus once it is mounted.
                     if selected {
                         focusedQuestionID = question.id
                     } else {
@@ -437,11 +393,7 @@ struct ExtensionFormSheet: View {
                 TextEditor(text: Binding(
                     get: { draft.value(for: question.id).other },
                     set: { text in
-                        // The editor is never disabled (see below), so a late
-                        // keystroke during submission or after expiry is refused here.
                         guard !submitting, !expired else { return }
-                        // A fading-out editor may finish an IME/autocorrection
-                        // callback after deselection. It cannot restore Other.
                         guard activeOtherQuestionIDs.contains(question.id)
                             || !draft.value(for: question.id).other.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                         if draft.setOther(text, for: question) {
@@ -468,12 +420,6 @@ struct ExtensionFormSheet: View {
                     .tronSettingsVisualTheme(accent: .tronAmber)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 14)
-                    // Never `.disabled` here. Disabling the focused editor flips
-                    // UITextView interaction off inside a layout pass, which
-                    // resigns the keyboard re-entrantly while FocusState still
-                    // names it; on device that fight hung the main thread when
-                    // Send was tapped mid-typing. Submission and expiry release
-                    // focus first and the binding refuses edits instead.
                     .accessibilityLabel("Other response for \(question.header ?? question.question)")
                     .onAppear {
                         guard pendingOtherFocusQuestionID == question.id else { return }
@@ -484,9 +430,6 @@ struct ExtensionFormSheet: View {
             }
         }
         .background {
-            // A composite card has two independent controls. Applying the
-            // glass content shape to their parent enlarges Other's tap target
-            // over the editor; selection accessibility belongs to the button.
             Color.clear
                 .tronGlassSurface(accent: selected ? .tronAmber : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
                 .allowsHitTesting(false)
@@ -566,16 +509,12 @@ struct ExtensionFormSheet: View {
     }
 
     private func respond(value: JSONValue?, cancelled: Bool) {
-        // Release the keyboard through SwiftUI's focus owner before any
-        // submission state changes, so UIKit and FocusState agree.
         focusedQuestionID = nil
         submitting = true
         errorMessage = nil
         let expectedToken = presentationSurfaceToken
         Task { @MainActor in
             do {
-                // SessionMutationService retains accepted mutations; presentation
-                // effects (including feedback) must not reach a successor sheet.
                 try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: cancelled)
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
@@ -600,10 +539,6 @@ struct ExtensionFormSheet: View {
     }
 }
 
-/// The only clock demand this sheet has is the one-way expiry transition that
-/// disables submission; the visible countdown is a self-updating relative text.
-/// A missing deadline therefore needs no timer at all, and an expired form needs
-/// no further ticks.
 enum ExtensionFormExpiryClockPolicy {
     static func ticks(deadline: Date?, now: Date) -> Bool {
         guard let deadline else { return false }
@@ -611,10 +546,6 @@ enum ExtensionFormExpiryClockPolicy {
     }
 }
 
-/// A horizontal page drag that never competes with vertical scrolling or the
-/// sheet: it fails as soon as a movement is not clearly horizontal, and until
-/// then other pans (the page's scroll view, the sheet's dismissal) wait for it,
-/// so a vertical drag scrolls and a horizontal one pages (#1123, #1155).
 private struct QuestionPagePanGesture: UIGestureRecognizerRepresentable {
     struct Sample {
         let state: UIGestureRecognizer.State
@@ -641,8 +572,6 @@ private struct QuestionPagePanGesture: UIGestureRecognizerRepresentable {
         ))
     }
 
-    /// The direction lock lives in the recognizer itself, not a delegate
-    /// SwiftUI may own.
     final class HorizontalPanGestureRecognizer: UIPanGestureRecognizer {
         private var origin: CGPoint?
 

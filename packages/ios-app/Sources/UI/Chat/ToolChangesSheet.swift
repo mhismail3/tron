@@ -55,8 +55,6 @@ struct ToolChangesSheet: View {
     }
 }
 
-/// One count pill for Git diffs, edit details, and their expanded Changes sheet.
-/// The presentation owns totals; this must not recount a shortened row array.
 struct ToolDiffCountChip: View {
     let diff: ToolDiffPresentation
 
@@ -122,9 +120,6 @@ struct ToolDiffView: View {
     }
 
     private var diffScroll: some View {
-        // Keep the code column intrinsic. A flexible row inside a horizontal
-        // scroll view can grow to the viewport width, making long lines fight
-        // the sheet's vertical scroll and producing a rubber-band snap.
         ScrollView(.horizontal, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(lines) { line in

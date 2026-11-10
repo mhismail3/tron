@@ -12,7 +12,7 @@ struct TronLogFilesystemTests {
         let messages = [
             "Short diagnostic",
             "诊断 ✓",
-            String(repeating: "é", count: 1_000), // Exactly the byte cap; no truncation.
+            String(repeating: "é", count: 1_000),
             "Cause:" + String(repeating: "a", count: 2_100),
             "Cause:" + String(repeating: "é", count: 1_100),
             "Cause:" + String(repeating: "界", count: 1_000),
@@ -39,8 +39,6 @@ struct TronLogFilesystemTests {
                 #expect(published.hasPrefix("Cause:"), "Byte clipping must not erase the diagnostic's leading context")
                 #expect(published.hasSuffix("…"))
                 #expect(original.hasPrefix(String(published.dropLast())))
-                // At most three bytes may be discarded to complete a scalar;
-                // don't satisfy the ceiling by throwing the whole message away.
                 #expect((1_997...2_000).contains(published.utf8.count))
             }
         }

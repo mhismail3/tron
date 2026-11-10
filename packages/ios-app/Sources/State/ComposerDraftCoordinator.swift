@@ -3,10 +3,6 @@ import TronMobileCore
 import Observation
 import UniformTypeIdentifiers
 
-/// Owns bounded session-scoped composer drafts and exact-presentation transient
-/// state. Gateway uploads and sessions remain canonical. Staged upload IDs are
-/// scope-owned: revocation cancels only in-flight upload work, and a remount or
-/// reconnect uploads only the chips that are not staged yet.
 @MainActor
 @Observable
 final class ComposerDraftCoordinator {
@@ -61,9 +57,6 @@ final class ComposerDraftCoordinator {
         var transportState: SubmissionTransportState
         var operationID: String?
         var observedQueuedCandidateIDs: Set<String>
-        /// Latest-snapshot-only visual continuity before the transport returns
-        /// the exact operation ID. This never settles admission or canonical
-        /// causality and is cleared on ambiguity or an ID mismatch.
         var provisionalQueuedCandidateID: String?
         var canonicalObserved: Bool
         var transcriptObserved: Bool
@@ -95,38 +88,21 @@ final class ComposerDraftCoordinator {
     @ObservationIgnored private let admitsLifecycleGeneration: @MainActor (Int) -> Bool
 
     private var drafts: [ComposerDraftScope: Draft] = [:]
-    /// Staged skill/prompt chips in pick order, or one exclusive extension command (#311).
     private var selectedResourcesByScope: [ComposerDraftScope: [CommandInfo]] = [:]
-    /// Staged quote+comment annotations. Like the selected resources they are
-    /// presentation-lifetime draft state, not persisted with the text draft.
     private var annotationsByScope: [ComposerDraftScope: [ChatAnnotation]] = [:]
     private var resourceMutationRevisionByScope: [ComposerDraftScope: Int] = [:]
     private var preparedOpenBySession: [String: PreparedOpen] = [:]
     private var lease: PresentationLease?
-    /// Unsent attachment payloads follow durable profile/session scope. Only
-    /// their disposable upload work and IDs are presentation-bound.
     private var attachmentsByScope: [ComposerDraftScope: [PendingAttachment]] = [:]
     private var editorRequestByTarget: [SessionPresentationIdentity: ComposerEditorRequest] = [:]
     private var uploadAdmissions = Set<UploadAdmission>()
     private var uploadTasks: [UploadAdmission: Task<String, Error>] = [:]
-    /// Exact local chip ownership for cancellable, presentation-scoped uploads.
-    /// Removing a chip retires only its transport admission immediately.
     private var uploadAdmissionByAttachmentID: [String: UploadAdmission] = [:]
-    /// One admitted transport lifecycle per durable profile/session scope. The
-    /// snapshot retains its origin presentation only for source metadata; route
-    /// replacement never changes ownership or resends the operation.
     private var submissionByScope: [ComposerDraftScope: SubmissionAdmission] = [:]
-    /// Only the newest exact canonical handoff for the mounted presentation is
-    /// retained. This bounds rich thumbnail payloads to one prompt lifecycle.
     private var canonicalHandoffReceipts: [SessionPresentationIdentity: CanonicalSubmissionHandoffReceipt] = [:]
     private static let maximumSettledQueueAliases = SessionSnapshot.maximumQueuedMessages
     private var settledQueueAliases: [SessionPresentationIdentity: [String: SettledQueueAlias]] = [:]
-    /// At most one consumed queue lifecycle is retained per bounded draft scope
-    /// until canonical delivery or explicit recovery. The scope owner survives
-    /// route/runtime replacement without replaying transport.
     private var settledQueueHandoffs: [ComposerDraftScope: SettledQueueHandoff] = [:]
-    /// Scopes whose durable value and attachment thumbnails have completed one
-    /// merge. Text edits alone never advance this boundary.
     @ObservationIgnored private var loadedScopes: Set<ComposerDraftScope> = []
     @ObservationIgnored private var textMutationRevisionByScope: [ComposerDraftScope: UInt64] = [:]
     @ObservationIgnored private var restoreTasks: [ComposerDraftScope: Task<ComposerDraftStore.Value?, Never>] = [:]
@@ -134,11 +110,7 @@ final class ComposerDraftCoordinator {
     @ObservationIgnored private var dirtyScopes: Set<ComposerDraftScope> = []
     @ObservationIgnored private var storageGenerationByScope: [ComposerDraftScope: UInt64] = [:]
     @ObservationIgnored private var persistenceTask: Task<Void, Never>?
-    /// LRU access order for `drafts`, kept outside observed state so an access
-    /// that changes no draft (an unchanged `setText`, a reopen) does not
-    /// invalidate views reading draft text. Keys always equal `drafts`' keys.
     @ObservationIgnored private var lastAccessByScope: [ComposerDraftScope: UInt64] = [:]
-    /// Monotonic source for LRU access and local identities; never presented.
     @ObservationIgnored private var sequence: UInt64 = 0
 
     init(
@@ -164,7 +136,6 @@ final class ComposerDraftCoordinator {
     }
 }
 
-// Behavior stays out of the @Observable class body; see AppModel (#1066).
 extension ComposerDraftCoordinator {
     func prepareDraft(
         profileID: String,
@@ -176,11 +147,6 @@ extension ComposerDraftCoordinator {
         return scope
     }
 
-    /// A Home route's unsent text follows it to the chapter Home names next. The
-    /// destination takes the text only as an absent draft, the same seed rule as an
-    /// initial editor text, so a retained successor draft is never replaced. The
-    /// source keeps its own draft: a submission still in flight on the sealed
-    /// chapter may restore that text.
     func carryDraft(from source: ComposerDraftScope, to destination: ComposerDraftScope) {
         guard source != destination, let text = drafts[source]?.text, !text.isEmpty else { return }
         touch(destination, installing: text)
@@ -199,8 +165,6 @@ extension ComposerDraftCoordinator {
         lastAccessByScope[scope] = sequence
         var draft = drafts[scope] ?? Draft(text: "", revision: 0)
         guard draft.text != text else {
-            // Unchanged text is still an LRU access, recorded above; only a
-            // scope without a draft yet changes observed state.
             if drafts[scope] == nil { drafts[scope] = draft }
             return
         }
@@ -236,10 +200,6 @@ extension ComposerDraftCoordinator {
         if annotationsByScope[scope]?.isEmpty == true { annotationsByScope[scope] = nil }
     }
 
-    /// Picking a skill or prompt appends its chip; existing chips stay and a
-    /// resource already staged is not added twice. An extension command runs
-    /// instead of a message, so it replaces every chip and is replaced by the
-    /// next skill or prompt picked (#311).
     func selectResource(_ command: CommandInfo, for scope: ComposerDraftScope) {
         guard !command.name.isEmpty else { return }
         let current = selectedResourcesByScope[scope] ?? []
@@ -269,10 +229,6 @@ extension ComposerDraftCoordinator {
         left.source == right.source && left.name == right.name
     }
 
-    /// Catalog replacement is authoritative. A retired or shadowed resource
-    /// cannot remain staged or be resurrected by a late transport failure;
-    /// metadata-only refreshes preserve the stable source/name selection of
-    /// every other chip.
     func reconcileSelectedResources(for scope: ComposerDraftScope, commands: [CommandInfo]) {
         if let selected = selectedResourcesByScope[scope] {
             let reconciled = selected.compactMap { resource in
@@ -292,8 +248,6 @@ extension ComposerDraftCoordinator {
     }
 
     private static func resourceIsUnambiguous(_ selected: CommandInfo, in commands: [CommandInfo]) -> Bool {
-        // Source/name is the stable invocation identity. Descriptions, paths,
-        // and resource metadata may legitimately change during reload.
         commands.filter { $0.source == selected.source && $0.name == selected.name }.count == 1
             && (selected.source == .extension
                 || !commands.contains { $0.source == .extension && $0.name == selected.name })
@@ -351,7 +305,6 @@ extension ComposerDraftCoordinator {
         preparedOpenBySession[sessionID] = nil
     }
 
-    /// Promotes the newest prepared open before deferred editor effects publish.
     @discardableResult
     func mountPreparedPresentation(_ target: SessionPresentationIdentity) -> Bool {
         guard let prepared = preparedOpenBySession[target.sessionID],
@@ -395,9 +348,6 @@ extension ComposerDraftCoordinator {
         return submissionByScope[scope]?.submittedAttachments ?? []
     }
 
-    /// Reads the one-shot canonical replacement receipt without consuming it.
-    /// Queue mutation ordering uses this to defer an ambiguous projection until
-    /// the command outcome determines whether the receipt remains causal.
     func canonicalSubmissionHandoff(
         target: SessionPresentationIdentity
     ) -> CanonicalSubmissionHandoffReceipt? {
@@ -405,9 +355,6 @@ extension ComposerDraftCoordinator {
         return canonicalHandoffReceipts[target]
     }
 
-    /// Consumes the one-shot canonical replacement receipt created before a
-    /// submission admission is retired. The receipt is presentation-only;
-    /// canonical transcript IDs remain authoritative.
     func consumeCanonicalSubmissionHandoff(
         target: SessionPresentationIdentity
     ) -> CanonicalSubmissionHandoffReceipt? {
@@ -415,9 +362,6 @@ extension ComposerDraftCoordinator {
         return canonicalHandoffReceipts.removeValue(forKey: target)
     }
 
-    /// A confirmed local edit/removal owns retirement of its exact queue
-    /// lineage. Unrelated queue mutations must not disturb the one retained
-    /// consumed-operation handoff.
     func invalidateSettledQueueHandoff(
         target: SessionPresentationIdentity,
         affectedOperationIDs: Set<String>
@@ -459,8 +403,6 @@ extension ComposerDraftCoordinator {
             ) ? item.id : nil
         }
         let matches = admission.operationID == nil ? fallbackMatches : exactMatches
-        // Presentation suppression is fail-closed for the same reason as
-        // reconciliation: never suppress multiple identical canonical rows.
         guard matches.count == 1 else { return [] }
         return Set(matches)
     }
@@ -475,17 +417,11 @@ extension ComposerDraftCoordinator {
         return submissionByScope[scope]?.transportState == .sending
     }
 
-    /// The outgoing row is intentionally separate from canonical transcript
-    /// projection. It remains visible after transport acknowledgement until a
-    /// matching canonical user message is observed for this exact target.
     func outgoingSubmission(for target: SessionPresentationIdentity) -> ComposerSubmissionSnapshot? {
         guard let scope = scope(for: target) else { return nil }
         return submissionByScope[scope]?.snapshot
     }
 
-    /// Matches the Gateway's sole foreground pending admission to the retained
-    /// local lifecycle. Once transport returns, operation identity is decisive;
-    /// before then, one target owns at most one bounded pending prompt.
     func matchesPendingPrompt(
         target: SessionPresentationIdentity,
         pending: SessionSnapshot.PendingPrompt
@@ -529,10 +465,6 @@ extension ComposerDraftCoordinator {
         outgoingSubmission(for: target) != nil
     }
 
-    /// Returns the optimistic identity only for the exact accepted operation or
-    /// one unique, current-snapshot provisional candidate. Provisional identity
-    /// is visual continuity only: it never retires the admission or establishes
-    /// canonical causality before the transport returns an operation ID.
     func queuedSubmissionPresentationID(
         target: SessionPresentationIdentity,
         message: SessionSnapshot.QueuedMessage
@@ -554,9 +486,6 @@ extension ComposerDraftCoordinator {
         return nil
     }
 
-    /// Freezes every attributable queue identity into one projection capture so
-    /// rendering never re-reads mutable coordinator state against an older
-    /// installed transcript.
     func queuedSubmissionPresentationIDs(
         target: SessionPresentationIdentity,
         queuedMessages: [SessionSnapshot.QueuedMessage]
@@ -587,9 +516,6 @@ extension ComposerDraftCoordinator {
         }
     }
 
-    /// Reconciles exactly once against authoritative user-message state. A
-    /// transport acknowledgement alone is not enough: canonical JSONL/events
-    /// remain the sole source of transcript truth.
     @discardableResult
     func reconcileSubmission(
         target: SessionPresentationIdentity,
@@ -600,10 +526,6 @@ extension ComposerDraftCoordinator {
         let queueIDs = queuedMessages.map(\.id)
         guard Set(queueIDs).count == queueIDs.count,
               queuedMessages.count <= SessionSnapshot.maximumQueuedMessages else {
-            // Malformed authoritative queue data must not settle a submission
-            // or retire an already-settled alias. The projection store rejects
-            // the same invalid commit at installation, leaving the current
-            // lifecycle row visible while recovery obtains a valid snapshot.
             return .unchanged
         }
         guard let scope = scope(for: target),
@@ -633,14 +555,9 @@ extension ComposerDraftCoordinator {
                 baselineTranscriptIDs: admission.baselineTranscriptIDs
             ) ? item.id : nil
         }
-        // The Gateway's operation-bound presentation identity is causal and
-        // wins over repeated-text ambiguity. Exact-content matching is allowed
-        // only before the transport response supplies that identity.
         let canonicalMatches = admission.operationID == nil
             ? fallbackMatches
             : exactOperationMatches
-        // A response-race snapshot can contain multiple same-text candidates.
-        // Keep the admission alive until authoritative identity is unambiguous.
         let transcriptObserved = canonicalMatches.count == 1
         if transcriptObserved, admission.canonicalHandoffID == nil {
             admission.canonicalHandoffID = canonicalMatches[0]
@@ -673,8 +590,6 @@ extension ComposerDraftCoordinator {
             runtimeGeneration: runtimeGeneration
         )
         if canonicalMatches.count > 1 {
-            // Do not let an independent queue observation settle an admission
-            // while canonical identity is ambiguous in this snapshot.
             submissionByScope[scope] = admission
             return settledQueueReconciliation
         }
@@ -683,8 +598,6 @@ extension ComposerDraftCoordinator {
            let runtimeGeneration,
            admittedGeneration != runtimeGeneration,
            !transcriptObserved {
-            // Runtime-only Pi queues cannot survive RuntimeSlot replacement.
-            // Restore for explicit user review, but never replay the prompt.
             restoreSubmission(admission)
             return .runtimeReplacedBeforeCanonicalDelivery
         }
@@ -699,8 +612,6 @@ extension ComposerDraftCoordinator {
         admission.canonicalObserved = true
         if newlySettled { schedulePersistence(for: admission.scope) }
         if admission.transportState == .accepted {
-            // Publish the enriched local admission before retirement so the
-            // exact canonical ID receipt survives this synchronous boundary.
             submissionByScope[scope] = admission
             finishSubmission(admission, settlementTarget: target)
         } else {
@@ -709,9 +620,6 @@ extension ComposerDraftCoordinator {
         return settledQueueReconciliation
     }
 
-    /// A sequenced Gateway failure is terminal for the exact accepted operation.
-    /// Transport admission is not canonical settlement, so this explicit receipt
-    /// is required to retire a row that can no longer produce canonical input.
     @discardableResult
     func failOperation(_ operationID: String, target: SessionPresentationIdentity) -> Bool {
         guard let scope = scope(for: target),
@@ -759,20 +667,14 @@ extension ComposerDraftCoordinator {
             }
         } catch {
             try require(admission)
-            // The local chip and bytes remain durable and explicitly require a
-            // later upload; transport failure never discards user input.
             throw error
         }
         let admitted = (try? require(admission)) != nil
-        // The chip adopts its upload even if this presentation lost ownership meanwhile.
         guard adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope), admitted else {
             throw CancellationError()
         }
     }
 
-    /// Stages one selected or pasted image batch atomically in source order,
-    /// then transfers members through ordered transport tasks. Network latency
-    /// cannot serialize chip publication or hide later images behind an upload.
     func uploadBatch(
         _ candidates: [ComposerAttachmentUploadCandidate],
         target: SessionPresentationIdentity
@@ -827,9 +729,6 @@ extension ComposerDraftCoordinator {
         }
         schedulePersistence(for: scope)
 
-        // Preserve the pre-batch transport contract: one HTTP body at a time.
-        // Every chip is already visible, so parallel network work adds no UI
-        // benefit and can contend with the Gateway's global upload capacity.
         var predecessor: Task<String, Error>?
         let transportTasks = candidates.map { candidate in
             let precedingTransport = predecessor
@@ -868,9 +767,6 @@ extension ComposerDraftCoordinator {
                     adoptOrDiscard(uploadID, identity: localID, admission: admission, scope: scope)
                 } catch {
                     if Task.isCancelled { throw CancellationError() }
-                    // Exact chip removal retires its admission and is not a
-                    // batch failure. Transport failures retain upload-required
-                    // bytes and surface one bounded error after siblings settle.
                     if uploadAdmissions.contains(admission), firstError == nil {
                         firstError = error
                     }
@@ -1014,12 +910,7 @@ extension ComposerDraftCoordinator {
     func hasActiveUploads(for target: SessionPresentationIdentity) -> Bool {
         guard admits(target), let scope = scope(for: target) else { return false }
         if uploadAdmissions.contains(where: { $0.target == target }) { return true }
-        // A transfer a replaced presentation started still owns its chip until it settles.
         if attachmentsByScope[scope]?.contains(where: { uploadAdmissionByAttachmentID[$0.id] != nil }) == true { return true }
-        // A newly scheduled restored upload may not have registered its first
-        // per-attachment admission yet. Keep send closed only while an
-        // unresolved chip still exists; removing the last chip releases it
-        // synchronously even if a non-cooperative request completes later.
         return restoredUploadTasks[target] != nil
             && attachmentsByScope[scope]?.contains(where: { $0.gatewayUploadID == nil }) == true
     }
@@ -1041,9 +932,6 @@ extension ComposerDraftCoordinator {
         try await transmitSubmission(submission)
     }
 
-    /// Admits the optimistic row, captured attachments, and draft clearing as
-    /// one MainActor mutation. Transport is deliberately separate so the UI can
-    /// dismiss the keyboard only after this presentation state is installed.
     func beginSubmission(
         target: SessionPresentationIdentity,
         behavior: String?,
@@ -1064,23 +952,12 @@ extension ComposerDraftCoordinator {
         ).snapshot
     }
 
-    /// Sends an already-admitted submission without changing its presentation
-    /// shape. A late transport result can only settle this exact admission.
     func transmitSubmission(_ submission: ComposerSubmissionSnapshot) async throws {
         guard let admission = submissionByScope.values.first(where: {
             $0.snapshot == submission
         }) else {
             throw CancellationError()
         }
-        // Route remounts preserve the admission, but a profile/lifecycle
-        // replacement must stop it before any mutation can enter the new
-        // Gateway connection.
-        // Lifecycle replacement or task cancellation must stop transport before
-        // its first suspension. That boundary is provably not sent, so it must
-        // also reject the local admission and restore the captured draft instead
-        // of leaving a scope-owned `.sending` row with no transport owner.
-        // Once transport is in flight, outcome-only admission intentionally lets
-        // accepted work survive a route remount.
         let operationID: String
         do {
             try require(admission)
@@ -1093,9 +970,6 @@ extension ComposerDraftCoordinator {
                 admission.snapshot.route
             )
         } catch {
-            // A route may disappear after admission. The exact submission
-            // remains owned here until transport reaches a terminal outcome;
-            // stale completions still require the same target/id below.
             try requireOutcome(admission)
             if Self.isPossiblySent(error) {
                 markTransportAccepted(admission)
@@ -1110,10 +984,6 @@ extension ComposerDraftCoordinator {
         try requireOutcome(admission)
         markOperationAccepted(operationID, admission: admission)
         markTransportAccepted(admission)
-        // Pi extension-command prompt completion means the handler has returned;
-        // there is no canonical user message to reconcile. Retire only this
-        // composer admission while the Gateway command receipt owns transcript
-        // lifecycle and any downstream turns independently.
         if admission.snapshot.isExtensionCommand,
            let accepted = submissionByScope[admission.scope],
            accepted.id == admission.id {
@@ -1121,8 +991,6 @@ extension ComposerDraftCoordinator {
         }
     }
 
-    /// Installs a target-routed editor request. Empty drafts accept immediately;
-    /// nonempty drafts require an explicit use/keep disposition from the UI.
     func publishEditorRequest(_ request: ComposerEditorRequest, target: SessionPresentationIdentity) {
         guard admits(target), request.sessionID == target.sessionID,
               request.presentationGeneration == target.generation,
@@ -1146,8 +1014,6 @@ extension ComposerDraftCoordinator {
         editorRequestByTarget[target] = nil
     }
 
-    /// Revokes every presentation-scoped fact synchronously while retaining the
-    /// inactive text draft under its explicit profile/session scope.
     func revoke(_ target: SessionPresentationIdentity) {
         guard lease?.target == target else { return }
         revokePresentation()
@@ -1210,9 +1076,6 @@ extension ComposerDraftCoordinator {
         return enqueuePersistence { store in await store.removeProfile(profileID) }
     }
 
-    /// Forces the latest coalesced local draft values to the owned store. The
-    /// returned task lets lifecycle tests and teardown boundaries await the
-    /// checkpoint without making ordinary keystrokes synchronous.
     @discardableResult
     func checkpointDrafts() -> Task<Void, Never> {
         let predecessor = persistenceTask
@@ -1279,16 +1142,10 @@ extension ComposerDraftCoordinator {
         let liveAttachments = attachmentsByScope[scope] ?? []
         let mergedAttachments = restoredAttachments + liveAttachments
         attachmentsByScope[scope] = mergedAttachments.isEmpty ? nil : mergedAttachments
-        // Persistence may now replace the durable directory because attachment
-        // bytes have completed their merge. A newer text mutation remains dirty
-        // and is checkpointed together with the restored payloads.
         loadedScopes.insert(scope)
         evictInactiveDraftsIfNeeded()
     }
 
-    /// A mounted presentation restored after a reconnect retries the chips whose
-    /// transfer the outage interrupted. Staged chips and chips whose upload is
-    /// still in flight are left alone, so no photo reaches the Gateway twice.
     func resumeUnstagedUploads(for target: SessionPresentationIdentity) {
         guard let scope = scope(for: target) else { return }
         beginRestoredAttachmentUploads(scope: scope, target: target)
@@ -1306,9 +1163,6 @@ extension ComposerDraftCoordinator {
         }
         restoredUploadTasks[target] = Task { @MainActor [weak self] in
             guard let self else { return }
-            // The next unowned chip is chosen at each step, not from a snapshot: a
-            // chip a replaced presentation's transfer released meanwhile joins, and
-            // one another transfer owns is never uploaded twice (#1665).
             var attempted: Set<String> = []
             while !Task.isCancelled, let identity = self.attachmentsByScope[scope]?.first(where: {
                 $0.gatewayUploadID == nil && self.uploadAdmissionByAttachmentID[$0.id] == nil && !attempted.contains($0.id)
@@ -1359,17 +1213,11 @@ extension ComposerDraftCoordinator {
                 task.cancel()
             }
         } catch {
-            // Payload and chip remain durable. A later exact mount retries;
-            // no restored draft is ever sent automatically.
             return
         }
         adoptOrDiscard(uploadID, identity: identity, admission: admission, scope: scope)
     }
 
-    /// A chip stays owned by its transfer until it settles, across a presentation
-    /// replacement too, so the replacement never stages the same bytes again (#1665).
-    /// A replaced presentation's released chip joins the mounted one's restored
-    /// uploads; a failure in the current presentation waits for a later mount.
     private func releaseTransfer(_ identity: String, admission: UploadAdmission, scope: ComposerDraftScope) {
         guard uploadAdmissionByAttachmentID[identity] == admission else { return }
         uploadAdmissionByAttachmentID[identity] = nil
@@ -1379,9 +1227,6 @@ extension ComposerDraftCoordinator {
         beginRestoredAttachmentUploads(scope: scope, target: lease.target)
     }
 
-    /// Staged IDs are scope-owned (#916): a completed transfer's chip adopts it while
-    /// still in its scope, unstaged and owned by this transfer, even if the presentation
-    /// that started it was replaced. Otherwise the unclaimed staging blob is discarded.
     @discardableResult
     private func adoptOrDiscard(_ uploadID: String, identity: String, admission: UploadAdmission, scope: ComposerDraftScope) -> Bool {
         guard uploadAdmissionByAttachmentID[identity] == admission, var attachments = attachmentsByScope[scope],
@@ -1395,10 +1240,6 @@ extension ComposerDraftCoordinator {
         return true
     }
 
-    /// A draft scope that is deleted or evicted no longer owns its staged chips.
-    /// Chips captured by a live submission stay with that submission. Discard
-    /// reaches the connected Mac; another Mac's ID is unknown there and expires
-    /// with that Mac's unclaimed staging.
     private func discardStagedUploads(in scope: ComposerDraftScope) {
         let submitted = Set(submissionByScope[scope]?.submittedAttachments.map(\.id) ?? [])
         for attachment in attachmentsByScope[scope] ?? [] where !submitted.contains(attachment.id) {
@@ -1494,8 +1335,6 @@ extension ComposerDraftCoordinator {
     private func touch(_ scope: ComposerDraftScope, installing initialText: String?) {
         sequence &+= 1
         lastAccessByScope[scope] = sequence
-        // Route editor text seeds only a previously absent draft. Reopen or
-        // repeated preparation can never replace retained user edits.
         if drafts[scope] == nil {
             let seed = initialText ?? ""
             drafts[scope] = Draft(
@@ -1568,19 +1407,11 @@ extension ComposerDraftCoordinator {
         let draft = drafts[scope] ?? Draft(text: "", revision: 0)
         let rawOutgoing = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachmentsByScope[scope] ?? []
-        // Staged chips are the sole invocation authority; a typed leading
-        // invocation applies only when no chip is staged.
         let submittedResources = selectedResourcesByScope[scope] ?? []
         let typedInvocation = submittedResources.isEmpty ? typedInvocation : nil
         let submittedAnnotations = annotationsByScope[scope] ?? []
-        // A manually typed leading invocation is normalized at the ChatView
-        // boundary. Its arguments become the sole visible/executed prompt text.
         let draftOutgoing = typedInvocation?.arguments ?? rawOutgoing
-        // Annotations travel as prompt text ahead of the message, so the model
-        // and canonical transcript see exactly what was sent.
         let outgoing = ChatAnnotationEnvelope.compose(annotations: submittedAnnotations, body: draftOutgoing)
-        // Skills and prompts expand ahead of the message text, which follows them
-        // once; an extension command's arguments are the message text (#311).
         let invocations: [(source: ComposerResourceInvocation.Source, name: String)] = if let typedInvocation {
             [(typedInvocation.source, typedInvocation.name)]
         } else {
@@ -1637,9 +1468,6 @@ extension ComposerDraftCoordinator {
         guard !outgoing.isEmpty || !attachmentIDs.isEmpty || !selectedResources.isEmpty else {
             throw CancellationError()
         }
-        // Ordinary prompt admission must match the Gateway's exact UTF-8
-        // boundary before clearing the draft or installing an optimistic row.
-        // An extension command retains its narrower transport contract above.
         if !isExtensionCommand,
            !SharedContentAdmissionPolicy.admitsPrompt(outgoing) {
             throw GatewayFailure(
@@ -1682,9 +1510,6 @@ extension ComposerDraftCoordinator {
             transcriptObserved: false,
             canonicalHandoffID: nil
         )
-        // A newly admitted prompt is newer presentation ownership. Any
-        // unresolved consumed-queue heuristic from the prior lifecycle can no
-        // longer claim a future same-text canonical row.
         settledQueueHandoffs[scope] = nil
         submissionByScope[scope] = admission
         setText("", for: scope)
@@ -1711,9 +1536,6 @@ extension ComposerDraftCoordinator {
         guard let currentAdmission = submissionByScope[admission.scope],
               currentAdmission.id == admission.id else { return }
         let scope = currentAdmission.scope
-        // A canonical event wins even if a late transport failure races it. A
-        // definitive rejection without canonical evidence is the only path
-        // that restores the draft and submitted attachments.
         guard !currentAdmission.canonicalObserved else {
             finishSubmission(currentAdmission)
             return
@@ -1748,8 +1570,6 @@ extension ComposerDraftCoordinator {
         }
     }
 
-    /// Captured annotations return ahead of any staged since the submission;
-    /// one already present again is not duplicated.
     private func restoreAnnotations(_ captured: [ChatAnnotation], for scope: ComposerDraftScope) {
         guard !captured.isEmpty else { return }
         let current = annotationsByScope[scope] ?? []
@@ -1771,9 +1591,6 @@ extension ComposerDraftCoordinator {
         schedulePersistence(for: scope)
     }
 
-    /// A newer chip with the same stable ID is authoritative, including its
-    /// fresh or deliberately absent upload ID. Only a missing chip is restored
-    /// from the capture, keeping its scope-owned staged upload ID.
     private static func restoredAttachments(
         captured: [PendingAttachment],
         current: [PendingAttachment]
@@ -1814,9 +1631,6 @@ extension ComposerDraftCoordinator {
               accepted.id == admission.id else { return }
         accepted.transportState = .accepted
         schedulePersistence(for: accepted.scope)
-        // Keep the exact captured IDs addressable by the ephemeral row even if
-        // the user edited the staged attachment strip while transport awaited
-        // acknowledgement. They are removed only at canonical reconciliation.
         let retained = attachmentsByScope[admission.scope] ?? []
         let retainedIDs = Set(retained.map(\.id))
         let captured = admission.submittedAttachments.filter { !retainedIDs.contains($0.id) }
@@ -1966,15 +1780,10 @@ extension ComposerDraftCoordinator {
         schedulePersistence(for: scope)
     }
 
-    /// The Gateway materializes every staged ID before it accepts a prompt; an
-    /// unknown one is `not_found` (expired, reset or another Mac's staging).
     private static func isMissingStagedUpload(_ error: Error) -> Bool {
         (error as? GatewayFailure)?.code == "not_found"
     }
 
-    /// The rejected prompt does not say which staged ID was missing, so every
-    /// submitted chip that was restored to the mounted strip uploads again from
-    /// its retained bytes. The next send carries only fresh staging.
     private func restageSubmittedAttachments(_ admission: SubmissionAdmission) {
         guard let lease, lease.scope == admission.scope,
               var attachments = attachmentsByScope[admission.scope] else { return }
@@ -2017,10 +1826,6 @@ extension ComposerDraftCoordinator {
             return part.text
         }.joined()
         let isAttachmentOnlySubmission = snapshot.outgoingText.isEmpty && !submittedAttachments.isEmpty
-        // Pi may persist bounded attachment-envelope context as canonical text
-        // even though the user-facing steering/follow-up text was empty. Exact
-        // attachment evidence below owns this fallback; text-only submissions
-        // still require exact display-text equality.
         if isAttachmentOnlySubmission {
             guard ChatAttachmentEnvelopePolicy.isBounded(text) else { return false }
         } else {
@@ -2043,9 +1848,6 @@ extension ComposerDraftCoordinator {
                             && metadata.mimeType == attachment.mimeType
                             && metadata.size == attachment.size
                     }
-                    // Canonical image projection uses a content-hash blob ID rather
-                    // than the client's upload ID. MIME multiplicity is the truthful
-                    // bounded identity when the projection omits names.
                     return true
                 }) else { return false }
                 unmatchedImages.remove(at: index)
@@ -2078,26 +1880,15 @@ extension ComposerDraftCoordinator {
         guard let lease else { return }
         restoredUploadTasks[lease.target]?.cancel()
         restoredUploadTasks[lease.target] = nil
-        // Staged chips keep their scope-owned upload IDs (#916); only in-flight
-        // transfers below are cancelled and stay upload-required.
         editorRequestByTarget[lease.target] = nil
-        // Transport ownership follows durable scope. Presentation revocation
-        // clears only target-routed receipts; sending and accepted admissions
-        // remain bounded local projections and are never replayed.
         canonicalHandoffReceipts[lease.target] = nil
         settledQueueAliases[lease.target] = nil
         for (admission, task) in uploadTasks where admission.target == lease.target {
             task.cancel()
         }
-        // Each chip stays owned by its cancelled transfer until it settles
-        // (`releaseTransfer`): a non-cooperative request may still stage it.
         uploadAdmissions = uploadAdmissions.filter { $0.target != lease.target }
         let retainedSubmission = submissionByScope[lease.scope]
         self.lease = nil
-        // Route replacement revokes presentation-only artifacts, never the
-        // durable scope-owned transport lifecycle. A sending or accepted
-        // admission is projected by the next lease without replaying transport;
-        // only already-observed canonical truth can retire it here.
         if let retainedSubmission, retainedSubmission.canonicalObserved {
             finishSubmission(retainedSubmission)
         }
@@ -2132,8 +1923,6 @@ extension ComposerDraftCoordinator {
             annotationsByScope[scope] = nil
             resourceMutationRevisionByScope[scope] = nil
             settledQueueHandoffs[scope] = nil
-            // Safe bounded eviction may retire an accepted presentation-only
-            // lifecycle, but never an unresolved transport operation.
             if submissionByScope[scope]?.transportState != .sending {
                 submissionByScope[scope] = nil
             }

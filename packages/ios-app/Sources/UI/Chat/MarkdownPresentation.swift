@@ -1,7 +1,5 @@
 import Foundation
 
-/// A pure, immutable Markdown presentation namespace. `Document` is the sole cold
-/// parser result consumed by the chat renderer.
 enum MarkdownPresentation: Sendable {
     struct Document: Hashable, Sendable {
         let source: String
@@ -18,14 +16,10 @@ enum MarkdownPresentation: Sendable {
     }
 
     struct SourceRange: Hashable, Sendable {
-        /// UTF-8 byte offsets in the exact `Document.source` supplied to the parser.
         let lowerBound: Int
         let upperBound: Int
     }
 
-    /// SwiftUI subtree state survives only for an exact unchanged source slice.
-    /// Content or type-changing revisions receive a new identity so interaction
-    /// state such as code-copy confirmation cannot transfer to another block.
     struct SourceIdentity: Hashable, Sendable {
         let sourceRange: SourceRange
         let content: String
@@ -56,8 +50,6 @@ enum MarkdownPresentation: Sendable {
         }
 
         var accountedByteCount: Int {
-            // Source storage plus a conservative source-sized presentation charge
-            // for the attributed value's characters and runs.
             source.utf8.count * 2
         }
     }
@@ -117,8 +109,6 @@ enum MarkdownPresentation: Sendable {
         }
     }
 
-    /// Markdown soft source wraps become ordinary spaces only in presentation.
-    /// Explicit hard breaks and blank paragraph separators remain line breaks.
     static func reflowSoftLineBreaks(_ source: String) -> String {
         let lines = source.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
         guard lines.count > 1 else { return lines[0] }
@@ -142,8 +132,6 @@ enum MarkdownPresentation: Sendable {
         return result
     }
 
-    /// Plain prose surfaces (such as commit bodies) share block boundaries, not
-    /// Markdown styling. Preserve structured text and Git trailers verbatim.
     static func reflowProse(_ source: String) -> String {
         let bytes = Array(source.utf8)
         var result = ""
@@ -322,8 +310,6 @@ enum MarkdownPresentation: Sendable {
                         index += 1
                     }
                     append(
-                        // Prepare cell styling once with the rest of the document,
-                        // rather than reparsing Markdown during SwiftUI layout.
                         .table(rows.map { $0.map { Inline(source: $0) } }),
                         lines: lines,
                         start: start,

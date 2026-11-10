@@ -2,9 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Real ChatView over a fixture socket for the annotate journey: a completed
-/// Markdown assistant response to select from, and a `session.prompt` handler
-/// that records the exact transport text the model would receive.
 @MainActor
 struct HostedChatAnnotationFixture: View {
     static let transcriptData = Data(#"""
@@ -71,13 +68,10 @@ struct HostedChatAnnotationFixture: View {
         .preferredColorScheme(dark ? .dark : .light)
         .tronPresentation()
         .overlay(alignment: .topLeading) {
-            // The exact transport text, for the journey's assertion only.
             Text(lastPrompt)
                 .font(.system(size: 1)).opacity(0.01)
                 .accessibilityIdentifier("fixture.last-prompt")
                 .allowsHitTesting(false)
-            // Each revealed source ("shown|quote|minY|maxY"), its element
-            // mounting ("exposed|quote") and its clearing ("cleared|quote").
             Text(reveals.isEmpty ? "none" : reveals.joined(separator: ";"))
                 .font(.system(size: 1)).opacity(0.01)
                 .accessibilityIdentifier("fixture.reveals")

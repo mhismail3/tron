@@ -57,8 +57,6 @@ struct NativeCaptureOperations: Sendable {
     }
 }
 
-/// Invalidations synchronously fence native callbacks even while the actor is
-/// awaiting selection/start. Stop does not depend on a caller's Task surviving.
 final class NativeCaptureFence: @unchecked Sendable {
     private let lock = NSLock()
     private enum State { case open, producerStopped, revoked }
@@ -75,8 +73,6 @@ final class NativeCaptureFence: @unchecked Sendable {
         let stopped = lock.withLock { self.producer = producer; return state != .open }
         if stopped { producer.requestStop() }
     }
-    /// Producer failure closes pixel admission, not the authenticated request's
-    /// right to receive its finite terminal error after native cleanup joins.
     func stopProducer() {
         let producer = lock.withLock { if state == .open { state = .producerStopped }; return self.producer }
         producer?.requestStop()
@@ -92,9 +88,6 @@ final class NativeCaptureFence: @unchecked Sendable {
     func releaseJoinedProducer() { lock.withLock { producer = nil } }
 }
 
-/// One connection/session retains the exact selected target, independently of
-/// visibility-owned streams. A fresh stream is allowed only after a clean suspend
-/// join; uncertain retirement never enables resume or releases the global slot.
 actor NativeCaptureSession {
     let bootID: UUID
     let connectionID = UUID()
@@ -137,8 +130,6 @@ actor NativeCaptureSession {
         guard request.operation == "hello" ? loadID == nil : matches(request) else { return .error(.stale) }
         if request.operation == "stop" {
             guard receiptCount < 64 else { return .error(.exhausted) }
-            // Stop is eligible during every awaited phase. It cannot free the
-            // slot until the pending native work and its exact producer join.
             closed = true; fence.close()
             let task = Task { [self] in
                 let result = await drain()
@@ -159,8 +150,6 @@ actor NativeCaptureSession {
                 if let pending { _ = await pending.value }
                 let result = await finishRetirement()
                 if result.joined, result.diagnostic == nil, !closed {
-                    // Keep only the original selected capability. No catalog
-                    // lookup or window/PID/title resolution occurs on resume.
                     generation = nil; usedStream = false; retiredResult = nil
                 } else {
                     closed = true; fence.close(); targets.removeAll()
@@ -178,7 +167,7 @@ actor NativeCaptureSession {
             guard request.readSequence! > lastRead else { return .error(.stale) }
             lastRead = request.readSequence!
         } else {
-            guard receiptCount < 63 else { return .error(.exhausted) } // Reserve Stop.
+            guard receiptCount < 63 else { return .error(.exhausted) }
             receiptCount += 1
         }
         if request.operation == "hello" { loadID = request.loadID }
@@ -187,8 +176,6 @@ actor NativeCaptureSession {
         if let commandID = request.commandID { receipts[commandID] = (request, task) }
         let result = await task.value
         pending = nil
-        // Replayed command receipts are control only. Pixels are never retained
-        // in a receipt; each pull consumes one latest frame once.
         return result
     }
 
@@ -244,7 +231,6 @@ actor NativeCaptureSession {
                 guard await admitted(request), case let .available(id) = result else {
                     if suspending { return .error(.stale) }
                     closed = true; fence.stopProducer()
-                    // Do not call drain from pending work: drain joins this task.
                     _ = await finishRetirement()
                     if case let .unavailable(reason) = result { return .error(.capture(reason)) }
                     return .error(.stale)
@@ -307,7 +293,7 @@ actor NativeCaptureSession {
     private func expireDemand(_ id: UUID) async {
         guard demandID == id, !closed else { return }
         closed = true; fence.close()
-        _ = await drain() // Expiry requests Stop; only actual retirement frees capacity.
+        _ = await drain()
     }
     private func response(_ request: NativeCaptureRequest, status: String, fields: [String: Any] = [:], jpeg: Data? = nil) -> NativeCaptureResponse {
         var object: [String: Any] = ["version": 1, "status": status,

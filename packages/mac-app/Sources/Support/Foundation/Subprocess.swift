@@ -13,8 +13,6 @@ struct ProcessResult: Equatable, Sendable {
     }
 }
 
-/// The caller must distinguish disposable observation from an already accepted
-/// operation. UI cancellation is not authority to abort registration/bootout.
 enum Subprocess {
     enum Policy: Sendable { case observation, acceptedOperation }
     static let maximumOutputBytes = 1_048_576
@@ -37,8 +35,6 @@ enum Subprocess {
     }
 }
 
-/// One lane owns the child and all reads. Cancellation/termination only wake
-/// that lane; they never race a read by closing its descriptors from elsewhere.
 private final class SubprocessExecution: @unchecked Sendable {
     private let policy: Subprocess.Policy
     private let timeoutSeconds: Int?
@@ -61,7 +57,6 @@ private final class SubprocessExecution: @unchecked Sendable {
     private func wakeLocked() {
         guard let wakeWriter else { return }
         var byte: UInt8 = 1
-        // Nonblocking: a full pipe already contains the wakeup we need.
         _ = Darwin.write(wakeWriter.fileDescriptor, &byte, 1)
     }
 
@@ -87,16 +82,11 @@ private final class SubprocessExecution: @unchecked Sendable {
         defer {
             if launched && process.isRunning {
                 if policy == .observation || deadline != nil {
-                    // Retire only this command client, never its target service.
-                    // A timed-out mutation has an uncertain result: its owner
-                    // must observe completion, not automatically replay it.
                     _ = Darwin.kill(process.processIdentifier, SIGKILL)
                 }
                 process.waitUntilExit()
             }
             process.terminationHandler = nil
-            // Disable/close the writer under the same lock used by wakeups,
-            // before closing the reader: no late write or SIGPIPE is possible.
             lock.withLock { wakeWriter = nil; try? wakeup.fileHandleForWriting.close() }
             try? wakeup.fileHandleForReading.close()
             for index in 0..<2 where readerOpen[index] { try? readers[index].close() }
@@ -137,9 +127,6 @@ private final class SubprocessExecution: @unchecked Sendable {
                 }
                 return ProcessResult(exitCode: Int(process.terminationStatus), stdout: stdout, stderr: stderr)
             }
-            // Accepted command status remains authoritative even if diagnostics
-            // are incomplete. Never manufacture failure (and invite a retry) for
-            // an operation that completed successfully.
             let note = captureFailure.map { "\n[\($0)]" } ?? ""
             return ProcessResult(
                 exitCode: Int(process.terminationStatus),
@@ -155,8 +142,6 @@ private final class SubprocessExecution: @unchecked Sendable {
                 return completedResult(captureFailure)
             }
             if exited && drainDeadline == nil {
-                // A descendant may retain a writer after our child exits. It
-                // does not own an unbounded lifetime for this capture operation.
                 drainDeadline = (DispatchTime.now() + .seconds(1)).uptimeNanoseconds
             }
             if let deadline, now >= deadline { return failure("Command timed out.") }
@@ -176,8 +161,6 @@ private final class SubprocessExecution: @unchecked Sendable {
             }
             if descriptors[2].revents != 0 { _ = Darwin.read(descriptors[2].fd, &bytes, bytes.count) }
             for index in 0..<2 where readerOpen[index] && descriptors[index].revents != 0 {
-                // One bounded read per stream lets exit/cancellation/deadline
-                // processing run even while a child continuously writes.
                 let count = Darwin.read(descriptors[index].fd, &bytes, bytes.count)
                 if count > 0 {
                     let retained = min(count, Subprocess.maximumOutputBytes - output[index].count)
@@ -186,8 +169,6 @@ private final class SubprocessExecution: @unchecked Sendable {
                         let message = "Command output exceeded its limit."
                         if policy == .observation { return failure(message) }
                         captureFailure = message
-                        // An accepted operation finishes; discard excess output
-                        // instead of blocking its writer or pretending it is complete.
                     }
                 } else if count == 0 {
                     try? readers[index].close()

@@ -1,7 +1,6 @@
 import XCTest
 import UIKit
 
-/// Rendered color at the real chip → managed sheet → document reader boundary.
 @MainActor final class TronDisplayDocumentThemeUITests: XCTestCase {
     func testSiblingMarkdownImageAndUnavailableTargets() {
         continueAfterFailure = false

@@ -1,11 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// Install step. The shell owns the icon, title, progress pill, and
-/// the bottom action bar. Its primary CTA starts as "Install" and
-/// only advances as "Continue" after `installOutcome == .success`.
-/// This view contributes the description, the per-stage progress list,
-/// and an error summary on failure.
 struct InstallStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
@@ -52,8 +47,6 @@ struct InstallStep: View {
             await refreshInstallStatus(request: request)
         }
         .onDisappear {
-            // Status is disposable presentation work. Retire its lease so a
-            // late ping cannot publish into a remounted or replaced step.
             statusRefreshFence.retire()
         }
     }
@@ -88,10 +81,6 @@ struct InstallStep: View {
         }
         switch state.installOutcome {
         case .success:
-            // Re-entering this page after a successful install should
-            // render completed rows on the first body pass. Updating
-            // them later from `.task` makes the icons pop separately
-            // from the page transition.
             return .succeeded
         default:
             return .pending

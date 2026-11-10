@@ -6,7 +6,6 @@ enum PackageMutationAction: Sendable {
     case update
     case remove
 
-    /// Explicit wire names keep every package RPC caller statically visible.
     var method: String {
         switch self {
         case .update: "packages.update"
@@ -20,8 +19,6 @@ protocol PackageConfigurationCoordinatorDelegate: AnyObject {
     func packageConfigurationCoordinatorSurface(_ error: Error)
 }
 
-/// Owns disposable package inventory/update projections and exact-target
-/// package request admission. Gateway package state remains canonical.
 @MainActor
 @Observable
 final class PackageConfigurationCoordinator {
@@ -58,9 +55,6 @@ final class PackageConfigurationCoordinator {
     private var updateGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var mutationGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var errorByTarget: [PackageConfigurationTarget: String] = [:]
-    // A confirmed mutation owns the post-mutation reload. Ordinary refreshes
-    // are coalesced while it runs instead of invalidating its load admission.
-    // The value is retained so an older mutation cannot revoke a newer owner.
     private var mutationReloadingTargets: [PackageConfigurationTarget: TargetAdmission] = [:]
     private var profileGeneration = 0
 
@@ -101,10 +95,6 @@ final class PackageConfigurationCoordinator {
         if mutationAdmission == nil, mutationReloadingTargets[target] != nil {
             return true
         }
-        // An ordinary refresh publishes only while it is still the newest,
-        // uncancelled read. A confirmed mutation's post-mutation reload is part
-        // of that mutation's completion, so it keeps publishing authority even
-        // if the requesting view was dismissed after confirmation.
         let requiresLiveTask = mutationAdmission == nil
         if requiresLiveTask, Task.isCancelled { return false }
         let admission = beginAdmission(target: target, generations: &loadGenerationByTarget)
@@ -125,8 +115,6 @@ final class PackageConfigurationCoordinator {
         } catch is CancellationError {
             return false
         } catch {
-            // A retired or cancelled request must not install a local error over
-            // the projection that owns this target.
             guard (!requiresLiveTask || !Task.isCancelled),
                   admits(admission, generations: loadGenerationByTarget),
                   mutationAdmission.map({ admits($0, generations: mutationGenerationByTarget) }) ?? true else {
@@ -160,8 +148,6 @@ final class PackageConfigurationCoordinator {
         } catch is CancellationError {
             return false
         } catch {
-            // A retired or cancelled request must not install a local error over
-            // the projection that owns this target.
             guard !Task.isCancelled,
                   admits(admission, generations: updateGenerationByTarget) else { return false }
             errorByTarget[target] = error.localizedDescription
@@ -197,9 +183,6 @@ final class PackageConfigurationCoordinator {
             throw error
         }
         try require(admission, generations: mutationGenerationByTarget)
-        // The confirmed mutation owns the following reload. Revoke any load
-        // or update admitted before confirmation so obsolete projections cannot
-        // be published after the mutation's authoritative reload starts.
         loadGenerationByTarget[target] = (loadGenerationByTarget[target] ?? 0) &+ 1
         updateGenerationByTarget[target] = (updateGenerationByTarget[target] ?? 0) &+ 1
         mutationReloadingTargets[target] = admission
@@ -235,8 +218,6 @@ final class PackageConfigurationCoordinator {
         invalidationGeneration &+= 1
     }
 
-    /// Synchronously revokes all suspended work and drops disposable package
-    /// projections for the retired profile.
     func clearProfile() {
         profileGeneration &+= 1
         loadGenerationByTarget = loadGenerationByTarget.mapValues { $0 &+ 1 }

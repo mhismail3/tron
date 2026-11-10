@@ -1,11 +1,6 @@
 import XCTest
 
-/// Manage Session, Manage Home and the sheets they open share one emerald sheet
-/// theme; each sub-sheet is titled by the row that opens it; Instructions rows
-/// keep their summary on the title's line (#1680).
 final class TronManageSheetsThemeUITests: XCTestCase {
-
-    /// Each editor is the first interaction on a newly opened Home model card.
     @MainActor func testFirstOpenHomeEffortAndContextExposeUsableSliders() {
         for (control, slider) in [("Effort", "settings-choice-slider")] {
             let app = launchManageHome(dark: false)
@@ -22,9 +17,6 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         }
     }
 
-    /// Each Manage Session row opens a sheet titled with the row's own label, and
-    /// the row's icon and that title are inked in Manage Session's emerald title
-    /// color: one sheet theme, no per-row teal.
     @MainActor func testManageSessionRowsTitleTheirSheetsInTheSheetTheme() {
         for dark in [false, true] {
             let app = launchManageSession(dark: dark); defer { app.terminate() }
@@ -45,8 +37,6 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         }
     }
 
-    /// Each Manage Home row opens a sheet titled with the row's title, inked in
-    /// Manage Home's own emerald.
     @MainActor func testManageHomeRowsTitleTheirSheetsInTheSheetTheme() {
         let app = launchManageHome(dark: false); defer { app.terminate() }
         let theme = ink(app, navigationTitle(app, "Manage Home"))
@@ -68,9 +58,6 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         }
     }
 
-    /// Instructions rows are one line: the summary trails the title on its line,
-    /// every row's number is inked in the sheet's title color, and the per-turn
-    /// section keeps its Each turn tag. At XXXL the summary reads whole.
     @MainActor func testInstructionsRowsKeepTheirSummaryOnTheTitleLine() {
         let app = launchInstructions([]); defer { app.terminate() }
         expand(app, title: AgentInstructions.title)
@@ -79,7 +66,6 @@ final class TronManageSheetsThemeUITests: XCTestCase {
             let row = app.buttons["agent-instructions-section-\(id)"]
             XCTAssertTrue(row.isHittable, "\(id)\n\(app.debugDescription)")
             XCTAssertTrue(row.label.contains(summary), "\(id) shows its summary: \(row.label)")
-            // The list standard (#1691) puts the summary under the title, as subtext.
             assertInk(ink(app, row, leading: 56), theme, "\(id) number")
         }
         XCTAssertTrue(app.buttons["agent-instructions-section-tron"].label.contains("Each turn"))
@@ -102,8 +88,6 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         static let summaries = [("preamble", "Built into Pi"), ("tools", "3 tools"), ("rules", "3 rules · 1 from tools"),
                                 ("cwd", "~/Workspace/project")]
     }
-
-    // MARK: Journeys
 
     @MainActor private func launchManageSession(dark: Bool) -> XCUIApplication {
         continueAfterFailure = false
@@ -143,14 +127,11 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         return app
     }
 
-    // MARK: Helpers
-
     @MainActor private func navigationTitle(_ app: XCUIApplication, _ text: String) -> XCUIElement {
         let titles = app.navigationBars.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text))
         return titles.allElementsBoundByIndex.last ?? titles.firstMatch
     }
 
-    /// The average saturated ink of `element` (its leading icon column when given).
     @MainActor private func ink(_ app: XCUIApplication, _ element: XCUIElement, leading: CGFloat? = nil) -> [Double] {
         XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
         Thread.sleep(forTimeInterval: 0.4)
@@ -162,9 +143,6 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         return ink
     }
 
-    /// Compares hue, not brightness: a thin glyph's antialiasing darkens its ink
-    /// toward the background, so each color is scaled to its brightest channel.
-    /// Emerald and the retired teal differ by about 0.3 on this scale.
     private func assertInk(_ ink: [Double], _ theme: [Double], _ what: String, file: StaticString = #filePath, line: UInt = #line) {
         let hue = { (color: [Double]) in color.map { $0 / max(color.max() ?? 1, 0.01) } }
         let distance = zip(hue(ink), hue(theme)).map { abs($0 - $1) }.max() ?? 1
@@ -175,7 +153,6 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         app.descendants(matching: .any)[id].firstMatch
     }
 
-    /// Brings the sheet titled `text` to its large detent once it stops presenting.
     @MainActor private func expand(_ app: XCUIApplication, title text: String) {
         let title = app.navigationBars.staticTexts.matching(NSPredicate(format: "label == %@", text)).allElementsBoundByIndex.last
             ?? app.staticTexts[text].firstMatch

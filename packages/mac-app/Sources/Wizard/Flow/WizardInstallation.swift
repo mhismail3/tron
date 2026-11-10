@@ -1,13 +1,10 @@
 import SwiftUI
 
-/// Progress belongs to the accepted wizard operation, not a mounted step view.
 enum InstallStageState: Equatable, Sendable {
     case pending, running, succeeded, failed(String)
 }
 
 extension WizardState {
-    /// Called only by the task admitted in requestInstall. Every failure stops
-    /// later stages; no view cancellation or remount creates another operation.
     func performInstall(setup: EnvironmentSetup) async {
         await paceInstallStage()
         if let locationProblem = setup.validateApplicationLocation() {
@@ -89,8 +86,6 @@ extension WizardState {
         try? await Task.sleep(nanoseconds: InstallStepContent.stagePaceDelayNanoseconds)
     }
 
-    /// Preserve the wizard's existing readiness policy: token rejection proves
-    /// liveness, while pairing owns token recovery; a wrong channel is not ready.
     private func waitForInstallPing(setup: EnvironmentSetup) async -> Bool {
         for _ in 0..<30 {
             let token = setup.readBearerToken()

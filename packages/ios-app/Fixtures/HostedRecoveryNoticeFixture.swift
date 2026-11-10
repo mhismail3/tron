@@ -2,11 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// A real recovery episode (#2273): the selected Mac never resolves, so the production
-/// lifecycle schedules its reconnects, and after the grace `AppModel` posts its recovery
-/// notice and the route shows `ChatRecoveryStatusLine`, as `ChatView` does. "Classify again"
-/// calls the lifecycle's failure-presentation callback the way a reconnect attempt whose
-/// failure is newly classified does, with the visible text unchanged.
 struct HostedRecoveryNoticeFixture: View {
     @State private var model: AppModel
     @State private var activity = PresentationActivityCoordinator()
@@ -16,7 +11,6 @@ struct HostedRecoveryNoticeFixture: View {
     init() {
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
-        // `.invalid` never resolves, so every attempt fails and recovery begins.
         try! profiles.save(GatewayProfile(id: "recovery-notice", label: "Studio Mac", host: "recovery-notice.invalid",
                                           port: 9847, machineId: "recovery-notice-machine"), token: "fixture-only-token")
         let root = FileManager.default.temporaryDirectory.appending(path: "recovery-notice-fixture-\(UUID().uuidString)")
@@ -53,10 +47,6 @@ struct HostedRecoveryNoticeFixture: View {
     }
 }
 
-/// #2296 item 15: the selected profile's Keychain token cannot be read until the
-/// app first leaves the foreground, as on a launch before the device's first
-/// unlock. The production scene runs over it; the overlay shows the lifecycle's
-/// connection state and unlocks the store when the app enters the background.
 @MainActor
 enum HostedKeychainLockedFixture {
     struct Locked: Error {}
@@ -86,8 +76,6 @@ enum HostedKeychainLockedFixture {
         return AppModel(profiles: profiles, cache: SnapshotCache(root: root.appending(path: "cache")))
     }()
 
-    /// The lifecycle's connection state for the selected Mac, which only the
-    /// coordinator writes.
     struct ConnectionState: View {
         var body: some View {
             Text(Self.describe(HostedKeychainLockedFixture.model.connectionState))

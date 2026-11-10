@@ -2,11 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Deterministic, test-only host for the rendered general extension-content
-/// sheet. It supplies bounded retained content of all three kinds — a string
-/// widget, a retained read-only component frame, and a retained status — so the
-/// real sheet can be verified as rendered native layout rather than merely
-/// admitted state.
 @MainActor
 struct HostedExtensionWidgetsFixtureView: View {
     @State private var presented = true
@@ -53,8 +48,6 @@ struct HostedExtensionWidgetsFixtureView: View {
         )
     ]
 
-    // One owned status (the real paused-goal shape) and one unowned status, so the
-    // rendered sheet covers status rendering and unknown-producer grouping.
     private static let statuses: [String: String] = [
         "pi-goal": "Goal paused (/goal resume)",
         "unowned-status": "2 background tasks running",

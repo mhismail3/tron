@@ -9,10 +9,7 @@ struct DisplayRoute: Identifiable, Hashable, Sendable {
     let sessionID: String
     let display: DisplayProjection
     var technicalTool: ChatToolPresentation? = nil
-    /// Runs a displayed `.swift` file as a mini-app instead of showing its
-    /// source (#1339). A distinct sheet identity from the same file's source.
     var runsSwiftApp = false
-    /// Native producer intent, not source text or a model-authored caption.
     var installsSwiftApp = false
 
     var id: String { "\(sessionID):\(display.presentationIdentity)\(runsSwiftApp ? ":app" : "")\(installsSwiftApp ? ":install" : "")" }
@@ -55,8 +52,6 @@ enum DisplayPresentationCommand: Hashable, Sendable {
     }
 }
 
-/// Every tool entrypoint uses the same admitted display, never raw result text.
-/// Grouped and inline content open the same full viewer.
 enum ToolDisplayActivation {
     static func command(for tool: ChatToolPresentation, sessionID: String?) -> DisplayPresentationCommand? {
         guard let command = command(for: tool.descriptor, sessionID: sessionID) else { return nil }
@@ -125,8 +120,6 @@ struct DisplayToolView: View {
                         action: inlineSheetAction(for: display)
                     )
                 } else if SwiftAppDisplay.runs(display) {
-                    // An app card's tap is the app itself; its source stays in
-                    // the menu below and in the card's non-runnable states.
                     SwiftAppDisplayCard(
                         sessionID: sessionID,
                         display: display,
@@ -166,9 +159,6 @@ struct DisplayToolView: View {
         display != nil && !tool.error && !tool.isRunning && effectiveSurface == .inline
     }
 
-    /// A completed inline card other than the photo thumbnail spans the
-    /// transcript width; every other display can share a grouped row, where it
-    /// renders as a thumbnail (`DisplayStripThumbnail`).
     static func rendersFullWidth(_ tool: ChatToolDescriptor) -> Bool {
         guard let display = tool.display, !tool.error, !tool.isRunning else { return false }
         return DisplayPresentationPolicy.effectiveSurface(for: display) == .inline && display.kind != .image
@@ -298,13 +288,6 @@ enum DisplayInlineLayoutPolicy {
         PendingPhotoRemoveLayoutPolicy.previewSide * imageChipScale
     }
 
-    /// The height an inline card reserves before its artifact is prepared,
-    /// decided by the kind it will render rather than by whether the payload has
-    /// arrived. It is the viewport its own content occupies, so preparing cannot
-    /// resize the row: an inline PDF renders in its 320-point viewport, and the
-    /// inline image chip is one exact square. Textual artifacts fill a bounded
-    /// 180-point viewport or their measured height, which the retained prepared
-    /// document makes exact on a remount.
     static func reservedViewportHeight(for kind: DisplayKind) -> CGFloat {
         switch kind {
         case .image: imageChipSide
@@ -316,11 +299,6 @@ enum DisplayInlineLayoutPolicy {
 
 }
 
-/// One display in a grouped run's horizontal row. It renders the same thumbnail
-/// card as a lone inline image display, and a tap opens that display's own
-/// preview directly, exactly as its chip did when shown alone. Displays still
-/// preparing or failed keep the card's shape with a progress or warning face,
-/// so the row never mixes thumbnails with tool chips.
 struct DisplayStripThumbnail: View {
     let tool: ChatToolDescriptor
     let onOpenTechnicalDetails: () -> Void
@@ -340,7 +318,6 @@ struct DisplayStripThumbnail: View {
         }
     }
 
-    /// A failed live view still opens its viewer, as its chip did alone.
     private var failed: Bool { tool.error && !(tool.display?.kind.isLive ?? false) }
 
     private var content: DisplayThumbnailContent {
@@ -390,10 +367,6 @@ enum DisplayKindSymbol {
     }
 }
 
-/// The transcript's display thumbnail control: the bounded square glass card a
-/// lone inline image display renders, shared by every display in a grouped row.
-/// The UI journeys find it by its identifier, so both cases stay on this one
-/// component rather than drifting into separate visuals.
 struct DisplayThumbnailButton: View {
     let sessionID: String?
     let content: DisplayThumbnailContent
@@ -479,16 +452,11 @@ private struct DisplayThumbnailSurface: View {
             source: transcriptReady ? mediaIdentity : nil,
             presentationActive: transcriptReady && presentationActivity.allowsPresentationPublication
         )) {
-            // The task owns its request fence. Separate onChange callbacks can
-            // invalidate the newly started load without changing its task ID,
-            // stranding the spinner until another presentation transition.
             loadGeneration &+= 1
             await loadThumbnail(generation: loadGeneration)
         }
     }
 
-    /// Only a photo needs an opaque backdrop behind its transparent pixels;
-    /// every other face sits directly on the card's glass.
     private var transparencyBackdrop: Color {
         guard display != nil else { return .clear }
         return colorScheme == .dark
@@ -523,8 +491,6 @@ private struct DisplayThumbnailSurface: View {
             image = loaded
             loadedIdentity = identity
         } catch {
-            // Only retirement of this view task is silent. A dependency that
-            // cancels a still-current request must not leave a permanent spinner.
             guard !Task.isCancelled,
                   generation == loadGeneration,
                   mediaIdentity == identity,
@@ -635,8 +601,6 @@ private struct DisplayInlineHeaderButton: View {
     }
 }
 
-/// The inline display card's round glass control, also the face of a Swift
-/// app card's open control (the whole app card is its button).
 struct DisplayInlineControlFace: View {
     let systemImage: String
 
@@ -702,9 +666,6 @@ struct DisplayArtifactContent: View {
                     onFrameGeometry: onLiveFrameGeometry
                 )
             case .webpage, .hls:
-                // Public remote content stays in Safari's isolated, explicit-
-                // gesture browser boundary. Gateway credentials are never
-                // attached to playlists, redirects, segments, or keys.
                 DisplayRemoteWebView(display: display)
             }
         }
@@ -753,7 +714,6 @@ private struct DisplayImageArtifactView: View {
     }
 
     private func load() async {
-        // Covered or retired surfaces neither start nor publish this work.
         guard presentationActivity.allowsPresentationPublication else { return }
         guard let identity = mediaIdentity else {
             loadGeneration &+= 1
@@ -762,8 +722,6 @@ private struct DisplayImageArtifactView: View {
             loadedIdentity = nil
             return
         }
-        // A decoded image for this exact source stays mounted; only a new
-        // source, a failed attempt, or interrupted work reloads it.
         if loadedIdentity == identity, image != nil { return }
         loadGeneration &+= 1
         let generation = loadGeneration
@@ -777,7 +735,6 @@ private struct DisplayImageArtifactView: View {
             image = value
             loadedIdentity = identity
         } catch is CancellationError {
-            // Interrupted work publishes nothing, so the next activation retries.
             return
         } catch {
             guard generation == loadGeneration,
@@ -823,11 +780,6 @@ private struct DisplayTextArtifactView: View {
         )) { await load() }
     }
 
-    /// What this card shows: the document its own load published, or — only for
-    /// the first frame after a remount — the document the loader retained for
-    /// this exact identity. The mounted card owns its value, so the loader's
-    /// bounded store can evict the identity under it without sending the card
-    /// back to a placeholder that resizes the row.
     private var prepared: PreparedAttachmentFilePreview? {
         guard let identity = mediaIdentity else { return nil }
         if loadedIdentity == identity, let loadedDocument { return loadedDocument }
@@ -842,9 +794,6 @@ private struct DisplayTextArtifactView: View {
         switch value.content {
         case .markdown(let document):
             if context == .inline {
-                // The transcript remains the sole vertical scroll owner. The
-                // fixed card viewport clips this bounded preview; its header
-                // exposes the complete scrolling sheet.
                 TronMarkdownView(document: document, streaming: false)
                     .padding(.horizontal, 16)
                     .padding(.top, DisplayInlineLayoutPolicy.contentTopPadding)
@@ -877,14 +826,11 @@ private struct DisplayTextArtifactView: View {
     }
 
     private func load() async {
-        // Covered or retired surfaces neither start nor publish this work.
         guard presentationActivity.allowsPresentationPublication else { return }
         guard let artifact = display.artifact, let identity = mediaIdentity else {
             failed = true
             return
         }
-        // The document this card already holds, or the loader's retained one for
-        // this identity, is the answer: a mounted card starts no second request.
         if prepared != nil { return }
         failed = false
         do {
@@ -896,15 +842,12 @@ private struct DisplayTextArtifactView: View {
                     rendersMarkdownImages: true
                 )
             }
-            // A retired surface or a superseded identity publishes nothing.
             guard !Task.isCancelled,
                   presentationActivity.allowsPresentationPublication,
                   mediaIdentity == identity else { return }
             loadedIdentity = identity
             loadedDocument = document
         } catch is CancellationError {
-            // Interrupted work publishes nothing, so the next activation asks
-            // again instead of keeping a placeholder forever.
         } catch {
             guard !Task.isCancelled,
                   presentationActivity.allowsPresentationPublication,
@@ -935,8 +878,6 @@ private struct DisplayDocumentSummary: View {
     }
 }
 
-/// Prepared generated HTML, retained by `ChatMediaLoader` for its exact
-/// artifact identity like any other inline display artifact.
 struct PreparedDisplayHTML: Sendable, ChatInlineArtifact {
     let source: String
 
@@ -973,10 +914,6 @@ private struct DisplayHTMLArtifactView: View {
         return model.chatMediaIdentity(blobID: artifact.id, sessionID: sessionID)
     }
 
-    /// Prepared markup this card loaded itself, or — only for the first frame
-    /// after a remount — the markup the loader retained for this exact source.
-    /// Markup above the loader's per-value ceiling is never retained, and the
-    /// card that prepared it still renders it.
     private var html: String? {
         guard let identity = mediaIdentity else { return nil }
         if loadedIdentity == identity, let loadedHTML { return loadedHTML }
@@ -984,7 +921,6 @@ private struct DisplayHTMLArtifactView: View {
     }
 
     private func load() async {
-        // Covered or retired surfaces neither start nor publish this work.
         guard presentationActivity.allowsPresentationPublication else { return }
         guard let artifact = display.artifact, artifact.size <= 5 * 1_024 * 1_024,
               let identity = mediaIdentity else {
@@ -1000,15 +936,12 @@ private struct DisplayHTMLArtifactView: View {
                 }
                 return PreparedDisplayHTML(source: source)
             }
-            // A retired surface or a superseded identity publishes nothing.
             guard !Task.isCancelled,
                   presentationActivity.allowsPresentationPublication,
                   mediaIdentity == identity else { return }
             loadedIdentity = identity
             loadedHTML = source.source
         } catch is CancellationError {
-            // Interrupted work publishes nothing, so the next activation asks
-            // again instead of keeping a placeholder forever.
         } catch {
             guard !Task.isCancelled,
                   presentationActivity.allowsPresentationPublication,
@@ -1036,8 +969,6 @@ struct StaticDisplayWebView: UIViewRepresentable {
         view.isOpaque = false
         view.backgroundColor = UIColor(Color.tronBackground)
         view.scrollView.backgroundColor = UIColor(Color.tronBackground)
-        // The document sheet owns the custom top blur. WebKit's automatic
-        // edge treatment can add a hard cutoff and dividing line beneath it.
         view.scrollView.topEdgeEffect.isHidden = true
         return view
     }
@@ -1163,8 +1094,6 @@ private struct DisplayUnavailableView: View {
 
     var body: some View {
         if context == .floating {
-            // The floating window already owns its glass surface. A nested
-            // info card adds a second container and overflows small windows.
             Text(text)
                 .font(TronTypography.secondaryDescription)
                 .foregroundStyle(Color.tronTextSecondary)
@@ -1228,11 +1157,6 @@ private struct LiveDisplayView: View {
         } ?? false
         let active = scenePhase == .active && viewingActivity.allowsViewing && presentationActivity.allowsPresentationPublication
             && managedActivityAllowsPublication
-        // Keep the native activity host on one structural container. A Group
-        // distributes its background to each conditional branch: the first
-        // image/error would remount the host, restart the task and clear itself.
-        // The source/activity check is evaluated by the body, before the task
-        // that retires old pixels gets a chance to run.
         let rendersCurrentResult = renderedSource == source && active
         ZStack {
             if rendersCurrentResult, let image {
@@ -1248,13 +1172,7 @@ private struct LiveDisplayView: View {
         }
         .accessibilityLabel((rendersCurrentResult ? failure?.message : nil) ?? display.altText)
         .background(LiveActivityHost(activity: viewingActivity).allowsHitTesting(false))
-        // Phase already participates in this task ID. An onChange that also
-        // increments the native generation feeds a second ID change back into
-        // the same update, so SwiftUI can suppress the final resume task. Only
-        // native transitions own that generation and its post-await fence.
         .task(id: PresentationActivityTaskID(source: source, presentationActive: active)) {
-            // A cancelled task may still enter its body; it cannot supersede
-            // the newer task's request fence or clear its pixels.
             guard !Task.isCancelled else { return }
             let request = UUID()
             requestID = request
@@ -1280,8 +1198,6 @@ private struct LiveDisplayView: View {
             return
         }
         func current() -> Bool {
-            // Read the mutable presentation owner after each await, not the
-            // captured Environment activity or SwiftUI cancellation timing.
             guard let activityCoordinator, let surface = source.surface else { return false }
             let activity = activityCoordinator.activity(for: surface)
             return !Task.isCancelled && requestID == request && model.selectedGatewayProfileID() == profileID
@@ -1338,8 +1254,6 @@ private struct LiveDisplayView: View {
             if requestID == request { image = nil }
             await lease.close()
         } onCancel: {
-            // Stop remote capture without waiting for synchronous ImageIO to
-            // drain. The original lease owns one cleanup task, joined above.
             Task { await lease.close() }
         }
     }

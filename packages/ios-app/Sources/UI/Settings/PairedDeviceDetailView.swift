@@ -84,8 +84,6 @@ struct PairedDeviceDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
-                    // Seed each presentation from the latest authoritative label;
-                    // cancelling the shared alert must not retain an abandoned edit.
                     renameText = savedLabel
                     showingRename = true
                 } label: {
@@ -114,8 +112,6 @@ struct PairedDeviceDetailView: View {
             allowsEmpty: true,
             validation: { labelValid($0) }
         ) { value in
-            // Capture the accepted value before the managed confirmation sheet
-            // retires this surface; the mutation owner continues independently.
             let acceptedLabel = value.trimmingCharacters(in: .whitespacesAndNewlines)
             Task { await saveLabel(acceptedLabel) }
         }
@@ -395,7 +391,6 @@ struct PairedDeviceDetailView: View {
             model.presentError(error)
         }
         guard generation == loadGeneration, admitsReadResult else { return }
-        // Initial, polling and post-command status reads share one latest lane.
         await loadStatus()
     }
 
@@ -471,8 +466,6 @@ struct PairedDeviceDetailView: View {
         labelReadGeneration &+= 1
         let generation = labelPresentationGeneration
         savingLabel = true
-        // This flag belongs to the accepted mutation, not a disposable read.
-        // Covering the sheet must not admit a second concurrent save.
         defer { savingLabel = false }
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
         do {

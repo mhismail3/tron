@@ -94,9 +94,6 @@ struct ProvidersSettingsView: View {
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             guard active else {
-                // The parent is covered while a provider detail sheet loads.
-                // Retire its request, but keep same-target snapshots mounted so
-                // the provider row's usage line remains visually continuous.
                 usageController.begin()
                 invalidateCatalogRefresh()
                 return
@@ -104,8 +101,6 @@ struct ProvidersSettingsView: View {
         }
     }
 
-    /// TypeSafe has classifier models but deliberately no chat models. Keep
-    /// its API-key setup reachable even if a Gateway omits it from chat catalog rows.
     private var classifierOnlyTypeSafeProvider: ProviderSummary {
         ProviderSummary(id: "typesafe", name: "TypeSafe (classifier)", configured: false,
                         usageSupported: false, localOnly: false, authSource: nil,
@@ -188,9 +183,6 @@ struct ProvidersSettingsView: View {
         manualReloadGeneration &+= 1
     }
 
-    /// Rows the Gateway reports as first-party usage capable reserve their usage
-    /// line while the bounded read is pending. The Gateway owns that support set
-    /// so the client never duplicates the adapter table.
     private func showsUsageLoadingLine(for provider: ProviderSummary) -> Bool {
         ProviderUsagePresentation.showsUsageLoadingLine(
             snapshot: usageController.snapshots[provider.id],
@@ -217,9 +209,6 @@ struct ProvidersSettingsView: View {
             loadFailed = false
         }
 
-        // Publish an already-authoritative catalog synchronously. A reconnect or
-        // competing settings refresh may revoke the network request, but should
-        // never blank a useful catalog that this visible sheet already owns.
         if let existing = model.providerCatalog(for: requestedTarget)?.providers {
             providers = existing
         }
@@ -250,8 +239,6 @@ struct ProvidersSettingsView: View {
             providers = catalog.providers
             loadFailed = false
         } else if !succeeded {
-            // Retain the last successful bounded projection rather than flashing
-            // an empty sheet during transient reconnect/catalog invalidation.
             loadFailed = providers.isEmpty
         }
         return true

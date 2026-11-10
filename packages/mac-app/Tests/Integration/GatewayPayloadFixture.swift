@@ -2,9 +2,6 @@ import CryptoKit
 import Foundation
 @testable import TronMac
 
-/// Builds an immutable Gateway payload that both the Swift validator and the
-/// C launcher admit. `runtimeExecutable` is written as `runtime/node-arm64` and
-/// `runtime/node-x64`; the launcher requires at least 1 MiB.
 func makeGatewayPayload(
     root: URL,
     channel: String,
@@ -125,8 +122,6 @@ func makeGatewayPayload(
         ),
         to: root.appendingPathComponent("manifest.json")
     )
-    // The launcher admits only immutable payload trees. Keep the fixture
-    // writable while assembling it, then model the published permissions.
     if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [URLResourceKey.isDirectoryKey]) {
         for case let item as URL in enumerator {
             let directory = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
@@ -140,9 +135,6 @@ func makeGatewayPayload(
 func writePayloadDocument<T: Encodable>(_ value: T, to url: URL) throws {
     let fm = FileManager.default
     let encoder = JSONEncoder()
-    // The manifest is written by bundle-gateway.sh and gateway-payload-deploy.mjs,
-    // neither of which escapes a solidus, and the launcher's bounded parser
-    // rejects every escape sequence. The fixture must model those bytes.
     encoder.outputFormatting = [.withoutEscapingSlashes]
     try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
     try encoder.encode(value).write(to: url)

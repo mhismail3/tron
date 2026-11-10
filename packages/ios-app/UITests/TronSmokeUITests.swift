@@ -4,10 +4,6 @@ import Vision
 import XCTest
 
 final class TronSmokeUITests: XCTestCase {
-    /// The task list names each task and its project; a finished task whose result the
-    /// current Home has not admitted can be redelivered from its detail. Stop and steer
-    /// live in the worker's own session (#911), so the detail has neither; the journey in
-    /// TronHomeSheetsUITests opens that session.
     @MainActor
     func testHomeTaskListAndRedelivery() {
         continueAfterFailure = false
@@ -19,7 +15,6 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
         tapManageRow(app, "home-manage-tasks")
         XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
-        // A row names the task and its project; spend and unavailable copy never appear in a row.
         XCTAssertTrue(app.buttons["home-task-active"].label.contains("Settings model: continue epic #758"))
         XCTAssertTrue(app.buttons["home-task-active"].label.contains("tron"))
         XCTAssertFalse(app.staticTexts["Spend unavailable"].exists)
@@ -28,7 +23,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-task-detail"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["home-task-spend"].label.contains("12 in · 480 cached · 3 out"),
                       "Fresh input stays apart from cache reads (#1250)")
-        // Bring the Tokens row on screen so the capture shows the split it asserts.
         let spendRow = app.descendants(matching: .any)["home-task-spend"]
         for _ in 0..<4 where !spendRow.isHittable { app.swipeUp() }
         keepScreenshot(named: "home-task-detail-spend")
@@ -58,13 +52,10 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:2", timeout: 5))
         revokeHomePermission(app, "Revoke grant grant-one")
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:3", timeout: 5))
-        // Grant requests are decided only on their exact card in Home's chat.
         XCTAssertFalse(app.staticTexts["Pending requests"].exists)
         keepScreenshot(named: "home-task-permission-revoked")
     }
 
-    /// Revoking is destructive: a cancelled confirmation changes nothing, and only the
-    /// confirmed revoke reaches the Gateway.
     @MainActor
     func testHomePermissionRevokeRequiresConfirmation() {
         continueAfterFailure = false
@@ -87,11 +78,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
     }
 
-    /// A delayed socket response must not shrink the scroll viewport (and its
-    /// edge material) to the loading row's intrinsic width, and the one shared
-    /// sheet pulse stays centered in the visible sheet at medium and large detents
-    /// and leaves chrome still when content arrives (#890). Exercise the real
-    /// managed parent/child sheet stack, not a replica of its layout.
     @MainActor
     func testHomeSheetLoadingSurfaceRemainsFullWidth() {
         continueAfterFailure = false
@@ -115,7 +101,6 @@ final class TronSmokeUITests: XCTestCase {
             releaseHeldTaskList()
             XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 20))
             XCTAssertFalse(app.descendants(matching: .any)["sheet-loading"].exists, "Arrived content retires the pulse")
-            // Independent Manage Home reads travel together, not one round trip each.
             XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-sheet-read-peak"], containing: "sheet-read-peak:2", timeout: 2))
             XCTAssertEqual(done.frame.midY, mediumY, accuracy: 2, "Loading must not move sheet chrome")
             keepScreenshot(named: "sheet-\(appearance)-manage-loaded")
@@ -180,14 +165,11 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Releases the fixture's next held `home.taskList` read (Manage Home's or the Tasks sheet's).
     private func releaseHeldTaskList() {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-task-list" as CFString), nil, nil, true)
     }
 
-    /// Asserts the one shared sheet pulse is exactly centered in the visible sheet
-    /// and returns that sheet's top, so callers can prove a detent change moved it.
     @MainActor
     @discardableResult
     private func assertHomeLoadingSurface(_ app: XCUIApplication, name: String, done: XCUIElement) -> CGFloat {
@@ -198,8 +180,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "sheet-loading").count, 1, "One pulse per sheet stack")
         XCTAssertFalse(app.staticTexts["Loading Home…"].exists, "Sheet loading never shows wrapping text")
         let window = app.windows.firstMatch.frame
-        // The surface is the whole visible sheet: its full (inset, at the medium
-        // detent) width, down to its bottom edge, and from its top above the toolbar.
         let sheet = surface.frame
         XCTAssertEqual(sheet.midX, window.midX, accuracy: 1, name)
         XCTAssertGreaterThan(sheet.width, window.width - 24, name)
@@ -210,9 +190,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(loading.frame.midX, sheet.midX, accuracy: 1, "The pulse is centered in the visible sheet (\(name))")
         XCTAssertEqual(loading.frame.midY, sheet.midY, accuracy: 1, "The pulse is centered in the visible sheet (\(name))")
         keepScreenshot(named: "sheet-\(name)-loading")
-        // The drawn pulse (not just its accessibility frame) sits there too, is
-        // small (no label), and is drawn in the title's color. It fades in and its waves
-        // breathe, so sample a few frames rather than trusting one instant.
         let probe = CGRect(x: sheet.midX - 80, y: sheet.midY - 80, width: 160, height: 160)
         var drawn: (center: CGPoint, extent: CGFloat)?
         for _ in 0..<5 where drawn == nil {
@@ -230,7 +207,6 @@ final class TronSmokeUITests: XCTestCase {
         return sheet.minY
     }
 
-    /// Centroid and extent (points) of saturated pixels, the title-colored pulse, in `area`.
     private func accentCentroid(_ image: UIImage, in area: CGRect, windowWidth: CGFloat) -> (center: CGPoint, extent: CGFloat)? {
         guard let source = image.cgImage else { return nil }
         let scale = CGFloat(source.width) / windowWidth
@@ -246,10 +222,7 @@ final class TronSmokeUITests: XCTestCase {
             for x in 0..<width {
                 let i = (y * width + x) * 4
                 let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
-                // The pulse is the sheet title's color (green for Manage Home, its
-                // row's teal for a sub-sheet): any saturated ink, never the gray material.
                 guard max(r, g, b) - min(r, g, b) > 24 else { continue }
-                // CGContext rows run bottom-up.
                 let row = height - 1 - y
                 sumX += Double(x); sumY += Double(row); count += 1
                 minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, row); maxY = max(maxY, row)
@@ -268,9 +241,6 @@ final class TronSmokeUITests: XCTestCase {
         let scroll = app.scrollViews.firstMatch
         XCTAssertGreaterThan(scroll.frame.width, app.windows.firstMatch.frame.width * 0.9,
                              "The sheet viewport and its edge material must not inherit the loading row's intrinsic width")
-        // Accessibility reports the full ScrollView even when its overlay is
-        // intrinsically narrow. Compare the actual material above the title,
-        // away from text, controls and rounded corners; no device-specific golden.
         let title = app.staticTexts[title].firstMatch
         let screenshot = XCUIScreen.main.screenshot().image
         let y = title.frame.minY - 12
@@ -308,7 +278,6 @@ final class TronSmokeUITests: XCTestCase {
             app.buttons["home-pinned-row"].tap()
             openManageHome(app)
             if state == "blocked" {
-                // A memory problem is the status pill plus the Memory row's subtitle.
                 XCTAssertTrue(waitForLabel(app.descendants(matching: .any)["home-manage-state"], containing: "Memory blocked", timeout: 5))
                 XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "source-unavailable")).firstMatch.waitForExistence(timeout: 5))
                 keepScreenshot(named: "home-sheet-blocked")
@@ -338,14 +307,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(empty.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         empty.buttons["home-pinned-row"].tap()
         openManageHome(empty)
-        // Before Home's first activation, Manage Home's context card has no activation line.
         XCTAssertTrue(empty.descendants(matching: .any)["home-context-summary"].waitForExistence(timeout: 5), empty.debugDescription)
         XCTAssertFalse(empty.descendants(matching: .any)["home-context-activation"].exists)
         keepScreenshot(named: "home-context-empty")
     }
 
-    /// Home shows the request's remaining context without a session breakdown,
-    /// raw entry IDs or byte counts.
     @MainActor
     func testHomeContextSummaryOmitsSessionBreakdownAndRawIdentifiers() {
         continueAfterFailure = false
@@ -368,8 +334,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-context-populated")
     }
 
-    /// Opening a memory row shows its detail; its exact evidence opens from one standard row,
-    /// and the next page continues to the older summaries.
     @MainActor
     func testHomeMemoryRowDetailOpensExactEvidence() {
         continueAfterFailure = false
@@ -393,7 +357,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-evidence-text"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Canonical original, not the memory projection"].exists)
         keepScreenshot(named: "home-exact-evidence")
-        // Evidence is a TronDocumentSheet: its Done is the sheet's own toolbar Done.
         let evidenceDone = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)
         XCTAssertNotNil(evidenceDone, app.debugDescription)
         evidenceDone?.tap()
@@ -401,17 +364,13 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-detail"].waitForExistence(timeout: 5))
         app.buttons["home-sheet-done-memory-item"].tap()
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        // The oldest summary is on the next page of the newest-first view.
         XCTAssertFalse(app.descendants(matching: .any)["home-memory-summary-0-16"].exists)
-        // The feed loads that page itself as the reader scrolls toward it.
         let oldest = app.descendants(matching: .any)["home-memory-summary-0-16"]
         for _ in 0..<12 where !oldest.exists { app.swipeUp() }
         XCTAssertTrue(oldest.waitForExistence(timeout: 5))
         keepScreenshot(named: "home-memory-next-page")
     }
 
-    /// The sealed chapter opens its transcript; the active chapter, the current chat, does
-    /// not. Browsing a chapter's memory filters the memory list to that chapter.
     @MainActor
     func testHomeChaptersSealedOpensTranscriptActiveBrowsesMemory() {
         continueAfterFailure = false
@@ -421,8 +380,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        // Chapters is below the medium viewport; expand before tapping rather
-        // than relying on XCTest to activate a partly off-screen row.
         expandSettingsSheet(app, title: "Manage Home")
         tapManageRow(app, "home-manage-chapters")
         XCTAssertTrue(app.buttons["home-chapter-2"].waitForExistence(timeout: 5), app.debugDescription)
@@ -448,7 +405,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-chapter-read-only")
     }
 
-    /// Capture the standard rows and conditional exceptions without mutating grants.
     @MainActor
     func testHomeDelegationSettingsApprovalCaptures() {
         continueAfterFailure = false
@@ -478,7 +434,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Compact destructive capsule review, without accepting a revocation.
     @MainActor
     func testCaptureHomeRevokeCapsuleForReview() {
         continueAfterFailure = false
@@ -504,8 +459,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Capture-only review of the production surfaces. Readiness/navigation here
-    /// is not behavioral acceptance of edits, reset, provenance, or prompt menus.
     @MainActor
     func testCaptureCompactSettingsAndFadeInLightAndDark() {
         continueAfterFailure = false
@@ -568,8 +521,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Approval-only captures of the reported Compaction mix and the shared
-    /// value/Revert/Unset labels. Mutation/geometry acceptance runs after review.
     @MainActor
     func testCaptureSettingsTrailingAlignmentForReview() {
         continueAfterFailure = false
@@ -597,8 +548,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Measure the rendered glass, independently of the transparent AX target.
-    /// This fails on the old centered-circle layout even though its AX edges agree.
     @MainActor
     func testSettingsPaintedEdgesSpacingAndHitTargets() {
         for appearance in ["light", "dark"] {
@@ -610,8 +559,6 @@ final class TronSmokeUITests: XCTestCase {
                     if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"] }
                     app.launch()
                     let row: (String) -> XCUIElement = { app.descendants(matching: .any)["settings-row-\($0)"] }
-                    // A non-inspectable row combines AX metadata into a parent
-                    // button too. Select the real labeled child, never that row.
                     let button: (String, String) -> XCUIElement = { id, label in
                         app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", id, label)).firstMatch
                     }
@@ -632,7 +579,6 @@ final class TronSmokeUITests: XCTestCase {
                         }
                         XCTAssertTrue(viewport.contains(target.frame), "Measure the entire visible target: \(target.frame)")
                         let hit = target.frame
-                        // AX can serialize 44 as 43.999999999999986.
                         XCTAssertGreaterThanOrEqual(hit.width + 0.001, 44)
                         XCTAssertGreaterThanOrEqual(hit.height + 0.001, 44)
                         let visible = paintedSettingsControl(target, in: app, backgroundX: inherited.frame.maxX + 6)
@@ -645,7 +591,6 @@ final class TronSmokeUITests: XCTestCase {
                         return visible
                     }
                     let right = measure(inherited).maxX
-                    // Native renderer groups use the standard 20pt sheet + 14pt row inset.
                     XCTAssertEqual(right, app.windows.firstMatch.frame.maxX - 34, accuracy: 1)
                     XCTAssertEqual(measure(short).maxX, right, accuracy: 1)
                     for (value, circle) in pairs {
@@ -665,17 +610,12 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Center-line extents of actual glass pixels against adjacent row material.
-    /// No production geometry hook or inferred inset from the 44pt frame: raster
-    /// sampling detects a centered 28pt circle ending 8pt before the target edge.
     @MainActor
     private func paintedSettingsControl(_ target: XCUIElement, in app: XCUIApplication, backgroundX: CGFloat) -> CGRect {
         guard let image = XCUIScreen.main.screenshot().image.cgImage else { XCTFail("Missing pixels"); return .zero }
         let frame = target.frame
         let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
         func strip(_ rect: CGRect) -> [[Int]] {
-            // AX coordinates can be fractional pixels. CGImage expands fractional
-            // crops; round explicitly so a one-pixel scanline stays one pixel.
             let pixels = CGRect(x: rect.minX.rounded(), y: rect.minY.rounded(),
                                 width: rect.width.rounded(), height: rect.height.rounded())
             guard let crop = image.cropping(to: pixels) else { XCTFail("Missing control raster: \(rect)"); return [] }
@@ -690,15 +630,7 @@ final class TronSmokeUITests: XCTestCase {
             }
             return samples
         }
-        // Sample beyond the entire action cluster, not just this target. A reset
-        // now precedes its value: target.maxX + 6 falls inside the neighboring pill.
         let background = strip(CGRect(x: backgroundX * scale, y: frame.midY * scale, width: 1, height: 1)).first ?? []
-        // The extent is the widest surface. iOS 27 glass paints its rim just
-        // outside its shape, so the next control's rim reaches into this frame;
-        // light glass fades to the row's color up to ~2.5pt inside its edge, and
-        // its faint shadow begins ~7pt below it. A background gap of 4pt or more
-        // separates surfaces and is measured as spacing; a smaller gap merges
-        // into the neighbor and reads as ~0. Both fail the 16pt check below.
         func extent(_ rect: CGRect, reversed: Bool = false) -> ClosedRange<CGFloat> {
             let samples = strip(rect)
             let isInk = samples.map { sample in (zip(sample, background).map { abs($0.0 - $0.1) }.max() ?? 0) > 4 }
@@ -714,14 +646,11 @@ final class TronSmokeUITests: XCTestCase {
         }
         let horizontal = extent(CGRect(x: frame.minX * scale, y: frame.midY * scale, width: frame.width * scale, height: 1))
         let centerX = frame.minX + (horizontal.lowerBound + horizontal.upperBound) / 2
-        // CGContext's one-column buffer is bottom-up; restore screen coordinates.
         let vertical = extent(CGRect(x: centerX * scale, y: frame.minY * scale, width: 1, height: frame.height * scale), reversed: true)
         return CGRect(x: frame.minX + horizontal.lowerBound, y: frame.minY + vertical.lowerBound,
                       width: horizontal.upperBound - horizontal.lowerBound, height: vertical.upperBound - vertical.lowerBound)
     }
 
-    /// Capture-only navigation for the Accounts → Providers grouping. Count and
-    /// Refresh are rendered from the real catalog owner over a synthetic socket.
     @MainActor
     func testCaptureGlobalAccountsAndProviderModelsInLightAndDark() {
         continueAfterFailure = false
@@ -780,17 +709,11 @@ final class TronSmokeUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         let applied = app.staticTexts["fixture.settings-renderer-applied"]
         openRendererSection(app, "model")
-        // Medium sheets scale the entire native AX projection (386/402 here).
-        // Measure logical target sizes at large; the other journeys operate at medium.
         expandSettingsSheet(app, title: "Agent Behavior")
         let row = app.descendants(matching: .any)["settings-row-model.ref"]
         let editor = settingEditor(row)
         let reset = app.buttons["settings-row-model.ref-reset"]
         for target in [editor, reset] {
-            // Sheet presentation briefly scales the underlying AX geometry.
-            // Wait for the target's actual admitted 44-point frame, not a sleep.
-            // Frames are derived from fractional origins, so compare on the
-            // display's pixel grid rather than raw floating-point differences.
             let scale = CGFloat(XCUIScreen.main.screenshot().image.cgImage?.width ?? 0) / app.windows.firstMatch.frame.width
             func points(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
@@ -802,14 +725,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Lite")).firstMatch.waitForExistence(timeout: 5))
         closeTopSheet(app)
         XCTAssertEqual(applied.label, "applied:0", "Opening/dismissing an editor cannot submit its draft")
-        // The leading strip is invisible hit area after painted-edge alignment.
-        // It must still invoke Revert, not the adjacent value editor or row body.
         reset.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5)).tap()
         XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
         XCTAssertEqual(editor.value as? String, "Fixture Lite")
         closeTopSheet(app)
         openRendererSection(app, "context")
-        // The native toggle exposes its semantic label, not the containing row ID.
         let toggle = app.switches["Block images"]
         reveal(toggle, in: app)
         let before = toggle.value as? String
@@ -819,8 +739,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "1308-independent-row-actions")
     }
 
-    /// Measure the rendered shared-row glyph, not its fixed AX/layout frame:
-    /// an oversized SF Symbol can paint outside that frame at accessibility sizes.
     @MainActor
     func testSharedSettingsGlyphStaysInsideColumn() {
         for mode in ["light", "dark"] {
@@ -840,9 +758,6 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(row.waitForExistence(timeout: 5))
                 XCTAssertTrue(row.isHittable)
                 XCTAssertGreaterThanOrEqual(row.frame.height, 44)
-                // Native sheet presentation can scale the entire content at
-                // XXXL. Normalize its 20pt sheet insets, not the glyph's layout
-                // frame (which cannot reveal ink overflowing that frame).
                 let presentationScale = row.frame.width / (app.windows.firstMatch.frame.width - 40)
                 if large {
                     XCTAssertGreaterThan(title.frame.height / presentationScale, standardTitleHeight * 2,
@@ -872,8 +787,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Color-select the actual emerald symbol against neutral text and the
-    /// low-saturation card material. No app geometry hook or glyph AX exposure.
     @MainActor
     private func paintedSettingsGlyph(row: CGRect, label: CGRect, in app: XCUIApplication) -> CGRect {
         guard let image = XCUIScreen.main.screenshot().image.cgImage else { XCTFail("Missing screenshot"); return .zero }
@@ -891,7 +804,6 @@ final class TronSmokeUITests: XCTestCase {
             for x in 0..<crop.width {
                 let offset = (y * crop.width + x) * 4
                 let r = Int(bytes[offset]), g = Int(bytes[offset + 1]), b = Int(bytes[offset + 2])
-                // ThemeColor.emerald ink: light #065F46, dark #6EE7B7.
                 if g > r + 60 && g > b + 15 {
                     minX = min(minX, x); maxX = max(maxX, x)
                     minY = min(minY, y); maxY = max(maxY, y)
@@ -899,13 +811,11 @@ final class TronSmokeUITests: XCTestCase {
             }
         }
         guard maxX >= minX else { XCTFail("No emerald glyph ink"); return .zero }
-        // CGContext rows are bottom-up; map back into native screen points.
         return CGRect(x: (region.minX + CGFloat(minX)) / scale,
                       y: (region.minY + CGFloat(crop.height - 1 - maxY)) / scale,
                       width: CGFloat(maxX - minX + 1) / scale, height: CGFloat(maxY - minY + 1) / scale)
     }
 
-    /// Expanded route preview only; durable policy/receipt acceptance waits for approval.
     @MainActor
     func testExpandedSettingsRoutesForVisualReview() {
         continueAfterFailure = false
@@ -984,8 +894,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Visual approval journey over production surfaces with explicit synthetic
-    /// wire values. This is navigation/rendering proof, not real-Gateway policy proof.
     @MainActor
     func testSettingsScopeVisualReviewInLightAndDark() {
         continueAfterFailure = false
@@ -1063,8 +971,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Session, Home and Project settings sheets at the largest accessibility
-    /// type size, top and scrolled, for visual review (#1634).
     @MainActor
     func testCaptureSettingsScopesAtAccessibilityXXXL() {
         continueAfterFailure = false
@@ -1117,8 +1023,6 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     private func captureSettingsTools(_ app: XCUIApplication, scope: String, appearance: String) {
         if scope == "project" {
-            // Tools cannot be set by Project. Inspect its admitted model and
-            // exact repository field, without opening another editor.
             let model = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
             reveal(model, in: app)
             XCTAssertTrue(model.waitForExistence(timeout: 5), app.debugDescription)
@@ -1145,8 +1049,6 @@ final class TronSmokeUITests: XCTestCase {
         let editor = settingEditor(row)
         reveal(editor, in: app)
         XCTAssertTrue(editor.isHittable, app.debugDescription)
-        // Rendered pixels, not accessibility labels: a truncated label keeps its
-        // full AX text, so only the painted glyphs prove nothing was cut off.
         assertRendersUntruncated(row.staticTexts["Overridden"], matching: "^Overridden$", named: "1325-\(scope)-\(appearance)-overridden-pill")
         assertRendersUntruncated(editor, matching: #"^\d+ of \d+ tools$"#, named: "1325-\(scope)-\(appearance)-tools-chip")
         let resize = app.descendants(matching: .any)["settings-row-context.images.autoResize"]
@@ -1172,8 +1074,6 @@ final class TronSmokeUITests: XCTestCase {
             return
         }
         if scope == "session" {
-            // Session Settings has no Models subsheet: the chat's model and
-            // Thinking rows are Manage Session's model card.
             XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
             XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.thinking_role_chat_"].waitForExistence(timeout: 5), app.debugDescription)
@@ -1191,7 +1091,6 @@ final class TronSmokeUITests: XCTestCase {
         closeTopSheet(app)
     }
 
-    /// Recognizes the element's painted text; an ellipsis or a shortened word fails.
     @MainActor
     private func assertRendersUntruncated(_ element: XCUIElement, matching pattern: String, named name: String,
                                           file: StaticString = #filePath, line: UInt = #line) {
@@ -1212,8 +1111,6 @@ final class TronSmokeUITests: XCTestCase {
                         "\(name) rendered \"\(text)\", expected \(pattern)", file: file, line: line)
     }
 
-    /// At least 6 points of row background (sampled after the pill's painted
-    /// capsule, its accessibility frame) separate the pill from its control.
     @MainActor
     private func assertVisibleGapBeforePill(in row: XCUIElement, named name: String,
                                             file: StaticString = #filePath, line: UInt = #line) {
@@ -1238,7 +1135,7 @@ final class TronSmokeUITests: XCTestCase {
         context.draw(strip, in: CGRect(x: 0, y: 0, width: width, height: 1))
         func color(_ x: Int) -> [Int] { (0..<3).map { Int(pixels[max(0, min(width - 1, x)) * 4 + $0]) } }
         let background = color(Int((pill.frame.maxX + 3) * scale))
-        var x = Int(pill.frame.minX * scale) - 3 // past the capsule's antialiased edge
+        var x = Int(pill.frame.minX * scale) - 3
         var gap = 0
         while x > 0, zip(color(x), background).allSatisfy({ abs($0 - $1) <= 12 }) { gap += 1; x -= 1 }
         XCTAssertGreaterThanOrEqual(CGFloat(gap + 3) / scale, 6,
@@ -1246,7 +1143,6 @@ final class TronSmokeUITests: XCTestCase {
             file: file, line: line)
     }
 
-    /// Measure the actual shared Revert button, not its enclosing settings row.
     @MainActor
     private func assertCircularRevert(_ button: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
         let frame = button.frame
@@ -1285,7 +1181,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Stop response"].exists, "Stop is the composer's control, not a Manage Home row")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-stop"].exists)
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Home · ")).firstMatch.exists, "The state is a pill, not a row")
-        // Pause and Disable live only at the bottom of Home Settings.
         for _ in 0..<4 where !app.descendants(matching: .any)["home-manage-settings"].isHittable { app.swipeUp() }
         for row in ["home-manage-pause", "home-manage-resume", "home-manage-disable", "home-settings-controls"] {
             XCTAssertFalse(app.descendants(matching: .any)[row].exists, "\(row) is not a Manage Home row")
@@ -1304,10 +1199,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-settings-controls")
     }
 
-
-
-    /// Every Manage Home sub-sheet opens at the medium detent, as the Manage Session
-    /// sub-sheets do: its frame stays well short of the full window.
     @MainActor
     func testManageHomeSubSheetsOpenAtMedium() {
         continueAfterFailure = false
@@ -1322,8 +1213,6 @@ final class TronSmokeUITests: XCTestCase {
                             ("home-manage-chapters", "home-sheet-done-chapters"), ("home-manage-tasks", "home-sheet-done-tasks")] {
             let rowElement = app.descendants(matching: .any)[row]
             XCTAssertTrue(rowElement.waitForExistence(timeout: 5), row)
-            // The medium detent crops the Manage Home list at the window's bottom edge, where a row's centre is off
-            // screen. Drag the list up until the row sits clear of that edge, then tap its centre.
             for _ in 0..<3 where rowElement.frame.maxY > windowHeight - 60 {
                 let window = app.windows.firstMatch
                 window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
@@ -1390,13 +1279,10 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        // The main sheet reads the task list for its Tasks subtitle, then the Tasks sheet
-        // reads it again: two reads before the reconnect.
         let reads = app.staticTexts["fixture.home-task-list-reads"]
         XCTAssertTrue(waitForLabel(reads, containing: "task-list-reads:1", timeout: 10))
         tapManageRow(app, "home-manage-tasks")
         XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5), app.debugDescription)
-        // The fixture reconnects once after the first read; the mounted sheet must re-read.
         XCTAssertTrue(waitForLabel(reads, containing: "task-list-reads:3", timeout: 10), "Mounted sheet did not re-read after reconnect")
         XCTAssertTrue(app.buttons["home-task-active"].exists)
         keepScreenshot(named: "proof-reconnected-tasks")
@@ -1424,8 +1310,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-settings-browser-unsupported")
     }
 
-    /// Stop is the composer's control: it stops the accepted activation through the
-    /// same canonical operation, while Pause never does.
     @MainActor
     func testManageHomeStatesAndStopOwner() {
         for (phase, label) in [("ready", "Ready"), ("active", "Working"), ("paused", "Paused"),
@@ -1445,7 +1329,6 @@ final class TronSmokeUITests: XCTestCase {
                 tapManageRow(app, "home-manage-pause")
                 XCTAssertTrue(app.descendants(matching: .any)["home-manage-resume"].waitForExistence(timeout: 5), app.debugDescription)
                 closeHomeSettings(app)
-                // Pause leaves the accepted response running: the phase, not the memory, owns the pill.
                 XCTAssertTrue(waitForLabel(state, containing: "Working", timeout: 5))
                 app.buttons["home-sheet-done-manage"].tap()
                 XCTAssertTrue(app.buttons["Stop Tron"].waitForExistence(timeout: 5), "The composer owns Stop")
@@ -1475,8 +1358,6 @@ final class TronSmokeUITests: XCTestCase {
         closeHomeSettings(app)
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].exists)
-        // Authoritative disable does not resolve an unknown command receipt: the
-        // ring still manages Home, and the fresh read shows Disabled.
         openManageHome(app)
         XCTAssertTrue(waitForLabel(app.descendants(matching: .any)["home-manage-state"], containing: "Disabled", timeout: 8))
         openHomeControls(app)
@@ -1508,7 +1389,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-pause"].waitForExistence(timeout: 5), app.debugDescription)
         closeHomeSettings(app)
         XCTAssertTrue(waitForLabel(state, containing: "Ready", timeout: 5))
-        // Disable is destructive: a cancelled confirmation keeps Home enabled.
         openHomeControls(app)
         tapManageRow(app, "home-manage-disable")
         XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
@@ -1522,14 +1402,12 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(state, containing: "Disabled", timeout: 5))
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].exists)
-        // Confirmed disable returns the ring to Manage Session.
         XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Session", timeout: 8))
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["Manage Home"].exists)
         app.terminate()
     }
 
-    /// Home's role title ignores a generated canonical session name.
     @MainActor
     func testHomeTitleUsesCanonicalRole() {
         continueAfterFailure = false
@@ -1546,9 +1424,6 @@ final class TronSmokeUITests: XCTestCase {
         openManageHome(app)
     }
 
-    /// Manage Home opens at medium, drags to large, and lists every Home entry. Its
-    /// child sheets keep their own lifetime and return to it; a sealed chapter opens
-    /// read-only and never claims the Home status.
     @MainActor
     func testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings() {
         continueAfterFailure = false
@@ -1561,7 +1436,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(homeControlCount.waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
-        // Home retains its direct Settings gear; ordinary chats use Manage Session.
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.navigationBars.buttons["Manage Home"].exists)
@@ -1572,7 +1446,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-gear-settings-sheet")
         app.buttons["Done"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5), app.debugDescription)
-        // Its context ring opens Manage Home at the medium detent, like Manage Session.
         openManageHome(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
         XCTAssertTrue(state.label.contains("Ready"), state.label)
@@ -1582,7 +1455,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertGreaterThan(mediumTop, windowHeight * 0.40, "Manage Home must open at its medium detent")
         keepScreenshot(named: "manage-home-medium")
         XCTAssertTrue(homeControlCount.label.contains("control-count:0"), "Opening Manage Home must not apply controls")
-        // It drags to large from the sheet title.
         let title = app.staticTexts["Manage Home"].firstMatch
         title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
         XCTAssertLessThan(done.frame.minY, mediumTop - 100, "Manage Home must drag to its large detent")
@@ -1594,14 +1466,10 @@ final class TronSmokeUITests: XCTestCase {
         for row in ["home-manage-pause", "home-manage-disable"] {
             XCTAssertFalse(app.descendants(matching: .any)[row].exists, "\(row) lives in Home Settings")
         }
-        // A child surface keeps its own sheet lifetime above Manage Home and returns to it.
         tapManageRow(app, "home-manage-memory-browser")
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-row-39"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["home-sheet-done-memory"].tap()
         XCTAssertTrue(state.waitForExistence(timeout: 5), app.debugDescription)
-        // The Chapters child sheet shows the whole ledger (#740): state, dates and
-        // size against the limits; a sealed chapter opens read-only and never
-        // claims the Home status.
         tapManageRow(app, "home-manage-chapters")
         XCTAssertTrue(app.buttons["home-chapter-2"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.buttons["home-chapter-1"].exists)
@@ -1612,8 +1480,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Session", timeout: 10), "A read-only chapter chat must not claim Home")
         XCTAssertFalse(app.buttons["Manage Home"].exists)
         keepScreenshot(named: "home-chapter-read-only")
-        // Opening a chapter replaced the single chat route, so Back returns to the
-        // dashboard; an ordinary chat's gear opens Settings, as Home's does.
         app.buttons["Back"].tap()
         let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
         XCTAssertTrue(ordinary.waitForExistence(timeout: 10), app.debugDescription)
@@ -1666,8 +1532,6 @@ final class TronSmokeUITests: XCTestCase {
                 reveal(refusal, in: app)
                 XCTAssertTrue(refusal.exists)
                 XCTAssertFalse(app.buttons["Reconfirm permissions"].exists)
-                // The section re-reads every 5 s; each 1 s refused re-read keeps the
-                // refusal on screen instead of flashing "Loading Home…".
                 let loading = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Loading Home…")).firstMatch
                 let deadline = Date().addingTimeInterval(12)
                 while Date() < deadline {
@@ -1684,9 +1548,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// The row stays routable while the successor is reserved: it opens the sealed
-    /// predecessor, the send goes through the logical Home route, and the chat
-    /// follows Home to the chapter it names once that send materializes it.
     @MainActor
     func testHomeRolloverPendingRoutesSendAndFollowsSuccessor() {
         continueAfterFailure = false
@@ -1722,8 +1583,6 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
-        // Mounting Home Settings' controls installs the retained action; the stale
-        // invocation after the profile switch must be refused by their identity fences.
         openManageHome(app)
         openHomeControls(app)
         closeHomeSettings(app)
@@ -1752,7 +1611,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["fixture.home-command-state"].label.contains("running"))
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(app.wait(for: .runningBackground, timeout: 3))
-        // The fixture resolves after six seconds, while presentation is retired.
         Thread.sleep(forTimeInterval: 7)
         app.activate()
         XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].waitForExistence(timeout: 10), app.debugDescription)
@@ -1770,14 +1628,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
     }
 
-    /// Editors and inspection are siblings, not nested buttons. Identify the
-    /// actual value action without depending on SwiftUI wrapper depth/order.
     @MainActor
     private func settingEditor(_ row: XCUIElement) -> XCUIElement {
         row.buttons.matching(NSPredicate(format: "NOT identifier ENDSWITH '-source' AND NOT identifier ENDSWITH '-reset'")).firstMatch
     }
 
-    /// Scrolls the sheet until the control is hittable, then taps it.
     @MainActor
     private func tapScrolling(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
@@ -1785,8 +1640,6 @@ final class TronSmokeUITests: XCTestCase {
         element.tap()
     }
 
-    /// A Home sheet belongs to the profile that opened it: once the selected profile
-    /// changes, the sheet is dismissed rather than left presenting another Mac's Home.
     @MainActor
     func testHomeSheetDismissesWhenProfileSwitches() {
         continueAfterFailure = false
@@ -1800,8 +1653,6 @@ final class TronSmokeUITests: XCTestCase {
         tapManageRow(app, "home-manage-tasks")
         XCTAssertTrue(app.buttons["home-sheet-done-tasks"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5), app.debugDescription)
-        // Opening a task is the sheet's next read; the fixture then selects another profile through
-        // the production switch, which must release the chat and every Home sheet it presents.
         app.buttons["home-task-active"].tap()
         XCTAssertTrue(app.buttons["home-sheet-done-tasks"].waitForNonExistence(timeout: 10),
                       "A profile switch left the Home sheet presented for the previous profile")
@@ -1820,7 +1671,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-check-completion"].waitForExistence(timeout: 8), app.debugDescription)
         closeHomeSettings(app)
         let state = app.descendants(matching: .any)["home-manage-state"]
-        // The unresolved command is the Memory row's subtitle; the state pill keeps the Home phase.
         let memoryRow = app.descendants(matching: .any)["home-manage-memory-browser"]
         XCTAssertTrue(waitForLabel(memoryRow, containing: "unresolved", timeout: 8))
         keepScreenshot(named: "manage-home-unresolved")
@@ -1832,7 +1682,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-pause"].exists)
         tapManageRow(app, "home-manage-check-completion")
         closeHomeSettings(app)
-        // The first check finds the receipt still pending and must not claim completion.
         XCTAssertTrue(waitForLabel(memoryRow, containing: "unresolved", timeout: 5))
         openHomeControls(app)
         tapManageRow(app, "home-manage-check-completion")
@@ -1848,9 +1697,6 @@ final class TronSmokeUITests: XCTestCase {
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
     }
 
-    /// Opens Manage Home from the composer's context ring (#748, #799). The ring
-    /// names the sheet it opens, so its "Manage Home" label is the claim; the
-    /// sheet's state row is the readiness signal.
     @MainActor
     private func openManageHome(_ app: XCUIApplication) {
         let ring = app.buttons["session-context-button"]
@@ -1861,8 +1707,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
-    /// Opens Home Settings from Manage Home and scrolls to its last section, the
-    /// pause/disable controls.
     @MainActor
     private func openHomeControls(_ app: XCUIApplication) {
         tapManageRow(app, "home-manage-settings")
@@ -1886,8 +1730,6 @@ final class TronSmokeUITests: XCTestCase {
         row.tap()
     }
 
-    /// A running Home change is shown on the row as an update: the row is not a
-    /// set-up or a completion check while the designation is still in flight.
     @MainActor
     func testHomePinnedRowNamesRunningDesignationAsUpdate() {
         continueAfterFailure = false
@@ -1905,7 +1747,6 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testHomePinnedRowCapabilityDesignationAndExactProfileRoute() {
         continueAfterFailure = false
-        // Capability-off baseline: no pinned row or Manage Home ring; the ordinary session opens unchanged.
         let unsupported = XCUIApplication()
         unsupported.launchArguments = ["-tron-home-dashboard-fixture", "-home-capability-absent"]
         unsupported.launch()
@@ -1955,8 +1796,6 @@ final class TronSmokeUITests: XCTestCase {
             row.tap()
             XCTAssertTrue(app.navigationBars.staticTexts[session == "home" ? "Home" : "Ordinary session chat"].waitForExistence(timeout: 10))
             app.buttons["Back"].tap()
-            // Sample the native row repeatedly while the Gateway response is held.
-            // Waiting for Ready here would hide precisely the reported flicker.
             for frame in 0..<3 {
                 keepScreenshot(named: "853-simulator-return-\(index)-frame-\(frame)")
                 XCTAssertTrue(home.exists, "Home disappeared on return \(index), frame \(frame)")
@@ -1980,12 +1819,8 @@ final class TronSmokeUITests: XCTestCase {
         let count = app.staticTexts["fixture.home-status-count"]
         XCTAssertTrue(count.waitForExistence(timeout: 5))
         let statusCount = { Int(count.label.split(separator: ":").last ?? "0") ?? 0 }
-        // The Home chat's context ring opens Manage Home (#725, #799); its one status
-        // read must settle inside the baseline window below, and it never polls.
         openManageHome(app)
         XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 5))
-        // Let a read admitted before cover settle, then require a quiet interval
-        // longer than the five-second fallback while the managed sheet is open.
         Thread.sleep(forTimeInterval: 1)
         let coveredBaseline = statusCount()
         Thread.sleep(forTimeInterval: 5.5)
@@ -1998,9 +1833,6 @@ final class TronSmokeUITests: XCTestCase {
         app.terminate()
     }
 
-    // Failure modes (#748, #799): the Home chat's composer context ring opens the ordinary
-    // Manage Session sheet, whose controls Home refuses; or the fix routes an ordinary
-    // chat's ring away from Manage Session.
     @MainActor
     func testComposerContextRingOpensManageHomeInHomeAndManageSessionElsewhere() {
         continueAfterFailure = false
@@ -2011,7 +1843,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["home-pinned-row"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 10), app.debugDescription)
-        // The ring's claim proves the Home status is routed before the ring is judged.
         XCTAssertTrue(waitForLabel(app.buttons["session-context-button"], containing: "Manage Home", timeout: 10), app.debugDescription)
         XCTAssertTrue(app.navigationBars.buttons["Settings"].exists)
         let ring = app.buttons["session-context-button"]
@@ -2024,10 +1855,8 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-ring-manage-home")
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home"].waitForExistence(timeout: 5))
-        // VoiceOver names the ring by what it opens.
         XCTAssertEqual(ring.label, "Manage Home")
 
-        // An ordinary chat's ring keeps opening Manage Session.
         app.buttons["Back"].tap()
         let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
         XCTAssertTrue(ordinary.waitForExistence(timeout: 10), app.debugDescription)
@@ -2045,7 +1874,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-state"].exists)
         keepScreenshot(named: "ordinary-ring-manage-session")
         manageSessionDone.tap()
-        // The gear opens Settings (this Mac and iPhone) in every chat; the ring is the chat's own.
         let gear = app.navigationBars.buttons["Settings"]
         XCTAssertTrue(gear.waitForExistence(timeout: 5), "The ordinary gear must name and open Settings")
         gear.tap()
@@ -2059,7 +1887,6 @@ final class TronSmokeUITests: XCTestCase {
                       "Opening and dismissing management sheets must not apply Home controls")
     }
 
-    /// A Home profile cannot manufacture a current-chapter context-window override.
     @MainActor
     func testManageHomeContextWindowOpenDismissDoesNotWrite() {
         continueAfterFailure = false
@@ -2073,15 +1900,13 @@ final class TronSmokeUITests: XCTestCase {
         let editor = app.descendants(matching: .any)["home-settings-content"]
         XCTAssertFalse(editor.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "settings-row-model.contextWindow")).firstMatch.exists)
-        closeTopSheet(app) // Home Settings
+        closeTopSheet(app)
         app.buttons["home-sheet-done-manage"].tap()
         app.buttons["Back"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5),
                       "Opening Home Settings cannot call settings.change")
     }
 
-    /// A model row in the shared ModelPicker, named by the model's display name.
-    /// A collapsed provider section is opened first, as a user would.
     private func modelPickerRow(_ app: XCUIApplication, _ name: String) -> XCUIElement {
         let collapsed = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@ AND value == %@", " models", "collapsed")).firstMatch
         if collapsed.waitForExistence(timeout: 3) { collapsed.tap() }
@@ -2099,8 +1924,6 @@ final class TronSmokeUITests: XCTestCase {
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
     }
 
-    // Home is never an ordinary session row: while it is Working, its pinned row
-    // is the only Home entry in the dashboard (#756).
     @MainActor
     func testHomeIsNotAnOrdinarySessionRowWhileWorking() {
         continueAfterFailure = false
@@ -2146,8 +1969,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    // Failure modes: an unexplained disabled control; pending work mistaken for
-    // a lock; browsing/dismissal blocked; receipt settlement leaving controls stuck.
     @MainActor
     func testConfigurationFeedbackExplainsLockAndPendingWithoutBlockingBrowsing() {
         configurationFeedbackJourney(appearance: "light")
@@ -2158,8 +1979,6 @@ final class TronSmokeUITests: XCTestCase {
         configurationFeedbackJourney(appearance: "dark")
     }
 
-    /// A running chat's Manage Session stays locked while the Gateway rebaselines
-    /// it: the lock never blinks, and Effort stays enabled for inspection.
     @MainActor
     func testRunningConfigurationLockHoldsAcrossRebaselines() {
         continueAfterFailure = false
@@ -2169,8 +1988,6 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["Manage running session"].waitForExistence(timeout: 5))
         app.buttons["Manage running session"].tap()
-        // Effort stays enabled and inspectable while the session is locked; the lock
-        // reason is the model switch's accessibility value.
         let thinking = app.buttons["Effort"]
         let lock = app.buttons["manage-model-switch"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
@@ -2187,9 +2004,6 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     private func configurationFeedbackJourney(appearance: String) {
         continueAfterFailure = false
-        // Keyboard/search animation monitoring belongs to one XCTest automation
-        // session. Each appearance gets its own case, not a second launch under
-        // the first launch's animation observer (which can wait 60s per action).
         let app = XCUIApplication()
         app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
         app.launch()
@@ -2222,9 +2036,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(switchModel.isEnabled, "Pending configuration must not block model browsing")
         XCTAssertEqual(switchModel.value as? String, "Applying configuration")
         keepScreenshot(named: "configuration-applying-\(appearance)")
-        // Semantic lookup finds the enabled control, but XCTest reports this
-        // post-dismissal activation point as not hittable. Use its observed
-        // center; the assertions below still require real pending-state browsing.
         switchModel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let selected = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout: 3))
@@ -2257,8 +2068,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Why configuration is unavailable"].exists)
     }
 
-    /// Real native taps through the production nested sheet, with receipt and
-    /// snapshot order controlled independently at the Gateway socket boundary.
     @MainActor
     func testModelAcknowledgementResolvesWithoutDismissingPicker() {
         continueAfterFailure = false
@@ -2274,13 +2083,11 @@ final class TronSmokeUITests: XCTestCase {
             let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
             let original = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
             XCTAssertTrue(alternative.waitForExistence(timeout: 5))
-            // A pick closes the shared picker; the scripted receipt is held until released.
             alternative.tap()
             let switchModel = app.buttons["manage-model-switch"]
             let picker = app.staticTexts["Models"]
             wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
             XCTAssertEqual(switchModel.value as? String, "Applying configuration")
-            // Browsing stays available while the receipt is pending; choices do not.
             switchModel.tap()
             XCTAssertTrue(alternative.waitForExistence(timeout: 5))
             XCTAssertFalse(original.isEnabled, "Rapid replacement choices are refused while one intent owns the receipt")
@@ -2291,7 +2098,7 @@ final class TronSmokeUITests: XCTestCase {
             wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: confirmed)], timeout: 10)
             XCTAssertTrue(picker.exists, "Acknowledgement must not dismiss the picker")
             keepScreenshot(named: "model-\(order)-confirmed-open")
-            confirmed.tap() // Reselect is a no-op, not another mutation; the pick closes the picker.
+            confirmed.tap()
             wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
             let requests = app.staticTexts.matching(identifier: "fixture.model-requests").firstMatch
             XCTAssertTrue(app.staticTexts["Model requests: 1"].waitForExistence(timeout: 3),
@@ -2330,14 +2137,12 @@ final class TronSmokeUITests: XCTestCase {
         let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alternative Model")).firstMatch
         let original = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fixture Model")).firstMatch
         XCTAssertTrue(alternative.waitForExistence(timeout: 5))
-        // A pick closes the shared picker; the scripted refusal is held until released.
         alternative.tap()
         let switchModel = app.buttons["manage-model-switch"]
         let picker = app.staticTexts["Models"]
         wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
         XCTAssertEqual(switchModel.value as? String, "Applying configuration")
         app.buttons["Deliver model receipt"].tap()
-        // The refusal is reported on the model row the picker closed back to.
         let failure = app.staticTexts.matching(identifier: "settings-row-model.ref_role_chat_-error").firstMatch
         XCTAssertTrue(failure.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(failure.label.contains("Model choice refused; try again."))
@@ -2350,7 +2155,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(alternative.isEnabled)
         alternative.tap()
         wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
-        XCTAssertEqual(switchModel.value as? String, "Applying configuration") // Accepted mutation survives picker dismissal.
+        XCTAssertEqual(switchModel.value as? String, "Applying configuration")
         app.buttons["Deliver model receipt"].tap()
         wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 10)
         switchModel.tap()
@@ -2370,7 +2175,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
         app.buttons["Stop session"].tap()
         app.buttons["Release terminal settlement"].tap()
-        // Thinking is the shared renderer's Effort row and its choice sheet.
         let thinking = app.buttons["Effort"]
         wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
         thinking.tap()
@@ -2399,12 +2203,9 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
         app.buttons["Stop session"].tap()
-        // Effort stays enabled and inspectable while configuration settles; the lock
-        // explains why.
         let thinking = app.buttons["Effort"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5))
         XCTAssertTrue(thinking.isEnabled, "Effort stays inspectable while configuration settles")
-        // The settling reason is the blocked model picker's lock explanation.
         app.buttons["Switch Model"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let explanation = app.buttons["Why configuration is unavailable"]
         XCTAssertTrue(explanation.waitForExistence(timeout: 5), app.debugDescription)
@@ -2423,15 +2224,12 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "post-stop-configuration-ready")
     }
 
-    /// The scope-owned Settings route from the real Manage Session surface.
     @MainActor
     private func openChatSettings(_ app: XCUIApplication) {
         tapScrolling(app.buttons["chat-settings-link"], in: app)
         XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
-    /// Manage Session, Chat Settings and a key's sheet in light and dark at the
-    /// largest accessibility type size: every row stays reachable (#766).
     @MainActor
     func testManageSessionSectionsAtAccessibilityTypeInLightAndDark() {
         continueAfterFailure = false
@@ -2446,14 +2244,9 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertFalse(app.buttons["Show all"].exists, "Manage Session never expands settings in place")
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-primary")
             app.buttons["Release terminal settlement"].tap()
-            // Session Settings has no Models subsheet: Thinking and its reset
-            // live on Manage Session's model card.
             let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
             reveal(reset, in: app)
             XCTAssertTrue(reset.isHittable, "The canonical Thinking reset must stay reachable at XXXL")
-            // At accessibility sizes a competing trailing control moves below its
-            // labels, so titles and values wrap only at word boundaries (#868): the
-            // usage card's Compact Now (#1655) and a row's plain value both stack.
             let compactNow = app.buttons["Compact Now"]
             let compactTitle = app.descendants(matching: .any)["session-usage-detail"]
             XCTAssertTrue(compactNow.waitForExistence(timeout: 5), app.debugDescription)
@@ -2470,8 +2263,6 @@ final class TronSmokeUITests: XCTestCase {
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context")
             openChatSettings(app)
             tapScrolling(app.buttons["settings-section-context-open"], in: app)
-            // Automatic compaction has no iPhone row; the Compaction sheet's own
-            // policy rows must still be reachable at XXXL.
             let compaction = app.descendants(matching: .any)["settings-section-context-detail"]
             XCTAssertTrue(compaction.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertFalse(app.switches["Automatic compaction"].exists, "The retired policy row stays retired")
@@ -2490,8 +2281,6 @@ final class TronSmokeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes"]
         app.launch(); defer { app.terminate() }
-        // The Gateway's first filtered page is empty but not the end: opening
-        // Changes still shows the one entry, without tapping Load more.
         let row = app.buttons["settings-change-fixture-change"]
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.buttons["settings-changes-load-more"].exists, "The feed's end needs no Load more")
@@ -2514,7 +2303,6 @@ final class TronSmokeUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
-        // Only Global Settings has a Changes entry; its feed spans every scope.
         app.navigationBars.buttons["Settings"].firstMatch.tap()
         tapScrolling(app.buttons["Changes"].firstMatch, in: app)
         let row = app.buttons["settings-change-worker-setting"]
@@ -2553,7 +2341,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-project-change"].exists, "Repository history is not a Session value")
-        // Actor/status filters intersect with the selected scope, never widen it.
         chooseChangesFilter(app, row: "settings-changes-actor", option: "Agents and outside")
         drainChanges(app)
         XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
@@ -2566,15 +2353,12 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "758-changes-scoped-filter-intersection")
     }
 
-    /// Changes follows empty filtered pages on its own and offers Load more only
-    /// for further history; follow every offered page so absence is meaningful.
     @MainActor
     private func drainChanges(_ app: XCUIApplication) {
         let more = app.buttons["settings-changes-load-more"]
         for _ in 0..<6 where more.waitForExistence(timeout: 2) { tapScrolling(more, in: app) }
     }
 
-    /// Opens Changes' Filters sheet, picks `option` on one filter row, and returns to the feed.
     @MainActor
     private func chooseChangesFilter(_ app: XCUIApplication, row: String, option: String) {
         let filters = app.buttons["settings-changes-filters"]
@@ -2587,7 +2371,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
         choice.tap()
         XCTAssertTrue(choice.waitForNonExistence(timeout: 5), app.debugDescription)
-        closeTopSheet(app) // Filters
+        closeTopSheet(app)
     }
 
     @MainActor
@@ -2623,7 +2407,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// A redacted entry never recorded its values, so its detail offers no Undo (#769).
     @MainActor
     func testSettingsChangesRedactedEntryIsNotUndoable() {
         continueAfterFailure = false
@@ -2649,8 +2432,6 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
 
-        // The first filtered page is empty but has a cursor: it is not EOF, and
-        // opening Changes follows it without a Load more tap.
         let row = app.buttons["settings-change-fixture-change"]
         XCTAssertTrue(row.waitForExistence(timeout: 10), "An empty history page with a cursor is not EOF: \(app.debugDescription)")
         XCTAssertTrue(showsText("6 retries", in: app))
@@ -2666,10 +2447,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(showsText("undos:1", in: app), "Undo was issued exactly once through settings.undo")
     }
 
-    /// The generic renderer over a fixture schema (settings-model.md F1, 7.5): a new
-    /// section, subgroup, key and badge kind render from served data alone; an
-    /// unknown control is read-only; the Gateway refuses an invalid value inline
-    /// and nothing applies; a model without thinking offers no thinking options.
     @MainActor
     func testSettingsRendererRetiresCoveredPreviewWithoutWritingOrLockingRows() {
         continueAfterFailure = false
@@ -2678,8 +2455,6 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
-        // The fixture mounts the Context sheet itself, under its own cover control.
-        // Its one row is the section: a one-row section keeps the row's identity.
         XCTAssertTrue(any["settings-row-context.images.block"].waitForExistence(timeout: 10), app.debugDescription)
         let toggle = any["settings-row-context.images.block"].switches.firstMatch
         tapScrolling(toggle, in: app)
@@ -2705,7 +2480,6 @@ final class TronSmokeUITests: XCTestCase {
         let applied = app.staticTexts["fixture.settings-renderer-applied"]
         let thinking = app.staticTexts["fixture.settings-renderer-thinking-options"]
         XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].waitForExistence(timeout: 10), app.debugDescription)
-        // Global combines agent sections; independently served sections still have their own rows.
         XCTAssertFalse(any["settings-row-model.ref"].exists, "Keys live on section sheets")
         XCTAssertFalse(app.buttons["Show all"].exists, "Settings never expands in place")
         XCTAssertTrue(app.buttons["settings-section-lab-open"].exists, "A section the app never heard of renders from its served title")
@@ -2717,7 +2491,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-run-sheet")
         closeTopSheet(app)
 
-        // An invalid value: the Gateway's dry run refuses it under the row; nothing applies.
         openRendererSection(app, "lab")
         let invalid = any["settings-row-lab.invalidValue"]
         scrollTo(invalid, in: app)
@@ -2729,7 +2502,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Fixture value rejected")).firstMatch.exists)
         XCTAssertTrue(waitForLabel(applied, containing: "applied:0", timeout: 2))
         keepScreenshot(named: "settings-renderer-invalid")
-        // The new subgroup, the unknown control and the read-only secret.
         XCTAssertTrue(showsText("Experiments", in: app), "A subgroup the app never heard of")
         scrollTo(any["settings-row-lab.palette"], in: app)
         XCTAssertTrue(showsText("Teal", in: app), "An unknown control shows its display read-only")
@@ -2738,7 +2510,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-lab-sheet")
         closeTopSheet(app)
 
-        // The row's trailing value opens the catalog picker.
         openRendererSection(app, "model")
         let modelCatalogRow = settingEditor(any["settings-row-model.ref"])
         tapScrolling(modelCatalogRow, in: app)
@@ -2751,14 +2522,12 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(modelCatalogRow, in: app)
         XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
         lite.tap()
-        // Switching to a model without thinking: the options are asked for again, and there are none.
         XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
         XCTAssertTrue(waitForLabel(thinking, containing: "thinking-options:0", timeout: 5))
         XCTAssertTrue(any["settings-row-model.thinking"].descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", "Off")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
-    /// Settings' tools.active editor reuses Available Tools grouping and tool detail.
     @MainActor
     func testHomeSettingsModelsOrderAndToolDescriptionsForVisualReview() {
         continueAfterFailure = false
@@ -2782,7 +2551,6 @@ final class TronSmokeUITests: XCTestCase {
             let tools = app.descendants(matching: .any)["settings-row-tools.active"]
             XCTAssertTrue(tools.waitForExistence(timeout: 5))
             tapScrolling(settingEditor(tools), in: app)
-            // Tool rows use the shared friendly tool identities.
             XCTAssertTrue(app.switches["Ask user"].waitForExistence(timeout: 5))
             keepScreenshot(named: "1332-home-tools-\(appearance)")
             XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Ask the user one bounded set of questions")).firstMatch.exists,
@@ -2816,7 +2584,7 @@ final class TronSmokeUITests: XCTestCase {
         openTools()
         XCTAssertEqual(app.switches["Ask user"].value as? String, "1")
         app.switches["Ask user"].tap()
-        closeTopSheet(app) // Cancel the unsaved draft.
+        closeTopSheet(app)
         XCTAssertTrue(waitForLabel(count, containing: "control-count:0", timeout: 5))
         openTools()
         XCTAssertEqual(app.switches["Ask user"].value as? String, "1", "Cancel does not alter Home defaults")
@@ -2857,9 +2625,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Fixture path input"].waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "900-tools-detail-light")
         closeTopSheet(app)
-        // A chosen tool the catalog no longer offers stays listed with its reason, so it can be cleared.
         XCTAssertTrue(app.staticTexts["Not available here"].exists, app.debugDescription)
-        // Toggles edit a draft like every checklist; Save applies one change.
         let applied = app.staticTexts["fixture.settings-renderer-applied"]
         let read = app.switches["Read file"]
         XCTAssertTrue(read.waitForExistence(timeout: 5), app.debugDescription)
@@ -2871,8 +2637,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
     }
 
-    /// Sheet intro text renders at the settings row subtitle's size and text style
-    /// (#900): at a large type size each wrapped intro line is one row-subtitle line.
     @MainActor
     func testSheetIntroTextMatchesRowSubtitleSize() {
         continueAfterFailure = false
@@ -2881,16 +2645,13 @@ final class TronSmokeUITests: XCTestCase {
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
         app.launch()
         defer { app.terminate() }
-        // A one-line row subtitle at this size is the unit the intro is measured in.
         let subtitle = app.staticTexts["Provider accounts and sign-in"]
         XCTAssertTrue(subtitle.waitForExistence(timeout: 10), app.debugDescription)
         let line = subtitle.frame.height
         XCTAssertGreaterThan(line, 8)
         tapScrolling(app.buttons["Changes"].firstMatch, in: app)
-        // The Changes intro copy is the audit-history caption.
         let intro = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "One audit history · All scopes.")).firstMatch
         XCTAssertTrue(intro.waitForExistence(timeout: 5), app.debugDescription)
-        // A medium-detent sheet is drawn slightly scaled; measure at large, settled.
         app.staticTexts["Changes"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
         var frame = intro.frame
@@ -2906,7 +2667,6 @@ final class TronSmokeUITests: XCTestCase {
                        "The intro uses the row subtitle's size: \(frame.height) is not \(lines) lines of \(line)")
     }
 
-    /// Opens one section's sheet from Settings.
     @MainActor
     private func openRendererSection(_ app: XCUIApplication, _ id: String, link: String? = nil) {
         let consolidated = ["model", "workers", "context", "run"].contains(id)
@@ -2916,8 +2676,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(detail.waitForExistence(timeout: 5), app.debugDescription)
     }
 
-    /// Dismisses the frontmost sheet by its own Done; covered sheets' Done
-    /// buttons are not hittable.
     @MainActor
     private func closeTopSheet(_ app: XCUIApplication) {
         let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.last { $0.isHittable }
@@ -2925,8 +2683,6 @@ final class TronSmokeUITests: XCTestCase {
         done?.tap()
     }
 
-    /// Revert is the renderer's receipt-backed unset: one change through the
-    /// dry-run/receipt path, read back on the key's row.
     @MainActor
     func testSettingsRendererRevertUsesTheReceiptPath() {
         continueAfterFailure = false
@@ -2948,8 +2704,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-revert-after")
     }
 
-    /// A served catalog remains complete beyond its first page, and browsing it
-    /// never changes the setting.
     @MainActor
     func testSettingsRendererCatalogPagesWithoutWriting() {
         continueAfterFailure = false
@@ -2972,8 +2726,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:0", timeout: 5))
     }
 
-    /// The same native anchored choice editor works for schema-only choices,
-    /// without thinking-specific labels or a second slider presentation owner.
     @MainActor
     func testSettingsRendererOrderedChoiceUsesSharedSlider() {
         continueAfterFailure = false
@@ -2991,20 +2743,15 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(slider.waitForExistence(timeout: 5), "An ordered choice reuses the native anchored slider, not a menu")
         keepScreenshot(named: "settings-renderer-ordered-choice-expanded")
         slider.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
-        // The editor's modal ScrollView becomes firstMatch while it is open.
-        // Dismiss on the host backdrop below the observed slider, not inside that panel.
         let outside = app.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: 10, dy: min(app.frame.maxY - 70, slider.frame.maxY + 80)))
         outside.tap()
         XCTAssertTrue(slider.waitForNonExistence(timeout: 5))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
-        // The row itself reads back the chosen value.
         XCTAssertTrue(row.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value == %@", "Off", "Off"))
             .firstMatch.waitForExistence(timeout: 5), app.debugDescription)
     }
 
-    /// Write-only replacement and ordered-list operations cross the real client
-    /// socket; reopening reads the stored result rather than the editor's draft.
     @MainActor
     func testSettingsRendererSecretAndListEditors() {
         continueAfterFailure = false
@@ -3037,7 +2784,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Remove alpha"].waitForExistence(timeout: 5))
         expandSettingsSheet(app, title: "Paths")
         keepScreenshot(named: "settings-renderer-list-before-edit")
-        // Direct row actions work at any sheet depth (#877).
         app.buttons["Remove alpha"].tap()
         app.textFields["Value"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
@@ -3052,7 +2798,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-list-persisted")
         closeTopSheet(app)
 
-        // Unknown numeric-map keys keep their value, never a native entry/reset route.
         let weights = any["settings-row-lab.weights"]
         reveal(weights, in: app)
         XCTAssertFalse(weights.buttons["Weights"].exists)
@@ -3061,7 +2806,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-number-map-readonly")
     }
 
-    /// The renderer in dark mode at the largest accessibility text size.
     @MainActor
     func testSettingsRendererDarkLargeType() {
         continueAfterFailure = false
@@ -3082,31 +2826,26 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-dark-xxxl-run-sheet")
     }
 
-    /// Any element whose label contains the text: a settings row combines its labels.
     @MainActor
     private func showsText(_ text: String, in app: XCUIApplication) -> Bool {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
     }
 
-    /// Scrolls a lazy list down until the element is built and hittable.
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<16 where !(element.exists && element.isHittable) { app.swipeUp() }
     }
 
-    /// A competing control stacks below its title but keeps the row's trailing inset.
     @MainActor
     private func assertStacked(_ control: XCUIElement, below title: XCUIElement, in app: XCUIApplication,
                                file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(title.exists && control.exists, app.debugDescription, file: file, line: line)
         XCTAssertGreaterThanOrEqual(control.frame.minY, title.frame.maxY,
                                     "\(control.label) sits below \(title.label), not beside it", file: file, line: line)
-        // Manage Session owns an 18pt content inset; the shared row adds 14pt.
         XCTAssertEqual(control.frame.maxX, app.windows.firstMatch.frame.maxX - 32, accuracy: 1,
                        "\(control.label) retains its container + standard row trailing inset", file: file, line: line)
     }
 
-    /// Scrolls until the element is hittable.
     @MainActor
     private func scrollTo(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
@@ -3136,7 +2875,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// The reported three-window quota must wrap without creating a second action row.
     @MainActor
     func testProviderUsageWrapsWithoutStackingDetails() {
         let app = XCUIApplication()
@@ -3180,8 +2918,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "1261-tools-persisted-selectors")
     }
 
-    /// #2207: the codemode choice sheet Default Tools presents is usable once
-    /// the section has read its values.
     @MainActor
     func testDefaultToolsCodemodePickerOffersEnabledChoices() {
         let app = XCUIApplication()
@@ -3214,8 +2950,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "1261-push-separate-summary")
     }
 
-    /// Picking the displayed default pins it at the edited layer; only a value that
-    /// layer already stores is a no-op.
     @MainActor
     func testRendererPickOfDisplayedDefaultPinsIt() {
         let app = XCUIApplication()
@@ -3240,7 +2974,6 @@ final class TronSmokeUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         let toggle = app.descendants(matching: .any)["settings-row-context.images.block"].switches.firstMatch
         tapScrolling(toggle, in: app)
-        // A dry run that requires a tap opens the shared exact review card.
         let confirm = app.buttons["change-review-approve"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(app.alerts.count, 0)
@@ -3294,7 +3027,6 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["fixture.settings-renderer-applied"].waitForExistence(timeout: 10), app.debugDescription)
             if surface == "placement" {
                 tapScrolling(app.buttons["settings-link-Extensions"], in: app)
-                // The section's lone heading is hidden in this subsheet; its own detail identifies it.
                 XCTAssertTrue(app.staticTexts["Turn a built-in off for all sessions."].waitForExistence(timeout: 5), app.debugDescription)
                 keepScreenshot(named: "1261-extensions")
                 app.staticTexts.matching(identifier: "Extensions").allElementsBoundByIndex.last!
@@ -3330,7 +3062,6 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["-tron-mac-settings-fixture"]
         app.launch()
         defer { app.terminate() }
-        // Global's direct model/thinking controls live in Agent Behavior.
         tapScrolling(app.buttons["settings-link-Agent Behavior"], in: app)
         let thinking = app.descendants(matching: .any)["settings-row-model.thinking"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
@@ -3343,11 +3074,10 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(slider.waitForNonExistence(timeout: 3))
         XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
         XCTAssertFalse(app.buttons["Settings Scope"].exists)
-        closeTopSheet(app) // Agent Behavior
+        closeTopSheet(app)
         XCTAssertTrue(app.buttons["settings-link-Agent Behavior"].isHittable)
     }
 
-    /// Device preferences survive destination dismissal and process relaunch.
     @MainActor
     func testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch() {
         continueAfterFailure = false
@@ -3457,8 +3187,6 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["dashboard.menu"].tap()
         let automations = app.buttons["Automations"]
         XCTAssertTrue(automations.waitForExistence(timeout: 3))
-        // The fixture performs thirty controlled parent updates. Wait for its
-        // completion while the actual tapped menu remains presented.
         let finished = NSPredicate(format: "label == %@", "Revision 30")
         let updates = expectation(for: finished, evaluatedWith: app.staticTexts["menu-fixture-revision"])
         wait(for: [updates], timeout: 10)
@@ -3613,33 +3341,22 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Extension widgets fixture"].waitForExistence(timeout: 10), app.debugDescription)
         let sheet = app.otherElements["session-activity-sheet"]
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), app.debugDescription)
-        // Producer attribution for both retained kinds.
         XCTAssertTrue(app.staticTexts["Goal"].waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(app.staticTexts["npm:fixture-extension"].exists)
-        // String widget lines render as native text.
         XCTAssertTrue(app.staticTexts["Goal active"].exists)
         XCTAssertTrue(app.staticTexts["Used 12k tokens"].exists)
-        // A retained status is presentable on its own, which is the only content a
-        // paused goal leaves behind after it clears its widget.
         XCTAssertTrue(app.staticTexts["Goal paused (/goal resume)"].exists)
-        // An ownerless status is grouped, never dropped.
         XCTAssertTrue(app.staticTexts["Unknown extension"].exists)
-        // A retained read-only component frame renders its sanitized content.
         let frameText = app.staticTexts.containing(
             NSPredicate(format: "label CONTAINS[c] %@", "Frame progress 3 of 5")
         ).firstMatch
         XCTAssertTrue(frameText.waitForExistence(timeout: 3), app.debugDescription)
-        // Admitted-but-unpresentable content is disclosed, not silently dropped.
         XCTAssertTrue(app.staticTexts["Some extension content is not shown on this device yet."].exists)
         keepScreenshot(named: "extension-widgets-sheet-content")
         app.buttons["Done"].tap()
         XCTAssertFalse(sheet.waitForExistence(timeout: 2))
     }
 
-    /// Failure modes: attributed sections are dropped or reordered, the overview
-    /// leaks section entries, the overview or a section sheet opens beyond its
-    /// medium detent, a section sheet omits its purpose or attributed sources,
-    /// or an instruction file cannot be read in full.
     @MainActor
     func testAgentInstructionsSectionsOpenSheetsWithTheirSources() {
         let app = XCUIApplication()
@@ -3699,7 +3416,6 @@ final class TronSmokeUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
-    /// Done on the frontmost sheet; the covered overview's Done stays in the tree.
     private func dismissTopSheet(_ app: XCUIApplication, revealing element: XCUIElement) {
         let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done"))
         done.element(boundBy: done.count - 1).tap()
@@ -3719,8 +3435,6 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         let sheet = app.otherElements["session-activity-sheet"]
         XCTAssertTrue(sheet.waitForExistence(timeout: 10), app.debugDescription)
-        // Every retained entry must still be reachable and read at the largest
-        // accessibility size; the sheet scrolls instead of truncating content.
         for label in ["Goal", "Goal active", "Used 12k tokens", "Goal paused (/goal resume)"] {
             let text = app.staticTexts[label]
             if !text.exists { app.swipeUp() }
@@ -3761,11 +3475,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(more.exists)
     }
 
-    /// Automations is a sheet opened from the Tron menu, not a dashboard: it
-    /// opens at medium and expands to large, search narrows the real catalog,
-    /// + opens the existing create flow, and a row opens the existing detail.
-    /// The same real edit form, reached without the catalog/detail AX trees.
-    /// Run against the pre-extraction and current components for visual parity.
     @MainActor
     func testAutomationEditDateControlsVisualParity() {
         continueAfterFailure = false
@@ -3821,9 +3530,6 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// The inventory lists active Automations first, then paused ones, then
-    /// drafts and the rest. The fixture names the paused row so that a name or
-    /// next-occurrence order alone would put it above the idle enabled row.
     @MainActor
     func testAutomationsListActiveBeforePaused() {
         let app = XCUIApplication()
@@ -3838,7 +3544,6 @@ final class TronSmokeUITests: XCTestCase {
         let paused = app.buttons["automation-card.automation-3"]
         let drafts = [app.buttons["automation-card.automation-0"], app.buttons["automation-card.automation-1"]]
         XCTAssertTrue(running.waitForExistence(timeout: 8), app.debugDescription)
-        // The large detent shows the whole fixture inventory at once.
         let bar = app.navigationBars.containing(.staticText, identifier: "Automations").firstMatch
         bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
             forDuration: 0.1,
@@ -3868,7 +3573,6 @@ final class TronSmokeUITests: XCTestCase {
         let card = app.buttons["automation-card.automation-0"]
         XCTAssertTrue(card.waitForExistence(timeout: 8), app.debugDescription)
 
-        // Medium detent first, then the large detent after an upward drag.
         let bar = app.navigationBars.containing(.staticText, identifier: "Automations").firstMatch
         XCTAssertGreaterThan(bar.frame.minY, app.frame.height * 0.35, "The sheet opens at the medium detent")
         let window = app.windows.firstMatch
@@ -3878,7 +3582,6 @@ final class TronSmokeUITests: XCTestCase {
         )
         XCTAssertLessThan(bar.frame.minY, app.frame.height * 0.2, "The sheet expands to the large detent")
 
-        // No search: Filter is the floating bottom-trailing control and opens the filter sheet.
         XCTAssertFalse(app.buttons["automations.search"].exists || app.buttons["Search Automations"].exists)
         let filter = app.buttons["automations.filter"]
         XCTAssertTrue(filter.isHittable, app.debugDescription)
@@ -3892,7 +3595,6 @@ final class TronSmokeUITests: XCTestCase {
         filterBar.buttons["Done"].tap()
         XCTAssertTrue(filterBar.waitForNonExistence(timeout: 3), app.debugDescription)
 
-        // + opens the existing create flow over the sheet.
         app.buttons["automations.new"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["New Automation"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["Cancel"].firstMatch.tap()
@@ -3902,7 +3604,6 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(card.label.contains(fact), "Missing \(fact): \(card.label)")
         }
         XCTAssertTrue(app.buttons["automation-card.automation-1"].label.contains("No runs yet"))
-        // One shared list card per Automation, at the list standard's feed rhythm.
         let next = app.buttons["automation-card.automation-1"]
         XCTAssertEqual(card.frame.height, next.frame.height, accuracy: 1)
         XCTAssertEqual(abs(card.frame.minY - next.frame.minY) - card.frame.height, 8, accuracy: 1)
@@ -3933,10 +3634,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Run Details"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
-    /// Archive and Unarchive follow Delete's flow: the swipe reveals the
-    /// action, the tap asks for confirmation, and only the confirmation commits.
-    /// The journey therefore proves that the revealed action alone changes
-    /// nothing, then confirms.
     @MainActor
     private func swipeTapAndConfirm(
         _ row: XCUIElement,
@@ -3967,7 +3664,6 @@ final class TronSmokeUITests: XCTestCase {
 
         let liveRow = app.buttons["session-row-fixture:live-session"]
         XCTAssertTrue(liveRow.waitForExistence(timeout: 8), app.debugDescription)
-        // A zero archived count keeps the container off the dashboard.
         XCTAssertFalse(app.buttons["archived-sessions-container"].exists)
 
         swipeTapAndConfirm(
@@ -3990,17 +3686,11 @@ final class TronSmokeUITests: XCTestCase {
 
         swipeTapAndConfirm(archivedRow, action: "session-unarchive-action-fixture:live-session", in: app)
 
-        // The count returns to zero, so the container hides and the session is
-        // back among its workspace rows.
         XCTAssertTrue(app.buttons["session-row-fixture:live-session"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.buttons["archived-sessions-container"].waitForExistence(timeout: 2))
         keepScreenshot(named: "session-archive-unarchived")
     }
 
-    /// The archived header is the dashboard's last section, so its rows publish
-    /// below the fold. Expanding must move the list up until they are on screen,
-    /// and the header's own icon is now the whole loading affordance: there is no
-    /// placeholder row to show instead.
     @MainActor
     func testSessionArchiveExpansionRevealsRowsInView() {
         continueAfterFailure = false
@@ -4010,8 +3700,6 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
 
         let container = app.buttons["archived-sessions-container"]
-        // The list is much longer than the screen, so the header starts off screen
-        // and the journey scrolls the dashboard to its end.
         XCTAssertFalse(container.isHittable, app.debugDescription)
         for _ in 0..<12 where !container.isHittable {
             app.swipeUp()
@@ -4027,16 +3715,11 @@ final class TronSmokeUITests: XCTestCase {
 
         let firstRow = app.buttons["archived-session-row-fixture:archived-session-0"]
         container.tap()
-        // The fixture gates its first page read, so the loading window is
-        // observable: the header is expanded and no row has published yet. The
-        // placeholder row this journey replaced never appears.
         XCTAssertFalse(firstRow.waitForExistence(timeout: 1), app.debugDescription)
         XCTAssertFalse(app.staticTexts["Loading archived sessions…"].exists, app.debugDescription)
         keepScreenshot(named: "session-archive-reveal-loading")
 
         XCTAssertTrue(firstRow.waitForExistence(timeout: 10), app.debugDescription)
-        // The reveal is animated, so wait for the row to be inside the visible
-        // frame rather than sampling the scroll the moment it publishes.
         let rowIsVisible = NSPredicate { element, _ in
             guard let element = element as? XCUIElement else { return false }
             return element.isHittable
@@ -4044,14 +3727,9 @@ final class TronSmokeUITests: XCTestCase {
         expectation(for: rowIsVisible, evaluatedWith: firstRow)
         waitForExpectations(timeout: 10)
 
-        // The list moved up to make room: the revealed rows are in view, the
-        // header is still visible and above its pre-expansion position, and the
-        // section's own rows sit below it.
         XCTAssertLessThan(container.frame.minY, headerMinYBeforeExpanding, app.debugDescription)
         XCTAssertTrue(container.isHittable, app.debugDescription)
         XCTAssertGreaterThan(firstRow.frame.minY, container.frame.minY, app.debugDescription)
-        // The revealed row is inside the usable area, not peeking past the
-        // bottom edge behind the home indicator.
         XCTAssertLessThan(
             firstRow.frame.maxY,
             app.frame.maxY - 40,
@@ -4073,13 +3751,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(liveRow.waitForExistence(timeout: 8), app.debugDescription)
         let container = app.buttons["archived-sessions-container"]
         XCTAssertTrue(container.waitForExistence(timeout: 5), app.debugDescription)
-        // The fixture serves one archived session per page, so the first pass
-        // both populates the container and offers Show more.
         XCTAssertEqual(container.value as? String, "1", app.debugDescription)
 
-        // Expanding starts the pass whose first read hangs. Archiving the live
-        // row then advances the archive projection while that read is still in
-        // flight, which is exactly the reload that a dropped pass would lose.
         container.tap()
         swipeTapAndConfirm(liveRow, action: "session-archive-action-fixture:live-session", in: app)
 
@@ -4087,9 +3760,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(archivedLiveRow.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.buttons["archived-session-row-fixture:older-session"].exists, app.debugDescription)
 
-        // A continuation the Gateway refuses is replaced by that server's first
-        // page: the rows stay, and no server is reported unavailable. The
-        // control's label carries the section it expands.
         let showMore = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
         XCTAssertTrue(showMore.waitForExistence(timeout: 5), app.debugDescription)
         showMore.tap()
@@ -4103,8 +3773,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "session-archive-paging-restart")
     }
 
-    /// #1123: tapping Other focuses its editor, expands the sheet and keeps
-    /// the whole editor above the keyboard, including multi-line growth.
     @MainActor
     func testAskUserOtherTapFocusesEditorAboveKeyboard() {
         let app = launchAskUser()
@@ -4125,8 +3793,6 @@ final class TronSmokeUITests: XCTestCase {
         editor.typeText((1...8).map { "Line \($0)" }.joined(separator: "\n"))
         assertAskUserEditorAboveKeyboard(editor, keyboard: keyboard)
         keepScreenshot(named: "ask-user-other-multiline-above-keyboard")
-        // A content drag scrolls the page and stays put; it must not resize
-        // the sheet or snap the page back.
         let staging = app.buttons["Staging"]
         let before = staging.frame.minY
         staging.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -4145,8 +3811,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Mutation count: 0"].exists)
     }
 
-    /// Failure mode: Send on a paged single-choice form while the last page's
-    /// Other editor holds the keyboard hangs the app before the answer is sent.
     @MainActor
     func testAskUserSendWithFocusedOtherEditorOnLastPageSubmits() {
         let app = launchAskUser(styled: true, multiple: true)
@@ -4187,8 +3851,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ask-user-other-editor-hidden-single-choice")
     }
 
-    /// #1123: swiping the sheet down is the only local close. It sends no
-    /// response, so the question stays pending and reopens with its draft.
     @MainActor
     func testAskUserSwipeDismissKeepsQuestionPendingWithDraft() {
         let app = launchAskUser()
@@ -4215,9 +3877,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["extension.respond cancelled=false selected=environment-a other=local canary"].exists)
     }
 
-    /// #2296 item 17: an unreadable record, an older duplicate of the
-    /// question's scope and one record over the bound each cost only
-    /// themselves; the question's newest stored draft still restores.
     @MainActor
     func testAskUserStoredDraftSurvivesBadNeighbourRecords() {
         let app = launchAskUser(storedDrafts: true)
@@ -4258,10 +3917,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ask-user-completed-read-only-fixture")
     }
 
-    /// #941: agent-authored question text is selectable with Copy, its URL is
-    /// a tappable link, and a fenced command's shared Copy control copies the
-    /// exact command (proved by pasting it into Other and submitting it with an
-    /// option through the real response path).
     @MainActor
     func testAskUserQuestionTextIsSelectableWithLinksAndCopyableCode() {
         let command = "scripts/tron-ios-device share --commit 1955237"
@@ -4274,14 +3929,12 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts[command].exists, "The fenced command renders as a code block")
         keepScreenshot(named: "941-1-question-url-command")
 
-        // Native range selection on the question offers the system Copy.
         question.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.2)).press(forDuration: 1.0)
         let copyMenu = app.descendants(matching: .menuItem).matching(NSPredicate(format: "label == 'Copy'")).firstMatch
         XCTAssertTrue(copyMenu.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "941-2-question-selection-copy-menu")
         copyMenu.tap()
 
-        // The code block's shared Copy control copies the exact command.
         let copyCode = app.buttons.matching(NSPredicate(format: "label == 'Copy'")).firstMatch
         XCTAssertTrue(copyCode.waitForExistence(timeout: 3), app.debugDescription)
         copyCode.tap()
@@ -4301,7 +3954,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["extension.respond cancelled=false selected=environment-a other=\(command)"].exists, app.debugDescription)
 
-        // The completed review renders the same link; tapping it opens Safari.
         let reviewed = app.textViews.matching(NSPredicate(format: "label CONTAINS %@", url)).firstMatch
         XCTAssertTrue(reviewed.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "941-4-completed-review-link")
@@ -4329,9 +3981,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertLessThan(cancel.frame.maxX, send.frame.minX)
         XCTAssertFalse(app.buttons["Close form and keep answers"].exists)
         XCTAssertFalse(send.isEnabled)
-        // #1123: no fixed opaque header. The instruction is page content that
-        // starts below the toolbar, and the page's scroll viewport extends up
-        // beneath the toolbar into the shared top blur.
         let page = app.scrollViews["Question 1 of 1"]
         XCTAssertTrue(page.exists, app.debugDescription)
         XCTAssertGreaterThan(instruction.frame.minY, send.frame.maxY)
@@ -4342,8 +3991,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ask-user-styled-active-selected")
     }
 
-    /// #1123: a page taller than the sheet scrolls under content drags, in
-    /// both directions, without resizing the sheet or snapping back.
     @MainActor
     func testAskUserLongPageScrollsWithContentDrags() {
         let app = launchAskUser(long: true)
@@ -4365,11 +4012,6 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ask-user-long-page-scrolled")
     }
 
-    /// #1155: pages follow horizontal drags without a nested pager. Vertical
-    /// drags scroll a long page and never turn it; a short horizontal drag
-    /// springs back; a long one turns the page either way; neither resizes nor
-    /// dismisses the sheet; Other still focuses above the keyboard; and a
-    /// swipe-down close keeps the page's draft.
     @MainActor
     func testAskUserPagesFollowHorizontalDragsAndKeepVerticalScroll() {
         let app = launchAskUser(multiple: true, long: true)
@@ -4389,7 +4031,6 @@ final class TronSmokeUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.7)
         }
 
-        // A vertical drag scrolls the long page and does not turn it.
         let beforeScroll = context.frame.minY
         drag(dx: 0, dy: -160)
         XCTAssertLessThan(context.frame.minY, beforeScroll - 60, "The page did not scroll")
@@ -4398,7 +4039,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(context.frame.minX, restX, accuracy: 1, "A vertical drag moved the page sideways")
         XCTAssertEqual(send.frame.minY, sheetY, accuracy: 2, "A content drag resized the sheet")
 
-        // A short horizontal drag springs back to the same page.
         let scrolledY = context.frame.minY
         drag(dx: -50, dy: 0)
         XCTAssertTrue(firstPage.exists)
@@ -4406,8 +4046,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(context.frame.minX, restX, accuracy: 1, "The page did not spring back")
         XCTAssertEqual(context.frame.minY, scrolledY, accuracy: 2, "A horizontal drag scrolled the page")
 
-        // A long, slightly diagonal drag turns the page; it neither scrolls,
-        // resizes nor starts dismissing the sheet.
         drag(dx: -240, dy: 30)
         XCTAssertTrue(secondPage.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertFalse(firstPage.exists, "The previous page stays mounted after the turn")
@@ -4416,8 +4054,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(send.frame.minY, sheetY, accuracy: 2, "A page drag resized or dismissed the sheet")
         keepScreenshot(named: "ask-user-page-2-after-drag")
 
-        // Dragging back returns to the first page; dragging past the last
-        // page bounces back without turning.
         drag(dx: 240, dy: 0)
         XCTAssertTrue(firstPage.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertFalse(secondPage.exists)
@@ -4427,8 +4063,6 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(secondPage.exists, "Dragging past the last page turned it")
         XCTAssertEqual(timing.frame.minX, restX, accuracy: 1, "The last page did not bounce back")
 
-        // Other on the turned page focuses above the keyboard, and a swipe-
-        // down close keeps the page and its draft pending.
         app.buttons["Other"].tap()
         let editor = app.textViews["Other response for When should the change happen?"]
         XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
@@ -4458,7 +4092,6 @@ final class TronSmokeUITests: XCTestCase {
         return app
     }
 
-    /// Drags the sheet down from its toolbar title, the interactive dismissal.
     @MainActor
     private func swipeDownAskUserSheet(in app: XCUIApplication) {
         let send = app.buttons["Submit all answers"]
@@ -4478,8 +4111,6 @@ final class TronSmokeUITests: XCTestCase {
         waitForExpectations(timeout: 5)
     }
 
-    /// The question's selectable text view. iOS 27 also exposes its paragraph
-    /// as a child the label query types TextView, so match the view itself.
     @MainActor
     private func askUserQuestion(_ text: String, in app: XCUIApplication) -> XCUIElement {
         app.textViews.matching(NSPredicate(
@@ -4507,9 +4138,6 @@ final class TronSmokeUITests: XCTestCase {
            let current = XCUIScreen.main.screenshot().image.cgImage else {
             return XCTFail("Historical onboarding visual reference is missing")
         }
-        // The executable historical artifact is an iPhone 17 Pro baseline.
-        // Larger physical devices retain geometry assertions and screenshots,
-        // but must not be resampled into a misleading feature-print comparison.
         guard reference.width == current.width, reference.height == current.height else { return }
         let crop = CGRect(x: 0, y: 1242, width: 1206, height: 1380)
         guard let referenceCrop = reference.cropping(to: crop),
@@ -4559,9 +4187,6 @@ final class TronSmokeUITests: XCTestCase {
         var failures: [String] = []
         XCTAssertNoThrow(try app.performAccessibilityAudit { issue in
             let element = issue.element
-            // XCTest predicts clipping from the field's normal-size UIKit host
-            // frame without rerunning SwiftUI layout. The dedicated XXXL test
-            // above relaunches and verifies the real custom field grows.
             if issue.auditType == .textClipped,
                element?.label == "Tailscale host",
                element?.elementType == .textField { return true }

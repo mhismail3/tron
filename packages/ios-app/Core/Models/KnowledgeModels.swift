@@ -1,7 +1,5 @@
 import Foundation
 
-// Shared presentation and accepted-result identities. These remain active in
-// settings, uploads, connection setup and Profile; they contain no corpus data.
 package struct KnowledgePresentationIdentity: Hashable, Sendable {
     package let profileID: String?
     package let lifecycleGeneration: Int?
@@ -19,7 +17,6 @@ package struct KnowledgePresentationIdentity: Hashable, Sendable {
     }
 }
 
-/// Form and accepted-result lifetime, distinct from a disposable read's socket.
 package struct KnowledgeDestinationIdentity: Equatable, Sendable {
     package let profileID: String?
     package let lifecycleGeneration: Int

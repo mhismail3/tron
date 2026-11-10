@@ -2,24 +2,18 @@ import SwiftUI
 import UIKit
 
 #if HOSTED_TEST
-/// Passive observation is injected by the hosted fixture, never imported from it.
 @MainActor enum HostedPresentationProbe {
     static var record: (@MainActor (String, String) -> Void)?
     static var nativeView: (@MainActor (String) -> AnyView)?
 }
 #endif
 
-/// One source's ordinary SwiftUI sheet node. The surface's retained hosting
-/// root renders it; a source control never contains a platform view.
 @MainActor
 final class RetainedNativeSheetHost {
     private(set) var content: AnyView?
     private weak var canvas: NativeSheetCanvas?
     private var onSourceRemoval: (@MainActor () -> Void)?
     private var retired = false
-    /// Never an object address: a freed host's address can be reused by its
-    /// replacement within one canvas update, and SwiftUI would then keep the
-    /// old sheet node's presentation state for the new source (#1695).
     nonisolated let id = UUID()
     var isInstalled: Bool { content != nil }
     var isAttached: Bool { canvas?.isAttached == true }
@@ -56,8 +50,6 @@ extension RetainedNativeSheetHost: PresentationScopedResource {
         #if HOSTED_TEST
         if content != nil { HostedPresentationProbe.record?("anchor-retire", "\(id)") }
         #endif
-        // Break source/scope/environment captures even while native dismissal
-        // still owns the hosting root. The installed marker remains observable.
         if content != nil { content = AnyView(EmptyView()) }
         let parent = canvas
         canvas = nil
@@ -89,8 +81,6 @@ private struct NativeSheetCanvasContent: View {
     var body: some View {
         ZStack { ForEach(sources) { $0.content } }
             #if HOSTED_TEST
-            // Animated detent insets can leave a stable fractional scroll offset.
-            // Static locks pin the native sheet transaction, not its pixels.
             .transaction { transaction in
                 if ProcessInfo.processInfo.environment["TRON_UI_LOCK_RENDERING"] == "1" {
                     transaction.disablesAnimations = true
@@ -100,8 +90,6 @@ private struct NativeSheetCanvasContent: View {
     }
 }
 
-/// The presenter of every managed sheet in its surface, so the one place an
-/// iPad sheet is sized before UIKit presents it.
 private final class NativeSheetHostingController: UIHostingController<NativeSheetCanvasContent> {
     override func present(_ presented: UIViewController, animated: Bool, completion: (() -> Void)? = nil) {
         if let window = view.window { TronPadSheetMode.prepare(presented, in: window) }
@@ -109,8 +97,6 @@ private final class NativeSheetHostingController: UIHostingController<NativeShee
     }
 }
 
-/// The hosting controller itself must survive reconstruction: retaining child
-/// controllers under a disposable UIKit container still dismisses their sheets.
 @MainActor
 final class NativeSheetCanvas: PresentationScopedResource {
     private var sources: [RetainedNativeSheetHost] = []
@@ -155,8 +141,6 @@ final class NativeSheetCanvas: PresentationScopedResource {
     }
 
     private func publish() {
-        // Explicit native-root publication also reaches covered sheet graphs;
-        // an observable child value alone can wait until that root is revealed.
         hostingController?.rootView = renderedContent
     }
 
@@ -184,20 +168,15 @@ private struct NativeSheetCanvasView: UIViewControllerRepresentable {
     }
 }
 
-/// The surface a canvas serves. Only the scene root reflows, so the navigation
-/// chrome moves with the content; a route's sheets report upward to it, and a
-/// sheet's own surface keeps its sheets stacked over it as on iPhone.
 enum TronSheetSurfaceRole {
     case scene, route, sheet
 }
 
-/// One native mounting point per scene/surface, outside its controls. Sources
-/// are render inputs, not a route registry: scoped resources still own lifetime.
 struct TronNativeSheetCanvas: ViewModifier {
     var role: TronSheetSurfaceRole = .sheet
     @PresentationState private var canvas = NativeSheetCanvas()
     @Environment(\.tronPadSheetScene) private var padSheetScene
-    @State private var presentsSheet = false // presentation read of this scene's sheets
+    @State private var presentsSheet = false
 
     func body(content: Content) -> some View {
         let canvas = canvas
@@ -210,7 +189,6 @@ struct TronNativeSheetCanvas: ViewModifier {
                     .frame(width: 0, height: 0)
                     .accessibilityHidden(true)
             }
-            // A nested surface owns its sources; an ancestor must not remount them.
             .transformPreference(NativeSheetSources.self) { $0 = [] }
             .transformPreference(TronPadSheetPresented.self) { if role != .route { $0 = false } }
     }

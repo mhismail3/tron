@@ -1,10 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// Offers its content at most `maximum` points and takes the content's own
-/// size, unlike a flexible `frame(maxWidth:)`, which would widen short content
-/// to the cap. Text inside truncates by its own truncation mode; the text
-/// itself is never shortened.
 struct TronWidthCap: Layout {
     let maximum: CGFloat
 
@@ -18,13 +14,8 @@ struct TronWidthCap: Layout {
     }
 }
 
-/// A title's width cap, set by the owner of a compact label (a worker result
-/// chip) and applied only where the label's title opts in with
-/// `tronTitleWidthCap()`. The base width is for the default text size and
-/// scales with Dynamic Type; a narrower proposal still bounds the title.
 struct TronTitleWidthCap: Equatable {
     let base: CGFloat
-    /// About "Worker · " and three or four title words at the default size.
     static let workerTaskTitle = TronTitleWidthCap(base: 208)
 }
 
@@ -54,6 +45,5 @@ private struct TronTitleWidthCapModifier: ViewModifier {
 }
 
 extension View {
-    /// Applies the environment's `tronTitleWidthCap`, if any, to this title.
     func tronTitleWidthCap() -> some View { modifier(TronTitleWidthCapModifier()) }
 }

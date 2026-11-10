@@ -27,9 +27,6 @@ struct StoredPrimitiveInteractionDraft: Codable, Equatable, Sendable {
     let confirmValue: Bool?
 }
 
-/// Bounded local ownership for answers the user has not submitted yet. Gateway
-/// interaction state remains authoritative; this store contains only disposable
-/// device-local drafts.
 @MainActor
 final class ExtensionInteractionDraftStore {
     static let documentKey = "extension.interactionDrafts.v1"
@@ -50,8 +47,6 @@ final class ExtensionInteractionDraftStore {
         let entries: [Entry]
     }
 
-    /// Reads each stored record on its own, so one unreadable record is
-    /// dropped without discarding its neighbours.
     private struct StoredDocument: Decodable {
         let version: Int
         let entries: [StoredEntry]
@@ -148,9 +143,6 @@ final class ExtensionInteractionDraftStore {
             defaults.removeObject(forKey: Self.documentKey)
             return
         }
-        // A bad record costs only itself: unreadable or invalid records are
-        // skipped, a duplicated scope keeps its newest record, and an
-        // oversized list keeps its newest records up to the bound.
         for entry in document.entries.compactMap(\.entry) where admits(entry.scope) && admits(entry) {
             if let kept = entries[entry.scope], kept.updatedAt >= entry.updatedAt { continue }
             entries[entry.scope] = entry

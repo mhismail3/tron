@@ -4,24 +4,17 @@ import UIKit
 extension ThemeColor {
     var ink: Color { Color(lightHex: lightHex, darkHex: darkHex) }
 
-    /// Burgundy glass uses a deeper wine pigment independent of foreground ink.
     var surfaceTint: Color {
         self == .burgundy ? Color(lightHex: lightHex, darkHex: "#5B1735") : ink
     }
 }
 
 extension Color {
-    /// Reading the observable owner registers the consuming SwiftUI body without
-    /// recreating the chat, navigation stack or composer when identity changes.
     @MainActor static var tronPrimary: Color { AppearanceSettings.shared.themeColor.ink }
     @MainActor static var tronPrimarySurface: Color { AppearanceSettings.shared.themeColor.surfaceTint }
 }
 
-// MARK: - Preserved Tron palette
-
 extension Color {
-    /// Parses both hex values once; the dynamic provider runs on every trait
-    /// resolution (per body on the dashboard), so it only selects a color.
     init(lightHex: String, darkHex: String) {
         let light = UIColor(hex: lightHex)
         let dark = UIColor(hex: darkHex)
@@ -42,18 +35,13 @@ extension Color {
     static let tronCyan = Color(lightHex: "#0891B2", darkHex: "#06B6D4")
     static let tronIndigo = Color(lightHex: "#6366F1", darkHex: "#818CF8")
     static let tronTeal = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
-    /// Subagent seafoam identity; darker light-mode ink keeps sheet controls readable.
     static let tronSubagent = Color(lightHex: "#007D6C", darkHex: "#03C3A8")
-    /// Automation teal: the chat Automation chip identity (approved chip-category palette).
     static let tronAutomation = Color(lightHex: "#31889A", darkHex: "#74CBDC")
     static let tronAutomationText = Color(lightHex: "#1F6675", darkHex: "#8BD8E4")
     static let tronSlate = Color(lightHex: "#64748B", darkHex: "#94A3B8")
-    /// Blue steel: the System settings identity and the chat Worker chip, distinct
-    /// from the primary theme, Automation teal and neutral slate.
     static let tronSteel = Color(lightHex: "#36566F", darkHex: "#9BBAD0")
 
     static let tronBackground = Color(lightHex: "#F7F8FA", darkHex: "#0D0E0F")
-    /// Historical neutral tint used by the composer and terminal keyboard bar.
     static let tronPhthaloGreen = Color(lightHex: "#FFFFFF", darkHex: "#111827")
     static let tronSurface = Color(lightHex: "#FFFFFF", darkHex: "#16181D")
     static let tronSurfaceElevated = Color(lightHex: "#EEF2F6", darkHex: "#252A32")
@@ -63,7 +51,6 @@ extension Color {
     static let tronTextMuted = Color(lightHex: "#6B7280", darkHex: "#8B949E")
     @MainActor static var userMessageText: Color { .tronPrimary }
     @MainActor static var inputText: Color { .tronPrimary }
-    /// The typed-text ink, dimmed: a placeholder reads as the theme's own quiet draft, not grey.
     @MainActor static var inputPlaceholder: Color { Color.tronPrimary.opacity(0.6) }
 
     init(hex: String) {
@@ -117,9 +104,6 @@ enum TronSpacing {
     static let cornerMD: CGFloat = 10
 }
 
-/// Full-screen app background: the palette color plus a faint static grain so
-/// flat regions read as paper and glass has texture to refract. The grain is
-/// one pre-rendered tile, so it adds no per-frame filter cost.
 struct TronBackdrop: View {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -138,13 +122,11 @@ struct TronBackdrop: View {
 }
 
 private enum TronGrain {
-    /// 128pt tile rendered at 3x so each speck is one device pixel.
     static let tile: UIImage = {
         let side = 384
         var pixels = [UInt8](repeating: 0, count: side * side * 4)
         var generator = DecorativeRandom()
         for pixel in stride(from: 0, to: pixels.count, by: 4) {
-            // Premultiplied white: every channel equals the random alpha.
             let alpha = UInt8.random(in: 0...255, using: &generator)
             pixels.replaceSubrange(pixel..<pixel + 4, with: [alpha, alpha, alpha, alpha])
         }
@@ -158,9 +140,6 @@ private enum TronGrain {
     }()
 }
 
-/// The one source of purely decorative randomness (the grain, the composer's
-/// prompt line). Hosted UI tests and locks compare frames across launches, so
-/// there it is SplitMix64 from a fixed seed; elsewhere it is the system source.
 struct DecorativeRandom: RandomNumberGenerator {
     static func element<T>(of items: [T]) -> T? {
         var random = DecorativeRandom()

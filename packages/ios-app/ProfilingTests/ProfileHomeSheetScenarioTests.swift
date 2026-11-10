@@ -6,12 +6,6 @@ import UIKit
 import XCTest
 @testable import TronMobile
 
-/// The Home view's Recently Completed sheet for `scripts/tron-profile ios`:
-/// the production `SessionShellView` in its Home view over a catalog of Home
-/// workers, while two running workers publish a summary every second. Each
-/// cycle opens the sheet through its own control, scrolls it to the end and
-/// back at a steady speed, and closes it through Done. The ledger records the
-/// open latency and the display frames the main thread missed (#1003).
 @MainActor
 final class ProfileHomeSheetScenarioTests: XCTestCase {
     func testHomeCompletedSheet() throws {
@@ -26,8 +20,6 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
     static let completedCount = 40
     static let unreadCount = 8
     static let runningCount = 2
-    /// The section's control: "View All" in its header, formerly "View more"
-    /// below its rows. SwiftUI's accessibility nodes publish labels, not identifiers.
     static let openLabels: Set<String> = ["View all sessions in Recently Completed", "View more sessions in Recently Completed"]
     static let sheetRowPrefix = "home-completed-sheet-row-"
 
@@ -35,8 +27,6 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
     private var sessions: [SessionSummary]
     private var host: UIHostingController<AnyView>?
     private var cycles = 0
-    /// The dashboard reads its view choice from standard defaults; the run
-    /// selects the Home view and restores the host's choice afterwards.
     private let savedFilter = UserDefaults.standard.data(forKey: DashboardServerFilterPreferences.documentKey)
 
     private init(fixture: ProfileGatewayFixture) {
@@ -50,7 +40,6 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
         for index in 0..<total {
             let running = index < Self.runningCount
             let unread = index >= Self.runningCount + Self.completedCount
-            // Ages spread from minutes to weeks, so the rows show every relative-time unit.
             let ago = 45 * pow(1.25, Double(index))
             rows.append(SessionSummary(
                 id: String(format: "home-worker-%02d", index), name: "\(names[index % names.count]) \(index)",
@@ -94,7 +83,6 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
         try await profileWaitUntil("the Home view shows Recently Completed's sheet control") {
             fixture.model.sessions.count == sessions.count && ProfileAccessibility.element(in: view, labels: Self.openLabels) != nil
         }
-        // Let the sections' first-appearance stagger finish.
         try await Task.sleep(for: .seconds(2))
     }
 
@@ -111,7 +99,6 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
         try await profileSleep(until: window, from: start)
     }
 
-    /// Running workers publish as the Gateway does while they work.
     private func publishSummaries(until deadline: Duration, from start: ContinuousClock.Instant) async throws {
         var revision = 1
         var offset = Duration.seconds(1)
@@ -141,7 +128,6 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
         defer { frames.stop() }
         let opened = CACurrentMediaTime()
         guard control.accessibilityActivate() else { throw ProfileScenarioError.workloadDiverged("the sheet control refused activation") }
-        // Open: until the presented sheet lists its rows and its presentation settled.
         var scroll: UIScrollView?
         try await profileWaitUntil("the sheet lists its rows", timeout: .seconds(5)) {
             scroll = self.sheetScrollView()
@@ -153,7 +139,6 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
         ProfileScenarioLedger.shared.add("sheet.open_ms", Int((CACurrentMediaTime() - opened) * 1_000))
         ProfileScenarioLedger.shared.add("sheet.open_missed_frames", frames.takeMissed().frames)
         guard let scroll else { return }
-        // Scroll to the end and back at a steady 1,600 pt/s, one step per display frame.
         let bottom = max(0, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
         let top = -scroll.adjustedContentInset.top
         for target in [bottom, top] {
@@ -171,7 +156,6 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
         ProfileScenarioLedger.shared.add("sheet.scroll_frames", missed.observed)
         ProfileScenarioLedger.shared.add("sheet.scroll_missed_frames", missed.frames)
         ProfileScenarioLedger.shared.add("sheet.scroll_missed_ms", missed.milliseconds)
-        // Close through Done and wait until the sheet is gone.
         guard let presented = host?.presentedViewController,
               let done = ProfileAccessibility.element(in: presented.view, labels: ["Done"]) else {
             throw ProfileScenarioError.workloadDiverged("the sheet has no Done control")
@@ -207,13 +191,8 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
     }
 }
 
-/// Finds SwiftUI controls through the accessibility tree the app already
-/// publishes, so a scenario drives the real control without a test hook.
 @MainActor
 enum ProfileAccessibility {
-    /// SwiftUI publishes its accessibility tree only to an accessibility
-    /// client. Turn on the automation client XCUITest itself uses, so the
-    /// scenario carries the same accessibility cost as a UI test run.
     static func enableAutomation() {
         guard let library = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW),
               let symbol = dlsym(library, "_AXSSetAutomationEnabled") else { return }
@@ -222,8 +201,6 @@ enum ProfileAccessibility {
     }
 
     static func element(in root: UIView, labels: Set<String>) -> NSObject? {
-        // A hosting view can carry its control's label; prefer SwiftUI's own
-        // accessibility node, which is the activatable element.
         var stack: [NSObject] = [root]
         var visited = 0
         var hostMatch: NSObject?
@@ -244,8 +221,6 @@ enum ProfileAccessibility {
     }
 }
 
-/// Display frames the main thread delivered late. A frame interval longer than
-/// 1.5 nominal frames counts the frames it skipped.
 @MainActor
 final class ProfileFrameClock: NSObject {
     private var link: CADisplayLink?

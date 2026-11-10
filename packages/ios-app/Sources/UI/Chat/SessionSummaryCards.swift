@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Local type adjustments for Manage Session; headings retain the established
-/// reading-family scale and other sheets keep their ordinary metadata sizes.
 @MainActor
 enum SessionSummaryTypography {
     static let metadataSizeAdjustment = TronSettingsLayoutPolicy.metadataSizeAdjustment
@@ -13,8 +11,6 @@ enum SessionSummaryTypography {
     static var metricLabel: Font { TronTypography.sans(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
 }
 
-/// Workspace inspection and navigation stay with the sheet; this row only
-/// lays out the current branch beneath its title and the status as a value.
 struct SessionWorkspaceSummaryRow: View {
     let presentation: SessionWorkspaceRowPresentation
     let accent: Color
@@ -63,15 +59,12 @@ struct SessionWorkspaceSummaryRow: View {
     }
 }
 
-/// A context window divided into named sections: the bar's segments and the
-/// compact legend under it. Manage Home supplies it from `home.context`.
 struct SessionContextSegments: Equatable {
     struct Segment: Identifiable, Equatable {
         let id: String
         let label: String
         let tokens: Int
         let color: Color
-        /// The section's count in words ("260 summaries"), for VoiceOver.
         let detail: String?
     }
     let used: Int
@@ -79,11 +72,6 @@ struct SessionContextSegments: Equatable {
     let segments: [Segment]
 }
 
-/// The stats card Manage Session and Manage Home show. Manage Home supplies an
-/// accessory (its state pill and last activation), placed on a header row above
-/// the usage, and segments, which replace the plain bar with one segment per
-/// section and a compact legend above the metrics. Manage Session supplies an
-/// action (Compact Now), trailing and centered on the headline and usage lines.
 struct SessionContextUsageCard<Accessory: View, Action: View>: View {
     let snapshot: SessionContextPresentation
     let accessory: Accessory?
@@ -160,8 +148,6 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
                     .accessibilityLabel("Context estimate pending")
                     .accessibilityValue("Displayed as zero percent until refreshed")
             }
-            // The usage line is also the separator; no duplicate divider or
-            // compaction status belongs between this header and its metrics.
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(spacing: 6) {
                     ForEach(statistics.indices, id: \.self) { index in
@@ -184,8 +170,6 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
         .accessibilityIdentifier("session-usage-summary")
     }
 
-    /// The headline over its detail line, with the action trailing and centered
-    /// on both; at accessibility sizes it moves below them, trailing like a row's.
     private func header(@ViewBuilder lines: () -> some View) -> some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 8)) : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
@@ -217,7 +201,6 @@ struct SessionContextUsageCard<Accessory: View, Action: View>: View {
     }
 }
 
-/// The usage bar split by section, in section order; the free remainder is the track.
 struct SessionContextSegmentedBar: View {
     let segments: SessionContextSegments
 
@@ -242,8 +225,6 @@ struct SessionContextSegmentedBar: View {
     }
 }
 
-/// One compact line per section: its dot, its name and its size, two to a row.
-/// The free remainder has no line; the header already says how much is left (#963).
 struct SessionContextSegmentLegend: View {
     let segments: SessionContextSegments
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize

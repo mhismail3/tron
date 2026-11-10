@@ -23,8 +23,6 @@ struct InAppNoticeReplacement: Hashable, Sendable {
     let scope: InAppNoticeScope
 }
 
-/// Disposable informational feedback, not recovery authority. One FIFO head is
-/// readable at a time; queued cards never cover it or consume its reading time.
 @MainActor
 @Observable
 final class InAppNoticeCenter {
@@ -94,8 +92,6 @@ final class InAppNoticeCenter {
             notices[index] = Notice(id: old.id, replacement: bounded.replacement, scope: bounded.scope,
                                     role: bounded.role, priority: bounded.priority, title: bounded.title,
                                     message: bounded.message, lifetime: bounded.lifetime)
-            // Updates retain both FIFO position and the original visible deadline.
-            // Repeated progress or connection failures cannot pin the head forever.
             if old.title != bounded.title || old.message != bounded.message {
                 announcedForegroundIDs.remove(old.id)
             }
@@ -148,8 +144,6 @@ final class InAppNoticeCenter {
     }
     private func enforceBounds() {
         while notices.count > Self.maximumCount || totalBytes > Self.maximumTotalBytes {
-            // Never evict/preempt the card being read. Priority only decides
-            // which pending feedback to shed under a burst, not display order.
             guard let victim = notices.dropFirst().min(by: { $0.priority < $1.priority }) else { break }
             notices.removeAll { $0.id == victim.id }
             announcedForegroundIDs.remove(victim.id)

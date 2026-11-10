@@ -193,10 +193,7 @@ package struct TranscriptForkBoundary: Codable, Hashable, Sendable {
 }
 
 package struct ExtensionToolOrigin: Codable, Hashable, Sendable {
-    /// Legacy public source fallback. It is never a filesystem path or grouping
-    /// key when more than one admitted owner claims it.
     let source: String
-    /// Exact opaque owner identity, when supplied by the Gateway.
     package let owner: ExtensionOwner?
 
     package init(source: String, owner: ExtensionOwner? = nil) {
@@ -288,10 +285,8 @@ package struct ChatSemanticMetadata: Codable, Hashable, Sendable {
     package let operationId: String?
     let sequence: Int
     package let lifecycle: InvocationLifecycle?
-    /// Ordered resources the message invoked: skills and prompts, or one extension command.
     package let resourceInvocations: [ComposerResourceInvocation]?
     package let submittedText: String?
-    /// Present only on a command row a fork inherited, whose lifecycle settled in its origin session.
     package let settledInOriginSession: Bool?
 
     private enum CodingKeys: String, CodingKey {
@@ -454,8 +449,6 @@ package struct MessageTranscriptItem: TranscriptPayload {
         details = try values.decodeIfPresent(JSONValue.self, forKey: .details)
         display = try values.decodeIfPresent(DisplayProjection.self, forKey: .display)
         if let display {
-            // Gateway admits provider-bound browser results before projection;
-            // raw extension details are never native display authority.
             guard role == .toolResult,
                   toolName == "display" || (toolName == "agent_browser" && display.kind == .browserLive)
                     || (toolName == "swift_app" && display.kind == .code && display.artifact?.name.lowercased().hasSuffix(".swift") == true) else {
@@ -620,8 +613,6 @@ package struct LabelTranscriptItem: TranscriptPayload {
     }
 }
 
-/// A discriminated Gateway transcript value. Each Pi entry kind decodes into
-/// a shape that cannot accidentally accept fields belonging to another kind.
 package enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     package enum Kind: String, Codable, Sendable {
         case message, bash, customMessage, customEntry, compaction, branchSummary, modelChange, thinkingChange, label

@@ -1,20 +1,10 @@
 import SwiftUI
 import TronMobileCore
 
-/// Authoritative, disposable projection of extension-provided retained content.
-///
-/// Retained widgets are deliberately not ambient transcript or composer chrome:
-/// a discrete extension *event* belongs in a notification pill, while retained
-/// *state* is only visible through the general widgets sheet. Nothing here owns
-/// extension execution or presentation authority; it is derived from the
-/// current authoritative session snapshot on every render.
 struct ExtensionRetainedContent: Equatable {
     enum Style: Equatable {
-        /// String widget lines, already sanitized for display.
         case text([String])
-        /// A bounded, read-only captured component frame.
         case frame(ExtensionFrame)
-        /// One retained keyed status line.
         case status(String)
     }
 
@@ -28,8 +18,6 @@ struct ExtensionRetainedContent: Equatable {
 
     var isEmpty: Bool { entries.isEmpty }
 
-    /// Deterministic producer order: first appearance wins, and unknown
-    /// producers sort last so a stable list never reshuffles on update.
     var producers: [String] {
         var seen = Set<String>()
         var ordered: [String] = []
@@ -51,25 +39,17 @@ struct ExtensionRetainedContent: Equatable {
 }
 
 enum ExtensionRetainedContentPolicy {
-    /// A string widget is presentable only if it has visible, sanitized content.
-    /// Empty or detail-hint-only widgets must not create an empty sheet.
     static func presentableWidgetLines(_ widget: ExtensionWidget) -> [String] {
         widget.lines
             .map(NativeExtensionText.clean)
             .filter { !$0.isEmpty }
     }
 
-    /// Status text is one display line. The Gateway already removed terminal
-    /// presentation, so only whitespace is normalized: the widget detail-hint
-    /// filter is deliberately not applied here, because it removes a widget-line
-    /// artifact rather than a status.
     static func presentableStatusText(_ raw: String) -> String {
         raw.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Retained statuses in deterministic key order. Wire dictionaries have no
-    /// order, so sorting by key is what keeps the list stable across updates.
     static func presentableStatuses(
         _ statuses: [String: String]?
     ) -> [(key: String, text: String)] {
@@ -79,9 +59,6 @@ enum ExtensionRetainedContentPolicy {
         }
     }
 
-    /// Only retained, non-blocking widget surfaces are presentable here.
-    /// Header/footer/custom/overlay/editor/renderer surfaces have no native
-    /// consumer and must never be advertised as shown.
     static func presentableSurfaces(_ surfaces: [ExtensionSurface]) -> [ExtensionSurface] {
         surfaces
             .filter { $0.kind == .widget && $0.lifecycle != .blocking }
@@ -100,8 +77,6 @@ enum ExtensionRetainedContentPolicy {
             guard widget.owner?.kind != .subagent else { continue }
             let lines = presentableWidgetLines(widget)
             guard !lines.isEmpty else { continue }
-            // The authoritative widget array order is stable across updates
-            // because the store replaces entries in place by key.
             entries.append(.init(
                 id: "widget:\(widget.key)",
                 producer: widget.owner?.title ?? ExtensionRetainedContent.unknownProducer,
@@ -116,10 +91,6 @@ enum ExtensionRetainedContentPolicy {
                 style: .frame(surface.frame)
             ))
         }
-        // A status outlives its owner's widget (a paused goal clears its widget
-        // and keeps only its status), so it is retained content in its own right.
-        // The key stays out of the visible card: the section header already names
-        // the producer, and the key is an extension-internal slot name.
         for status in presentableStatuses(statuses) {
             guard statusOwners?[status.key]?.kind != .subagent else { continue }
             entries.append(.init(
@@ -131,9 +102,6 @@ enum ExtensionRetainedContentPolicy {
         return ExtensionRetainedContent(entries: entries)
     }
 
-    /// Surface provenance carries a resolver source string, never a display
-    /// name. Show that exact identity (bounded) instead of guessing a friendlier
-    /// label: two packages can share a last path component.
     static func surfaceProvenanceTitle(_ source: String?) -> String {
         guard let source else { return ExtensionRetainedContent.unknownProducer }
         let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -178,8 +146,6 @@ struct UnifiedActivityButton: View {
 
     var body: some View {
         Button(action: onTap) {
-            // The glass button keeps its identity; only its glyph crossfades.
-            // A symbol content transition cannot animate replacement by Canvas.
             ZStack {
                 if kind == .extensionContent {
                     Image(systemName: kind.symbolName)
@@ -206,7 +172,6 @@ struct UnifiedActivityButton: View {
         )
         .glassEffectID("chat-unified-activity", in: glassNamespace)
         .glassEffectTransition(.matchedGeometry)
-        // Liquid Glass owns the composer morph, without a competing scale.
         .transition(.opacity)
         .accessibilityLabel(kind == .extensionContent ? "Extension content" : "Subagents")
         .accessibilityValue(kind == .extensionContent ? "\(contentCount) available" : "Shows current and recently finished subagents")

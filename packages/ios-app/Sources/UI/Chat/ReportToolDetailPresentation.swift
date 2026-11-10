@@ -2,8 +2,6 @@ import Foundation
 import TronMobileCore
 
 extension HomeToolDetailPresentation {
-    /// Report content belongs to the accepted invocation. Its result only carries
-    /// an opaque transcript receipt; keep that receipt in Technical details.
     static func report(_ call: Call) -> HomeToolDetailPresentation? {
         guard call.string("outcome") != nil || call.string("text") != nil || call.running || call.error else { return nil }
         let outcome = call.string("outcome")

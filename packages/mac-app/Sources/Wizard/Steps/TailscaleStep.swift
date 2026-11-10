@@ -1,11 +1,5 @@
 import SwiftUI
 
-/// Tailscale prerequisite step. The shell owns the icon, title,
-/// progress pill, and the bottom action bar (Back / "I have Tailscale"
-/// or Continue). This view contributes the explanatory copy, the live
-/// status card driven by `setup.probeTailscale()`, and — only when
-/// Tailscale isn't yet ready — an inline link to the macOS download
-/// page.
 struct TailscaleStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
@@ -23,10 +17,6 @@ struct TailscaleStep: View {
 
                 statusCard
 
-                // Tertiary action: only relevant before Tailscale is up.
-                // Inlined here (rather than living in the shell's bottom
-                // bar) so it slides with the rest of the body content
-                // and disappears cleanly once the user signs in.
                 if !(state.tailscaleStatus?.isReady ?? false) {
                     Button {
                         NSWorkspace.shared.open(URL(string: "https://tailscale.com/download/mac")!)
@@ -102,8 +92,6 @@ struct TailscaleStep: View {
         }
     }
 
-    /// Probes once immediately, then every second until the view-scoped
-    /// SwiftUI task is cancelled or Tailscale is ready.
     @MainActor
     private func probeUntilReady() async {
         while !Task.isCancelled {

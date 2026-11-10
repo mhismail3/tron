@@ -2,8 +2,6 @@ import AppKit
 import CoreText
 import Foundation
 
-/// Registers the bundled Google Fonts sans-serif face so the Mac
-/// onboarding wizard does not depend on fonts installed on the host.
 enum TronFontLoader {
     static let bundledSansFontResource = "Exo2-Variable"
     static let bundledSansFontExtension = "ttf"

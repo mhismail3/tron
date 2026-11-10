@@ -2,7 +2,6 @@ import Darwin
 import Foundation
 import Security
 
-/// Kernel birth + executable path, NOT an exec incarnation or an input grant.
 struct NativeCaptureProcess: Equatable, Sendable {
     let pid: Int32
     let seconds: UInt64
@@ -46,9 +45,6 @@ public struct NativeCaptureContext: Sendable {
     }
 }
 
-/// A connection pins signed Node bytes before messages are delivered. Fresh
-/// launchd evidence independently proves this is the actual Stable job, not
-/// another process loading those bytes. No credential or caller provenance input.
 final class NativeCapturePeer: @unchecked Sendable {
     let process: NativeCaptureProcess
     let codeRequirement: String
@@ -92,8 +88,6 @@ final class NativeCapturePeer: @unchecked Sendable {
         guard isCurrent(), let runtime = try? await LaunchAgentRuntimeReader.read(label: TronGatewayProfile.stable.launchAgentLabel),
               isCurrent(), runtime.pid == Int(process.pid), !runtime.needsLaunchConstraintRefresh,
               StableGatewayProvenance.validates(runtime, payload: payload, expectedHelperPath: context.helper.path) else { return false }
-        // launchd observation includes ps awaits; compare birth/executable and
-        // immutable payload selection again rather than accepting the old PID.
         return isCurrent()
     }
 }

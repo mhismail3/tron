@@ -1,8 +1,6 @@
 import XCTest
 
-/// Real rendered Home controls (the bottom of Home Settings) in both supported appearances.
 final class TronHomeControlsUITests: XCTestCase {
-    /// Compare rendered glyph colors, not a test-only accessibility style label.
     @MainActor func testDisableHomeSubtitleMatchesDestructiveTitle() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
@@ -16,8 +14,6 @@ final class TronHomeControlsUITests: XCTestCase {
             screenshot.name = "disable-home-subtitle-\(mode)"
             screenshot.lifetime = .keepAlways
             add(screenshot)
-            // Default-size labels occupy separate halves of this two-line row.
-            // Exclude the leading icon so it cannot make a neutral subtitle pass.
             let title = ink(app, disable, crop: { frame in
                 CGRect(x: frame.minX + 56, y: frame.minY,
                        width: frame.width - 56, height: frame.height / 2)
@@ -32,8 +28,6 @@ final class TronHomeControlsUITests: XCTestCase {
         }
     }
 
-    /// Pause is a neutral hold: its icon, title and subtitle carry no accent hue,
-    /// in light and dark and at an accessibility text size.
     @MainActor func testPauseMemoryRowIsNeutralGray() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
@@ -78,8 +72,6 @@ final class TronHomeControlsUITests: XCTestCase {
         return app
     }
 
-    /// Ink pixels (far from the row's median luminance) and how many of them are
-    /// hued (channel spread above 60/255): glyphs, not the material behind them.
     @MainActor private func neutrality(_ app: XCUIApplication, _ area: CGRect) -> (ink: Int, hued: Int) {
         let window = app.windows.firstMatch.frame.width
         guard let source = XCUIScreen.main.screenshot().image.cgImage,
@@ -111,7 +103,6 @@ final class TronHomeControlsUITests: XCTestCase {
         app.descendants(matching: .any)[id].firstMatch
     }
 
-    /// Taps a row and waits for the sheet it opens.
     @MainActor private func open(_ app: XCUIApplication, _ row: XCUIElement, ready: String, name: String) {
         XCTAssertTrue(row.waitForExistence(timeout: 5), "\(name)\n\(app.debugDescription)")
         row.tap()
@@ -122,8 +113,6 @@ final class TronHomeControlsUITests: XCTestCase {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
-    /// The average color of an element's saturated (inked) pixels: a title's
-    /// glyphs or a row's icon, never the sheet material behind them.
     @MainActor private func ink(_ app: XCUIApplication, _ element: XCUIElement, crop: (CGRect) -> CGRect) -> [Double] {
         XCTAssertTrue(element.waitForExistence(timeout: 5), app.debugDescription)
         let area = crop(element.frame)

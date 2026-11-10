@@ -2,8 +2,6 @@ import SwiftUI
 import UIKit
 import TronMobileCore
 
-/// The historical chat photo preview: one medium-height, edge-to-edge media
-/// sheet with native pinch/double-tap zoom and concentric sheet corners.
 struct AttachmentImagePreviewSheet: View {
     private enum Source {
         case local
@@ -11,9 +9,6 @@ struct AttachmentImagePreviewSheet: View {
     }
 
     private let source: Source
-    /// Local callers pass a thumbnail first and replace it with the decoded
-    /// full preview. This must remain ordinary input rather than `@PresentationState`, so
-    /// the higher-resolution replacement reaches the zoom view.
     private let localImage: UIImage?
     private let accessibilityLabel: String
     var title: String
@@ -53,8 +48,6 @@ struct AttachmentImagePreviewSheet: View {
 
     var body: some View {
         NavigationStack {
-            // The outer reader keeps the title row's safe-area inset, so the
-            // fitted photo clears the real bar instead of a guessed height.
             GeometryReader { titleRow in
                 GeometryReader { geometry in
                     previewViewport(titleRowHeight: titleRow.safeAreaInsets.top)
@@ -63,8 +56,6 @@ struct AttachmentImagePreviewSheet: View {
                 .ignoresSafeArea(.container, edges: .all)
             }
             .navigationBarTitleDisplayMode(.inline)
-            // Media owns its viewport; suppress both the native bar's fill and
-            // visibility at the content boundary, as other underlapping readers do.
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
             .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
             .toolbar {
@@ -92,9 +83,6 @@ struct AttachmentImagePreviewSheet: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
-        // The system presentation owns the device-relative outer radius. The
-        // inset media viewport follows it concentrically instead of imposing a
-        // fixed app radius that can diverge on different phones.
         .presentationCornerRadius(nil)
         .presentationContentInteraction(.scrolls)
         .task(id: PresentationActivityTaskID(
@@ -151,7 +139,6 @@ struct AttachmentImagePreviewSheet: View {
               presentationActivity.allowsPresentationPublication,
               model.connectionState == .connected, model.knowledgePresentationIdentity.connectionID != nil,
               model.chatMediaDestinationIdentity(blobID: identity.blobID, sessionID: identity.sessionID) == identity else { return }
-        // Keeping the decoded image keeps the native zoom/viewport instance.
         guard remoteImage?.identity != identity else { return }
         let admission = model.knowledgePresentationIdentity
         failed = false
@@ -184,7 +171,6 @@ struct AttachmentImagePreviewSheet: View {
     }
 }
 
-/// Geometry contract retained from the pre-gateway image preview.
 enum AttachmentImagePreviewLayout {
     static let viewportInset: CGFloat = 8
     static let fittedPhotoCornerRadius: CGFloat = 18
@@ -194,13 +180,8 @@ enum AttachmentImagePreviewLayout {
         zoomScale <= minimumScale + 0.01 ? fittedPhotoCornerRadius : 0
     }
 
-    /// Clearance between the fitted photo and the title row, sides and bottom.
     static let fittedPhotoMargin = TronSpacing.section
 
-    /// Keeps a fitted photo centered with equal clearance for the overlay chrome:
-    /// `chromeInset` is the part of the viewport under the title row. The
-    /// returned frame has the photo's aspect ratio, so its pixels fill its
-    /// rounded rectangle without cropping.
     static func fittedImageFrame(imageSize: CGSize, in viewportBounds: CGRect, chromeInset: CGFloat) -> CGRect {
         guard imageSize.width > 0,
               imageSize.height > 0,
@@ -275,8 +256,6 @@ private final class AttachmentImageZoomScrollView: UIScrollView, UIScrollViewDel
         showsVerticalScrollIndicator = false
         backgroundColor = .clear
         contentInsetAdjustmentBehavior = .never
-        // Native bar fill and the scroll viewport's edge effect are separate.
-        // Photos keep their pixels clear beneath the floating title and Done.
         topEdgeEffect.isHidden = true
         clipsToBounds = true
 
@@ -300,9 +279,6 @@ private final class AttachmentImageZoomScrollView: UIScrollView, UIScrollViewDel
 
     func setImage(_ image: UIImage, accessibilityLabel: String) {
         imageView.accessibilityLabel = accessibilityLabel
-        // Identity is the decoded pixels and their orientation: a parent re-render that
-        // wraps the same CGImage in a new UIImage must not reset an active zoom. An image
-        // without a CGImage has no pixel identity, so only the same object is unchanged.
         if let current = imageView.image, current === image
             || (image.cgImage != nil && current.cgImage === image.cgImage && current.imageOrientation == image.imageOrientation) { return }
         setZoomScale(minimumZoomScale, animated: false)
@@ -366,7 +342,6 @@ private final class AttachmentImageZoomScrollView: UIScrollView, UIScrollViewDel
     }
 
     private func updatePanOwnership() {
-        // At fitted scale the native sheet keeps drag-to-dismiss ownership.
         panGestureRecognizer.isEnabled = zoomScale > minimumZoomScale + 0.01
     }
 

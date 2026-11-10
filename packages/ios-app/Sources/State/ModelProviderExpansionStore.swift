@@ -1,23 +1,15 @@
 import Foundation
 import Observation
 
-/// Per-device memory of which model-picker provider sections the user expanded
-/// or collapsed.
-/// The paired Gateway profile and the provider ID key every entry, so each
-/// pairing keeps its own choices. This is a presentation preference only; the
-/// Gateway catalog stays canonical.
 @MainActor
 @Observable
 final class ModelProviderExpansionStore {
     private struct Document: Codable {
         let version: Int
-        /// Explicit user choice per `profile|provider`; true is expanded.
         let expanded: [String: Bool]
     }
 
     static let documentKey = "modelPicker.providerExpansion.v1"
-    /// The app shares one device-local preference. Tests construct a store over
-    /// their own defaults suite instead.
     static let shared = ModelProviderExpansionStore()
 
     private static let version = 1
@@ -33,8 +25,6 @@ final class ModelProviderExpansionStore {
         choices = Self.load(from: defaults)
     }
 
-    /// A section with no remembered choice starts expanded only when it holds
-    /// the current selection.
     func isExpanded(profileID: String?, provider: String, selectedProvider: String?) -> Bool {
         choices[Self.key(profileID: profileID, provider: provider)] ?? (selectedProvider == provider)
     }

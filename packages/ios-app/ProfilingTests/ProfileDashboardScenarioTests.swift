@@ -4,22 +4,14 @@ import SwiftUI
 import XCTest
 @testable import TronMobile
 
-/// Dashboard scenarios for `scripts/tron-profile ios`: the production
-/// `SessionShellView` over a catalog the real `AppModel` loaded through
-/// `session.list`, with `session.summary` events delivered through the real
-/// `GatewayClient` at a scripted cadence.
 @MainActor
 final class ProfileDashboardScenarioTests: XCTestCase {
-    /// Three running sessions send the Gateway's per-session summary heartbeat
-    /// every 10 s, staggered; the other 57 rows are idle.
     func testIdleDashboard() throws {
         try profileScenario("idle-dashboard", defaultWindow: .seconds(30)) { _ in
             try await ProfileDashboardRun.make(activeSessions: 3, interval: .seconds(10), appendsMessages: false)
         }
     }
 
-    /// Five running sessions each publish a summary at snapshot rate (a
-    /// canonical append every 750 ms, two per tool call).
     func testSummaryStorm() throws {
         try profileScenario("summary-storm", defaultWindow: .seconds(15)) { _ in
             try await ProfileDashboardRun.make(activeSessions: 5, interval: .milliseconds(750), appendsMessages: true)
@@ -57,8 +49,6 @@ final class ProfileDashboardRun: ProfileScenarioRun {
                 parentSessionId: nil,
                 createdAt: GatewayTimestamp.preciseString(from: Date(timeIntervalSince1970: 1_790_000_000 + Double(index) * 600)),
                 updatedAt: GatewayTimestamp.preciseString(from: Date(timeIntervalSince1970: 1_790_000_000 + Double(index) * 600 + 300)),
-                // Running rows show a live elapsed clock; start it 90 s before
-                // the scenario so every run shows the same label cadence.
                 activeSince: active ? GatewayTimestamp.preciseString(from: Date().addingTimeInterval(-90)) : nil,
                 messageCount: 12 + index,
                 firstMessage: "Deterministic dashboard fixture row \(index)",
@@ -95,12 +85,9 @@ final class ProfileDashboardRun: ProfileScenarioRun {
             fixture.model.sessions.count == Self.sessionCount
                 && profileViews(UIButton.self, in: view).contains { $0.accessibilityIdentifier == "dashboard.menu" }
         }
-        // Let the initial reveal, first layout and mount-time reads finish so
-        // the window measures steady state rather than opening.
         try await Task.sleep(for: .seconds(2))
     }
 
-    /// Session `j` publishes at `interval * (k + (j + 1) / activeSessions)`.
     private func schedule(window: Duration) -> [(offset: Duration, session: Int)] {
         var events: [(Duration, Int)] = []
         var cycle = 0
@@ -118,7 +105,6 @@ final class ProfileDashboardRun: ProfileScenarioRun {
 
     func workload(window: Duration) async throws {
         let start = ContinuousClock.now
-        // As in the chat scenarios, the last second of the window only drains.
         let events = schedule(window: window - ProfileChatRun.drainTail)
         var revisions = Array(repeating: 1, count: activeSessions)
         for (offset, index) in events {
@@ -142,9 +128,6 @@ final class ProfileDashboardRun: ProfileScenarioRun {
         finalRevisions = revisions
     }
 
-    /// The dashboard list must have its rows mounted when the window ends; a
-    /// list that showed a loading or empty state instead would measure the
-    /// summary deliveries without their row updates.
     static let minimumMountedRows = 5
 
     func renderCheck() -> ProfileRenderCheck {

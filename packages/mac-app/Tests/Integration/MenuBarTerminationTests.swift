@@ -6,7 +6,6 @@ import Testing
 struct MenuBarTerminationTests {
     @Test("real AppKit deferred termination completes, retries, and rejects dispatch-based controls")
     func appKitTermination() async throws {
-        // Tests/Integration/<file> -> packages/mac-app
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -29,8 +28,6 @@ struct MenuBarTerminationTests {
             let result = await Subprocess.run(executable: executable, arguments: [mode], policy: .observation)
             #expect(result.stderr.contains("termination-requested"), "\(mode): \(result.stderr)")
             if mode == "direct" || mode == "dispatch" {
-                // These reproduce the installed stack and the insufficient
-                // DispatchQueue.main.async workaround, not a mocked scheduler.
                 #expect(result.exitCode == 42, "\(mode): \(result.stderr)")
                 #expect(result.stderr.contains("watchdog-expired"))
                 #expect(!result.stderr.contains("reply-task-ran"))

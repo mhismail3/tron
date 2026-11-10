@@ -2,9 +2,6 @@ import Foundation
 import Observation
 import TronMobileCore
 
-/// Typed projection of the Gateway's bounded `home.status`. It decodes exactly the
-/// fields the app reads: required sections and the closed `Phase` fail closed on
-/// drift, and every other Gateway field is ignored.
 struct HomeStatusDTO: Decodable, Equatable, Sendable {
     enum Phase: String, Decodable, Sendable {
         case unavailable, undesignated, disabled, missingSession = "missing-session"
@@ -67,7 +64,6 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let paused: Bool?
         let blocked: String?
         let reason: String?
-        /// The background model queue it summarizes with, `provider/id` in order.
         let models: [String]?
         let spentTokens: Int?
     }
@@ -77,8 +73,6 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let reason: String?
     }
 
-    /// Bounded chapter metadata of `home.status`; the full chapter list is a
-    /// future Gateway read (#725 follow-up).
     struct Chapter: Decodable, Equatable, Sendable {
         enum RecoveryDecision: String, Decodable, Sendable { case none, reserved, materializing }
         let count: Int
@@ -95,8 +89,6 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let running: Int
     }
 
-    // These are Gateway process facts, not the dashboard's session-row count or
-    // the work tooling's heavy-step queue. Home workers have no admission cap.
     let hostPressure: HostPressure
     let workers: Workers
     let taskRecovery: TaskRecovery?
@@ -110,18 +102,13 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     let enabled: Bool
     let homeId: String?
     let sessionId: String?
-    /// The newest chapter a client may open; the sealed predecessor while a
-    /// rollover is pending. Nil when nothing is openable.
     let openSessionId: String?
     let generation: Int?
     let sessionPresent: Bool
-    /// Home's live chapter is blocked on a pending user interaction (ask_user).
-    /// Absent on an older Gateway.
     let waitingForUser: Bool?
     let memory: Memory
     let chapter: Chapter?
 
-    /// Task and permission reads are admitted only while the Gateway's task recovery is open.
     var admitsTaskReads: Bool { available && taskRecovery?.available == true }
 
     static func decode(_ value: JSONValue) throws -> HomeStatusDTO {
@@ -150,11 +137,6 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     }
 }
 
-/// The chat route that a status claim and the context ring's Manage Home routing both decide for. A
-/// Home route always presents Home, even when no chapter is openable, so its
-/// recovery state stays reachable from the composer's context ring. An ordinary chat presents only
-/// the chapter it is (`sessionId`), so an ordinary chat on the sealed
-/// predecessor during a rollover neither claims the status nor manages Home.
 enum HomeChatRouteKey: Equatable, Sendable {
     case home
     case ordinary(sessionID: String)
@@ -171,7 +153,6 @@ enum HomeChatRouteKey: Equatable, Sendable {
     }
 }
 
-/// The one source of the Home state and memory lines the Manage Home sheet shows.
 enum HomeStatusLinePresentation {
     static func workers(_ status: HomeStatusDTO) -> String {
         let count = status.workers.running
@@ -194,8 +175,6 @@ enum HomeStatusLinePresentation {
         }
     }
 
-    /// The Memory row's subtitle. A blocked or unresolved memory names its reason
-    /// here, while the state pill carries the headline.
     static func memory(_ status: HomeStatusDTO, unresolvedCommand: Bool) -> String {
         if unresolvedCommand { return "Home change unresolved" }
         if status.memory.paused == true { return "Paused" }
@@ -208,9 +187,7 @@ enum HomeStatusLinePresentation {
     }
 }
 
-/// The Manage Home rows' secondary lines, each read from the sheet's own load.
 enum HomeManageRowPresentation {
-    /// Active item count, split by whether the maintainer confirmed them.
     static func profile(_ list: HomeProfileListDTO?) -> String {
         guard let list else { return "Unavailable" }
         let active = list.active
@@ -220,7 +197,6 @@ enum HomeManageRowPresentation {
         return "\(count) · \(confirmed.formatted()) confirmed · \((active.count - confirmed).formatted()) inferred"
     }
 
-    /// Chapter count, and the active chapter's share of the soft limit when measured.
     static func chapters(_ list: HomeChapterListDTO?, fallback: HomeStatusDTO.Chapter?) -> String? {
         guard let list else { return fallback.map(HomeChapterPresentation.manageSubtitle) }
         let count = list.chapters.count == 1 ? "1 chapter" : "\(list.chapters.count.formatted()) chapters"
@@ -229,8 +205,6 @@ enum HomeManageRowPresentation {
         return "\(count) · Active chapter \(percent)% of soft limit"
     }
 
-    /// Active and finished counts from the first page. A further page makes the
-    /// finished count a floor, shown with a plus sign.
     static func tasks(_ page: HomeTaskPageDTO?, admitted: Bool) -> String {
         guard admitted, let page else { return "Unavailable while task recovery is closed" }
         if page.items.isEmpty { return "No tasks yet" }
@@ -245,8 +219,6 @@ enum HomeManageRowPresentation {
     }
 }
 
-/// Home does not appear in the ordinary session catalog. Its explicit states
-/// keep unavailable and stale session identities from becoming route targets.
 enum HomePinnedRowAction: Equatable {
     case checkReceipt
     case designate
@@ -254,8 +226,6 @@ enum HomePinnedRowAction: Equatable {
     case unavailable
 }
 
-/// The one owner of whether a Home status is routable. `AppModel.navigationRouteForHome`
-/// consumes this action rather than re-deciding it.
 enum HomePinnedRowPolicy {
     static func action(
         for status: HomeStatusDTO?,
@@ -269,8 +239,6 @@ enum HomePinnedRowPolicy {
         case .unavailable:
             return .unavailable
         case .ready, .active, .blocked, .paused, .rolloverPending:
-            // `openSessionId` is the only route target: during a rollover it names
-            // the sealed predecessor, because the reserved successor is not openable.
             guard status.enabled, let sessionID = status.openSessionId, !sessionID.isEmpty else { return .unavailable }
             return .open(sessionID: sessionID)
         }
@@ -285,16 +253,12 @@ struct HomeStatusReadFence: Equatable, Sendable {
     fileprivate let surfaceGeneration: UInt64
 }
 
-/// Owns a disposable focused-profile status projection. A read is valid only
-/// while its exact managed surface and authenticated connection are current.
 @MainActor
 @Observable
 final class HomeStatusPresentationOwner {
     static let fallbackInterval: Duration = .seconds(5)
 
     private(set) var status: HomeStatusDTO?
-    /// The latest read reached a Gateway whose status this client could not read
-    /// or admit. It is cleared with the status and by the next publication.
     private(set) var isStatusUnavailable = false
     @ObservationIgnored private var readGeneration: UInt64 = 0
     @ObservationIgnored private var surfaceGeneration: UInt64 = 0
@@ -309,25 +273,14 @@ final class HomeStatusPresentationOwner {
     @ObservationIgnored private var activeReadTask: Task<Void, Never>?
     @ObservationIgnored private var mountedTask: Task<Void, Never>?
 
-    /// `mounted` follows the visible Home surface: a fallback cadence, immediate
-    /// invalidation, and mutation refresh. `connectionOnly` is a chat's probe for a
-    /// status it could not yet know: it reads on connection admission and, once
-    /// per claim, after a covering discarded its read. Its first publication decides
-    /// the claim by its `HomeChatRouteKey`: a match promotes it to `mounted`; a miss
-    /// moves it to `released`, which keeps the published status but never reads again.
     enum Cadence: Equatable, Sendable {
         case mounted
         case connectionOnly(HomeChatRouteKey)
         case released
     }
-    /// Chosen at mount: a claim is a property of the surface that takes the status.
     @ObservationIgnored private var cadence = Cadence.mounted
     @ObservationIgnored private var claimCoverRetryUsed = false
 
-    /// Replacing a mount creates a new authority. A late retirement callback for
-    /// the prior token is intentionally a no-op. The surface owns the read, so a
-    /// mount before pairing (no selected profile yet) can still read once a
-    /// profile is configured.
     func mountSurface(
         token: PresentationSurfaceToken,
         coordinator: PresentationActivityCoordinator,
@@ -335,9 +288,6 @@ final class HomeStatusPresentationOwner {
         fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO
     ) {
         guard token != surfaceToken || activityCoordinator !== coordinator else { return }
-        // Surface ownership can move between dashboard and chat without changing
-        // the Gateway. Retire reads, not the last admitted connection's value;
-        // configure/profileRetired remain the authority for identity changes.
         stopWork(clearStatus: false)
         surfaceGeneration &+= 1
         surfaceToken = token
@@ -348,9 +298,6 @@ final class HomeStatusPresentationOwner {
         suspended = false
     }
 
-    /// Installs the lifecycle's current identity: the selected profile, its
-    /// authenticated connection (nil until one is admitted), and the Home capability.
-    /// A changed profile or connection retires the previous status and reads again.
     func configure(profileID: String, connectionID: String?, capabilityEnabled: Bool) {
         let identityChanged = self.profileID != profileID || self.connectionID != connectionID
         if identityChanged { stopWork(clearStatus: true) }
@@ -365,15 +312,11 @@ final class HomeStatusPresentationOwner {
         startWorkIfActive()
     }
 
-    /// Lifecycle retirement drops connection-scoped data, but keeps the exact
-    /// visible surface so an authenticated reconnect can install a new admission.
-    /// The capability survives: a reconnect to the same profile must not flicker.
     func connectionRetired() {
         connectionID = nil
         stopWork(clearStatus: true)
     }
 
-    /// A profile transition forgets what the previous profile advertised.
     func profileRetired() {
         profileID = nil
         connectionID = nil
@@ -381,10 +324,6 @@ final class HomeStatusPresentationOwner {
         stopWork(clearStatus: true)
     }
 
-    /// Presentation coordinator changes are re-evaluated at the same owner
-    /// boundary as reads, rather than trusting an activity Boolean captured earlier.
-    /// A covering discards a claim's in-flight read; the first uncover of that claim
-    /// retries it once, so a sheet cannot leave the chat's claim unresolved forever.
     func presentationActivityChanged(for token: PresentationSurfaceToken) {
         guard token == surfaceToken else { return }
         guard surfaceIsActive(token) else {
@@ -403,9 +342,6 @@ final class HomeStatusPresentationOwner {
         }
     }
 
-    /// A session-scoped invalidation names a Home chapter: the one a route opens
-    /// (`openSessionId`, the sealed predecessor during a rollover) or the reserved
-    /// `sessionId`. Both are Home's sessions, so either refreshes the projection.
     func invalidateMounted(sessionID: String? = nil) async {
         guard sessionID == nil || status?.sessionId == sessionID || status?.openSessionId == sessionID else { return }
         await refreshMounted()
@@ -480,17 +416,11 @@ final class HomeStatusPresentationOwner {
         suspended = false
     }
 
-    /// Backgrounding suspends disposable presentation work but retains the route
-    /// token for foreground reconciliation if SwiftUI keeps that route mounted.
     func suspendForBackground() {
         suspended = true
         stopWork(clearStatus: true)
     }
 
-    /// A claim's first publication decides it, by the same `HomeChatRouteKey` the
-    /// chat's context-ring routing uses. A matching route promotes the surface to the mounted
-    /// cadence without an extra read. Any other route releases it and stops every
-    /// read, while the published status stays for the dashboard.
     private func resolveClaim(with value: HomeStatusDTO) {
         guard case .connectionOnly(let claim) = cadence else { return }
         if claim.matches(value) {
@@ -502,9 +432,6 @@ final class HomeStatusPresentationOwner {
         }
     }
 
-    /// Starts the surface's read for its current identity. The fence is captured
-    /// when the read starts, so it is bound to the surface, profile and connection
-    /// current at that moment. A new read supersedes the one in flight.
     @discardableResult
     private func startRead() -> Task<Void, Never>? {
         guard !suspended, capabilityEnabled,
@@ -527,14 +454,9 @@ final class HomeStatusPresentationOwner {
                 let value = try await fetch(fence)
                 if !Task.isCancelled { _ = self.publish(value, for: fence) }
             } catch is CancellationError {
-                // A superseded or retired read is not an answer from the Gateway.
             } catch {
-                // Status is disposable: the next event or mounted fallback retries.
-                // The row must still say why it has no status, not keep loading.
                 if !Task.isCancelled, fence == self.latestFence { self.isStatusUnavailable = true }
             }
-            // The handle is the single in-flight read; a read that is still the latest
-            // when it settles releases it, so the next start is not blocked.
             if fence == self.latestFence { self.activeReadTask = nil }
         }
         activeReadTask = task
@@ -546,9 +468,6 @@ final class HomeStatusPresentationOwner {
               let coordinator = activityCoordinator,
               coordinator.activity(for: token).allowsPresentationPublication,
               profileID != nil, connectionID != nil, fetch != nil else { return }
-        // Configuration and presentation both reach here for one mount, in the same
-        // turn. The read already in flight serves that start, so a second one is not
-        // started: two reads would cancel each other after the first had fetched.
         if activeReadTask == nil { startRead() }
         if cadence == .mounted { startFallbackLoop() }
     }
@@ -585,8 +504,6 @@ final class HomeStatusPresentationOwner {
         invalidateRead(clearStatus: clearStatus)
     }
 
-    /// Invalidating a read cancels it: an invalidated read has no fence left to
-    /// publish under, so its request is no longer wanted.
     private func invalidateRead(clearStatus: Bool) {
         readGeneration &+= 1
         latestFence = nil

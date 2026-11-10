@@ -1,11 +1,6 @@
 import Darwin
 import Foundation
 
-/// Owns one user Quit across Gateway drain, exact process disappearance and
-/// native-host retirement. Uncertain stages fail closed; the caller leaves UI open.
-/// A Quit retried after the Gateway has stopped (for example, native-host
-/// retirement failed) resumes at retirement only while the Login Item is enabled
-/// and launchd reports no running Gateway process.
 @MainActor
 final class MacQuitCoordinator {
     enum Failure: Error, LocalizedError, Equatable {
@@ -87,15 +82,9 @@ final class MacQuitCoordinator {
         if await runtimeOwnershipHealthy() {
             do { try await stopOwnedRuntime(progress: progress) }
             catch { await TronLog.shared.flush(); throw error }
-            // Persist the stop outcome before native retirement can terminate the app.
             await TronLog.shared.flush()
         } else {
-            // Unowned means either stopped (resume) or running but foreign. Only an
-            // enabled service with no running process resumes; a foreign runtime or
-            // a disabled service is refused without a stop request.
             guard serviceEnabled(), try await readRuntime()?.pid == nil else { throw Failure.unmanaged }
-            // bootout can remove a job before its process exits. A retry must
-            // retain that exact old PID fence, not infer offline from job absence.
             if let identity = attempt?.identity, Self.processExists(identity.pid) {
                 throw Failure.observation
             }
@@ -134,8 +123,6 @@ final class MacQuitCoordinator {
                 outcome: outcome
             )
         }
-        // A retry after uncertainty reuses this exact runtime's receipt. There is
-        // no automatic replay and a different runtime always gets a new attempt.
         if attempt!.response == nil {
             attempt!.response = try await stopGateway(attempt!.commandID)
         }
@@ -155,9 +142,6 @@ final class MacQuitCoordinator {
             let observedStart = await processStartIdentity(currentPID)
             if let observedStart, observedStart != identity.start { throw Failure.runtimeReplaced }
             if current.processCommand != identity.command || observedStart == nil {
-                // launchd can still project a dying PID after ps stops returning
-                // its metadata. Missing observations are not a replacement PID
-                // and never authorize removal; allow bounded convergence.
                 identityLostAt = identityLostAt ?? clock.now
                 if identityLostAt!.duration(to: clock.now) >= exitStallGrace { throw Failure.observation }
                 try await wait()
@@ -173,23 +157,17 @@ final class MacQuitCoordinator {
                         message: "Gateway completed intentional shutdown; retiring its exact stalled job without relaunch",
                         commandId: attempt?.commandID, why: "pid=\(identity.pid)", outcome: "recovering"
                     )
-                    // Only the accepted drain's durable completion receipt permits
-                    // recovery. The supervisor owner rechecks identity immediately
-                    // before bootout; removing the job prevents crash relaunch.
                     await progress("Shutdown completed; waiting for launchd to retire the stalled Gateway")
                     try await retireCompletedGateway(identity.pid, identity.command, identity.start)
                     outcome = "recovered"
                     return
                 }
             } else {
-                // A missing receipt is not evidence that accepted work finished.
-                // Keep a reachable canonical drain unbounded; loss of observation
-                // fails the UI only, never cancels work or signals the process.
                 do {
                     let drain = try await readDrain()
                     guard drain.drainId == drainID else { throw Failure.runtimeReplaced }
                     guard drain.phase != "failed" else {
-                        attempt = nil // an explicit retry may start a new failed-drain attempt
+                        attempt = nil
                         throw Failure.observation
                     }
                     if drain.phase == "preparing" || drain.phase == "waiting" {
@@ -216,20 +194,13 @@ final class MacQuitCoordinator {
         outcome = "clean"
     }
 
-    /// Called only after this runtime's accepted drain has completed and its
-    /// exit grace elapsed. Bootout, not a signal watcher or Login Item disable,
-    /// owns termination so SuccessfulExit=false cannot relaunch an intentional stop.
     static func retireCompletedGateway(label: String, pid: Int, command: String, start: String) async throws {
         guard let current = try await LaunchAgentRuntimeReader.read(label: label),
               current.pid == pid, current.processCommand == command,
               await ServerProcessProbe.processStartIdentity(pid: pid) == start else {
-            // Exit may win the race with the pre-bootout observation.
             if !processExists(pid), try await LaunchAgentRuntimeReader.read(label: label)?.pid == nil { return }
             throw Failure.runtimeReplaced
         }
-        // launchd, not a second Swift timeout policy, owns SIGTERM -> SIGKILL.
-        // Read its effective value (also correct for a still-loaded older job).
-        // Zero means infinite; unknown or unreasonable policy fails before mutation.
         guard let seconds = current.exitTimeoutSeconds, (1...120).contains(seconds) else {
             throw Failure.retirementPolicy
         }
@@ -237,8 +208,6 @@ final class MacQuitCoordinator {
         TronLog.shared.record(.info, event: "app.quit.gateway-retirement", source: "lifecycle",
             message: "Waiting for launchd retirement (exit timeout \(seconds)s plus 5s observation margin)",
             pid: pid, outcome: "waiting")
-        // Accepted removal survives caller cancellation. Even an uncertain client
-        // result is followed to its bounded process outcome; it is never replayed.
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/launchctl"),
             arguments: ["bootout", "gui/\(getuid())/\(label)"], policy: .acceptedOperation,
@@ -254,16 +223,11 @@ final class MacQuitCoordinator {
             if let replacement = runtime?.pid, replacement != pid { throw Failure.runtimeReplaced }
             if !processExists(pid), runtime?.pid == nil { return }
             if processExists(pid) {
-                // A missing ps result during process reap is uncertainty, not a
-                // changed identity. A positively different identity still fails
-                // immediately; there is never another mutation or signal here.
                 if let observed = await ServerProcessProbe.processStartIdentity(pid: pid), observed != start {
                     throw Failure.runtimeReplaced
                 }
             }
             guard ContinuousClock.now < deadline else { throw Failure.exitStalled }
-            // The job may outlive the process (or the reverse). Join both rather
-            // than report success/failure from just one side of launchd removal.
             try await Task.sleep(for: .milliseconds(100))
         }
     }
@@ -275,8 +239,6 @@ final class MacQuitCoordinator {
     static func hasCompletedShutdown(pid: Int, drainID: String, receiptURL: URL) async -> Bool {
         struct Receipt: Decodable { let version: Int; let pid: Int; let drainId: String }
         return await Task.detached(priority: .utility) {
-            // Reject non-regular/symlink receipts without blocking on a FIFO or
-            // following a replacement path. The producer publishes regular files.
             let descriptor = open(receiptURL.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
             guard descriptor >= 0 else { return false }
             let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)

@@ -9,15 +9,10 @@ struct ChatView: View {
     private let initialEditorText: String?
     private let initialModel: ModelRef?
     private let initialHistoryEntryID: String?
-    /// The Home conversation's logical route: sends go through `home.prompt`,
-    /// and Manage Home belongs to this chat whichever chapter it opens.
     private let isHomeRoute: Bool
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
-    /// The transcript's origin-anchored layout. There is one layout; the value
-    /// is fixed for the life of the view and owns the geometry reflection and
-    /// anchors the coordinator and row modifiers read.
     private let transcriptOrientation: ChatTranscriptOrientation
     #if HOSTED_TEST
     let hostedProbe: ChatHostedProbe?
@@ -44,8 +39,6 @@ struct ChatView: View {
     @State private var transcriptPresentation: ChatTranscriptPresentationStore
     @State private var transcriptScrollPosition = ScrollPosition(idType: String.self)
     @Namespace private var composerGlassNamespace
-    // UITextView owns responder state; this mirrors its delegate callbacks for
-    // placeholder and scroll presentation.
     @State private var composerFocused = false
     @State private var composerSelection = NSRange(location: 0, length: 0)
     @State private var composerHeightLedger = ChatComposerHeightLedger()
@@ -59,21 +52,12 @@ struct ChatView: View {
     )?
     @State private var composerResourcePicker: ComposerResourcePickerSource?
     @State private var composerResourceResults: [ComposerResourceEntry] = []
-    /// The exact installed frame from before a descendant began consuming live
-    /// transcript data. Viewport work is rebased once on uncover rather than on
-    /// every hidden tool-output update.
     @State private var deferredViewportProjectionBaseline: InstalledChatTranscript?
     @State private var hasDeferredViewportProjection = false
     @State private var floatingDisplayCompletionTracker = DisplayFloatingCompletionTracker()
-    /// One native viewport activation can surface through scene, coverage, and
-    /// reconciliation callbacks. They share this identity so physical evidence
-    /// is rebased exactly once for the replacement tree.
     @State private var viewportActivation = 0
     @State private var homeSheet: HomeSheetRoute?
     #if HOSTED_TEST
-    /// Test-only lifecycle evidence for real-UI journeys: how many opening
-    /// attempts this mounted route began, and how often its transcript left
-    /// the ready phase (hidden, unscrollable, then revealed again).
     @State private var hostedOpeningAttempts = 0
     @State private var hostedReadyExits = 0
     #endif
@@ -148,24 +132,15 @@ struct ChatView: View {
     }
     #endif
 
-    // The surface is built in stages, each a separate opaque property: one long
-    // modifier chain is solved as a single expression, and ChatView's took ~19 s
-    // to type-check in every compile and module-emit job (#1066). The stages
-    // compose the same modifiers in the same order, so the view tree is unchanged.
     private var contentLayers: some View {
         transcript
             .overlay(alignment: .top) { topBlur }
             .overlay {
-                // The inset and native navigation/keyboard layout propose the
-                // same usable region to this overlay as to the transcript.
-                // Do not subtract safe-area insets or mirror composer height.
                 ChatFloatingDisplayHost(
                     route: $sessionPresentation.floatingDisplay,
                     onOpenSheet: { sessionPresentation.presentDisplay(.showSheet($0)) }
                 )
             }
-            // Same usable region as the floating display: the bubble stays
-            // above the composer and keyboard without measuring either.
             .overlay { ChatAnnotationBubbleHost(presenter: annotationPresenter, composer: composerResponder) }
             #if HOSTED_TEST
             .overlay(alignment: .topLeading) {
@@ -192,9 +167,6 @@ struct ChatView: View {
             }
             #endif
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                // The complete composer is the sole structural inset owner, so
-                // the keyboard, multiline text, and attachment chips push the
-                // native transcript viewport exactly once and reverse naturally.
                 composer
                     #if HOSTED_TEST
                     .background {
@@ -266,8 +238,6 @@ struct ChatView: View {
             activityPresented: activityPresentationBinding,
             extensionContent: extensionRetainedContent,
             omittedExtensionContentCount: omittedExtensionContentCount,
-            // Process rows come from the mounted SessionPresentation owner,
-            // not a raw snapshot read that can bypass its anchor retention.
             processActivities: model.sessionProcessPresentation(for: sessionID)?.activities ?? [],
             interaction: interactionBinding,
             onInteractionClosed: closeInteractionPresentation,
@@ -440,9 +410,6 @@ struct ChatView: View {
             layoutTransaction.configure(keyboard: transition, reduceMotion: reduceMotion)
             guard layoutTransaction.generation != nil else { return }
             let participant = layoutTransaction.joinParticipant(.keyboard)
-            // UIKit owns the inset interpolation. Keep only the participant
-            // lease on the frozen structural clock; an empty SwiftUI animation
-            // is not physical keyboard-completion evidence.
             layoutTransaction.settleAfterResolvedClock(participant)
         }
         .onChange(of: reduceMotion) { _, enabled in
@@ -471,15 +438,8 @@ struct ChatView: View {
         }
     }
 
-    // Named handlers keep the modifier chains above cheap to type-check:
-    // multi-statement closures are solved together with their whole chain,
-    // which previously cost several seconds per ChatView rebuild.
-
     private func photoSelectionChanged(_ values: [PhotosPickerItem]) {
         guard !values.isEmpty else { return }
-        // PhotosPicker may deliver after its native presentation closes.
-        // Clear the selection first so it cannot replay into another chat,
-        // then bind this import to the current presentation authority.
         sessionPresentation.photos = []
         guard let target = presentationTarget else {
             sessionPresentation.cancelImports()
@@ -512,8 +472,6 @@ struct ChatView: View {
     private func buildComposerResourceCatalog() async {
         let activity = composerCatalogActivity
         guard !Task.isCancelled, activity.allowsPresentationPublication, scenePhase == .active else { return }
-        // Command authority continues under a sheet; only this composer's
-        // disposable index pauses, retaining its last complete value.
         let identity = composerResourceCatalogIdentity
         let ownsCatalog = identity.catalogTarget != nil
             && identity.catalogTarget == identity.presentationTarget
@@ -604,10 +562,6 @@ struct ChatView: View {
             scrollCoordinator.viewportActivationChanged(viewportActivation)
             scrollCoordinator.viewportObservationChanged(isActive: false)
             if sessionPresentation.ownsUnsettledOpening {
-                // A covered transcript cannot publish the native geometry
-                // needed to finish positioning. Cancel the exact opening and
-                // scroll leases now so uncovering resumes with a fresh epoch;
-                // never let their deadlines mature behind another surface.
                 sessionPresentation.cancelOpeningTask()
                 scrollCoordinator.cancel()
             }
@@ -619,9 +573,6 @@ struct ChatView: View {
         }
         if previous.allowsPresentationPublication,
            !current.allowsPresentationPublication {
-            // Retire a build/ready frame already admitted before cover, not
-            // just future source callbacks. Descendant facts have their own
-            // state selectors; the covered native transcript stays installed.
             transcriptPresentation.suspendPendingWork()
         }
         if !current.allowsDataPublication {
@@ -821,9 +772,6 @@ struct ChatView: View {
               presentationActivity.allowsDataPublication else { return }
         let context = ensureInteractionTraceContext()
         if deferred {
-            // Direct reader ownership retires any derivation admitted while the
-            // view was pinned. Keep the last complete commit physically fixed;
-            // canonical SessionPresentationStore authority continues advancing.
             transcriptPresentation.suspendPendingWork()
             transcriptPresentation.discardPendingEntrances()
             model.chatInteractionTrace.projection(
@@ -847,16 +795,11 @@ struct ChatView: View {
             viewportActivation &+= 1
             scrollCoordinator.viewportActivationChanged(viewportActivation)
             abandonLayoutTransaction()
-            // Retire page/opening/correction tasks and native target leases;
-            // durable pinned/detached intent remains in the coordinator.
             scrollCoordinator.cancel()
-            // Background suspension retires disposable presentation work while
-            // AppModel retains accepted uploads and submissions.
             sessionPresentation.suspendForBackground()
         } else if current == .active,
                   presentationActivity.allowsPresentationPublication {
             if admitsAutomaticOpeningResume {
-                // Resume even when foregrounding changes no connection/generation.
                 beginOpeningAfterForegroundWhenConnected()
             } else {
                 scrollCoordinator.foregroundViewportBecameActive(
@@ -911,8 +854,6 @@ struct ChatView: View {
 
     private func dismissComposerForAdmittedSubmission() {
         let keyboardRevision = keyboardObserver.revision
-        // UIKit is the responder authority. Its synchronous keyboard frame
-        // notification joins this exact layout generation when available.
         _ = composerResponder.resignFirstResponder()
         composerFocused = false
         layoutTransaction.configure(
@@ -922,15 +863,9 @@ struct ChatView: View {
         if keyboardObserver.transitionArrived(after: keyboardRevision) {
             _ = layoutTransaction.join(.keyboard)
         }
-        // Resolve one clock after the keyboard participant has had its
-        // synchronous admission opportunity. Every submission height owner
-        // reads this frozen value.
         _ = layoutTransaction.animation
     }
 
-    /// Keep the pre-cover baseline until the latest complete source installs.
-    /// Lazy estimates can otherwise leave a pinned uncover at an empty tail:
-    /// suppressed entrances do not trigger ordinary new-row materialization.
     private func reconcileDeferredViewportProjectionIfNeeded() {
         guard hasDeferredViewportProjection else { return }
         let baseline = deferredViewportProjectionBaseline
@@ -995,9 +930,6 @@ struct ChatView: View {
             return previous.handoffIdentity != installed.tag.handoffIdentity
         } ?? true)
         if physicalProjectionChanged {
-            // The coordinator advances its semantic epoch only when this
-            // installed commit changes the physical row spine. Streaming text
-            // and shallow tool-state updates keep current hosts and evidence.
             scrollCoordinator.projectionInstalled(
                 structure: installed?.physicalRowSpineIdentity,
                 physicalRowPositions: physicalRowPositions,
@@ -1018,9 +950,6 @@ struct ChatView: View {
 
     private func composerHeightChanged(_ height: CGFloat) {
         guard height.isFinite, height >= 0 else { return }
-        // Live structural animation samples must not invalidate the entire
-        // transcript tree. The non-observable ledger is read only by bounded
-        // layout settlement and submission admission callbacks.
         composerHeightLedger.install(height)
     }
 
@@ -1059,10 +988,6 @@ struct ChatView: View {
         )
     }
 
-    /// Keeps the installed queue boundary visible while a local queue command
-    /// decides whether a simultaneous canonical row consumed that operation or
-    /// is unrelated. Once deferral starts, newer complete captures coalesce here
-    /// until the one in-flight command resolves.
     @MainActor
     private func deferQueueMutationProjectionIfNeeded(
         _ capture: ChatTranscriptProjectionCapture
@@ -1200,8 +1125,6 @@ struct ChatView: View {
             rememberCanonicalSubmissionHandoffs([canonicalHandoffID])
         }
         if let previousPending = installedBeforeSubmission?.handoff.pendingPromptPresentation {
-            // Match the installed pending handoff against incoming canonical
-            // facts so replacement consumes the original entrance entitlement.
             let pendingCanonicalIDs = ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
                 for: previousPending,
                 in: snapshot.transcript
@@ -1224,9 +1147,6 @@ struct ChatView: View {
                 rememberCanonicalSubmissionHandoffs(["queued-message-\(previousPending.id)"])
             }
         }
-        // Projection intake remains live during prepend. The scroll owner
-        // preserves the exact anchor, while this store coalesces to the newest
-        // complete desired commit.
         if !presentationActivity.allowsViewportObservation,
            !hasDeferredViewportProjection {
             deferredViewportProjectionBaseline = installedBeforeSubmission
@@ -1299,8 +1219,6 @@ struct ChatView: View {
             earlierRow: { installed in earlierMessagesChip(installed: installed) },
             openingSurface: {
                 Group {
-                    // A retained transcript reports recovery in the
-                    // navigation chrome instead (`retainedRecoveryStatus`).
                     if !hasRetainedTranscript { openingPhaseSurface }
                 }
             },
@@ -1350,35 +1268,20 @@ struct ChatView: View {
                 Color.clear
                     .onChange(of: transcriptProjectionSource, initial: true) { _, source in
                         guard sessionPresentation.permitsExtensionInteractionPresentation else {
-                            // Opening installs one complete captured source directly.
-                            // Churn is coalesced after the first ready frame instead
-                            // of repeatedly superseding the opaque opening build.
                             return
                         }
                         guard !scrollCoordinator.isPrependingHistory else {
-                            // The exact page window owns this projection transaction.
-                            // Current authority remains available and is coalesced
-                            // immediately when semantic restoration terminates.
                             return
                         }
                         guard let capture = transcriptProjectionCapture else {
-                            // A recycled same-session owner can briefly have no exact
-                            // generation while the retained canonical snapshot is still
-                            // valid. Keep the mounted projection until its replacement
-                            // installs; only a genuinely absent session clears the view.
                             if selectedAuthoritativeSnapshot == nil { transcriptPresentation.reset() }
                             return
                         }
-                        // Ignore a callback captured before opening installed its mounted
-                        // generation; the newer exact source owns submission.
                         guard source == capture.tag,
                               !scrollCoordinator.blocksAutomaticLiveProjectionIntake else { return }
                         intakeTranscriptProjection(capture)
                     }
             } else if presentationActivity.allowsDataPublication {
-                // Detached readers observe only a scalar canonical revision.
-                // The immutable installed commit remains untouched until manual
-                // tail return or catch-up settlement re-enables projection intake.
                 Color.clear
                     .onChange(of: deferredLiveProjectionRevision) { previous, current in
                         guard previous != nil, current != nil, previous != current else { return }
@@ -1392,8 +1295,6 @@ struct ChatView: View {
         model.authoritativeSnapshot(for: sessionID)
     }
 
-    /// Visible chrome advances with the exact immutable transcript commit.
-    /// Command admission and draft ownership still read canonical owners.
     private var visibleSessionFacts: ChatVisibleSessionFacts? {
         transcriptPresentation.installed?.tag.layoutIdentity.visibleSessionFacts
     }
@@ -1411,9 +1312,6 @@ struct ChatView: View {
         }
     }
 
-    /// A disconnected Gateway must not revoke the installed commit. Once a
-    /// Gateway reports a capability again, its exact fact becomes part of the
-    /// next desired commit and is published atomically with that transcript.
     private var queueManagementCapabilityForProjection: Bool {
         guard let gatewayInfo = model.gatewayInfo else {
             return transcriptPresentation.installed?.tag.queueManagementCapability ?? false
@@ -1439,9 +1337,6 @@ struct ChatView: View {
     }
 
     private var transcriptProjectionCapture: ChatTranscriptProjectionCapture? {
-        // Foreground synchronization is one aggregate admission. Keep the last
-        // complete projection visible until that aggregate succeeds or fails;
-        // otherwise an intermediate unsuppressed snapshot can animate backlog.
         let freezesMountedAggregate = model.isReconcilingForeground
             && sessionPresentation.open.phase == .ready
         guard !freezesMountedAggregate,
@@ -1466,8 +1361,6 @@ struct ChatView: View {
             presentationGeneration: generation,
             canonicalGeneration: projection.canonical,
             timelineGeneration: projection.timeline,
-            // Retained frames consume foreground tokens only after the foremost
-            // presentation's required dependencies settle.
             entranceSuppressionGeneration: model.isReconcilingForeground
                 || model.foregroundReconciliationGeneration == 0
                 ? nil
@@ -1526,9 +1419,6 @@ struct ChatView: View {
                     tag: tag
                 )
                 guard startedWork || transcriptPresentation.hasInstallWork(for: tag) else {
-                    // A rejected source cannot satisfy a waiter. Fail closed so
-                    // this exact capture receives one bounded authoritative
-                    // recovery instead of spinning on `.superseded`.
                     throw ChatTranscriptPresentationStoreError.invalidProjection
                 }
                 let installed = try await transcriptPresentation.waitForInstall(of: tag)
@@ -1546,9 +1436,6 @@ struct ChatView: View {
                        installed: tag,
                        desired: desiredCapture?.tag
                    ) {
-                    // Authority may stream while opening. The first complete
-                    // same-presentation/runtime commit is safe to reveal; the
-                    // newest source is submitted after the first ready frame.
                     return installed
                 }
                 if consistency == .firstCompleteTranscriptWindow,
@@ -1605,13 +1492,7 @@ struct ChatView: View {
         )
     }
 
-    /// Read-through owner version used by the UIKit bridge during callback-turn
-    /// races. Unlike a rendered Int value, this binding observes the coordinator
-    /// synchronously before SwiftUI has produced the next representable update.
     private var composerTextRevisionBinding: Binding<ComposerTextAuthority> {
-        // Capture the State location and coordinator reference, not this render's
-        // scalar scope/revision values. A delegate callback that precedes the
-        // next updateUIView therefore still reads the current draft owner.
         let liveScope = $composerScope
         let drafts = model.composerDrafts
         return Binding(
@@ -1681,10 +1562,6 @@ struct ChatView: View {
         )
     }
 
-    /// Interactive extension prompts and editors retain foreground priority.
-    /// The unified activity sheet resumes after those leased routes settle and
-    /// owns both process and retained-extension presentation.
-    /// Foreground extension interactions retain priority over this read-only route.
     private var activityPresentationBinding: Binding<Bool> {
         Binding(
             get: { sessionPresentation.showActivity && extensionForegroundPresentation == .none },
@@ -1694,10 +1571,6 @@ struct ChatView: View {
         )
     }
 
-    /// Retained extension content is derived from the authoritative snapshot on
-    /// every render; it never polls and never opens provider work. The sheet
-    /// receives this value, so widget updates replace its content in place
-    /// without recreating the sheet or resetting its scroll position.
     private var extensionRetainedContent: ExtensionRetainedContent {
         let presentation = selectedAuthoritativeSnapshot?.extensionPresentation
         return ExtensionRetainedContentPolicy.content(
@@ -1708,7 +1581,6 @@ struct ChatView: View {
         )
     }
 
-    /// A partial projection must say so rather than implying completeness.
     private var omittedExtensionContentCount: Int {
         let presentation = selectedAuthoritativeSnapshot?.extensionPresentation
         guard presentation?.projection?.complete == false else { return 0 }
@@ -1732,11 +1604,7 @@ struct ChatView: View {
         presentationTarget.map(model.composerDrafts.hasActiveUploads(for:)) ?? false
     }
 
-    /// Cheap rendered admission shared with the send action. The action repeats
-    /// the authority checks after capturing invocation intent before mutation.
     private var admitsLiveSessionCommands: Bool {
-        // openingTask is intentionally ignored by Observation; its revision is
-        // the published fence that re-evaluates this rendered admission.
         _ = sessionPresentation.openingTaskRevision
         guard !model.isReconcilingForeground,
               sessionPresentation.openingTask == nil,
@@ -1789,16 +1657,9 @@ struct ChatView: View {
         )
     }
 
-    /// Builds the complete handoff exactly once with the canonical snapshot.
-    /// The resulting immutable value, not the live composer, is what enters the
-    /// projection worker and the installed transcript.
     private func transcriptHandoffCommit(snapshot: SessionSnapshot) -> ChatTranscriptHandoffCommit {
         if let target = presentationTarget,
            let submission = model.composerDrafts.outgoingSubmission(for: target) {
-            // Extension commands have no canonical user message. Their sole
-            // transcript identity is the Gateway invocation-start receipt;
-            // never hand the outgoing submission to the ordinary prompt graft,
-            // even after the first projection has been skipped.
             if submission.isExtensionCommand { return .none }
             let canonicalIDs = model.composerDrafts.canonicalSubmissionIDs(
                 target: target,
@@ -1852,10 +1713,6 @@ struct ChatView: View {
             && (sessionPresentation.needsOpeningResume
                 || transcriptPresentation.installed == nil
                 || model.presentationTarget(for: sessionID) != presentationTarget
-                // An independent covering sheet can defer reconnect restoration
-                // without changing the mounted target or local ready frame.
-                // While the reconnect is still reconciling, the model owns that
-                // restoration; reopening here would cover the retained transcript.
                 || (!model.isReconcilingForeground
                     && presentationTarget.map { !model.hasMountedSessionAuthority($0) } == true))
     }
@@ -1894,8 +1751,6 @@ struct ChatView: View {
         presentationActivity.allowsViewportObservation
     }
 
-    /// Display continuity belongs to the same-session snapshot, not to the
-    /// disposable subscription that is replaced while reconnecting.
     private var hasRetainedTranscript: Bool {
         guard let installed = transcriptPresentation.installed,
               installed.tag.sessionID == sessionID,
@@ -1904,17 +1759,9 @@ struct ChatView: View {
         return true
     }
 
-    /// Persistent recovery for a retained same-session transcript. It is route
-    /// chrome in the title's place, never a control floating over readable rows.
-    /// A missing transport is shown only once the app's recovery episode says
-    /// it outlived the grace: every foreground reconnects after background
-    /// retirement, and that expected replacement is not an outage (#878).
-    /// Gateway and synchronization failures stay visible until resolved.
     private var retainedRecoveryStatus: ChatRetainedRecoveryStatus? {
         guard hasRetainedTranscript else { return nil }
         if !model.admitsSessionPresentationOpen {
-            // A rejected credential stops automatic recovery: it is a failure
-            // to explain at once, not a reconnect to wait out.
             if model.connectionState == .unauthorized {
                 return .unavailable("The Mac no longer accepts this iPhone. Pair again in Settings.")
             }
@@ -1927,8 +1774,6 @@ struct ChatView: View {
         return nil
     }
 
-    /// One Retry for every recovery treatment. A missing transport retries the
-    /// selected Mac's connection; the opening resumes on its connected callback.
     @MainActor
     private func retryRecovery() async {
         if !model.admitsSessionPresentationOpen {
@@ -1947,10 +1792,6 @@ struct ChatView: View {
         case .opening, .positioning, .revealing, .presenting:
             ZStack {
                 if ChatOpeningSurfacePolicy.showsOpaqueCover(phase: sessionPresentation.open.phase) {
-                    // The transcript scrolls under the navigation bar, beyond
-                    // the scroll view's safe frame this overlay is sized to.
-                    // Extend only the cover upward so positioning rows cannot
-                    // show through the bar; the indicator stays centered.
                     TronBackdrop()
                         .ignoresSafeArea(.container, edges: .top)
                 }
@@ -2028,8 +1869,6 @@ struct ChatView: View {
 
     @MainActor
     private func beginOpeningPresentation(retryingFailure: Bool = false) async {
-        // An absent transport admits neither an opening lease nor its deadline.
-        // Cancellation for that absence must not become an endless spinner.
         guard model.admitsSessionPresentationOpen else {
             if sessionPresentation.open.phase != .ready {
                 sessionPresentation.open.waitForConnection(sessionID: sessionID, epoch: sessionPresentation.open.epoch)
@@ -2045,9 +1884,6 @@ struct ChatView: View {
                   model.admitsSessionPresentationOpen,
                   (sessionPresentation.shouldBeginOpening(retryingFailure: retryingFailure)
                     || admitsAutomaticOpeningResume) else { return }
-            // Retry and foreground resume serialize behind the exact drained
-            // lease. Re-entering also coalesces multiple waiters on any newer
-            // task installed by an earlier waiter.
             await beginOpeningPresentation(retryingFailure: retryingFailure)
             return
         }
@@ -2071,8 +1907,6 @@ struct ChatView: View {
                   presentationActivity.allowsPresentationPublication,
                   model.admitsSessionPresentationOpen,
                   ChatOpeningAttemptPolicy.isUnsettled(sessionPresentation.open.phase) else {
-                // Coverage/background/navigation cancellation is resumable and
-                // must not publish a delayed timeout behind another surface.
                 return
             }
             model.chatInteractionTrace.opening(
@@ -2098,9 +1932,6 @@ struct ChatView: View {
             modelAdmitsOpen: model.admitsSessionPresentationOpen,
             phase: sessionPresentation.open.phase
         ) else { return }
-        // Only a still-current foreground owner may turn an unexplained return
-        // into a visible failure. Cancellation, route coverage, and background
-        // retirement leave the opening phase resumable instead.
         model.chatInteractionTrace.opening(
             .failed,
             context: ensureInteractionTraceContext(),
@@ -2117,8 +1948,6 @@ struct ChatView: View {
     private func performOpeningPresentation() async {
         let openingConnectionID = model.gatewayConnectionID
         sessionPresentation.permitsExtensionInteractionPresentation = false
-        // Retiring/restarting presentation authority cancels any local page
-        // admission; late model/scroll completions are token-gated.
         sessionPresentation.earlierMessagesOperation.cancel()
         retireQueueMutationPresentationState()
         if composerScope == nil, let profileID = model.profiles.selected?.id {
@@ -2141,10 +1970,6 @@ struct ChatView: View {
             if !retainsAuthority { sessionPresentation.modelPresentationGeneration = nil }
             transcriptPresentation.reset()
         }
-        // A retained pinned surface, including an interrupted unfinished open,
-        // revalidates its native viewport against the same installed authority.
-        // A retained detached reader remains ready and anchored; it must never
-        // be repinned by resume reconciliation.
         let retainedPinnedRevalidation = retainsInstalledPresentation
             && (scrollCoordinator.viewportMode == .pinned
                 || ChatOpeningAttemptPolicy.isUnsettled(sessionPresentation.open.phase))
@@ -2191,8 +2016,6 @@ struct ChatView: View {
             let generation: Int
             if retainsAuthority || retainsDetachedCut,
                let target = currentMountedPresentationTarget {
-                // Authority is bound independently of the immutable display cut.
-                // A replacement may already be synchronized by the model owner.
                 generation = target.generation
                 sessionPresentation.modelPresentationGeneration = generation
             } else {
@@ -2226,15 +2049,8 @@ struct ChatView: View {
                 retainedPresentation: retainsVisiblePresentation,
                 state: interactionTraceState()
             )
-            // Presence follows exact synchronized route authority, not scroll
-            // positioning. The composer can admit work before a large retained
-            // transcript reaches its first ready frame.
             reconcileSessionPresentationVisibility()
             if retainsVisiblePresentation && !retainedPinnedRevalidation {
-                // A detached reader keeps the already-installed immutable cut.
-                // Rebinding canonical authority must not format or mount a live
-                // tail behind the user's viewport; returning to the tail admits
-                // one newest cut for this new presentation generation.
                 guard !Task.isCancelled,
                       transcriptPresentation.installed != nil,
                       sessionPresentation.open.epoch == epoch,
@@ -2372,8 +2188,6 @@ struct ChatView: View {
     @MainActor
     private func openModelPresentation() async throws -> Int {
         #if HOSTED_TEST
-        // Native-only fixtures substitute the open dependency, never the
-        // opening/cover/retirement lifecycle. RPC regressions leave this nil.
         if let open = hostedProbe?.fixtureOpenPresentation { return try await open() }
         #endif
         return try await model.openSessionPresentation(sessionID, composerScope: composerScope)
@@ -2384,9 +2198,6 @@ struct ChatView: View {
         _ generation: Int,
         retainingVisiblePresentation: Bool
     ) async {
-        // Command authority and the immutable reader cut have distinct owners.
-        // A cancelled reconciliation must not close a valid new subscription
-        // merely because the detached display still bears its old generation.
         let retainsReaderCut = retainsDetachedPresentationCut
         let retainsAuthority = retainingVisiblePresentation
             && !ChatOpeningAttemptPolicy.isFailed(sessionPresentation.open.phase)
@@ -2415,9 +2226,6 @@ struct ChatView: View {
             context: ensureInteractionTraceContext(),
             state: interactionTraceState()
         )
-        // Begin the reveal while the opening surface still covers the exact
-        // origin-anchored baseline; the cosmetic animation is separate from
-        // viewport ownership and first-ready publication.
         var transaction = Transaction()
         transaction.disablesAnimations = true
         let began = withTransaction(transaction) {
@@ -2430,9 +2238,6 @@ struct ChatView: View {
     private func revealSettledTranscript(epoch: Int) async -> Bool {
         let activation = viewportActivation
         do {
-            // Commit the initial opacity/offset while the opaque surface still
-            // owns presentation. This prevents an unanimated ready frame when
-            // settlement and reveal are coalesced in one SwiftUI update.
             try await displayFrameScheduler.nextFrame()
         } catch {
             return false
@@ -2443,8 +2248,6 @@ struct ChatView: View {
               viewportActivation == activation,
               composerCatalogActivity.allowsViewportObservation,
               admitCurrentOpeningCommit() else { return false }
-        // The cosmetic fade starts at presented; only a current physical frame
-        // may commit ready. No animation-completion callback owns readiness.
         let began = withAnimation(transcriptRevealAnimation) {
             sessionPresentation.open.beginVisibleReveal(sessionID: sessionID, epoch: epoch)
         }
@@ -2490,24 +2293,13 @@ struct ChatView: View {
                 epoch: epoch,
                 expectedVisibleRows: totalInteractionTraceRows
             )
-            // The validated current frame releases opening ownership. The
-            // cosmetic fade may still run; it owns no intake/command lease.
             scrollCoordinator.completeVisibleOpeningReveal()
             reconcileSessionPresentationVisibility()
-            // Publish leased interaction/editor routes only after chat opening
-            // has crossed a real ready frame. Otherwise their sheet can cover
-            // the parent, cancel opening, and create a present/dismiss loop.
-            // This frame settles the opening, so the sheet admitted next can
-            // cover it without cancelling it into a later re-reveal (#935).
             sessionPresentation.markOpeningReady()
             sessionPresentation.permitsExtensionInteractionPresentation = true
             intakeLatestTranscriptProjectionIfNeeded()
             admitPendingFloatingDisplay()
             #if HOSTED_TEST
-            // #935 journey: keep this opening's tail alive for a bounded number
-            // of frames so the parent-covering form the line above admits lands
-            // while the opening task still exists, the order a loaded device
-            // produces. Cover cancellation ends the hold early.
             if ProcessInfo.processInfo.arguments.contains("--tron-hosted-hold-opening-tail") {
                 for _ in 0..<120 where !Task.isCancelled {
                     try? await displayFrameScheduler.nextFrame()
@@ -2545,8 +2337,6 @@ struct ChatView: View {
         case discarded
     }
 
-    /// Shared production/hosted post-authority path. Authority setup differs,
-    /// but the origin-anchored viewport needs no tail-positioning pass.
     @MainActor
     private func completeOpening(
         interval: PerformanceInterval,
@@ -2561,9 +2351,6 @@ struct ChatView: View {
             return .discarded
         }
         let activation = viewportActivation
-        // The newest row is the exact content origin on the first layout pass.
-        // Keep one covered frame before revealing it, without a tail-positioning
-        // command or a physical settlement proof.
         do { try await displayFrameScheduler.nextFrame() } catch {
             performanceSignposts.end(
                 interval,
@@ -2611,26 +2398,16 @@ struct ChatView: View {
             case .oldestHistory:
                 transcriptScrollPosition.scrollTo(edge: transcriptOrientation.oldestEdge)
             case .tail:
-                // On the origin-anchored transcript, the newest end is the
-                // native content origin. A fresh position makes repeated catch-up
-                // requests to that same origin observable to SwiftUI.
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(y: 0)
                 transcriptScrollPosition = target
             case .offsetY(let offsetY):
-                // The coordinator's point is measured from the newest content
-                // origin; reflect it back before sending it to the native scroll
-                // view, or a point near the newest row jumps into old history.
                 transcriptScrollPosition.scrollTo(y: transcriptOrientation.scrollOffsetY(
                     forModelOffsetY: offsetY,
                     geometry: scrollCoordinator.latestGeometry
                 ))
             }
         }
-        // An annotation reveal measures its source once the scroll has landed:
-        // after its animation completes (or the jump), when the source's frame
-        // holds still between display frames; lazy rows can keep settling for
-        // a few frames. A reader who took the transcript in between ends it.
         let landed: () -> Void = command.origin == .annotationReveal
             ? { [annotationPresenter, scrollCoordinator, displayFrameScheduler] in
                 Task { @MainActor in
@@ -2655,10 +2432,6 @@ struct ChatView: View {
             withTransaction(transaction, update)
             landed()
         }
-        // The coordinator keeps this exact token installed through its native
-        // opening/catch-up/semantic settlement, then publishes a leased release.
-        // Clearing the binding in this same update could cancel the
-        // scrollTo before SwiftUI applies it.
         _ = scrollCoordinator.commandApplied(command)
     }
 
@@ -2807,7 +2580,6 @@ struct ChatView: View {
             onSelectResource: selectComposerResource,
             onDismissResourcePicker: dismissComposerResourcePicker,
             onShowContext: {
-                // Manage Home replaces Manage Session for Home, whose controls it refuses (#748).
                 if !presentManageHome() { sessionPresentation.showContext = true }
             },
             onSend: { behavior in send(behavior: behavior) },
@@ -2818,7 +2590,6 @@ struct ChatView: View {
             onComposerHeight: composerHeightChanged,
             onComposerHeightSettled: composerHeightSettled
         )
-        // The transcript's visible bottom, above the composer and its staged chips.
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: {
             annotationPresenter.revealBottom = $0
         }
@@ -2826,8 +2597,6 @@ struct ChatView: View {
     }
 
     private func abortCurrentOperation() {
-        // Both Home's menu and the composer stop the current authoritative
-        // operation, never an ID captured by a delayed render or Home status.
         let operation = selectedAuthoritativeSnapshot?.operation
         let kind = ChatComposerPolicy.abortKind(operation: operation)
         Task { await model.abort(sessionID: sessionID, kind: kind, operationID: operation?.id) }
@@ -2879,10 +2648,6 @@ struct ChatView: View {
             .accessibilityLabel("Back")
         }
         ToolbarItem(placement: .principal) {
-            // Recovery takes the title's place, as messaging apps show
-            // "Connecting" there. The title view keeps one fixed size in both
-            // states: a changed title-view size relays out the bar and its
-            // safe area, which moves an anchored transcript reader (#878).
             ZStack {
                 if let status = retainedRecoveryStatus {
                     ChatRecoveryStatusLine(status: status) { Task { await retryRecovery() } }
@@ -2903,8 +2668,6 @@ struct ChatView: View {
             .animation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion), value: retainedRecoveryStatus)
         }
         ToolbarItem(placement: .primaryAction) {
-            // Two surfaces: the context ring opens Manage Session/Home (this chat,
-            // its settings and project); the gear opens Settings (this Mac and iPhone).
             Button { sessionPresentation.showSettings = true } label: {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
@@ -2914,17 +2677,12 @@ struct ChatView: View {
         }
     }
 
-    /// Opens Manage Home when this chat claims the Home status. The composer's
-    /// context ring is its one caller; false leaves the ring's Manage Session sheet.
     private func presentManageHome() -> Bool {
         guard let (profileID, _) = manageHomeContext else { return false }
         homeSheet = HomeSheetRoute(profileID: profileID, sessionID: sessionID, destination: .manage)
         return true
     }
 
-    /// The Home status this chat's route claims, with the profile that owns its
-    /// mutations. Decides what the composer's context ring opens; nil keeps
-    /// Manage Session. Home's state, controls and Stop live in Manage Home (#740).
     private var manageHomeContext: (profileID: String, status: HomeStatusDTO)? {
         guard let profileID = composerScope?.profileID,
               profileID == model.profiles.selected?.id,
@@ -2997,23 +2755,17 @@ struct ChatView: View {
     private func admitCurrentOpeningCommit() -> Bool {
         guard currentMountedPresentationTarget != nil,
               currentMountedPresentationTarget == presentationTarget else { return false }
-        // Only an already-ready anchored reader may display an older identity.
         if retainsDetachedPresentationCut { return true }
         guard let installed = transcriptPresentation.installed,
               let generation = sessionPresentation.modelPresentationGeneration else { return false }
         let current = installedCommitBelongsToCurrentPresentation(installed, generation: generation)
         if !current {
-            // Runtime replacement is resumable against the model's new mounted
-            // authority, not a layout failure or a reason to reopen transport.
             sessionPresentation.cancelOpeningTask()
             scrollCoordinator.cancel()
         }
         return current
     }
 
-    /// A ready detached reader may keep its immutable cut while a new target is
-    /// being reconciled. That cut is display-only: it never admits mutations or
-    /// gets relabeled with the replacement target's canonical metadata.
     private var retainsDetachedPresentationCut: Bool {
         guard sessionPresentation.open.phase == .ready,
               scrollCoordinator.viewportMode == .anchored,
@@ -3058,8 +2810,6 @@ struct ChatView: View {
     }
 
     private var composerCatalogActivity: PresentationSurfaceActivity {
-        // Read the retained topology owner after awaits, not only the activity
-        // value captured by the task's last SwiftUI environment update.
         presentationCoordinator?.activity(for: presentationSurfaceToken) ?? presentationActivity
     }
 
@@ -3086,8 +2836,6 @@ struct ChatView: View {
             sessionPresentation.attachmentPresentationTask?.cancel()
             sessionPresentation.queuedAttachmentDestination = nil
             sessionPresentation.attachmentPresentationTask = Task { @MainActor in
-                // Let the native menu complete dismissal before inserting the
-                // inline child. The UITextView remains the responder owner.
                 do { try await Task.sleep(for: .milliseconds(100)) }
                 catch { return }
                 guard !Task.isCancelled, attachmentActionsEnabled,
@@ -3100,14 +2848,7 @@ struct ChatView: View {
             return
         }
         dismissComposerResourcePicker()
-        // Keep the composer responder intent intact while the native menu
-        // settles. UIKit may temporarily cover the keyboard for a system picker,
-        // but selecting an attachment must not explicitly end the draft's focus.
 
-        // A native Menu is still dismissing when its action runs. Presenting a
-        // sheet or system picker synchronously can collide with that transient
-        // presentation controller on physical iOS. Queue one destination, force
-        // a fresh presentation edge, and activate it after dismissal settles.
         sessionPresentation.attachmentPresentationTask?.cancel()
         sessionPresentation.attachmentDestination = nil
         sessionPresentation.queuedAttachmentDestination = destination
@@ -3194,9 +2935,6 @@ struct ChatView: View {
                 ) else { return }
                 replacement = tokenReplacement
             } else {
-                // A selected command/template is represented by the chip; its
-                // editable arguments remain ordinary composer text without a
-                // leading slash or trigger token.
                 replacement = ComposerCommandCompletionPolicy.removingLeadingCommand(
                     text: composerText,
                     selection: composerSelection,
@@ -3286,8 +3024,6 @@ struct ChatView: View {
         }
         guard let queue = model.sessionQueuePresentation(for: sessionID),
               queue.revision > expectedRevision else { return false }
-        // Receipt reconciliation continues behind the editor; installing a chat
-        // frame waits for the native viewport's uncover, not for command success.
         if presentationActivity.allowsPresentationPublication {
             _ = try? await installCurrentTranscriptProjection(presentationGeneration: presentationGeneration)
         }
@@ -3353,9 +3089,6 @@ struct ChatView: View {
                 target: target,
                 presentationGeneration: presentationGeneration
             )
-            // A confirmed response is not canonical. The bounded mounted
-            // resynchronization above either installs the newer queue revision
-            // or retires the local mutation so controls cannot remain disabled.
             clearSettledQueueMutationPresentationState()
             if !converged {
                 model.presentComposerActionError(
@@ -3372,17 +3105,12 @@ struct ChatView: View {
             }
             sessionPresentation.queueMutationCommandIsPending = false
             clearSettledQueueMutationPresentationState()
-            // Failure restores the pre-command interpretation before the held
-            // canonical boundary installs, preserving its consumed entrance.
             resolveDeferredQueueMutationProjection()
             _ = sessionPresentation.queueMutationResolution.resolve(mutationToken, as: .commandCompleted)
             model.presentComposerActionError(error, target: target)
         }
     }
 
-    /// Every resource this message would invoke: the staged chips, or else one
-    /// typed leading invocation. A slash typed beside a chip is message text,
-    /// not an opportunity to replace the chips.
     private func composerInvocationIntent() -> (staged: [CommandInfo], typed: ComposerResourceInvocation?) {
         let staged = composerScope.map(model.composerDrafts.selectedResources(for:)) ?? []
         guard staged.isEmpty else { return (staged, nil) }
@@ -3400,13 +3128,9 @@ struct ChatView: View {
             recordComposerAvailability(blockedAction: true)
             return
         }
-        // Recheck exact authority after capturing the current projection and
-        // again inside the mutation coordinator; display admission is not a receipt.
         let snapshotAcceptsQueuedPrompts = selectedAuthoritativeSnapshot.map {
             $0.acceptsQueuedPrompts ?? ($0.phase == .running)
         } ?? false
-        // A stale context-menu closure cannot force queue semantics after the
-        // authoritative capability changes; the prompt becomes ordinary.
         let behavior = ChatComposerPolicy.submissionBehavior(
             acceptsQueuedPrompts: snapshotAcceptsQueuedPrompts
         ).map { explicitBehavior ?? $0 }
@@ -3417,8 +3141,6 @@ struct ChatView: View {
             )
             return
         }
-        // Capture invocation intent exactly once before any presentation state
-        // changes. The same value is validated, staged, rendered, and sent.
         let intent = composerInvocationIntent()
         let typedInvocation = intent.typed
         let invoked: [(source: CommandInfo.Source, name: String)] = intent.staged.map { ($0.source, $0.name) }
@@ -3472,14 +3194,9 @@ struct ChatView: View {
             state: interactionTraceState(installed: installed)
         )
         do {
-            // Admission and the local lifecycle graft are atomic. A locally
-            // knowable rejection must occur before viewport, responder, layout,
-            // draft, or row-presentation state changes.
             let installedBeforeSubmission = installed
             let freezesDetachedProjection = scrollCoordinator
                 .defersAutomaticLiveProjectionIntake
-            // A neutral root transaction preserves descendant-scoped composer
-            // and flight animations.
             let admission = try withTransaction(Transaction()) {
                 let submission = try model.beginComposerSubmission(
                     target: target,
@@ -3491,11 +3208,7 @@ struct ChatView: View {
                     runtimeGeneration: selectedAuthoritativeSnapshot?.runtimeGeneration
                 )
                 composerResourcePicker = nil
-                // Transfer an applied sentinel lease directly to the outgoing
-                // row while preserving detached-reader ownership.
                 scrollCoordinator.submitted()
-                // Submission, composer height, row admission, and keyboard
-                // changes join one settlement generation only after admission.
                 let layoutGeneration = layoutTransaction.join(.submission)
                 _ = layoutTransaction.join(.transcriptGrowth)
                 let submittedAttachments = model.composerDrafts.submittedAttachments(for: target)
@@ -3505,12 +3218,7 @@ struct ChatView: View {
                     .prefix(ComposerAttachmentPolicy.maximumCount)
                     .map { $0.frozenForHandoff() }
                 let isExtensionCommand = submission.isExtensionCommand
-                // UIKit publishes its keyboard clock synchronously when
-                // available before the already-sized outgoing row is grafted.
                 dismissComposerForAdmittedSubmission()
-                // Exact extension commands do not create a canonical user
-                // message in Pi. Never graft a prompt bubble that can become a
-                // phantom row; the canonical invocation receipt owns its row.
                 let grafted = isExtensionCommand
                     || !presentationActivity.allowsPresentationPublication
                     || freezesDetachedProjection
@@ -3549,8 +3257,6 @@ struct ChatView: View {
                     state: interactionTraceState()
                 )
             }
-            // ComposerDraftCoordinator retains accepted transport across route
-            // changes and target-gates late presentation effects.
             Task { @MainActor in
                 do {
                     try await model.sendComposer(submission)
@@ -3675,8 +3381,6 @@ struct ChatView: View {
             model.presentComposerActionError(ComposerPastedImages.ImportError.tooLarge, target: target)
             return
         }
-        // Repeated pastes are independent accepted selections, not replacements
-        // for an earlier paste. Bound preparation work and retire it with its chat.
         guard sessionPresentation.pastedImageImports.count < ChatAttachmentImportPolicy.maximumPhotoSelection else {
             model.presentComposerActionError("Wait for the copied images to finish loading.", target: target)
             return
@@ -3702,8 +3406,6 @@ struct ChatView: View {
                 }
             }
             guard !candidates.isEmpty, !Task.isCancelled, presentationTarget == target else { return }
-            // Once admitted, the draft coordinator owns upload receipts/removal.
-            // Covering the chat must not cancel already-published attachment chips.
             sessionPresentation.pastedImageImports[id] = nil
             do { try await model.uploadBatch(candidates, target: target) }
             catch is CancellationError { return }
@@ -3711,8 +3413,6 @@ struct ChatView: View {
         }
     }
 
-    /// PhotosPicker can deliver a library photo as HEIC; upload only formats
-    /// every model provider accepts (#407).
     private static func providerAcceptedPhoto(_ data: Data, type: UTType?) -> (Data, String)? {
         if let type, ProviderImageFormat.isAccepted(type), let mimeType = type.preferredMIMEType {
             return (data, mimeType)

@@ -2,8 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// The real chat/composer and read-only child RPC path with bounded provider DTOs.
-/// No provider execution or user store is involved in this presentation journey.
 @MainActor
 struct HostedSubagentParityFixture: View {
     @State private var model: AppModel
@@ -56,8 +54,6 @@ struct HostedSubagentParityFixture: View {
                     [{"id":"provider-frame","kind":"widget","placement":"aboveEditor","lifecycle":"retained","revision":1,"focused":false,"inputMode":"none","provenance":{"source":"tron:pi-subagents@fixture#build","kind":"subagent"},"frame":{"width":80,"height":1,"plainText":"PRIVATE PROVIDER FRAME","lines":[{"plainText":"PRIVATE PROVIDER FRAME","runs":[{"text":"PRIVATE PROVIDER FRAME","style":{}}]}]}}]
                     """#.utf8)), pendingInteractions: []), diagnostics: [])
         snapshot.transcript = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Self.transcript)
-        // Hold the wire projection before canonical binding to exercise the
-        // two runtime-owned input lifetimes, not the canonical wake filter.
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("-pending-wake") || arguments.contains("-queued-wake") {
             let wake = snapshot.transcript.removeLast()
@@ -109,7 +105,6 @@ struct HostedSubagentParityFixture: View {
             snapshot.phase = .running
         }
         if arguments.contains("-history-grouping") {
-            // A session that never ran a subagent: no mounted runs and an empty canonical page.
             snapshot.processActivities = arguments.contains("-history-empty") || arguments.contains("-history-long") ? [] : Self.historyProcesses(sequence: 1,
                 stage: arguments.contains("-history-lifecycle") ? 0 : 1)
         }
@@ -137,7 +132,6 @@ struct HostedSubagentParityFixture: View {
         func row(_ id: String, _ title: String, _ state: SessionProcessLifecycleState,
                  settled: Bool = false) -> SessionProcessActivity {
             let terminal = state.isTerminal || settled
-            // Canonical history is ordered by observation time; keep the newest run first.
             let age = id == "completed" ? 1 : (Int(id.replacingOccurrences(of: "earlier-", with: "")).map { $0 + 1 } ?? 0)
             let observedAt = now.addingTimeInterval(-Double(age))
             return SessionProcessActivity(
@@ -152,8 +146,6 @@ struct HostedSubagentParityFixture: View {
                 durationMs: 282_000, toolCount: 8, turnCount: 3, toolCallId: "launch-\(id)", runId: "run-\(id)"
             )
         }
-        // Resume is a new exact execution, not a terminal row becoming live.
-        // Keep its settled paused predecessor alongside it, as the Gateway does.
         let states: [SessionProcessLifecycleState] = [.queued, .running, .paused, .paused, .queued, .running, outcome]
         let isResumed = resumed && stage >= 4
         let current = row(isResumed ? "resumed" : "worker", "Asynchronous worker", states[stage], settled: stage == 3)
@@ -311,7 +303,6 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
             """#.utf8))
         } else if method == "session.processHistory.list" {
             if ProcessInfo.processInfo.arguments.contains("-history-long") {
-                // Let the loading feed lay out before its canonical page arrives.
                 try await Task.sleep(for: .milliseconds(750))
             }
             result = .object([

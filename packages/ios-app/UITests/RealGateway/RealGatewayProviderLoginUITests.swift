@@ -1,9 +1,6 @@
 import XCTest
 
 extension RealGatewayPairAndChatUITests {
-    /// A pending manual login is owned by its presentation, not a rebuilt row
-    /// or a disposable socket. Success after both transitions proves the same
-    /// Gateway prompt survived; the callback is deliberately fixture-only.
     @MainActor
     func testProviderLoginSurvivesSafariAndReconnect() throws {
         continueAfterFailure = false
@@ -40,7 +37,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitForHittable(details, timeout: 30), "The retained prompt did not complete: \(app.debugDescription)")
         details.tap()
         let remove = app.buttons["Clear Login Information"]
-        // Reopening reads the real Gateway's persisted configured credential.
         XCTAssertTrue(remove.waitForExistence(timeout: 15), app.debugDescription)
         remove.tap()
         for _ in 0..<12 where !connect.isHittable { app.swipeUp() }

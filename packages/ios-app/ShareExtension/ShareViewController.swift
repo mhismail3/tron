@@ -57,8 +57,6 @@ final class ShareViewController: UIViewController {
         processSharedItems()
     }
 
-    // MARK: - Item Processing
-
     private func processSharedItems() {
         guard let extensionItems = extensionContext?.inputItems as? [NSExtensionItem] else {
             complete()
@@ -102,17 +100,13 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    // MARK: - Content Extraction
-
     private func extractContent(from provider: NSItemProvider) async -> ExtractionResult {
-        // Try URL first (more specific than plain text)
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
            let url = await loadURL(from: provider) {
             let fragment = SharedContentFragment.url(url)
             return SharedContentAdmissionPolicy.admits(fragment) ? .fragment(fragment) : .rejected
         }
 
-        // Then try plain text
         if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier),
            let text = await loadText(from: provider) {
             let fragment = SharedContentFragment.text(text)
@@ -145,8 +139,6 @@ final class ShareViewController: UIViewController {
             }
         }
     }
-
-    // MARK: - Completion
 
     private func complete() {
         extensionContext?.completeRequest(returningItems: nil)

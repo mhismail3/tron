@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// A compact state label for a header or row: Home's state, a chapter's state,
-/// a task's lifecycle. The pill's text is its whole label.
 struct TronStatusPill: View {
     let text: String
     let accent: Color
@@ -18,9 +16,6 @@ struct TronStatusPill: View {
     }
 }
 
-/// Centers its second subview (a pill) on one line of its first, hidden subview
-/// (a line of the title's font), and reports that line's baseline as its own, so
-/// a first-baseline stack puts the pill on the title line's center.
 struct TronTitleLineCenteredLayout: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard subviews.count == 2 else { return .zero }

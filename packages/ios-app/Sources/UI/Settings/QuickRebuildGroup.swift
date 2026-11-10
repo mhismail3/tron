@@ -1,10 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// What one quick rebuild row can do right now. Availability mirrors the owning
-/// detail sheets: the Gateway source rebuild needs the update helper and a
-/// configured source repository; the device install needs the installer and a
-/// configured source repository for this device.
 enum QuickRebuildRowState: Equatable {
     case ready
     case running
@@ -23,8 +19,6 @@ enum QuickRebuildRowState: Equatable {
     }
 }
 
-/// What the Replace Mac App row offers: the path the Mac would take, a running
-/// replacement, or why it is unavailable (#984).
 enum MacReplacementRowState: Equatable {
     case ready(String)
     case running(String)
@@ -48,20 +42,13 @@ enum MacReplacementRowState: Equatable {
     }
 }
 
-/// Last group in Connections: two-tap rebuilds of the selected server and of
-/// this iPhone's optimized build from that server, and the one-tap Mac app
-/// replacement. Commands go through the same model owners as the server and
-/// device detail sheets.
 struct QuickRebuildGroup: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
 
     let profile: GatewayProfile
-    /// This iPhone's authorization on `profile`, when the device list has it.
     let thisDevice: GatewayAuthorizedDevice?
-    /// Presents the replacement progress sheet, owned by Connections so it
-    /// stays up while this group's Gateway is down for the swap.
     let showReplacement: () -> Void
 
     @State private var gatewayConfigured = false
@@ -107,8 +94,6 @@ struct QuickRebuildGroup: View {
         return false
     }
 
-    /// Part of the load task identity, so an accepted command starts following
-    /// its progress immediately.
     private var isRunning: Bool { gatewayState == .running || deviceState == .running || replacementRunning }
 
     var body: some View {
@@ -141,8 +126,6 @@ struct QuickRebuildGroup: View {
         )) {
             guard admitsRead else { return }
             await load()
-            // Follow accepted work until it settles; the task restarts when the
-            // Gateway reconnects after its own rebuild.
             while isRunning {
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
                 guard admitsRead else { return }
@@ -167,8 +150,6 @@ struct QuickRebuildGroup: View {
         case .unavailable(let reason): detail = reason
         }
         return TronValueRow(icon: icon, title: title, detail: detail, accent: .tronPrimary) {
-            // One tap opens the menu, a second confirms; Cancel or tapping
-            // outside dismisses without a command.
             Menu {
                 Button("Confirm") { Task { await confirm() } }
                 Button("Cancel", role: .cancel) {}
@@ -195,8 +176,6 @@ struct QuickRebuildGroup: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Show Mac app replacement progress")
             } else {
-                // Same two-tap pattern as the rebuild rows; the last journal
-                // stays one tap away after it settles.
                 Menu {
                     if case .ready = replacementState {
                         Button("Confirm") { Task { await replaceMacApp() } }
@@ -245,7 +224,6 @@ struct QuickRebuildGroup: View {
             guard current() else { return }
             replacement = status?.operation
             if replacement.map({ !$0.isTerminal }) == true { replacementRequested = false }
-            // The plan runs git on the Mac; refresh it only when nothing is running.
             if !replacementRunning || replacementPlan == nil {
                 let plan = await model.loadMacReplacementPlan(for: profile)
                 guard current() else { return }
@@ -262,8 +240,6 @@ struct QuickRebuildGroup: View {
             guard current() else { return }
             installStatus = status
         } catch {
-            // Disposable read: keep the last published state. The device
-            // detail sheet surfaces install read errors.
             return
         }
     }

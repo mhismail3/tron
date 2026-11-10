@@ -1,16 +1,6 @@
 import XCTest
 
-/// The Take Photo sheet (#937), opened from the real composer menu against
-/// scripted camera hardware (`HostedCameraFixture`): the first feed becomes
-/// live 6 s after it is requested (long enough to observe the opening state),
-/// later ones after 3 s. Mid-switch assertions also hold once the switch has
-/// finished, so a slow accessibility snapshot cannot make them flaky. `camera.phase-history` is the model's complete
-/// phase sequence, so "never shows loading again" is an exact assertion, not a
-/// sampled one.
 final class TronCameraCaptureUITests: XCTestCase {
-    /// Opening shows the shared sheet loading state once; switching cameras and
-    /// retaking hold the last frame instead, keep the controls in place, and
-    /// follow the torch of the camera that is live. The used photo attaches.
     @MainActor func testOnlyOpeningShowsLoadingAndSwitchesKeepControlsInPlace() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -30,7 +20,6 @@ final class TronCameraCaptureUITests: XCTestCase {
         XCTAssertTrue(takePhoto.waitForExistence(timeout: 5), app.debugDescription)
         takePhoto.tap()
 
-        // Opening: the shared sheet loading state, centred over the sheet.
         let loading = app.descendants(matching: .any)["sheet-loading"]
         XCTAssertTrue(loading.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(loading.label, "Opening camera")
@@ -46,7 +35,6 @@ final class TronCameraCaptureUITests: XCTestCase {
         let controlFrames = [flash.frame, shutter.frame, flip.frame]
         XCTAssertTrue(flash.isEnabled, "the back camera has a torch")
 
-        // Back to front: the held frame replaces the loading state.
         flip.tap()
         waitFor(history, "label BEGINSWITH 'starting>live>switching'", "the switch did not start")
         XCTAssertFalse(loading.exists, "switching cameras showed the loading state")
@@ -56,12 +44,10 @@ final class TronCameraCaptureUITests: XCTestCase {
         waitFor(history, "label == 'starting>live>switching>live'", "the front camera never went live")
         XCTAssertFalse(flash.isEnabled, "the front camera has no torch")
 
-        // Front to back: the torch returns with the back camera.
         flip.tap()
         waitFor(history, "label == 'starting>live>switching>live>switching>live'", "the back camera never came back")
         XCTAssertTrue(flash.isEnabled)
 
-        // Capture, retake (held photo, no loading), capture again and attach.
         shutter.tap()
         let retake = app.buttons["Go back to capture"]
         XCTAssertTrue(retake.waitForExistence(timeout: 10), app.debugDescription)

@@ -1,29 +1,18 @@
 import Foundation
 
-// The typed diagnostics the Gateway client reports: connection stages, RPC
-// outcomes, the failure-code classifier, and the event consumer's work window.
-// The service that serves them to the UI, and the client-side store that
-// retains them, live above this layer.
-
 package enum GatewayConnectionDiagnosticStage: String, Sendable {
     case queuePressure = "queue-pressure"
-    /// The WebSocket never opened: the path did not reach the Mac.
     case transportOpen = "transport-open"
     case helloSend = "hello-send"
     case helloReceive = "hello-receive"
     case liveness
     case transport
-    /// One lane of a raced attempt lost (E-3c). The winner's own hello record
-    /// names the transport that carried the connection; this record names why
-    /// the other lane did not.
     case transportRace = "transport-race"
 }
 
 package enum GatewayConnectionDiagnosticOutcome: String, Sendable {
     case success
     case failure
-    /// A liveness probe that missed its deadline but was answered by an inbound
-    /// frame. It leaves a debug record and never retires an epoch.
     case excused
 }
 
@@ -42,15 +31,8 @@ enum GatewayConnectionDiagnosticReason: String, Sendable {
     case identityMismatch
     case invalidProfile
     case decodeLimit = "decode_limit"
-    /// The LAN lane did not answer (E-3c). The next attempt races both lanes
-    /// again; a Mac that is off the home network simply loses this lane.
     case lanUnreachable = "lan_unreachable"
-    /// The LAN lane served a certificate the profile's pin does not admit
-    /// (E-3c): the lane is refused before any credential is written.
     case lanPinMismatch = "lan_pin_mismatch"
-    /// iOS denied this install the Local Network permission (E-3c): the lane is
-    /// not dialed again until the permission changes, and the phone stays on
-    /// Tailscale.
     case lanDenied = "lan_denied"
 }
 
@@ -59,7 +41,6 @@ package struct GatewayConnectionDiagnostic: Sendable {
     let clientID: String?
     let attemptID: String?
     let connectionID: Int?
-    /// The Gateway's `connectionId` from this epoch's hello, once received.
     let gatewayConnectionID: String?
     let timestamp: String
     let profileID: String?
@@ -69,8 +50,6 @@ package struct GatewayConnectionDiagnostic: Sendable {
     let durationMilliseconds: Int
     let reason: GatewayConnectionDiagnosticReason?
     let platformCode: Int?
-    /// Transport metadata remains typed and separate: WebSocket close codes
-    /// and HTTP handshake statuses must never be merged into one numeric code.
     let closeCode: Int?
     let httpStatusCode: Int?
     let overflowCount: Int?
@@ -216,10 +195,6 @@ package enum GatewayDiagnosticFailure {
         return normalizedCode(failure.code)
     }
 
-    /// The Gateway's own error code when the Gateway answered. A typed failure
-    /// (for example `conflict`, `busy` or `forbidden`) must never be reported as
-    /// `transport`, which is reserved for a failure that never reached the
-    /// Gateway. Bounded so a malformed code cannot inflate a record.
     package static func answerCode(_ error: Error) -> String {
         guard let failure = error as? GatewayFailure,
               !failure.code.isEmpty, failure.code.utf8.count <= 64 else { return code(error) }

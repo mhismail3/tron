@@ -1,8 +1,5 @@
 import XCTest
 
-/// The production Tron menu → Apps → runner path against the real Gateway. The
-/// app is offered by the real `swift_app` tool in a real Pi session and installed
-/// by the phone's explicit review in Apps.
 extension RealGatewayPairAndChatUITests {
     @MainActor
     func testTronMenuListsInstalledAppAndKeepsItsValuesAcrossReopen() throws {
@@ -23,7 +20,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(app.staticTexts["Transient 1"].exists)
         closeRunner(app)
 
-        // Reopen from the catalog: stored values come back, @State starts over.
         let reopened = proofRow(app, "Persistence proof")
         XCTAssertTrue(reopened.waitForExistence(timeout: 30), app.debugDescription)
         reopened.tap()
@@ -33,8 +29,6 @@ extension RealGatewayPairAndChatUITests {
         keepScreenshot(app, name: "2076-real-gateway-apps-runner-reopened")
     }
 
-    /// A save the Gateway refuses (the app was updated underneath the open
-    /// runner) is shown, kept as unsaved work, and given up only on request.
     @MainActor
     func testRefusedSaveAfterAnAppUpdateIsShownAndKeptUntilDiscarded() throws {
         continueAfterFailure = false
@@ -50,7 +44,6 @@ extension RealGatewayPairAndChatUITests {
         proofRow(app, "Persistence proof").tap()
         XCTAssertTrue(app.staticTexts["Count 0"].waitForExistence(timeout: 20), app.debugDescription)
 
-        // Another writer updates the installed app while this runner is open.
         try Data().write(to: go)
         let deadline = Date().addingTimeInterval(120)
         while !FileManager.default.fileExists(atPath: go.path + ".done"), Date() < deadline { Thread.sleep(forTimeInterval: 0.25) }
@@ -140,7 +133,6 @@ extension RealGatewayPairAndChatUITests {
     @MainActor func testCaptureAppsAndManageLight() throws { try captureAppsAndManage(scheme: "light") }
     @MainActor func testCaptureAppsAndManageDark() throws { try captureAppsAndManage(scheme: "dark") }
 
-    /// Review captures of the real production screens, not the design fixture.
     @MainActor
     private func captureAppsAndManage(scheme: String) throws {
         continueAfterFailure = false
@@ -170,8 +162,6 @@ extension RealGatewayPairAndChatUITests {
         keepScreenshot(app, name: "apps-\(scheme)-empty")
     }
 
-    // MARK: Helpers
-
     @MainActor
     private func installProofApp(_ app: XCUIApplication, _ fixture: RealGatewayUIFixture) throws {
         open(fixture.invitationLink())
@@ -181,7 +171,6 @@ extension RealGatewayPairAndChatUITests {
         try sendPrompt(app, "INSTALLED-SWIFT-APP-PERSISTENCE")
         XCTAssertTrue(assistantReply(app, containing: "Persistence proof app ready for review")
             .waitForExistence(timeout: 90), "the agent's swift_app offer never completed: \(app.debugDescription)")
-        // The agent offers the app; only the phone's explicit review in Apps installs it.
         app.buttons["Back"].tap()
         openApps(app)
         let pending = app.buttons["pending-app-row-persistence-proof"]
@@ -194,7 +183,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(app.buttons["apps.install.open"].waitForExistence(timeout: 30), "the reviewed install never completed: \(app.debugDescription)")
         buildsDismissReview(app)
         closeTopSheet(app)
-        // Back to the producing chat, where the journeys continue.
         let session = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'session-row-' AND label CONTAINS %@", "INSTALLED-SWIFT-APP-PERSISTENCE")).firstMatch
         XCTAssertTrue(session.waitForExistence(timeout: 30), app.debugDescription)
         session.tap()
@@ -215,7 +203,6 @@ extension RealGatewayPairAndChatUITests {
     private func openApps(_ app: XCUIApplication) {
         let menu = app.buttons["dashboard.menu"]
         XCTAssertTrue(waitForHittable(menu, timeout: 60), app.debugDescription)
-        // With Home offered, a tap opens Home and a hold opens the menu.
         if menu.label == "Home" { menu.press(forDuration: 0.6) } else { menu.tap() }
         let apps = app.buttons["Apps"]
         XCTAssertTrue(apps.waitForExistence(timeout: 30), "the Tron menu has no Apps entry: \(app.debugDescription)")
@@ -256,7 +243,6 @@ extension RealGatewayPairAndChatUITests {
     @MainActor
     private func closeManage(_ app: XCUIApplication) { closeTopSheet(app) }
 
-    /// Each sheet owns one Done; the topmost is the last hittable.
     @MainActor
     private func closeTopSheet(_ app: XCUIApplication) {
         let done = app.buttons.matching(identifier: "Done")

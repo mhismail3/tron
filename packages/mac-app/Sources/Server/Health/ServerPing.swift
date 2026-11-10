@@ -1,16 +1,5 @@
 import Foundation
 
-/// Result of a single authenticated Tron Gateway probe. The four non-success cases
-/// drive distinct UI affordances in the menu bar / wizard so the user
-/// gets the right action ("re-pair" vs "wait for boot" vs "check
-/// network").
-///
-/// INVARIANT: `ServerStatusPoller.singleSnapshot` MUST map ping
-/// results into explicit menu-bar states:
-/// - `.success` → `.running`
-/// - `.unauthorized` → `.unauthorized`
-/// - `.unreachable`, `.timeout`, `.malformedResponse` → ask launchd;
-///   unloaded maps to `.paused`, loaded maps to `.failed(reason:)`.
 enum ServerPingResult: Sendable, Equatable {
     case success(ServerPingInfo)
     case unauthorized
@@ -19,16 +8,11 @@ enum ServerPingResult: Sendable, Equatable {
     case malformedResponse
 }
 
-/// One-shot `system.info` request over the stable Tron Gateway protocol. Used
-/// by the install step's "wait for Tron" loop and by the menu bar poller.
 enum ServerPing {
     static let requestID = "mac-system-info"
     static let supportedProtocolVersion = TronGatewayProtocolContract.protocolVersion
     static let minimumProtocolVersion = TronGatewayProtocolContract.minimumProtocolVersion
 
-    /// Performs a single ping with a default 3 s timeout. Classifies
-    /// failures so the caller can render the right state without
-    /// guessing.
     static func ping(host: String, port: Int, token: String?, timeout: TimeInterval = 3) async throws -> ServerPingResult {
         try Task.checkCancellation()
         guard let url = socketURL(host: host, port: port) else {
@@ -132,8 +116,6 @@ enum ServerPing {
         case .ignore:
             return .ignore
         case .error:
-            // A failed system.info carries no version to report; the poller
-            // treats this exactly as an unreadable payload.
             return .error
         case .malformed:
             return .malformed
@@ -177,12 +159,6 @@ enum GatewaySocketURL {
     }
 }
 
-/// Shared bounded transport for the wrapper's authenticated Gateway probes.
-/// Clients retain ownership of their frame decoders and error taxonomies.
-///
-/// `maximumFrameBytes` is a protocol admission limit at the transport boundary:
-/// URLSession may allocate a larger incoming frame before this code sees it, but
-/// decoding and retained wrapper work never proceed for an oversized frame.
 enum GatewayWebSocketTransport {
     protocol WebSocketTask: AnyObject {
         func resume()
@@ -318,8 +294,6 @@ enum GatewayWebSocketTransport {
                             group.cancelAll()
                             return value
                         } catch {
-                            // A timeout must close before this scope waits for the
-                            // pending URLSession operation to leave the group.
                             group.cancelAll()
                             self.close()
                             if error is CancellationError { throw CancellationError() }
@@ -331,8 +305,6 @@ enum GatewayWebSocketTransport {
                     throw CancellationError()
                 }
             }, onCancel: {
-                // URLSession does not observe cancellation of the child task
-                // group; synchronously close the underlying operation instead.
                 self.close()
             })
         }

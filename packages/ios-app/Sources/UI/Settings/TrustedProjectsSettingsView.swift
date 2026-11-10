@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Global Settings' single entrypoint. The former embedded toggle/Add write
-/// route is replaced by native lifecycle pages and the shared exact review card.
 struct TrustedProjectsSettingsView: View {
     static let key = "permissions.projectTrust"
     static let policyKey = "permissions.defaultProjectTrust"

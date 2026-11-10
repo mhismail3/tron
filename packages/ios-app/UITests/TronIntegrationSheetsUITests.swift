@@ -1,7 +1,5 @@
 import XCTest
 
-/// Surviving provider layout and connection recovery against the hosted owner.
-/// MCP add/auth authority and token handoff are covered by TronMCPServerSheetsUITests.
 final class TronIntegrationSheetsUITests: XCTestCase {
     @MainActor
     func testOllamaUnlimitedAccessibilityAndTypeSizes() {
@@ -96,7 +94,6 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         app.buttons["Retry secondary"].tap()
         waitFirstDelay("2.0,")
         app.buttons["Restore secondary"].tap()
-        // Automatic success, without another Retry, must reset the next outage.
         waitLabel(state, "connected")
         XCTAssertEqual(app.staticTexts["primary-state"].label, primary)
         XCTAssertNotEqual(app.staticTexts["secondary-last-connected"].label, lastConnected)

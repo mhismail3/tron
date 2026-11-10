@@ -4,8 +4,6 @@ import UIKit
 import CryptoKit
 import TronMobileCore
 
-/// Socket-side data only. Production chat routing, review admission and the
-/// receipt-backed install owner remain in the app under test. No disk install.
 struct HostedInstallReviewGateway {
     private var installed: InstalledSwiftAppManifest?
     mutating func handle(_ method: String, params: [String: JSONValue], source: Data) -> JSONValue? {
@@ -28,8 +26,6 @@ struct HostedInstallReviewGateway {
     }
 }
 
-/// Records mounted document chrome, including a transient title that AX polling
-/// after RPC completion would miss. Only active in this explicitly chosen fixture.
 @MainActor enum HostedInstallReviewObservation {
     static var titles: [String] = []
     static func install() {

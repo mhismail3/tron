@@ -1,7 +1,5 @@
 import XCTest
 
-/// Proposal-only shared-component journeys. These prove the native composition,
-/// not the unimplemented installed-app backend. No goldens or pixel assertions.
 final class TronAppsDesignUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
@@ -10,8 +8,6 @@ final class TronAppsDesignUITests: XCTestCase {
     @MainActor func testLightXXXLProposal() { review(dark: false, large: true) }
     @MainActor func testDarkXXXLProposal() { review(dark: true, large: true) }
 
-    // The approval package excludes the independently reproduced main failure
-    // #2086. Full Automations-comparison journeys above remain unchanged.
     @MainActor func testCaptureAppsManageLightDefault() { review(dark: false, large: false, compareAutomations: false) }
     @MainActor func testCaptureAppsManageDarkDefault() { review(dark: true, large: false, compareAutomations: false) }
     @MainActor func testCaptureAppsManageLightXXXL() { review(dark: false, large: true, compareAutomations: false) }
@@ -41,8 +37,6 @@ final class TronAppsDesignUITests: XCTestCase {
         app.buttons["Preview long catalog"].tap()
         let feed = app.scrollViews["apps-design-feed"]
         XCTAssertTrue(feed.waitForExistence(timeout: 5))
-        // Scroll through a real shared lazy feed. Its prefetch callback adds
-        // at most 20 rows per page; the position pill belongs to TronFeed.
         for _ in 0..<7 {
             if app.buttons["apps-design-row-item-21"].isHittable { break }
             feed.swipeUp()
@@ -67,8 +61,6 @@ final class TronAppsDesignUITests: XCTestCase {
         expand(app, title: "Manage Artifact")
         capture("manage-\(suffix)")
         if large {
-            // A large-type still cannot show the whole scrollable destination.
-            // Preserve the standard first viewport and also show its real tail.
             app.scrollViews["apps-design-manage-scroll"].swipeUp()
             capture("manage-\(suffix)-continued")
         }
@@ -76,16 +68,12 @@ final class TronAppsDesignUITests: XCTestCase {
 
         guard compareAutomations else { return }
 
-        // Matching appearance/type size on the actual unchanged Automations
-        // surface, not a manually recreated lookalike.
         let automation = XCUIApplication()
         automation.launchArguments = arguments(large: large) + ["-tron-automation-fixture"] + (dark ? ["-automation-dark"] : [])
         automation.launch()
         XCTAssertTrue(automation.buttons["dashboard.menu"].waitForExistence(timeout: 8))
         automation.buttons["dashboard.menu"].tap()
         automation.buttons["Automations"].tap()
-        // The inventory's first row in lifecycle order (the running one), so it is
-        // built at every type size; drafts sort last and stay lazy at XXXL.
         XCTAssertTrue(automation.buttons["automation-card.automation-2"].waitForExistence(timeout: 8))
         expand(automation, title: "Automations")
         capture("automations-\(suffix)")

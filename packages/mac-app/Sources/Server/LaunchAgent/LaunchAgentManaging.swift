@@ -1,8 +1,5 @@
 import Foundation
 
-/// Outcome of a launchctl operation. Distinguishes "the agent is loaded
-/// and the binary is up" from "we asked launchd nicely but the unit
-/// failed to start".
 enum LaunchAgentOutcome: Equatable, Sendable {
     case ok
     case alreadyLoaded
@@ -12,9 +9,6 @@ enum LaunchAgentOutcome: Equatable, Sendable {
     case unknown(message: String)
 }
 
-/// Registration decision from one status/runtime snapshot, application identity,
-/// helper presence and wrapper authority. Only real operations enter the list;
-/// execution never re-derives policy between them.
 enum LaunchAgentRegistrationPlan: Equatable, Sendable {
     enum Step: Equatable, Sendable { case bootout, unregister, register }
     case keep
@@ -29,33 +23,18 @@ enum LaunchAgentRegistrationPlan: Equatable, Sendable {
     }
 }
 
-/// Indirection over `SMAppService` and launchd diagnostics.
 protocol LaunchAgentManaging: Sendable {
-    /// `SMAppService.agent(plistName:).register()` — registers the
-    /// bundled LaunchAgent. Returns `.requiresApproval` when macOS is
-    /// waiting for the user to approve the Login Item.
     func load(plistPath: URL, label: String) async -> LaunchAgentOutcome
 
-    /// `SMAppService.agent(plistName:).unregister()` — removes the
-    /// bundled Login Item registration. Safe to call when not registered.
     func unload(label: String) async -> LaunchAgentOutcome
 
-    /// Explicit process restart used only by lifecycle flows that cannot use
-    /// the Gateway's authenticated drain command (for example permissions).
     func restart(label: String) async -> LaunchAgentOutcome
 
-    /// True if `launchctl print gui/$UID/<label>` returns a state row.
-    /// Nil means the observation failed; it is not proof that the job is absent.
     func isLoaded(label: String) async -> Bool?
 
-    /// Best-effort process metadata from launchd/ps for diagnostics UI.
-    /// Returns nil when launchd has no loaded service or does not expose a pid.
     func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo?
 }
 
-/// Applies the shared service-start policy for registration/start flows.
-/// The menu-bar Restart action deliberately does not use this helper: it asks
-/// the supervised Gateway to drain and lets launchd perform relaunch.
 enum LaunchAgentLoader {
     static func ensureLoaded(
         manager: LaunchAgentManaging,

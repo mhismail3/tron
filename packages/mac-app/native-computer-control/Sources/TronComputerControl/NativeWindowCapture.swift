@@ -5,7 +5,6 @@ public enum NativeWindowCaptureError: Error, Sendable, Equatable {
     case unsupportedSystem, malformedFrame, encodingFailed, streamFailed, stopFailed, stopped
 }
 
-/// Producer bounds, deliberately no larger than the browser viewer's admission.
 package struct NativeWindowCaptureLimits: Sendable, Equatable {
     package let width: Int
     package let height: Int
@@ -21,12 +20,10 @@ package struct NativeWindowCaptureLimits: Sendable, Equatable {
     }
 }
 
-/// This generation identifies a disposable producer, NOT a WindowServer incarnation.
 public struct NativeWindowCaptureFrame: Sendable {
     public let generation: UUID
     public let sequence: UInt64
     public let jpeg: Data
-    /// Actual cropped JPEG dimensions, not source-window points or input coordinates.
     public let width: Int
     public let height: Int
 }
@@ -49,13 +46,9 @@ internal protocol NativeWindowCaptureStream: AnyObject, Sendable {
     var retirementFailure: NativeWindowCaptureError? { get }
     func start() async throws
     func requestStop()
-    /// Only called after start has returned; must join native stop and callbacks.
     func stopAndJoin() async -> NativeWindowCaptureJoin
 }
 
-/// Single-use, pull-only producer. There is one replaceable frame, no consumer
-/// callbacks, waiter list, or Task-per-frame queue. Callers own disposal and must
-/// carry the returned generation through any asynchronous presentation work.
 package final class NativeWindowCapture: @unchecked Sendable {
     private enum State { case idle, starting, running, stopping, stopped, retirementFailed }
     private let lock = NSLock()
@@ -71,8 +64,6 @@ package final class NativeWindowCapture: @unchecked Sendable {
     private var startTask: Task<NativeWindowCaptureAvailability, Never>?
     private var stopTask: Task<NativeWindowCaptureJoin, Never>?
 
-    // Internal injection is used only by offline tests; production binds the
-    // immutable SCK selection, never an arbitrary platform supplied by a caller.
     internal init(platform: any NativeWindowCapturePlatform, limits: NativeWindowCaptureLimits) {
         self.platform = platform; self.limits = limits
     }
@@ -109,7 +100,7 @@ package final class NativeWindowCapture: @unchecked Sendable {
                 self?.ingest(output, generation: generation)
             }
             let admitted = lock.withLock {
-                stream = created // Stop also owns a stream created after its fence.
+                stream = created
                 return state == .starting
             }
             guard admitted else { created.requestStop(); return .unavailable(.stopped) }
@@ -138,8 +129,6 @@ package final class NativeWindowCapture: @unchecked Sendable {
         lock.withLock {
             guard generation == callbackGeneration, state == .starting || state == .running,
                   sequence < UInt64.max else { return }
-            // SCK may deliver the only complete frame of a static window before
-            // its start completion. Retain one, but pulls stay closed until ready.
             sequence += 1
             latest = .init(generation: generation, sequence: sequence, jpeg: jpeg, width: width, height: height)
         }
@@ -158,7 +147,6 @@ package final class NativeWindowCapture: @unchecked Sendable {
         }
     }
 
-    /// A native Stop error is observable while joined retirement remains pending.
     package var retirementFailure: NativeWindowCaptureError? {
         let current = lock.withLock { (stream, joinedRetirementFailure) }
         return current.0?.retirementFailure ?? current.1
@@ -180,8 +168,6 @@ package final class NativeWindowCapture: @unchecked Sendable {
                 let diagnostic = installed?.retirementFailure
                 lock.withLock {
                     joinedRetirementFailure = diagnostic
-                    // Uncertain native Stop cannot return from the platform join.
-                    // A failed output removal still keeps its exact resource owned.
                     if result == .joined { stream = nil; state = .stopped }
                     else { state = .retirementFailed }
                 }
@@ -190,14 +176,11 @@ package final class NativeWindowCapture: @unchecked Sendable {
             stopTask = task
             return (task, stream)
         }
-        work.1?.requestStop() // Never invoke platform code under the owner lock.
+        work.1?.requestStop()
         return work.0
     }
 
     deinit {
-        // Explicit Stop's task retains this owner until completion. Abandonment
-        // before Stop instead transfers the exact stream to the same native join
-        // path once; closing its callback gate alone would leave capture running.
         if stopTask == nil, let installed = stream {
             installed.requestStop()
             Task.detached { _ = await installed.stopAndJoin() }

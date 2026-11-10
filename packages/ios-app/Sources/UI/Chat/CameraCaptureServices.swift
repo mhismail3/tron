@@ -2,29 +2,18 @@
 import CoreImage
 import UIKit
 
-/// The camera a running feed comes from.
 struct CameraDevice: Equatable, Sendable {
     let position: AVCaptureDevice.Position
     let hasTorch: Bool
 }
 
-/// What the capture graph reports to `CameraModel`. The model fences every
-/// event by the token of the request that produced it (#937).
 enum CameraSessionEvent: @unchecked Sendable {
-    /// The outgoing camera's last frame, emitted before its input is removed,
-    /// so the sheet can hold it (blurred) while the next camera starts.
     case frozenFrame(UIImage)
-    /// The first frame from the requested camera reached the preview.
     case live(CameraDevice)
-    /// No usable camera for the initial start.
     case unavailable
-    /// The requested camera could not be attached; the previous one is kept.
     case switchFailed
 }
 
-/// One capture session per camera sheet. `session` stays attached to the
-/// mounted preview layer for the sheet's whole life; starts, camera switches
-/// and retakes only change its inputs or running state.
 @MainActor
 protocol CameraSessionProviding: AnyObject {
     var session: AVCaptureSession { get }
@@ -41,8 +30,6 @@ protocol CameraSessionProviding: AnyObject {
 @MainActor
 final class SystemCameraSessionProvider: CameraSessionProviding {
     var onEvent: (@MainActor (Int, CameraSessionEvent) -> Void)?
-    // Created on first use: SwiftUI may construct (and discard) the sheet's
-    // model on every parent render, which must not allocate a capture graph.
     private lazy var graph: CameraCaptureGraph = {
         let graph = CameraCaptureGraph()
         graph.setEmitter { [weak self] token, event in
@@ -78,17 +65,12 @@ final class SystemCameraSessionProvider: CameraSessionProviding {
     }
 }
 
-/// Owns the AVFoundation graph. Every session mutation runs on `sessionQueue`;
-/// frames arrive on `frameQueue`. The video data output keeps the latest frame
-/// (to freeze it across a switch) and reports the first frame from the input
-/// a start, switch or resume is waiting for.
 private final class CameraCaptureGraph: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     let session = AVCaptureSession()
 
     private let sessionQueue = DispatchQueue(label: "app.tron.camera.session", qos: .userInitiated)
     private let frameQueue = DispatchQueue(label: "app.tron.camera.frames", qos: .userInitiated)
 
-    // sessionQueue only.
     private let photoOutput = AVCapturePhotoOutput()
     private let frameOutput = AVCaptureVideoDataOutput()
     private var input: AVCaptureDeviceInput?
@@ -97,7 +79,6 @@ private final class CameraCaptureGraph: NSObject, AVCaptureVideoDataOutputSample
     private var photoDelegates: [Int64: CameraPhotoDelegate] = [:]
     private lazy var imageContext = CIContext(options: [.cacheIntermediates: false])
 
-    // Shared between queues, guarded by `lock`.
     private let lock = NSLock()
     private var latestFrame: CMSampleBuffer?
     private var awaiting: (token: Int, input: AVCaptureInput, device: CameraDevice)?
@@ -172,8 +153,6 @@ private final class CameraCaptureGraph: NSObject, AVCaptureVideoDataOutputSample
             }
             session.addInput(next)
             input = next
-            // Armed before commit so the new camera's first frame cannot be missed;
-            // frames still in flight from the old input do not match it.
             arm(token, next)
             session.commitConfiguration()
             run()
@@ -228,8 +207,6 @@ private final class CameraCaptureGraph: NSObject, AVCaptureVideoDataOutputSample
         }
     }
 
-    // MARK: sessionQueue helpers
-
     private func arm(_ token: Int, _ input: AVCaptureDeviceInput) {
         let device = CameraDevice(position: input.device.position, hasTorch: input.device.hasTorch)
         lock.withLock { awaiting = (token, input, device) }
@@ -248,9 +225,6 @@ private final class CameraCaptureGraph: NSObject, AVCaptureVideoDataOutputSample
         }
     }
 
-    /// The preview is portrait; video data buffers are in sensor orientation and
-    /// unmirrored, so the frozen frame is rotated (and mirrored for the front
-    /// camera) to match. It is shown blurred, so a small copy suffices.
     private func snapshot(_ frame: CMSampleBuffer, mirrored: Bool) -> UIImage? {
         guard let pixels = CMSampleBufferGetImageBuffer(frame) else { return nil }
         var image = CIImage(cvPixelBuffer: pixels).oriented(mirrored ? .leftMirrored : .right)
@@ -289,8 +263,6 @@ private final class CameraCaptureGraph: NSObject, AVCaptureVideoDataOutputSample
             return false
         }
     }
-
-    // MARK: frameQueue
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         let arrived: (token: Int, device: CameraDevice)? = lock.withLock {

@@ -38,9 +38,6 @@ package enum JSONValueDecodingLimitKind: String, Sendable, Equatable {
     case totalStringBytes = "total_string_bytes"
 }
 
-/// Typed evidence for a bounded dynamic JSON rejection. The coding path is
-/// reduced to source-owned keys and fixed placeholders before it leaves the
-/// decoder; response-owned dictionary keys never cross this boundary.
 package struct JSONValueDecodingLimitViolation: Error, Sendable, Equatable, LocalizedError {
     package let kind: JSONValueDecodingLimitKind
     let actual: Int
@@ -73,8 +70,6 @@ private struct DynamicJSONCodingKey: CodingKey {
     }
 }
 
-/// Bounded dynamic JSON used only at protocol extension points such as tool
-/// details. Stable gateway fields remain strongly typed.
 package enum JSONValue: Codable, Hashable, Sendable {
     case string(String)
     case number(Double)
@@ -263,8 +258,6 @@ package enum JSONValue: Codable, Hashable, Sendable {
     ) -> JSONValueDecodingLimitViolation {
         let path = codingPath.prefix(32).map { key -> String in
             if let index = key.intValue { return "[\(index)]" }
-            // DynamicJSONCodingKey is response-owned data. Only synthesized
-            // model keys are retained; all other keys use one fixed marker.
             guard String(reflecting: type(of: key)).hasSuffix(".CodingKeys") else {
                 return "<dynamic>"
             }

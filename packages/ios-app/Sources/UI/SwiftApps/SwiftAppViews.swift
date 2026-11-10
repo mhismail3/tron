@@ -1,13 +1,6 @@
 import SwiftUI
 import TronSwiftAppEngine
 
-// Built-in SwiftUI views and modifiers of the experimental runtime (#889).
-
-/// Evaluates a builder closure or view value only when SwiftUI asks for it
-/// (navigation destinations, sheets, toolbar and tab content).
-/// Content of a presentation the program created (a `sheet` or a
-/// `NavigationLink` destination). Its views' `@Environment(\.dismiss)` closes
-/// this presentation, the way SwiftUI's does, and never the runner sheet.
 struct SwiftAppPresentedContent: View {
     let runtime: SwiftAppRuntime
     let value: SwiftAppValue?
@@ -16,15 +9,11 @@ struct SwiftAppPresentedContent: View {
     var body: some View {
         SwiftAppLazyContent(runtime: runtime, value: value)
             .environment(\.swiftAppDismiss, dismiss)
-            // A presentation leaves the runner's hosted root: its own
-            // NavigationStack and title are the program's, not the sheet's.
             .environment(\.swiftAppHostedRoot, false)
             .environment(\.swiftAppHostsNavigation, false)
     }
 }
 
-/// Evaluate authored alert builders only once their managed sheet is visible,
-/// just like the other interpreted presentation contents.
 private struct SwiftAppConfirmationSheet: View {
     let runtime: SwiftAppRuntime
     let title: String
@@ -66,14 +55,9 @@ private struct SwiftAppConfirmationSheet: View {
     }
 }
 
-/// What the runner gives the program's root (#909): until the program's
-/// first non-container view, `swiftAppHostChrome` is set, and that view is
-/// wrapped in a `SwiftAppHostStack`.
 struct SwiftAppHostChrome {
-    /// The sheet title when the program sets no root `navigationTitle`.
     let title: String
 
-    /// Containers the program's root passes through before its first real view.
     @MainActor static func passesThrough(_ node: SwiftAppViewNode) -> Bool {
         node.declaration != nil || ["WindowGroup", "TabView"].contains(node.name)
             || (node.name == "Group" && node.modifiers.isEmpty)
@@ -81,11 +65,6 @@ struct SwiftAppHostChrome {
     static let tabModifiers: Set<String> = ["tabItem", "badge", "tag"]
 }
 
-/// One navigation stack the runner owns, with the shared document sheet
-/// chrome (`tronDocumentSheetChrome`): the program's root `navigationTitle`
-/// (else the file name), and Done, which closes the runner. A root TabView
-/// gets one per tab, because a stack around a TabView would hide each tab's
-/// own toolbar.
 struct SwiftAppHostStack<Content: View>: View {
     let chrome: SwiftAppHostChrome
     @ViewBuilder let content: () -> Content
@@ -103,10 +82,6 @@ struct SwiftAppHostStack<Content: View>: View {
     }
 }
 
-/// The program's outermost `NavigationStack` merges into the runner's shared
-/// `TronDocumentSheet` stack, so its title, toolbar and pushes use the sheet's
-/// navigation bar instead of nesting a second stack inside it (#909). Any other
-/// stack (inside a sheet the program presents) stays a real NavigationStack.
 struct SwiftAppNavigationStack: View {
     let content: AnyView
     @Environment(\.swiftAppHostsNavigation) private var hosted
@@ -120,9 +95,6 @@ struct SwiftAppNavigationStack: View {
     }
 }
 
-/// `navigationTitle`. In the runner's hosted root it also names the shared
-/// sheet title (`SwiftAppRootTitleKey`), so the program's own title wins over
-/// the file name.
 struct SwiftAppNavigationTitle: View {
     let content: AnyView
     let title: String
@@ -202,9 +174,6 @@ struct SwiftAppModifiedView: View {
     @Environment(\.swiftAppHostChrome) private var hostChrome
 
     private func build() throws -> AnyView {
-        // The program's first view that is not a pass-through container gets
-        // the runner's navigation stack and shared chrome (#909). A tab's own
-        // tabItem/badge/tag stay outside it so the TabView still reads them.
         guard let hostChrome, !SwiftAppHostChrome.passesThrough(node) else {
             return try modified(try base(), node.modifiers)
         }
@@ -221,8 +190,6 @@ struct SwiftAppModifiedView: View {
         }
         return view
     }
-
-    // MARK: Bindings
 
     private func bindingValue(_ label: String) -> SwiftAppBinding? {
         if case .binding(let binding)? = node.argument(label) { return binding }
@@ -264,8 +231,6 @@ struct SwiftAppModifiedView: View {
     private func closure(_ label: String?) -> SwiftAppValue? {
         node.closures.first(where: { $0.label == label }).map { .closure($0.closure) }
     }
-
-    // MARK: Views
 
     private func base() throws -> AnyView {
         let runtime = runtime
@@ -379,7 +344,6 @@ struct SwiftAppModifiedView: View {
             return AnyView(ScrollView(horizontal ? .horizontal : .vertical) { content }.tronScrollEdgeChrome())
         case "List":
             if node.unlabeled.contains(where: { if case .closure = $0 { false } else { true } }) {
-                // `List(items) { item in … }` is a List around a ForEach.
                 let rows = SwiftAppViewNode(name: "ForEach", arguments: node.arguments)
                 return AnyView(List { SwiftAppNodeView(runtime: runtime, node: rows) }.tronScrollEdgeChrome())
             }
@@ -431,7 +395,6 @@ struct SwiftAppModifiedView: View {
                 if let label { SwiftAppLazyContent(runtime: runtime, value: label) } else { Text(verbatim: title) }
             })
         case "Link":
-            // A link the policy refuses diagnoses here instead of rendering (#1160).
             guard let destination = node.argument("destination") else { throw SwiftAppRuntimeError("Link needs a destination") }
             guard case .record(let url) = destination.resolved, url.typeName == "URL",
                   case .string(let address)? = url.fields["absoluteString"] else { throw SwiftAppRuntimeError("Link needs a URL destination") }
@@ -506,8 +469,6 @@ struct SwiftAppModifiedView: View {
             }
         })
     }
-
-    // MARK: Modifiers
 
     private func argument(_ arguments: [SwiftAppLabeledValue], _ label: String? = nil) -> SwiftAppValue? {
         if let label { return arguments.first(where: { $0.label == label })?.value }
@@ -699,8 +660,6 @@ struct SwiftAppModifiedView: View {
         case "accessibilityIdentifier": return AnyView(view.accessibilityIdentifier(text(first)))
         case "accessibilityLabel": return AnyView(view.accessibilityLabel(Text(verbatim: text(first))))
         default:
-            // Layout-neutral or unsupported modifiers are ignored so a mostly
-            // supported app still runs.
             return view
         }
     }

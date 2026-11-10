@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Home's activation context is not a normal session's section-by-section summary.
-/// Context remaining describes the current request; total tokens is cumulative usage.
 struct HomeContextSummaryCard: View {
     let snapshot: SessionContextPresentation
     let read: HomeManageDTO

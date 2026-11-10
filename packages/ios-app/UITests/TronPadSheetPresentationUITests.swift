@@ -1,13 +1,7 @@
 import XCTest
 
-/// The iPad sheet geometry owned by `TronPadSheetMode` (iPadOS 27): a scene at
-/// least 1100 pt wide shows managed sheets as a trailing side column that leaves
-/// the chat interactive, and a narrower scene shows one large centered sheet. iPhone keeps native detent sheets
-/// (`TronSmokeUITests.testManageHomeOpensAtMediumFromRingAndHomeGearOpensSettings`).
-/// Run on an iPad lane: `scripts/tron-ios-test run --lane ipad --device-type "iPad Pro 13-inch (M5)"`.
 private enum TronPadGeometry {
     static let gap: CGFloat = 12
-    /// 420 pt column + 25 pt system margin + the gap.
     static let reflowInset: CGFloat = 457
 }
 
@@ -22,8 +16,6 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         super.tearDown()
     }
 
-    /// Full-screen landscape: Manage Home and Global Settings open as a trailing
-    /// column, and the chat beside them still takes taps and text.
     @MainActor
     func testWideLandscapePrimarySheetsAreTrailingColumnsBesideAnInteractiveChat() {
         let app = launchHomeChat(orientation: .landscapeLeft)
@@ -51,8 +43,6 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         assertChatInteractive(app, beside: settings, typing: " and beside Global Settings")
     }
 
-    /// A sheet opened from the side column stacks on it in that column, the
-    /// parent's top edge showing, and still leaves the chat interactive.
     @MainActor
     func testWideLandscapeSubSheetStacksInsideTheSideColumn() {
         let app = launchHomeChat(orientation: .landscapeLeft)
@@ -79,7 +69,6 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-settings-controls"].exists, "Using the chat must not dismiss Home Settings")
     }
 
-    /// A session chat's own sheet follows the same owner as Home's.
     @MainActor
     func testWideLandscapeSessionSheetIsATrailingColumn() {
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -98,9 +87,6 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         keepScreenshot(app, "ipad-landscape-manage-session")
     }
 
-    /// The dashboard's New Session sheet follows the same owner as Manage Home:
-    /// a trailing column pinned to the window's trailing edge, the dashboard
-    /// panel narrowed beside it, and nothing clipped or overlapping.
     @MainActor
     func testWideLandscapeDashboardNewSessionIsAPinnedColumnBesideTheShrunkenList() {
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -129,7 +115,6 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         XCTAssertLessThan(list.width, listBefore.width - 300, "The dashboard list narrows beside the column: \(list) from \(listBefore)")
         XCTAssertLessThanOrEqual(list.maxX, sheet.minX, "The list does not sit under the sheet: \(list) vs \(sheet)")
         XCTAssertLessThanOrEqual(panel.frame.maxX, sheet.minX, "The panel and column do not overlap")
-        // The column is 420 pt wide with its title centered: its leading edge is exact where `sheetFrame` is estimated.
         let columnMinX = title.frame.midX - 210
         XCTAssertEqual(columnMinX - panel.frame.maxX, TronPadGeometry.gap, accuracy: 3, "A constant gap separates the panels")
         XCTAssertLessThanOrEqual(sheet.maxX, window.maxX + 1, "The column is not clipped by the window")
@@ -139,9 +124,6 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         }
     }
 
-    /// The scene is one rounded panel that narrows as the column arrives: its
-    /// chrome (the Settings gear) stays inside it, nothing overlaps the column and
-    /// the gap is constant, at rest and in frames sampled while it moves.
     @MainActor
     func testWideLandscapePanelCarriesItsChromeAndKeepsAConstantGapThroughTheTransition() {
         let app = launchHomeChat(orientation: .landscapeLeft)
@@ -183,10 +165,6 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         XCTAssertEqual(gear.frame.minX, gearClosed.minX, accuracy: 1, "The gear returns with it")
     }
 
-    /// Window widths across the 1100 pt threshold (simulated: the mode resolves
-    /// from `-tron-scene-width-override`, the window itself stays full screen).
-    /// At and above it Manage Home is a trailing column; below it one centered
-    /// card. Neither strands the sheet off screen or clips its content.
     @MainActor
     func testSheetModeFollowsSimulatedWindowWidthAcrossTheThreshold() {
         for (width, column) in [(1210, true), (1100, true), (1099, false), (900, false), (700, false)] {
@@ -211,8 +189,6 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         }
     }
 
-    /// Portrait full screen is narrower than the side-column threshold: one
-    /// large centered sheet that a title drag does not resize.
     @MainActor
     func testNarrowWindowShowsOneFixedCenteredSheetWithoutDetents() {
         let app = launchHomeChat(orientation: .portrait)
@@ -231,12 +207,10 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         let before = done.frame
         title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)))
-        Thread.sleep(forTimeInterval: 1) // a detent change would have settled
+        Thread.sleep(forTimeInterval: 1)
         XCTAssertEqual(done.frame, before, "The narrow sheet has one size: a drag changes no detent")
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].exists)
     }
-
-    // MARK: - Helpers
 
     @MainActor
     private func launchHomeChat(orientation: UIDeviceOrientation) -> XCUIApplication {
@@ -258,11 +232,9 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, app.debugDescription)
         ring.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5), app.debugDescription)
-        Thread.sleep(forTimeInterval: 1) // let the presentation transition settle before reading frames
+        Thread.sleep(forTimeInterval: 1)
     }
 
-    /// The sheet's chrome bounds as read from its own title and Done button: its
-    /// leading edge is its title's mirrored Done inset, its top the Done button.
     @MainActor
     private func sheetFrame(_ app: XCUIApplication, title: String, done: XCUIElement) -> CGRect {
         let titleElement = app.staticTexts[title].firstMatch
@@ -274,17 +246,12 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         return CGRect(x: center - halfWidth, y: doneFrame.minY - 12, width: halfWidth * 2, height: app.windows.firstMatch.frame.maxY - doneFrame.minY)
     }
 
-    /// A tall trailing column: at the trailing edge, right of center, and opened
-    /// at full height (its top within the window's top fifth, not a medium detent).
     private func assertTrailingColumn(_ sheet: CGRect, in window: CGRect, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertGreaterThan(sheet.minX, window.midX, "The sheet occupies a trailing column, not the middle: \(sheet) in \(window)", file: file, line: line)
         XCTAssertGreaterThan(sheet.maxX, window.maxX - 48, "The sheet sits at the trailing edge: \(sheet) in \(window)", file: file, line: line)
         XCTAssertLessThan(sheet.minY, window.minY + window.height * 0.2, "The column is full height, not a medium detent: \(sheet) in \(window)", file: file, line: line)
     }
 
-    /// The chat beside the sheet is not covered and still takes a tap and text.
-    /// (The sheet keeps an accessibility-only dismiss region over the window, so
-    /// `isHittable` is not the oracle; the typed text reaching the composer is.)
     @MainActor
     private func assertChatInteractive(_ app: XCUIApplication, beside sheet: CGRect, typing text: String, file: StaticString = #filePath, line: UInt = #line) {
         let composer = app.textViews["Message input"]

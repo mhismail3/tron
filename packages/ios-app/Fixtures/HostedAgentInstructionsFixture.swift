@@ -2,9 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Deterministic, test-only host for the Agent Instructions sheet. It installs a
-/// bounded `instructions` projection in the Gateway's wire shape so the real
-/// sheet's sections, sources, and document reader can be driven by XCUITest.
 @MainActor
 struct HostedAgentInstructionsFixtureView: View {
     @State private var model = AppModel()

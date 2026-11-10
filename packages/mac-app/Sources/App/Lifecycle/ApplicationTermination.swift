@@ -1,14 +1,7 @@
 import AppKit
 
-/// AppKit's `.terminateLater` loop must not retain a main-dispatch callback:
-/// that prevents main-actor cleanup/reply tasks from running. Another dispatch
-/// hop has the same problem. A run-loop callback escapes that queue entirely.
-/// Protected by MenuBarTerminationTests' real AppKit subprocess regression.
 @MainActor
 enum ApplicationTermination {
-    /// Same deferred AppKit owner for menu Quit and unattended replacement.
-    /// A matching replacement reports failure to its runner, never a modal.
-    /// Returning false cancels only UI termination, not an accepted Gateway drain.
     static func complete(
         directory: URL, pid: Int, start: String?,
         quit: (@escaping @Sendable (String) async -> Void) async throws -> Void,

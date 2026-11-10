@@ -1,9 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// One presentation-time geometry owns the glass, contents, and clipping edge.
-/// Animating an outer frame around a destination-sized clipped child lets that
-/// child's composited glass escape the *visible* frame during the transition.
 struct ConfigurationSliderSurface<Content: View, Label: View>: View, @preconcurrency Animatable {
     let source: CGRect
     let target: CGRect
@@ -23,8 +20,6 @@ struct ConfigurationSliderSurface<Content: View, Label: View>: View, @preconcurr
         self.fraction = fraction
         self.reduceMotion = reduceMotion
         self.accent = accent
-        // Build payloads on input changes, not for every interpolated geometry
-        // sample. In particular, font/label construction is not animation work.
         self.content = content()
         self.label = label()
     }
@@ -48,9 +43,6 @@ struct ConfigurationSliderSurface<Content: View, Label: View>: View, @preconcurr
         let reveal = min(1, max(0, (phase - 0.18) / 0.82))
 
         ZStack(alignment: .topLeading) {
-            // Keep backdrop sampling in a native effect view at alpha 1. The
-            // effect's own feather mask controls intensity; fading a composited
-            // SwiftUI material can leave little/no actual blur on device.
             ConfigurationSliderBackdrop(fraction: phase)
                 .frame(width: frame.width + 192, height: frame.height + 192)
                 .position(x: frame.midX, y: frame.midY)
@@ -72,23 +64,16 @@ struct ConfigurationSliderSurface<Content: View, Label: View>: View, @preconcurr
                         .opacity(max(0, 1 - phase * 3))
                         .accessibilityHidden(true)
                 }
-                // Clip at the interpolated viewport, not the child's final
-                // layout bounds. Apply glass afterward to preserve its rim.
                 .clipShape(shape)
-                // A light neutral fill quiets clear glass without returning
-                // to opaque lavender. The native backdrop supplies softening
-                // while this material retains the translucent rim.
                 .glassEffect(.clear.tint(accent.opacity(0.08)), in: shape)
                 .contentShape(shape)
-                .onTapGesture {} // Blank glass is not an outside-dismiss tap.
+                .onTapGesture {}
                 .shadow(color: accent.opacity(0.12 * phase), radius: 24, y: 10)
                 .opacity(reduceMotion ? phase : 1)
                 .position(x: frame.midX, y: frame.midY)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .transaction { transaction in
-            // Do not start a second layout animation from each interpolated
-            // sample. Settled slider gestures retain their own spring motion.
             if phase < 1 { transaction.animation = nil }
         }
     }
@@ -109,8 +94,6 @@ private struct ConfigurationSliderBackdrop: UIViewRepresentable {
     }
 }
 
-/// Public backdrop blur with a GPU-interpolated elliptical falloff. No snapshot,
-/// private blur filter, per-frame bitmap, or sheet-wide effect is needed.
 private final class ConfigurationSliderBackdropView: UIVisualEffectView {
     private let featherView = UIView()
     private let feather = CAGradientLayer()
@@ -158,10 +141,6 @@ private final class ConfigurationSliderBackdropView: UIVisualEffectView {
     }
 
     private func installMask() {
-        // UIVisualEffectView forwards UIView masks to its internal backdrop
-        // views; CALayer.mask does not follow that contract. UIKit copies the
-        // mask, so reassign after size/strength changes, per its public docs:
-        // developer.apple.com/documentation/uikit/uivisualeffectview
         mask = nil
         mask = featherView
     }

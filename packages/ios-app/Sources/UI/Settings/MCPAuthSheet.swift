@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Presents the same provider authorization content for Pi's session-bound MCP
-/// auth operation; only the owner and cancellation RPC differ.
 struct MCPAuthSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -42,8 +40,6 @@ struct MCPAuthSheet: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }
-        // Consuming a prompt only advances the operation to its completion
-        // event. Transport retirement also hides the prompt without ending it.
         .onChange(of: model.isAuthOperationActive(operationID), initial: true) { _, isActive in
             if !isActive { finish() }
         }

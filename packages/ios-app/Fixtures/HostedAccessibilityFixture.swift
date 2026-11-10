@@ -2,8 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Real production surfaces inspected by the out-of-process accessibility client.
-/// Fixture controls change inputs, never duplicate the surfaces' AX descriptions.
 struct HostedAccessibilityFixtureView: View {
     @State private var state = HostedAccessibilityFixtureState()
     @State private var destination: Destination?
@@ -96,7 +94,6 @@ struct HostedAccessibilityFixtureView: View {
                                               runtimeEpoch: "fallback-epoch", payloadFingerprint: "payload-identity"),
         candidateIdentity: nil, candidateAvailable: false, error: nil, updatedAt: nil
     )
-    /// A replacement that failed after the swap, rolled back, and stopped two workers.
     private static let replacement = MacReplacementStatus(
         startable: true,
         operation: MacReplacementOperation(
@@ -148,8 +145,6 @@ private final class HostedAccessibilityFixtureState {
     @ObservationIgnored private weak var scrollOwner: UIScrollView?
     @ObservationIgnored private var scrollOrigin = CGPoint.zero
 
-    // SwiftUI content margins are not UIKit adjustedContentInset. Measure the
-    // actual native origin once per owner, just as the hosted geometry test does.
     func scroll(to offset: Int) {
         func find(in view: UIView) -> UIScrollView? {
             if let scroll = view as? UIScrollView, scroll.contentSize.height > scroll.bounds.height { return scroll }
@@ -162,8 +157,6 @@ private final class HostedAccessibilityFixtureState {
             scrollOwner = scroll
             scrollOrigin = scroll.contentOffset
         }
-        // This route samples exact rendered geometry, not command animation, and
-        // does not drive animated return: the offset is set without animation.
         scroll.setContentOffset(CGPoint(x: scrollOrigin.x, y: scrollOrigin.y + CGFloat(offset)), animated: false)
     }
 

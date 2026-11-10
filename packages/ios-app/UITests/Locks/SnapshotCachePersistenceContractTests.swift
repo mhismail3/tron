@@ -1,9 +1,6 @@
 import CryptoKit
 import XCTest
 
-/// Real app processes and actual UUID-scoped files, through the production
-/// SnapshotCache/AppModel owners. Fixture reports are file/model observations,
-/// not persistence substitutes, private actor counters or passed flags.
 final class SnapshotCachePersistenceContractTests: XCTestCase {
     private enum Failure: Error { case missing(String), malformedReport }
     private let firstID = "fixture/profile:first"
@@ -77,7 +74,7 @@ final class SnapshotCachePersistenceContractTests: XCTestCase {
         XCTAssertEqual(stored["archivedCount"] as? Int, 7)
         XCTAssertEqual(stored["hasTranscript"] as? Bool, false)
         XCTAssertEqual(stored["hasTranscriptKey"] as? Bool, false)
-        app.terminate() // intentionally retain only this UUID root for the next process
+        app.terminate()
         launch(app, mode: "restore", token: token)
         _ = try require(app, "cache.phase", label: "ready")
         _ = try require(app, "cache.catalog", label: "Before summary")
@@ -165,8 +162,6 @@ final class SnapshotCachePersistenceContractTests: XCTestCase {
         try tap(app, "cache.switch")
         _ = try require(app, "cache.save", label: "held")
         _ = try require(app, "cache.completion", label: "pending")
-        // A successor cache.load also waits behind this actor's held save.
-        // Pending alone cannot prove the lifecycle retirement joined the write.
         _ = try require(app, "cache.profile", label: firstID)
         try tap(app, "cache.release")
         _ = try require(app, "cache.completion", label: "done")

@@ -2,8 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// A socket-held canonical refresh crosses the production AppModel and renderer.
-/// The UI test owns the gate directory; no user profile or private draft state is touched.
 @MainActor
 struct HostedSettingsListRefreshFixture: View {
     @State private var model: AppModel
@@ -68,7 +66,6 @@ struct HostedSettingsListRefreshFixture: View {
 private actor SettingsListRefreshSocket: GatewaySocketConnection {
     private let gate: URL
     private var held = false
-    /// What a held read publishes on release; nil keeps the accepted values.
     private var replacement: [String]?
     private var values = ["alpha"]
     private var hello = true
@@ -98,8 +95,6 @@ private actor SettingsListRefreshSocket: GatewaySocketConnection {
             }
             result = resolution()
         case "settings.change":
-            // An accepted (non-dry-run) list Save becomes canonical, and the
-            // renderer's following canonical read is held at the gate.
             let params = frame["params"]?.objectValue
             if params?["dryRun"]?.boolValue != true,
                let saved = params?["changes"]?.arrayValue?.first?.objectValue?["value"]?.arrayValue?.compactMap(\.stringValue) {

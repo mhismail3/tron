@@ -1,10 +1,6 @@
 import CoreGraphics
 import SwiftUI
 
-/// Mac onboarding typography tokens.
-///
-/// The face is bundled from Google Fonts so the compact 480pt Mac
-/// wizard keeps the same look on clean machines and dogfood builds.
 enum TronTypography {
     static let titleSize: CGFloat = 22
     static let bodySize: CGFloat = 15

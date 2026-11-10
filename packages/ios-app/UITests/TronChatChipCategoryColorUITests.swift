@@ -1,14 +1,9 @@
 import XCTest
 import UIKit
 
-/// Real transcript DTOs pass through the mounted ChatView and its compact chips.
-/// Chip color is observed from rendered title ink: the message category owns
-/// the color, never the producer's origin kind.
 @MainActor final class TronChatChipCategoryColorUITests: XCTestCase {
     private struct Ink { let light: String; let dark: String }
 
-    /// Title ink per chip category, keyed by the chip's rendered title.
-    /// Tools and own-session chrome use the selected theme's ink.
     private static let burgundy = Ink(light: "#57152F", dark: "#B6478C")
     private static let expected: [(category: String, title: String, ink: Ink)] = [
         ("tool", "Read file", burgundy),
@@ -57,8 +52,6 @@ import UIKit
         return app
     }
 
-    /// The text's fully covered glyph pixels: those farthest from the chip
-    /// surface. Anti-aliased edges blend with the surface and are excluded.
     private func coreInk(_ image: CGImage, _ frame: CGRect, scale: CGFloat) -> [Double]? {
         let rect = frame.insetBy(dx: 0, dy: 2).applying(CGAffineTransform(scaleX: scale, y: scale)).integral
         guard let crop = image.cropping(to: rect) else { return nil }

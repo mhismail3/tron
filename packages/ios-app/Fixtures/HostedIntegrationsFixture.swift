@@ -3,7 +3,6 @@ import SwiftUI
 @testable import TronMobileCore
 import Observation
 
-/// Hosted MCP, provider layout and connection recovery journeys; no vendor API.
 struct HostedIntegrationsFixtureView: View {
     @Environment(\.scenePhase) private var scenePhase
     private let profile = GatewayProfile(id: "integration-fixture", label: "Studio server", host: "localhost", port: 9847, machineId: "fixture-integrations")
@@ -286,7 +285,6 @@ actor HostedIntegrationsSocket: GatewaySocketConnection {
     private func deliver(_ data: Data) { if receivers.isEmpty { inbound.append(data) } else { receivers.removeFirst().resume(returning: data) } }
 }
 
-/// Real Mac details, with only the transport and recovery clock scripted.
 private struct HostedConnectionRetryFixture: View {
     private let profile = GatewayProfile(id: "recovery-fixture", label: "Recovery server", host: "localhost", port: 9847, machineId: "fixture-integrations")
     @State private var model: AppModel
@@ -299,7 +297,6 @@ private struct HostedConnectionRetryFixture: View {
         self.factory = factory
         let origin = ContinuousClock().now
         let clock = MonotonicClock(now: { ContinuousClock().now }, sleep: { duration in
-            // First unreachable attempt advances; the next delay is parked until Retry cancels it.
             try await Task.sleep(for: duration >= .seconds(10) ? .seconds(3_600) : duration)
         }, gridOrigin: origin)
         let store = AutomationFixtureProfileStore()
@@ -379,8 +376,6 @@ private actor HostedOpenedFailureSocket: GatewaySocketConnection {
     }
 }
 
-/// A byte transport that never opens or yields handshake bytes. The production
-/// GatewayClient's transport-open deadline, not a fixture error, ends the attempt.
 private actor HostedRecoveryFailedSocket: GatewaySocketConnection {
     private var receiver: CheckedContinuation<Data, Error>?
     private var sender: CheckedContinuation<Void, Error>?
@@ -403,8 +398,6 @@ private actor HostedRecoveryFailedSocket: GatewaySocketConnection {
     }
 }
 
-/// Drives the real pool and byte-level client through the scene's retirement boundary.
-/// Only elapsed time and the remote socket are controlled; status comes from the pool.
 private struct HostedSecondaryRecoveryFixture: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var owner = HostedSecondaryRecoveryOwner()

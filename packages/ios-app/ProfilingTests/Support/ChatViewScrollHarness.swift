@@ -3,9 +3,6 @@ import SwiftUI
 import UIKit
 @testable import TronMobile
 
-/// A real `ChatView` mounted in a hosted window over a memory-only session, for
-/// the pinned performance baseline. The recorder samples the chat's own probe
-/// and window geometry at each display frame.
 @MainActor
 final class ChatViewScrollHarness {
     let lastTranscriptID: String
@@ -37,8 +34,6 @@ final class ChatViewScrollHarness {
         guard model.authoritativeSnapshot(for: snapshot.sessionId) == nil else {
             throw HarnessError.invalidAuthorityBoundary
         }
-        // Hosted presentation generations are authoritative and need not match
-        // ChatOpenPresentationState's local opening epoch.
         model.invalidateHostedPendingPresentation()
         model.installHostedSubscribedSnapshot(snapshot, token: "hosted-session-token")
         guard model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot else {
@@ -101,79 +96,38 @@ final class ChatViewScrollHarness {
     }
 }
 
-/// The transcript's bottom, measured in window coordinates: the one oracle for
-/// "is the newest row where the pinned tail puts it?".
-///
-/// Window coordinates carry what the reader sees, so every quantity here means
-/// the same thing whichever way the transcript's scroll view is oriented. The
-/// rects come from the layer chain (`CALayer.convert`), not `UIView.convert`:
-/// SwiftUI applies its own transforms on layers, which `UIView.convert` does not
-/// walk.
 enum TranscriptWindowOracle {
-    /// The tail spacing a pinned transcript keeps between its newest row and the
-    /// composer.
     static let tailSpacing = ChatTranscriptLayoutConstants.tailAffordanceHeight
-    /// The band above the composer a pinned transcript keeps covered: the tail
-    /// spacing plus 24 pt of the newest row.
     static let bottomBandHeight = tailSpacing + 24
-    /// The tolerance the profiling scenarios allow a measured window's pinned
-    /// bottom: the window ends while the transcript may still be settling.
     static let profilingTolerance: CGFloat = 24
-    /// How far the newest row's rendered bottom edge may sit outside the pinned
-    /// band and still count as pinned. The edge is read from the render tree, so
-    /// it carries a row's own animated transforms: the queued card's 80 → 44 pt
-    /// shrink measured 4.1-13.5 pt excursions below the band, while a detached
-    /// reader or a blank is tens or hundreds of points away.
     static let pinnedTolerance: CGFloat = 6
 
-    /// One mounted transcript row, in window coordinates.
     struct Row: Sendable, Equatable {
-        /// The row marker's frame in window coordinates.
         let windowFrame: CGRect
-        /// Whether the row intersects the pinned bottom band.
         let isInBottomBand: Bool
     }
 
-    /// The transcript's bottom in window coordinates.
     struct Bottom: Sendable, Equatable {
-        /// The composer marker's top edge.
         let composerTop: CGFloat?
-        /// The bottom edge of the bottom-most mounted row, which is the newest row
-        /// when the origin-anchored viewport is pinned.
         let newestRowBottomEdge: CGFloat?
-        /// The fraction of the visible transcript rect that mounted rows cover.
         let visibleRowFraction: CGFloat
-        /// Whether any mounted row intersects the bottom band.
         let isBandCovered: Bool
-        /// The visual distance of the bottom-most row's bottom edge from the
-        /// pinned band, signed: `0` anywhere inside the band, negative when the
-        /// row rests above it (a detached reader, or a blank) and positive when
-        /// it runs under it below the composer.
         let pinnedError: CGFloat?
 
-        /// The visual gap between the bottom-most row's bottom edge and the
-        /// composer's top edge.
         var clearance: CGFloat? {
             guard let composerTop, let newestRowBottomEdge else { return nil }
             return composerTop - newestRowBottomEdge
         }
     }
 
-    /// Every mounted transcript row and the transcript's bottom, from one walk
-    /// of the live hierarchy.
     struct State: Sendable, Equatable {
         let rows: [Row]
         let bottom: Bottom
-        /// The transcript scroll view's own content height, which a sample's
-        /// identity includes so a lazy-stack re-estimate is a new sample.
         let contentHeight: CGFloat?
     }
 
     static func bottom(in root: UIView) -> Bottom { state(in: root).bottom }
 
-    /// Whether the newest row's bottom edge sits within `tolerance` points of
-    /// the pinned band: the decision the profiling scenarios make about a
-    /// measured window, which ends while the transcript may still be settling.
     static func isPinned(in root: UIView, tolerance: CGFloat) -> Bool {
         guard let pinnedError = bottom(in: root).pinnedError else { return false }
         return abs(pinnedError) <= tolerance
@@ -189,9 +143,6 @@ enum TranscriptWindowOracle {
             .map { $0.layer.convert($0.bounds, to: windowLayer).standardized.minY }
         var visible = scroll.layer.convert(scroll.bounds, to: windowLayer).standardized
             .intersection(window.bounds)
-        // The composer is subtracted from the window rect rather than read from
-        // `adjustedContentInset`, which a flipped scroll view would apply at the
-        // other edge.
         if let composerTop, composerTop > visible.minY {
             visible = visible.intersection(CGRect(
                 x: visible.minX, y: visible.minY,
@@ -233,17 +184,12 @@ enum TranscriptWindowOracle {
         return State(rows: rows, bottom: bottom, contentHeight: scroll.contentSize.height)
     }
 
-    /// This fixed-window harness has one full-size transcript viewport. Its
-    /// identity cannot depend on overflowing content or a lazy child being
-    /// mounted at the instant an entrance or compaction is sampled.
     static func transcriptScrollView(in root: UIView) -> UIScrollView? {
         scrollViews(in: root).filter { !($0 is UITextView) }.max {
             $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height
         }
     }
 
-    /// The signed distance of a newest-row clearance from the pinned band: `0`
-    /// inside it, negative above it, positive below it.
     private static func pinnedError(forClearance clearance: CGFloat) -> CGFloat {
         if clearance > tailSpacing + pinnedTolerance {
             return (tailSpacing + pinnedTolerance) - clearance
@@ -270,8 +216,6 @@ enum TranscriptWindowOracle {
     }
 }
 
-/// Samples the probe's observation at each display frame that changed it or the
-/// transcript's window geometry, keeping the newest samples only.
 @MainActor
 final class PresentedFrameRecorder: NSObject {
     private static let retainedSampleLimit = 256

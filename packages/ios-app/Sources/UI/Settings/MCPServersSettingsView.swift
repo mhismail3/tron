@@ -30,14 +30,10 @@ enum MCPServerPresentationPolicy {
 
     static func isNeedsAuth(_ state: String) -> Bool { state == "needs-auth" }
 
-    /// Pi's exposure choices in the order the settings menu offers them.
     static let exposures: [(value: String, title: String)] = [
         ("codemode", "Codemode"),
         ("deferred", "Tool search"), ("direct", "Direct"), ("hidden", "Hidden"),
     ]
-    /// The menu choice a stored exposure selects. Pi 0.99.2+ treats
-    /// `codemode-deferred` as an alias of `codemode` (#490), so it selects the one
-    /// Codemode choice; the stored value is rewritten only by an explicit change.
     static func exposureChoice(_ value: String) -> String {
         value == "codemode-deferred" ? "codemode" : value
     }
@@ -54,7 +50,6 @@ enum MCPServerPresentationPolicy {
     }
 }
 
-/// Raw user input is an immutable submission snapshot, not live form bindings.
 private struct MCPAddServerDraft: Equatable {
     let serverName: String
     let transport: String
@@ -64,22 +59,15 @@ private struct MCPAddServerDraft: Equatable {
     let bearerToken: String
 }
 
-/// MCP configuration is owned by Pi's mcp.json; this screen is only an
-/// explicitly refreshed Mac integration projection and sends accepted commands
-/// through RPC. Repository MCP files have no app mutation destination.
 struct MCPServersSettingsView: View {
     @Environment(AppModel.self) private var model
-    /// The opening group's accent (Tools, or Manage Session's); cyan only when opened alone.
     @Environment(\.tronSettingsVisualTheme) private var theme
     private var accent: Color { theme?.accent ?? .tronCyan }
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.colorScheme) private var colorScheme
-    /// The session Settings was opened from. MCP OAuth runs inside a live
-    /// session's Pi MCP extension, so sign-in needs one.
     let sessionID: String?
     @PresentationState private var servers: [MCPServerList.Server] = []
     @PresentationState private var serverErrorCount = 0
-    /// A surface starts loading: its empty state waits for the first read.
     @PresentationState private var loading = true
     @PresentationState private var error: String?
     @PresentationState private var generation = 0
@@ -151,8 +139,6 @@ struct MCPServersSettingsView: View {
         .tronScrollEdgeChrome().tronNavigationTitle("MCP Servers").tronSettingsLayout()
         .task(id: PresentationActivityTaskID(source: requestID, presentationActive: activity.allowsPresentationPublication)) { await load() }
         .onChange(of: model.knowledgeDestinationIdentity) { _, _ in
-            // Socket replacement is not a new destination. Actual authority
-            // replacement revokes credential input instead of retargeting it.
             generation &+= 1; servers = []; error = nil; working = false
             showingAdd = false; tokenServer = nil; authOperationID = nil
             clearAddDraft(); transport = "http"
@@ -302,8 +288,6 @@ struct MCPServersSettingsView: View {
             guard await mutate("mcp.token.set", ["server": .string(name), "token": .string(submitted.bearerToken)], destination: destination),
                   model.knowledgeDestinationIdentity == destination else { return }
         }
-        // A newer draft entered while this receipt settled is still unsent.
-        // Successful cleanup belongs only to the exact submitted values.
         guard addDraft == submitted else { return }
         clearAddDraft(); showingAdd = false
     }
@@ -318,8 +302,6 @@ struct MCPServersSettingsView: View {
     private func startAuth(_ server: String, destination: KnowledgeDestinationIdentity) async {
         guard model.knowledgeDestinationIdentity == destination else { return }
         do {
-            // MCP OAuth is owned by a live Pi session; this screen deliberately
-            // reports the missing session rather than inventing a parallel flow.
             guard let session = sessionID else { throw GatewayFailure(code: "needs_session", message: "Open the session that uses this MCP server to sign in.", retryable: false, details: nil) }
             let admission = model.beginMCPAuthAdmission()
             do {
@@ -341,7 +323,6 @@ struct MCPServersSettingsView: View {
     }
 }
 
-/// Shared by the production managed sheet and hosted presentation evidence.
 struct MCPAddServerForm: View {
     @Environment(\.tronSettingsVisualTheme) private var theme
     private var accent: Color { theme?.accent ?? .tronCyan }

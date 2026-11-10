@@ -1,8 +1,6 @@
 import Foundation
 import TronMobileCore
 
-/// Schema-formatted settings audit entry. The Gateway projection is disposable;
-/// layer stores remain settings truth. Audit is only history and fenced undo.
 struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable {
     struct Actor: Decodable, Equatable, Sendable {
         let kind: String
@@ -53,14 +51,11 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
     let failure: String?
     let action: Bool?
     let undoOf: String?
-    /// A later fact's subject: for an outside change, the Tron change whose value it replaced.
     let refersTo: String?
     let presentation: Presentation
 
     var id: String { changeId }
     var title: String { presentation.label }
-    /// Parsed with value-type format styles: a feed renders many rows, and
-    /// allocating formatters per read made every list refresh expensive.
     var date: Date? {
         (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(at))
             ?? (try? Date.ISO8601FormatStyle().parse(at))
@@ -85,7 +80,6 @@ struct SettingsChangeHistoryPage: Decodable, Sendable {
     let nextCursor: String?
 }
 
-/// Native entry point ownership: global Settings, Home, or one chat.
 enum SettingsChangesScope: Hashable, Sendable {
     case all
     case global

@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Compact pull-style continuation control shared by paged surfaces. The
-/// owning surface supplies its accent; pagination state and accessibility stay
-/// with the caller.
 struct TronPaginationButton: View {
     let label: String
     let loadingLabel: String

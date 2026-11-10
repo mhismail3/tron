@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// The bounded standard library of the experimental SwiftUI runtime (#889).
 @MainActor
 enum SwiftAppBuiltins {
     static let mutatingMethods: Set<String> = [
@@ -33,8 +32,6 @@ enum SwiftAppBuiltins {
     private static func predicate(_ function: SwiftAppValue, _ value: SwiftAppValue, runtime: SwiftAppRuntime) throws -> Bool {
         try invoke(function, [value], runtime: runtime).asBool()
     }
-
-    // MARK: Mutation
 
     static func mutate(
         _ value: SwiftAppValue,
@@ -123,8 +120,6 @@ enum SwiftAppBuiltins {
         return .array(result)
     }
 
-    // MARK: Construction
-
     static func construct(_ typeName: String, _ arguments: [SwiftAppLabeledValue], runtime: SwiftAppRuntime) throws -> SwiftAppValue {
         let first = positional(arguments).first?.resolved
         switch typeName {
@@ -160,8 +155,6 @@ enum SwiftAppBuiltins {
             }
             let values = try runtime.collection(source)
             try runtime.admit(.array(values))
-            // This builder owns unique storage: native default-subscript mutation
-            // appends in place rather than copying each growing group on every row.
             var groups: [SwiftAppDictionaryKey: [SwiftAppValue]] = [:]
             for value in values {
                 let key = try runtime.dictionaryKey(invoke(by, [value], runtime: runtime))
@@ -174,7 +167,6 @@ enum SwiftAppBuiltins {
         case "UUID":
             return .string(UUID().uuidString)
         case "URL":
-            // Only a value: whether it may open is decided when it is opened.
             guard case .string(let text)? = arguments.first(where: { $0.label == "string" })?.value.resolved,
                   URL(string: text) != nil else { return .nilValue }
             return .record(SwiftAppRecord(typeName: "URL", keys: ["absoluteString"], fields: ["absoluteString": .string(text)]))
@@ -205,8 +197,6 @@ enum SwiftAppBuiltins {
         }
     }
 
-    // MARK: Functions and methods
-
     static func call(
         _ name: String,
         receiver: SwiftAppValue?,
@@ -214,8 +204,6 @@ enum SwiftAppBuiltins {
         runtime: SwiftAppRuntime
     ) throws -> SwiftAppValue {
         guard let receiver else { return try callFree(name, arguments, runtime: runtime) }
-        // Optional.map/flatMap: nil stays nil; a non-collection value is
-        // passed to the closure. Arrays, ranges and strings keep their own map.
         if SwiftAppRuntime.optionalMethods.contains(name), let transform = arguments.last?.value {
             switch receiver.resolved {
             case .nilValue: return .nilValue
@@ -261,7 +249,6 @@ enum SwiftAppBuiltins {
             if name == "opacity", let color = SwiftAppRenderer.color(.member(memberName, nil)) {
                 return .color(color.opacity(try argument(arguments, nil).asDouble()))
             }
-            // Font and animation refinements (`.title.bold()`, `.spring().delay(1)`) keep the base.
             return receiver
         case .nilValue:
             return .nilValue
@@ -315,7 +302,6 @@ enum SwiftAppBuiltins {
             let isInt = arguments.allSatisfy { $0.value.resolved.isInt }
             let through = arguments.first(where: { $0.label == "through" })
             let end = try (through ?? arguments.first(where: { $0.label == "to" }))?.value.asDouble() ?? from
-            // Bound the length before materializing anything.
             guard from.isFinite, end.isFinite, step.isFinite,
                   (end - from) / step <= Double(SwiftAppRuntime.maximumCollectionCount) else {
                 throw SwiftAppRuntimeError("stride is too long")
@@ -441,7 +427,6 @@ enum SwiftAppBuiltins {
             for (index, value) in values.enumerated() {
                 if index > 0 { text += separator }
                 text += value.display
-                // Stop as soon as the result is too large rather than after building it.
                 guard text.utf8.count <= SwiftAppRuntime.maximumStringBytes else { return try runtime.admit(.string(text)) }
             }
             return .string(text)
@@ -465,7 +450,6 @@ enum SwiftAppBuiltins {
         case "trimmingCharacters": return .string(text.trimmingCharacters(in: .whitespacesAndNewlines))
         case "replacingOccurrences":
             let target = try string("of"), replacement = try string("with")
-            // Reject a result past the string limit before building it.
             if !target.isEmpty, replacement.utf8.count > target.utf8.count {
                 let occurrences = text.components(separatedBy: target).count - 1
                 guard text.utf8.count + occurrences * (replacement.utf8.count - target.utf8.count) <= SwiftAppRuntime.maximumStringBytes else {

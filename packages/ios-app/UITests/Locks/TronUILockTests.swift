@@ -1,18 +1,12 @@
 import XCTest
 
-/// Accessibility witnesses of two light/dark states: Home's Settings sheet and a
-/// tool's detail sheet. Behavioral assertions stay in feature journeys; these
-/// locks fail when the hierarchy a VoiceOver user or a test addresses changes.
 final class TronUILockTests: XCTestCase {
     private static let modes = ["light", "dark"]
 
-    /// A lock failure records and moves on to the next state; a navigation
-    /// failure throws, since every later step would only fail the same way.
     override func setUp() {
         continueAfterFailure = true
     }
 
-    /// Home's chat with a settled tool transcript opens one tool's detail sheet.
     @MainActor
     func testChatSettledAndToolSheet() throws {
         for mode in Self.modes {
@@ -27,7 +21,6 @@ final class TronUILockTests: XCTestCase {
         }
     }
 
-    /// Home's Settings gear opens the global Settings sheet.
     @MainActor
     func testHomeSettings() throws {
         for mode in Self.modes {
@@ -41,9 +34,6 @@ final class TronUILockTests: XCTestCase {
         }
     }
 
-    // MARK: Navigation
-
-    /// Locale and time zone are pinned so dates and numbers render identically.
     @MainActor
     private func launch(_ arguments: [String]) -> XCUIApplication {
         let app = XCUIApplication()
@@ -75,14 +65,7 @@ final class TronUILockTests: XCTestCase {
     }
 }
 
-// MARK: Accessibility witnesses
-
-/// The exact `UILockTree` text of each state with an accessibility witness: every
-/// element's type, identifier, label, value, traits, enabled/focus state and
-/// whole-point frame, its nesting (two-space indentation) and its order. Light and
-/// dark render the same hierarchy, so each state has one expectation for both.
 extension TronUILockTests {
-    /// Home's global Settings sheet: shared chrome and #1607 source/control metadata.
     static let homeSettingsTree = #"""
         application label="Tron" (0,0 402×874)
           window (0,0 402×874)
@@ -153,7 +136,6 @@ extension TronUILockTests {
 
         """#
 
-    /// The memory-search tool detail sheet: shared chrome and #1607 source/control metadata.
     static let memorySearchToolSheetTree = #"""
         application label="Tron" (0,0 402×874)
           window (0,0 402×874)

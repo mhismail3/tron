@@ -1,11 +1,7 @@
 import SwiftUI
 import TronMobileCore
 
-/// How `SettingsRendererView` groups and orders the Gateway's keys: pure functions of the
-/// resolution, kept apart from the view's state and actions.
 extension SettingsRendererView {
-    /// A group whose every row already names it (Home's Tools; Session's
-    /// Resize/Block images) needs no heading.
     static func rowsNameGroup(_ group: DetailGroup) -> Bool {
         group.keys.allSatisfy { $0.presentation.label.localizedCaseInsensitiveContains(group.title) }
     }
@@ -15,7 +11,6 @@ extension SettingsRendererView {
         var detail: String? = nil
         var instanced = false
         var keys: [ResolvedSetting]
-        /// One key with more instances than a group should list inline.
         var manyInstances: ResolvedSetting? { instanced && keys.count > SettingsRendererView.inlineInstanceLimit ? keys.first : nil }
     }
 
@@ -28,8 +23,6 @@ extension SettingsRendererView {
             else { groups.append(DetailGroup(title: title, detail: detail, instanced: instanced, keys: [key])) }
         }
         let single = keys.filter { instanceCount($0, in: keys) == 1 }
-        // Keep the main group coherent: importance ranks values, not another
-        // one-row “Advanced” card. Only multi-row subgroups earn a heading.
         let subgroups = Dictionary(grouping: single.filter { $0.subgroup != nil }, by: { $0.subgroup! })
         for key in single where key.subgroup == nil || key.subgroup == section.title || (subgroups[key.subgroup ?? ""]?.count ?? 0) < 2 {
             add(section.title, key)
@@ -53,15 +46,11 @@ extension SettingsRendererView {
             SettingsRendererRow.instanceName(setting) ?? setting.id
         }
 
-        /// The instance with no qualifier of its own: the value its siblings override.
         static func isBase(_ setting: ResolvedSetting) -> Bool {
             SettingsRendererRow.instanceName(setting) == nil
         }
     }
-    // MARK: Ordering
 
-    /// The Gateway's sections, plus any group a key names that no section declares,
-    /// so a value is never hidden.
     static func sections(_ resolution: SettingsResolution) -> [SettingsRendererSection] {
         let declared = resolution.sections.sorted { $0.order < $1.order }
         let known = Set(declared.map(\.id))

@@ -1,8 +1,6 @@
 import AppKit
 import Foundation
 
-/// Opens a prefilled GitHub issue from the menu bar feedback item.
-/// Log capture is best-effort and never routes through Mail.
 @MainActor
 enum MenuBarFeedbackAction {
     static func present(snapshot: ServerStatusSnapshot, setup: EnvironmentSetup, token: String?) async {

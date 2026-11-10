@@ -1,10 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// The existing default-tool controls, owned by the Tools sheet at its Global
-/// or Project scope. Toggling a managed entry preserves every other selector.
-/// While a managed tool's built-in extension does not load at this scope, its
-/// switch is inactive and the saved entry is kept, not shown (#1491).
 struct DefaultToolsSettingsSection: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
@@ -45,8 +41,6 @@ struct DefaultToolsSettingsSection: View {
                     )
                     TronSettingsDivider(accent: .tronCyan)
                 }
-                // Tools is already a progressive sheet; use the shared choice
-                // sheet rather than a native menu that fails at this depth.
                 TronChoiceRow(
                     icon: "square.stack.3d.up",
                     title: "Other tools with codemode",
@@ -98,8 +92,6 @@ struct DefaultToolsSettingsSection: View {
     }
 
     private func persist(_ key: String, _ value: JSONValue) async {
-        // A mounted picker child accepts the command while covering this owner;
-        // only the follow-up presentation read waits for the parent to uncover.
         guard activity.allowsDataPublication else { return }
         let ticket = generation, identity = model.knowledgePresentationIdentity
         do {
@@ -125,10 +117,6 @@ struct DefaultToolsSettingsSection: View {
         await persist(Self.codemodeModeKey, .string(value))
     }
 
-    /// Whether a built-in extension loads at this scope, as Pi resolves it: the
-    /// project's last matching `+`, `-` or `!` entry wins, else the Mac list
-    /// (a `-` entry excludes, `+` includes, `!` excludes). An unapplied
-    /// (untrusted) layer does not count.
     static func builtinLoads(_ name: String, extensions: ResolvedSetting?) -> Bool {
         let path = "builtin:\(name)"
         func entries(_ layer: String) -> [String] {

@@ -1,7 +1,5 @@
 import XCTest
 
-/// Crosses the packaged asset/Info.plist and UIApplication alternate-icon boundary.
-/// The fixture only reads native state; selections use the real Appearance view.
 @MainActor final class TronThemeIconUITests: XCTestCase {
     func testThemeSelectionAppliesBundledIconsAndRestoresSilently() {
         continueAfterFailure = false
@@ -12,8 +10,6 @@ import XCTest
         XCTAssertTrue(initial.contains("primary=AppIconBeta"), initial)
         let alternates = Set(initial.components(separatedBy: "alternates=").last!.split(separator: ",").map(String.init))
         XCTAssertEqual(alternates, ["AppIcon", "AppIconBurgundy", "AppIconOliveGold"], initial)
-        // Finish at the hosted suite's default identity rather than leaking a
-        // selected theme into later visual locks in this shared test app.
         let choices = [("burgundy", "AppIconBurgundy"), ("oliveGold", "AppIconOliveGold"), ("emerald", "AppIcon")]
         for (theme, icon) in choices {
             app.buttons["theme-icon-open-appearance"].tap()
@@ -64,7 +60,6 @@ import XCTest
     private func dismissIconChangeAlert(_ app: XCUIApplication) {
         let alert = iconChangeAlert(app)
         if alert.waitForExistence(timeout: 3) {
-            // This is Apple's icon-change acknowledgement, never a permission prompt.
             let ok = alert.buttons["OK"]
             XCTAssertTrue(ok.exists)
             ok.tap()

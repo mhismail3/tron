@@ -108,8 +108,6 @@ struct ProviderConfigurationSheet: View {
         ProviderConfigurationPresentation.automaticallyBegunMethod(for: provider)
     }
 
-    /// The method whose login is starting or owned by this sheet. It stays
-    /// checked in the always-visible method group so the user can switch.
     private var selectedMethod: String? {
         beginningMethod ?? (isPresentingOwnedAuth
             ? model.activeProviderAuthType(providerID: provider.id, target: target)
@@ -120,9 +118,6 @@ struct ProviderConfigurationSheet: View {
         beginningMethod != nil || clearing || answeringPromptID != nil
     }
 
-    /// An owned auth operation is cancellable when the detail sheet disappears;
-    /// only the request that is still beginning or credential mutation that is
-    /// clearing may block an interactive dismissal.
     private var disablesInteractiveDismissal: Bool {
         ProviderConfigurationPresentation.disablesInteractiveDismissal(
             beginningMethod: beginningMethod,
@@ -150,9 +145,6 @@ struct ProviderConfigurationSheet: View {
                 }
             }
         }
-        // Keep this detail surface on the standard sheet material. A custom
-        // opaque background made the provider detail noticeably darker than
-        // the other settings sheets.
         .tronPresentation()
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
@@ -174,8 +166,6 @@ struct ProviderConfigurationSheet: View {
         }
         .onChange(of: currentOperationID) { previous, current in
             if let previous, previous == activeOperationID {
-                // Restart replaces this sheet's exact operation; adopt the
-                // successor so closing the sheet cancels the live login.
                 if let current {
                     activeOperationID = current
                 } else {
@@ -190,16 +180,11 @@ struct ProviderConfigurationSheet: View {
         .onChange(of: model.authPrompt?.id) { _, _ in replayIfNeeded() }
         .onPresentationRetire {
             usageController.begin()
-            // SwiftUI can destroy sheet content on foreground without ending
-            // its presentation. Only real dismissal retires the owned login.
             guard let operationID = activeOperationID else { return }
             activeOperationID = nil
             Task { await model.cancelAuth(operationID: operationID) }
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
-            // Dismissing the parent behind this detail sheet retires its read,
-            // but keeps the already-authoritative same-provider snapshot in
-            // place so the third usage line does not vanish during the cover.
             guard active else { usageController.begin(); return }
         }
         .onChange(of: model.providerInvalidationGeneration) { _, _ in
@@ -241,8 +226,6 @@ struct ProviderConfigurationSheet: View {
     @ViewBuilder private var usageSection: some View {
         TronSettingsGroup("Account Usage", accent: .tronPrimary) {
             if provider.isLocalOnly {
-                // Local models have no account, so this status is authoritative
-                // without a Gateway usage capability or a provider.usage read.
                 TronSettingsRow(
                     icon: "infinity",
                     title: "Unlimited",
@@ -362,8 +345,6 @@ struct ProviderConfigurationSheet: View {
                 trail: trail,
                 answeringPromptID: answeringPromptID,
                 answeringOptionID: answeringOptionID,
-                // A pending replay keeps earlier choices fixed; switching the
-                // method above stays available and discards it.
                 isDisabled: isBusy || trail.isReplaying,
                 onChoose: { prompt, optionID in choose(prompt, optionID) },
                 onChangeStep: { index, optionID in changeAnswer(at: index, to: optionID) }
@@ -388,13 +369,9 @@ struct ProviderConfigurationSheet: View {
         begin(automaticMethod)
     }
 
-    /// Starts `method`, first cancelling a different method this sheet owns,
-    /// so the user can move between connection methods at any step.
     private func begin(_ method: String) {
         guard beginningMethod == nil, !clearing else { return }
         let replaced = activeOperationID
-        // Release ownership first so the retiring operation cannot dismiss
-        // this sheet; the successor is adopted when it appears.
         activeOperationID = nil
         beginningMethod = method
         trail.reset()
@@ -423,8 +400,6 @@ struct ProviderConfigurationSheet: View {
         }
     }
 
-    /// Changing an answered choice restarts the same method; the kept answers
-    /// replay onto the successor's prompts as they arrive.
     private func changeAnswer(at index: Int, to optionID: String) {
         guard !isBusy, !trail.isReplaying, let operationID = activeOperationID, let method = selectedMethod else { return }
         trail.change(stepAt: index, to: optionID)
@@ -484,8 +459,6 @@ struct ProviderConfigurationSheet: View {
     }
 
     private func close() {
-        // `currentOperationID` may belong to another provider sheet. Only an
-        // operation admitted by this view may be retired on close.
         let operationID = activeOperationID
         activeOperationID = nil
         dismiss()
@@ -524,9 +497,6 @@ enum ModelPickerSectioning {
         let providers: [ProviderSection]
     }
 
-    /// Builds the picker's three layers from the available catalog plus the
-    /// Gateway's recent history. Any query replaces the Recent and Latest rails
-    /// with matching provider sections, so every result stays visible.
     static func sections(
         models: [ModelSummary],
         recent: [RecentModelRef],
@@ -548,8 +518,6 @@ enum ModelPickerSectioning {
         )
     }
 
-    /// Recent order belongs to the Gateway. A ref that has left the available
-    /// catalog, or repeats an earlier one, is dropped.
     static func recentModels(_ recent: [RecentModelRef], catalog: [ModelSummary]) -> [ModelSummary] {
         let byRef = Dictionary(catalog.map { ($0.ref, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<ModelRef>()
@@ -561,13 +529,8 @@ enum ModelPickerSectioning {
         .map { $0 }
     }
 
-    /// Newest release date first. A latest alias and the pinned release its ID
-    /// names share that date, and the rail keeps the alias only; both stay
-    /// selectable in their provider section.
     static func latestModels(_ catalog: [ModelSummary]) -> [ModelSummary] {
         let dated = catalog.filter { $0.admittedReleaseDate != nil }
-        // Provider-scoped: two providers may publish the same model ID, and a
-        // pinned release may only collapse against its own provider's alias.
         let byRef = Dictionary(dated.map { ($0.ref, $0) }, uniquingKeysWith: { first, _ in first })
         let collapsedPinnedRefs = Set(dated.compactMap { pinned -> ModelRef? in
             guard let releaseDate = pinned.admittedReleaseDate,
@@ -581,9 +544,6 @@ enum ModelPickerSectioning {
             .map { $0 }
     }
 
-    /// Newest release first, same-day ties by display name. Models without an
-    /// admitted date follow in their Gateway catalog order. Sort keys are
-    /// resolved once per model, not once per comparison.
     static func newestFirst(_ models: [ModelSummary]) -> [ModelSummary] {
         let dated = models
             .compactMap { model in model.admittedReleaseDate.map { (model: model, date: $0, name: model.displayName) } }
@@ -596,9 +556,6 @@ enum ModelPickerSectioning {
         return dated + models.filter { $0.admittedReleaseDate == nil }
     }
 
-    /// The selected model's provider leads so its section is reachable without
-    /// scrolling; the rest follow by provider display name. Inside a section the
-    /// newest release leads (`newestFirst`).
     static func providerSections(models: [ModelSummary], selection: ModelRef?) -> [ProviderSection] {
         var grouped: [String: [ModelSummary]] = [:]
         var catalogOrder: [String] = []
@@ -624,9 +581,6 @@ enum ModelPickerSectioning {
     }
 }
 
-/// Memoizes `ModelPickerSectioning.sections` by its inputs. A reference held
-/// in `@State` so a body evaluation can reuse the last result without writing
-/// observed state.
 @MainActor
 final class ModelPickerSectionsCache {
     private struct Key: Equatable {
@@ -649,18 +603,12 @@ final class ModelPickerSectionsCache {
     }
 }
 
-/// Picker-local spacing, type, and motion. Section headers share one size so
-/// Recent, Latest, and provider sections read as one hierarchy.
 @MainActor
 enum ModelPickerLayout {
     static let headerFont = TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold)
     static let sectionGap: CGFloat = 10
     static let contentTopPadding: CGFloat = 12
-    /// Below the Latest rail at the opening detent: clears the card shadows and
-    /// the sheet's rounded bottom corners, and stays short of the next header.
     static let railsBottomMargin: CGFloat = 14
-    /// Rows drop in from their header and fade out quickly on collapse, so a
-    /// leaving row is gone before the content below slides over it.
     static let rowTransition = AnyTransition.asymmetric(
         insertion: .opacity.combined(with: .offset(y: -10)),
         removal: .opacity.animation(.easeOut(duration: 0.12))
@@ -670,35 +618,24 @@ enum ModelPickerLayout {
 struct ModelPicker: View {
     @Binding var selection: ModelRef?
     let models: [ModelSummary]
-    /// The session owner supplies admission/receipt state; browsing stays live.
     var selectionAvailability: ModelSelectionAvailability = .ready
     @PresentationState private var search = ""
     @PresentationState private var showingSearch = false
     @PresentationState private var closingSearch = false
-    /// The one owner of section expansion: toggles write here inside the
-    /// disclosure animation, and the next picker over this profile reads it.
     @PresentationState private var providerExpansion = ModelProviderExpansionStore.shared
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(AppModel.self) private var model
     @PresentationState private var railsHeight: CGFloat = 0
     @PresentationState private var scrollTopInset: CGFloat = 0
-    /// Section order and default expansion follow the selection the picker
-    /// opened with, so a pick never reorders or resizes the list under the
-    /// finger. Captured on first appearance.
     @PresentationState private var openingSelection: ModelRef??
-    /// The Recent list first shown, held while open so a Gateway change (a
-    /// message sent in any session) cannot reorder cards under the finger.
     @PresentationState private var heldRecents: [RecentModelRef]?
     @PresentationState private var sectionsCache = ModelPickerSectionsCache()
 
     var body: some View {
-        // Sectioning sorts and groups the whole catalog; build it once per body
-        // evaluation rather than once per section read.
         let sections = self.sections
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if !sections.recent.isEmpty || !sections.latest.isEmpty {
-                    // Availability changes only control chrome, never rail fit.
                     VStack(alignment: .leading, spacing: 8) {
                         if !sections.recent.isEmpty {
                             sectionTitle("Recent")
@@ -712,9 +649,6 @@ struct ModelPicker: View {
                     }
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { railsHeight = $0 }
                 }
-                // Header and rows are separate lazy children, so a long expanded
-                // provider builds only the rows on screen and its neighbours
-                // move with the same disclosure transaction.
                 ForEach(Array(sections.providers.enumerated()), id: \.element.id) { index, section in
                     let isExpanded = isSectionExpanded(section.provider)
                     providerHeader(section, isExpanded: isExpanded)
@@ -731,7 +665,6 @@ struct ModelPicker: View {
             .padding(.horizontal, 16)
             .padding(.top, ModelPickerLayout.contentTopPadding)
             .padding(.bottom, showingSearch ? 72 : 12)
-            // Rails leave and return with the query instead of snapping.
             .animation(.snappy(duration: 0.18), value: search.isEmpty)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -751,7 +684,6 @@ struct ModelPicker: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        // Scroll-invariant: the bar inset, not the current offset.
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.top } action: { _, inset in
             scrollTopInset = inset
         }
@@ -780,8 +712,6 @@ struct ModelPicker: View {
             if openingSelection == nil { openingSelection = .some(selection) }
         }
         .onChange(of: model.recentModels, initial: true) { _, recents in
-            // Adopt once: a first open before the warm read lands takes the
-            // first non-empty list; later changes wait for the next open.
             if heldRecents == nil, !recents.isEmpty { heldRecents = recents }
         }
         .task { await model.refreshRecentModels() }
@@ -789,8 +719,6 @@ struct ModelPicker: View {
             guard closingSearch else { return }
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            // Clearing the query with the bar keeps the rails and the bar in
-            // one transition instead of two layout changes.
             withAnimation(.snappy(duration: 0.18)) {
                 search = ""
                 showingSearch = false
@@ -799,24 +727,16 @@ struct ModelPicker: View {
         }
     }
 
-    /// Visible sheet height, from its top edge, that shows the toolbar and both
-    /// rails and stops before the first provider header. The scroll view spans
-    /// the sheet from its top edge (content scrolls under the toolbar), so the
-    /// bar inset locates the content. Built only from scroll-invariant inputs.
     private var fitHeight: CGFloat? {
         guard railsHeight > 0, scrollTopInset > 0, !showingSearch else { return nil }
         return scrollTopInset + ModelPickerLayout.contentTopPadding + railsHeight
             + ModelPickerLayout.railsBottomMargin
     }
 
-    /// The selection that orders sections and picks default expansion.
     private var anchorSelection: ModelRef? {
         openingSelection ?? selection
     }
 
-    /// Rebuilt only when an input changes: the owning sheet re-renders the
-    /// picker for unrelated updates (usage, pending mutations), and sectioning
-    /// sorts the whole catalog.
     private var sections: ModelPickerSectioning.Sections {
         sectionsCache.sections(
             models: models,
@@ -916,8 +836,6 @@ struct ModelPicker: View {
         #endif
     }
 
-    /// A search shows every match, so a result never hides behind a collapsed
-    /// section. Clearing the query restores the remembered expansion.
     private func isSectionExpanded(_ provider: String) -> Bool {
         guard search.isEmpty else { return true }
         return providerExpansion.isExpanded(

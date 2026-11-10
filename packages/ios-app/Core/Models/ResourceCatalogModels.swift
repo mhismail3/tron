@@ -1,8 +1,5 @@
 import Foundation
 
-/// Where an available resource comes from, derived by the Gateway from Pi
-/// sourceInfo. Pi built-ins carry no distribution, and `origin` keeps Pi's own
-/// package/top-level meaning on the separate scope badge.
 package enum ResourceDistribution: String, Codable, Hashable, Sendable {
     case external
     case module
@@ -15,7 +12,6 @@ package struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
     package enum ResourceOrigin: String, Codable, Sendable { case package, topLevel = "top-level" }
 
     package let name: String
-    /// A skill's optional SKILL.md frontmatter `title`; display only.
     package let title: String?
     package let description: String?
     package let argumentHint: String?
@@ -167,32 +163,19 @@ package struct PackageSummary: Codable, Hashable, Identifiable, Sendable {
     package let scope: Scope
     package let filtered: Bool
     let installedPath: String?
-    /// The names this install contributes, projected by the Gateway from the
-    /// same resolution the package read already performs. Optional so a Gateway
-    /// that predates the field still decodes its listing; the detail sheet then
-    /// shows no Provides groups rather than an empty one.
     package var provides: PackageProvides? = nil
     package var conflict: PackageConflict? = nil
-    /// The package's `engines.node` against the Mac's Gateway Node (#243).
-    /// Optional: absent when the package declares none or the Gateway predates it.
     package var nodeRequirement: PackageNodeRequirement? = nil
     package var id: String { "\(scope.rawValue):\(source)" }
-    /// The Gateway appends the provider Tron ships (`tron:` sources, such as
-    /// the managed subagents) to the configured packages; it is not in the
-    /// `packages` setting and has no Update or Remove.
     package var isBundled: Bool { source.hasPrefix("tron:") }
-    /// The scope word the installed row and its detail sheet both show.
     package var scopeLabel: String { isBundled ? "Bundled with Tron" : scope == .project ? "Project" : "Global" }
 }
 
-/// A declared Node range the Gateway's runtime does not meet, or cannot read, is
-/// a warning only: the package still installs and loads (D-2, #241).
 package struct PackageNodeRequirement: Codable, Hashable, Sendable {
     package let range: String
     package let runtime: String
     package let status: String
 
-    /// The short tag the Installed row and the detail header add, or nil when met.
     package var tag: String? {
         switch status {
         case "satisfied": nil
@@ -201,7 +184,6 @@ package struct PackageNodeRequirement: Codable, Hashable, Sendable {
         }
     }
 
-    /// The detail sheet's explanation, or nil when the requirement is met.
     package var notice: String? {
         switch status {
         case "satisfied":
@@ -214,15 +196,11 @@ package struct PackageNodeRequirement: Codable, Hashable, Sendable {
     }
 }
 
-/// Gateway-owned exclusion state; unknown codes retain their display message.
 package struct PackageConflict: Codable, Hashable, Sendable {
     package let code: String
     package let message: String
 }
 
-/// The names one installed package provides, by kind. `packages.list` carries
-/// them beside each package and they stay names only: the flat resolved
-/// `resources` inventory remains authoritative for every path and status.
 package struct PackageProvides: Codable, Hashable, Sendable {
     package let skills: [String]
     package let prompts: [String]
@@ -235,13 +213,9 @@ package struct PackageProvides: Codable, Hashable, Sendable {
 package struct PackageInventory: Codable, Hashable, Sendable {
     package let packages: [PackageSummary]
     package let resources: JSONValue
-    /// One bounded explanation for kinds `provides` could not resolve, so a
-    /// failed attribution never fails the package read itself.
     package var providesDiagnostic: String? = nil
 }
 
-/// One built-in Tron extension from `modules.list`. The commands are empty for
-/// every module today; they stay decoded because the Gateway reports them.
 package struct TronModuleSummary: Codable, Hashable, Identifiable, Sendable {
     package let name: String
     package let purpose: String
@@ -250,7 +224,6 @@ package struct TronModuleSummary: Codable, Hashable, Identifiable, Sendable {
     package var id: String { name }
 }
 
-/// `modules.list`: the installed Tron modules.
 package struct TronModuleList: Codable, Hashable, Sendable {
     package let modules: [TronModuleSummary]
 }
@@ -321,8 +294,6 @@ package enum PackageCatalogPolicy {
     }
 
     private static func validateResources(_ resources: JSONValue) throws {
-        // The Gateway may add projected resource categories over time. Validate
-        // every category this client consumes, but do not reject additive keys.
         guard case .object(let root) = resources else {
             throw invalidCatalog("its resource projection is not an object")
         }
@@ -344,9 +315,6 @@ package enum PackageCatalogPolicy {
                       paths.insert(path).inserted else {
                     throw invalidCatalog("a \(kind) resource entry is malformed, oversized, or duplicated")
                 }
-                // Resource metadata is a Gateway projection. Keep its
-                // structural/string bounds, but do not reject newer scope or
-                // origin values that this client only displays as raw JSON.
                 if let enabled = item["enabled"] {
                     guard case .bool = enabled else {
                         throw invalidCatalog("a \(kind) resource enabled flag is malformed")
@@ -383,17 +351,8 @@ package struct ProviderSummary: Codable, Hashable, Identifiable, Sendable {
     package let id: String
     package let name: String
     package let configured: Bool
-    /// Gateway-reported first-party usage support. Optional so a Gateway that
-    /// predates the field simply reserves no usage placeholder.
     let usageSupported: Bool?
-    /// Gateway-reported local-model provider: every advertised model (and the
-    /// provider default) resolves to a loopback base URL, so account usage
-    /// never applies. Optional so a Gateway that predates the field simply
-    /// presents no local indicator.
     let localOnly: Bool?
-    /// The provider whose row currently presents this provider's account usage
-    /// (OpenAI's ChatGPT sign-in borrows the Codex login's plan usage). Absent
-    /// from Gateways that predate the field.
     package let usageLentTo: String?
     package let authSource: String?
     package let credentialType: String?
@@ -450,13 +409,8 @@ package struct ModelSummary: Codable, Hashable, Identifiable, Sendable {
     package let maxTokens: Int
     package let available: Bool
     package var contextWindowLimits: ContextWindowLimits? = nil
-    /// Gateway canon release date (`YYYY-MM-DD`). Absent when the Gateway has no
-    /// recorded release for the model, which keeps it out of the Latest rail.
     package var releaseDate: String? = nil
-    /// USD per million tokens from the pinned SDK catalog. Absent when the
-    /// Gateway has no price, which is not the same as free.
     package var cost: ModelTokenPrice? = nil
-    /// Present only when the Gateway reports that Pi routes this virtual model.
     package var virtual: Bool? = nil
 
     package var ref: ModelRef { ModelRef(provider: provider, id: id) }
@@ -467,8 +421,6 @@ package struct ModelTokenPrice: Codable, Hashable, Sendable {
     let output: Double
 }
 
-/// One Gateway-recorded recently used model. The Gateway owns this history;
-/// iOS only projects it into the picker's Recent rail.
 package struct RecentModelRef: Codable, Hashable, Sendable {
     package let provider: String
     package let id: String

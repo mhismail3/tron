@@ -33,10 +33,9 @@ package struct AppLogRecord: Codable, Equatable, Sendable {
 }
 
 package actor AppLog {
-    // This bounded always-on buffer feeds the user's chosen 10 MB on-disk cap.
     static let maximumRecords = 2_000
     static let maximumBufferBytes = 512 * 1_024
-    static let maximumFileBytes = 10 * 1_024 * 1_024 // user's chosen total disk cap
+    static let maximumFileBytes = 10 * 1_024 * 1_024
     static let maximumSegmentBytes = maximumFileBytes / 2
     static let flushInterval: Duration = .seconds(5)
     static let slowOperationThresholdMilliseconds = 250
@@ -90,8 +89,6 @@ package actor AppLog {
         if eventLevel == "error" { flush() }
     }
 
-    /// One bounded per-request record: `rpc.completed` for every completion, and
-    /// `rpc.cancelled` for the reads this client told the Gateway to stop.
     func recordRPC(
         event: String = "rpc.completed",
         method: String, requestID: String, outcome: String, code: String?,
@@ -243,13 +240,7 @@ package final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable
     private let log: AppLog
     private let lock = NSLock()
     private var openIntervals: [Int: OpenInterval] = [:]
-    /// Intervals that were still open when the scene went to background. Their
-    /// owner's later `end` no longer decides the outcome — the scene's
-    /// background does — so a background-cancelled `.failure` is never recorded
-    /// as a failure at error level.
     private var backgroundedIntervals: Set<Int> = []
-    /// Those already written at background, because they had passed the
-    /// threshold then. Their owner's later `end` writes nothing more.
     private var signedAtBackgroundIntervals: Set<Int> = []
     private var nextIntervalID = 1
 
@@ -276,9 +267,6 @@ package final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable
         guard let started = interval.measuredStart, disposition != .signedAtBackground else { return }
         let duration = diagnosticMilliseconds(started.duration(to: ContinuousClock().now))
         guard duration >= AppLog.slowOperationThresholdMilliseconds else { return }
-        // An interval the scene retired is signed `backgrounded` whenever its end
-        // passes the threshold: the failure its owner reports is the background
-        // cancellation, not the operation.
         let outcome = disposition == .backgrounded ? "backgrounded"
             : (result == .success ? "success" : "failure")
         Task {
@@ -292,9 +280,6 @@ package final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable
     package func endOpenIntervalsAtBackground() {
         let now = ContinuousClock().now
         let signed = lock.withLock { () -> [OpenInterval] in
-            // Every interval open now belongs to the background, whatever its age:
-            // its owner will unwind it because the scene retired, and that unwind
-            // must not be recorded as the operation's own failure.
             backgroundedIntervals.formUnion(openIntervals.keys)
             var signed: [OpenInterval] = []
             var signedIDs: [Int] = []
@@ -318,9 +303,6 @@ package final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable
         }
     }
 
-    /// What the owner's `end` means for one tracked interval: its own result, a
-    /// scene retirement it survived to the threshold, or a record already written
-    /// at background.
     private enum IntervalDisposition {
         case owner
         case backgrounded

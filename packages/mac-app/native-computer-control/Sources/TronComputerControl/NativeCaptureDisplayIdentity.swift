@@ -2,8 +2,6 @@ import ColorSync
 import CoreGraphics
 import Foundation
 
-/// A display selection is physical/virtual-display identity plus its local
-/// coordinate space, not whichever monitor later becomes the primary display.
 internal struct NativeCaptureDisplayIdentity: Equatable, Sendable {
     let id: CGDirectDisplayID
     let uuid: String

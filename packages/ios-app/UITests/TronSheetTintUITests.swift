@@ -1,18 +1,10 @@
 import XCTest
 
-/// Sheets of every family tint their toolbar icons like their titles (#963):
-/// Settings and its groups, the Automations and
-/// Knowledge sheets, and Manage Home with a sub-sheet that takes its row's tint.
-/// The paired-device sheet, reachable only with a real Gateway, is covered by
-/// `RealGatewayPairAndChatUITests.testSettingsSourcesTextDoneAndRoutes`.
-/// The nested-menu journeys retain the native Settings/History presentations
-/// that #877 reported as inert; both now open on iOS 26.5 without a UI rewrite.
 final class TronSheetTintUITests: XCTestCase {
     @MainActor
     func testSettingsSheetToolbarsTakeTheirTitleTint() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        // Burgundy separates the primary theme from any fixed group colour (#2370).
         app.launchArguments = ["-tron-settings-navigation-fixture", "-themeColor", "burgundy"]
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["settings-link-Connections"].waitForExistence(timeout: 10), app.debugDescription)
@@ -20,7 +12,6 @@ final class TronSheetTintUITests: XCTestCase {
         for title in ["Connections", "MCP Servers", "Appearance"] {
             let link = app.buttons["settings-link-\(title)"]
             for _ in 0..<12 where !link.isHittable { app.swipeUp() }
-            // The group row's icon and the sheet it opens both take the theme.
             let window = app.windows.firstMatch.frame.width
             let icon = CGRect(x: link.frame.minX, y: link.frame.minY, width: 48, height: link.frame.height)
             assertBurgundy(sheetInk(XCUIScreen.main.screenshot().image, icon, window: window), "\(title) row icon")
@@ -35,7 +26,6 @@ final class TronSheetTintUITests: XCTestCase {
         }
     }
 
-    /// Burgundy ink keeps red over blue over green through glass and antialiasing.
     private func assertBurgundy(_ ink: [Double]?, _ context: String, file: StaticString = #filePath, line: UInt = #line) {
         guard let ink else { return XCTFail("\(context): no inked pixels", file: file, line: line) }
         XCTAssertGreaterThan(ink[0], ink[2], "\(context) \(ink) is not the burgundy theme", file: file, line: line)
@@ -101,7 +91,6 @@ final class TronSheetTintUITests: XCTestCase {
             let history = app.buttons["Session History"]
             for _ in 0..<12 where !history.isHittable { app.swipeUp() }
             XCTAssertTrue(history.isHittable, app.debugDescription); history.tap()
-            // Rows have no ⋯ menu; a long-press offers the entry's actions.
             let actions = app.buttons["history-row-fixture-prompt"]
             XCTAssertTrue(actions.waitForExistence(timeout: 10), app.debugDescription)
             assertToolbarTint(app, title: "Session History")
@@ -129,7 +118,6 @@ final class TronSheetTintUITests: XCTestCase {
                     let entryCapture = XCTAttachment(screenshot: app.screenshot())
                     entryCapture.name = "1261-bookmark-\(appearance)"; entryCapture.lifetime = .keepAlways; add(entryCapture)
                     app.buttons["Save"].tap()
-                    // The bookmark now reads inside the row's one combined label.
                     XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'Saved bookmark'")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
                     actions.press(forDuration: 1.0); app.buttons["Edit Bookmark"].tap()
                     XCTAssertTrue(app.buttons["Remove"].waitForExistence(timeout: 5))
@@ -155,8 +143,6 @@ final class TronSheetTintUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         let menu = app.buttons["dashboard.menu"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10), app.debugDescription)
-        // The Automations sheet's own create, filter and Done actions, then
-        // the create flow it opens.
         menu.tap(); app.buttons["Automations"].tap()
         assertToolbarTint(app, title: "Automations")
         app.buttons["automations.new"].tap()

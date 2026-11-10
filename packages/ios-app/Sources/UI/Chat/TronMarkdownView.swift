@@ -5,12 +5,7 @@ import UIKit
 struct TronMarkdownView: View {
     let document: MarkdownPresentation.Document
     let streaming: Bool
-    /// Body typography for paragraphs and list items; headings keep their
-    /// scale and take the color. The default is the transcript's.
     var textStyle = ChatSelectableTextStyle()
-    /// Completed inline text uses native range selection with Copy and
-    /// detected links even without annotation. Ask Question opts in so agents'
-    /// URLs, commands and IDs can be copied; other surfaces keep SwiftUI text.
     var selectableText = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.sizeCategory) private var sizeCategory
@@ -46,10 +41,6 @@ struct TronMarkdownView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             ForEach(Array(document.blocks.enumerated()), id: \.offset) { index, block in
-                // During a live stream, block positions are the stable
-                // presentation slots while the authoritative source grows in
-                // place. Completed code blocks add their content identity below
-                // so copy state still resets when a block is replaced.
                 if !streaming, let annotationSource, let annotationPresenter, annotationPresenter.admitsAnnotations,
                    Self.isSelectableProse(block.kind) {
                     if let range = selectableProseRange(startingAt: index) {
@@ -83,8 +74,6 @@ struct TronMarkdownView: View {
                     switch block.kind {
                 case .paragraph(let value):
                     if selectableText {
-                        // The native text view stays the element so its
-                        // links remain activatable by VoiceOver and tests.
                         inlineBlock(value, identity: "block:\(index)")
                             .frame(alignment: .topLeading)
                     } else {
@@ -147,11 +136,6 @@ struct TronMarkdownView: View {
         }
         .font(TronFontLoader.createFont(size: textStyle.size, weight: textStyle.weight))
         .foregroundStyle(textStyle.color)
-        // A transcript row is one lazy child even when this eager block stack
-        // contains hundreds of paragraphs. Always publish the exact wrapped
-        // vertical ideal instead of accepting a viewport-sized/stale proposal;
-        // otherwise LazyVStack can retain an invalid estimate after a live
-        // assistant row settles and place later rows against phantom geometry.
         .fixedSize(horizontal: false, vertical: true)
         .transcriptTextSelection(enabled: !dynamicTypeSize.isAccessibilitySize)
     }
@@ -170,9 +154,6 @@ struct TronMarkdownView: View {
         }
     }
 
-    /// A completed assistant block in the transcript is natively selectable
-    /// and annotatable; streaming text and every other Markdown surface keep
-    /// the SwiftUI reveal renderer.
     @ViewBuilder
     private func inlineBlock(
         _ value: MarkdownPresentation.Inline,
@@ -203,7 +184,6 @@ struct TronMarkdownView: View {
             .alignmentGuide(.firstTextBaseline) { _ in
                 ChatSelectableTextLayout.firstBaseline(style: style, sizeCategory: sizeCategory)
             }
-            // Assistive technologies read it as the static text it replaces.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(value.accessibilitySource)
             .accessibilityAddTraits(.isStaticText)
@@ -223,9 +203,6 @@ struct TronMarkdownView: View {
         _ value: MarkdownPresentation.Inline,
         identity: String
     ) -> some View {
-        // Keep one mounted view type as the response crosses the streaming
-        // boundary. Changing from a reveal view to a fresh Text at completion
-        // recreates the whole final paragraph and produces the visible flash.
         ChatStreamingInlineText(
             inline: value,
             identity: identity,
@@ -236,8 +213,6 @@ struct TronMarkdownView: View {
 
 }
 
-/// The Markdown blockquote treatment: a rule beside secondary text. Quoted
-/// annotations reuse it so a quote reads the same everywhere in chat.
 struct ChatQuoteBlock<Content: View>: View {
     var rule: Color = .tronBorder
     @ViewBuilder let content: Content
@@ -282,8 +257,6 @@ final class CodeCopyFeedbackLifecycle {
     }
 
     func appear() {
-        // SwiftUI can retain this owner across disappearance. Retirement has
-        // already advanced the generation, so old resets remain inadmissible.
         mounted = true
     }
 
@@ -341,8 +314,6 @@ private struct CodeBlock: View {
         .task(id: copyFeedback.generation) {
             let taskGeneration = copyFeedback.generation
             guard taskGeneration != 0 else { return }
-            // The lifecycle owner keeps the delay, cancellation, generation,
-            // and mount fence in one shipping path for every configuration.
             _ = await copyFeedback.resetIfCurrent(taskGeneration)
         }
         .onAppear { copyFeedback.appear() }

@@ -1,16 +1,7 @@
 import Foundation
 
-/// The checked `printf` subset behind `String(format:)` and interpolation
-/// `specifier:` (#889). Foundation's formatter reads C varargs by the types the
-/// format names, so a format chosen by the program must never reach it with a
-/// mismatched argument: `%s` or `%@` against a number reads arbitrary memory.
-/// Each conversion is parsed here, paired with one argument of the right
-/// dynamic type, and only a single well-formed numeric conversion is handed to
-/// Foundation. Strings are padded here. `*` widths, positional arguments and
-/// `%n` are rejected.
 @MainActor
 enum SwiftAppFormat {
-    /// Largest width or precision; bigger values only allocate.
     static let maximumField = 64
 
     static func format(_ pattern: String, _ values: [SwiftAppValue]) throws -> String {
@@ -51,7 +42,6 @@ enum SwiftAppFormat {
                 index += 1
                 precision = try number() ?? 0
             }
-            // Length modifiers do not change Swift's 64-bit Int or Double.
             while index < characters.count, "lhqzjt".contains(characters[index]) { index += 1 }
             guard index < characters.count else { throw fail("incomplete conversion") }
             let conversion = characters[index]

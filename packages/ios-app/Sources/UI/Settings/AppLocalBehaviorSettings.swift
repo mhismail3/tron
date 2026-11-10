@@ -1,7 +1,6 @@
 import Foundation
 import Observation
 
-/// Preferences owned by the iOS app presentation, never by a Gateway session.
 @MainActor
 @Observable
 final class AppLocalBehaviorSettings {
@@ -21,8 +20,6 @@ final class AppLocalBehaviorSettings {
 
     private let defaults: UserDefaults
 
-    /// The existing dashboard preference document has one observable owner,
-    /// shared by the dashboard and Appearance, with no copied selection.
     var dashboardFilter: DashboardServerFilterState {
         didSet {
             if dashboardFilter != oldValue { DashboardServerFilterPreferences.save(dashboardFilter, to: defaults) }

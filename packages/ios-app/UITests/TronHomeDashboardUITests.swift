@@ -1,12 +1,6 @@
 import XCTest
 
-/// The Home dashboard view (#973) on the hosted Home fixture: the usage card,
-/// Home's running and recently completed workers, ordinary read/unread sessions,
-/// the shared View All sheet, and the floating Home button above the
-/// dashboard logo. Screenshots are kept as attachments.
 final class TronHomeDashboardUITests: XCTestCase {
-    /// A worker Home dispatches while the view is open appears in In Progress
-    /// as soon as its catalog row arrives, without relaunching.
     @MainActor
     func testNewWorkerAppearsWithoutRelaunch() {
         continueAfterFailure = false
@@ -14,13 +8,9 @@ final class TronHomeDashboardUITests: XCTestCase {
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home", "-home-dashboard-new-worker"]
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-new"].waitForExistence(timeout: 10), app.debugDescription)
-        // Worker identity rides on the synced catalog rows: the view never queries Home's task ledger.
         XCTAssertEqual(app.staticTexts["fixture.home-task-list-reads"].label, "task-list-reads:0")
     }
 
-    /// #982: the view's sections fade in once, in stagger order, while the usage
-    /// card holds the shared pulse at its final height; its rows then fade in
-    /// without a layout jump, and a live new worker re-fades nothing.
     @MainActor
     func testSectionsRevealInOrderAndLiveUpdatesDoNotRefade() {
         continueAfterFailure = false
@@ -33,8 +23,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         let reveals = app.staticTexts["fixture.dashboard-reveals"]
         XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(waitFor(card, "label == 'Loading account usage'"), card.label)
-        // The card (order 0), In Progress (1) and Recently Completed (2) reveal
-        // while the card still shows its pulse.
         XCTAssertTrue(waitFor(reveals, "label BEGINSWITH 'orders:0,1,2'"), reveals.label)
         XCTAssertEqual(card.label, "Loading account usage", "The usage read is still in flight")
         let inProgress = app.staticTexts["In Progress"], completed = app.staticTexts["Recently Completed"]
@@ -44,13 +32,11 @@ final class TronHomeDashboardUITests: XCTestCase {
         let loadingHeight = card.frame.height
         keep("05-usage-loading")
 
-        // Loader to content at the same height.
         XCTAssertTrue(waitFor(card, "label BEGINSWITH 'Anthropic, 42%'"), card.label)
         XCTAssertEqual(card.frame.height, loadingHeight, accuracy: 1, "The card keeps its height when usage arrives")
         let settled = reveals.label
         keep("06-usage-content")
 
-        // A live catalog update inserts its row without re-revealing anything.
         let newWorker = app.buttons["session-row-home-shell-fixture:worker-new"]
         XCTAssertFalse(newWorker.exists)
         XCTAssertTrue(newWorker.waitForExistence(timeout: 10), app.debugDescription)
@@ -59,9 +45,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(card.label.hasPrefix("Anthropic, 42%"), "Refreshes keep the usage content")
     }
 
-    /// Tapping the usage card opens the Filter-style providers sheet; a hidden
-    /// provider leaves the card and returns when shown again, and with every
-    /// provider hidden the card keeps a compact row that reopens the sheet.
     @MainActor
     func testUsageCardChoosesItsProviders() {
         continueAfterFailure = false
@@ -76,7 +59,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         let anthropic = app.buttons["home-usage-provider-anthropic"], codex = app.buttons["home-usage-provider-openai-codex"]
         XCTAssertTrue(anthropic.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.navigationBars["Usage Providers"].exists || app.staticTexts["Usage Providers"].exists, app.debugDescription)
-        // Only providers with usage support are listed.
         XCTAssertFalse(app.buttons["home-usage-provider-fixture"].exists)
         XCTAssertEqual(anthropic.value as? String, "Selected")
         keep("07-usage-providers-sheet")
@@ -90,7 +72,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(waitFor(anthropic, "exists == false"), app.debugDescription)
         keep("08-usage-card-all-hidden")
 
-        // The compact row reopens the sheet; showing a provider restores it.
         card.tap()
         XCTAssertTrue(anthropic.waitForExistence(timeout: 5), app.debugDescription)
         anthropic.tap()
@@ -99,8 +80,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(waitFor(card, "label CONTAINS 'Anthropic, ' AND label CONTAINS 'OpenAI Codex, '"), card.label)
     }
 
-    /// Full AppModel/catalog socket path: View All must include continuation
-    /// pages, preserve attention, search ordinary titles and open the exact row.
     @MainActor
     func testOtherSessionsAllPagesSearchAndReadNavigation() {
         continueAfterFailure = false
@@ -140,7 +119,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("1310-read-session-retained")
     }
 
-    /// A mounted View All is a live child of the catalog, not a frozen copy.
     @MainActor
     func testOtherSessionsSheetPublishesLiveRenameAndEmptyProjection() {
         continueAfterFailure = false
@@ -182,15 +160,13 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("1310-empty-server-selection")
     }
 
-    /// Identical session IDs on two Macs must route/read the row's owning Mac,
-    /// not whichever connection happened to be focused when the sheet opened.
     @MainActor
     func testOtherSessionsPreviewRoutesToOwningServer() {
         continueAfterFailure = false
         let app = otherSessionsApp(extra: ["-home-dashboard-secondary"])
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["dashboard.menu"].waitForExistence(timeout: 10))
-        toggleVisibleServer(app, "Home fixture") // Leave only Other Mac selected.
+        toggleVisibleServer(app, "Home fixture")
         let row = app.buttons["session-row-competing-profile:chat-recent-unread"]
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.buttons["session-row-home-shell-fixture:chat-recent-unread"].exists)
@@ -211,9 +187,8 @@ final class TronHomeDashboardUITests: XCTestCase {
         return app
     }
 
-    /// Servers are chosen in Settings › Appearance › Visible Servers (#1331: the menu has no Filter); each sheet closes by its Done.
     @MainActor private func toggleVisibleServer(_ app: XCUIApplication, _ label: String) {
-        app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
+        app.buttons["dashboard.menu"].press(forDuration: 1.2)
         for id in ["Settings", "settings-link-Appearance"] { XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5)); app.buttons[id].tap() }
         let servers = app.buttons["Visible Servers"].firstMatch
         XCTAssertTrue(app.navigationBars.staticTexts["Appearance"].waitForExistence(timeout: 5), app.debugDescription)
@@ -235,9 +210,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-other-sessions-sheet-row-home-shell-fixture:chat-active"].waitForExistence(timeout: 5))
     }
 
-    /// Visual approval pass: the production dashboard and existing View All
-    /// sheet, with mixed activity/attention and misleading ordinary titles.
-    /// Navigation and Gateway boundary validation live in the focused journeys above.
     @MainActor
     func testOtherSessionsPreviewInLightAndDark() {
         continueAfterFailure = false
@@ -276,10 +248,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         }
     }
 
-    /// #1003: each usage window is its own right-aligned column, its copy with
-    /// a bar about a quarter of the card wide directly beneath it; two windows
-    /// sit side by side, and the provider name is vertically centered against
-    /// them. A long name keeps clear of its column.
     @MainActor
     func testUsageCardRowsShowWindowColumns() {
         continueAfterFailure = false
@@ -313,8 +281,6 @@ final class TronHomeDashboardUITests: XCTestCase {
                 XCTAssertEqual(bar.minX, column.minX, accuracy: 1)
                 XCTAssertEqual(bar.maxY, column.maxY, accuracy: 1, "\(provider) bar sits under its copy")
                 XCTAssertEqual(bar.height, 5, accuracy: 0.5)
-                // Every non-zero fill keeps the capsule's rounded left end: it
-                // starts at the track's start and is never narrower than tall.
                 let fill = try! XCTUnwrap(frames["\(provider).column\(index).fill"], probe.label)
                 XCTAssertEqual(fill.minX, bar.minX, accuracy: 0.5, "\(provider) fill starts at its track")
                 XCTAssertEqual(fill.height, bar.height, accuracy: 0.5)
@@ -331,9 +297,6 @@ final class TronHomeDashboardUITests: XCTestCase {
             }
             XCTAssertEqual(previous!.maxX, cardFrame.maxX - 12, accuracy: 1, "\(provider) columns are right-aligned")
         }
-        // OpenAI's weekly window is 2% used: proportionally under 2pt, its fill
-        // is a round dot exactly one bar height wide, while a larger share
-        // (Anthropic's 42%) stays proportional.
         let small = try! XCTUnwrap(frames["openai-codex.column1.fill"], probe.label)
         let smallTrack = try! XCTUnwrap(frames["openai-codex.column1.bar"], probe.label)
         XCTAssertLessThan(smallTrack.width * 0.02, small.height, "the fixture share is below one bar height")
@@ -344,11 +307,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("11-usage-card-window-columns")
     }
 
-    /// #1163: every plan window a provider enforces reaches its compact
-    /// surfaces. OpenCode Go's monthly limit is its third window: the card
-    /// keeps all three columns on the name's line, and a window warns from 60%
-    /// and shows its reached limit on the card, the Providers row and its
-    /// detail sheet.
     @MainActor
     func testUsageShowsMonthlyWindowAndExhaustedLimit() {
         continueAfterFailure = false
@@ -379,8 +337,6 @@ final class TronHomeDashboardUITests: XCTestCase {
             XCTAssertGreaterThan(column.minX, previous.maxX, "column \(index) sits clear of what precedes it")
             previous = column
         }
-        // Each level draws its own accent: 5h at 0% stays the usage accent,
-        // weekly at 72% warns, and the monthly limit is reached with a full bar.
         XCTAssertNil(frames["opencode-go.column0.warning"] ?? frames["opencode-go.column0.exhausted"], probe.label)
         XCTAssertNotNil(frames["opencode-go.column1.warning"], probe.label)
         let monthly = try! XCTUnwrap(frames["opencode-go.column2.bar"], probe.label)
@@ -388,7 +344,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertNil(frames["anthropic.column0.warning"] ?? frames["anthropic.column1.warning"], "under 60% never warns")
         keep("12-usage-card-monthly-exhausted")
 
-        app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
+        app.buttons["dashboard.menu"].press(forDuration: 1.2)
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["Settings"].tap()
         let providers = app.buttons["settings-link-Model Providers"]
@@ -398,17 +354,13 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         keep("13-providers-row-monthly-exhausted")
         app.navigationBars.staticTexts["Providers"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-        app.buttons["Details for Opencode Go"].tap() // on screen only once the sheet is large
+        app.buttons["Details for Opencode Go"].tap()
         XCTAssertTrue(app.staticTexts["Monthly"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["100% used"].exists, app.debugDescription)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Resets '")).count >= 3, app.debugDescription)
         keep("14-provider-detail-monthly-exhausted")
     }
 
-    /// A provider without a 5h window whose second window repeats its weekly
-    /// cadence (Anthropic's per-model limit) shows one Weekly column, not two
-    /// identically labeled ones; the repeat stays in the detail sheet, and
-    /// OpenCode Go's three distinct cadences all remain on the card.
     @MainActor
     func testUsageCardShowsOneColumnPerCadence() {
         continueAfterFailure = false
@@ -428,7 +380,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertFalse(probe.label.contains("cloudflare-ai-gateway.column1"), "one Weekly column: \(probe.label)")
         keep("15-usage-card-one-column-per-cadence")
 
-        app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
+        app.buttons["dashboard.menu"].press(forDuration: 1.2)
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["Settings"].tap()
         let providers = app.buttons["settings-link-Model Providers"]
@@ -443,10 +395,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("16-provider-detail-scoped-weekly")
     }
 
-    /// #1009: the Recently Completed sheet's floating search button opens the
-    /// shared search pill, which filters the rows by title locally: tolerant
-    /// of diacritics and abbreviations, a title prefix ranked above a match
-    /// inside a word, and the shared placeholder when nothing matches.
     @MainActor
     func testRecentlyCompletedSheetSearchesTitles() {
         continueAfterFailure = false
@@ -476,22 +424,18 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Close search"].exists)
         XCTAssertFalse(searchButton.exists, "the pill replaces the button")
 
-        // Abbreviation across words: "simlan" finds "Simulator lane cleanup".
         field.typeText("simlan")
         XCTAssertTrue(row("worker-done-7").waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(waitFor(row("worker-done-1"), "exists == false"), app.debugDescription)
         XCTAssertFalse(row("worker-done-2").exists)
         keep("13-recently-completed-search-filtered")
 
-        // Diacritics and case fold; every word must match.
         replace(field, with: "GÀRDEN email", app: app)
         XCTAssertTrue(row("worker-done-2").waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(waitFor(row("worker-done-7"), "exists == false"), app.debugDescription)
         replace(field, with: "garden budget", app: app)
         XCTAssertTrue(noMatches(app).waitForExistence(timeout: 3), app.debugDescription)
 
-        // "ra": the title starting with it ranks above the older-ordered title
-        // that only contains it ("Garden review email dRAft").
         replace(field, with: "ra", app: app)
         let raindrop = row("worker-done-6"), garden = row("worker-done-2")
         XCTAssertTrue(raindrop.waitForExistence(timeout: 3) && garden.waitForExistence(timeout: 3), app.debugDescription)
@@ -527,7 +471,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("04-home-button-working")
     }
 
-    /// View All shares its section title's line and sits at the row's trailing edge.
     @MainActor private func assertHeaderAction(_ action: XCUIElement, title: XCUIElement, app: XCUIApplication) {
         XCTAssertTrue(title.exists, app.debugDescription)
         XCTAssertEqual(action.label, "View all sessions in \(title.label)")
@@ -536,15 +479,12 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertGreaterThan(action.frame.maxX, app.frame.width * 0.85, "View All is right-aligned")
     }
 
-    /// Replaces the search field's text through its clear button, so the
-    /// journey types exactly what a user would.
     @MainActor private func replace(_ field: XCUIElement, with text: String, app: XCUIApplication) {
         let clear = app.buttons["Clear search"]
         if clear.exists { clear.tap() }
         field.typeText(text)
     }
 
-    /// The shared placeholder's combined accessibility element.
     @MainActor private func noMatches(_ app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'No matches'")).firstMatch
     }
