@@ -458,7 +458,7 @@ class Prober:
         locks = [self.root / f'packages/{package}/package-lock.json' for package in PACKAGES]
         dependencies = hashlib.sha256(b''.join(lock.read_bytes() for lock in locks if lock.exists())).hexdigest()
         pure_static = self.failed.get('probe', {}).get('name') in {
-            'ownership', 'budgets', 'documentation policy', 'agent policy', 'privacy guard',
+            'ownership', 'documentation policy', 'agent policy', 'privacy guard',
             'git diff --check'}
         if not pure_static and dependencies != self.dependency_key:
             if not prepare(self.root, attempt / 'dependencies'):
