@@ -25,12 +25,14 @@ wire/Protocol.dfy                the Gateway protocol's value types (protocol v8
 ```
 
 Run by its shell: `schedule/occurrence` (Automation once/interval occurrences; shell
-`packages/gateway/src/automations/schedule.ts`, core in `packages/gateway/src/core/schedule/occurrence`).
+`packages/gateway/src/automations/schedule.ts`, core in `packages/gateway/src/core/schedule/occurrence`) and
+`settings/precedence` (which layer's value a setting resolves to, which layers are shown and what lies below a
+layer, over value tokens; shell `packages/gateway/src/kernel/settings/settings-resolver.ts`, core in
+`packages/gateway/src/core/settings/precedence`).
 
 Shadowed: `schedule/calendar` (calendar occurrences over a zone transition table from
 `packages/gateway/src/automations/zone-table.ts`; shell `packages/gateway/src/automations/schedule.ts`);
-`settings/precedence` (which layer's value a setting resolves to,
-over value tokens; shell `packages/gateway/src/kernel/settings/settings-resolver.ts`); `settings/tool-selection` (how a
+`settings/tool-selection` (how a
 tool selection's plain names and +name/-name modifiers compose and are stored, over name tokens; shell
 `packages/gateway/src/kernel/settings/settings-types.ts`); `receipts/invocation-lifecycle` (how a session's invocation
 receipts fold into each invocation's lifecycle, and which histories are refused; shell

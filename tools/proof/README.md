@@ -125,7 +125,6 @@ one). Seams (shell files under `packages/gateway/src/`), with the oracle each bl
 | Block | Seam | Recorded | Oracle's generated inputs |
 |---|---|---|---|
 | `schedule/calendar` | `next/first/classifyDueOccurrence` (`automations/schedule.ts`) | calendar triggers only (once and interval triggers are decided by block `schedule/occurrence`, which its shell runs); nested calls are not seams | core fed `automations/zone-table.ts`'s Intl table (also on replay); TS throws (a skipped civil date) counted as `tsRefused` |
-| `settings/precedence` | `resolveInstance` (`kernel/settings/settings-resolver.ts`) | `precedenceFacts` (per layer: in target, bound, per-model and plain value, applied; default token 0) and the fold before clamping; a composing value as null | real `resolveSettings`/`composedBelow` over a synthetic schema; compose builds a term, so its order is exact |
 | `settings/tool-selection` | `toolSelectionType().compose/encode` (`kernel/settings/settings-types.ts`) | `toolSelectionFacts` (empty name 0); a non-list below/current is none; a list holding a non-string is not recorded | plain names, modifiers, repeats and the empty name over every kind of selection below |
 | `receipts/invocation-lifecycle` | `invocationProjection` (`kernel/receipts/invocation-receipts.ts`) | `invocationLifecycleFacts` and the projections or refusal reason; not above 64 receipts, once per history (snapshots refold branches) | legal moves with duplicate/contradictory terminals, orphans, foreign owners, renames, origin changes, rebinds; 1 in 10 with tokens shifted sparse or past the core's array limit (its fallback) |
 
@@ -289,9 +288,7 @@ TypeScript rejects each at its path and Swift rejects or reads each as stated.
 outside an opted-in Debug Gateway (Stable channel, no channel, other values, the Stable home), that a
 seeded schedule journey through the real seams writes one record per call (none for nested calls), each under
 its trigger's block (`schedule/occurrence` or `schedule/calendar`), that replays through the same TypeScript to the recorded outputs,
-that resolving the real settings schema records every key instance's fold (layer and not-applied layer as
-resolved, an untrusted project's value reported) with no setting value, model id or path in the corpus, that
-tool-selection compose and encode calls (direct and through a real resolution) record name tokens, never names,
+that tool-selection compose and encode calls (direct and through a real resolution) record name tokens, never names,
 and nothing for a value outside the block's domain, that invocation receipt folds record tokens and refusal
 reasons, once per history and not above the receipt bound, and
 that the daily cap and retention hold.
