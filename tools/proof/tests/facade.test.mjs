@@ -1,4 +1,4 @@
-// Integration test for `scripts/tron proof facade` (tools/proof/README.md "Façade") on a copy of the fixture
+// Integration test for `scripts/tron proof facade` (tools/proof/dafny2wire/README.md "Façade") on a copy of the fixture
 // block demo/counter (tests/fixtures/facade; test input, not a core block): the generated façade exposes
 // exactly the compiled declarations of the laws (a multi-line datatype in full, an opaque function, not a
 // ghost function or a commented-out one), marshals values both ways (sequences as arrays, also nested and as
