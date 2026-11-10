@@ -66,9 +66,8 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   All progressive disclosure (pickers, skill/command containers, custom chat UI, default sheets) moves to one generic content-sized
   custom sheet, built ground-up, never patched per surface; until it lands, managed sheets stay ([Sheets](packages/ios-app/docs/presentation-parity.md#sheets-and-chrome)). Apps show no read-only settings, except values that live in a repo/project file, shown read-only with where to edit them.
 - **Prove rather than imply** (inspected ≠ inferred ≠ reproduced ≠ verified); label visuals honestly.
-- **Comments:** explain current-code invariants, ownership, ordering or non-obvious tradeoffs;
-  never justify hacks/temporary workarounds or narrate dialogue/history. Delete stale comments,
-  not useful rationale (no blanket ban). Update changed-file references; commit no scratch/reports.
+- **No comments** (Mohsin, 2026-11-10): code carries no comments; rationale lives in commits and docs. Directives that tools
+  parse (lint/type pragmas, generated-file markers, purpose lines) are not comments. Update changed-file references; commit no scratch/reports.
 - **Dependencies:** exact pins/lockfiles; Node via `scripts/tron-node exec`, not the signed
   runtime. Pi SDK/`pi-subagents` change atomically through updaters; behavior deltas need a decision.
 
@@ -143,9 +142,9 @@ it touches (P1); the full suite and E2E journeys are batch and checkpoint signal
   (verify already refuses untracked and unnamed ignored files). Remove a tool with its tests and `scripts/tron` arm.
 
 ## Documentation
-- Owners: `README.md` (≤ 250 lines), `docs/PRINCIPLES.md`, `packages/gateway/README.md` (local lanes and hazards in its `AGENTS.md`), `packages/ios-app/docs/`, `packages/mac-app/docs/`,
+- Owners: `README.md`, `docs/PRINCIPLES.md`, `packages/gateway/README.md` (local lanes and hazards in its `AGENTS.md`), `packages/ios-app/docs/`, `packages/mac-app/docs/`,
   repo runbooks `docs/development.md` and `scripts/tron --help`, `tools/work/README.md`, skills only in `.agents/skills/`.
 - If docs and code disagree, follow existing code conventions and report each inconsistency.
-- Docs state current behavior: no history, evidence or audit ledgers; indexes are generated; docs ≤ 2× budget. AGENTS.md files
-  stay concise, at the highest information density: a new rule earns its place by replacing or tightening weaker text, never by padding.
-  [check: `scripts/tron budgets`, `scripts/check-documentation-policy.py`, `scripts/check-agent-policy.sh`]
+- Docs state current behavior: no history, evidence or audit ledgers; indexes are generated. Docs, AGENTS.md included, have no
+  line cap; they stay concise, at the highest information density: a new rule earns its place by replacing or tightening weaker text, never by padding.
+  [check: `scripts/check-documentation-policy.py`, `scripts/check-agent-policy.sh`]

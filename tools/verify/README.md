@@ -118,12 +118,11 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 ## Static checks (existing tools only)
 1. `scripts/tron ownership`, including the repository layout
 2. `scripts/tron tidy --here --landing`: no untracked file or ignored path without a named writer
-3. `scripts/tron budgets HEAD` (sizes are reported; few cases fail)
-4. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
+3. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
    --base <base>` when Markdown, a manifest or the Gateway changed; `--all` and empty-diff
    baselines check every block without `--base` (loaded generators need Gateway dependencies).
-5. the privacy guard over `git diff <base>..HEAD`
-6. `git diff --check`
+4. the privacy guard over `git diff <base>..HEAD`
+5. `git diff --check`
 7. When the selection touches the Gateway: `npm run check` (production and test
    support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
 8. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane

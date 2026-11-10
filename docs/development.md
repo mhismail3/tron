@@ -266,9 +266,6 @@ Existing upward and two-way pairs live in the shrink-only
 always allowed.
 [Layer rules](../tools/layers/README.md).
 
-`scripts/tron budgets` reports a commit's docs over budget and fails a doc above
-twice its budget, or the root README over its own. [Budget rules](../tools/AGENTS.md#doc-budgets-toolsbudgets).
-
 Run affected checks before landing with the merge procedure in the
 [Git/gh skill](../.agents/skills/tron-work/SKILL.md); the post-land batch owns broader coverage ([principles P2](PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)).
 Markdown-only changes need static/docs evidence. [Verify](../tools/verify/README.md)
