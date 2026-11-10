@@ -51,7 +51,7 @@ export async function applyConnectionsResidue(plan: ResiduePlan, backup: string)
   if ((await readdir(backup)).length) throw new Error(`Backup directory ${backup} is not empty`);
   const original = join(backup, "connections.json");
   await copyFile(plan.path, original, constants.COPYFILE_EXCL);
-  if (!(await readFile(original)).equals(plan.before)) throw new Error(`${plan.path} changed while it was backed up; rerun`);
+  if (!(await readFile(original)).equals(plan.before)) throw new Error(`${plan.path} changed while it was backed up; rerun with a new backup directory`);
   const manifest: Manifest = { version: 1, path: plan.path, before: digest(plan.before), after: digest(plan.after) };
   await writeFile(join(backup, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   await publish(plan.path, plan.after, plan.before);
@@ -74,7 +74,7 @@ async function publish(path: string, bytes: Buffer, expected: Buffer): Promise<v
   const handle = await open(temporary, "wx", 0o600);
   try {
     try { await handle.writeFile(bytes); await syncDurably(handle); } finally { await handle.close(); }
-    if (!(await readFile(path)).equals(expected)) throw new Error(`${path} changed since it was read; rerun`);
+    if (!(await readFile(path)).equals(expected)) throw new Error(`${path} changed since it was read; rerun with a new backup directory`);
     await rename(temporary, path);
   } catch (error) {
     await rm(temporary, { force: true });

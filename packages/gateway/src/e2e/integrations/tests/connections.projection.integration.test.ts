@@ -1,9 +1,21 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { startLockGateway } from "../../../../test-support/gateway-lock-harness.js";
 import { ConnectionOwner } from "../../../integrations/connection-owner.js";
+
+// A write landing between the migration's backup and its publication: the hook
+// runs once, as the next temporary file beside connections.json is opened.
+const beforePublish = vi.hoisted(() => ({ hook: undefined as undefined | (() => Promise<void>) }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+    const hook = beforePublish.hook;
+    if (hook && String(args[0]).includes("connections.json.migration-")) { beforePublish.hook = undefined; await hook(); }
+    return actual.open(...args);
+  } };
+});
 import { applyConnectionsResidue, planConnectionsResidue, restoreConnectionsResidue } from "../../../integrations/connections-residue-migration.js";
 import { createTronCoreExtension } from "../../../workspace/tron-core-extension.js";
 
@@ -83,7 +95,15 @@ it("removes retired setup operations, receipts and Raindrop mappings once, behin
     await writeFile(join(root, "used", "x"), "");
     await expect(applyConnectionsResidue(plan, join(root, "used"))).rejects.toThrow(/not empty/);
     await writeFile(path, JSON.stringify({ ...state, stateRevision: 8 }), { mode: 0o600 });
-    await expect(applyConnectionsResidue(plan, join(root, "raced"))).rejects.toThrow(/changed/);
+    await expect(applyConnectionsResidue(plan, join(root, "raced"))).rejects.toThrow(/changed while it was backed up/);
+    await writeFile(path, original, { mode: 0o600 });
+    const concurrent = JSON.stringify({ ...state, stateRevision: 9 });
+    beforePublish.hook = () => writeFile(path, concurrent, { mode: 0o600 });
+    await expect(applyConnectionsResidue(await planConnectionsResidue(home), join(root, "late"))).rejects.toThrow(/changed since it was read/);
+    expect(await readFile(path, "utf8")).toBe(concurrent);
+    await writeFile(path, original, { mode: 0o600 });
+    await writeFile(path, JSON.stringify({ ...state, setupOperations: { jev: { ...state.setupOperations.jev, status: "unknown" } } }), { mode: 0o600 });
+    await expect(planConnectionsResidue(home)).rejects.toThrow(/Setup operation is invalid/);
     await writeFile(path, original, { mode: 0o600 });
 
     const backup = join(root, "backup");
@@ -95,6 +115,14 @@ it("removes retired setup operations, receipts and Raindrop mappings once, behin
       instances: [{ ...projected, credentialConfigured: true, credentialAvailability: "unknown", providerIdentity: "unknown" }] });
     expect(await planConnectionsResidue(home)).toEqual({ path, setupOperations: 0, receipts: 0, collectionMappings: 0 });
 
+    const migrated = await readFile(path);
+    await writeFile(path, JSON.stringify({ ...JSON.parse(migrated.toString("utf8")), stateRevision: 9 }), { mode: 0o600 });
+    await expect(restoreConnectionsResidue(backup)).rejects.toThrow(/changed after the migration/);
+    await writeFile(path, migrated, { mode: 0o600 });
+    await writeFile(join(backup, "connections.json"), "{}");
+    await expect(restoreConnectionsResidue(backup)).rejects.toThrow(/does not match its manifest/);
+    expect(await readFile(path)).toEqual(migrated);
+    await writeFile(join(backup, "connections.json"), original);
     expect(await restoreConnectionsResidue(backup)).toBe(true);
     expect(await readFile(path)).toEqual(original);
     expect(await restoreConnectionsResidue(backup)).toBe(false);
