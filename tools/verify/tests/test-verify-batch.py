@@ -318,6 +318,9 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(report['verdict'], 'green')
         self.assertEqual(len(report['results']), 9)
         self.assertTrue(all(lane['seconds'] >= 0 for lane in report['results']))
+        # The test-host pool places the Gateway lanes; with no mini configured they run here, named.
+        self.assertEqual({lane['name']: lane.get('gatewayHost') for lane in report['results'] if lane.get('gatewayLock')},
+                         {'Gateway default': 'on this Mac (no mini is configured)', 'Gateway nested': 'on this Mac (no mini is configured)'})
         self.assertEqual(json.loads((self.root / '.git/verify/green.json').read_text())['commit'], self.git('rev-parse', 'HEAD'))
         self.assertIn('no uncovered commits', self.run_batch().stdout)
         self.assertEqual(len(self.reports()), 1)

@@ -21,7 +21,7 @@ Unmarked runs (the verifier's Gateway groups, verifier-step probes, the candidat
 checks) wait in the same queue without a cap, like any pre-land run; no holder waits on the batch.
 Same green HEAD does nothing once its turn comes; `--repeat` reruns all nine lanes there. `--plan` is read-only. After pinned Gateway/relay dependency preparation every
 required lane runs, even after failures: locks and every declaration (`verify --all`), full
-default and nested Gateway Vitest, signed Mac integration, relay Workers Vitest, unsigned
+default and nested Gateway Vitest (on the test-host pool, [README](README.md); each lane's `gatewayHost` names where it ran), signed Mac integration, relay Workers Vitest, unsigned
 shipping iOS compile, UI smoke `checkpoint`, real-Gateway boundary and real-UI journeys
 (installation disabled; Mac uses scratch HOME/TMPDIR). The lanes run as two concurrent chains, each
 in plan order: **Node** (`verify --all`, Gateway default, nested, Mac integration, relay) and
