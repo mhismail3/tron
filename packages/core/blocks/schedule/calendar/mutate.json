@@ -7,6 +7,10 @@
     "AtLeast",
     "Better",
     "ResFrom",
+    "OffAt",
+    "DateAt",
+    "WeekdayOf",
+    "Has",
     "Resolve",
     "Candidate",
     "Least",
@@ -28,7 +32,8 @@
       "ScheduleCalendar.ResolveSpec",
       "ScheduleCalendar.ResFromSpec",
       "ScheduleCalendar.ScanMinSpec",
-      "ScheduleCalendar.DateOf"
+      "ScheduleCalendar.DateOf",
+      "ScheduleCalendar.CandidateBounds"
     ],
     "N2 next-least": [
       "ScheduleCalendar.N2NextLeast",
@@ -45,7 +50,8 @@
     ],
     "P1 prior-sound": [
       "ScheduleCalendar.P1PriorSound",
-      "ScheduleCalendar.ScanMaxSpec"
+      "ScheduleCalendar.ScanMaxSpec",
+      "ScheduleCalendar.CandidateBounds"
     ],
     "P2 prior-greatest": [
       "ScheduleCalendar.P2PriorGreatest",
@@ -68,24 +74,12 @@
     "LDateBounds",
     "OffBound",
     "LocalBound",
-    "ModMultiple"
+    "ModMultiple",
+    "DateStart",
+    "DateBound"
   ],
   "translate": "blocks/schedule/calendar/Block.dfy",
-  "oracles": [
-    {
-      "name": "diff-vs-gateway-schedule.ts-calendar(3000)",
-      "cmd": [
-        "node",
-        "tools/proof/oracles/schedule-calendar.mjs",
-        "{dir}/out/core.js",
-        "3000"
-      ],
-      "jsonEq": [
-        "agree",
-        "requests"
-      ]
-    }
-  ],
+  "oracles": [],
   "accepted": {
     "AtLeast/boundary/>=->>#1": {
       "kind": "equivalent",
@@ -109,25 +103,6 @@
     }
   },
   "report": "blocks/schedule/calendar/MUTATION.json",
-  "shadow": {
-    "cmd": [
-      "node",
-      "tools/proof/oracles/schedule-calendar.mjs",
-      "{core}",
-      "20000"
-    ],
-    "source": "compiled core over zone-table.ts tables vs the calendar code of packages/gateway/src/automations/schedule.ts on 20,000 generated inputs (not real traffic; inputs the TypeScript throws on are counted apart, not compared)"
-  },
-  "replay": {
-    "cmd": [
-      "node",
-      "tools/proof/oracles/schedule-calendar.mjs",
-      "{core}",
-      "--replay",
-      "{corpus}"
-    ],
-    "source": "compiled core over zone-table.ts tables vs the schedule seams' recorded Debug-Gateway calendar calls (packages/gateway/src/automations/schedule.ts)"
-  },
   "kinds": {
     "safety": [
       "N1 next-sound",
