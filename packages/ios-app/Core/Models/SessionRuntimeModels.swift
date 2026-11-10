@@ -365,8 +365,6 @@ package struct RetryState: Codable, Hashable, Sendable {
     enum Source: String, Codable, Sendable { case agent, compaction, branchSummary }
     let source: Source
     let attempt: Int
-    let maxAttempts: Int?
-    let delayMs: Int?
     let errorMessage: String?
 }
 

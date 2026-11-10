@@ -12,9 +12,7 @@ struct MacTerminalStatus: Decodable, Equatable, Sendable {
     let hostKeys: [String]
     let serviceState: String
     let detail: String?
-    let hostFingerprint: String?
     let enrolled: Bool
-    let enrolledKey: String?
     var fingerprint: String {
         let parts = hostKeys.first?.split(separator: " ") ?? []
         guard parts.count >= 2, let blob = Data(base64Encoded: String(parts[1])) else { return "Unavailable" }
