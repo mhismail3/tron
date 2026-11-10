@@ -24,8 +24,9 @@ struct HostedSubagentParityFixture: View {
         self.defaults = defaults
         profile = GatewayProfile(id: "parity", label: "Fixture", host: "gateway.test", port: 9847,
             machineId: "fixture-machine", deviceId: "fixture-device")
-        defaults.set(try! JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
-        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        defaults.set(try! JSONEncoder.gateway.encode(
+            GatewayProfileDocument(profiles: [profile], selectedProfileID: profile.id)
+        ), forKey: "gatewayProfiles.v2")
         let socket = HostedSubagentParitySocket()
         cacheRoot = FileManager.default.temporaryDirectory.appending(path: "subagent-parity-\(UUID().uuidString)")
         _model = State(initialValue: AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { _ in socket }),

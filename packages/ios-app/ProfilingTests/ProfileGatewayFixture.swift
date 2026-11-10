@@ -42,8 +42,9 @@ final class ProfileGatewayFixture {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         // The profile record without a Keychain token: hosted connection takes
         // its token directly, and no scenario touches the device Keychain.
-        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
-        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        defaults.set(try JSONEncoder.gateway.encode(
+            GatewayProfileDocument(profiles: [profile], selectedProfileID: profile.id)
+        ), forKey: "gatewayProfiles.v2")
         client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
         let draftRoot = root.appending(path: "drafts", directoryHint: .isDirectory)
         model = AppModel(
