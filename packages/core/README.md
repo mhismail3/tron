@@ -25,16 +25,17 @@ wire/Protocol.dfy                the Gateway protocol's value types (protocol v8
 ```
 
 Run by its shell: `schedule/occurrence` (Automation once/interval occurrences; shell
-`packages/gateway/src/automations/schedule.ts`, core in `packages/gateway/src/core/schedule/occurrence`) and
+`packages/gateway/src/automations/schedule.ts`, core in `packages/gateway/src/core/schedule/occurrence`),
 `settings/precedence` (which layer's value a setting resolves to, which layers are shown and what lies below a
 layer, over value tokens; shell `packages/gateway/src/kernel/settings/settings-resolver.ts`, core in
-`packages/gateway/src/core/settings/precedence`).
+`packages/gateway/src/core/settings/precedence`) and `settings/tool-selection` (how a tool selection's plain
+names and +name/-name modifiers compose and are stored, over name tokens; shell
+`packages/gateway/src/kernel/settings/settings-types.ts`, core in
+`packages/gateway/src/core/settings/tool-selection`).
 
 Shadowed: `schedule/calendar` (calendar occurrences over a zone transition table from
 `packages/gateway/src/automations/zone-table.ts`; shell `packages/gateway/src/automations/schedule.ts`);
-`settings/tool-selection` (how a
-tool selection's plain names and +name/-name modifiers compose and are stored, over name tokens; shell
-`packages/gateway/src/kernel/settings/settings-types.ts`); `receipts/invocation-lifecycle` (how a session's invocation
+`receipts/invocation-lifecycle` (how a session's invocation
 receipts fold into each invocation's lifecycle, and which histories are refused; shell
 `packages/gateway/src/kernel/receipts/invocation-receipts.ts`).
 
@@ -49,7 +50,11 @@ receipts fold into each invocation's lifecycle, and which histories are refused;
   the JavaScript safe integers; the proof shows no value leaves it), booleans, datatypes (constructors, `.C?`
   tests, fields, updates), reads of sequences and arrays, and loops; integer `/` and `%` use the compiler's own
   helper. An unbounded `int`, building a sequence, datatype `==` and tuples need the runtime and are refused when
-  the core is generated; ghost code is not compiled and may use anything.
+  the core is generated; ghost code is not compiled and may use anything. A block that builds a list builds a
+  linked list (`datatype List<T> = Nil | Cons(head: T, tail: List<T>)`) with tail-recursive functions, which
+  compile to loops; the façade passes it to and from the shell as an array. Its laws may define what it computes
+  over sequences in ghost functions and state that the compiled functions compute exactly that
+  (`settings/tool-selection`).
 - A dependent sees only its deps' laws: it imports their abstract modules. A block's impl files include
   only its own files and its transitive deps' interface files; its interface (laws) files include only
   interface files, since dependents follow them. `proof check` refuses any other include (also one
