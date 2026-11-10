@@ -58,13 +58,16 @@ Claude Pro, Max and Ultra run on Pi's built-in `anthropic` provider and its OAut
 `auth.json`, with no provider package. Pi refreshes that login under its credential lock, and the
 usage card reads the bearer Pi resolves. Home's view mark reaches the wire through
 `before_provider_request` with one-hour retention. Anthropic gates newer models on the Claude
-Code version a subscription request claims (Fable 5.2 needs 2.1.290 or later). Tron never
-patches that version or Pi's request shaping: a model Pi cannot serve waits for a Pi release.
-Every Pi bump runs `scripts/tron provider-smoke` ([tool](../../../tools/claude-provider-smoke/README.md)):
-it reports Fable 5.2 and the Claude Code version Pi sends, fails when Pi lists a model it
-cannot serve, and runs the wiring tests (`home-anthropic-oauth-wire`, `provider-usage`). Once Pi
-claims Claude Code 2.1.290 or later, the bump also passes `--require-fable-5-2`. A live run of
-a few real requests waits for the maintainer.
+Code version a subscription request claims (Fable 5.2 needs 2.1.290 or later), so the Gateway
+owns that one value: `src/providers/claude-code-identity.json`, sent as Pi's `user-agent`
+request header on stored-OAuth `anthropic` requests (`installClaudeCodeIdentity` in
+`createProviderModelRuntime`) and by the usage card. Pi's other request shaping is unchanged and
+API-key logins keep Pi's identity. Raise the version to the current `@anthropic-ai/claude-code`
+release when Anthropic raises its floor. Every Pi bump runs `scripts/tron provider-smoke`
+([tool](../../../tools/claude-provider-smoke/README.md)): it reports Fable 5.2 and the Claude Code
+versions Pi and Tron send, fails when Pi lists a model Tron's version cannot serve, and runs the
+wiring tests (`home-anthropic-oauth-wire`, `provider-usage`). A live run of a few real requests
+names the new floor when Anthropic refuses the version.
 
 ## Tron-patched `pi-coding-agent`
 

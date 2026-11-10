@@ -1,6 +1,7 @@
 // Runs the offline probe of scripts/tron provider-smoke against the Gateway's pinned Pi.
 import { spawnSync } from "node:child_process";
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { newerOrEqual } from "./smoke.mjs";
@@ -12,10 +13,11 @@ test("reports the Claude Code version Pi sends and Fable 5.2's status, and gates
   const plain = run();
   const { probe } = JSON.parse(plain.stdout);
   assert.match(probe.piAi, /^\d+\.\d+\.\d+/u);
-  // Read off the wire, not Pi's source.
-  assert.match(probe.userAgent, /^claude-cli\/\d+\.\d+\.\d+/u);
-  assert.equal(probe.userAgent.split("/")[1].split(" ")[0], probe.claudeCode);
-  assert.ok(probe.claudeCode, "Pi's OAuth request carried a Claude Code version");
+  // Read off the wire: the version Tron sends is the Gateway's own, and Pi still claims one.
+  const { version } = JSON.parse(readFileSync(new URL("../../packages/gateway/src/providers/claude-code-identity.json", import.meta.url), "utf8"));
+  assert.equal(probe.userAgent, `claude-cli/${version}`);
+  assert.equal(probe.claudeCode, version);
+  assert.match(probe.piClaudeCode, /^\d+\.\d+\.\d+$/u);
   assert.equal(probe.fable52.listed, probe.anthropicModels.includes("claude-fable-5-2"));
   const expected = !probe.fable52.listed ? "absent" : newerOrEqual(probe.claudeCode, probe.fable52.minimumClaudeCode) ? "servable" : "listed-but-refused";
   assert.equal(probe.fable52.status, expected);

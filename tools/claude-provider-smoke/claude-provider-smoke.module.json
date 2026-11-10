@@ -1,6 +1,6 @@
 {
   "layer": "L5",
-  "purpose": "Claude subscription smoke for each Pi release: Fable 5.2, the Claude Code version Pi sends, and Tron's wiring on Pi's built-in Anthropic OAuth.",
+  "purpose": "Claude subscription smoke for each Pi release: Fable 5.2, the Claude Code version Tron sends, and Tron's wiring on Pi's built-in Anthropic OAuth.",
   "owns": [
     "**"
   ]
