@@ -53,7 +53,7 @@ module ReceiptsInvocationLifecycle refines ReceiptsInvocationLifecycleLaws {
         p.bound || f.kind.Binding?, if f.entry.IndexOf? then k else p.entryAt, if f.retryable.FlagOf? then f.retryable else p.retryable, k))
   }
 
-  // The cells below `count` as a list, in order, before `tail`.
+  // The cells below `count` as a list, in order.
   method Collect(cells: array<Cell>, count: Index) returns (list: List<Cell>)
     requires 0 <= count as int <= cells.Length
     ensures Elems(list) == cells[..count]

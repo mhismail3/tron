@@ -185,6 +185,8 @@ test("a block a shell runs compiles to a module that needs no Dafny runtime", as
     // establishes or checks.
     [laws, "requires |order| < 0x1_0000_0000 && taken.Length == |order|", "requires |order| < 0x1_0000_0000", /Firsts: array taken needs a precondition taken\.Length == \|<a sequence parameter>\|/],
     [laws, "requires |order| < 0x1_0000_0000 && taken.Length == |order|", "requires |order| < 0x1_0000_0000 && taken.Length == |order| && taken.Length > 0", /Firsts: precondition 'taken\.Length > 0' cannot be checked by the façade/],
+    [laws, "requires |order| < 0x1_0000_0000 && taken.Length == |order|", "requires |order| < 0x1_0000_0000 && taken.Length == |order| && Short(order)", /Firsts: precondition Short is not a compiled predicate of the laws/],
+    [laws, "requires |order| < 0x1_0000_0000 && taken.Length == |order|", "requires |order| < 0x1_0000_0000 && taken.Length == |order| && Recent(taken)", /Firsts: precondition Recent\(taken\) must take parameters only/],
     // A linked list is exactly an empty constructor, then one of an item and the rest.
     [laws, "datatype Chain<T> = End | Link(first: T, rest: Chain<T>)", "datatype Chain<T> = Link(first: T, rest: Chain<T>) | End", /unsupported Dafny type Chain</],
     [laws, "datatype Chain<T> = End | Link(first: T, rest: Chain<T>)", "datatype Chain<T> = End(size: Level) | Link(first: T, rest: Chain<T>)", /unsupported Dafny type Chain</],

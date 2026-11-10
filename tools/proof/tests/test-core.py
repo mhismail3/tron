@@ -16,6 +16,10 @@ For every block with a mutate.json, with the pinned toolchain and the repository
 And for the protocol source packages/core/wire/Protocol.dfy: the Gateway's protocol types are what it
 generates, and its TypeScript and Swift codecs agree (the protocol test of wire.test.mjs).
 
+5. A block with a compiled method lists hand-made changes to it in `method-mutants.json` (`[{from, to}]`, each
+   `from` text occurring once in the block's implementation): the mutation tool does not mutate a method, so
+   each change must make `scripts/tron proof check` fail on a copy of the block with a verification error.
+
 So an edit to a block that does not re-run its mutation check, shadow and review, or regenerate its
 packet, fails here. The review row is verified against the reviewer's transcript in this machine's Pi
 session store (read only), so the test needs that transcript.
@@ -25,9 +29,11 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -86,6 +92,31 @@ class CoreBlocksTest(unittest.TestCase):
                     shadow = tron("shadow", block, "--out", str(out))
                     self.assertEqual(shadow.returncode, 0, shadow.stderr)
                     self.assertEqual(json.loads(out.read_text())["status"], "match")
+
+    def test_compiled_methods_reject_their_hand_mutants(self) -> None:
+        for listed in sorted((CORE / "blocks").rglob("method-mutants.json")):
+            block = listed.parent.relative_to(CORE / "blocks").as_posix()
+            impl = Path(json.loads((listed.parent / "mutate.json").read_text())["impl"])
+            source = (CORE / impl).read_text()
+            mutants = json.loads(listed.read_text())
+            self.assertTrue(mutants, f"{block}: no method mutants listed")
+
+            def rejected(mutant: dict[str, str]) -> str | None:
+                if source.count(mutant["from"]) != 1:
+                    return f"'{mutant['from']}' does not occur exactly once in {impl}"
+                with tempfile.TemporaryDirectory(prefix="tron-proof-method-mutant.") as tmp:
+                    for part in ("laws", "blocks"):
+                        shutil.copytree(CORE / part, Path(tmp) / part)
+                    (Path(tmp) / impl).write_text(source.replace(mutant["from"], mutant["to"]))
+                    check = tron("check", block, "--root", tmp, "--cache", str(Path(tmp) / "cache.json"))
+                # A verification error, not a change the compiler refuses.
+                if check.returncode == 1 and re.search(r"finished with \d+ verified, [1-9]\d* errors?", check.stdout + check.stderr):
+                    return None
+                return f"'{mutant['from']}' -> '{mutant['to']}' was not rejected by the verifier:\n{(check.stdout + check.stderr)[-600:]}"
+
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                failures = [failure for failure in pool.map(rejected, mutants) if failure]
+            self.assertEqual(failures, [], f"{block}: {len(failures)} of {len(mutants)} method mutants not rejected")
 
 
 if __name__ == "__main__":

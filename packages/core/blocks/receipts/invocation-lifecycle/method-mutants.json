@@ -1,0 +1,90 @@
+[
+ {
+  "from": "slots[k] := -1;",
+  "to": "slots[k] := 0;"
+ },
+ {
+  "from": "entries[k] := false;",
+  "to": "entries[k] := true;"
+ },
+ {
+  "from": "if f.inv < 0 || f.inv >= n ||",
+  "to": "if f.inv < 0 || f.inv > n ||"
+ },
+ {
+  "from": "(f.entry.i < 0 || f.entry.i >= n))",
+  "to": "(f.entry.i < 0 || f.entry.i > n))"
+ },
+ {
+  "from": "        if i >= 0 {\n          return Stopped(DuplicateStart, k);",
+  "to": "        if i > 0 {\n          return Stopped(DuplicateStart, k);"
+ },
+ {
+  "from": "return Stopped(DuplicateStart, k);",
+  "to": "return Stopped(NoStart, k);"
+ },
+ {
+  "from": "return Stopped(DuplicateStart, k);",
+  "to": "return Stopped(DuplicateStart, 0);"
+ },
+ {
+  "from": "        cells[count] := Begin(f, k);",
+  "to": "        cells[count] := Begin(f, 0);"
+ },
+ {
+  "from": "        slots[f.inv] := count;\n",
+  "to": "        slots[f.inv] := 0;\n"
+ },
+ {
+  "from": "        count := count + 1;\n",
+  "to": ""
+ },
+ {
+  "from": "        if i < 0 {\n          return Stopped(NoStart, k);",
+  "to": "        if i <= 0 {\n          return Stopped(NoStart, k);"
+ },
+ {
+  "from": "var entryBound := if f.entry.IndexOf? then entries[f.entry.i] else noneBound;",
+  "to": "var entryBound := if f.entry.IndexOf? then false else noneBound;"
+ },
+ {
+  "from": "var entryBound := if f.entry.IndexOf? then entries[f.entry.i] else noneBound;",
+  "to": "var entryBound := if f.entry.IndexOf? then entries[f.entry.i] else false;"
+ },
+ {
+  "from": "var verdict := Advance(facts[p.start], p, f, k, entryBound);",
+  "to": "var verdict := Advance(f, p, f, k, entryBound);"
+ },
+ {
+  "from": "return Stopped(verdict.why, k);",
+  "to": "return Stopped(NoStart, k);"
+ },
+ {
+  "from": "        cells[i] := verdict.cell;\n",
+  "to": "        cells[i] := p;\n"
+ },
+ {
+  "from": "if f.entry.IndexOf? { entries[f.entry.i] := true; } else { noneBound := true; }",
+  "to": "if f.entry.IndexOf? { entries[f.entry.i] := true; }"
+ },
+ {
+  "from": "if f.entry.IndexOf? { entries[f.entry.i] := true; } else { noneBound := true; }",
+  "to": "if f.entry.IndexOf? { } else { noneBound := true; }"
+ },
+ {
+  "from": "      k := k + 1;\n    }\n    assert rs[k..] == [];",
+  "to": "      k := k + 2;\n    }\n    assert rs[k..] == [];"
+ },
+ {
+  "from": "    var list := Collect(cells, count);",
+  "to": "    var list := Collect(cells, 0);"
+ },
+ {
+  "from": "    return Finished(list);",
+  "to": "    return Finished(Nil);"
+ },
+ {
+  "from": "      list := Cons(cells[i], list);",
+  "to": "      list := Cons(cells[0], list);"
+ }
+]

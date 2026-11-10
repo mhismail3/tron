@@ -62,11 +62,15 @@ abstract module ReceiptsInvocationLifecycleLaws {
   // invocation before it; its name mark is Absent when it carries no name, Same when its name is that start's
   // and Differs otherwise, and its origin mark likewise (origins compared by canonical JSON). A receipt with no
   // start before it is refused whatever its marks say. The fold reads any facts the way Project reads the
-  // receipts they stand for (law F1), so its laws do not depend on A1; A1 is what the facts mean.
-  // Assumption A2: the shell reads each invocation's identity, name, origin and sequence from the receipt at its
-  // cell's start position, its canonical entry from the receipt at entryAt and its time from the receipt at
-  // updated, and orders the result by start sequence (a stable sort, ties in start order), as
-  // invocationProjection does; the block returns invocations in start order.
+  // receipts they stand for (law F1), so its laws do not depend on A1; A1 is what the facts mean. In the receipt
+  // grammar only a binding carries a canonical entry and only a terminal a retryable flag or, besides a start, a
+  // name or an origin.
+  // Assumption A2: a cell's start position is the position of its invocation's start receipt (law F1: the cell
+  // stands for the state StepOf built from that receipt). The shell reads everything a projection takes from the
+  // start there: its identity, operation, source, name, arguments, resources, submitted text, origin and sequence;
+  // it reads the canonical entry from the receipt at entryAt and the time from the receipt at updated, and orders
+  // the result by start sequence (a stable sort, ties in start order), as invocationProjection does; the block
+  // returns invocations in start order.
 
   // TerminalLife: completed, failed, interrupted and outcome-unknown are settled; nothing follows them.
   predicate TerminalLife(l: Life) { l.Completed? || l.Failed? || l.Interrupted? || l.OutcomeUnknown? }
@@ -191,10 +195,11 @@ abstract module ReceiptsInvocationLifecycleLaws {
       && forall i | 0 <= i < |projs| :: Placed(Elems(out.cells)[i], rs) && ProjOf(Elems(out.cells)[i], rs) == projs[i])
   }
 
-  // F1 fold-computed: for any facts, Fold answers exactly what Project answers for the history they stand for: the
-  // same refusal at the same position, or the same invocation states in the same order. It answers Unfit, naming a
-  // position, only when an invocation or entry number is not below the number of facts. It needs three arrays as
-  // long as the facts to work in, and what they held before does not matter.
+  // F1 fold-computed: given fewer than 2^32 facts and three arrays as long as the facts to work in (what the arrays
+  // held before does not matter), Fold gives one of two answers. Unfit, naming a position: only when some
+  // invocation or entry number is negative or not below the number of facts. Otherwise exactly what Project
+  // answers for the history the facts stand for: the same refusal at the same position, or one cell for each
+  // invocation state, in the same order, standing for that state.
   method Fold(facts: seq<Fact>, cells: array<Cell>, slots: array<Index>, entries: array<bool>) returns (out: Folding)
     requires |facts| < 0x1_0000_0000 && cells.Length == |facts| && slots.Length == |facts| && entries.Length == |facts|
     modifies cells, slots, entries
@@ -258,14 +263,14 @@ abstract module ReceiptsInvocationLifecycleLaws {
         else if p.terminal then ContradictoryTerminal else IllegalTerminal)
 
   // S5 update: a later receipt that is accepted updates only its own invocation: the lifecycle it carries (kept
-  // when the invocation is settled and the receipt is not terminal; an accepted terminal receipt always carries
-  // one), its entry and retryable flag when it carries
+  // when the invocation is settled and the receipt is not terminal), its entry and retryable flag when it carries
   // them, the latest time, and settlement for a terminal receipt; a binding also records its entry and invocation
-  // as bound.
+  // as bound. An accepted terminal receipt always carries a lifecycle.
   lemma S5Update(st: State, r: Receipt, i: int)
     requires !r.kind.Start?
     requires 0 <= i < |st.projs| && st.projs[i].inv == r.inv && forall j | 0 <= j < i :: st.projs[j].inv != r.inv
     requires StepOf(st, r).Next?
+    ensures r.kind.Terminal? ==> r.life.LifeOf?
     ensures var p := st.projs[i];
       var settled := p.terminal || r.kind.Terminal?;
       StepOf(st, r).st == State(st.projs[i := p.(
@@ -277,7 +282,8 @@ abstract module ReceiptsInvocationLifecycleLaws {
         if r.kind.Binding? then st.bound + [r.inv] else st.bound)
 
   // P1 progress: a start, its acceptance, running, completion and its canonical binding are all accepted, and the
-  // invocation ends completed, settled and bound to its entry.
+  // invocation ends completed, settled and bound to its entry, with the start's operation, source, origin and
+  // sequence, no name, the completion's retryable flag and the binding's time.
   lemma P1Progress(inv: int, op: int, src: int, origin: int, e: int, s: int)
     ensures var rs := [Receipt(inv, op, src, Start, LifeOf(Staged), None, Some(origin), None, NoFlag, s, 1),
         Receipt(inv, op, src, Transition, LifeOf(Accepted), None, None, None, NoFlag, s, 2),

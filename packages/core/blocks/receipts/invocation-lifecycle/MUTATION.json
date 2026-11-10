@@ -12,14 +12,14 @@
   "lawGap": 0,
   "survived": 0,
   "accepted": 0,
-  "seconds": 425,
+  "seconds": 729,
   "score": 1,
   "unknown": 0,
   "stillbornRatio": 0.205,
   "filter": null,
   "generated": 195,
   "pass": true,
-  "inputsHash": "4f9112b487d00db5"
+  "inputsHash": "16b0ecad54930014"
  },
  "perLaw": [
   {
@@ -54,7 +54,7 @@
   },
   {
    "law": "S5 update",
-   "killed": 0,
+   "killed": 3,
    "only": 0
   },
   {
@@ -87,6 +87,7 @@
    "killedBy": [
     "I1 settled-stays-settled",
     "L1 legal-moves",
+    "S5 update",
     "build: impl well-formedness"
    ],
    "unmapped": [],
@@ -125,6 +126,7 @@
    "killedBy": [
     "I1 settled-stays-settled",
     "L1 legal-moves",
+    "S5 update",
     "build: impl well-formedness"
    ],
    "unmapped": [],
@@ -143,7 +145,8 @@
    "status": "killed",
    "killedBy": [
     "I1 settled-stays-settled",
-    "L1 legal-moves"
+    "L1 legal-moves",
+    "S5 update"
    ],
    "unmapped": [],
    "timeouts": 0,

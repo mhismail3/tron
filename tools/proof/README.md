@@ -208,7 +208,9 @@ its exit status (`tests/fixtures/mutate-variants/shadow-stub.mjs`). The oracle a
 change under either runs it: `proof check` passes on a fresh cache, and for each block with a `mutate.json` the
 regenerated packet equals the committed `LAWS.md` and shows proof PASS, a current mutation PASS and a
 `REVIEW.json` for the current block hash with every law ACCEPT, and `proof facade --check` finds the generated
-core and façade fresh; a shadowed block also shows a current shadow match and still matches today's TypeScript.
+core and façade fresh; a shadowed block also shows a current shadow match and still matches today's TypeScript;
+and each change listed in a block's `method-mutants.json` (to a compiled method, which `proof mutate` does not
+mutate) makes `proof check` fail on a copy of the block with a verification error.
 An edit that skips any gate fails it.
 
 `scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: `--protocol --check`

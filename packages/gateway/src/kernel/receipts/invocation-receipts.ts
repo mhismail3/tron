@@ -304,7 +304,7 @@ export function invocationProjection(receipts: readonly InvocationReceiptData[])
     }
     const flagged = "retryable" in receipt && receipt.retryable !== undefined;
     if (flagged && firstFlagAt[inv] === undefined) firstFlagAt[inv] = position;
-    const lifecycle = "lifecycle" in receipt ? receipt.lifecycle : undefined;
+    const carried = "lifecycle" in receipt ? receipt.lifecycle : undefined;
     let name: Mark = "Absent";
     let origin: Mark = "Absent";
     if (isStart || start === undefined) {
@@ -315,13 +315,15 @@ export function invocationProjection(receipts: readonly InvocationReceiptData[])
       if ("origin" in receipt) origin = canonicalJSON(receipt.origin) === canonicalJSON(startOrigin(start)) ? "Same" : "Differs";
     }
     return {
-      inv, kind: KINDS_AS_FACTS[receipt.receiptKind], life: lifecycle ? LIFE_FACTS[lifecycle] : NO_LIFE,
+      inv, kind: KINDS_AS_FACTS[receipt.receiptKind], life: carried ? LIFE_FACTS[carried] : NO_LIFE,
       owned: isStart || start === undefined || (start.operationId === receipt.operationId && start.source === receipt.source),
       name, origin, entry, retryable: flagged ? { $: "FlagOf", b: receipt.retryable! } : NO_FLAG,
     };
   });
   const folded = lifecycle.Fold(facts);
   if (folded.$ === "Stopped") throw new Error(REFUSALS[folded.why]);
+  // The numbers above count distinct ids from 0, so each is below the number of facts and the block never
+  // answers Unfit; if the numbering ever broke, the fold stops here rather than project a wrong history.
   if (folded.$ === "Unfit") throw new Error("invocation receipts are not numbered for the fold");
   return folded.cells.map((cell): InvocationProjection => {
     const start = receipts[cell.start] as InvocationStartReceipt;

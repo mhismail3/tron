@@ -12,8 +12,8 @@
   ],
   "excludeSymbols": {
     "TerminalLife": "defined in the laws file (which lifecycles are settled), not implementation",
-    "Fold": "a method: its loops carry proof annotations the mutation tool cannot tell from code. Law F1 is its contract and fixes its answer for every input, so a change to what it answers fails its own proof; its decisions are the functions Begin and Advance, which are mutated",
-    "Collect": "a method called by Fold only; its postcondition says exactly what it returns"
+    "Fold": "a method: its loops carry proof annotations the mutation tool cannot tell from code. Law F1 is its contract and fixes its answer for every input; method-mutants.json lists changes to its statements, each of which the gate test shows the verifier rejects; its decisions are the functions Begin and Advance, which are mutated",
+    "Collect": "a method called by Fold only; its postcondition says exactly what it returns, and method-mutants.json covers it"
   },
   "verify": [
     "blocks/receipts/invocation-lifecycle/Block.dfy"
