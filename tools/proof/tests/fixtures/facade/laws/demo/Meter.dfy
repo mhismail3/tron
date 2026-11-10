@@ -4,8 +4,10 @@
 abstract module MeterLaws {
   newtype Ms = x: int | -0x20_0000_0000_0000 < x < 0x20_0000_0000_0000
   newtype Level = x: int | 0 <= x <= 100
+  newtype Position = x: int | 0 <= x < 0x1_0000_0000
   datatype Reading = Reading(at: Ms, level: Level)
   datatype Trend = Rising(step: Level) | Falling(step: Level) | Flat
+  datatype Scale = Fine | Coarse
   // A linked list: the form in which such a block reads and builds lists.
   datatype Chain<T> = End | Link(first: T, rest: Chain<T>)
   datatype Series = Series(name: Level, readings: Chain<Reading>)
@@ -22,6 +24,14 @@ abstract module MeterLaws {
 
   function Compare(a: Reading, b: Reading): Trend
 
+  function Grain(s: Scale): Level
+
   // The levels of a series, latest reading first.
   function Levels(s: Series): Chain<Level>
+
+  // The positions named in `order` that are below its length, each once, the latest newcomer first. A method:
+  // it works in an array as long as `order`, which the façade lends.
+  method Firsts(order: seq<Position>, taken: array<bool>) returns (firsts: Chain<Position>)
+    requires |order| < 0x1_0000_0000 && taken.Length == |order|
+    modifies taken
 }

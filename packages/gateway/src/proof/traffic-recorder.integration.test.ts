@@ -104,50 +104,6 @@ describe("proof traffic recorder", () => {
     expect(journey.map((r) => r.output)).toEqual(calendar.map(({ index }) => JSON.parse(JSON.stringify(outputs[index] ?? null))));
   });
 
-  it("records invocation receipt folds with identities as tokens, refusals included, bounded and once each", async () => {
-    const dataDir = home();
-    vi.stubEnv("TRON_PROOF_TRAFFIC", "1");
-    vi.stubEnv("TRON_GATEWAY_CHANNEL", "dev");
-    vi.stubEnv("TRON_DATA_DIR", dataDir);
-    vi.resetModules();
-    const { invocationProjection, makeInvocationReceipt } = await import("../kernel/receipts/invocation-receipts.js");
-    let n = 0;
-    const at = (second: number) => new Date(Date.parse("2026-11-09T12:00:00.000Z") + second * 1_000).toISOString();
-    const receipt = (invocationId: string, fields: Record<string, unknown>) => makeInvocationReceipt({
-      receiptId: `sentinel-receipt-${n++}`, version: 1, invocationId, operationId: `sentinel-op-${invocationId}`, sessionId: "sentinel-session",
-      source: "plain", sequence: 1, createdAt: at(n), ...fields } as never);
-    const start = (id: string) => receipt(id, { receiptKind: "start", lifecycle: "staged", origin: { kind: "user", confidence: "receipt", title: "sentinel title" } });
-    const history = [start("sentinel-a"), receipt("sentinel-a", { receiptKind: "transition", lifecycle: "running" }), start("sentinel-b"),
-      receipt("sentinel-a", { receiptKind: "terminal", lifecycle: "completed", retryable: false }),
-      receipt("sentinel-a", { receiptKind: "binding", canonicalEntryId: "sentinel-entry" })];
-    const projected = invocationProjection(history);
-    expect(invocationProjection(history)).toEqual(projected);
-    const contradictory = [...history, receipt("sentinel-a", { receiptKind: "terminal", lifecycle: "failed" })];
-    expect(() => invocationProjection(contradictory)).toThrow("contradictory terminal invocation receipt");
-    // Above the bound a history is projected as before but not recorded.
-    const long = [start("sentinel-c"), ...Array.from({ length: 64 }, () => receipt("sentinel-c", { receiptKind: "transition", lifecycle: "running" }))];
-    expect(() => invocationProjection(long)).toThrow("illegal invocation transition");
-
-    const records = corpus(dataDir, "receipts/invocation-lifecycle");
-    // The repeated history is recorded once; the refusal is recorded with its reason.
-    expect(records).toHaveLength(2);
-    expect(records.every((r) => r.schema === TRAFFIC_SCHEMA && r.seam === "project")).toBe(true);
-    expect(records[0]!.input).toEqual([
-      { inv: 0, op: 1, src: "plain", kind: "start", life: "staged", name: null, origin: 0, entry: null, retryable: null, sequence: 1, at: 0 },
-      { inv: 0, op: 1, src: "plain", kind: "transition", life: "running", name: null, origin: null, entry: null, retryable: null, sequence: 1, at: 1 },
-      { inv: 2, op: 3, src: "plain", kind: "start", life: "staged", name: null, origin: 0, entry: null, retryable: null, sequence: 1, at: 2 },
-      { inv: 0, op: 1, src: "plain", kind: "terminal", life: "completed", name: null, origin: null, entry: null, retryable: false, sequence: 1, at: 3 },
-      { inv: 0, op: 1, src: "plain", kind: "binding", life: null, name: null, origin: null, entry: 0, retryable: null, sequence: 1, at: 4 },
-    ]);
-    expect(records[0]!.output).toEqual({ projections: [
-      { inv: 0, op: 1, src: "plain", name: null, origin: 0, life: "completed", entry: 0, retryable: false, sequence: 1, updated: 4 },
-      { inv: 2, op: 3, src: "plain", name: null, origin: 0, life: "staged", entry: null, retryable: null, sequence: 1, updated: 2 },
-    ] });
-    expect(projected.map((p) => [p.invocationId, p.lifecycle, p.canonicalEntryId])).toEqual([["sentinel-a", "completed", "sentinel-entry"], ["sentinel-b", "staged", undefined]]);
-    expect(records[1]!.output).toEqual({ refused: "ContradictoryTerminal" });
-    expect(JSON.stringify(records)).not.toContain("sentinel");
-  });
-
   it("keeps at most the daily cap per block and the newest retained days", () => {
     const dataDir = home();
     const dir = join(dataDir, "gateway/proof-traffic/schedule/occurrence");

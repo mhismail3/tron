@@ -29,7 +29,12 @@ list, a generic datatype of the shape `L<T> = Nil | Cons(head: T, tail: L<T>)` u
 array of `T`, converted in a loop in both directions (no other generic datatype has a shape); a datatype
 of nullary constructors -> a string union of their names, a one-constructor datatype named like its type -> a
 plain object, any other datatype -> an object tagged by `$`; an unknown constructor is a `TypeError` in either
-direction. `bind(compiled)` binds the façade to another translation of the block; `core` is the checked-in one.
+direction. A constructor without fields is built once and shared (compiled datatype values are never changed).
+A compiled method of the laws (`method M(...) returns (out: T)`) is exposed with its sequence and plain
+parameters only: each `array<T>` parameter is a work array the façade lends, fresh on every call and as long as
+the sequence parameter its precondition names (`a.Length == |s|`), so nothing a call left behind reaches the
+next. A method's preconditions must be ones the façade establishes or checks: that sizing, `|s| < literal`, or a
+call of a compiled predicate on parameters; anything else is refused. `bind(compiled)` binds the façade to another translation of the block; `core` is the checked-in one.
 
 **A shadowed block** is written to `packages/core/dist/<block>` as `core.js`, compiled with the Dafny runtime
 (unedited, with a generated header), and a `facade.ts` that evaluates it: `load(corePath)` binds it to any

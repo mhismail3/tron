@@ -23,7 +23,8 @@ export interface Core {
 export function bind(M: any): Core {
   const inMs = (n: number): number => { if (!Number.isSafeInteger(n) || n < -9007199254740991 || n > 9007199254740991) throw new RangeError(`not a Ms: ${n}`); return n; };
   const fromOpt = (v: any): Opt => v.is_None ? { $: "None" } : v.is_Some ? { $: "Some", v: inMs(v.dtor_v) } : bad("Opt");
-  const toPolicy = (v: Policy): unknown => { switch (v) { case "Latest": return M.Policy.create_Latest(); case "Skip": return M.Policy.create_Skip(); default: return unknown("Policy", v); } };
+  const thePolicy: Record<string, unknown> = Object.assign(Object.create(null), { Latest: M.Policy.create_Latest(), Skip: M.Policy.create_Skip() });
+  const toPolicy = (v: Policy): unknown => thePolicy[v] ?? unknown("Policy", v);
   const fromResult = (v: any): Result => ({ dispatchAt: fromOpt(v.dtor_dispatchAt), next: fromOpt(v.dtor_next), skipped: fromOpt(v.dtor_skipped) });
   const toTrigger = (v: Trigger): unknown => { switch (v?.$) { case "Once": return M.Trigger.create_Once(inMs(v.at)); case "Interval": return M.Trigger.create_Interval(inMs(v.anchor), inMs(v.every)); default: return unknown("Trigger", v); } };
   return {
