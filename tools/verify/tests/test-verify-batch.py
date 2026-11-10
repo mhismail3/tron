@@ -27,6 +27,18 @@ def shipped_runner(root, lock):
     return root / 'tools/verify/gateway.py'
 
 
+# The mini host as this fixture's mini.py runs a job: in this checkout, after recording the job-lock wait cap
+# the job carried, or with no result when `mini-down` exists (`mini-down-probes`: for case probes only).
+# Everything else in the file is the real mini.py.
+MINI_HOST = '''if __name__ == '__main__' and sys.argv[1:2] not in (['remote'], ['status'], ['pool'], ['python']):
+    Path('test-results').mkdir(exist_ok=True)
+    with Path('test-results/executed').open('a') as f: f.write('mini-job wait=' + os.environ.get('TRON_MINI_JOB_WAIT_SECONDS', 'none') + '\\n')
+    if Path('mini-down').exists() or (Path('mini-down-probes').exists() and '-t' in sys.argv):
+        sys.exit(no_result('could not push to mini.test; the mini is unreachable or not set up'))
+    sys.exit(subprocess.run(['python3', 'tools/verify/gateway.py', *sys.argv[1:]], env={**os.environ, 'FIXTURE_ON_MINI': '1'}).returncode)
+'''
+
+
 def wait_until(predicate, message, timeout=30):
     deadline = time.monotonic() + timeout
     while not predicate():
@@ -109,6 +121,9 @@ class BatchTests(unittest.TestCase):
             text = source.read_text()
             # The shared host lock path belongs to real full-Gateway runs, not fixtures.
             text = text.replace("'/tmp/tron-full-gateway.lock'", repr(str(Path(self.temporary.name) / 'full-gateway.lock')))
+            if file == 'mini.py':
+                assert "\nif __name__ == '__main__':\n" in text, 'mini.py moved its entry point; point this fixture at it'
+                text = text.replace("\nif __name__ == '__main__':\n", "\n" + MINI_HOST + "\nif __name__ == '__main__':\n")
             self.write('tools/verify/' + file, text)
         for directory in ('ownership', 'budgets', 'metrics', 'layers'):
             for source in (ROOT / 'tools' / directory).glob('*.py'):
@@ -125,9 +140,11 @@ if sys.argv[1:3] == ['work','issue'] or sys.argv[1:3] == ['work','comment']:
     print('created issue #100')
     sys.exit(0)
 Path('test-results').mkdir(exist_ok=True)
-# The verifier and the candidate's affected checks run their Gateway groups through the real runner,
-# which skips the host lock when this marker is set; only a batch Gateway lane may pass it on.
+# The verifier and the candidate's affected checks run their Gateway groups on the mini (#2446), with the
+# batch's cap on the mini job-lock wait; a caller's held-lock marker never reaches them.
 if os.environ.get('TRON_FULL_GATEWAY_LOCK_HELD'): sys.exit('verify ran marked as holding the full-Gateway lock')
+if sys.argv[1:2] == ['verify'] and sys.argv[-2:] != ['--gateway-host', 'mini']: sys.exit('verify ran without --gateway-host mini')
+if sys.argv[1:2] == ['verify'] and not os.environ.get('TRON_MINI_JOB_WAIT_SECONDS'): sys.exit('verify ran without the mini job wait cap')
 with Path('test-results/executed').open('a') as f: f.write(' '.join(sys.argv[1:3])+'\\n')
 import subprocess
 affected = '--changed' in sys.argv and os.environ.get('FIXTURE_AFFECTED')
@@ -143,14 +160,18 @@ sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
 Path('test-results/verify').mkdir(exist_ok=True)
 verdict = Path('verifier-verdict').read_text().strip() if Path('verifier-verdict').exists() else 'passed'
 if affected == 'red': verdict = 'failed'
-Path('test-results/verify',sha+'.json').write_text(json.dumps({'commit':sha,'verdict':verdict,'message':'locks passed','passingTests':1,'steps':[],'selection':{},'skipped':[]}))
-sys.exit(1 if verdict == 'failed' else 0)
+# verify's own record of a mini lane without a result (tools/verify/verify.py), not a test outcome.
+steps = [{'name':'tests: gateway','status':'no result','exit':75,'reason':'could not push to mini.test','command':['python3','tools/verify/mini.py'],'cwd':'.'}] if Path('mini-down').exists() and sys.argv[1:2] == ['verify'] else []
+if steps: verdict = 'incomplete'
+Path('test-results/verify',sha+'.json').write_text(json.dumps({'commit':sha,'verdict':verdict,'message':'locks passed','passingTests':1,'steps':steps,'selection':{},'skipped':[]}))
+# An incomplete run exits 1 like verify; other verdicts keep exit 0, so the batch must read the report, not the exit.
+sys.exit(1 if verdict in ('failed', 'incomplete') else 0)
 ''', True)
         self.write('tools/verify/gateway.py', '''import json,os,re,sys,time,subprocess
 from pathlib import Path
-# A batch lane runs under the batch's full-Gateway lock and must say so, or the real
-# runner would wait on the lock its own batch holds.
-if os.environ.get('TRON_FULL_GATEWAY_LOCK_HELD') != '1': sys.exit('gateway lane ran without the held-lock marker')
+# Every batch Gateway lane and probe runs on the (stand-in) mini, never on this Mac (#2446).
+if os.environ.get('FIXTURE_ON_MINI') != '1': sys.exit('gateway lane ran on this Mac, not the mini')
+if os.environ.get('TRON_FULL_GATEWAY_LOCK_HELD'): sys.exit('gateway lane ran marked as holding the full-Gateway lock')
 args=sys.argv[1:]
 nested='--config' in args
 name='nested' if nested else 'default'
@@ -318,22 +339,63 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(report['verdict'], 'green')
         self.assertEqual(len(report['results']), 9)
         self.assertTrue(all(lane['seconds'] >= 0 for lane in report['results']))
-        # The test-host pool places the Gateway lanes; with no mini configured they run here, named.
-        self.assertEqual({lane['name']: lane.get('gatewayHost') for lane in report['results'] if lane.get('gatewayLock')},
-                         {'Gateway default': 'on this Mac (no mini is configured)', 'Gateway nested': 'on this Mac (no mini is configured)'})
+        # Both Gateway lanes ran as mini jobs (the stand-in lane refuses this Mac), each capping its job-lock wait at 45 minutes.
+        self.assertEqual([line for line in (self.root / 'test-results/executed').read_text().splitlines() if line.startswith('mini-job')],
+                         ['mini-job wait=2700', 'mini-job wait=2700'])
         self.assertEqual(json.loads((self.root / '.git/verify/green.json').read_text())['commit'], self.git('rev-parse', 'HEAD'))
         self.assertIn('no uncovered commits', self.run_batch().stdout)
         self.assertEqual(len(self.reports()), 1)
 
-    def test_an_inherited_held_lock_marker_reaches_only_the_gateway_lanes(self):
-        # A batch started under a caller's marker must not pass it to lanes that do not hold the lock.
+    def test_an_inherited_held_lock_marker_reaches_no_lane(self):
+        # A batch started under a caller's marker must not pass it on: a local Gateway run inside a lane takes the lock itself.
         self.land('good', 'yes')
         self.env['TRON_FULL_GATEWAY_LOCK_HELD'] = '1'
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.reports()[-1]['verdict'], 'green')
+
+    def test_a_mini_without_a_result_leaves_gateway_coverage_uncovered_not_red_and_never_runs_it_here(self):
+        # #2446: no fallback to this Mac. A mini job with no result (unreachable, or busy past the cap) is no
+        # test outcome: its lanes are uncovered, nothing is attributed or filed, and green.json stays.
+        self.land('good', 'yes')
+        self.land('mini-down', 'yes')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         report = self.reports()[-1]
-        self.assertEqual(report['verdict'], 'green')
-        self.assertEqual([lane['name'] for lane in report['results'] if lane.get('fullGatewayLock')], ['Gateway default', 'Gateway nested'])
+        self.assertEqual(report['verdict'], 'uncovered')
+        lanes = {lane['name']: lane for lane in report['results']}
+        for name in ('full verify', 'Gateway default', 'Gateway nested'):
+            self.assertEqual((lanes[name]['status'], lanes[name]['exit']), ('uncovered', None), name)
+            self.assertIn('the mini gave no result', lanes[name]['reason'])
+        self.assertEqual(lanes['Gateway default']['reason'],
+                         'the mini gave no result: could not push to mini.test; the mini is unreachable or not set up')
+        self.assertEqual(lanes['full verify']['reason'], 'the mini gave no result: tests: gateway: could not push to mini.test')
+        executed = (self.root / 'test-results/executed').read_text().split('\n')
+        self.assertFalse([line for line in executed if line.startswith(('default', 'nested'))], 'no Gateway lane ran here')
+        self.assertTrue(all(lane['exit'] == 0 for name, lane in lanes.items() if name not in ('full verify', 'Gateway default', 'Gateway nested')))
+        self.assertEqual(report['failures'], [])
+        self.assertFalse((self.root / 'test-results/issue-writes').exists(), 'no issue is filed for a missing result')
+        self.assertFalse((self.root / '.git/verify/green.json').exists())
+
+    def test_a_mini_without_a_result_during_attribution_concludes_nothing_and_is_not_memoized(self):
+        # A real red, then no mini result for its case probe: the red is filed unresolved naming the mini,
+        # no probe outcome is cached and no attribution is memoized, so the next batch attributes afresh.
+        self.land('bad', 'yes')
+        self.land('mini-down-probes', 'yes')
+        result = self.run_batch('--base', self.base)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = self.reports()[-1]
+        self.assertEqual(report['verdict'], 'red')
+        [failure] = report['failures']
+        attribution = failure['attribution']
+        self.assertEqual((attribution['status'], attribution.get('commit')), ('unresolved', None))
+        self.assertEqual(attribution['reason'], 'the mini gave no result: could not push to mini.test; the mini is unreachable '
+                                                'or not set up; attribution resumes on the next batch')
+        self.assertEqual([probe['outcome'] for probe in attribution['probes']], ['no-result'])
+        self.assertIsNone(failure['repair'])
+        self.assertEqual(list((self.root / '.git/verify').glob('attributions/*.json')), [])
+        self.assertEqual(list((self.root / '.git/verify').glob('probes/*.json')), [])
+        self.assertEqual(list((self.root / '.git/verify').glob('repairs/*.json')), [])
 
     def test_repeat_requires_explicit_flag_and_executes_all_lanes(self):
         self.land('good', 'yes')
@@ -993,140 +1055,6 @@ if sys.argv[1] == 'clean':
         self.assertEqual(repair['state'], 'refused')
         self.assertIn('packages/gateway/src/auth/token.ts', repair['reason'])
         self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
-
-    def test_a_batch_records_its_gateway_lanes_as_the_full_gateway_lock_holder(self):
-        self.land('good', 'yes')
-        result = self.run_batch('--base', self.base)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        holder = json.loads((Path(self.temporary.name) / 'full-gateway.lock').read_text())
-        self.assertEqual(holder['purpose'], 'verify --batch: Gateway nested')
-        windows = {lane['name']: lane.get('fullGatewayLock') for lane in self.reports()[-1]['results']}
-        self.assertEqual([name for name, window in windows.items() if window], ['Gateway default', 'Gateway nested'])
-        default, nested = windows['Gateway default'], windows['Gateway nested']
-        self.assertLessEqual(default['acquiredAt'], default['releasedAt'])
-        self.assertLessEqual(default['releasedAt'], nested['acquiredAt'], 'batch Gateway lanes never overlap')
-
-    def gateway_runs(self):
-        runs = GatewayRuns(Path(self.temporary.name) / 'full-gateway.lock')
-        self.addCleanup(runs.close)
-        return runs
-
-    def test_held_full_gateway_lock_leaves_gateway_lanes_uncovered_after_the_capped_wait(self):
-        self.land('good', 'yes')
-        # The shipped cap is 45 minutes; this fixture's copy of the batch waits 2 seconds.
-        source = (self.root / 'tools/verify/batch.py').read_text()
-        self.assertIn('\nFULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60\n', source)
-        self.land('tools/verify/batch.py', source.replace('\nFULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60\n', '\nFULL_GATEWAY_LOCK_WAIT_SECONDS = 2\n'))
-        runs = self.gateway_runs()
-        holder = runs.start('holder')
-        runs.wait_holding('holder')
-        result = self.run_batch('--base', self.base)
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        report = self.reports()[-1]
-        self.assertEqual(report['verdict'], 'uncovered')
-        lanes = {lane['name']: lane for lane in report['results']}
-        self.assertEqual(len(lanes), 9)
-        for name in ('Gateway default', 'Gateway nested'):
-            lane = lanes[name]
-            self.assertEqual((lane['status'], lane['exit']), ('uncovered', None))
-            self.assertIn('full-Gateway run held', lane['reason'])
-            self.assertIn(f'"pid": {holder.pid}', lane['reason'])
-            self.assertIn('gateway vitest holder', lane['reason'])
-            self.assertRegex(lane['reason'], r'waited \d+s')
-            self.assertGreaterEqual(lane['seconds'], 2)
-        self.assertNotIn('default', (self.root / 'test-results/executed').read_text().split())
-        self.assertTrue(all(lane['exit'] == 0 for name, lane in lanes.items() if not name.startswith('Gateway ')))
-        self.assertFalse((self.root / '.git/verify/green.json').exists())
-        self.assertIsNone(holder.poll(), 'a capped lane never interrupts the holder')
-        self.assertEqual(sorted(Path(self.temporary.name).glob('full-gateway.lock.queue/*')), [], 'a capped lane leaves no ticket')
-        # The capped lanes left the line: the next run follows the holder.
-        runs.start('next')
-        runs.wait_queued('next')
-        runs.release('holder')
-        runs.wait_all()
-        self.assertEqual(runs.names(), ['holder', 'next'])
-
-    def land_gateway_lane_marker(self, order):
-        """The fixture Gateway lane also records itself in `order` once its lane holds the lock."""
-        source = (self.root / 'tools/verify/gateway.py').read_text()
-        self.land('tools/verify/gateway.py', source.replace(
-            "with (root/'test-results/executed').open('a') as f: f.write(name+' '+repr(args)+'\\n')\n",
-            "with (root/'test-results/executed').open('a') as f: f.write(name+' '+repr(args)+'\\n')\n"
-            f"with open({str(order)!r}, 'a') as f: f.write('batch-'+name+'\\n')\n", 1))
-        self.assertIn('batch-', (self.root / 'tools/verify/gateway.py').read_text())
-
-    def test_due_gateway_lanes_wait_their_turn_in_arrival_order_with_other_gateway_runs(self):
-        runs = self.gateway_runs()
-        self.land_gateway_lane_marker(runs.order)
-        runs.start('holder')
-        runs.wait_holding('holder')
-        output = Path(self.temporary.name) / 'batch.out'
-        with output.open('w') as stream:
-            batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
-                                     env=self.env, stdout=stream, stderr=subprocess.STDOUT)
-        self.addCleanup(lambda: batch.poll() is None and (batch.terminate(), batch.wait(timeout=40)))
-        wait_until(lambda: batch.poll() is not None or 'Gateway default waiting for' in output.read_text(),
-                   'the Gateway lane neither waited nor exited')
-        self.assertIsNone(batch.poll(), 'a due Gateway lane waits behind the holder instead of refusing:\n' + output.read_text())
-        for name in ('later-1', 'later-2'):
-            runs.start(name)
-            runs.wait_queued(name)
-        runs.release('holder')
-        self.assertEqual(batch.wait(timeout=90), 0, output.read_text())
-        runs.wait_all()
-        # The nested lane queues again after its default lane releases, so earlier arrivals go first.
-        self.assertEqual(runs.names(), ['holder', 'batch-default', 'later-1', 'later-2', 'batch-nested'])
-
-    def test_an_interrupt_cancels_a_lane_waiting_for_the_full_gateway_lock(self):
-        """#2253 review: the Gateway lane waits on a chain thread; SIGTERM must end that wait at once,
-        give up its queue place and never start the lane, then report the batch interrupted."""
-        runs = self.gateway_runs()
-        self.land_gateway_lane_marker(runs.order)
-        runs.start('holder')
-        runs.wait_holding('holder')
-        output = Path(self.temporary.name) / 'batch.out'
-        with output.open('w') as stream:
-            batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
-                                     env=self.env, stdout=stream, stderr=subprocess.STDOUT)
-        self.addCleanup(lambda: batch.poll() is None and (batch.kill(), batch.wait(timeout=40)))
-        wait_until(lambda: batch.poll() is not None or 'Gateway default waiting for' in output.read_text(),
-                   'the Gateway lane neither waited nor exited')
-        self.assertIsNone(batch.poll(), output.read_text())
-        batch.send_signal(signal.SIGTERM)
-        self.assertEqual(batch.wait(timeout=15), 130, output.read_text())
-        self.assertEqual(self.reports()[-1]['verdict'], 'interrupted')
-        # The holder still has the lock; once it releases, nothing of the batch takes it.
-        runs.start('after')
-        runs.wait_queued('after')
-        runs.release('holder')
-        runs.wait_all(['holder', 'after'])
-        self.assertEqual(runs.names(), ['holder', 'after'])
-
-    def test_pre_land_gateway_runs_do_not_wait_for_the_ui_journey_lane(self):
-        runs = self.gateway_runs()
-        self.land_gateway_lane_marker(runs.order)
-        gate = Path(self.temporary.name) / 'ui-gate'
-        gate.mkdir()
-        self.land('scripts/ios-gateway-e2e-test', '#!/bin/sh\nmkdir -p test-results\necho boundary-$1 >> test-results/executed\n'
-                  f'if [ "$1" = run-ui ]; then touch {gate}/started; while [ ! -e {gate}/release ]; do sleep 0.05; done; fi\n')
-        output = Path(self.temporary.name) / 'batch.out'
-        with output.open('w') as stream:
-            batch = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
-                                     env=self.env, stdout=stream, stderr=subprocess.STDOUT)
-        self.addCleanup(lambda: batch.poll() is None and (batch.terminate(), batch.wait(timeout=40)))
-        self.addCleanup(lambda: gate.is_dir() and (gate / 'release').touch())
-        wait_until(lambda: (gate / 'started').exists() or batch.poll() is not None, 'the UI journey lane never started', timeout=60)
-        self.assertIsNone(batch.poll(), output.read_text())
-        # The Node chain runs beside the UI journeys; once its Gateway lanes are done, a
-        # pre-land Gateway run takes the free lock at once while the journeys still run.
-        wait_until(lambda: self.reports() and 'Gateway nested' in [lane['name'] for lane in self.reports()[-1]['results']],
-                   'the Gateway lanes never finished beside the UI journeys', timeout=60)
-        runs.start('pre-land')
-        runs.wait_all(['pre-land'])
-        self.assertNotIn('waiting for', runs.stderr('pre-land'))
-        (gate / 'release').touch()
-        self.assertEqual(batch.wait(timeout=90), 0, output.read_text())
-        self.assertEqual(runs.names(), ['batch-default', 'batch-nested', 'pre-land'])
 
     def test_node_and_apple_chains_run_concurrently_and_join_before_the_verdict(self):
         """#2253: each chain waits for a lane of the other, so a sequential batch could not finish.

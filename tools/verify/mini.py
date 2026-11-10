@@ -10,9 +10,11 @@ stdout in order, since verify counts each file's unittest summary after that fil
 Local side: refuse a dirty tree, push the exact HEAD commit to the mini's bare repository, run this same file there
 (sent as source, so both halves are one version), stream its output live, and write the Vitest output files it
 returns where the caller asked, with the mini's checkout path rewritten to this checkout. The exit code is the
-mini's. No result means a failure (exit 2), never a local fallback.
+mini's. No result, never a local fallback, exits EXIT_NO_RESULT with a last `mini: no result: <reason>` line on stderr;
+`no_result_reason` reads it, so a lane that itself exits 75 stays its own exit.
 
-Mini side (`remote`): one job at a time under ~/tron-ci/jobs/gateway.lock, check out the commit in
+Mini side (`remote`): one job at a time under ~/tron-ci/jobs/gateway.lock (a caller's TRON_MINI_JOB_WAIT_SECONDS
+caps the wait for it, naming the holder; unset waits indefinitely), check out the commit in
 ~/tron-ci/jobs/gateway, refuse a Node or npm that differs from the commit's pins, `npm ci` only when the
 commit's Gateway dependency inputs changed (Python tests import Gateway packages too), then run the commit's own
 gateway.py or, once the pinned Dafny passes `proof doctor`, the Python command. Closing the ssh session
@@ -41,9 +43,21 @@ from typing import Sequence
 # The mini runs this source as `python3 -c`, where there is no file and no local checkout.
 ROOT = Path(__file__).resolve().parents[2] if '__file__' in globals() else None
 BASE = 'tron-ci'  # under the mini user's home: tron.git, jobs/, results/
-EXIT_INFRA = 2
+EXIT_NO_RESULT = 75  # EX_TEMPFAIL; with NO_RESULT_LINE, never a test outcome
+NO_RESULT_LINE = 'mini: no result: '
 OUTPUT_OPTION = '--outputFile'
 INCOMING = 'refs/tron-jobs/incoming'  # carries a pushed commit to its job; the job checks it out by object id
+
+
+def no_result(reason: str) -> int:
+    print(NO_RESULT_LINE + ' | '.join(line.strip() for line in reason.strip().splitlines() if line.strip()), file=sys.stderr, flush=True)
+    return EXIT_NO_RESULT
+
+
+def no_result_reason(code: int, output: str) -> str | None:
+    """Why a mini lane produced no result, read from its exit and output; None for a lane result, whatever its exit."""
+    said = [line for line in output.splitlines() if line.startswith('mini: ')]
+    return said[-1][len(NO_RESULT_LINE):] if code == EXIT_NO_RESULT and said and said[-1].startswith(NO_RESULT_LINE) else None
 
 
 def frame(nonce: str) -> bytes:
@@ -141,22 +155,18 @@ def outputs(args: list[str]) -> tuple[list[str], list[str]]:
 
 def local_main(args: list[str], lane: str = 'gateway') -> int:
     if os.environ.get('TRON_UPDATE_LOCKS'):
-        print('mini: TRON_UPDATE_LOCKS would rewrite goldens in the mini checkout, not here; record locks locally', file=sys.stderr)
-        return EXIT_INFRA
+        return no_result('TRON_UPDATE_LOCKS would rewrite goldens in the mini checkout, not here; record locks locally')
     if git('status', '--porcelain', '--untracked-files=normal'):
-        print('mini: the worktree has uncommitted or untracked changes; the mini runs a commit, commit first', file=sys.stderr)
-        return EXIT_INFRA
+        return no_result('the worktree has uncommitted or untracked changes; the mini runs a commit, commit first')
     try:
         ssh = ssh_command()
     except SystemExit as error:
-        print(error, file=sys.stderr)
-        return EXIT_INFRA
+        return no_result(str(error).removeprefix('mini: '))
     sha, destination = git('rev-parse', 'HEAD'), ssh[-1]
     # verify names the commit its report records; a HEAD that moved since then is not that commit.
     expected = os.environ.get('TRON_VERIFY_COMMIT')
     if expected and expected != sha:
-        print(f'mini: HEAD is {sha[:12]}, not the commit under verification {expected[:12]}; no result', file=sys.stderr)
-        return EXIT_INFRA
+        return no_result(f'HEAD is {sha[:12]}, not the commit under verification {expected[:12]}')
     mapped, paths = outputs(args) if lane == 'gateway' else (args, [])
     started = time.time()
     print(f'mini: {lane} lane for {sha[:12]} on {destination}; pushing the commit', flush=True)
@@ -165,16 +175,17 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
                            f'+{sha}:{INCOMING}'], env={**os.environ, 'GIT_SSH_COMMAND': shlex.join(ssh[:-1])},
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if push.returncode:
-        print(f'mini: could not push {sha[:12]} to {destination}:{BASE}/tron.git; the mini is unreachable or not set up, '
-              f'no result (pass --gateway-host local to run here):\n{push.stdout.strip()}', file=sys.stderr)
-        return EXIT_INFRA
+        return no_result(f'could not push {sha[:12]} to {destination}:{BASE}/tron.git; the mini is unreachable or not set up '
+                         f'(pass --gateway-host local to run here): {push.stdout.strip()}')
     print(f'mini: pushed in {time.time() - started:.1f}s', flush=True)
     nonce = uuid.uuid4().hex
+    wait = os.environ.get('TRON_MINI_JOB_WAIT_SECONDS')
     job = json.dumps({'sha': sha, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
+                      'lockWaitSeconds': float(wait) if wait else None,
                       'requester': {'host': platform.node(), 'worktree': str(ROOT), 'pid': os.getpid()}})
     source = Path(__file__).read_text()
     remote = shlex.join(['/usr/bin/python3', '-c', source, 'remote', job])
-    marker, code, received, stopped = frame(nonce), None, set(), []
+    marker, code, refused, received, stopped = frame(nonce), None, None, set(), []
     with subprocess.Popen([*ssh, remote], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as child:
         # Closing stdin ends the mini's job: it sends its lane SIGTERM and returns what it has.
         def stop(signum, _frame):
@@ -197,6 +208,8 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
                     temporary.write_bytes(base64.b64decode(payload))
                     os.replace(temporary, target)
                     received.add(int(index))
+                elif kind == 'refused':
+                    refused = json.loads(value)
                 elif kind == 'exit':
                     code = int(value)
             child.wait()
@@ -207,9 +220,9 @@ def local_main(args: list[str], lane: str = 'gateway') -> int:
         print(f'mini: stopped; the mini job was ended (lane exit {code}); not a test result', file=sys.stderr)
         return 128 + stopped[0]
     if code is None:
-        print(f'mini: the session with {destination} ended (ssh exit {child.returncode}) without a result; not a test result',
-              file=sys.stderr)
-        return EXIT_INFRA
+        return no_result(f'the session with {destination} ended (ssh exit {child.returncode}) without a result')
+    if refused is not None:
+        return no_result(refused)
     missing = [paths[index] for index in range(len(paths)) if index not in received]
     print(f'mini: lane exit {code} after {time.time() - started:.1f}s' + (f'; it wrote no {", ".join(missing)}' if missing else ''), flush=True)
     return code
@@ -269,8 +282,9 @@ def remote_main(job: dict) -> int:
         return code
 
     def refuse(text: str) -> int:
-        print(f'mini: {text}', file=sys.stderr, flush=True)
-        return finish(EXIT_INFRA)
+        """No result: the reason in its own frame, so a lane that itself exits 75 is never read as one."""
+        out.write(b'\n' + frame(nonce) + f'refused {json.dumps(text)}\n'.encode())
+        return finish(EXIT_NO_RESULT)
 
     clean = {'HOME': str(home), 'PATH': '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin', 'PYTHONDONTWRITEBYTECODE': '1',
              'LANG': os.environ.get('LANG', 'en_US.UTF-8'), **{key: os.environ[key] for key in ('USER', 'LOGNAME', 'SHELL') if key in os.environ}}
@@ -302,7 +316,7 @@ def remote_main(job: dict) -> int:
     try:
         (base / 'jobs').mkdir(exist_ok=True)
         with open(base / 'jobs/gateway.lock', 'a+') as lock:
-            announced = 0.0
+            announced, waiting, cap = 0.0, time.monotonic(), job.get('lockWaitSeconds')
             while True:
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -310,11 +324,15 @@ def remote_main(job: dict) -> int:
                 except BlockingIOError:
                     if cancelled.is_set():
                         return refuse('stopped while waiting for the mini job lock')
+                    lock.seek(0)
+                    holder = lock.read().strip() or 'an unrecorded job'
+                    if cap is not None and time.monotonic() - waiting >= cap:
+                        return refuse(f'waited {round(time.monotonic() - waiting)}s for the mini job lock, held by {holder}; '
+                                      'the caller caps that wait, no result')
                     if time.time() - announced >= 60:
-                        lock.seek(0)
-                        say(f'waiting for the mini job lock, held by {lock.read().strip() or "an unrecorded job"}')
+                        say(f'waiting for the mini job lock, held by {holder}')
                         announced = time.time()
-                    time.sleep(2)
+                    time.sleep(min(2, cap) if cap else 2)
             lock.seek(0)
             lock.truncate()
             lock.write(json.dumps({**job['requester'], 'sha': sha}))
@@ -426,5 +444,4 @@ if __name__ == '__main__':
         sys.exit(130)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         # A broken session or frame is infrastructure, never a test failure.
-        print(f'mini: {error}; no result', file=sys.stderr)
-        sys.exit(EXIT_INFRA)
+        sys.exit(no_result(str(error)))
