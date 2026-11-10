@@ -22,39 +22,18 @@ package enum ModelDisplayFormatting {
         "xai": "xAI"
     ]
 
-    // ModelRef carries only an ID; catalog rows use the SDK's authoritative name instead.
-    private static let modelAliases: [String: String] = [
-        "claude-fable-5-1": "Claude Fable 5.1",
-        "claude-haiku-4-5": "Claude Haiku 4.5 (latest)",
-        "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
-        "claude-mythos-5-1": "Claude Mythos 5.1",
-        "claude-opus-4-5": "Claude Opus 4.5 (latest)",
-        "claude-opus-4-5-20251101": "Claude Opus 4.5",
-        "claude-opus-4-8": "Claude Opus 4.8",
-        "claude-opus-5-5": "Claude Opus 5.5",
-        "claude-sonnet-4-5": "Claude Sonnet 4.5 (latest)",
-        "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
-        "claude-sonnet-5": "Claude Sonnet 5"
-    ]
+    // Anthropic's moving aliases; their dated siblings pin a release.
+    private static let latestAliases: Set<String> = ["claude-haiku-4-5", "claude-opus-4-5", "claude-sonnet-4-5"]
 
     private static let wordAliases: [String: String] = [
         "ai": "AI",
         "api": "API",
-        "codex": "Codex",
-        "claude": "Claude",
         "deepseek": "DeepSeek",
-        "gemini": "Gemini",
         "github": "GitHub",
         "gpt": "GPT",
-        "llama": "Llama",
         "llm": "LLM",
         "lm": "LM",
-        "mistral": "Mistral",
         "openai": "OpenAI",
-        "opus": "Opus",
-        "qwen": "Qwen",
-        "sonnet": "Sonnet",
-        "haiku": "Haiku",
         "xai": "xAI"
     ]
 
@@ -66,11 +45,26 @@ package enum ModelDisplayFormatting {
         return words(in: clean).map(formatWord).joined(separator: " ")
     }
 
-    static func model(_ value: String) -> String {
+    /// A bare ModelRef ID named as the catalog names it, so no model needs its own row:
+    /// one- or two-digit tokens join into a version (`5-2` is 5.2) unless zero-padded
+    /// or after a number, which marks a date (`02-23`, `2024-05-13`). Like the catalog,
+    /// the name omits a `-YYYYMMDD` pin, which `pickerIdentity` shows.
+    package static func model(_ value: String) -> String {
         let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return "Unknown model" }
-        if let alias = modelAliases[normalizeKey(clean)] { return alias }
-        return words(in: clean).map(formatWord).joined(separator: " ")
+        let key = normalizeKey(clean)
+        let undated = ModelReleaseDate.pinnedReleaseDate(inID: key) == nil ? key : String(key.dropLast(9))
+        var parts: [String] = []
+        var joinsVersion = false, previousIsNumber = false
+        for token in words(in: undated) {
+            let isNumber = token.allSatisfy { $0.isASCII && $0.isNumber }
+            let isVersion = isNumber && (token.count == 1 || token.count == 2 && !token.hasPrefix("0"))
+            if isVersion, joinsVersion { parts[parts.count - 1] += ".\(token)" } else { parts.append(token) }
+            joinsVersion = isVersion && (joinsVersion || !previousIsNumber)
+            previousIsNumber = isNumber
+        }
+        let name = parts.map(formatWord).joined(separator: " ")
+        return latestAliases.contains(key) ? "\(name) (latest)" : name
     }
 
     package static func reference(provider: String, model: String) -> String {
@@ -79,7 +73,7 @@ package enum ModelDisplayFormatting {
 
     static func pickerIdentity(for model: ModelSummary) -> String {
         let identifier = "\(model.provider)/\(model.id)"
-        if ["claude-haiku-4-5", "claude-opus-4-5", "claude-sonnet-4-5"].contains(model.id) {
+        if latestAliases.contains(model.id) {
             return "Latest alias · \(identifier)"
         }
         if let date = ModelReleaseDate.pinnedReleaseDate(inID: model.id) {

@@ -42,7 +42,7 @@ struct ChatProviderErrorOccurrence: Hashable, Identifiable, Sendable {
         return text
     }
     var modelLabel: String? {
-        let value = [provider.map(ModelDisplayFormatting.provider), model].compactMap { $0 }.joined(separator: " · ")
+        let value = [provider.map(ModelDisplayFormatting.provider), model.map(ModelDisplayFormatting.model)].compactMap { $0 }.joined(separator: " · ")
         return value.isEmpty ? nil : value
     }
     var timeLabel: String { ToolInvocationTimestamp.text(for: timestamp) ?? timestamp }
