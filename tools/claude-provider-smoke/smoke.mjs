@@ -112,7 +112,9 @@ async function live(agentDir, probed) {
   const steps = [];
   const send = async (name, modelId, context, reasoning) => {
     let headers = {};
-    const result = await streamSimple(getBuiltinModel("anthropic", modelId), normalizeContext(context), {
+    // Full context as the Gateway sends it (providers/anthropic-full-context.ts): no message thread.
+    const model = getBuiltinModel("anthropic", modelId);
+    const result = await streamSimple({ ...model, compat: { ...model.compat, supportsMessageThreads: false } }, normalizeContext(context), {
       apiKey: token, headers: tronHeaders, fetch, sessionId: "provider-smoke", cacheRetention: "long", reasoning, maxTokens: 2048,
       onResponse: (response) => { headers = response.headers; },
     }).result();
