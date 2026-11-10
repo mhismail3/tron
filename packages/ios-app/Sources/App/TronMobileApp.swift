@@ -78,6 +78,9 @@ struct TronMobileApp: App {
                 HostedNotificationInboxFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-recovery-notice-fixture") {
                 HostedRecoveryNoticeFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-keychain-locked-fixture") {
+                HostedProductionScene(model: HostedKeychainLockedFixture.model)
+                    .overlay(alignment: .bottom) { HostedKeychainLockedFixture.ReadCount() }
             } else if ProcessInfo.processInfo.arguments.contains("-tron-readonly-attachment-fixture") {
                 HostedReadonlyAttachmentFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-chat-display-fixture") {

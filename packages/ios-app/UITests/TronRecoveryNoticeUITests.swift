@@ -36,6 +36,36 @@ final class TronRecoveryNoticeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Retries 1"].waitForExistence(timeout: 5), "Retry did not receive the tap")
     }
 
+    /// #2296 item 15: a launch whose Keychain cannot be read yet (before the
+    /// first unlock) keeps its paired Mac. Setup is not offered, and the next
+    /// foreground reads the token again.
+    @MainActor
+    func testUnreadableKeychainAtLaunchStaysPairedAndRetriesOnForeground() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-keychain-locked-fixture", "-tronSetupComplete.v1", "YES",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+        let reads = app.staticTexts["keychain-locked-reads"]
+        XCTAssertTrue(reads.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label != %@", "Keychain reads 0"), object: reads)], timeout: 15) == .completed,
+                      "the launch never read the token: \(reads.label)")
+        XCTAssertFalse(app.staticTexts["Welcome to Tron"].waitForExistence(timeout: 5),
+                       "an unreadable Keychain presented setup for a paired Mac: \(app.debugDescription)")
+        keep(app.screenshot(), "2296-keychain-unreadable-launch")
+        let launchReads = reads.label
+
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackgroundSuspended, timeout: 10) || app.state == .runningBackground)
+        app.activate()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label != %@", launchReads), object: reads)], timeout: 20) == .completed,
+                      "the foreground did not read the token again: \(reads.label)")
+        XCTAssertFalse(app.staticTexts["Welcome to Tron"].exists, app.debugDescription)
+        keep(app.screenshot(), "2296-keychain-readable-after-foreground")
+    }
+
     private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {

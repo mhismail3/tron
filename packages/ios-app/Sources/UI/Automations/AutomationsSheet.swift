@@ -163,7 +163,7 @@ struct AutomationsSheet: View {
     private func reconcileViewPreferences() {
         var next = viewPreferences
         next.reconcile(knownProfileIDs: model.profiles.profiles.compactMap { profile in
-            guard profile.isEnabled, model.profiles.token(for: profile) != nil else { return nil }
+            guard profile.isEnabled, (try? model.profiles.token(for: profile)) != nil else { return nil }
             return profile.id
         })
         guard next != viewPreferences else { return }

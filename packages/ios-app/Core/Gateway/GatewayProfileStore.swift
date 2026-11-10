@@ -204,8 +204,9 @@ package final class GatewayProfileStore {
         cachedDocument = replacement
     }
 
-    package func token(for profile: GatewayProfile) -> String? {
-        try? tokens.read(profileID: profile.id)
+    /// Nil when no token is stored; throws when the Keychain cannot be read.
+    package func token(for profile: GatewayProfile) throws -> String? {
+        try tokens.read(profileID: profile.id)
     }
 
     private func requireHealthyMetadata() throws {
