@@ -8,20 +8,13 @@ module SettingsToolSelection refines SettingsToolSelectionLaws {
   // built back to front in an accumulator and reversed at the end.
 
   // a reversed, then b.
-  function RevOnto<T>(a: List<T>, b: List<T>): List<T> {
-    match a
-    case Nil => b
-    case Cons(head, tail) => RevOnto(tail, Cons(head, b))
-  }
+  function RevOnto<T>(a: List<T>, b: List<T>): List<T> { if a.Nil? then b else RevOnto(a.tail, Cons(a.head, b)) }
 
-  predicate Has(t: List<Token>, n: Token) {
-    if t.Nil? then false else if t.head == n then true else Has(t.tail, n)
-  }
+  predicate Has(t: List<Token>, n: Token) { if t.Nil? then false else if t.head == n then true else Has(t.tail, n) }
 
   // acc reversed, then t without its first n.
   function WithoutFrom(t: List<Token>, n: Token, acc: List<Token>): List<Token> {
-    if t.Nil? then RevOnto(acc, Nil)
-    else if t.head == n then RevOnto(acc, t.tail)
+    if t.Nil? then RevOnto(acc, Nil) else if t.head == n then RevOnto(acc, t.tail)
     else WithoutFrom(t.tail, n, Cons(t.head, acc))
   }
 
@@ -35,32 +28,21 @@ module SettingsToolSelection refines SettingsToolSelectionLaws {
 
   function ModsList(tools: List<Token>, entries: List<Entry>): List<Token>
     decreases entries
-  {
-    match entries
-    case Nil => tools
-    case Cons(e, rest) => ModsList(Step(tools, e), rest)
-  }
+  { if entries.Nil? then tools else ModsList(Step(tools, entries.head), entries.tail) }
 
   // acc reversed, then the plain names of es.
   function PlainsFrom(es: List<Entry>, acc: List<Token>): List<Token> {
-    match es
-    case Nil => RevOnto(acc, Nil)
-    case Cons(e, rest) => PlainsFrom(rest, if e.Plain? then Cons(e.n, acc) else acc)
+    if es.Nil? then RevOnto(acc, Nil) else PlainsFrom(es.tail, if es.head.Plain? then Cons(es.head.n, acc) else acc)
   }
 
   function ComposeList(below: BelowList, entries: List<Entry>, defaults: List<Token>): List<Token> {
     var plain := PlainsFrom(entries, Nil);
-    if plain.Cons? || entries.Nil? then ModsList(plain, entries)
-    else ModsList(if below.NamesList? then below.names else defaults, entries)
+    ModsList(if plain.Cons? || entries.Nil? then plain else if below.NamesList? then below.names else defaults, entries)
   }
 
-  predicate HasModifier(es: List<Entry>) {
-    if es.Nil? then false else if IsModifier(es.head) then true else HasModifier(es.tail)
-  }
+  predicate HasModifier(es: List<Entry>) { if es.Nil? then false else if IsModifier(es.head) then true else HasModifier(es.tail) }
 
-  predicate HasPlain(es: List<Entry>) {
-    if es.Nil? then false else if es.head.Plain? then true else HasPlain(es.tail)
-  }
+  predicate HasPlain(es: List<Entry>) { if es.Nil? then false else if es.head.Plain? then true else HasPlain(es.tail) }
 
   // An add (plus) or a remove of each name of a that is not in b, last name first, then acc.
   function MarksFrom(a: List<Token>, b: List<Token>, plus: bool, acc: List<Entry>): List<Entry> {
@@ -69,10 +51,7 @@ module SettingsToolSelection refines SettingsToolSelectionLaws {
   }
 
   predicate Same(a: List<Token>, b: List<Token>) {
-    if a.Nil? then b.Nil?
-    else if b.Nil? then false
-    else if a.head != b.head then false
-    else Same(a.tail, b.tail)
+    if a.Nil? then b.Nil? else if b.Nil? then false else if a.head != b.head then false else Same(a.tail, b.tail)
   }
 
   // An add of each chosen name that is not in base, then a remove of each base name that is not chosen.
@@ -81,8 +60,7 @@ module SettingsToolSelection refines SettingsToolSelectionLaws {
   }
 
   function EncodeList(chosen: List<Entry>, below: BelowList, current: List<Entry>, defaults: List<Token>): HeldList {
-    if HasModifier(chosen) then HoldsList(chosen)
-    else if HasPlain(current) then HoldsList(chosen)
+    if HasModifier(chosen) || HasPlain(current) then HoldsList(chosen)
     else
       var base := if below.NamesList? then below.names else defaults;
       var names := PlainsFrom(chosen, Nil);
@@ -94,22 +72,17 @@ module SettingsToolSelection refines SettingsToolSelectionLaws {
   // ---------- proofs: the linked-list functions compute the sequence definitions ----------
 
   // Back: the items of a linked list, last first.
-  ghost function Back<T>(l: List<T>): seq<T> {
-    match l
-    case Nil => []
-    case Cons(head, tail) => Back(tail) + [head]
-  }
+  ghost function Back<T>(l: List<T>): seq<T> { if l.Nil? then [] else Back(l.tail) + [l.head] }
 
   lemma RevOntoElems<T>(a: List<T>, b: List<T>)
     ensures Elems(RevOnto(a, b)) == Back(a) + Elems(b)
     ensures Back(RevOnto(a, b)) == Back(b) + Elems(a)
   {
-    match a {
-      case Nil => {}
-      case Cons(head, tail) =>
-        RevOntoElems(tail, Cons(head, b));
-        assert Back(tail) + ([head] + Elems(b)) == (Back(tail) + [head]) + Elems(b);
-        assert (Back(b) + [head]) + Elems(tail) == Back(b) + ([head] + Elems(tail));
+    if a.Cons? {
+      var head, tail := a.head, a.tail;
+      RevOntoElems(tail, Cons(head, b));
+      assert Back(tail) + ([head] + Elems(b)) == (Back(tail) + [head]) + Elems(b);
+      assert (Back(b) + [head]) + Elems(tail) == Back(b) + ([head] + Elems(tail));
     }
   }
 
@@ -159,24 +132,24 @@ module SettingsToolSelection refines SettingsToolSelectionLaws {
     decreases entries
     ensures Elems(ModsList(tools, entries)) == Mods(Elems(tools), Elems(entries))
   {
-    match entries {
-      case Nil => {}
-      case Cons(e, rest) =>
-        assert Elems(entries)[0] == e && Elems(entries)[1..] == Elems(rest);
-        StepSpec(tools, e);
-        ModsListSpec(Step(tools, e), rest);
+    if entries.Cons? {
+      var e, rest := entries.head, entries.tail;
+      assert Elems(entries)[0] == e && Elems(entries)[1..] == Elems(rest);
+      StepSpec(tools, e);
+      ModsListSpec(Step(tools, e), rest);
     }
   }
 
   lemma PlainsFromSpec(es: List<Entry>, acc: List<Token>)
     ensures Elems(PlainsFrom(es, acc)) == Back(acc) + Plains(Elems(es))
   {
-    match es {
-      case Nil => RevOntoElems(acc, Nil);
-      case Cons(e, rest) =>
-        assert Elems(es)[0] == e && Elems(es)[1..] == Elems(rest);
-        PlainsFromSpec(rest, if e.Plain? then Cons(e.n, acc) else acc);
-        if e.Plain? { assert (Back(acc) + [e.n]) + Plains(Elems(rest)) == Back(acc) + ([e.n] + Plains(Elems(rest))); }
+    if es.Nil? {
+      RevOntoElems(acc, Nil);
+    } else {
+      var e, rest := es.head, es.tail;
+      assert Elems(es)[0] == e && Elems(es)[1..] == Elems(rest);
+      PlainsFromSpec(rest, if e.Plain? then Cons(e.n, acc) else acc);
+      if e.Plain? { assert (Back(acc) + [e.n]) + Plains(Elems(rest)) == Back(acc) + ([e.n] + Plains(Elems(rest))); }
     }
   }
 
@@ -192,24 +165,16 @@ module SettingsToolSelection refines SettingsToolSelectionLaws {
     ModsListSpec(if below.NamesList? then below.names else defaults, entries);
   }
 
-  // No more plain names than entries; as many exactly when every entry is plain, none exactly when every entry
-  // is a modifier.
+  // No more plain names than entries: none exactly when every entry is a modifier, fewer exactly when one is.
   lemma PlainsCount(es: seq<Entry>)
     decreases |es|
     ensures |Plains(es)| <= |es|
-    ensures |Plains(es)| == |es| <==> forall i | 0 <= i < |es| :: es[i].Plain?
     ensures |Plains(es)| == 0 <==> AllModifiers(es)
+    ensures |Plains(es)| < |es| <==> exists i | 0 <= i < |es| :: IsModifier(es[i])
   {
     if |es| > 0 {
       var rest := es[1..];
       PlainsCount(rest);
-      if (forall i | 0 <= i < |rest| :: rest[i].Plain?) && es[0].Plain? {
-        forall i | 0 <= i < |es| ensures es[i].Plain? { if i > 0 { assert es[i] == rest[i - 1]; } }
-      }
-      if forall i | 0 <= i < |es| :: es[i].Plain? {
-        assert es[0].Plain?;
-        forall i | 0 <= i < |rest| ensures rest[i].Plain? { assert rest[i] == es[i + 1]; }
-      }
       if AllModifiers(rest) && IsModifier(es[0]) {
         forall i | 0 <= i < |es| ensures IsModifier(es[i]) { if i > 0 { assert es[i] == rest[i - 1]; } }
       }
@@ -217,39 +182,24 @@ module SettingsToolSelection refines SettingsToolSelectionLaws {
         assert IsModifier(es[0]);
         forall i | 0 <= i < |rest| ensures IsModifier(rest[i]) { assert rest[i] == es[i + 1]; }
       }
+      if exists i | 0 <= i < |rest| :: IsModifier(rest[i]) {
+        var i :| 0 <= i < |rest| && IsModifier(rest[i]);
+        assert rest[i] == es[i + 1] && IsModifier(es[i + 1]);
+      }
+      if exists i | 0 <= i < |es| :: IsModifier(es[i]) {
+        var i :| 0 <= i < |es| && IsModifier(es[i]);
+        if i > 0 { assert es[i] == rest[i - 1] && IsModifier(rest[i - 1]); }
+      }
     }
   }
 
-  // The entries hold a modifier exactly when they have fewer plain names than entries.
-  lemma HoldsModifier(es: seq<Entry>)
-    ensures (exists i | 0 <= i < |es| :: IsModifier(es[i])) <==> |Plains(es)| < |es|
-  {
-    PlainsCount(es);
-    if exists i | 0 <= i < |es| :: IsModifier(es[i]) {
-      var i :| 0 <= i < |es| && IsModifier(es[i]);
-      assert !es[i].Plain?;
-    }
-    if !forall i | 0 <= i < |es| :: es[i].Plain? {
-      var i :| 0 <= i < |es| && !es[i].Plain?;
-      assert IsModifier(es[i]);
-    }
-  }
-
-  lemma HasModifierSpec(es: List<Entry>)
+  lemma HasSpecs(es: List<Entry>)
     ensures HasModifier(es) <==> |Plains(Elems(es))| < |Elems(es)|
-  {
-    if es.Cons? {
-      HasModifierSpec(es.tail);
-      PlainsCount(Elems(es.tail));
-      assert Elems(es)[0] == es.head && Elems(es)[1..] == Elems(es.tail);
-    }
-  }
-
-  lemma HasPlainSpec(es: List<Entry>)
     ensures HasPlain(es) <==> |Plains(Elems(es))| > 0
   {
     if es.Cons? {
-      HasPlainSpec(es.tail);
+      HasSpecs(es.tail);
+      PlainsCount(Elems(es.tail));
       assert Elems(es)[0] == es.head && Elems(es)[1..] == Elems(es.tail);
     }
   }
@@ -320,21 +270,12 @@ module SettingsToolSelection refines SettingsToolSelectionLaws {
         == Decide(HasModifier(chosen), HasPlain(current), Same(ModsList(base, delta), names), Elems(chosen), Elems(delta))
   {}
 
-  // Encode decides by the same three facts.
-  lemma EncodeDecides(chosen: seq<Entry>, below: Below, current: seq<Entry>, defaults: seq<Token>)
-    ensures var base := if below.Names? then below.names else defaults;
-      var delta := Delta(Plains(chosen), base);
-      Encode(chosen, below, current, defaults)
-        == Decide(exists i | 0 <= i < |chosen| :: IsModifier(chosen[i]), !AllModifiers(current), Mods(base, delta) == Plains(chosen), chosen, delta)
-  {}
-
   lemma L2EncodeComputed(chosen: List<Entry>, below: BelowList, current: List<Entry>, defaults: List<Token>)
   {
     EncodeListDecides(chosen, below, current, defaults);
-    EncodeDecides(Elems(chosen), BelowOf(below), Elems(current), Elems(defaults));
-    HasModifierSpec(chosen);
-    HoldsModifier(Elems(chosen));
-    HasPlainSpec(current);
+    HasSpecs(chosen);
+    PlainsCount(Elems(chosen));
+    HasSpecs(current);
     PlainsCount(Elems(current));
     var base := if below.NamesList? then below.names else defaults;
     var names := PlainsFrom(chosen, Nil);
@@ -344,6 +285,9 @@ module SettingsToolSelection refines SettingsToolSelectionLaws {
     DeltaListSpec(names, base);
     ModsListSpec(base, delta);
     SameSpec(ModsList(base, delta), names);
+    var c, cur, b := Elems(chosen), Elems(current), Elems(base);
+    assert Encode(c, BelowOf(below), cur, Elems(defaults))
+      == Decide(exists i | 0 <= i < |c| :: IsModifier(c[i]), !AllModifiers(cur), Mods(b, Delta(Plains(c), b)) == Plains(c), c, Delta(Plains(c), b));
   }
 
   // ---------- proofs: what Compose and Encode do ----------

@@ -33,11 +33,7 @@ abstract module SettingsToolSelectionLaws {
   // name and none for a choice that holds a modifier.
 
   // Elems: the items of a linked list, in order.
-  ghost function Elems<T>(l: List<T>): seq<T> {
-    match l
-    case Nil => []
-    case Cons(head, tail) => [head] + Elems(tail)
-  }
+  ghost function Elems<T>(l: List<T>): seq<T> { if l.Nil? then [] else [l.head] + Elems(l.tail) }
 
   // BelowOf, HeldOf: the selection below and the held entries that the linked-list forms stand for.
   ghost function BelowOf(b: BelowList): Below { if b.NamesList? then Names(Elems(b.names)) else NoBelow }

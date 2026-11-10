@@ -37,10 +37,7 @@
     "L2 encode-computed": [
       "SettingsToolSelection.L2EncodeComputed",
       "SettingsToolSelection.EncodeListDecides",
-      "SettingsToolSelection.EncodeDecides",
-      "SettingsToolSelection.HasModifierSpec",
-      "SettingsToolSelection.HoldsModifier",
-      "SettingsToolSelection.HasPlainSpec",
+      "SettingsToolSelection.HasSpecs",
       "SettingsToolSelection.MarksFromSpec",
       "SettingsToolSelection.DeltaListSpec",
       "SettingsToolSelection.SameSpec"
