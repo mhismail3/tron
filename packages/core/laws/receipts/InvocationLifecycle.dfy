@@ -180,10 +180,8 @@ abstract module ReceiptsInvocationLifecycleLaws {
       s.sequence, c.updated as int, c.settled)
   }
 
-  // Fits: every invocation and entry number is at least 0 and below the number of facts.
-  ghost predicate Fits(fs: seq<Fact>) {
-    forall k | 0 <= k < |fs| :: 0 <= fs[k].inv as int < |fs| && (fs[k].entry.IndexOf? ==> 0 <= fs[k].entry.i as int < |fs|)
-  }
+  // Fit: the fact's invocation number, and its entry number if it has one, is at least 0 and below n.
+  ghost predicate Fit(f: Fact, n: int) { 0 <= f.inv as int < n && (f.entry.IndexOf? ==> 0 <= f.entry.i as int < n) }
 
   // Agrees: the answer is Project's for the history the facts stand for: the same refusal at the same position,
   // or one cell for each invocation state, in the same order, standing for it.
@@ -196,14 +194,14 @@ abstract module ReceiptsInvocationLifecycleLaws {
   }
 
   // F1 fold-computed: given fewer than 2^32 facts and three arrays as long as the facts to work in (what the arrays
-  // held before does not matter), Fold gives one of two answers. Unfit, naming a position: only when some
+  // held before does not matter), Fold gives one of two answers. Unfit, naming the position of a fact whose
   // invocation or entry number is negative or not below the number of facts. Otherwise exactly what Project
   // answers for the history the facts stand for: the same refusal at the same position, or one cell for each
   // invocation state, in the same order, standing for that state.
   method Fold(facts: seq<Fact>, cells: array<Cell>, slots: array<Index>, entries: array<bool>) returns (out: Folding)
     requires |facts| < 0x1_0000_0000 && cells.Length == |facts| && slots.Length == |facts| && entries.Length == |facts|
     modifies cells, slots, entries
-    ensures out.Unfit? ==> !Fits(facts)
+    ensures out.Unfit? ==> 0 <= out.at as int < |facts| && !Fit(facts[out.at], |facts|)
     ensures !out.Unfit? ==> Agrees(out, facts)
 
   // L1 legal-moves: a settled lifecycle never moves; a terminal receipt may settle any unsettled lifecycle into a
@@ -283,7 +281,7 @@ abstract module ReceiptsInvocationLifecycleLaws {
 
   // P1 progress: a start, its acceptance, running, completion and its canonical binding are all accepted, and the
   // invocation ends completed, settled and bound to its entry, with the start's operation, source, origin and
-  // sequence, no name, the completion's retryable flag and the binding's time.
+  // sequence, no name, the completion's retryable flag (false) and the binding's time.
   lemma P1Progress(inv: int, op: int, src: int, origin: int, e: int, s: int)
     ensures var rs := [Receipt(inv, op, src, Start, LifeOf(Staged), None, Some(origin), None, NoFlag, s, 1),
         Receipt(inv, op, src, Transition, LifeOf(Accepted), None, None, None, NoFlag, s, 2),

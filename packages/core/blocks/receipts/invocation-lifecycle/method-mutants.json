@@ -86,5 +86,45 @@
  {
   "from": "      list := Cons(cells[i], list);",
   "to": "      list := Cons(cells[0], list);"
+ },
+ {
+  "from": "    var noneBound := false;",
+  "to": "    var noneBound := true;"
+ },
+ {
+  "from": "    var count: Index := 0;",
+  "to": "    var count: Index := 1;"
+ },
+ {
+  "from": "      if f.inv < 0 || f.inv >= n ||",
+  "to": "      if f.inv < 1 || f.inv >= n ||"
+ },
+ {
+  "from": "        return Unfit(k);",
+  "to": "        return Unfit(0);"
+ },
+ {
+  "from": "      if f.kind.Start? {",
+  "to": "      if f.kind.Binding? {"
+ },
+ {
+  "from": "        if verdict.Refuse? {",
+  "to": "        if !verdict.Refuse? {"
+ },
+ {
+  "from": "        if f.kind.Binding? {\n          if f.entry.IndexOf? { entries",
+  "to": "        if f.kind.Terminal? {\n          if f.entry.IndexOf? { entries"
+ },
+ {
+  "from": "      var i := slots[f.inv];",
+  "to": "      var i := slots[0];"
+ },
+ {
+  "from": "    var i := count;\n    while i > 0",
+  "to": "    var i := 0;\n    while i > 0"
+ },
+ {
+  "from": "    while i > 0\n      invariant 0 <= i <= count && Elems(list)",
+  "to": "    while i > 1\n      invariant 0 <= i <= count && Elems(list)"
  }
 ]

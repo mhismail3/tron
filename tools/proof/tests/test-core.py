@@ -101,14 +101,21 @@ class CoreBlocksTest(unittest.TestCase):
             mutants = json.loads(listed.read_text())
             self.assertTrue(mutants, f"{block}: no method mutants listed")
 
-            def rejected(mutant: dict[str, str]) -> str | None:
-                if source.count(mutant["from"]) != 1:
-                    return f"'{mutant['from']}' does not occur exactly once in {impl}"
+            def checked(text: str) -> subprocess.CompletedProcess:
                 with tempfile.TemporaryDirectory(prefix="tron-proof-method-mutant.") as tmp:
                     for part in ("laws", "blocks"):
                         shutil.copytree(CORE / part, Path(tmp) / part)
-                    (Path(tmp) / impl).write_text(source.replace(mutant["from"], mutant["to"]))
-                    check = tron("check", block, "--root", tmp, "--cache", str(Path(tmp) / "cache.json"))
+                    (Path(tmp) / impl).write_text(text)
+                    return tron("check", block, "--root", tmp, "--cache", str(Path(tmp) / "cache.json"))
+
+            # The control: an unchanged copy verifies, so a rejection below is the change's doing.
+            control = checked(source)
+            self.assertEqual(control.returncode, 0, control.stdout + control.stderr)
+
+            def rejected(mutant: dict[str, str]) -> str | None:
+                if source.count(mutant["from"]) != 1:
+                    return f"'{mutant['from']}' does not occur exactly once in {impl}"
+                check = checked(source.replace(mutant["from"], mutant["to"]))
                 # A verification error, not a change the compiler refuses.
                 if check.returncode == 1 and re.search(r"finished with \d+ verified, [1-9]\d* errors?", check.stdout + check.stderr):
                     return None
