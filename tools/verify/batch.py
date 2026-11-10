@@ -796,6 +796,13 @@ def relative(path: str) -> str:
     return str(Path(path).relative_to(common)) if Path(path).is_relative_to(common) else Path(path).name
 
 
+def candidates(shas: list[str], covered: list[str]) -> str:
+    """A narrowed candidate list by name; the whole range by count, so a long range stays within the 64 KiB issue bound."""
+    if shas == covered:
+        return f'Candidates: all {len(covered)} covered commits of the range.\n'
+    return 'Candidates: ' + ', '.join(f"`{sha}`" for sha in shas) + '.\n'
+
+
 def file_issue(report: dict, directory: Path, state: Path) -> dict:
     attribution, journal = report['attribution'], report.get('repair')
     body = ('## Failed verification batch\n\n'
@@ -803,9 +810,10 @@ def file_issue(report: dict, directory: Path, state: Path) -> dict:
             f"Lane: {report['failed']['name']}; attribution: {attribution['status']}"
             + (f" ({attribution['reason']})" if attribution.get('reason') else '') + '.\n\n'
             + (f"Causal landing: `{attribution['commit']}` (first parent `{attribution['parent']}`).\n" if attribution.get('commit') else
-               'Candidates: ' + ', '.join(f"`{sha}`" for sha in attribution.get('candidates', [])) + '.\n')
+               candidates(attribution.get('candidates', []), report['commits']))
             + repair_summary(journal)
-            + '\nFiles: ' + ', '.join(f'`{p}`' for p in attribution.get('files', report['files']))
+            + ('\nFiles: ' + ', '.join(f'`{p}`' for p in attribution['files']) if 'files' in attribution else
+               f"\nFiles: {len(report['files'])} changed in the range (`report.json` `files`).")
             + '\n\nThe first failure, exact commands, counts and logs are frozen in the repository-local '
             f"Git common directory at `verify/batches/{directory.parent.name}/` (`evidence.json` manifest). "
             'No test, golden, assertion or timeout changed. The red stays red until a raw-green batch.\n')

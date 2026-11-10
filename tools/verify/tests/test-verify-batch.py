@@ -1344,6 +1344,12 @@ while other and not Path('test-results/started-'+other).exists() and time.time()
         self.assertEqual(report['results'][1]['status'], 'uncovered')
         self.assertEqual(report['failures'][0]['attribution'], {'status': 'unresolved', 'reason': 'owner provided no exact-case attribution selector',
                                                                 'candidates': report['commits']})
+        # The issue names the range, not each of its commits and files, so a long range stays within the
+        # issue tracker's 64 KiB bound (#2413: 1,052 commits made a 109 KB body that was refused).
+        body = next((self.root / '.git/verify/batches').glob('*/failure-*/issue.md')).read_text()
+        self.assertIn(f"Candidates: all {len(report['commits'])} covered commits of the range.", body)
+        self.assertIn(f"Files: {len(report['files'])} changed in the range (`report.json` `files`).", body)
+        self.assertFalse([sha for sha in report['commits'] if sha != report['head'] and sha in body])
         self.assertFalse(list((self.root / '.git/verify/batches').glob('*/attribution-*')))
         self.assertFalse((self.root / '.git/verify/attributions').exists())
         self.assertFalse(self.repair())
