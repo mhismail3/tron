@@ -62,6 +62,15 @@ Path(output).write_text(json.dumps({'testResults': [{'name': str(ROOT / 'package
 sys.exit(3 if 'fail' in args else 0)
 '''
 
+# A stand-in Python test file: progress on stdout, unittest's summary on stderr, then where it ran.
+PROBE = r'''import os, sys
+from pathlib import Path
+print('stand-in python progress', flush=True)
+print('Ran 1 test in 0.001s', file=sys.stderr, flush=True)
+print(Path.cwd().relative_to(Path(os.environ['HOME']).resolve()), flush=True)
+sys.exit(int(sys.argv[1]) if sys.argv[1:] else 0)
+'''
+
 
 class MiniGatewayLane(unittest.TestCase):
     def setUp(self) -> None:
@@ -163,6 +172,20 @@ class MiniGatewayLane(unittest.TestCase):
         self.assertNotIn('pushing', dirty.stdout)
         self.assertFalse(report.exists())
 
+    def test_a_python_lane_runs_its_command_at_the_exact_commit_with_one_ordered_output(self) -> None:
+        # #2397: verify's Python group, the same per-file command, run in the mini checkout. stderr comes back in order
+        # with stdout, as verify counts each file's summary after its marker.
+        self.write('tools/probe.py', PROBE)
+        sha = self.commit('probe')
+        command = "echo '### one' && python3 tools/probe.py && echo '### two' && python3 tools/probe.py 4"
+        result = subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), 'python', command], cwd=self.local,
+                                env={**self.env, 'TRON_VERIFY_COMMIT': sha}, text=True, capture_output=True, timeout=300)
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+        run = '### {}\nstand-in python progress\nRan 1 test in 0.001s\ntron-ci/jobs/gateway\n'
+        self.assertIn(run.format('one') + run.format('two'), result.stdout, result.stderr)
+        self.assertIn('mini: python lane for', result.stdout)
+        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=(self.mini / 'tron-ci/jobs/gateway').resolve()), sha)
+
     def pool(self, *args: str) -> subprocess.CompletedProcess:
         # The local lane is gateway.py here; its stand-in reads its working directory relative to HOME.
         return subprocess.run(['python3', str(self.local / 'tools/verify/mini.py'), 'pool', *args], cwd=self.local / 'packages/gateway',
@@ -190,7 +213,7 @@ class MiniGatewayLane(unittest.TestCase):
             lock.write(json.dumps({'host': 'other', 'worktree': '/w', 'pid': 1}))
             lock.flush()
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            here('the mini is busy with another Gateway job')
+            here('the mini is busy with another job')
         outside = self.temporary / 'outside.config.ts'
         here(f'an argument names {outside}, outside this checkout', '--config', str(outside))
         # A relative argument resolves against the Gateway package, as the lane reads it.

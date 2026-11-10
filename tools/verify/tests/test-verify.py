@@ -230,7 +230,8 @@ class ExternalVerificationTests(VerifyCase):
         r.write("packages/gateway/consumer.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
         r.write("packages/gateway/vitest.nested.config.ts", 'const nestedTestFiles = ["src/nested.integration.test.ts"];\n')
         r.write("packages/gateway/vitest.mac-terminal.config.ts", 'const macTerminalTestFiles = ["src/mac.integration.test.ts"];\n')
-        self.declare("alpha", ["scripts/tron test gateway " + " ".join(files)])
+        python = self.external("pooled")
+        self.declare("alpha", ["scripts/tron test gateway " + " ".join(files), python])
         r.commit("Gateway consumer declarations")
         # Plan-only: classify inputs without running Gateway checks or installing dependencies.
         planned = r.verify("--module", "repo/alpha", "--plan")
@@ -256,9 +257,25 @@ class ExternalVerificationTests(VerifyCase):
             plan = json.loads(planned.stdout[planned.stdout.index("{"):])
             self.assertEqual({c["name"]: Path(c["command"][1]).name for c in plan["commands"] if c["name"].startswith("tests: gateway")},
                              {"tests: gateway": runner, "tests: gateway-nested": runner}, options)
+            # The Python group goes to the same host (#2397): the same per-file command, run there by mini.py.
+            local_python = " && ".join(f"echo '### verify file: {path}' && python3 {path}"
+                                       for path in ("mods/alpha/test-alpha.py", "scripts/test-pooled.py"))
+            python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
+            self.assertEqual([python_command[0], Path(python_command[1]).name, *python_command[2:]] if runner == "mini.py"
+                             else python_command, ["python3", "mini.py", "python", local_python] if runner == "mini.py"
+                             else local_python, options)
             self.assertEqual(plan["gatewayHost"], {"host": runner.removesuffix(".py").replace("gateway", "local"), "reason": reason})
-            self.assertIn(f"gateway lanes: on {'the Mac mini' if runner == 'mini.py' else 'this Mac'} ({reason})", planned.stdout)
+            self.assertIn(f"gateway and python lanes: on {'the Mac mini' if runner == 'mini.py' else 'this Mac'} ({reason})", planned.stdout)
             self.assertIn("mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", planned.stdout)
+        # A Python-only selection is placed by the pool too, not kept here for want of a Gateway lane.
+        r.git("config", "tron.verify.mini", "mini.test")
+        self.declare("alpha", [python])
+        r.commit("Python-only consumer")
+        planned = r.verify("--module", "repo/alpha", "--plan")
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        python_command = next(c["command"] for c in plan["commands"] if c["name"] == "tests: python")
+        self.assertEqual((Path(python_command[1]).name, python_command[2]), ("mini.py", "python"), planned.stdout)
+        self.assertIn("gateway and python lanes: on the Mac mini (reachable and idle, load 1.5)", planned.stdout)
         r.git("config", "--unset", "tron.verify.mini")
         self.declare("alpha", ["scripts/tron test gateway scripts/outside.test.ts"])
         r.commit("unsupported Gateway input")
@@ -407,7 +424,7 @@ class GatewayFailureTests(VerifyCase):
         r.env["PATH"] = f"{stub}:{r.env['PATH']}"
         result = r.verify("--module", "gateway/sample", "--gateway-host", "mini")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("gateway lanes: on the Mac mini", result.stdout)
+        self.assertIn("gateway and python lanes: on the Mac mini", result.stdout)
         report = r.report()
         step = next(step for step in report["steps"] if step["name"] == "tests: gateway")
         self.assertEqual((report["verdict"], step["status"], step["exit"]), ("failed", "failed", 2))

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Run one Gateway Vitest lane (tools/verify/gateway.py) on the Mac mini test host and return its result as this run's.
+"""Run one Gateway Vitest lane (tools/verify/gateway.py) or verify's Python group on the Mac mini test host and return
+its result as this run's.
 
 The test-host pool is {the mini, this Mac}: `choose_host` picks the mini when it is configured, reachable and idle,
 and otherwise this Mac, always with its reason; `mini.py pool [vitest args]` runs one lane on the chosen host.
+`mini.py python <command>` runs verify's per-file Python command in the mini checkout, its stderr merged into
+stdout in order, since verify counts each file's unittest summary after that file's marker.
 
 Local side: refuse a dirty tree, push the exact HEAD commit to the mini's bare repository, run this same file there
 (sent as source, so both halves are one version), stream its output live, and write the Vitest output files it
@@ -11,7 +14,8 @@ mini's. No result means a failure (exit 2), never a local fallback.
 
 Mini side (`remote`): one job at a time under ~/tron-ci/jobs/gateway.lock, check out the commit in
 ~/tron-ci/jobs/gateway, refuse a Node or npm that differs from the commit's pins, `npm ci` only when the
-commit's Gateway dependency inputs changed, then run the commit's own gateway.py. Closing the ssh session
+commit's Gateway dependency inputs changed (Python tests import Gateway packages too), then run the commit's own
+gateway.py or the Python command. Closing the ssh session
 (the local side stopped) sends that lane SIGTERM. The mini host is `git config tron.verify.mini` (an ssh
 destination) and `tron.verify.miniIdentity` (an optional key file). Runs on the mini's /usr/bin/python3.
 """
@@ -101,7 +105,7 @@ def choose_host(args: Sequence[str] = ()) -> tuple[str, str]:
     if not ready:
         return 'local', f'the mini is not set up: no ~/{BASE}/tron.git'
     if busy:
-        return 'local', 'the mini is busy with another Gateway job'
+        return 'local', 'the mini is busy with another job'
     return 'mini', f'reachable and idle, load {load:.1f}'
 
 
@@ -135,7 +139,7 @@ def outputs(args: list[str]) -> tuple[list[str], list[str]]:
     return mapped, [str(ROOT / 'packages/gateway' / path) for path in paths]
 
 
-def local_main(args: list[str]) -> int:
+def local_main(args: list[str], lane: str = 'gateway') -> int:
     if os.environ.get('TRON_UPDATE_LOCKS'):
         print('mini: TRON_UPDATE_LOCKS would rewrite goldens in the mini checkout, not here; record locks locally', file=sys.stderr)
         return EXIT_INFRA
@@ -153,9 +157,9 @@ def local_main(args: list[str]) -> int:
     if expected and expected != sha:
         print(f'mini: HEAD is {sha[:12]}, not the commit under verification {expected[:12]}; no result', file=sys.stderr)
         return EXIT_INFRA
-    mapped, paths = outputs(args)
+    mapped, paths = outputs(args) if lane == 'gateway' else (args, [])
     started = time.time()
-    print(f'mini: Gateway lane for {sha[:12]} on {destination}; pushing the commit', flush=True)
+    print(f'mini: {lane} lane for {sha[:12]} on {destination}; pushing the commit', flush=True)
     # One shared incoming ref, overwritten by every push: a push whose job never starts leaves nothing that grows.
     push = subprocess.run(['git', '-C', str(ROOT), 'push', '--no-verify', '--quiet', f'{destination}:{BASE}/tron.git',
                            f'+{sha}:{INCOMING}'], env={**os.environ, 'GIT_SSH_COMMAND': shlex.join(ssh[:-1])},
@@ -166,7 +170,7 @@ def local_main(args: list[str]) -> int:
         return EXIT_INFRA
     print(f'mini: pushed in {time.time() - started:.1f}s', flush=True)
     nonce = uuid.uuid4().hex
-    job = json.dumps({'sha': sha, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
+    job = json.dumps({'sha': sha, 'lane': lane, 'args': mapped, 'outputs': len(paths), 'nonce': nonce, 'localRoot': str(ROOT),
                       'requester': {'host': platform.node(), 'worktree': str(ROOT), 'pid': os.getpid()}})
     source = Path(__file__).read_text()
     remote = shlex.join(['/usr/bin/python3', '-c', source, 'remote', job])
@@ -214,7 +218,7 @@ def local_main(args: list[str]) -> int:
 # ---------------------------------------------------------------------------- mini side
 
 def remote_status() -> int:
-    """Whether the mini is set up, whether a Gateway job holds its job lock, and its load: the pool's availability probe."""
+    """Whether the mini is set up, whether a job holds its job lock, and its load: the pool's availability probe."""
     lock_path = Path.home() / BASE / 'jobs/gateway.lock'
     busy = False
     if lock_path.is_file():
@@ -287,10 +291,10 @@ def remote_main(job: dict) -> int:
                     break
                 except BlockingIOError:
                     if cancelled.is_set():
-                        return refuse('stopped while waiting for the mini Gateway job lock')
+                        return refuse('stopped while waiting for the mini job lock')
                     if time.time() - announced >= 60:
                         lock.seek(0)
-                        say(f'waiting for the mini Gateway job lock, held by {lock.read().strip() or "an unrecorded job"}')
+                        say(f'waiting for the mini job lock, held by {lock.read().strip() or "an unrecorded job"}')
                         announced = time.time()
                     time.sleep(2)
             lock.seek(0)
@@ -356,6 +360,9 @@ def remote_main(job: dict) -> int:
             if cancelled.is_set():
                 return refuse('stopped before the lane started')
 
+            if job['lane'] == 'python':
+                # One stream, so each file's unittest summary (stderr) stays after its marker (stdout).
+                return finish(stream('/bin/bash', '-c', 'exec 2>&1\n' + job['args'][0], cwd=checkout))
             results.mkdir(parents=True, exist_ok=True)
             try:
                 files = [results / f'output-{index}' for index in range(job['outputs'])]
@@ -384,7 +391,10 @@ if __name__ == '__main__':
     if sys.argv[1:2] == ['status']:
         sys.exit(remote_status())
     try:
-        sys.exit(pool_main(sys.argv[2:]) if sys.argv[1:2] == ['pool'] else local_main(sys.argv[1:]))
+        if sys.argv[1:2] == ['python'] and len(sys.argv) != 3:
+            sys.exit('usage: mini.py python <command>')
+        sys.exit(pool_main(sys.argv[2:]) if sys.argv[1:2] == ['pool'] else local_main(sys.argv[2:], 'python')
+                 if sys.argv[1:2] == ['python'] else local_main(sys.argv[1:]))
     except KeyboardInterrupt:
         sys.exit(130)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
