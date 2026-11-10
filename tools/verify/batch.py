@@ -288,7 +288,11 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
                 shutil.copytree(logs, directory / 'steps', dirs_exist_ok=True)
             failed = next((step for step in report['steps'] if step['status'] == 'failed'), None)
             if failed and failed.get('command'):
-                result['probe'] = {'name': failed['name'], 'command': failed['command'], 'cwd': failed['cwd']}
+                command = failed['command']
+                build = next((step for step in report['steps'] if step['name'] == 'ios build' and step.get('command')), None)
+                if (failed['name'] == 'tests: ios' or failed['name'].startswith('tests: ios ')) and build:
+                    command = f"{shlex.join(build['command'])} && {shlex.join(command) if isinstance(command, list) else command}"
+                result['probe'] = {'name': failed['name'], 'command': command, 'cwd': failed['cwd']}
             failures = failed.get('failedTests', []) if failed else []
             detail = (root / failed['log']).read_text(errors='replace') if failed and failed.get('log') else ''
             result['signature'] = signature(report['message'], failures, detail, root)

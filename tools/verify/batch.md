@@ -57,6 +57,8 @@ freeze the first failure after every lane joined and before any probe runs.
 **Attribution** probes one exact case (Vitest file plus `-t` anchoring the describe and test
 titles joined with ` > `, as Vitest matches them; XCTest class/method;
 or the owner's `--only-testing` selector) in one disposable worktree; it never reruns a suite.
+A failed verifier iOS test step's (`tests: ios`, `tests: ios k/N`; not the journeys) probe runs the verifier's recorded `ios build` before its `run`, since the
+probe worktree starts without test products.
 A red lane with no such selector is uncovered and filed unresolved, naming the range by its commit and file counts (the full lists stay in `report.json`).
 Main's first-parent chain is the landing history: an ordinary commit or a two-parent
 integration is one unit; octopus history is unresolved. Proof requires two fresh failing
