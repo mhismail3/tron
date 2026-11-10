@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { importGatewaySource } from "./gateway-source.mjs";
+import { mulberry32 } from "./random.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 // The receipts seam records on an opted-in Debug Gateway; an oracle run must never add its own calls to that corpus.
@@ -85,10 +86,7 @@ if (replay) {
   }
 } else {
   const count = Number(countArg ?? 5000);
-  let seed = Number(seedArg ?? 9);
-  // mulberry32: exact 32-bit integer steps (a floating-point LCG loses precision and falls into a short cycle).
-  const rnd = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const rnd = mulberry32(Number(seedArg ?? 9));
   const int = (lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1));
   const pick = (xs) => xs[int(0, xs.length - 1)];
   const NEXT = { staged: ["accepted", "running", "queued"], accepted: ["queued", "running"], queued: ["running", "settling"], running: ["waitingForInput", "retrying", "settling"],

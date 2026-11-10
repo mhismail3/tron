@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { importGatewaySource } from "./gateway-source.mjs";
+import { mulberry32 } from "./random.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 // The schedule seams record on an opted-in Debug Gateway; an oracle run must never add its own calls to that corpus.
@@ -21,7 +22,7 @@ const [corePath, countArg, seedArg, ...replayFiles] = process.argv.slice(2);
 if (!corePath) { console.error("usage: schedule-occurrence.mjs <compiled core.js> [count] [seed] | --replay <corpus.jsonl>..."); process.exit(2); }
 const replay = countArg === "--replay";
 const count = Number(countArg ?? 20000);
-let seed = Number(seedArg ?? 7);
+const seed = Number(seedArg ?? 7);
 
 // The compiled core under test, called through its generated façade with requests in the core's own shapes.
 const { load } = await import(join(REPO, "packages/core/dist/schedule/occurrence/facade.ts"));
@@ -87,7 +88,7 @@ if (replay) {
 
 // Inputs: triggers near and far from their reference time, periods from 1 s to a week (including odd ones),
 // stored next occurrences that are usually real occurrences and sometimes arbitrary.
-const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+const rnd = mulberry32(seed);
 const int = (lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1));
 const BASE = 1_600_000_000_000;
 function generated() {

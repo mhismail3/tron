@@ -18,6 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseWire } from "../dafny2wire/dafny2wire.mjs";
+import { mulberry32 } from "../oracles/random.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const FIXTURE = join(ROOT, "tools/proof/tests/fixtures/wire/Wire.dfy");
@@ -34,8 +35,7 @@ test("protocol: types.ts is generated, and its TypeScript and tolerant Swift cod
   const types = parseWire(readFileSync(PROTOCOL, "utf8"));
   const byName = new Map(types.map((ty) => [ty.name, ty]));
 
-  let seed = 23;
-  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const rnd = mulberry32(23);
   const pick = (xs) => xs[Math.floor(rnd() * xs.length)];
   const STRINGS = ["", "a", 'q"uote', "back\\slash", "line\nbreak", "\u0001ctl", "é ✓ 😀", "2026-11-09T09:00:00.000Z"];
   const DOUBLES = [0, 1, 7, 100, 0.5, 1 / 3, 1e21, 5e-324, -2, 1700000000000];
@@ -135,8 +135,7 @@ test("generated TypeScript and Swift codecs agree byte for byte", async (t) => {
   assert.equal(gen.status, 0, gen.stderr);
   const W = await import(pathToFileURL(join(dir, "wire.ts")).href);
 
-  let seed = 11;
-  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const rnd = mulberry32(11);
   const pick = (xs) => xs[Math.floor(rnd() * xs.length)];
   const STRINGS = ["", "a", 'quote"q', "back\\slash", "new\nline", "tab\t\r", "\u0001\u001f ctl", "é ✓ 😀 中", "/slash", "\u2028sep"];
   const KEYS = ["a", "b", "0", "1", "10", "01", "4294967294", "4294967295", "__proto__", "constructor", "-1", "z"];

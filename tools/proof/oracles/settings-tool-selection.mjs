@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { importGatewaySource } from "./gateway-source.mjs";
+import { mulberry32 } from "./random.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 // The settings seams record on an opted-in Debug Gateway; an oracle run must never add its own calls to that corpus.
@@ -67,8 +68,7 @@ if (replay) {
   }
 } else {
   const count = Number(countArg ?? 20000);
-  let seed = Number(seedArg ?? 5);
-  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const rnd = mulberry32(Number(seedArg ?? 5));
   const int = (lo, hi) => lo + Math.floor(rnd() * (hi - lo + 1));
   const NAMES = ["read", "bash", "edit", "write", "web", "grep", "ls", "find", ""];
   const name = () => (rnd() < 0.03 ? "" : NAMES[int(0, NAMES.length - 2)]);
