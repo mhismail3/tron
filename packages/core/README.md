@@ -28,16 +28,16 @@ Run by its shell: `schedule/occurrence` (Automation once/interval occurrences; s
 `packages/gateway/src/automations/schedule.ts`, core in `packages/gateway/src/core/schedule/occurrence`),
 `settings/precedence` (which layer's value a setting resolves to, which layers are shown and what lies below a
 layer, over value tokens; shell `packages/gateway/src/kernel/settings/settings-resolver.ts`, core in
-`packages/gateway/src/core/settings/precedence`) and `settings/tool-selection` (how a tool selection's plain
+`packages/gateway/src/core/settings/precedence`), `settings/tool-selection` (how a tool selection's plain
 names and +name/-name modifiers compose and are stored, over name tokens; shell
 `packages/gateway/src/kernel/settings/settings-types.ts`, core in
-`packages/gateway/src/core/settings/tool-selection`).
+`packages/gateway/src/core/settings/tool-selection`) and `receipts/invocation-lifecycle` (how a session's
+invocation receipts fold into each invocation's lifecycle, and which histories are refused; shell
+`packages/gateway/src/kernel/receipts/invocation-receipts.ts`, core in
+`packages/gateway/src/core/receipts/invocation-lifecycle`).
 
 Shadowed: `schedule/calendar` (calendar occurrences over a zone transition table from
-`packages/gateway/src/automations/zone-table.ts`; shell `packages/gateway/src/automations/schedule.ts`);
-`receipts/invocation-lifecycle` (how a session's invocation
-receipts fold into each invocation's lifecycle, and which histories are refused; shell
-`packages/gateway/src/kernel/receipts/invocation-receipts.ts`).
+`packages/gateway/src/automations/zone-table.ts`; shell `packages/gateway/src/automations/schedule.ts`).
 
 ## Block contract
 
@@ -54,17 +54,19 @@ receipts fold into each invocation's lifecycle, and which histories are refused;
   linked list (`datatype List<T> = Nil | Cons(head: T, tail: List<T>)`) with tail-recursive functions, which
   compile to loops; the façade passes it to and from the shell as an array. Its laws may define what it computes
   over sequences in ghost functions and state that the compiled functions compute exactly that
-  (`settings/tool-selection`).
+  (`settings/tool-selection`). A fold that needs a table works in arrays: a compiled method whose arrays the façade
+  lends (it cannot allocate one without the runtime), whose contract is the law that it computes the fold as
+  defined, and whose pure decisions are functions the mutation check covers (`receipts/invocation-lifecycle`).
+  Types that exist for the laws only have ghost constructors, so nothing is compiled for them.
 - A dependent sees only its deps' laws: it imports their abstract modules. A block's impl files include
   only its own files and its transitive deps' interface files; its interface (laws) files include only
   interface files, since dependents follow them. `proof check` refuses any other include (also one
   behind a comment), because the cache key would not cover what the block depends on.
 - Law statements are what review guards; definitions and proofs are what the checker guards. Edit a
   law only with an independent review of that law.
-- A fast compiled body is a `function ... { spec } by method { ... }` proven equal to its spec. Put it on a function
-  of the block's own (the laws' function calls it): Dafny 4.11 drops a `by method` on a function that refines a laws
-  declaration, neither verifying nor compiling it. The mutation tool mutates only the functional body; the method is
-  held to it by the proof.
+- The mutation tool mutates functions and predicates, never a method: a method's loops carry proof annotations it
+  cannot tell from code. A compiled method is listed in `excludeSymbols`, its contract says exactly what it
+  returns, and every decision in it that could be a function is one.
 - Escape hatches (`assume`, `{:axiom}`, `{:verify false}`, `{:extern}`) are trusted code and need a
   maintainer decision.
 

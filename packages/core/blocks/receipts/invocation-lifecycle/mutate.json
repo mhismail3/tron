@@ -5,14 +5,14 @@
   "impl": "blocks/receipts/invocation-lifecycle/Block.dfy",
   "symbols": [
     "Legal",
-    "SameLife",
-    "SameMark",
+    "Repeats",
+    "Changed",
     "Begin",
     "Advance"
   ],
   "excludeSymbols": {
     "TerminalLife": "defined in the laws file (which lifecycles are settled), not implementation",
-    "Fold": "a method: its loops carry proof annotations the mutation tool cannot tell from code; law F1 is its postcondition, so any change to what it answers fails its own proof (hand mutants: tools/proof/README.md)",
+    "Fold": "a method: its loops carry proof annotations the mutation tool cannot tell from code. Law F1 is its contract and fixes its answer for every input, so a change to what it answers fails its own proof; its decisions are the functions Begin and Advance, which are mutated",
     "Collect": "a method called by Fold only; its postcondition says exactly what it returns"
   },
   "verify": [
@@ -21,12 +21,10 @@
   "laws": {
     "F1 fold-computed": [
       "ReceiptsInvocationLifecycle.Fold",
+      "ReceiptsInvocationLifecycle.RunStep",
       "ReceiptsInvocationLifecycle.BeginSpec",
       "ReceiptsInvocationLifecycle.AdvanceSpec",
-      "ReceiptsInvocationLifecycle.SameLifeSpec",
-      "ReceiptsInvocationLifecycle.SameMarkSpec",
-      "ReceiptsInvocationLifecycle.RunAtProject",
-      "ReceiptsInvocationLifecycle.RunAtRun",
+      "ReceiptsInvocationLifecycle.SameSpec",
       "ReceiptsInvocationLifecycle.FindIndexAppend",
       "ReceiptsInvocationLifecycle.FindIndexUpdate"
     ],

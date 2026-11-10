@@ -56,13 +56,13 @@ abstract module ReceiptsInvocationLifecycleLaws {
 
   // Assumption A1: the facts are the receipts invocationReceipts parsed from the session branch, in branch order.
   // The shell numbers invocations and canonical entries from 0 in order of first appearance, so every number is
-  // below the number of receipts. A start receipt is stated as owned, with name and origin marks Same when it
-  // carries them (else Absent). A later receipt is owned exactly when its operation and source equal those of the
-  // first start receipt of its invocation before it; its name mark is Absent when it carries no name, Same when
-  // its name is that start's and Differs otherwise, and its origin mark likewise (origins compared by canonical
-  // JSON, the start's being the default origin of its source when it carries none). A receipt with no start
-  // before it is refused whatever its marks say. The fold reads any facts the way Project reads the receipts
-  // they stand for (law F1), so its laws do not depend on A1; A1 is what the facts mean.
+  // below the number of receipts. A start receipt is stated as owned, with name mark Same when it carries a name
+  // (else Absent) and origin mark Same (its origin being the default origin of its source when it carries none).
+  // A later receipt is owned exactly when its operation and source equal those of the first start receipt of its
+  // invocation before it; its name mark is Absent when it carries no name, Same when its name is that start's
+  // and Differs otherwise, and its origin mark likewise (origins compared by canonical JSON). A receipt with no
+  // start before it is refused whatever its marks say. The fold reads any facts the way Project reads the
+  // receipts they stand for (law F1), so its laws do not depend on A1; A1 is what the facts mean.
   // Assumption A2: the shell reads each invocation's identity, name, origin and sequence from the receipt at its
   // cell's start position, its canonical entry from the receipt at entryAt and its time from the receipt at
   // updated, and orders the result by start sequence (a stable sort, ties in start order), as
@@ -148,12 +148,7 @@ abstract module ReceiptsInvocationLifecycleLaws {
   ghost function Project(rs: seq<Receipt>): Outcome { Run(State([], [], []), rs, 0) }
 
   // MarkOf: a mark as a name or origin token: none, the start's (0) or another (1).
-  ghost function MarkOf(m: Mark): Opt {
-    match m
-    case Absent => None
-    case Same => Some(0)
-    case Differs => Some(1)
-  }
+  ghost function MarkOf(m: Mark): Opt { if m.Absent? then None else if m.Same? then Some(0) else Some(1) }
 
   // ReceiptOf: the receipt the fact at position k stands for: its invocation and entry numbers as tokens; an
   // operation that is its start's (0) or not (1); its position as its sequence and its time.
@@ -163,21 +158,13 @@ abstract module ReceiptsInvocationLifecycleLaws {
   }
 
   // ReceiptsOf: the history the facts stand for.
-  ghost function ReceiptsOf(fs: seq<Fact>): seq<Receipt> {
-    seq(|fs|, k requires 0 <= k < |fs| => ReceiptOf(fs[k], k))
-  }
+  ghost function ReceiptsOf(fs: seq<Fact>): seq<Receipt> { seq(|fs|, k requires 0 <= k < |fs| => ReceiptOf(fs[k], k)) }
 
   // Elems: the items of a linked list, in order.
-  ghost function Elems<T>(l: List<T>): seq<T> {
-    match l
-    case Nil => []
-    case Cons(head, tail) => [head] + Elems(tail)
-  }
+  ghost function Elems<T>(l: List<T>): seq<T> { if l.Nil? then [] else [l.head] + Elems(l.tail) }
 
   // Placed: the cell's positions are positions of the history (entryAt and none: -1).
-  ghost predicate Placed(c: Cell, rs: seq<Receipt>) {
-    0 <= c.start as int < |rs| && -1 <= c.entryAt as int < |rs| && 0 <= c.updated as int < |rs|
-  }
+  ghost predicate Placed(c: Cell, rs: seq<Receipt>) { 0 <= c.start as int < |rs| && c.entryAt as int < |rs| && 0 <= c.updated as int < |rs| }
 
   // ProjOf: the invocation state a cell stands for: identity, name, origin and sequence of the receipt at its
   // start; the entry of the receipt at entryAt; its position `updated` as its time.

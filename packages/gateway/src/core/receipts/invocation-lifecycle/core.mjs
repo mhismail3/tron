@@ -55,77 +55,11 @@ let ReceiptsInvocationLifecycle = (function() {
         }
       }
     };
-    static SameLife(a, b) {
-      let _source0 = a;
-      {
-        if (_source0.is_Staged) {
-          return (b).is_Staged;
-        }
-      }
-      {
-        if (_source0.is_Accepted) {
-          return (b).is_Accepted;
-        }
-      }
-      {
-        if (_source0.is_Queued) {
-          return (b).is_Queued;
-        }
-      }
-      {
-        if (_source0.is_Running) {
-          return (b).is_Running;
-        }
-      }
-      {
-        if (_source0.is_WaitingForInput) {
-          return (b).is_WaitingForInput;
-        }
-      }
-      {
-        if (_source0.is_Retrying) {
-          return (b).is_Retrying;
-        }
-      }
-      {
-        if (_source0.is_Settling) {
-          return (b).is_Settling;
-        }
-      }
-      {
-        if (_source0.is_Completed) {
-          return (b).is_Completed;
-        }
-      }
-      {
-        if (_source0.is_Failed) {
-          return (b).is_Failed;
-        }
-      }
-      {
-        if (_source0.is_Interrupted) {
-          return (b).is_Interrupted;
-        }
-      }
-      {
-        return (b).is_OutcomeUnknown;
-      }
+    static Repeats(to, settled) {
+      return ((to).is_LifeOf) && ((((((((((((((to).dtor_l).is_Staged) && ((settled).is_Staged)) || ((((to).dtor_l).is_Accepted) && ((settled).is_Accepted))) || ((((to).dtor_l).is_Queued) && ((settled).is_Queued))) || ((((to).dtor_l).is_Running) && ((settled).is_Running))) || ((((to).dtor_l).is_WaitingForInput) && ((settled).is_WaitingForInput))) || ((((to).dtor_l).is_Retrying) && ((settled).is_Retrying))) || ((((to).dtor_l).is_Settling) && ((settled).is_Settling))) || ((((to).dtor_l).is_Completed) && ((settled).is_Completed))) || ((((to).dtor_l).is_Failed) && ((settled).is_Failed))) || ((((to).dtor_l).is_Interrupted) && ((settled).is_Interrupted))) || ((((to).dtor_l).is_OutcomeUnknown) && ((settled).is_OutcomeUnknown)));
     };
-    static SameMark(a, b) {
-      let _source0 = a;
-      {
-        if (_source0.is_Absent) {
-          return (b).is_Absent;
-        }
-      }
-      {
-        if (_source0.is_Same) {
-          return (b).is_Same;
-        }
-      }
-      {
-        return (b).is_Differs;
-      }
+    static Changed(mark, start) {
+      return (((mark).is_Same) && (!((start).is_Same))) || (((mark).is_Differs) && (!((start).is_Differs)));
     };
     static Begin(f, k) {
       return ReceiptsInvocationLifecycle.Cell.create_Cell(k, ((((f).dtor_life).is_LifeOf) ? (((f).dtor_life).dtor_l) : (ReceiptsInvocationLifecycle.Life.create_Accepted())), false, false, -1, ReceiptsInvocationLifecycle.Flag.create_NoFlag(), k);
@@ -137,11 +71,11 @@ let ReceiptsInvocationLifecycle = (function() {
         return ReceiptsInvocationLifecycle.Verdict.create_Refuse(ReceiptsInvocationLifecycle.Refusal.create_EntryBound());
       } else if ((((f).dtor_kind).is_Binding) && ((p).dtor_bound)) {
         return ReceiptsInvocationLifecycle.Verdict.create_Refuse(ReceiptsInvocationLifecycle.Refusal.create_InvocationBound());
-      } else if ((!(((f).dtor_name).is_Absent)) && (!(ReceiptsInvocationLifecycle.__default.SameMark((f).dtor_name, (s).dtor_name)))) {
+      } else if (ReceiptsInvocationLifecycle.__default.Changed((f).dtor_name, (s).dtor_name)) {
         return ReceiptsInvocationLifecycle.Verdict.create_Refuse(ReceiptsInvocationLifecycle.Refusal.create_NameChanged());
-      } else if ((!(((f).dtor_origin).is_Absent)) && (!(ReceiptsInvocationLifecycle.__default.SameMark((f).dtor_origin, (s).dtor_origin)))) {
+      } else if (ReceiptsInvocationLifecycle.__default.Changed((f).dtor_origin, (s).dtor_origin)) {
         return ReceiptsInvocationLifecycle.Verdict.create_Refuse(ReceiptsInvocationLifecycle.Refusal.create_OriginChanged());
-      } else if (((((f).dtor_kind).is_Terminal) && ((p).dtor_settled)) && (!((((f).dtor_life).is_LifeOf) && (ReceiptsInvocationLifecycle.__default.SameLife(((f).dtor_life).dtor_l, (p).dtor_life))))) {
+      } else if (((((f).dtor_kind).is_Terminal) && ((p).dtor_settled)) && (!(ReceiptsInvocationLifecycle.__default.Repeats((f).dtor_life, (p).dtor_life)))) {
         return ReceiptsInvocationLifecycle.Verdict.create_Refuse(ReceiptsInvocationLifecycle.Refusal.create_ContradictoryTerminal());
       } else if (((((f).dtor_kind).is_Terminal) && (!((p).dtor_settled))) && (!(ReceiptsInvocationLifecycle.__default.Legal((p).dtor_life, (f).dtor_life, true)))) {
         return ReceiptsInvocationLifecycle.Verdict.create_Refuse(ReceiptsInvocationLifecycle.Refusal.create_IllegalTerminal());

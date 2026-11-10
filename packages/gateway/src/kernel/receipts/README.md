@@ -10,9 +10,12 @@ codecs. Producers construct facts here; only the live Run authority persists the
 Strict receipt grammar, encoded bounds, duplicate/contradiction refusal, canonical
 entry bindings, legal lifecycle folding, captured owner classification and bounded
 history read projection. Persisted tags/versions and JSONL stay unchanged. The
-invocation lifecycle fold (`invocationProjection`) is shadowed by proof block
-`receipts/invocation-lifecycle` (packages/core) through a Debug-only seam
-(`invocationLifecycleFacts`); the TypeScript stays authoritative until its cut-over.
+invocation lifecycle fold is decided by proof block `receipts/invocation-lifecycle`
+([`gateway/core`](../../core/receipts/invocation-lifecycle/facade.ts), generated from `packages/core`):
+`invocationProjection` states each receipt to it as a fact (numbers for the invocation and the canonical entry;
+whether its operation, source, name and origin are those of its invocation's first start receipt) and writes the
+answer back from the receipts the block names. It holds no copy of the fold (`invocation-receipts.test.ts` pins
+each projection's fields and order and each refusal's message).
 
 ## Not here
 

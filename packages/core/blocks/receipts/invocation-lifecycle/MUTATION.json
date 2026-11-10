@@ -3,693 +3,82 @@
   "block": "receipts/invocation-lifecycle",
   "tier": "high-stakes",
   "laws": "blocks/receipts/invocation-lifecycle/Block.dfy",
-  "oracle": true,
+  "oracle": false,
   "toolHash": "ee15458abb801a8b",
-  "mutants": 267,
-  "stillborn": 42,
-  "valid": 225,
-  "killed": 225,
+  "mutants": 195,
+  "stillborn": 40,
+  "valid": 155,
+  "killed": 155,
   "lawGap": 0,
   "survived": 0,
   "accepted": 0,
-  "seconds": 878,
+  "seconds": 501,
   "score": 1,
   "unknown": 0,
-  "stillbornRatio": 0.157,
+  "stillbornRatio": 0.205,
   "filter": null,
-  "generated": 267,
+  "generated": 195,
   "pass": true,
-  "inputsHash": "567b18e428635b86"
+  "inputsHash": "c24aba376294a958"
  },
  "perLaw": [
+  {
+   "law": "F1 fold-computed",
+   "killed": 144,
+   "only": 140
+  },
   {
    "law": "L1 legal-moves",
    "killed": 10,
    "only": 4
   },
   {
-   "law": "H1 history",
-   "killed": 12,
+   "law": "S1 start",
+   "killed": 0,
    "only": 0
   },
   {
-   "law": "S1 start",
-   "killed": 61,
-   "only": 36
-  },
-  {
    "law": "S2 checks",
-   "killed": 74,
-   "only": 49
+   "killed": 0,
+   "only": 0
   },
   {
    "law": "S3 no-start",
-   "killed": 13,
-   "only": 9
+   "killed": 0,
+   "only": 0
   },
   {
    "law": "S4 settle",
-   "killed": 60,
-   "only": 28
+   "killed": 0,
+   "only": 0
   },
   {
    "law": "S5 update",
-   "killed": 16,
-   "only": 1
+   "killed": 0,
+   "only": 0
   },
   {
    "law": "P1 progress",
-   "killed": 72,
+   "killed": 3,
    "only": 0
   },
   {
    "law": "I1 settled-stays-settled",
-   "killed": 20,
+   "killed": 3,
    "only": 0
   },
   {
    "law": "I2 one-binding",
-   "killed": 7,
+   "killed": 0,
    "only": 0
   }
  ],
  "results": [
   {
-   "id": "FindIndex/branch/|projs| == 0->false#1",
-   "sym": "FindIndex",
-   "op": "branch",
-   "line": 21,
-   "col": 8,
-   "from": "|projs| == 0",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/branch/|projs| == 0->true#1",
-   "sym": "FindIndex",
-   "op": "branch",
-   "line": 21,
-   "col": 8,
-   "from": "|projs| == 0",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/relational/==->!=#1",
-   "sym": "FindIndex",
-   "op": "relational",
-   "line": 21,
-   "col": 16,
-   "from": "==",
-   "to": "!=",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/0->1#1",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 21,
-   "col": 19,
-   "from": "0",
-   "to": "1",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/arith/-->+#1",
-   "sym": "FindIndex",
-   "op": "arith",
-   "line": 21,
-   "col": 26,
-   "from": "-",
-   "to": "+",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/drop-operand/-1->#1",
-   "sym": "FindIndex",
-   "op": "drop-operand",
-   "line": 21,
-   "col": 26,
-   "from": "-1",
-   "to": "",
-   "note": "drop right operand",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/1->0#1",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 21,
-   "col": 27,
-   "from": "1",
-   "to": "0",
-   "status": "killed",
-   "killedBy": [
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/1->2#1",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 21,
-   "col": 27,
-   "from": "1",
-   "to": "2",
-   "status": "killed",
-   "killedBy": [
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/branch/projs[0].inv == inv->false#1",
-   "sym": "FindIndex",
-   "op": "branch",
-   "line": 22,
-   "col": 13,
-   "from": "projs[0].inv == inv",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/branch/projs[0].inv == inv->true#1",
-   "sym": "FindIndex",
-   "op": "branch",
-   "line": 22,
-   "col": 13,
-   "from": "projs[0].inv == inv",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/0->1#2",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 22,
-   "col": 19,
-   "from": "0",
-   "to": "1",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/relational/==->!=#2",
-   "sym": "FindIndex",
-   "op": "relational",
-   "line": 22,
-   "col": 26,
-   "from": "==",
-   "to": "!=",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/off-by-one/inv->(inv - 1)#1",
-   "sym": "FindIndex",
-   "op": "off-by-one",
-   "line": 22,
-   "col": 29,
-   "from": "inv",
-   "to": "(inv - 1)",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/off-by-one/inv->(inv + 1)#1",
-   "sym": "FindIndex",
-   "op": "off-by-one",
-   "line": 22,
-   "col": 29,
-   "from": "inv",
-   "to": "(inv + 1)",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/0->1#3",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 22,
-   "col": 38,
-   "from": "0",
-   "to": "1",
-   "status": "killed",
-   "killedBy": [
-    "S1 start",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/swap-args/projs[1..], inv->inv, projs[1..]#1",
-   "sym": "FindIndex",
-   "op": "swap-args",
-   "line": 23,
-   "col": 29,
-   "from": "projs[1..], inv",
-   "to": "inv, projs[1..]",
-   "note": "FindIndex args 1<->2",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/1->0#2",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 23,
-   "col": 35,
-   "from": "1",
-   "to": "0",
-   "status": "killed",
-   "killedBy": [
-    "S1 start",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/1->2#2",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 23,
-   "col": 35,
-   "from": "1",
-   "to": "2",
-   "status": "killed",
-   "killedBy": [
-    "S1 start",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/branch/k < 0->false#1",
-   "sym": "FindIndex",
-   "op": "branch",
-   "line": 23,
-   "col": 50,
-   "from": "k < 0",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/branch/k < 0->true#1",
-   "sym": "FindIndex",
-   "op": "branch",
-   "line": 23,
-   "col": 50,
-   "from": "k < 0",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/off-by-one/k->(k - 1)#1",
-   "sym": "FindIndex",
-   "op": "off-by-one",
-   "line": 23,
-   "col": 50,
-   "from": "k",
-   "to": "(k - 1)",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/off-by-one/k->(k + 1)#1",
-   "sym": "FindIndex",
-   "op": "off-by-one",
-   "line": 23,
-   "col": 50,
-   "from": "k",
-   "to": "(k + 1)",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/boundary/<-><=#1",
-   "sym": "FindIndex",
-   "op": "boundary",
-   "line": 23,
-   "col": 52,
-   "from": "<",
-   "to": "<=",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/relational/<->>=#1",
-   "sym": "FindIndex",
-   "op": "relational",
-   "line": 23,
-   "col": 52,
-   "from": "<",
-   "to": ">=",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/0->1#4",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 23,
-   "col": 54,
-   "from": "0",
-   "to": "1",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/arith/-->+#2",
-   "sym": "FindIndex",
-   "op": "arith",
-   "line": 23,
-   "col": 61,
-   "from": "-",
-   "to": "+",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/drop-operand/-1->#2",
-   "sym": "FindIndex",
-   "op": "drop-operand",
-   "line": 23,
-   "col": 61,
-   "from": "-1",
-   "to": "",
-   "note": "drop right operand",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/1->0#3",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 23,
-   "col": 62,
-   "from": "1",
-   "to": "0",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/1->2#3",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 23,
-   "col": 62,
-   "from": "1",
-   "to": "2",
-   "status": "killed",
-   "killedBy": [
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/off-by-one/k->(k - 1)#2",
-   "sym": "FindIndex",
-   "op": "off-by-one",
-   "line": 23,
-   "col": 69,
-   "from": "k",
-   "to": "(k - 1)",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/off-by-one/k->(k + 1)#2",
-   "sym": "FindIndex",
-   "op": "off-by-one",
-   "line": 23,
-   "col": 69,
-   "from": "k",
-   "to": "(k + 1)",
-   "status": "killed",
-   "killedBy": [
-    "S1 start",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/arith/+->-#1",
-   "sym": "FindIndex",
-   "op": "arith",
-   "line": 23,
-   "col": 71,
-   "from": "+",
-   "to": "-",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/drop-operand/+ 1->#1",
-   "sym": "FindIndex",
-   "op": "drop-operand",
-   "line": 23,
-   "col": 71,
-   "from": "+ 1",
-   "to": "",
-   "note": "drop right operand",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/1->0#4",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 23,
-   "col": 73,
-   "from": "1",
-   "to": "0",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "FindIndex/constant/1->2#4",
-   "sym": "FindIndex",
-   "op": "constant",
-   "line": 23,
-   "col": 73,
-   "from": "1",
-   "to": "2",
-   "status": "killed",
-   "killedBy": [
-    "S1 start",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
    "id": "Legal/branch/TerminalLife(from) || to.NoLife?->false#1",
    "sym": "Legal",
    "op": "branch",
-   "line": 27,
+   "line": 9,
    "col": 8,
    "from": "TerminalLife(from) || to.NoLife?",
    "to": "false",
@@ -709,7 +98,7 @@
    "id": "Legal/branch/TerminalLife(from) || to.NoLife?->true#1",
    "sym": "Legal",
    "op": "branch",
-   "line": 27,
+   "line": 9,
    "col": 8,
    "from": "TerminalLife(from) || to.NoLife?",
    "to": "true",
@@ -728,7 +117,7 @@
    "id": "Legal/logic/||->&&#1",
    "sym": "Legal",
    "op": "logic",
-   "line": 27,
+   "line": 9,
    "col": 27,
    "from": "||",
    "to": "&&",
@@ -747,7 +136,7 @@
    "id": "Legal/constant/false->true#1",
    "sym": "Legal",
    "op": "constant",
-   "line": 27,
+   "line": 9,
    "col": 46,
    "from": "false",
    "to": "true",
@@ -765,7 +154,7 @@
    "id": "Legal/branch/settle->false#1",
    "sym": "Legal",
    "op": "branch",
-   "line": 28,
+   "line": 10,
    "col": 13,
    "from": "settle",
    "to": "false",
@@ -784,7 +173,7 @@
    "id": "Legal/branch/settle->true#1",
    "sym": "Legal",
    "op": "branch",
-   "line": 28,
+   "line": 10,
    "col": 13,
    "from": "settle",
    "to": "true",
@@ -803,7 +192,7 @@
    "id": "Legal/logic/||->&&#2",
    "sym": "Legal",
    "op": "logic",
-   "line": 33,
+   "line": 14,
    "col": 34,
    "from": "||",
    "to": "&&",
@@ -818,7 +207,7 @@
    "id": "Legal/logic/||->&&#3",
    "sym": "Legal",
    "op": "logic",
-   "line": 33,
+   "line": 14,
    "col": 47,
    "from": "||",
    "to": "&&",
@@ -833,7 +222,7 @@
    "id": "Legal/logic/||->&&#4",
    "sym": "Legal",
    "op": "logic",
-   "line": 33,
+   "line": 14,
    "col": 61,
    "from": "||",
    "to": "&&",
@@ -848,7 +237,7 @@
    "id": "Legal/logic/||->&&#5",
    "sym": "Legal",
    "op": "logic",
-   "line": 33,
+   "line": 14,
    "col": 83,
    "from": "||",
    "to": "&&",
@@ -863,7 +252,7 @@
    "id": "Legal/logic/||->&&#6",
    "sym": "Legal",
    "op": "logic",
-   "line": 33,
+   "line": 14,
    "col": 98,
    "from": "||",
    "to": "&&",
@@ -878,7 +267,7 @@
    "id": "Legal/logic/||->&&#7",
    "sym": "Legal",
    "op": "logic",
-   "line": 34,
+   "line": 15,
    "col": 34,
    "from": "||",
    "to": "&&",
@@ -893,7 +282,7 @@
    "id": "Legal/logic/||->&&#8",
    "sym": "Legal",
    "op": "logic",
-   "line": 34,
+   "line": 15,
    "col": 48,
    "from": "||",
    "to": "&&",
@@ -908,7 +297,7 @@
    "id": "Legal/logic/||->&&#9",
    "sym": "Legal",
    "op": "logic",
-   "line": 34,
+   "line": 15,
    "col": 70,
    "from": "||",
    "to": "&&",
@@ -923,7 +312,7 @@
    "id": "Legal/logic/||->&&#10",
    "sym": "Legal",
    "op": "logic",
-   "line": 34,
+   "line": 15,
    "col": 85,
    "from": "||",
    "to": "&&",
@@ -938,7 +327,7 @@
    "id": "Legal/logic/||->&&#11",
    "sym": "Legal",
    "op": "logic",
-   "line": 35,
+   "line": 16,
    "col": 33,
    "from": "||",
    "to": "&&",
@@ -955,7 +344,7 @@
    "id": "Legal/logic/||->&&#12",
    "sym": "Legal",
    "op": "logic",
-   "line": 36,
+   "line": 17,
    "col": 42,
    "from": "||",
    "to": "&&",
@@ -970,7 +359,7 @@
    "id": "Legal/logic/||->&&#13",
    "sym": "Legal",
    "op": "logic",
-   "line": 36,
+   "line": 17,
    "col": 57,
    "from": "||",
    "to": "&&",
@@ -985,7 +374,7 @@
    "id": "Legal/logic/||->&&#14",
    "sym": "Legal",
    "op": "logic",
-   "line": 37,
+   "line": 18,
    "col": 42,
    "from": "||",
    "to": "&&",
@@ -1002,7 +391,7 @@
    "id": "Legal/logic/||->&&#15",
    "sym": "Legal",
    "op": "logic",
-   "line": 38,
+   "line": 19,
    "col": 35,
    "from": "||",
    "to": "&&",
@@ -1019,7 +408,7 @@
    "id": "Legal/constant/false->true#2",
    "sym": "Legal",
    "op": "constant",
-   "line": 39,
+   "line": 20,
    "col": 17,
    "from": "false",
    "to": "true",
@@ -1033,3380 +422,48 @@
    "oracleFailed": []
   },
   {
-   "id": "StepOf/swap-args/st.projs, r.inv->r.inv, st.projs#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 43,
-   "col": 24,
-   "from": "st.projs, r.inv",
-   "to": "r.inv, st.projs",
-   "note": "FindIndex args 1<->2",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Start?->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 44,
-   "col": 8,
-   "from": "r.kind.Start?",
-   "to": "false",
-   "note": "drop then-branch",
+   "id": "Repeats/logic/&&->||#1",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 25,
+   "col": 16,
+   "from": "&&",
+   "to": "||",
    "status": "killed",
    "killedBy": [
-    "I1 settled-stays-settled",
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Start?->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 44,
-   "col": 8,
-   "from": "r.kind.Start?",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "I2 one-binding",
-    "P1 progress",
-    "S2 checks",
-    "S3 no-start",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/i >= 0->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 45,
-   "col": 10,
-   "from": "i >= 0",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/i >= 0->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 45,
-   "col": 10,
-   "from": "i >= 0",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/off-by-one/i->(i - 1)#1",
-   "sym": "StepOf",
-   "op": "off-by-one",
-   "line": 45,
-   "col": 10,
-   "from": "i",
-   "to": "(i - 1)",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/off-by-one/i->(i + 1)#1",
-   "sym": "StepOf",
-   "op": "off-by-one",
-   "line": 45,
-   "col": 10,
-   "from": "i",
-   "to": "(i + 1)",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/boundary/>=->>#1",
-   "sym": "StepOf",
-   "op": "boundary",
-   "line": 45,
-   "col": 12,
-   "from": ">=",
-   "to": ">",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/relational/>=-><#1",
-   "sym": "StepOf",
-   "op": "relational",
-   "line": 45,
-   "col": 12,
-   "from": ">=",
-   "to": "<",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constant/0->1#1",
-   "sym": "StepOf",
-   "op": "constant",
-   "line": 45,
-   "col": 15,
-   "from": "0",
-   "to": "1",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/DuplicateStart->ContradictoryTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 45,
-   "col": 30,
-   "from": "DuplicateStart",
-   "to": "ContradictoryTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/DuplicateStart->EntryBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 45,
-   "col": 30,
-   "from": "DuplicateStart",
-   "to": "EntryBound",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/DuplicateStart->IllegalTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 45,
-   "col": 30,
-   "from": "DuplicateStart",
-   "to": "IllegalTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/DuplicateStart->IllegalTransition#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 45,
-   "col": 30,
-   "from": "DuplicateStart",
-   "to": "IllegalTransition",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/DuplicateStart->InvocationBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 45,
-   "col": 30,
-   "from": "DuplicateStart",
-   "to": "InvocationBound",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/DuplicateStart->NameChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 45,
-   "col": 30,
-   "from": "DuplicateStart",
-   "to": "NameChanged",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/DuplicateStart->NoStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 45,
-   "col": 30,
-   "from": "DuplicateStart",
-   "to": "NoStart",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/DuplicateStart->OriginChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 45,
-   "col": 30,
-   "from": "DuplicateStart",
-   "to": "OriginChanged",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/DuplicateStart->OwnershipChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 45,
-   "col": 30,
-   "from": "DuplicateStart",
-   "to": "OwnershipChanged",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/arith/+->-#1",
-   "sym": "StepOf",
-   "op": "arith",
-   "line": 46,
-   "col": 39,
-   "from": "+",
-   "to": "-",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/drop-operand/+ [Proj(r.inv, r.op, r.src, r.name, r.origin, if r.life.LifeOf? then r.life.l else Accepted, None, NoFlag, r.sequence, r.at, false)]->#1",
-   "sym": "StepOf",
-   "op": "drop-operand",
-   "line": 46,
-   "col": 39,
-   "from": "+ [Proj(r.inv, r.op, r.src, r.name, r.origin,\n        if r.life.LifeOf? then r.life.l else Accepted, None, NoFlag, r.sequence, r.at, false)]",
-   "to": "",
-   "note": "drop right operand",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/r.inv, r.op->r.op, r.inv#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 46,
-   "col": 47,
-   "from": "r.inv, r.op",
-   "to": "r.op, r.inv",
-   "note": "Proj args 1<->2",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/r.op, r.src->r.src, r.op#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 46,
-   "col": 54,
-   "from": "r.op, r.src",
-   "to": "r.src, r.op",
-   "note": "Proj args 2<->3",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/r.src, r.name->r.name, r.src#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 46,
-   "col": 60,
-   "from": "r.src, r.name",
-   "to": "r.name, r.src",
-   "note": "Proj args 3<->4",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/r.name, r.origin->r.origin, r.name#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 46,
-   "col": 67,
-   "from": "r.name, r.origin",
-   "to": "r.origin, r.name",
-   "note": "Proj args 4<->5",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/r.origin, if r.life.LifeOf? then r.life.l else Accepted->if r.life.LifeOf? then r.life.l else Accepted, r.origin#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 46,
-   "col": 75,
-   "from": "r.origin, if r.life.LifeOf? then r.life.l else Accepted",
-   "to": "if r.life.LifeOf? then r.life.l else Accepted, r.origin",
-   "note": "Proj args 5<->6",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/if r.life.LifeOf? then r.life.l else Accepted, None->None, if r.life.LifeOf? then r.life.l else Accepted#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 47,
-   "col": 9,
-   "from": "if r.life.LifeOf? then r.life.l else Accepted, None",
-   "to": "None, if r.life.LifeOf? then r.life.l else Accepted",
-   "note": "Proj args 6<->7",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.life.LifeOf?->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 47,
-   "col": 12,
-   "from": "r.life.LifeOf?",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.life.LifeOf?->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 47,
-   "col": 12,
-   "from": "r.life.LifeOf?",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "S1 start",
+    "F1 fold-computed",
     "build: impl well-formedness"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/Accepted->Completed#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 47,
-   "col": 46,
-   "from": "Accepted",
-   "to": "Completed",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/Accepted->Failed#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 47,
-   "col": 46,
-   "from": "Accepted",
-   "to": "Failed",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/Accepted->Interrupted#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 47,
-   "col": 46,
-   "from": "Accepted",
-   "to": "Interrupted",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/Accepted->OutcomeUnknown#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 47,
-   "col": 46,
-   "from": "Accepted",
-   "to": "OutcomeUnknown",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/Accepted->Queued#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 47,
-   "col": 46,
-   "from": "Accepted",
-   "to": "Queued",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/Accepted->Retrying#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 47,
-   "col": 46,
-   "from": "Accepted",
-   "to": "Retrying",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/Accepted->Running#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 47,
-   "col": 46,
-   "from": "Accepted",
-   "to": "Running",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/Accepted->Settling#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 47,
-   "col": 46,
-   "from": "Accepted",
-   "to": "Settling",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/Accepted->Staged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 47,
-   "col": 46,
-   "from": "Accepted",
-   "to": "Staged",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/Accepted->WaitingForInput#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 47,
-   "col": 46,
-   "from": "Accepted",
-   "to": "WaitingForInput",
-   "status": "killed",
-   "killedBy": [
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/None, NoFlag->NoFlag, None#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 47,
-   "col": 56,
-   "from": "None, NoFlag",
-   "to": "NoFlag, None",
-   "note": "Proj args 7<->8",
-   "status": "stillborn",
-   "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "StepOf/swap-args/NoFlag, r.sequence->r.sequence, NoFlag#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 47,
-   "col": 62,
-   "from": "NoFlag, r.sequence",
-   "to": "r.sequence, NoFlag",
-   "note": "Proj args 8<->9",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/r.sequence, r.at->r.at, r.sequence#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 47,
-   "col": 70,
-   "from": "r.sequence, r.at",
-   "to": "r.at, r.sequence",
-   "note": "Proj args 9<->10",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/r.at, false->false, r.at#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 47,
-   "col": 82,
-   "from": "r.at, false",
-   "to": "false, r.at",
-   "note": "Proj args 10<->11",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constant/false->true#1",
-   "sym": "StepOf",
-   "op": "constant",
-   "line": 47,
-   "col": 88,
-   "from": "false",
-   "to": "true",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S1 start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/i < 0->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 48,
-   "col": 13,
-   "from": "i < 0",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "S3 no-start",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/i < 0->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 48,
-   "col": 13,
-   "from": "i < 0",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/off-by-one/i->(i - 1)#2",
-   "sym": "StepOf",
-   "op": "off-by-one",
-   "line": 48,
-   "col": 13,
-   "from": "i",
-   "to": "(i - 1)",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/off-by-one/i->(i + 1)#2",
-   "sym": "StepOf",
-   "op": "off-by-one",
-   "line": 48,
-   "col": 13,
-   "from": "i",
-   "to": "(i + 1)",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "S3 no-start",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/boundary/<-><=#1",
-   "sym": "StepOf",
-   "op": "boundary",
-   "line": 48,
-   "col": 15,
-   "from": "<",
-   "to": "<=",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/relational/<->>=#1",
-   "sym": "StepOf",
-   "op": "relational",
-   "line": 48,
-   "col": 15,
-   "from": "<",
-   "to": ">=",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "P1 progress",
-    "S2 checks",
-    "S3 no-start",
-    "S4 settle",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constant/0->1#2",
-   "sym": "StepOf",
-   "op": "constant",
-   "line": 48,
-   "col": 17,
-   "from": "0",
-   "to": "1",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NoStart->ContradictoryTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 48,
-   "col": 32,
-   "from": "NoStart",
-   "to": "ContradictoryTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S3 no-start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NoStart->DuplicateStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 48,
-   "col": 32,
-   "from": "NoStart",
-   "to": "DuplicateStart",
-   "status": "killed",
-   "killedBy": [
-    "S3 no-start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NoStart->EntryBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 48,
-   "col": 32,
-   "from": "NoStart",
-   "to": "EntryBound",
-   "status": "killed",
-   "killedBy": [
-    "S3 no-start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NoStart->IllegalTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 48,
-   "col": 32,
-   "from": "NoStart",
-   "to": "IllegalTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S3 no-start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NoStart->IllegalTransition#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 48,
-   "col": 32,
-   "from": "NoStart",
-   "to": "IllegalTransition",
-   "status": "killed",
-   "killedBy": [
-    "S3 no-start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NoStart->InvocationBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 48,
-   "col": 32,
-   "from": "NoStart",
-   "to": "InvocationBound",
-   "status": "killed",
-   "killedBy": [
-    "S3 no-start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NoStart->NameChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 48,
-   "col": 32,
-   "from": "NoStart",
-   "to": "NameChanged",
-   "status": "killed",
-   "killedBy": [
-    "S3 no-start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NoStart->OriginChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 48,
-   "col": 32,
-   "from": "NoStart",
-   "to": "OriginChanged",
-   "status": "killed",
-   "killedBy": [
-    "S3 no-start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NoStart->OwnershipChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 48,
-   "col": 32,
-   "from": "NoStart",
-   "to": "OwnershipChanged",
-   "status": "killed",
-   "killedBy": [
-    "S3 no-start"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/p.op != r.op || p.src != r.src->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 51,
-   "col": 10,
-   "from": "p.op != r.op || p.src != r.src",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/p.op != r.op || p.src != r.src->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 51,
-   "col": 10,
-   "from": "p.op != r.op || p.src != r.src",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/relational/!=->==#1",
-   "sym": "StepOf",
-   "op": "relational",
-   "line": 51,
-   "col": 15,
-   "from": "!=",
-   "to": "==",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/||->&&#1",
-   "sym": "StepOf",
+   "id": "Repeats/logic/&&->||#2",
+   "sym": "Repeats",
    "op": "logic",
-   "line": 51,
-   "col": 23,
-   "from": "||",
-   "to": "&&",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/relational/!=->==#2",
-   "sym": "StepOf",
-   "op": "relational",
-   "line": 51,
-   "col": 32,
-   "from": "!=",
-   "to": "==",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OwnershipChanged->ContradictoryTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 51,
-   "col": 54,
-   "from": "OwnershipChanged",
-   "to": "ContradictoryTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OwnershipChanged->DuplicateStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 51,
-   "col": 54,
-   "from": "OwnershipChanged",
-   "to": "DuplicateStart",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OwnershipChanged->EntryBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 51,
-   "col": 54,
-   "from": "OwnershipChanged",
-   "to": "EntryBound",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OwnershipChanged->IllegalTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 51,
-   "col": 54,
-   "from": "OwnershipChanged",
-   "to": "IllegalTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OwnershipChanged->IllegalTransition#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 51,
-   "col": 54,
-   "from": "OwnershipChanged",
-   "to": "IllegalTransition",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OwnershipChanged->InvocationBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 51,
-   "col": 54,
-   "from": "OwnershipChanged",
-   "to": "InvocationBound",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OwnershipChanged->NameChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 51,
-   "col": 54,
-   "from": "OwnershipChanged",
-   "to": "NameChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OwnershipChanged->NoStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 51,
-   "col": 54,
-   "from": "OwnershipChanged",
-   "to": "NoStart",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OwnershipChanged->OriginChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 51,
-   "col": 54,
-   "from": "OwnershipChanged",
-   "to": "OriginChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Binding? && r.entry in st.entries->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 52,
-   "col": 15,
-   "from": "r.kind.Binding? && r.entry in st.entries",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "I2 one-binding",
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Binding? && r.entry in st.entries->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 52,
-   "col": 15,
-   "from": "r.kind.Binding? && r.entry in st.entries",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/&&->||#1",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 52,
-   "col": 31,
-   "from": "&&",
-   "to": "||",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/EntryBound->ContradictoryTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 52,
-   "col": 69,
-   "from": "EntryBound",
-   "to": "ContradictoryTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/EntryBound->DuplicateStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 52,
-   "col": 69,
-   "from": "EntryBound",
-   "to": "DuplicateStart",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/EntryBound->IllegalTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 52,
-   "col": 69,
-   "from": "EntryBound",
-   "to": "IllegalTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/EntryBound->IllegalTransition#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 52,
-   "col": 69,
-   "from": "EntryBound",
-   "to": "IllegalTransition",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/EntryBound->InvocationBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 52,
-   "col": 69,
-   "from": "EntryBound",
-   "to": "InvocationBound",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/EntryBound->NameChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 52,
-   "col": 69,
-   "from": "EntryBound",
-   "to": "NameChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/EntryBound->NoStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 52,
-   "col": 69,
-   "from": "EntryBound",
-   "to": "NoStart",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/EntryBound->OriginChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 52,
-   "col": 69,
-   "from": "EntryBound",
-   "to": "OriginChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/EntryBound->OwnershipChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 52,
-   "col": 69,
-   "from": "EntryBound",
-   "to": "OwnershipChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Binding? && r.inv in st.bound->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 53,
-   "col": 15,
-   "from": "r.kind.Binding? && r.inv in st.bound",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "I2 one-binding",
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Binding? && r.inv in st.bound->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 53,
-   "col": 15,
-   "from": "r.kind.Binding? && r.inv in st.bound",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/&&->||#2",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 53,
-   "col": 31,
-   "from": "&&",
-   "to": "||",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/InvocationBound->ContradictoryTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 53,
-   "col": 65,
-   "from": "InvocationBound",
-   "to": "ContradictoryTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/InvocationBound->DuplicateStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 53,
-   "col": 65,
-   "from": "InvocationBound",
-   "to": "DuplicateStart",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/InvocationBound->EntryBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 53,
-   "col": 65,
-   "from": "InvocationBound",
-   "to": "EntryBound",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/InvocationBound->IllegalTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 53,
-   "col": 65,
-   "from": "InvocationBound",
-   "to": "IllegalTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/InvocationBound->IllegalTransition#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 53,
-   "col": 65,
-   "from": "InvocationBound",
-   "to": "IllegalTransition",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/InvocationBound->NameChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 53,
-   "col": 65,
-   "from": "InvocationBound",
-   "to": "NameChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/InvocationBound->NoStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 53,
-   "col": 65,
-   "from": "InvocationBound",
-   "to": "NoStart",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/InvocationBound->OriginChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 53,
-   "col": 65,
-   "from": "InvocationBound",
-   "to": "OriginChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/InvocationBound->OwnershipChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 53,
-   "col": 65,
-   "from": "InvocationBound",
-   "to": "OwnershipChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.name.Some? && r.name != p.name->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 54,
-   "col": 15,
-   "from": "r.name.Some? && r.name != p.name",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.name.Some? && r.name != p.name->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 54,
-   "col": 15,
-   "from": "r.name.Some? && r.name != p.name",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/&&->||#3",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 54,
-   "col": 28,
-   "from": "&&",
-   "to": "||",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/relational/!=->==#3",
-   "sym": "StepOf",
-   "op": "relational",
-   "line": 54,
-   "col": 38,
-   "from": "!=",
-   "to": "==",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NameChanged->ContradictoryTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 54,
-   "col": 61,
-   "from": "NameChanged",
-   "to": "ContradictoryTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NameChanged->DuplicateStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 54,
-   "col": 61,
-   "from": "NameChanged",
-   "to": "DuplicateStart",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NameChanged->EntryBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 54,
-   "col": 61,
-   "from": "NameChanged",
-   "to": "EntryBound",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NameChanged->IllegalTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 54,
-   "col": 61,
-   "from": "NameChanged",
-   "to": "IllegalTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NameChanged->IllegalTransition#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 54,
-   "col": 61,
-   "from": "NameChanged",
-   "to": "IllegalTransition",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NameChanged->InvocationBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 54,
-   "col": 61,
-   "from": "NameChanged",
-   "to": "InvocationBound",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NameChanged->NoStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 54,
-   "col": 61,
-   "from": "NameChanged",
-   "to": "NoStart",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NameChanged->OriginChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 54,
-   "col": 61,
-   "from": "NameChanged",
-   "to": "OriginChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/NameChanged->OwnershipChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 54,
-   "col": 61,
-   "from": "NameChanged",
-   "to": "OwnershipChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.origin.Some? && r.origin != p.origin->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 55,
-   "col": 15,
-   "from": "r.origin.Some? && r.origin != p.origin",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.origin.Some? && r.origin != p.origin->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 55,
-   "col": 15,
-   "from": "r.origin.Some? && r.origin != p.origin",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/&&->||#4",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 55,
-   "col": 30,
-   "from": "&&",
-   "to": "||",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/relational/!=->==#4",
-   "sym": "StepOf",
-   "op": "relational",
-   "line": 55,
-   "col": 42,
-   "from": "!=",
-   "to": "==",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OriginChanged->ContradictoryTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 55,
-   "col": 67,
-   "from": "OriginChanged",
-   "to": "ContradictoryTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OriginChanged->DuplicateStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 55,
-   "col": 67,
-   "from": "OriginChanged",
-   "to": "DuplicateStart",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OriginChanged->EntryBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 55,
-   "col": 67,
-   "from": "OriginChanged",
-   "to": "EntryBound",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OriginChanged->IllegalTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 55,
-   "col": 67,
-   "from": "OriginChanged",
-   "to": "IllegalTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OriginChanged->IllegalTransition#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 55,
-   "col": 67,
-   "from": "OriginChanged",
-   "to": "IllegalTransition",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OriginChanged->InvocationBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 55,
-   "col": 67,
-   "from": "OriginChanged",
-   "to": "InvocationBound",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OriginChanged->NameChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 55,
-   "col": 67,
-   "from": "OriginChanged",
-   "to": "NameChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OriginChanged->NoStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 55,
-   "col": 67,
-   "from": "OriginChanged",
-   "to": "NoStart",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/OriginChanged->OwnershipChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 55,
-   "col": 67,
-   "from": "OriginChanged",
-   "to": "OwnershipChanged",
-   "status": "killed",
-   "killedBy": [
-    "S2 checks"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Terminal? && p.terminal && r.life != LifeOf(p.life)->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 56,
-   "col": 15,
-   "from": "r.kind.Terminal? && p.terminal && r.life != LifeOf(p.life)",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Terminal? && p.terminal && r.life != LifeOf(p.life)->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 56,
-   "col": 15,
-   "from": "r.kind.Terminal? && p.terminal && r.life != LifeOf(p.life)",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/&&->||#5",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 56,
-   "col": 32,
-   "from": "&&",
-   "to": "||",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/&&->||#6",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 56,
-   "col": 46,
-   "from": "&&",
-   "to": "||",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/relational/!=->==#5",
-   "sym": "StepOf",
-   "op": "relational",
-   "line": 56,
-   "col": 56,
-   "from": "!=",
-   "to": "==",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/LifeOf(p.life)->NoLife#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 56,
-   "col": 59,
-   "from": "LifeOf(p.life)",
-   "to": "NoLife",
-   "note": "drop value",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/ContradictoryTerminal->DuplicateStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 56,
-   "col": 87,
-   "from": "ContradictoryTerminal",
-   "to": "DuplicateStart",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/ContradictoryTerminal->EntryBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 56,
-   "col": 87,
-   "from": "ContradictoryTerminal",
-   "to": "EntryBound",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/ContradictoryTerminal->IllegalTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 56,
-   "col": 87,
-   "from": "ContradictoryTerminal",
-   "to": "IllegalTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/ContradictoryTerminal->IllegalTransition#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 56,
-   "col": 87,
-   "from": "ContradictoryTerminal",
-   "to": "IllegalTransition",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/ContradictoryTerminal->InvocationBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 56,
-   "col": 87,
-   "from": "ContradictoryTerminal",
-   "to": "InvocationBound",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/ContradictoryTerminal->NameChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 56,
-   "col": 87,
-   "from": "ContradictoryTerminal",
-   "to": "NameChanged",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/ContradictoryTerminal->NoStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 56,
-   "col": 87,
-   "from": "ContradictoryTerminal",
-   "to": "NoStart",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/ContradictoryTerminal->OriginChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 56,
-   "col": 87,
-   "from": "ContradictoryTerminal",
-   "to": "OriginChanged",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/ContradictoryTerminal->OwnershipChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 56,
-   "col": 87,
-   "from": "ContradictoryTerminal",
-   "to": "OwnershipChanged",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Terminal? && !p.terminal && !Legal(p.life, r.life, true)->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 57,
-   "col": 15,
-   "from": "r.kind.Terminal? && !p.terminal && !Legal(p.life, r.life, true)",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Terminal? && !p.terminal && !Legal(p.life, r.life, true)->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 57,
-   "col": 15,
-   "from": "r.kind.Terminal? && !p.terminal && !Legal(p.life, r.life, true)",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/&&->||#7",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 57,
-   "col": 32,
-   "from": "&&",
-   "to": "||",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/!->#1",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 57,
-   "col": 35,
-   "from": "!",
-   "to": "",
-   "note": "drop negation",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/&&->||#8",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 57,
-   "col": 47,
-   "from": "&&",
-   "to": "||",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/!->#2",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 57,
-   "col": 50,
-   "from": "!",
-   "to": "",
-   "note": "drop negation",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "P1 progress",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/p.life, r.life->r.life, p.life#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 57,
-   "col": 57,
-   "from": "p.life, r.life",
-   "to": "r.life, p.life",
-   "note": "Legal args 1<->2",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/r.life, true->true, r.life#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 57,
-   "col": 65,
-   "from": "r.life, true",
-   "to": "true, r.life",
-   "note": "Legal args 2<->3",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constant/true->false#1",
-   "sym": "StepOf",
-   "op": "constant",
-   "line": 57,
-   "col": 73,
-   "from": "true",
-   "to": "false",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTerminal->ContradictoryTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 57,
-   "col": 92,
-   "from": "IllegalTerminal",
-   "to": "ContradictoryTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTerminal->DuplicateStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 57,
-   "col": 92,
-   "from": "IllegalTerminal",
-   "to": "DuplicateStart",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTerminal->EntryBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 57,
-   "col": 92,
-   "from": "IllegalTerminal",
-   "to": "EntryBound",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTerminal->IllegalTransition#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 57,
-   "col": 92,
-   "from": "IllegalTerminal",
-   "to": "IllegalTransition",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTerminal->InvocationBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 57,
-   "col": 92,
-   "from": "IllegalTerminal",
-   "to": "InvocationBound",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTerminal->NameChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 57,
-   "col": 92,
-   "from": "IllegalTerminal",
-   "to": "NameChanged",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTerminal->NoStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 57,
-   "col": 92,
-   "from": "IllegalTerminal",
-   "to": "NoStart",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTerminal->OriginChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 57,
-   "col": 92,
-   "from": "IllegalTerminal",
-   "to": "OriginChanged",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTerminal->OwnershipChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 57,
-   "col": 92,
-   "from": "IllegalTerminal",
-   "to": "OwnershipChanged",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Transition? && !Legal(p.life, r.life, false)->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 58,
-   "col": 15,
-   "from": "r.kind.Transition? && !Legal(p.life, r.life, false)",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Transition? && !Legal(p.life, r.life, false)->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 58,
-   "col": 15,
-   "from": "r.kind.Transition? && !Legal(p.life, r.life, false)",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/&&->||#9",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 58,
+   "line": 25,
    "col": 34,
    "from": "&&",
    "to": "||",
    "status": "killed",
    "killedBy": [
-    "P1 progress",
-    "S2 checks",
-    "S4 settle"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/!->#3",
-   "sym": "StepOf",
-   "op": "logic",
-   "line": 58,
-   "col": 37,
-   "from": "!",
-   "to": "",
-   "note": "drop negation",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/p.life, r.life->r.life, p.life#2",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 58,
-   "col": 44,
-   "from": "p.life, r.life",
-   "to": "r.life, p.life",
-   "note": "Legal args 1<->2",
-   "status": "stillborn",
-   "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "StepOf/swap-args/r.life, false->false, r.life#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 58,
-   "col": 52,
-   "from": "r.life, false",
-   "to": "false, r.life",
-   "note": "Legal args 2<->3",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constant/false->true#2",
-   "sym": "StepOf",
-   "op": "constant",
-   "line": 58,
-   "col": 60,
-   "from": "false",
-   "to": "true",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTransition->ContradictoryTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 58,
-   "col": 80,
-   "from": "IllegalTransition",
-   "to": "ContradictoryTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTransition->DuplicateStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 58,
-   "col": 80,
-   "from": "IllegalTransition",
-   "to": "DuplicateStart",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTransition->EntryBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 58,
-   "col": 80,
-   "from": "IllegalTransition",
-   "to": "EntryBound",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTransition->IllegalTerminal#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 58,
-   "col": 80,
-   "from": "IllegalTransition",
-   "to": "IllegalTerminal",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTransition->InvocationBound#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 58,
-   "col": 80,
-   "from": "IllegalTransition",
-   "to": "InvocationBound",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTransition->NameChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 58,
-   "col": 80,
-   "from": "IllegalTransition",
-   "to": "NameChanged",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTransition->NoStart#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 58,
-   "col": 80,
-   "from": "IllegalTransition",
-   "to": "NoStart",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTransition->OriginChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 58,
-   "col": 80,
-   "from": "IllegalTransition",
-   "to": "OriginChanged",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/constructor/IllegalTransition->OwnershipChanged#1",
-   "sym": "StepOf",
-   "op": "constructor",
-   "line": 58,
-   "col": 80,
-   "from": "IllegalTransition",
-   "to": "OwnershipChanged",
-   "status": "killed",
-   "killedBy": [
-    "S4 settle"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/||->&&#2",
-   "sym": "StepOf",
+   "id": "Repeats/logic/||->&&#1",
+   "sym": "Repeats",
    "op": "logic",
-   "line": 60,
-   "col": 35,
+   "line": 25,
+   "col": 54,
    "from": "||",
    "to": "&&",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "P1 progress",
-    "S5 update"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/st.projs[i := p.( life := if r.life.LifeOf? && (r.kind.Terminal? || !settled) then r.life.l else p.life, entry := if r.entry.Some? then r.entry else p.entry, retryable := if r.retryable.FlagOf? then r.retryable else p.retryable, updated := r.at, terminal := settled)], if r.kind.Binding? then st.entries + [r.entry] else st.entries->if r.kind.Binding? then st.entries + [r.entry] else st.entries, st.projs[i := p.(\n            life := if r.life.LifeOf? && (r.kind.Terminal? || !settled) then r.life.l else p.life,\n            entry := if r.entry.Some? then r.entry else p.entry,\n            retryable := if r.retryable.FlagOf? then r.retryable else p.retryable,\n            updated := r.at, terminal := settled)]#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 61,
-   "col": 20,
-   "from": "st.projs[i := p.(\n            life := if r.life.LifeOf? && (r.kind.Terminal? || !settled) then r.life.l else p.life,\n            entry := if r.entry.Some? then r.entry else p.entry,\n            retryable := if r.retryable.FlagOf? then r.retryable else p.retryable,\n            updated := r.at, terminal := settled)], if r.kind.Binding? then st.entries + [r.entry] else st.entries",
-   "to": "if r.kind.Binding? then st.entries + [r.entry] else st.entries, st.projs[i := p.(\n            life := if r.life.LifeOf? && (r.kind.Terminal? || !settled) then r.life.l else p.life,\n            entry := if r.entry.Some? then r.entry else p.entry,\n            retryable := if r.retryable.FlagOf? then r.retryable else p.retryable,\n            updated := r.at, terminal := settled)]",
-   "note": "State args 1<->2",
    "status": "stillborn",
    "killedBy": [],
    "unmapped": [],
@@ -4415,679 +472,745 @@
    "oracleFailed": []
   },
   {
-   "id": "StepOf/branch/r.life.LifeOf? && (r.kind.Terminal? || !settled)->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 62,
-   "col": 24,
-   "from": "r.life.LifeOf? && (r.kind.Terminal? || !settled)",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "P1 progress",
-    "S5 update"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.life.LifeOf? && (r.kind.Terminal? || !settled)->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 62,
-   "col": 24,
-   "from": "r.life.LifeOf? && (r.kind.Terminal? || !settled)",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "P1 progress",
-    "S5 update",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/logic/&&->||#10",
-   "sym": "StepOf",
+   "id": "Repeats/logic/&&->||#3",
+   "sym": "Repeats",
    "op": "logic",
-   "line": 62,
-   "col": 39,
+   "line": 25,
+   "col": 73,
    "from": "&&",
    "to": "||",
    "status": "killed",
    "killedBy": [
-    "I1 settled-stays-settled",
-    "S5 update",
-    "build: impl well-formedness"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "StepOf/logic/||->&&#3",
-   "sym": "StepOf",
+   "id": "Repeats/logic/||->&&#2",
+   "sym": "Repeats",
    "op": "logic",
-   "line": 62,
-   "col": 60,
+   "line": 25,
+   "col": 95,
    "from": "||",
    "to": "&&",
-   "status": "killed",
-   "killedBy": [
-    "I1 settled-stays-settled",
-    "P1 progress",
-    "S5 update"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "StepOf/logic/!->#4",
-   "sym": "StepOf",
+   "id": "Repeats/logic/&&->||#4",
+   "sym": "Repeats",
    "op": "logic",
-   "line": 62,
+   "line": 25,
+   "col": 112,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/||->&&#3",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 26,
+   "col": 7,
+   "from": "||",
+   "to": "&&",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/&&->||#5",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 26,
+   "col": 25,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/||->&&#4",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 26,
+   "col": 46,
+   "from": "||",
+   "to": "&&",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/&&->||#6",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 26,
+   "col": 72,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/||->&&#5",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 26,
+   "col": 101,
+   "from": "||",
+   "to": "&&",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/&&->||#7",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 26,
+   "col": 120,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/||->&&#6",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 27,
+   "col": 7,
+   "from": "||",
+   "to": "&&",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/&&->||#8",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 27,
+   "col": 26,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/||->&&#7",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 27,
+   "col": 48,
+   "from": "||",
+   "to": "&&",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/&&->||#9",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 27,
+   "col": 68,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/||->&&#8",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 27,
+   "col": 91,
+   "from": "||",
+   "to": "&&",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/&&->||#10",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 27,
+   "col": 108,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/||->&&#9",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 28,
+   "col": 7,
+   "from": "||",
+   "to": "&&",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/&&->||#11",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 28,
+   "col": 29,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/||->&&#10",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 28,
+   "col": 54,
+   "from": "||",
+   "to": "&&",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Repeats/logic/&&->||#12",
+   "sym": "Repeats",
+   "op": "logic",
+   "line": 28,
+   "col": 79,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Changed/logic/&&->||#1",
+   "sym": "Changed",
+   "op": "logic",
+   "line": 32,
+   "col": 60,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Changed/logic/!->#1",
+   "sym": "Changed",
+   "op": "logic",
+   "line": 32,
    "col": 63,
    "from": "!",
    "to": "",
    "note": "drop negation",
    "status": "killed",
    "killedBy": [
-    "I1 settled-stays-settled",
-    "P1 progress",
-    "S5 update"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.entry.Some?->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 63,
-   "col": 25,
-   "from": "r.entry.Some?",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S5 update"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.entry.Some?->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 63,
-   "col": 25,
-   "from": "r.entry.Some?",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "S5 update"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.retryable.FlagOf?->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 64,
-   "col": 29,
-   "from": "r.retryable.FlagOf?",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S5 update"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.retryable.FlagOf?->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 64,
-   "col": 29,
-   "from": "r.retryable.FlagOf?",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S5 update"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/swap-args/if r.kind.Binding? then st.entries + [r.entry] else st.entries, if r.kind.Binding? then st.bound + [r.inv] else st.bound->if r.kind.Binding? then st.bound + [r.inv] else st.bound, if r.kind.Binding? then st.entries + [r.entry] else st.entries#1",
-   "sym": "StepOf",
-   "op": "swap-args",
-   "line": 66,
-   "col": 11,
-   "from": "if r.kind.Binding? then st.entries + [r.entry] else st.entries, if r.kind.Binding? then st.bound + [r.inv] else st.bound",
-   "to": "if r.kind.Binding? then st.bound + [r.inv] else st.bound, if r.kind.Binding? then st.entries + [r.entry] else st.entries",
-   "note": "State args 2<->3",
-   "status": "stillborn",
-   "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "StepOf/branch/r.kind.Binding?->false#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 66,
-   "col": 14,
-   "from": "r.kind.Binding?",
-   "to": "false",
-   "note": "drop then-branch",
+   "id": "Changed/logic/||->&&#1",
+   "sym": "Changed",
+   "op": "logic",
+   "line": 32,
+   "col": 77,
+   "from": "||",
+   "to": "&&",
    "status": "killed",
    "killedBy": [
-    "I2 one-binding",
-    "P1 progress",
-    "S5 update"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/branch/r.kind.Binding?->true#1",
-   "sym": "StepOf",
-   "op": "branch",
-   "line": 66,
-   "col": 14,
-   "from": "r.kind.Binding?",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "P1 progress",
-    "S5 update"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/arith/+->-#2",
-   "sym": "StepOf",
-   "op": "arith",
-   "line": 66,
-   "col": 46,
-   "from": "+",
-   "to": "-",
-   "status": "stillborn",
-   "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "StepOf/drop-operand/+ [r.entry]->#1",
-   "sym": "StepOf",
-   "op": "drop-operand",
-   "line": 66,
-   "col": 46,
-   "from": "+ [r.entry]",
+   "id": "Changed/logic/&&->||#2",
+   "sym": "Changed",
+   "op": "logic",
+   "line": 32,
+   "col": 95,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Changed/logic/!->#2",
+   "sym": "Changed",
+   "op": "logic",
+   "line": 32,
+   "col": 98,
+   "from": "!",
    "to": "",
-   "note": "drop right operand",
+   "note": "drop negation",
    "status": "killed",
    "killedBy": [
-    "I2 one-binding",
-    "P1 progress",
-    "S5 update"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "StepOf/branch/r.kind.Binding?->false#2",
-   "sym": "StepOf",
+   "id": "Begin/swap-args/k, if f.life.LifeOf? then f.life.l else Accepted->if f.life.LifeOf? then f.life.l else Accepted, k#1",
+   "sym": "Begin",
+   "op": "swap-args",
+   "line": 35,
+   "col": 50,
+   "from": "k, if f.life.LifeOf? then f.life.l else Accepted",
+   "to": "if f.life.LifeOf? then f.life.l else Accepted, k",
+   "note": "Cell args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Begin/swap-args/if f.life.LifeOf? then f.life.l else Accepted, false->false, if f.life.LifeOf? then f.life.l else Accepted#1",
+   "sym": "Begin",
+   "op": "swap-args",
+   "line": 35,
+   "col": 53,
+   "from": "if f.life.LifeOf? then f.life.l else Accepted, false",
+   "to": "false, if f.life.LifeOf? then f.life.l else Accepted",
+   "note": "Cell args 2<->3",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Begin/branch/f.life.LifeOf?->false#1",
+   "sym": "Begin",
    "op": "branch",
-   "line": 67,
-   "col": 14,
-   "from": "r.kind.Binding?",
+   "line": 35,
+   "col": 56,
+   "from": "f.life.LifeOf?",
    "to": "false",
    "note": "drop then-branch",
    "status": "killed",
    "killedBy": [
-    "I2 one-binding",
-    "P1 progress",
-    "S5 update"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "StepOf/branch/r.kind.Binding?->true#2",
-   "sym": "StepOf",
+   "id": "Begin/branch/f.life.LifeOf?->true#1",
+   "sym": "Begin",
    "op": "branch",
-   "line": 67,
-   "col": 14,
-   "from": "r.kind.Binding?",
+   "line": 35,
+   "col": 56,
+   "from": "f.life.LifeOf?",
    "to": "true",
    "note": "drop else-branch",
    "status": "killed",
    "killedBy": [
-    "P1 progress",
-    "S5 update"
+    "F1 fold-computed",
+    "build: impl well-formedness"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "StepOf/arith/+->-#3",
-   "sym": "StepOf",
-   "op": "arith",
-   "line": 67,
-   "col": 44,
-   "from": "+",
-   "to": "-",
-   "status": "stillborn",
-   "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "StepOf/drop-operand/+ [r.inv]->#1",
-   "sym": "StepOf",
-   "op": "drop-operand",
-   "line": 67,
-   "col": 44,
-   "from": "+ [r.inv]",
-   "to": "",
-   "note": "drop right operand",
+   "id": "Begin/constructor/Accepted->Completed#1",
+   "sym": "Begin",
+   "op": "constructor",
+   "line": 35,
+   "col": 90,
+   "from": "Accepted",
+   "to": "Completed",
    "status": "killed",
    "killedBy": [
-    "I2 one-binding",
-    "P1 progress",
-    "S5 update"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "RunAt/branch/k == |rs|->false#1",
-   "sym": "RunAt",
-   "op": "branch",
-   "line": 75,
-   "col": 8,
-   "from": "k == |rs|",
-   "to": "false",
-   "note": "drop then-branch",
-   "status": "killed",
-   "killedBy": [
-    "H1 history",
-    "P1 progress",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "RunAt/branch/k == |rs|->true#1",
-   "sym": "RunAt",
-   "op": "branch",
-   "line": 75,
-   "col": 8,
-   "from": "k == |rs|",
-   "to": "true",
-   "note": "drop else-branch",
-   "status": "killed",
-   "killedBy": [
-    "H1 history",
-    "P1 progress"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "RunAt/off-by-one/k->(k - 1)#1",
-   "sym": "RunAt",
-   "op": "off-by-one",
-   "line": 75,
-   "col": 8,
-   "from": "k",
-   "to": "(k - 1)",
-   "status": "killed",
-   "killedBy": [
-    "H1 history",
-    "P1 progress",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "RunAt/off-by-one/k->(k + 1)#1",
-   "sym": "RunAt",
-   "op": "off-by-one",
-   "line": 75,
-   "col": 8,
-   "from": "k",
-   "to": "(k + 1)",
-   "status": "killed",
-   "killedBy": [
-    "H1 history",
-    "P1 progress",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "RunAt/relational/==->!=#1",
-   "sym": "RunAt",
-   "op": "relational",
-   "line": 75,
-   "col": 10,
-   "from": "==",
-   "to": "!=",
-   "status": "killed",
-   "killedBy": [
-    "H1 history",
-    "P1 progress",
-    "build: impl well-formedness"
-   ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "RunAt/swap-args/st, rs[k]->rs[k], st#1",
-   "sym": "RunAt",
-   "op": "swap-args",
-   "line": 76,
-   "col": 23,
-   "from": "st, rs[k]",
-   "to": "rs[k], st",
-   "note": "StepOf args 1<->2",
-   "status": "stillborn",
-   "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "RunAt/swap-args/why, k->k, why#1",
-   "sym": "RunAt",
-   "op": "swap-args",
-   "line": 77,
-   "col": 37,
-   "from": "why, k",
-   "to": "k, why",
-   "note": "Rejected args 1<->2",
-   "status": "stillborn",
-   "killedBy": [],
+   "id": "Begin/constructor/Accepted->Failed#1",
+   "sym": "Begin",
+   "op": "constructor",
+   "line": 35,
+   "col": 90,
+   "from": "Accepted",
+   "to": "Failed",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
    "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "RunAt/swap-args/st2, rs->rs, st2#1",
-   "sym": "RunAt",
-   "op": "swap-args",
-   "line": 78,
-   "col": 31,
-   "from": "st2, rs",
-   "to": "rs, st2",
-   "note": "RunAt args 1<->2",
-   "status": "stillborn",
-   "killedBy": [],
+   "id": "Begin/constructor/Accepted->Interrupted#1",
+   "sym": "Begin",
+   "op": "constructor",
+   "line": 35,
+   "col": 90,
+   "from": "Accepted",
+   "to": "Interrupted",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
    "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "RunAt/swap-args/rs, k + 1->k + 1, rs#1",
-   "sym": "RunAt",
-   "op": "swap-args",
-   "line": 78,
-   "col": 36,
-   "from": "rs, k + 1",
-   "to": "k + 1, rs",
-   "note": "RunAt args 2<->3",
-   "status": "stillborn",
-   "killedBy": [],
+   "id": "Begin/constructor/Accepted->OutcomeUnknown#1",
+   "sym": "Begin",
+   "op": "constructor",
+   "line": 35,
+   "col": 90,
+   "from": "Accepted",
+   "to": "OutcomeUnknown",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
    "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "RunAt/off-by-one/k->(k - 1)#2",
-   "sym": "RunAt",
-   "op": "off-by-one",
-   "line": 78,
-   "col": 40,
-   "from": "k",
-   "to": "(k - 1)",
+   "id": "Begin/constructor/Accepted->Queued#1",
+   "sym": "Begin",
+   "op": "constructor",
+   "line": 35,
+   "col": 90,
+   "from": "Accepted",
+   "to": "Queued",
    "status": "killed",
    "killedBy": [
-    "H1 history",
-    "P1 progress",
-    "build: impl well-formedness"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "RunAt/off-by-one/k->(k + 1)#2",
-   "sym": "RunAt",
-   "op": "off-by-one",
-   "line": 78,
-   "col": 40,
-   "from": "k",
-   "to": "(k + 1)",
+   "id": "Begin/constructor/Accepted->Retrying#1",
+   "sym": "Begin",
+   "op": "constructor",
+   "line": 35,
+   "col": 90,
+   "from": "Accepted",
+   "to": "Retrying",
    "status": "killed",
    "killedBy": [
-    "H1 history",
-    "P1 progress",
-    "build: impl well-formedness"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "RunAt/arith/+->-#1",
-   "sym": "RunAt",
-   "op": "arith",
-   "line": 78,
-   "col": 42,
-   "from": "+",
-   "to": "-",
+   "id": "Begin/constructor/Accepted->Running#1",
+   "sym": "Begin",
+   "op": "constructor",
+   "line": 35,
+   "col": 90,
+   "from": "Accepted",
+   "to": "Running",
    "status": "killed",
    "killedBy": [
-    "H1 history",
-    "P1 progress",
-    "build: impl well-formedness"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "RunAt/drop-operand/+ 1->#1",
-   "sym": "RunAt",
-   "op": "drop-operand",
-   "line": 78,
-   "col": 42,
-   "from": "+ 1",
-   "to": "",
-   "note": "drop right operand",
+   "id": "Begin/constructor/Accepted->Settling#1",
+   "sym": "Begin",
+   "op": "constructor",
+   "line": 35,
+   "col": 90,
+   "from": "Accepted",
+   "to": "Settling",
    "status": "killed",
    "killedBy": [
-    "H1 history",
-    "P1 progress",
-    "build: impl well-formedness"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "RunAt/constant/1->0#1",
-   "sym": "RunAt",
+   "id": "Begin/constructor/Accepted->Staged#1",
+   "sym": "Begin",
+   "op": "constructor",
+   "line": 35,
+   "col": 90,
+   "from": "Accepted",
+   "to": "Staged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Begin/constructor/Accepted->WaitingForInput#1",
+   "sym": "Begin",
+   "op": "constructor",
+   "line": 35,
+   "col": 90,
+   "from": "Accepted",
+   "to": "WaitingForInput",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Begin/constant/false->true#1",
+   "sym": "Begin",
    "op": "constant",
-   "line": 78,
-   "col": 44,
+   "line": 35,
+   "col": 100,
+   "from": "false",
+   "to": "true",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Begin/constant/false->true#2",
+   "sym": "Begin",
+   "op": "constant",
+   "line": 35,
+   "col": 107,
+   "from": "false",
+   "to": "true",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Begin/swap-args/false, -1->-1, false#1",
+   "sym": "Begin",
+   "op": "swap-args",
+   "line": 35,
+   "col": 107,
+   "from": "false, -1",
+   "to": "-1, false",
+   "note": "Cell args 4<->5",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Begin/swap-args/-1, NoFlag->NoFlag, -1#1",
+   "sym": "Begin",
+   "op": "swap-args",
+   "line": 35,
+   "col": 114,
+   "from": "-1, NoFlag",
+   "to": "NoFlag, -1",
+   "note": "Cell args 5<->6",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Begin/constant/1->0#1",
+   "sym": "Begin",
+   "op": "constant",
+   "line": 35,
+   "col": 115,
    "from": "1",
    "to": "0",
    "status": "killed",
    "killedBy": [
-    "H1 history",
-    "P1 progress",
-    "build: impl well-formedness"
+    "F1 fold-computed"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "RunAt/constant/1->2#1",
-   "sym": "RunAt",
+   "id": "Begin/constant/1->2#1",
+   "sym": "Begin",
    "op": "constant",
-   "line": 78,
-   "col": 44,
+   "line": 35,
+   "col": 115,
    "from": "1",
    "to": "2",
    "status": "killed",
    "killedBy": [
-    "H1 history",
-    "P1 progress",
     "build: impl well-formedness"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
-   ],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
   },
   {
-   "id": "ProjectFast/swap-args/State([], [], []), rs->rs, State([], [], [])#1",
-   "sym": "ProjectFast",
+   "id": "Begin/swap-args/NoFlag, k->k, NoFlag#1",
+   "sym": "Begin",
    "op": "swap-args",
-   "line": 88,
-   "col": 11,
-   "from": "State([], [], []), rs",
-   "to": "rs, State([], [], [])",
-   "note": "RunAt args 1<->2",
+   "line": 35,
+   "col": 118,
+   "from": "NoFlag, k",
+   "to": "k, NoFlag",
+   "note": "Cell args 6<->7",
    "status": "stillborn",
    "killedBy": [],
    "unmapped": [],
@@ -5096,38 +1219,2157 @@
    "oracleFailed": []
   },
   {
-   "id": "ProjectFast/swap-args/rs, 0->0, rs#1",
-   "sym": "ProjectFast",
-   "op": "swap-args",
-   "line": 88,
-   "col": 30,
-   "from": "rs, 0",
-   "to": "0, rs",
-   "note": "RunAt args 2<->3",
-   "status": "stillborn",
-   "killedBy": [],
-   "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
-  },
-  {
-   "id": "ProjectFast/constant/0->1#1",
-   "sym": "ProjectFast",
-   "op": "constant",
-   "line": 88,
-   "col": 34,
-   "from": "0",
-   "to": "1",
+   "id": "Advance/branch/s.owned != f.owned->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 42,
+   "col": 8,
+   "from": "s.owned != f.owned",
+   "to": "false",
+   "note": "drop then-branch",
    "status": "killed",
    "killedBy": [
-    "H1 history",
-    "P1 progress",
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/s.owned != f.owned->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 42,
+   "col": 8,
+   "from": "s.owned != f.owned",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/relational/!=->==#1",
+   "sym": "Advance",
+   "op": "relational",
+   "line": 42,
+   "col": 16,
+   "from": "!=",
+   "to": "==",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OwnershipChanged->ContradictoryTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 42,
+   "col": 39,
+   "from": "OwnershipChanged",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OwnershipChanged->DuplicateStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 42,
+   "col": 39,
+   "from": "OwnershipChanged",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OwnershipChanged->EntryBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 42,
+   "col": 39,
+   "from": "OwnershipChanged",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OwnershipChanged->IllegalTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 42,
+   "col": 39,
+   "from": "OwnershipChanged",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OwnershipChanged->IllegalTransition#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 42,
+   "col": 39,
+   "from": "OwnershipChanged",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OwnershipChanged->InvocationBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 42,
+   "col": 39,
+   "from": "OwnershipChanged",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OwnershipChanged->NameChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 42,
+   "col": 39,
+   "from": "OwnershipChanged",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OwnershipChanged->NoStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 42,
+   "col": 39,
+   "from": "OwnershipChanged",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OwnershipChanged->OriginChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 42,
+   "col": 39,
+   "from": "OwnershipChanged",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.kind.Binding? && entryBound->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 43,
+   "col": 13,
+   "from": "f.kind.Binding? && entryBound",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.kind.Binding? && entryBound->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 43,
+   "col": 13,
+   "from": "f.kind.Binding? && entryBound",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/&&->||#1",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 43,
+   "col": 29,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/EntryBound->ContradictoryTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 43,
+   "col": 55,
+   "from": "EntryBound",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/EntryBound->DuplicateStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 43,
+   "col": 55,
+   "from": "EntryBound",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/EntryBound->IllegalTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 43,
+   "col": 55,
+   "from": "EntryBound",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/EntryBound->IllegalTransition#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 43,
+   "col": 55,
+   "from": "EntryBound",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/EntryBound->InvocationBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 43,
+   "col": 55,
+   "from": "EntryBound",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/EntryBound->NameChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 43,
+   "col": 55,
+   "from": "EntryBound",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/EntryBound->NoStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 43,
+   "col": 55,
+   "from": "EntryBound",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/EntryBound->OriginChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 43,
+   "col": 55,
+   "from": "EntryBound",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/EntryBound->OwnershipChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 43,
+   "col": 55,
+   "from": "EntryBound",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.kind.Binding? && p.bound->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 44,
+   "col": 13,
+   "from": "f.kind.Binding? && p.bound",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.kind.Binding? && p.bound->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 44,
+   "col": 13,
+   "from": "f.kind.Binding? && p.bound",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/&&->||#2",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 44,
+   "col": 29,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/InvocationBound->ContradictoryTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 44,
+   "col": 52,
+   "from": "InvocationBound",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/InvocationBound->DuplicateStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 44,
+   "col": 52,
+   "from": "InvocationBound",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/InvocationBound->EntryBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 44,
+   "col": 52,
+   "from": "InvocationBound",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/InvocationBound->IllegalTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 44,
+   "col": 52,
+   "from": "InvocationBound",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/InvocationBound->IllegalTransition#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 44,
+   "col": 52,
+   "from": "InvocationBound",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/InvocationBound->NameChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 44,
+   "col": 52,
+   "from": "InvocationBound",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/InvocationBound->NoStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 44,
+   "col": 52,
+   "from": "InvocationBound",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/InvocationBound->OriginChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 44,
+   "col": 52,
+   "from": "InvocationBound",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/InvocationBound->OwnershipChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 44,
+   "col": 52,
+   "from": "InvocationBound",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/Changed(f.name, s.name)->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 45,
+   "col": 13,
+   "from": "Changed(f.name, s.name)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/Changed(f.name, s.name)->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 45,
+   "col": 13,
+   "from": "Changed(f.name, s.name)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/f.name, s.name->s.name, f.name#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 45,
+   "col": 21,
+   "from": "f.name, s.name",
+   "to": "s.name, f.name",
+   "note": "Changed args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/NameChanged->ContradictoryTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 45,
+   "col": 49,
+   "from": "NameChanged",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/NameChanged->DuplicateStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 45,
+   "col": 49,
+   "from": "NameChanged",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/NameChanged->EntryBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 45,
+   "col": 49,
+   "from": "NameChanged",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/NameChanged->IllegalTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 45,
+   "col": 49,
+   "from": "NameChanged",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/NameChanged->IllegalTransition#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 45,
+   "col": 49,
+   "from": "NameChanged",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/NameChanged->InvocationBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 45,
+   "col": 49,
+   "from": "NameChanged",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/NameChanged->NoStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 45,
+   "col": 49,
+   "from": "NameChanged",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/NameChanged->OriginChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 45,
+   "col": 49,
+   "from": "NameChanged",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/NameChanged->OwnershipChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 45,
+   "col": 49,
+   "from": "NameChanged",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/Changed(f.origin, s.origin)->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 46,
+   "col": 13,
+   "from": "Changed(f.origin, s.origin)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/Changed(f.origin, s.origin)->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 46,
+   "col": 13,
+   "from": "Changed(f.origin, s.origin)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/f.origin, s.origin->s.origin, f.origin#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 46,
+   "col": 21,
+   "from": "f.origin, s.origin",
+   "to": "s.origin, f.origin",
+   "note": "Changed args 1<->2",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OriginChanged->ContradictoryTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 46,
+   "col": 53,
+   "from": "OriginChanged",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OriginChanged->DuplicateStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 46,
+   "col": 53,
+   "from": "OriginChanged",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OriginChanged->EntryBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 46,
+   "col": 53,
+   "from": "OriginChanged",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OriginChanged->IllegalTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 46,
+   "col": 53,
+   "from": "OriginChanged",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OriginChanged->IllegalTransition#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 46,
+   "col": 53,
+   "from": "OriginChanged",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OriginChanged->InvocationBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 46,
+   "col": 53,
+   "from": "OriginChanged",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OriginChanged->NameChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 46,
+   "col": 53,
+   "from": "OriginChanged",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OriginChanged->NoStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 46,
+   "col": 53,
+   "from": "OriginChanged",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/OriginChanged->OwnershipChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 46,
+   "col": 53,
+   "from": "OriginChanged",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.kind.Terminal? && p.settled && !Repeats(f.life, p.life)->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 47,
+   "col": 13,
+   "from": "f.kind.Terminal? && p.settled && !Repeats(f.life, p.life)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.kind.Terminal? && p.settled && !Repeats(f.life, p.life)->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 47,
+   "col": 13,
+   "from": "f.kind.Terminal? && p.settled && !Repeats(f.life, p.life)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/&&->||#3",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 47,
+   "col": 30,
+   "from": "&&",
+   "to": "||",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/&&->||#4",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 47,
+   "col": 43,
+   "from": "&&",
+   "to": "||",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/!->#1",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 47,
+   "col": 46,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/f.life, p.life->p.life, f.life#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 47,
+   "col": 55,
+   "from": "f.life, p.life",
+   "to": "p.life, f.life",
+   "note": "Repeats args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/ContradictoryTerminal->DuplicateStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 47,
+   "col": 83,
+   "from": "ContradictoryTerminal",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/ContradictoryTerminal->EntryBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 47,
+   "col": 83,
+   "from": "ContradictoryTerminal",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/ContradictoryTerminal->IllegalTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 47,
+   "col": 83,
+   "from": "ContradictoryTerminal",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/ContradictoryTerminal->IllegalTransition#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 47,
+   "col": 83,
+   "from": "ContradictoryTerminal",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/ContradictoryTerminal->InvocationBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 47,
+   "col": 83,
+   "from": "ContradictoryTerminal",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/ContradictoryTerminal->NameChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 47,
+   "col": 83,
+   "from": "ContradictoryTerminal",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/ContradictoryTerminal->NoStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 47,
+   "col": 83,
+   "from": "ContradictoryTerminal",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/ContradictoryTerminal->OriginChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 47,
+   "col": 83,
+   "from": "ContradictoryTerminal",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/ContradictoryTerminal->OwnershipChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 47,
+   "col": 83,
+   "from": "ContradictoryTerminal",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.kind.Terminal? && !p.settled && !Legal(p.life, f.life, true)->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 48,
+   "col": 13,
+   "from": "f.kind.Terminal? && !p.settled && !Legal(p.life, f.life, true)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.kind.Terminal? && !p.settled && !Legal(p.life, f.life, true)->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 48,
+   "col": 13,
+   "from": "f.kind.Terminal? && !p.settled && !Legal(p.life, f.life, true)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/&&->||#5",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 48,
+   "col": 30,
+   "from": "&&",
+   "to": "||",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/!->#2",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 48,
+   "col": 33,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/&&->||#6",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 48,
+   "col": 44,
+   "from": "&&",
+   "to": "||",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/!->#3",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 48,
+   "col": 47,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/p.life, f.life->f.life, p.life#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 48,
+   "col": 54,
+   "from": "p.life, f.life",
+   "to": "f.life, p.life",
+   "note": "Legal args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/f.life, true->true, f.life#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 48,
+   "col": 62,
+   "from": "f.life, true",
+   "to": "true, f.life",
+   "note": "Legal args 2<->3",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constant/true->false#1",
+   "sym": "Advance",
+   "op": "constant",
+   "line": 48,
+   "col": 70,
+   "from": "true",
+   "to": "false",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTerminal->ContradictoryTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 48,
+   "col": 88,
+   "from": "IllegalTerminal",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTerminal->DuplicateStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 48,
+   "col": 88,
+   "from": "IllegalTerminal",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTerminal->EntryBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 48,
+   "col": 88,
+   "from": "IllegalTerminal",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTerminal->IllegalTransition#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 48,
+   "col": 88,
+   "from": "IllegalTerminal",
+   "to": "IllegalTransition",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTerminal->InvocationBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 48,
+   "col": 88,
+   "from": "IllegalTerminal",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTerminal->NameChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 48,
+   "col": 88,
+   "from": "IllegalTerminal",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTerminal->NoStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 48,
+   "col": 88,
+   "from": "IllegalTerminal",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTerminal->OriginChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 48,
+   "col": 88,
+   "from": "IllegalTerminal",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTerminal->OwnershipChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 48,
+   "col": 88,
+   "from": "IllegalTerminal",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.kind.Transition? && !Legal(p.life, f.life, false)->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 49,
+   "col": 13,
+   "from": "f.kind.Transition? && !Legal(p.life, f.life, false)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.kind.Transition? && !Legal(p.life, f.life, false)->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 49,
+   "col": 13,
+   "from": "f.kind.Transition? && !Legal(p.life, f.life, false)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/&&->||#7",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 49,
+   "col": 32,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/!->#4",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 49,
+   "col": 35,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/p.life, f.life->f.life, p.life#2",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 49,
+   "col": 42,
+   "from": "p.life, f.life",
+   "to": "f.life, p.life",
+   "note": "Legal args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/f.life, false->false, f.life#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 49,
+   "col": 50,
+   "from": "f.life, false",
+   "to": "false, f.life",
+   "note": "Legal args 2<->3",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constant/false->true#1",
+   "sym": "Advance",
+   "op": "constant",
+   "line": 49,
+   "col": 58,
+   "from": "false",
+   "to": "true",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTransition->ContradictoryTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 49,
+   "col": 77,
+   "from": "IllegalTransition",
+   "to": "ContradictoryTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTransition->DuplicateStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 49,
+   "col": 77,
+   "from": "IllegalTransition",
+   "to": "DuplicateStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTransition->EntryBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 49,
+   "col": 77,
+   "from": "IllegalTransition",
+   "to": "EntryBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTransition->IllegalTerminal#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 49,
+   "col": 77,
+   "from": "IllegalTransition",
+   "to": "IllegalTerminal",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTransition->InvocationBound#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 49,
+   "col": 77,
+   "from": "IllegalTransition",
+   "to": "InvocationBound",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTransition->NameChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 49,
+   "col": 77,
+   "from": "IllegalTransition",
+   "to": "NameChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTransition->NoStart#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 49,
+   "col": 77,
+   "from": "IllegalTransition",
+   "to": "NoStart",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTransition->OriginChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 49,
+   "col": 77,
+   "from": "IllegalTransition",
+   "to": "OriginChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/constructor/IllegalTransition->OwnershipChanged#1",
+   "sym": "Advance",
+   "op": "constructor",
+   "line": 49,
+   "col": 77,
+   "from": "IllegalTransition",
+   "to": "OwnershipChanged",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/||->&&#1",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 51,
+   "col": 32,
+   "from": "||",
+   "to": "&&",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/p.start, if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life->if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life, p.start#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 52,
+   "col": 19,
+   "from": "p.start, if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life",
+   "to": "if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life, p.start",
+   "note": "Cell args 1<->2",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life, settled->settled, if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 52,
+   "col": 28,
+   "from": "if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life, settled",
+   "to": "settled, if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life",
+   "note": "Cell args 2<->3",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.life.LifeOf? && (f.kind.Terminal? || !settled)->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 52,
+   "col": 31,
+   "from": "f.life.LifeOf? && (f.kind.Terminal? || !settled)",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.life.LifeOf? && (f.kind.Terminal? || !settled)->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 52,
+   "col": 31,
+   "from": "f.life.LifeOf? && (f.kind.Terminal? || !settled)",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed",
     "build: impl well-formedness"
    ],
-   "unmapped": [
-    "ReceiptsInvocationLifecycle.ProjectFast"
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/&&->||#8",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 52,
+   "col": 46,
+   "from": "&&",
+   "to": "||",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed",
+    "build: impl well-formedness"
    ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/||->&&#2",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 52,
+   "col": 67,
+   "from": "||",
+   "to": "&&",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/!->#5",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 52,
+   "col": 70,
+   "from": "!",
+   "to": "",
+   "note": "drop negation",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/settled, p.bound || f.kind.Binding?->p.bound || f.kind.Binding?, settled#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 52,
+   "col": 107,
+   "from": "settled, p.bound || f.kind.Binding?",
+   "to": "p.bound || f.kind.Binding?, settled",
+   "note": "Cell args 3<->4",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/p.bound || f.kind.Binding?, if f.entry.IndexOf? then k else p.entryAt->if f.entry.IndexOf? then k else p.entryAt, p.bound || f.kind.Binding?#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 53,
+   "col": 9,
+   "from": "p.bound || f.kind.Binding?, if f.entry.IndexOf? then k else p.entryAt",
+   "to": "if f.entry.IndexOf? then k else p.entryAt, p.bound || f.kind.Binding?",
+   "note": "Cell args 4<->5",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/logic/||->&&#3",
+   "sym": "Advance",
+   "op": "logic",
+   "line": 53,
+   "col": 17,
+   "from": "||",
+   "to": "&&",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/if f.entry.IndexOf? then k else p.entryAt, if f.retryable.FlagOf? then f.retryable else p.retryable->if f.retryable.FlagOf? then f.retryable else p.retryable, if f.entry.IndexOf? then k else p.entryAt#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 53,
+   "col": 37,
+   "from": "if f.entry.IndexOf? then k else p.entryAt, if f.retryable.FlagOf? then f.retryable else p.retryable",
+   "to": "if f.retryable.FlagOf? then f.retryable else p.retryable, if f.entry.IndexOf? then k else p.entryAt",
+   "note": "Cell args 5<->6",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.entry.IndexOf?->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 53,
+   "col": 40,
+   "from": "f.entry.IndexOf?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.entry.IndexOf?->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 53,
+   "col": 40,
+   "from": "f.entry.IndexOf?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/swap-args/if f.retryable.FlagOf? then f.retryable else p.retryable, k->k, if f.retryable.FlagOf? then f.retryable else p.retryable#1",
+   "sym": "Advance",
+   "op": "swap-args",
+   "line": 53,
+   "col": 80,
+   "from": "if f.retryable.FlagOf? then f.retryable else p.retryable, k",
+   "to": "k, if f.retryable.FlagOf? then f.retryable else p.retryable",
+   "note": "Cell args 6<->7",
+   "status": "stillborn",
+   "killedBy": [],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.retryable.FlagOf?->false#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 53,
+   "col": 83,
+   "from": "f.retryable.FlagOf?",
+   "to": "false",
+   "note": "drop then-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
+   "timeouts": 0,
+   "error": null,
+   "oracleFailed": []
+  },
+  {
+   "id": "Advance/branch/f.retryable.FlagOf?->true#1",
+   "sym": "Advance",
+   "op": "branch",
+   "line": 53,
+   "col": 83,
+   "from": "f.retryable.FlagOf?",
+   "to": "true",
+   "note": "drop else-branch",
+   "status": "killed",
+   "killedBy": [
+    "F1 fold-computed"
+   ],
+   "unmapped": [],
    "timeouts": 0,
    "error": null,
    "oracleFailed": []
