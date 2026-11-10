@@ -1053,7 +1053,8 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
     if group == "node":
         return (node + ["node", "--test", "--test-concurrency=1", *files], ROOT, tap_count)
     if group == "python":
-        return (per_file("python3", files), ROOT, python_count)
+        command = per_file("python3", files)
+        return (["python3", str(ROOT / "tools/verify/mini.py"), "python", command] if gateway_host == "mini" else command, ROOT, python_count)
     return (per_file("bash", files), ROOT, lambda _out: len(files))
 
 
@@ -1160,7 +1161,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--skip", default="", help=f"comma-separated runner groups to skip explicitly: {', '.join(SKIPPABLE)}")
     parser.add_argument("--plan", action="store_true", help="print the selection and steps without running them")
     parser.add_argument("--gateway-host", choices=("pool", "local", "mini"), default="pool",
-                        help="where the Gateway Vitest lanes run: the test-host pool (the Mac mini when reachable and idle, "
+                        help="where the Gateway Vitest and Python test lanes run: the test-host pool (the Mac mini when reachable and idle, "
                              "else this Mac), this Mac, or the mini (tools/verify/mini.py)")
     args = parser.parse_args(argv)
     # Recorded goldens must land in this checkout, so recording runs here.
@@ -1222,12 +1223,12 @@ def main(argv: list[str]) -> int:
             print(f"  delta: compatibility wording added in {addition}: no compat code (AGENTS.md); delete it or ask", flush=True)
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
-    if any(group.startswith("gateway") and not skipped_group(group) for group in groups) or selection["deferredTests"]:
+    if any(group.startswith("gateway") or group == "python" for group in groups if not skipped_group(group)) or selection["deferredTests"]:
         if gateway_host == "pool":
             gateway_host, gateway_reason = mini.choose_host()
-        print(f"  gateway lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
+        print(f"  gateway and python lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
     else:
-        gateway_host, gateway_reason = "local", "no Gateway lane selected"
+        gateway_host, gateway_reason = "local", "no Gateway or Python lane selected"
     if "mac-terminal" in groups and not skipped_group("mac-terminal"):
         print("  mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", flush=True)
     plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
@@ -1417,7 +1418,7 @@ def main(argv: list[str]) -> int:
             command, cwd, count = test_spec(group, files, selectors, run.logs, ios_wait=name != "all", gateway_host=gateway_host)
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
-            env = {**update, "TRON_VERIFY_COMMIT": sha} if gateway_host == "mini" and group.startswith("gateway") else update
+            env = {**update, "TRON_VERIFY_COMMIT": sha} if gateway_host == "mini" and (group.startswith("gateway") or group == "python") else update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
             if group in ('gateway', 'gateway-nested'):
                 result['caseOutcomes'], result['caseEvidenceComplete'] = case_outcomes(report)
