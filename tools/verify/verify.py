@@ -1428,8 +1428,13 @@ def main(argv: list[str]) -> int:
             command, cwd, count = test_spec(group, files, selectors, run.logs, ios_wait=name != "all", gateway_host=gateway_host)
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
-            env = {**update, "TRON_VERIFY_COMMIT": sha} if gateway_host == "mini" and (group.startswith("gateway") or group == "python") else update
+            on_mini = gateway_host == "mini" and (group.startswith("gateway") or group == "python")
+            env = {**update, "TRON_VERIFY_COMMIT": sha} if on_mini else update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
+            if on_mini and (reason := mini.no_result_reason(result["exit"], (ROOT / result["log"]).read_text(errors="replace"))):
+                # Not a test outcome, so the run is incomplete, not failed.
+                result.update(status="no result", reason=reason)
+                return finish("incomplete", f"{label}: the mini gave no result: {reason}")
             if group in ('gateway', 'gateway-nested'):
                 result['caseOutcomes'], result['caseEvidenceComplete'] = case_outcomes(report)
             if group in ("gateway", "gateway-nested") and result["status"] == "failed":

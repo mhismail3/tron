@@ -24,7 +24,7 @@ def hold_full_gateway_lock():
     if os.environ.get(HELD_BY_CALLER) == '1':
         return None
     record = {'pid': os.getpid(), 'worktree': str(ROOT), 'purpose': 'gateway vitest ' + ' '.join(sys.argv[1:])[:200]}
-    return wait_for_full_gateway_lock(record, None, lambda line: print(f'gateway tests: {line}', file=sys.stderr, flush=True))
+    return wait_for_full_gateway_lock(record, lambda line: print(f'gateway tests: {line}', file=sys.stderr, flush=True))
 
 
 # The browser receipt test runs the pinned agent-browser fork, which it reads from this
