@@ -79,7 +79,7 @@ actor SnapshotCache {
                 return .empty
             }
             let document = try JSONDecoder.gateway.decode(Document.self, from: data)
-            guard document.version == 3 || document.version == 4 else {
+            guard document.version == 4 else {
                 try? FileManager.default.removeItem(at: source)
                 performanceSignposts.end(
                     interval,

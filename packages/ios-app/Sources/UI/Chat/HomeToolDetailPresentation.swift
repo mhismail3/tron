@@ -428,7 +428,7 @@ extension HomeToolDetailPresentation {
         }
         guard call.detail("status") == "ok" else { return nil }
         // The typed instant when the Gateway sends it; the recorded local text otherwise.
-        let instant = call.details?["date"]?.objectValue?["at"]?.stringValue.flatMap(HomeChapterPresentation.parse)
+        let instant = call.details?["date"]?.objectValue?["at"]?.stringValue.flatMap(GatewayTimestamp.parse)
             ?? MemoryLine.parse(call.text).flatMap { Self.localTimestamp($0.text) }
         guard let instant else { return nil }
         let rows = [

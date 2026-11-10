@@ -110,7 +110,7 @@ struct HomeTaskCheckinView: View {
     }
 
     private var absoluteTime: String {
-        HomeChapterPresentation.parse(checkin.at)?.formatted(date: .complete, time: .standard) ?? checkin.at
+        GatewayTimestamp.parse(checkin.at)?.formatted(date: .complete, time: .standard) ?? checkin.at
     }
     private var metadata: String? {
         var facts = context.map { [$0] } ?? []

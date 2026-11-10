@@ -30,7 +30,7 @@ baselines through the manifest's consumer graph. They do not record anything.
 `SnapshotCachePersistenceContractTests` launches the hosted app with a UUID-scoped
 temporary root and the production SnapshotCache/AppModel owners. It observes actual
 file envelopes/digest names plus public catalog/snapshot values across app process
-termination/relaunch. Version 3/4 readability, invalid/oversized envelope discard,
+termination/relaunch. Version 4 readability, discard of version 3, future, invalid and oversized envelopes,
 summary-only rows, archived count without archived rows, profile separation,
 generation fencing and removal tombstones are storage contracts, not new formats.
 

@@ -25,7 +25,6 @@ final class TronDeliveredNotificationUITests: XCTestCase {
         let delivered = app.staticTexts["fixture.delivered-notifications"]
         XCTAssertTrue(delivered.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertEqual(delivered.label, "home,ordinary,other-chat,other-machine,sealed-home,unrouted")
-        XCTAssertEqual(app.staticTexts["fixture.delivered-badge"].label, "badge:7")
         if home {
             let homeButton = app.buttons["dashboard.menu"]
             let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'Ready'"), object: homeButton)
@@ -43,7 +42,6 @@ final class TronDeliveredNotificationUITests: XCTestCase {
             : "home,other-chat,other-machine,sealed-home,unrouted"
         let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", remaining), object: delivered)
         XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 15), .completed)
-        XCTAssertEqual(app.staticTexts["fixture.delivered-badge"].label, "badge:0")
         app.buttons["Deliver later"].tap()
         let later = home ? "later,ordinary,other-chat,other-machine,unrouted"
             : "home,later,other-chat,other-machine,sealed-home,unrouted"

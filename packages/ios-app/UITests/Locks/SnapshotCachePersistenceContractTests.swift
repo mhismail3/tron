@@ -93,13 +93,13 @@ final class SnapshotCachePersistenceContractTests: XCTestCase {
             defer { cleanup(app) }
             launch(app, mode: mode, token: UUID().uuidString)
             _ = try require(app, "cache.phase", label: "ready")
-            let valid = mode == "v3" || mode == "v4"
+            let valid = mode == "v4"
             _ = try require(app, "cache.catalog", label: valid ? "Before summary" : "<none>")
             let report = try inspect(app)
             XCTAssertEqual(report["firstExists"] as? Bool, valid)
             if valid {
                 let stored = try document(report, profileID: firstID)
-                XCTAssertEqual(stored["version"] as? Int, mode == "v3" ? 3 : 4)
+                XCTAssertEqual(stored["version"] as? Int, 4)
             } else {
                 XCTAssertEqual((report["documents"] as? [[String: Any]])?.count, 0)
             }
