@@ -4,8 +4,10 @@
 On-demand lock sensitivity (#1465): each sampled mutant flips one operator in the file, the *locks*
 `scripts/tron verify` would select for a change to that file run, and a failing run kills
 the mutant. M1 measures what locks catch, so module journeys are not part of the run. It measures and never gates: it exits non-zero only for usage errors, unmutated locks that do not pass, or harness errors.
-A mutant whose locks outlive `--timeout` (an infinite loop starves vitest's own timers) is
-stopped with its whole process group and counted as detected. The source file is restored
+A mutant whose locks outlive twice the unmutated run plus `--timeout` (an infinite loop starves
+vitest's own timers) is stopped with its whole process group and counted as detected. The deadline
+is measured from the unmutated run on the same host, so a loaded host slows every run alike and
+does not turn slow mutants into timeouts. The source file is restored
 after every mutant, including on interrupt or SIGTERM, and the report is rewritten after
 each mutant, so an interrupted run keeps what it finished.
 """
@@ -46,7 +48,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("file", help="repository-relative Gateway source file")
     parser.add_argument("--count", type=int, default=30)
     parser.add_argument("--seed", type=int, default=1465)
-    parser.add_argument("--timeout", type=float, default=300, help="seconds one mutant's lock run may take")
+    parser.add_argument("--timeout", type=float, default=300,
+                        help="seconds one mutant's lock run may take beyond twice the unmutated run")
     args = parser.parse_args(argv)
     path = verify.ROOT / args.file
     if not path.is_file() or not args.file.startswith(f"{verify.GATEWAY}/src/") or args.file.endswith(".test.ts"):
@@ -109,16 +112,22 @@ def main(argv: list[str]) -> int:
           f"{len(tests)} selected lock file(s)", flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
-    # A broken harness would otherwise count every mutant as killed.
+    # SIGTERM (an outer `timeout`) unwinds like an interrupt, so every lock run's group is stopped
+    # and the source is restored; installed before the unmutated run, which has no deadline.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    # A broken harness would otherwise count every mutant as killed. The unmutated run is not bounded
+    # (like the lock wait): it is the verify-green locks, and its time sets every mutant's deadline.
     started = time.monotonic()
-    baseline = run_locks(args.timeout)
+    baseline = run_locks(None)
+    elapsed = time.monotonic() - started
     if not isinstance(baseline, dict) or baseline.get("numFailedTests", 1) or baseline.get("numFailedTestSuites", 1) or not baseline.get("numPassedTests"):
-        # Which refusal, and how long it took, separates a broken harness from a baseline past --timeout (#2400).
-        observed = (baseline if isinstance(baseline, str) else "no readable report" if baseline is None else
-                    {key: baseline.get(key) for key in ("numPassedTests", "numFailedTests", "numFailedTestSuites")})
-        print(f"mutate: the unmutated locks do not pass cleanly ({observed} after {time.monotonic() - started:.1f}s, "
-              f"--timeout {args.timeout}); no mutant was run", file=sys.stderr)
+        observed = "no readable report" if baseline is None else \
+            {key: baseline.get(key) for key in ("numPassedTests", "numFailedTests", "numFailedTestSuites")}
+        print(f"mutate: the unmutated locks do not pass cleanly ({observed} after {elapsed:.1f}s); no mutant was run",
+              file=sys.stderr)
         return 1
+    deadline = 2 * elapsed + args.timeout
+    print(f"mutate: unmutated locks passed in {elapsed:.1f}s; a mutant run times out after {deadline:.1f}s", flush=True)
     mutants, started = [], time.time()
     out = verify.ROOT / "test-results" / "mutate" / f"{args.file.replace('/', '__')}.json"
 
@@ -135,15 +144,13 @@ def main(argv: list[str]) -> int:
         out.write_text(json.dumps(report, indent=2) + "\n")
         return report
 
-    # SIGTERM (an outer `timeout`) unwinds like an interrupt, so the source is restored.
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         for number, (index, start, end, replacement) in enumerate(sample, 1):
             mutated = lines[:]
             mutated[index] = lines[index][:start] + replacement + lines[index][end:]
             path.write_text("\n".join(mutated))
             begun = time.time()
-            summary = run_locks(args.timeout)
+            summary = run_locks(deadline)
             path.write_text(source)
             # Killed by a failing test, a suite the mutant broke, or a run it hung; no report is a harness error.
             outcome = summary if summary == "timeout" else "error" if summary is None \

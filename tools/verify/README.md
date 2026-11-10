@@ -276,9 +276,9 @@ flips (`===`/`!==`, `&&`/`||`, booleans, comparisons, `±1`) and runs the locks 
 for that source once per mutant, not the module's ordinary journeys. Each run goes through the Gateway
 test runner (`gateway.py`: temporary HOME and scratch), and `mutate` holds the host's full-Gateway lock
 for the whole sampling. Waiting for that lock is not bounded and does not count toward `--timeout`;
-the holder is printed to stderr while it waits. Unmutated locks
-must pass first. A failing test/suite in the Vitest report or a timed-out process is a
-kill; timeout stops the whole owned group (default 300 s, including infinite loops).
+the holder is printed to stderr while it waits. Unmutated locks must pass first (unbounded); a mutant's
+deadline is twice their time plus `--timeout` (default 300 s), so host load slows all runs alike. A failing
+test/suite in the Vitest report or a run past its deadline is a kill that stops the whole owned group.
 Missing reports are harness errors, excluded from the rate, and exit 1. Source is
 restored after each mutant, interrupt or SIGTERM. Incremental `test-results/mutate/`
 reports retain partial results (`complete: false` until finished). Stryker remains
