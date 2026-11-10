@@ -285,6 +285,10 @@ final class TronSubagentParityUITests: XCTestCase {
                 XCTAssertEqual(rows.count, 1, app.debugDescription)
                 XCTAssertTrue((rows.firstMatch.value as? String)?.hasPrefix(state == "running" ? "Live," : "Completed,") == true,
                               "\(rows.firstMatch.value ?? "")")
+                if state == "running" {
+                    XCTAssertTrue((rows.firstMatch.value as? String)?.contains("Claude Fable 5.2 · Medium thinking") == true,
+                                  "\(rows.firstMatch.value ?? "")")
+                }
                 XCTAssertFalse(app.staticTexts["DETAILS"].exists, "The bespoke DETAILS heading is retired")
                 XCTAssertFalse(app.staticTexts["LIVE OUTPUT"].exists, "The bespoke LIVE OUTPUT heading is retired")
                 try capture("2090-activity-\(state)-medium-\(scheme)")
