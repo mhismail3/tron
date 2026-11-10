@@ -7,7 +7,7 @@
 scripts/tron proof bootstrap   # install the pin if absent, then re-verify it; prints versions and the entry point
 scripts/tron proof doctor      # re-verify only; never downloads or writes
 scripts/tron proof check [<block>...] [--json] [--root <dir>] [--cache <file>]
-scripts/tron proof mutate <block> [--root <dir>] [--jobs 1..4] [--no-oracle] [--out <report.json>] [--laws <file>]
+scripts/tron proof mutate <block> [--root <dir>] [--jobs 1..4] [--out <report.json>] [--laws <file>]
                           [--config <mutate.json>] [--only <id>] [--list] [--equiv <id>] [--recheck <report.json> [--sample N]]
 scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]
 scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...
@@ -57,10 +57,10 @@ printed and blocks above it do not run); 2: usage, block graph or toolchain erro
 `mutate/mutate.mjs` (`proof mutate`) checks that a block's laws reject every first-order change to its
 compiled functions. Config: `blocks/<block>/mutate.json`, every path relative to the core root:
 `{block, tier: "high-stakes"|"leaf", impl, symbols, excludeSymbols?, verify, laws: {"<id> <name>": ["Module.Lemma"]},
-helpers?, kinds?, translate, setup?, oracles, accepted?, report, resourceLimit?}`. Each mutant runs in its own copy
+helpers?, kinds?, translate, accepted?, report, resourceLimit?}`. Each mutant runs in its own copy
 of the core root (so relative includes hold) with the pinned wrapper after `doctor` passes.
 
-1. **Baseline.** The unmutated block must verify, pass every oracle, and show a Passed row for every law; else exit 2.
+1. **Baseline.** The unmutated block must verify and show a Passed row for every law; else exit 2.
 2. **Mutants** of the `symbols` bodies only (ghost code and proofs are never mutated): `relational`, `boundary`,
    `arith`, `drop-operand`, `off-by-one`, `constant`, `branch`, `constructor`, `swap-args`, `logic`. Identical
    sources are deduplicated; ids are stable (`<function>/<op>/<from>-><to>#<n>`). A compiled method is
@@ -68,9 +68,8 @@ of the core root (so relative includes hold) with the pinned wrapper after `doct
    and its contract must fix what it returns.
 3. **Verdicts.** `killed`: a lemma listed in `laws` failed, or a compiled function's own well-formedness check did.
    Never a kill: `unknown-timeout` (timed out, out of resource or inconclusive; retried once alone), `unmapped`
-   (only a lemma not in `laws` failed, so it cannot mask a vacuous law), `verifier-error`, `law-gap` (only an
-   oracle caught it), `survived`. `stillborn` (resolution/type error) is excluded from the score.
-4. **Gate.** PASS only for a full run (no `--only`) with valid > 0, stillborn ≤ 40% and zero law-gap, survived and
+   (only a lemma not in `laws` failed, so it cannot mask a vacuous law), `verifier-error`, `survived`. `stillborn` (resolution/type error) is excluded from the score.
+4. **Gate.** PASS only for a full run (no `--only`) with valid > 0, stillborn ≤ 40% and zero survived and
    unknown. An `accepted` entry exempts a mutant only if it holds: `equivalent` makes the tool prove
    `F == F_mutant` on F's whole domain (its preconditions: the impl's, else those it inherits from the laws'
    signature, which Dafny enforces at every call; optional `hint` proof body); `out-of-contract` only for `tier: "leaf"`. A stale accepted id exits 2, and every compiled
@@ -87,8 +86,7 @@ of the core root (so relative includes hold) with the pinned wrapper after `doct
 Exit 0: PASS; 1: FAIL; 2: config, baseline or toolchain error. Limits: mutants are first-order; the tokenizer
 covers the Dafny subset blocks use (no attributes inside bodies, no nested comments in mutated bodies); Dafny
 reports a solver "unknown" on a goal as an ordinary failure, so such a failure of a mapped law counts as a kill;
-a forged `killed` label in a report is caught only if sampled. Oracles run with the repository as working
-directory.
+a forged `killed` label in a report is caught only if sampled.
 
 ## Packet
 
@@ -137,7 +135,7 @@ proven equivalences; a weakened law FAILS with the survivor it no longer catches
 rejected by its failing proof; a mutant only an unmapped helper catches is `unmapped`, not killed; a law proof
 that runs out of resources is `unknown-timeout` after its retry, never killed; the packet renders each law's
 English and statement from the laws file; and an impl or a law edit shows the review and the mutation report
-STALE. No core block declares an oracle, so the oracle and `law-gap` path is not exercised.
+STALE.
 
 `scripts/tron test tooling tools/proof/tests/test-core.py` is the gate test of the real blocks, declared by
 `packages/core/package.module.json` and by the generated cores' module (`packages/gateway/src/core`), so any

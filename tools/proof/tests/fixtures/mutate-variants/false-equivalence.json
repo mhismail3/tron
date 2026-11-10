@@ -26,7 +26,6 @@
     "AtLow"
   ],
   "translate": "blocks/demo/clamp/Block.dfy",
-  "oracles": [],
   "report": "blocks/demo/clamp/mutation-report.json",
   "accepted": {
     "Clamp/off-by-one/x->(x - 1)#1": {

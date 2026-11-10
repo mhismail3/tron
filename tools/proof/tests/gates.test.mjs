@@ -25,7 +25,7 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   const cli = (...args) => spawnSync(join(ROOT, "scripts/tron"), ["proof", ...args, "--root", root], { encoding: "utf8" });
   const mutate = (out, ...args) => {
     const block = args[0] === "demo/timeout" ? args.shift() : "demo/clamp";
-    const run = cli("mutate", block, "--no-oracle", "--jobs", "2", "--out", out, ...args);
+    const run = cli("mutate", block, "--jobs", "2", "--out", out, ...args);
     const report = JSON.parse(readFileSync(out, "utf8"));
     return { status: run.status, summary: report.summary, byId: Object.fromEntries(report.results.map((r) => [r.id, r])) };
   };
@@ -87,7 +87,7 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   assert.equal(reviewed.hash, before.hash);
   assert.match(reviewed.proof, /\| PASS: blocks\/demo\/clamp\/Block\.dfy: Dafny program verifier finished with \d+ verified, 0 errors/);
   assert.equal(reviewed.review, "| Independent review | NOT ACCEPTED: reviewer transcript (reviewer.session) missing: identity unverifiable |");
-  assert.match(reviewed.mutation, /^\| Mutation check \| PASS: 16 valid mutants, 10 killed by laws, 0 law-gap, 0 survived, 6 accepted /);
+  assert.match(reviewed.mutation, /^\| Mutation check \| PASS: 16 valid mutants, 10 killed by laws, 0 survived, 6 accepted /);
 
   const block = join(root, "blocks/demo/clamp/Block.dfy");
   writeFileSync(block, readFileSync(block, "utf8").replace("// Definition and proofs", "// Definition and the proofs"));

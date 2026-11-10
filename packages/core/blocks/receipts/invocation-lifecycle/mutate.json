@@ -68,7 +68,6 @@
   },
   "helpers": [],
   "translate": "blocks/receipts/invocation-lifecycle/Block.dfy",
-  "oracles": [],
   "accepted": {},
   "report": "blocks/receipts/invocation-lifecycle/MUTATION.json",
   "kinds": {

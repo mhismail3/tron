@@ -56,7 +56,6 @@
     "OriginLive"
   ],
   "translate": "blocks/settings/precedence/Block.dfy",
-  "oracles": [],
   "accepted": {},
   "report": "blocks/settings/precedence/MUTATION.json",
   "kinds": {

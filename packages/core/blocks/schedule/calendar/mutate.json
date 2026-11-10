@@ -79,7 +79,6 @@
     "DateBound"
   ],
   "translate": "blocks/schedule/calendar/Block.dfy",
-  "oracles": [],
   "accepted": {
     "AtLeast/boundary/>=->>#1": {
       "kind": "equivalent",

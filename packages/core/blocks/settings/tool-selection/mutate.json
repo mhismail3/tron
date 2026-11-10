@@ -87,7 +87,6 @@
   },
   "helpers": [],
   "translate": "blocks/settings/tool-selection/Block.dfy",
-  "oracles": [],
   "accepted": {},
   "report": "blocks/settings/tool-selection/MUTATION.json",
   "kinds": {
