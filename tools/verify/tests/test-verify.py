@@ -19,7 +19,8 @@ modules own real Python tests, and runs verify as a worker would:
    build on the next run with an identical digest; a failing or empty XCTest summary
    fails the run.
 6. `scripts/tron mutate` over a fake Gateway runner: a mutant whose locks hang is
-   stopped at the per-mutant timeout with its whole process group, and an
+   stopped at the per-mutant deadline with its whole process group while runs that
+   are all slower than `--timeout` still measure, and an
    interrupted run restores the source and keeps the mutants it finished.
 
 The last run's output is kept in `test-results/verify-cli/`.
@@ -1294,7 +1295,8 @@ class IosLaneTests(VerifyCase):
 
 
 # The Gateway runner `mutate` drives, faked at `scripts/tron-node`: a flipped comparison
-# fails the lock, a flipped flag hangs it (with a child the timeout must also stop).
+# fails the lock, a flipped flag hangs it (with a child the timeout must also stop), and
+# FIXTURE_RUN_SECONDS makes every other run that slow, as a loaded host does.
 FAKE_RUNNER = """#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time
 out = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--outputFile="))
@@ -1305,6 +1307,7 @@ if "hang = false" in source:
     child = subprocess.Popen(["sleep", "300"])
     pathlib.Path("hung.pid").write_text(f"{child.pid}\\n")
     time.sleep(300)
+time.sleep(float(os.environ.get("FIXTURE_RUN_SECONDS", "0")))
 failed = 0 if "1 === 1" in source else 1
 pathlib.Path(out).write_text(json.dumps({"numFailedTests": failed, "numFailedTestSuites": 0, "numPassedTests": 1 - failed}))
 """
@@ -1371,8 +1374,10 @@ class MutateTests(VerifyCase):
         self.fail(f"the hung lock's child {pid} outlived its mutant")
 
     def test_a_hanging_mutant_times_out_and_counts_as_detected(self) -> None:
+        # Every lock run outlasts --timeout, as on a loaded host (#2400): the deadline is measured
+        # from the unmutated run, so only the hanging mutant times out.
         started = time.time()
-        process = self.mutate("--timeout", "3")
+        process = self.mutate("--timeout", "1", env={"FIXTURE_RUN_SECONDS": "2"})
         output, _ = process.communicate(timeout=120)
         self.assertEqual(process.returncode, 0, output)
         self.assertLess(time.time() - started, 60, output)
