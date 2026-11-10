@@ -1,5 +1,5 @@
 {
-  "packetHash": "c9d7818409872c4a",
+  "packetHash": "8715d2ffa5cf91fc",
   "tier": "high-stakes",
   "date": "2026-11-10",
   "writer": {
@@ -7,68 +7,68 @@
     "model": "anthropic/claude-fable-5-2"
   },
   "reviewer": {
-    "agent": "law-reviewer (run ce0209c5, round 481724f3)",
+    "agent": "law-reviewer (run ce0209c5, rounds 481724f3, 1c4be3ae)",
     "model": "anthropic/claude-haiku-5-5",
     "session": "2026-11-10T08-53-14-181Z_01a1c4a9-5544-763e-83f4-9bfde4bf6d71/84571c39-0dfd-4443-9c48-b64c6292441d/run-0/session.jsonl"
   },
   "laws": {
     "L1 compose-computed": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged statement; English equals Dafny: for every below, entries and defaults, Elems of ComposeList equals Compose over the same lists, in order, with no premise. Elems is injective on List, so it hides nothing. ComposeList's branch (plain.Cons? or entries.Nil? gives ModsList(plain)) agrees with Compose's two branches, including NoBelow, Names([]) and empty entries. Kills 40 of 92 (30 alone)."
+      "notes": "Statement and English unchanged: for every below, entries and defaults, Elems of ComposeList equals Compose over the same lists, in order, with no premise. The compiled ComposeList now picks its start list in one expression (plain if plain is nonempty or entries is empty, else below's names or defaults) and then applies ModsList; I checked this case by case against Compose's two branches, and it is the same function. Elems is still injective, so nothing is hidden."
     },
     "L2 encode-computed": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged statement; English equals Dafny: HeldOf(EncodeList(...)) equals Encode over the same lists, nothing or the same entries in order, with no premise. HeldOf is faithful, and EncodeList's three early cases and Same(ModsList(base, DeltaList)) test match Encode. The A1 change now states that the shell passes only a prefix of current up to its first plain name; L2 covers every current, and the prefix suffices because Encode reads only whether a plain name exists. Kills 52 of 92 (44 alone)."
+      "notes": "Statement and English unchanged: HeldOf(EncodeList(...)) equals Encode over the same lists, nothing or the same entries in order, with no premise. The compiled EncodeList now tests HasModifier(chosen) || HasPlain(current) in one branch, which is the same as its two early cases; the rest (base, PlainsFrom, DeltaList, Same, NothingList) is unchanged. The proof now uses HasSpecs and PlainsCount for the modifier and plain facts, and an in-proof assertion that Encode equals Decide on the same inputs; the proof check passes fresh (77 verified, 0 errors), so the assertion is checked, not assumed."
     },
     "M1 modifier-steps": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; English matches the four equations: no entry and a plain entry change nothing; +name appends when unlisted and non-empty (token 0 is the empty name); -name removes the first occurrence. Premise-free. Kills nothing by construction: it is a fact about the ghost Mods, which the mutation tool does not mutate."
+      "notes": "Unchanged statement and English (no entry or a plain entry changes nothing; +name appends when unlisted and non-empty; -name removes the first occurrence). Matches applyToolModifiers. Premise-free. Kills nothing by construction: it is a fact about the ghost Mods, which the mutation tool does not mutate."
     },
     "M2 modifier-sequence": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; entries apply one after another, in order, which is exactly Mods(t, a+b) == Mods(Mods(t,a),b). Premise-free. Kills nothing by construction, as for M1."
+      "notes": "Unchanged; Mods(t, a+b) == Mods(Mods(t,a),b). Premise-free. Kills nothing by construction, as for M1."
     },
     "C1 modifiers-over-below": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; English equals the premise (nonempty, all modifiers) and Compose(Names(below)) == Mods(below). Satisfiable: below=[1], es=[Plus(2)]. Matches composeToolSelection's first branch."
+      "notes": "Unchanged; a nonempty all-modifier layer over a selection below applies them to it. Satisfiable (below=[1], es=[Plus(2)]). Matches composeToolSelection's first branch."
     },
     "C2 plain-list": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; a layer with a plain name replaces the selection below, giving its plain names in order then its modifiers, whatever lies below. Premise and result match the Dafny. Matches the TS else-branch with plain.length > 0; duplicate plain names are kept, as in the TS."
+      "notes": "Unchanged; a layer with a plain name replaces the selection below with its plain names in order, then its modifiers. Matches the TS else-branch with plain.length > 0; duplicate plain names are kept, as in the TS."
     },
     "C3 modifiers-over-defaults": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; modifiers only with nothing below apply to the defaults. Compose(NoBelow, es, defaults) == Mods(defaults, es) under the C1 premise. Matches the TS, which uses the default list when the filtered plain list is empty and entries are nonempty. Witness: defaults=[1], es=[Minus(1)]."
+      "notes": "Unchanged; modifiers only with nothing below apply to the defaults. Matches the TS, which uses the default list when the filtered plain list is empty and entries are nonempty. Witness: defaults=[1], es=[Minus(1)]."
     },
     "C4 empty-is-no-tools": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; an empty layer selects no tools whatever lies below. Compose(below, [], defaults) == []. Matches the TS: entries.length === 0 gives []. Covers NoBelow and Names(below)."
+      "notes": "Unchanged; Compose(below, [], defaults) == []. Matches the TS (entries.length === 0 gives []). Premise-free."
     },
     "B1 no-duplicates": {
       "verdict": "ACCEPT",
-      "notes": "Re-reviewed. The English now states the whole premise: the layer's plain names, the selection below (when present) and the defaults each have no tool twice. This equals the unchanged Dafny premise (Nodup(Plains(es)), Nodup(below.names) when Names, Nodup(defaults)), so the earlier REJECT is resolved. The premise is stronger than needed (defaults are required even when unused), which makes the law weaker, not wrong. Witness: NoBelow, es=[Plain(1)], defaults=[2]. Kills 0 by construction (a fact about the ghost Mods)."
+      "notes": "Unchanged statement and English, which state the whole premise: the plain names, the selection below (when present) and the defaults each have no tool twice. The premise is stronger than needed (defaults must be duplicate-free even when unused), which only weakens the law. Witness: NoBelow, es=[Plain(1)], defaults=[2]. Kills nothing by construction."
     },
     "E1 modifiers-kept": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; a chosen list holding a modifier is stored as chosen. Matches encodeToolSelection's first line, and the premise is satisfiable: chosen=[Plus(1)]."
+      "notes": "Unchanged; a chosen list holding a modifier is stored as chosen. Matches encodeToolSelection's first line. Witness: chosen=[Plus(1)]."
     },
     "E2 plain-layer-stays-plain": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; a current layer holding a plain name stores the chosen list as it is, whatever the choice. Matches the TS (stored holds a non-modifier, so return chosen). Witness: current=[Plain(1)], chosen=[]."
+      "notes": "Unchanged; a current layer holding a plain name stores the chosen list as it is. Matches the TS. Witness: current=[Plain(1)], chosen=[]."
     },
     "E3 round-trip": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; storing a plain choice then composing with the selection below gives the chosen names in order, and storing nothing leaves the base (below, or defaults with nothing below). The shell returns undefined for Nothing, and settings-change.ts turns that into an unset. Pinned now by settings-types.test.ts (encode with undefined current and with reproduced choices returns undefined) and the e2e test named by the orchestrator. Kills 0 by construction."
+      "notes": "Unchanged; a plain choice stored then composed with the selection below gives the chosen names in order, and storing nothing leaves the base. The shell returns undefined for Nothing, which settings-change.ts treats as an unset; settings-types.test.ts pins undefined returns. Kills nothing by construction."
     },
     "E4 relative-when-reproducible": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; an all-plain choice over a modifiers-only (or empty) layer is stored as Nothing when Delta is empty, and as Holds(Delta) when Mods(base, Delta) reproduces the choice in order. Satisfiable (chosen=[Plain(1)], current=[], defaults=[1] gives Nothing). Matches encodeToolSelection, and the shell's test covers the relative case."
+      "notes": "Unchanged; an all-plain choice over a modifiers-only (or empty) layer is stored as Nothing when Delta is empty and as Holds(Delta) when Mods(base, Delta) reproduces the choice. Satisfiable (chosen=[Plain(1)], current=[], defaults=[1] gives Nothing). Matches encodeToolSelection."
     },
     "E5 plain-when-order-differs": {
       "verdict": "ACCEPT",
-      "notes": "Unchanged; when Delta cannot reproduce the chosen order the choice is stored as the plain list, for any current. Matches the TS reproduction check. Witness: chosen=[Plain(2),Plain(1)], NoBelow, defaults=[1]."
+      "notes": "Unchanged; when Delta cannot reproduce the chosen order, the choice is stored as the plain list for any current. Matches the TS reproduction check. Witness: chosen=[Plain(2),Plain(1)], NoBelow, defaults=[1]."
     }
   },
   "acceptedMutants": {},
-  "general": "Tier: high-stakes confirmed. Hash c9d7818409872c4a: MUTATION.json reports inputsHash c9d7818409872c4a, pass true, 92 valid, 0 accepted; the only ToolSelection.dfy change is comments (A1 and B1 English), so every statement and definition is as I reviewed at 050823a354a43b19. Definitions versus the TypeScript (.scratch/settings-types.before.ts) still match line by line: Mods vs applyToolModifiers, Compose vs composeToolSelection, Encode vs encodeToolSelection. No assume, axiom, verify-false or extern in either .dfy file. A1 now states what the shell passes; I checked it against the shell and the tests. Entries are validated as lists of strings on write, and compose and encode throw a TypeError on non-string entries, a non-string current entry and a non-list current, which settings-types.test.ts pins. Residual, not verified by me: the selection below comes from composedBelow / resolver values read from stores, and I did not trace the load path that validates stored values before that read; A1's claim that the selection below is 'an earlier Compose result or a declared default, so its names are strings too' rests on that load path, which should be pinned by a test if it is not already. Also, the packet's 'Reviewer: general notes' section (LAWS.md around line 651) is writer-authored text, not this review, and it still cites 110 valid mutants and 20,000 shadow inputs, which do not match this hash's report (92 valid). The writer should correct or remove it before the packet is read as a review. Missing law kinds: none that would let a concrete bug through for this pure block. Accepted mutants: none, so none to agree or disagree with."
+  "general": "Tier: high-stakes confirmed. Hash 8715d2ffa5cf91fc: MUTATION.json reports inputsHash 8715d2ffa5cf91fc, pass true, 96 valid, 0 accepted; the proof check passes fresh at this hash (77 verified, 0 errors). Since my last review the changes are refactors: Elems, RevOnto, Has, WithoutFrom, Step, ModsList, PlainsFrom, ComposeList, HasModifier, HasPlain, Same, Back, EncodeList and the proof lemmas were rewritten with if/else and merged lemmas (PlainsCount, HasSpecs). I compared each compiled function with its predecessor and with the ghost Compose and Encode: the functions are the same, and the merged EncodeList early cases are the same disjunction. No law statement or English changed in ToolSelection.dfy. The definitions still match the TypeScript (.scratch/settings-types.before.ts) line by line: Mods vs applyToolModifiers, Compose vs composeToolSelection, Encode vs encodeToolSelection. No assume, axiom, verify-false or extern in either .dfy file. Mutation: the compiled list functions are the only mutated code and every valid mutant is killed by L1 or L2; M1 to E5 kill nothing by construction because they are facts about ghost definitions. Residual, not verified by me: the selection below reaches compose from store reads (composedBelow / resolver values), and A1 says those names are strings because stored values are validated; I did not trace that load path, so a test should pin it. Also, the packet's 'Reviewer: general notes' section (LAWS.md around line 596) still contains my earlier review text for hash c9d7818409872c4a, with that hash and 92 valid mutants; the writer should replace it with this review's text, or drop it, so the packet does not show an earlier hash as current. Missing law kinds: none that would let a concrete bug through for this pure block. Accepted mutants: none, so none to agree or disagree with."
 }
