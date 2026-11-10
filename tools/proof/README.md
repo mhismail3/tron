@@ -287,8 +287,8 @@ TypeScript rejects each at its path and Swift rejects or reads each as stated.
 
 `scripts/tron test gateway src/proof/traffic-recorder.integration.test.ts` proves the recorder is refused
 outside an opted-in Debug Gateway (Stable channel, no channel, other values, the Stable home), that a
-seeded schedule journey through the real seams writes one record per call (none for nested calls), each under
-its trigger's block (`schedule/occurrence` or `schedule/calendar`), that replays through the same TypeScript to the recorded outputs,
+seeded schedule journey through the real seams writes one record per calendar call under `schedule/calendar` (none for
+nested calls or for once and interval triggers, which their block decides), that replays through the same TypeScript to the recorded outputs,
 that resolving the real settings schema records every key instance's fold (layer and not-applied layer as
 resolved, an untrusted project's value reported) with no setting value, model id or path in the corpus, that
 tool-selection compose and encode calls (direct and through a real resolution) record name tokens, never names,
