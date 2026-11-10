@@ -112,6 +112,9 @@ def main(argv: list[str]) -> int:
           f"{len(tests)} selected lock file(s)", flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
+    # SIGTERM (an outer `timeout`) unwinds like an interrupt, so every lock run's group is stopped
+    # and the source is restored; installed before the unmutated run, which has no deadline.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     # A broken harness would otherwise count every mutant as killed. The unmutated run is not bounded
     # (like the lock wait): it is the verify-green locks, and its time sets every mutant's deadline.
     started = time.monotonic()
@@ -141,8 +144,6 @@ def main(argv: list[str]) -> int:
         out.write_text(json.dumps(report, indent=2) + "\n")
         return report
 
-    # SIGTERM (an outer `timeout`) unwinds like an interrupt, so the source is restored.
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         for number, (index, start, end, replacement) in enumerate(sample, 1):
             mutated = lines[:]

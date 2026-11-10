@@ -20,8 +20,9 @@ modules own real Python tests, and runs verify as a worker would:
    fails the run.
 6. `scripts/tron mutate` over a fake Gateway runner: a mutant whose locks hang is
    stopped at the per-mutant deadline with its whole process group while runs that
-   are all slower than `--timeout` still measure, and an
-   interrupted run restores the source and keeps the mutants it finished.
+   are all slower than `--timeout` still measure; an interrupted run restores the
+   source and keeps the mutants it finished, and one interrupted during the unbounded
+   unmutated run stops that run's group and removes its HOME.
 
 The last run's output is kept in `test-results/verify-cli/`.
 """
@@ -1301,7 +1302,8 @@ FAKE_RUNNER = """#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time
 out = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--outputFile="))
 with open("runs.jsonl", "a") as runs:
-    runs.write(json.dumps({"home": os.environ["HOME"], "held": os.environ.get("TRON_FULL_GATEWAY_LOCK_HELD")}) + "\\n")
+    runs.write(json.dumps({"home": os.environ["HOME"], "held": os.environ.get("TRON_FULL_GATEWAY_LOCK_HELD"),
+                           "pid": os.getpid()}) + "\\n")
 source = pathlib.Path("src/store/store.ts").read_text()
 if "hang = false" in source:
     child = subprocess.Popen(["sleep", "300"])
@@ -1405,6 +1407,30 @@ class MutateTests(VerifyCase):
         report = self.report()
         self.assertEqual(([(m["line"], m["outcome"]) for m in report["mutants"]], report["complete"]), ([(1, "killed")], False))
         self.assert_hung_child_stopped()
+
+    def test_an_interrupt_during_the_unmutated_run_stops_its_group(self) -> None:
+        # The unmutated run has no deadline (#2400), so SIGTERM is its only stop.
+        process = self.mutate("--timeout", "1", env={"FIXTURE_RUN_SECONDS": "300"})
+        runs = self.repo.path / "packages/gateway/runs.jsonl"
+        deadline = time.time() + 60
+        while not runs.exists() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertTrue(runs.exists(), "the unmutated run never started")
+        run = json.loads(runs.read_text().splitlines()[0])
+        process.send_signal(signal.SIGTERM)
+        output, _ = process.communicate(timeout=60)
+        self.assertNotEqual(process.returncode, 0, output)
+        for _ in range(100):
+            try:
+                os.kill(run["pid"], 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            os.kill(run["pid"], signal.SIGKILL)
+            self.fail(f"the unmutated run {run['pid']} outlived mutate:\n{output}")
+        self.assertFalse(Path(run["home"]).exists(), output)
+        self.assertEqual(len(runs.read_text().splitlines()), 1, "no mutant may run after the interrupt")
 
     def test_mutants_run_through_the_gateway_runner_under_the_host_lock(self) -> None:
         import fcntl
