@@ -13,7 +13,7 @@ struct HomeTaskHistoryPageDTO: Decodable, Equatable, Sendable {
         let outcome: HomeTaskOutcome?
         let checkin: HomeTaskCheckinDTO?
         var valid: Bool {
-            historyText(id, bytes: 200) && HomeChapterPresentation.parse(at) != nil && historyID(taskId)
+            historyText(id, bytes: 200) && GatewayTimestamp.parse(at) != nil && historyID(taskId)
                 && (operationId.map(historyID) ?? true) && operationNumber > 0
                 && ((lifecycle == .terminal) == (outcome != nil)) && (checkin?.valid ?? true)
                 && (checkin.map { $0.id == id && $0.at == at && $0.taskId == taskId && $0.operationId == operationId } ?? true)
@@ -29,7 +29,7 @@ struct HomeTaskHistoryPageDTO: Decodable, Equatable, Sendable {
         let page = try value.decode(Self.self)
         guard page.items.count <= 50, page.total >= page.items.count, page.items.allSatisfy(\.valid),
               Set(page.items.map(\.id)).count == page.items.count,
-              zip(page.items, page.items.dropFirst()).allSatisfy({ HomeChapterPresentation.parse($0.at)! >= HomeChapterPresentation.parse($1.at)! }),
+              zip(page.items, page.items.dropFirst()).allSatisfy({ GatewayTimestamp.parse($0.at)! >= GatewayTimestamp.parse($1.at)! }),
               page.nextCursor.map({ historyText($0, bytes: 1024) && !page.items.isEmpty }) ?? true else {
             throw GatewayFailure(code: "invalid_response", message: "Home returned invalid check-in history. Reload history.", retryable: false, details: nil)
         }
