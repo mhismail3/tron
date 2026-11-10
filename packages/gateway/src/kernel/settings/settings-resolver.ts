@@ -98,8 +98,9 @@ const NO_VALUE: Opt = { $: "None" };
 
 /** One key instance as proof block settings/precedence (packages/core) decides it: each stored layer's presence,
  * binding, values and whether it applies. The block never sees a value, only its token: 0 is the instance's
- * default, 2n+1 the per-model value of the nth layer from the bottom and 2n+2 its plain value. `value` turns
- * the block's term over tokens back into a value, composing with the key's own type. */
+ * default, and the layer at index n from the bottom (Global is 0) has 2n+1 for its per-model value and 2n+2 for
+ * its plain value. `value` turns the block's term over tokens back into a value, composing with the key's own
+ * type. */
 function precedenceFacts(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers) {
   const values: unknown[] = [keyDefault(key, qualifiers)];
   const entry = (layer: StoredLayer, index: number): Entry => {

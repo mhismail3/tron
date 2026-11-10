@@ -56,7 +56,8 @@ module SettingsPrecedence refines SettingsPrecedenceLaws {
     else if k.composes then Compose(v, e.unqualified.v) else Tok(e.unqualified.v)
   }
 
-  // No layer lies above Project, so Project's own value is below nothing.
+  // The value from the layers strictly below l: the plain values of Global, Home and Session, lowest first, each
+  // counted only when its layer lies below l. Project is the top layer, so it lies below none.
   function Below(k: Key, ls: Layers, l: Layer): Value {
     PlainOver(k, ls, Session, l.Project?,
       PlainOver(k, ls, Home, l.Session? || l.Project?,

@@ -133,8 +133,9 @@ abstract module SettingsPrecedenceLaws {
     requires k.composes
     ensures Resolve(k, ls).value == Folded(k, Default, LiveTokens(k, ls))
 
-  // R4 untrusted-inert: a layer that is not applied never changes the resolved value or layer: two targets
-  // that differ only in the values held by an unapplied layer resolve the same.
+  // R4 untrusted-inert: a layer that is not applied never changes the resolved value or the layer it comes from:
+  // two targets that differ only in the values held by an unapplied layer resolve to the same value from the same
+  // layer. (What is shown, and which layer is reported as not applied, may differ: R6 and R7 say what they are.)
   lemma R4UntrustedInert(k: Key, ls: Layers, ls2: Layers, l: Layer)
     requires !At(ls, l).applied
     requires At(ls2, l) == At(ls, l).(qualified := At(ls2, l).qualified, unqualified := At(ls2, l).unqualified)
@@ -163,8 +164,10 @@ abstract module SettingsPrecedenceLaws {
     ensures Resolve(k, ls).notApplied == Unapplied(l) ==>
       Resolve(k, ls).layer.FromDefault? || Rank(Resolve(k, ls).layer.l) < Rank(l)
 
-  // R8 below: the value below layer l composes, lowest first, the plain values (never per-model ones) of the
-  // applied layers strictly below l that take part.
+  // R8 below: the value below layer l is the default with the plain values (never per-model ones) of the applied
+  // layers strictly below l that take part folded over it, lowest first. For a composing setting that is their
+  // composition over the default; for an ordinary setting it is the plain value of the highest such layer, or the
+  // default when there is none.
   lemma R8Below(k: Key, ls: Layers, l: Layer)
     ensures Below(k, ls, l) == Folded(k, Default, BelowTokens(k, ls, l))
 

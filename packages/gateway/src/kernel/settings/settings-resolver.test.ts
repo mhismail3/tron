@@ -81,5 +81,27 @@ describe("settings resolution around the precedence block", () => {
     expect(composedBelow(given, tools, {}, "global")).toEqual(["read", "bash", "edit", "write"]);
     expect(composedBelow(given, tools, {}, "session")).toEqual(["read", "bash", "edit"]);
     expect(composedBelow(given, tools, {}, "project")).toEqual(["read", "edit", "web"]);
+    // An ordinary setting does not compose: the plain value of the highest layer below, never a per-model one.
+    const thinking = keyForHome(TEST_SETTINGS_SCHEMA.schemaKey(THINKING), false);
+    const perModel = stores({ global: { ...global, modelThinkingLevels: { [MODEL]: "high" } }, project: project(true), session: chat });
+    expect(composedBelow(perModel, thinking, { role: "chat", model: MODEL }, "global")).toBe("medium");
+    expect(composedBelow(perModel, thinking, { role: "chat", model: MODEL }, "session")).toBe("low");
+    expect(composedBelow(perModel, thinking, { role: "chat", model: MODEL }, "project")).toBe("minimal");
+  });
+
+  it("Home is the layer above Global for the Home chat: its value wins under the Session scope, and below it lies Global alone", () => {
+    const home = { kind: "home" as const };
+    const given: SettingsStores = { layers: targetLayers(home, {}), gateway: {}, trust: {}, macTerminal: {}, global, home: { thinking: { chat: "high" } }, session: { settings: {} } };
+    const thinking = keyForHome(TEST_SETTINGS_SCHEMA.schemaKey(THINKING), true);
+    expect(resolveSettings(TEST_SETTINGS_SCHEMA, home, given, options).keys.find(candidate => candidate.key === THINKING)).toMatchObject({
+      value: "high", layer: "session", applied: true, overridden: true,
+      layers: [{ layer: "session", value: "high", applied: true }, { layer: "global", value: "low", applied: true }],
+    });
+    expect(composedBelow(given, thinking, { role: "chat", model: MODEL }, "home")).toBe("low");
+    expect(composedBelow(given, thinking, { role: "chat", model: MODEL }, "global")).toBe("medium");
+    // Without a Home value the row falls to Global, and Home's empty layer is still listed.
+    expect(resolveSettings(TEST_SETTINGS_SCHEMA, home, { ...given, home: {} }, options).keys.find(candidate => candidate.key === THINKING)).toMatchObject({
+      value: "low", layer: "global", overridden: false, layers: [{ layer: "session", applied: true }, { layer: "global", value: "low", applied: true }],
+    });
   });
 });
