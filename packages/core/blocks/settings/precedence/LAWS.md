@@ -8,7 +8,7 @@ Block hash: `c9232182f7d5762a` (over `blocks/settings/precedence/Block.dfy`, `la
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/settings/precedence/Block.dfy: Dafny program verifier finished with 46 verified, 0 errors;  |
 | Independent review | ACCEPT by law-reviewer (run 1a6b88c7, round 38ac5ae0) (openai/gpt-6-luna, transcript-verified); writer parent (anthropic/claude-opus-5-5); 2026-11-09 |
 | Mutation check | PASS: 92 valid mutants, 92 killed by laws, 0 law-gap, 0 survived, 0 accepted (blocks/settings/precedence/MUTATION.json) |
-| Shadow | match: 22710 inputs compared, 0 mismatches; lab traffic only; compiled core vs packages/gateway/src/kernel/settings/settings-resolver.ts (resolveSettings and composedBelow over a synthetic schema, random stores and targets) on 2,000 generated resolutions (not real traffic) |
+| Shadow | match: 22678 inputs compared, 0 mismatches; lab traffic only; compiled core vs packages/gateway/src/kernel/settings/settings-resolver.ts (resolveSettings and composedBelow over a synthetic schema, random stores and targets) on 2,000 generated resolutions (not real traffic) |
 | **Ready for cut-over** | no (READY is only computed with --recheck) (needs a current real-traffic shadow over >= 7 days) |
 
 ## S1 admission
