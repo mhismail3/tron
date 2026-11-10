@@ -1,1 +1,1 @@
-{"interface": ["laws/schedule/Calendar.dfy"], "impl": ["blocks/schedule/calendar/Block.dfy"], "deps": []}
+{"interface": ["laws/schedule/Calendar.dfy"], "impl": ["blocks/schedule/calendar/Block.dfy"], "deps": [], "shell": "packages/gateway/src/core/schedule/calendar"}

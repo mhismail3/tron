@@ -34,7 +34,6 @@ IDLE_DAYS, BRANCH_IDLE_DAYS = 3, 14
 REGENERABLE = {  # deleting loses nothing; the writer recreates it
     SCRATCH, EVIDENCE, ".ci-tools", "packages/gateway/node_modules", "packages/gateway/dist",
     "packages/push-relay/node_modules", "packages/push-relay/dist", "packages/push-relay/dist-sandbox",
-    "packages/core/node_modules",  # scripts/tron-node exec npm --prefix packages/core ci
     "packages/push-relay/.wrangler", "packages/ios-app/TronMobile.xcodeproj", "packages/mac-app/TronMac.xcodeproj",
     "packages/ios-app/MacTerminalSSH/.build", "packages/mac-app/.build", "packages/mac-app/build",
     "packages/mac-app/native-computer-control/.build", "packages/mac-app/native-computer-control/build",

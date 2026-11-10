@@ -3,23 +3,21 @@
   "block": "schedule/occurrence",
   "tier": "high-stakes",
   "laws": "blocks/schedule/occurrence/Block.dfy",
-  "oracle": false,
-  "toolHash": "ee15458abb801a8b",
+  "toolHash": "2eb85aae438a0ad4",
   "mutants": 116,
   "stillborn": 1,
   "valid": 115,
   "killed": 115,
-  "lawGap": 0,
   "survived": 0,
   "accepted": 0,
-  "seconds": 714,
+  "seconds": 857,
   "score": 1,
   "unknown": 0,
   "stillbornRatio": 0.009,
   "filter": null,
   "generated": 116,
   "pass": true,
-  "inputsHash": "869cf4e3481a4418"
+  "inputsHash": "8358bfcb2ff969ff"
  },
  "perLaw": [
   {
@@ -29,7 +27,7 @@
   },
   {
    "law": "L2 next-minimal",
-   "killed": 16,
+   "killed": 17,
    "only": 0
   },
   {
@@ -40,7 +38,7 @@
   {
    "law": "L4 first-interval",
    "killed": 12,
-   "only": 4
+   "only": 3
   },
   {
    "law": "L5 classify-not-due",
@@ -49,7 +47,7 @@
   },
   {
    "law": "L6 classify-due",
-   "killed": 68,
+   "killed": 67,
    "only": 36
   },
   {
@@ -59,7 +57,7 @@
   },
   {
    "law": "L8 first-after-occurrence",
-   "killed": 32,
+   "killed": 33,
    "only": 0
   }
  ],
@@ -79,8 +77,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Periods/off-by-one/span->(span - 1)#1",
@@ -96,8 +93,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Periods/off-by-one/span->(span + 1)#1",
@@ -113,8 +109,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Periods/arith//->*#1",
@@ -130,8 +125,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Periods/drop-operand// e->#1",
@@ -149,8 +143,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Periods/off-by-one/e->(e - 1)#1",
@@ -166,8 +159,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Periods/off-by-one/e->(e + 1)#1",
@@ -183,8 +175,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/branch/at > after->false#1",
@@ -202,8 +193,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/branch/at > after->true#1",
@@ -221,8 +211,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/at->(at - 1)#1",
@@ -239,8 +228,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/at->(at + 1)#1",
@@ -257,8 +245,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/boundary/>->>=#1",
@@ -275,8 +262,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/relational/>-><=#1",
@@ -294,8 +280,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/after->(after - 1)#1",
@@ -312,8 +297,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/after->(after + 1)#1",
@@ -330,8 +314,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/constructor/Some(at)->None#1",
@@ -349,8 +332,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/branch/after < a->false#1",
@@ -367,8 +349,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/branch/after < a->true#1",
@@ -387,8 +368,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/after->(after - 1)#2",
@@ -406,8 +386,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/after->(after + 1)#2",
@@ -423,8 +402,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/boundary/<-><=#1",
@@ -442,8 +420,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/relational/<->>=#1",
@@ -462,8 +439,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/a->(a - 1)#1",
@@ -479,8 +455,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/a->(a + 1)#1",
@@ -498,8 +473,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/constructor/Some(a)->None#1",
@@ -517,8 +491,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/constructor/Some(a + Periods(after - a, e) * e + e)->None#1",
@@ -539,8 +512,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/a->(a - 1)#2",
@@ -558,8 +530,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/a->(a + 1)#2",
@@ -578,8 +549,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/arith/+->-#1",
@@ -597,8 +567,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/drop-operand/+ Periods(after - a, e) * e->#1",
@@ -617,8 +586,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/after->(after - 1)#3",
@@ -631,14 +599,14 @@
    "status": "killed",
    "killedBy": [
     "L1 next-sound",
+    "L2 next-minimal",
     "L6 classify-due",
     "L8 first-after-occurrence",
     "build: impl well-formedness"
    ],
    "unmapped": [],
-   "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "timeouts": 0,
+   "error": null
   },
   {
    "id": "Next/off-by-one/after->(after + 1)#3",
@@ -658,8 +626,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/swap-args/after - a, e->e, after - a#1",
@@ -680,8 +647,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/arith/-->+#1",
@@ -701,8 +667,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/drop-operand/- a->#1",
@@ -723,8 +688,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/a->(a - 1)#3",
@@ -744,8 +708,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/a->(a + 1)#3",
@@ -764,8 +727,7 @@
    ],
    "unmapped": [],
    "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/arith/*->+#1",
@@ -785,8 +747,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/drop-operand/* e->#1",
@@ -806,8 +767,7 @@
    ],
    "unmapped": [],
    "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/e->(e - 1)#1",
@@ -826,8 +786,7 @@
    ],
    "unmapped": [],
    "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/e->(e + 1)#1",
@@ -841,14 +800,12 @@
    "killedBy": [
     "L1 next-sound",
     "L2 next-minimal",
-    "L6 classify-due",
     "L8 first-after-occurrence",
     "build: impl well-formedness"
    ],
    "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "timeouts": 1,
+   "error": null
   },
   {
    "id": "Next/arith/+->-#2",
@@ -866,8 +823,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/drop-operand/+ e->#1",
@@ -886,8 +842,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/e->(e - 1)#2",
@@ -905,8 +860,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Next/off-by-one/e->(e + 1)#2",
@@ -925,8 +879,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/constructor/Some(at)->None#1",
@@ -943,8 +896,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/branch/now <= a->false#1",
@@ -961,8 +913,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/branch/now <= a->true#1",
@@ -980,8 +931,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/off-by-one/now->(now - 1)#1",
@@ -998,8 +948,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/off-by-one/now->(now + 1)#1",
@@ -1015,8 +964,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/boundary/<=-><#1",
@@ -1032,8 +980,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/relational/<=->>#1",
@@ -1051,8 +998,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/off-by-one/a->(a - 1)#1",
@@ -1068,8 +1014,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/off-by-one/a->(a + 1)#1",
@@ -1086,8 +1031,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/constructor/Some(a)->None#1",
@@ -1104,8 +1048,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/swap-args/t, now - 1->now - 1, t#1",
@@ -1120,8 +1063,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/off-by-one/now->(now - 1)#2",
@@ -1139,8 +1081,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/off-by-one/now->(now + 1)#2",
@@ -1152,12 +1093,12 @@
    "to": "(now + 1)",
    "status": "killed",
    "killedBy": [
-    "L4 first-interval"
+    "L4 first-interval",
+    "L8 first-after-occurrence"
    ],
    "unmapped": [],
-   "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "timeouts": 0,
+   "error": null
   },
   {
    "id": "First/arith/-->+#1",
@@ -1175,8 +1116,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/drop-operand/- 1->#1",
@@ -1193,8 +1133,7 @@
    ],
    "unmapped": [],
    "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/constant/1->0#1",
@@ -1210,8 +1149,7 @@
    ],
    "unmapped": [],
    "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "First/constant/1->2#1",
@@ -1229,8 +1167,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/branch/nxt > now->false#1",
@@ -1248,8 +1185,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/branch/nxt > now->true#1",
@@ -1266,8 +1202,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/nxt->(nxt - 1)#1",
@@ -1284,8 +1219,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/nxt->(nxt + 1)#1",
@@ -1301,8 +1235,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/boundary/>->>=#1",
@@ -1318,8 +1251,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/relational/>-><=#1",
@@ -1337,8 +1269,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/now->(now - 1)#1",
@@ -1354,8 +1285,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/now->(now + 1)#1",
@@ -1372,8 +1302,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/swap-args/None, Some(nxt)->Some(nxt), None#1",
@@ -1390,8 +1319,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/constructor/Some(nxt)->None#1",
@@ -1408,8 +1336,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/swap-args/Some(nxt), None->None, Some(nxt)#1",
@@ -1426,8 +1353,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/branch/p.Latest?->false#1",
@@ -1444,8 +1370,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/branch/p.Latest?->true#1",
@@ -1462,8 +1387,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/constructor/Some(nxt)->None#2",
@@ -1480,8 +1404,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/swap-args/Some(nxt), None->None, Some(nxt)#2",
@@ -1498,8 +1421,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/swap-args/None, Some(nxt)->Some(nxt), None#2",
@@ -1516,8 +1438,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/constructor/Some(nxt)->None#3",
@@ -1534,8 +1455,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/nxt->(nxt - 1)#2",
@@ -1551,8 +1471,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/nxt->(nxt + 1)#2",
@@ -1568,8 +1487,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/arith/+->-#1",
@@ -1585,8 +1503,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/drop-operand/+ Periods(now - nxt, e) * e->#1",
@@ -1603,8 +1520,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/now->(now - 1)#2",
@@ -1621,8 +1537,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/now->(now + 1)#2",
@@ -1634,12 +1549,12 @@
    "to": "(now + 1)",
    "status": "killed",
    "killedBy": [
+    "L6 classify-due",
     "build: impl well-formedness"
    ],
    "unmapped": [],
-   "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "timeouts": 0,
+   "error": null
   },
   {
    "id": "Classify/swap-args/now - nxt, e->e, now - nxt#1",
@@ -1652,13 +1567,11 @@
    "note": "Periods args 1<->2",
    "status": "killed",
    "killedBy": [
-    "L6 classify-due",
     "build: impl well-formedness"
    ],
    "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "timeouts": 1,
+   "error": null
   },
   {
    "id": "Classify/arith/-->+#1",
@@ -1670,13 +1583,11 @@
    "to": "+",
    "status": "killed",
    "killedBy": [
-    "L6 classify-due",
     "build: impl well-formedness"
    ],
    "unmapped": [],
-   "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "timeouts": 1,
+   "error": null
   },
   {
    "id": "Classify/drop-operand/- nxt->#1",
@@ -1694,8 +1605,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/nxt->(nxt - 1)#3",
@@ -1711,8 +1621,7 @@
    ],
    "unmapped": [],
    "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/nxt->(nxt + 1)#3",
@@ -1724,12 +1633,12 @@
    "to": "(nxt + 1)",
    "status": "killed",
    "killedBy": [
+    "L6 classify-due",
     "build: impl well-formedness"
    ],
    "unmapped": [],
-   "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "timeouts": 0,
+   "error": null
   },
   {
    "id": "Classify/arith/*->+#1",
@@ -1746,8 +1655,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/drop-operand/* e->#1",
@@ -1765,8 +1673,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/e->(e - 1)#1",
@@ -1782,8 +1689,7 @@
    ],
    "unmapped": [],
    "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/e->(e + 1)#1",
@@ -1799,8 +1705,7 @@
    ],
    "unmapped": [],
    "timeouts": 1,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/branch/p.Skip?->false#1",
@@ -1817,8 +1722,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/branch/p.Skip?->true#1",
@@ -1835,8 +1739,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/swap-args/None, Some(latest + e)->Some(latest + e), None#1",
@@ -1853,8 +1756,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/constructor/Some(latest + e)->None#1",
@@ -1871,8 +1773,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/swap-args/Some(latest + e), Some(latest)->Some(latest), Some(latest + e)#1",
@@ -1889,8 +1790,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/latest->(latest - 1)#1",
@@ -1906,8 +1806,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/latest->(latest + 1)#1",
@@ -1923,8 +1822,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/arith/+->-#2",
@@ -1940,8 +1838,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/drop-operand/+ e->#1",
@@ -1958,8 +1855,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/e->(e - 1)#2",
@@ -1975,8 +1871,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/e->(e + 1)#2",
@@ -1992,8 +1887,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/constructor/Some(latest)->None#1",
@@ -2010,8 +1904,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/constructor/Some(latest)->None#2",
@@ -2028,8 +1921,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/swap-args/Some(latest), Some(latest + e)->Some(latest + e), Some(latest)#1",
@@ -2046,8 +1938,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/constructor/Some(latest + e)->None#2",
@@ -2064,8 +1955,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/swap-args/Some(latest + e), None->None, Some(latest + e)#1",
@@ -2082,8 +1972,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/latest->(latest - 1)#2",
@@ -2099,8 +1988,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/latest->(latest + 1)#2",
@@ -2116,8 +2004,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/arith/+->-#3",
@@ -2133,8 +2020,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/drop-operand/+ e->#2",
@@ -2151,8 +2037,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/e->(e - 1)#3",
@@ -2168,8 +2053,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Classify/off-by-one/e->(e + 1)#3",
@@ -2185,8 +2069,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   }
  ]
 }

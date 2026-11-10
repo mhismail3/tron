@@ -27,7 +27,6 @@ import mini  # noqa: E402  (the test-host pool's one owner)
 
 GATEWAY = "packages/gateway"
 RELAY = "packages/push-relay"
-CORE = "packages/core"
 MAC = "packages/mac-app"
 # A change here reaches everything above it, so it selects every lock.
 WIDENING_LAYERS = {"L0", "L1", "L2"}
@@ -101,8 +100,8 @@ def require_install(package: str = GATEWAY) -> None:
 
     Tests well beyond the Gateway import its packages (scripts/, tools/docs, tools/layers, tools/proof,
     tools/verify), so any test step needs them; the relay's own lane needs the relay's. A
-    platform-optional package may be absent. The proof gate (python-here) runs compiled cores, which need the core's."""
-    root, name, hint = ROOT / package, {GATEWAY: "Gateway", RELAY: "Relay", CORE: "Core"}[package], install_hint(package)
+    platform-optional package may be absent."""
+    root, name, hint = ROOT / package, "Gateway" if package == GATEWAY else "Relay", install_hint(package)
     try:
         wanted = json.loads((root / "package-lock.json").read_text())["packages"]
         installed = json.loads((root / "node_modules/.package-lock.json").read_text())["packages"]
@@ -1310,8 +1309,6 @@ def main(argv: list[str]) -> int:
                 require_install(GATEWAY)
             if "relay" in groups and not skipped_group("relay"):
                 require_install(RELAY)
-            if "python-here" in groups and not skipped_group("python-here") and (ROOT / CORE / "package-lock.json").is_file():
-                require_install(CORE)
         except VerifyError as error:
             print(f"verify: {error}", file=sys.stderr)
             return 2

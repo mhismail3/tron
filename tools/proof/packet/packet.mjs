@@ -4,18 +4,16 @@
 // the Dafny statement (lemma header, no proof body) of the law and of every supporting lemma it lists,
 // the reviewer's verdict and notes, and its mutation kills. Per block: the implementation under test
 // (full definitions of the compiled functions), the definitions the laws use, the world-model assumptions,
-// the law-kind checklist, and its gates: proof, independent review, mutation and, until a shell runs the block
-// (block.json "shell"), shadow and readiness for cut-over.
+// the law-kind checklist, and its gates: proof, independent review, mutation, and the shell that runs the block
+// (block.json "shell").
 // Every gate result is bound to the block hash (hash.mjs): any edit makes it STALE.
 //
 // Usage: scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck]   -> <block dir>/LAWS.md
-//   --recheck re-runs a random sample of mutants and the shadow comparison (gate files are not trusted);
-//   "Ready for cut-over" can only be YES with --recheck.
+//   --recheck re-runs a random sample of mutants (gate files are not trusted).
 //        scripts/tron proof packet --batch <out.md> [--root <dir>] <block>...      -> one batch for human reading
 // Exit 1 if the packet has problems (missing English, unlisted law lemma, missing law kinds).
-import { readFileSync, readdirSync, statSync, writeFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, statSync, writeFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { blockFiles, blockHash, toolHash } from "./hash.mjs";
@@ -63,7 +61,7 @@ function packet(root, block, opts = {}) {
   if (cfg.block !== block) throw new Error(`mutate.json block "${cfg.block}" is not ${block}`);
   const sources = sourcesOf(root, cfg); const all = decls(sources);
   const hash = blockHash(root, cfg);
-  const review = readJson(join(dir, "REVIEW.json")), shadow = readJson(join(dir, "SHADOW.json"));
+  const review = readJson(join(dir, "REVIEW.json"));
   const report = cfg.report ? readJson(join(root, cfg.report)) : null;
   const problems = [];
   // A law's statement and English live in the block's laws (block.json interface); a refining proof repeats only its name.
@@ -128,58 +126,27 @@ function packet(root, block, opts = {}) {
   const reviewOk = !!review && reviewProblems.length === 0;
   // Gate 3: mutation report for exactly these inputs.
   const ms = report?.summary; const mutFresh = ms?.inputsHash === hash;
-  // --recheck: never trust gate files alone. Re-run a seeded sample of the report's mutants and the
-  // whole shadow comparison; READY requires both to reproduce.
-  let mutRecheck = null, shadowRecheck = null;
+  // --recheck: never trust gate files alone. Re-run a seeded sample of the report's mutants.
+  let mutRecheck = null;
   if (opts.recheck && ms && mutFresh) { const r = sh([process.execPath, join(REPO, "tools/proof/mutate/mutate.mjs"), block, "--root", root, "--recheck", join(root, cfg.report), "--sample", "12", "--jobs", "2"], REPO); try { mutRecheck = JSON.parse(r.out.trim().split("\n").pop()); } catch { mutRecheck = { recheck: "error", why: r.out.slice(-200) }; } }
-  // A recorded-traffic shadow is re-run over the same window of the (growing) corpus; a generated one exactly.
-  if (opts.recheck && cfg.shadow && shadow) {
-    const tmp = join(tmpdir(), `shadow-recheck-${process.pid}.json`);
-    sh([process.execPath, join(REPO, "tools/proof/shadow/shadow.mjs"), block, "--root", root, "--out", tmp, ...(shadow.realTraffic ? ["--days", String(shadow.windowDays)] : [])], REPO);
-    shadowRecheck = readJson(tmp); rmSync(tmp, { force: true });
-  }
   // The report must come from the current checker (a semantics change re-runs every block).
   const toolNow = toolHash();
   const toolFresh = ms?.toolHash === toolNow;
   const reportOnly = (report?.results ?? []).filter((r) => r.accepted && !cfg.accepted?.[r.id]).map((r) => r.id);
   if (reportOnly.length) problems.push(`mutation report accepts mutants not in mutate.json accepted: ${reportOnly.join(", ")}`);
   const mutOk = reportOnly.length === 0 && ms?.pass === true && mutFresh && toolFresh && (!opts.recheck || mutRecheck?.recheck === "ok");
-  // Gate 4: shadow for exactly these inputs; cut-over additionally needs real traffic over the tier's window.
-  const windowNeed = cfg.tier === "high-stakes" ? 7 : 3;
-  const shadowFresh = shadow?.inputsHash === hash;
-  // The compiled core the shadow ran must be the one the current sources compile to (pinned toolchain).
-  let coreHashNow = null;
-  if (shadow && !opts.noVerify) {
-    const work = mkdtempSync(join(tmpdir(), "tron-proof-packet-"));
-    try {
-      if (sh([DAFNY, "translate", "js", "--no-verify", "--include-runtime", cfg.translate, "-o", join(work, "core")], root).code === 0)
-        coreHashNow = createHash("sha256").update(readFileSync(join(work, "core.js"))).digest("hex").slice(0, 16);
-    } finally { rmSync(work, { recursive: true, force: true }); }
-  }
-  const shadowOk = shadow?.status === "match" && shadow.compared > 0 && shadow.mismatches === 0 && shadowFresh && shadow.coreJsHash === coreHashNow
-    && (!opts.recheck || (shadowRecheck?.status === "match" && shadowRecheck.realTraffic === shadow.realTraffic
-      && (shadow.realTraffic ? shadowRecheck.compared >= shadow.compared : shadowRecheck.compared === shadow.compared)));
-  // Real traffic must also be current: its newest recorded day at most two days old.
-  const recent = shadow?.corpus?.last !== undefined && Date.now() - Date.parse(`${shadow.corpus.last}T00:00:00Z`) <= 2 * 86_400_000 + 86_400_000;
-  const realOk = shadowOk && shadow.realTraffic === true && shadow.windowDays >= windowNeed && recent;
-  const ready = opts.recheck === true && verify.ok === true && reviewOk && mutOk && realOk;
-
-  // A block its shell runs (block.json "shell") is the implementation: there is no TypeScript left to shadow.
-  const cutOver = shell !== undefined;
-  const tierRules = (cfg.tier === "high-stakes"
+  const tierRules = cfg.tier === "high-stakes"
     ? "reviewer must be a different agent AND model than the writer; equivalent-mutant acceptances must be proven"
-    : "reviewer must be a different agent than the writer; out-of-contract acceptances allowed with a reason")
-    + (cutOver ? "" : `; real-traffic shadow 100% over >= ${windowNeed} days before cut-over`);
+    : "reviewer must be a different agent than the writer; out-of-contract acceptances allowed with a reason";
   const md = [];
   md.push(`# Law review packet: ${cfg.block}`, "", `Tier: **${cfg.tier}** (${tierRules}).`,
     `Block hash: \`${hash}\` (over ${sources.map((s) => `\`${s.f}\``).join(", ")} and the whole mutate.json). Generated by \`scripts/tron proof packet\`; do not edit.`, "",
     "| Gate | Status |", "|---|---|",
     `| Proof (pinned Dafny, --verify-included-files) | ${verify.ok === null ? verify.text : `${verify.ok ? "PASS" : "FAIL"}: ${verify.text}`} |`,
     `| Independent review | ${!review ? "MISSING" : reviewOk ? `ACCEPT by ${review.reviewer.agent} (${review.reviewer.model}, transcript-verified); writer ${review.writer.agent} (${review.writer.model}); ${review.date}` : `NOT ACCEPTED: ${reviewProblems.join("; ")}`} |`,
-    `| Mutation check | ${!ms ? "MISSING" : `${!mutFresh ? `STALE (report for ${ms.inputsHash}) ` : ""}${!toolFresh ? "STALE (older mutation checker) " : ""}${ms.pass ? "PASS" : "FAIL"}${mutRecheck ? ` [recheck ${mutRecheck.recheck}: ${mutRecheck.sampled?.length ?? 0} sampled mutants re-run]` : ""}: ${ms.valid} valid mutants, ${ms.killed} killed by laws, ${ms.lawGap} law-gap, ${ms.survived} survived, ${ms.accepted} accepted (${cfg.report})`} |`,
-    ...(cutOver ? [`| Cut over | the only implementation: \`${shell}\` runs this block's compiled core (scripts/tron proof facade) |`] : [
-    `| Shadow | ${!shadow ? "MISSING" : `${!shadowFresh ? `STALE (run for ${shadow.inputsHash}) ` : ""}${shadow.status}: ${shadow.compared} ${shadow.unit ?? ""} compared, ${shadow.mismatches} mismatches; ${(opts.recheck ? shadowRecheck?.realTraffic : shadow.realTraffic) ? `real traffic, ${shadow.windowDays} days` : "lab traffic only"}; ${shadow.source ?? shadow.error}${coreHashNow === null ? "; compiled core not checked (--no-verify or translate failed)" : shadow.coreJsHash !== coreHashNow ? "; STALE: compiled core changed" : ""}${shadowRecheck ? ` [recheck: ${shadowRecheck.status}, ${shadowRecheck.compared} compared]` : ""}`} |`,
-    `| **Ready for cut-over** | ${ready ? "**YES**" : `no${!opts.recheck ? " (READY is only computed with --recheck)" : ""}${shadowOk && !realOk ? ` (needs a current real-traffic shadow over >= ${windowNeed} days)` : ""}`} |`]), "");
+    `| Mutation check | ${!ms ? "MISSING" : `${!mutFresh ? `STALE (report for ${ms.inputsHash}) ` : ""}${!toolFresh ? "STALE (older mutation checker) " : ""}${ms.pass ? "PASS" : "FAIL"}${mutRecheck ? ` [recheck ${mutRecheck.recheck}: ${mutRecheck.sampled?.length ?? 0} sampled mutants re-run]` : ""}: ${ms.valid} valid mutants, ${ms.killed} killed by laws, ${ms.survived} survived, ${ms.accepted} accepted (${cfg.report})`} |`,
+    shell === undefined ? "| Cut over | no: block.json names no shell that runs this block |"
+      : `| Cut over | the only implementation: \`${shell}\` runs this block's compiled core (scripts/tron proof facade) |`, "");
   const per = (law) => report?.perLaw?.find((p) => p.law === law);
   for (const { law, items } of laws) {
     const [main, ...helpers] = items; if (!main) continue; const p = per(law), r = review?.laws?.[law];
@@ -199,7 +166,7 @@ function packet(root, block, opts = {}) {
   if (notKilled.length || Object.keys(cfg.accepted ?? {}).length) md.push("## Mutants not killed by a law (each needs the reviewer's AGREE)", "", "| Mutant | Change | Status | Reviewer |", "|---|---|---|---|", ...notKilled.map((r) => `| \`${r.id}\` | \`${r.from}\` -> \`${r.to}\` | ${r.accepted ?? r.status} | ${review?.acceptedMutants?.[r.id] ?? "-"} |`), "");
   if (review?.general) md.push("## Reviewer: general notes", "", review.general, "");
   if (problems.length) md.push("## Packet problems", "", ...problems.map((p) => `- ${p}`), "");
-  return { md: md.join("\n"), hash, ready, problems };
+  return { md: md.join("\n"), hash, pass: verify.ok === true && reviewOk && mutOk, problems };
 }
 
 const args = process.argv.slice(2);
@@ -210,14 +177,14 @@ const positional = args.filter((a, i) => !a.startsWith("--") && !(rootAt >= 0 &&
 if (args[0] === "--batch") {
   const out = positional[0]; const blocks = positional.slice(1); const parts = blocks.map((b) => packet(root, b, opts));
   writeFileSync(out, [`# Law review batch (${parts.length} blocks)`, "", "Read the English first; the Dafny is the exact statement that is proven.", "",
-    "| Block | Hash | Ready |", "|---|---|---|", ...parts.map((p, i) => `| ${blocks[i]} | ${p.hash} | ${p.ready ? "YES" : "no"} |`), "", ...parts.map((p) => p.md)].join("\n\n---\n\n"));
+    "| Block | Hash | Gates pass |", "|---|---|---|", ...parts.map((p, i) => `| ${blocks[i]} | ${p.hash} | ${p.pass ? "YES" : "no"} |`), "", ...parts.map((p) => p.md)].join("\n\n---\n\n"));
   console.log(`wrote ${out}`);
   const bad = parts.filter((p) => p.problems.length); if (bad.length) { for (const p of bad) console.error(p.problems.join("\n")); process.exit(1); }
 } else {
   if (positional.length !== 1) { console.error("usage: scripts/tron proof packet <block> [--root <dir>] [--write] [--no-verify] [--recheck] (tools/proof/README.md)"); process.exit(2); }
   const p = packet(root, positional[0], opts);
   const target = join(root, "blocks", positional[0], "LAWS.md");
-  if (args.includes("--write")) { writeFileSync(target, `${p.md.trimEnd()}\n`); console.log(`wrote ${target} (hash ${p.hash}, ready ${p.ready})`); }
+  if (args.includes("--write")) { writeFileSync(target, `${p.md.trimEnd()}\n`); console.log(`wrote ${target} (hash ${p.hash}, gates ${p.pass ? "pass" : "do not pass"})`); }
   else console.log(p.md.trimEnd());
   if (p.problems.length) { console.error(p.problems.join("\n")); process.exit(1); }
 }

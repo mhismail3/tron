@@ -2,29 +2,24 @@
 // mutate: automatic mutation checker for a Dafny proof block (laws + implementation).
 //
 // Every mutant of the implementation must be KILLED by the laws (verification fails, attributed to the
-// law whose lemma failed). A mutant the laws accept is either:
-//   law-gap   - the compiled-JS oracle/shadow tests reject it, but no law does (the laws are too weak:
-//               once the oracle is retired, nothing would catch this bug), or
-//   survived  - nothing rejects it (laws AND tests too weak, or an equivalent mutant).
-// Both fail the gate unless the mutant is listed in mutate.json "accepted" with a reviewed reason
+// law whose lemma failed). A mutant the laws accept survives (the laws are too weak, or it is an equivalent
+// mutant), which fails the gate unless the mutant is listed in mutate.json "accepted" with a reviewed reason
 // (an equivalent mutant, or behaviour outside every law's contract that the block owner accepts).
 // Stillborn mutants (resolution/type errors) are reported and excluded from the score.
 //
 // Block config <root>/blocks/<block>/mutate.json, every file path relative to <root> (packages/core):
 //   { block, tier: "high-stakes"|"leaf", impl: "blocks/<block>/Block.dfy", symbols: [compiled functions to mutate],
 //     verify: [files whose verification checks the laws], laws: { "<law id>": ["<Module.lemma>", ...] }, translate: "...",
-//     setup: [[cmd...]], oracles: [{ name, cmd: [...], env?: {}, jsonEq?: [a, b] }],
 //     accepted: { "<mutant id>": { kind: "equivalent"|"out-of-contract", reason, reviewer, hint? } } }
 //   "equivalent" is checked, not trusted: the tool proves <sym> == mutated <sym> in Dafny (hint = proof
 //   body); "out-of-contract" (behaviour no law constrains, by decision) is allowed only for tier "leaf".
-// Placeholders in cmd/env: {dir} = mutant work root (a copy of <root>), {repo}, {block} (source block dir), {work}.
 // Each mutant runs in its own copy of <root>, so relative includes between laws/ and blocks/ hold.
 //
-// Usage: scripts/tron proof mutate <block> [--root <dir>] [--laws <file>] [--config <mutate.json>] [--no-oracle]
+// Usage: scripts/tron proof mutate <block> [--root <dir>] [--laws <file>] [--config <mutate.json>]
 //        [--jobs N] [--only <id-substr>] [--list] [--equiv <mutant id>] [--out <report.json>] [--recheck <report.json> [--sample N]]
 //   --equiv <id>   print the generated equivalence-proof file for one mutant (for reviewers) and exit
 //   --laws <file>  use this file's content as the block's laws (block.json interface[0]; shows a weakened law)
-// Exit 0 iff the full mutant set ran (no --only) with no survivors, law-gaps or unknowns (after "accepted").
+// Exit 0 iff the full mutant set ran (no --only) with no survivors or unknowns (after "accepted").
 import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, mkdtempSync, statSync } from "node:fs";
 import { dirname, join, resolve, basename } from "node:path";
@@ -221,7 +216,6 @@ function equivSource(origSrc, mutSrc, sym, hint) {
 }
 
 // ---------------- running a mutant ----------------
-const fill = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`);
 // Every child runs in its own process group so an interrupted run kills its dafny AND z3 processes
 // (killing only node used to leave orphaned solvers running).
 const children = new Set();
@@ -272,21 +266,6 @@ async function verify(dir, baseline = false) {
   }
   return { stillborn, failedLaws: [...failed].sort(), wf, unmapped: [...unmapped].sort(), timeouts, error, passedLaws: [...passed] };
 }
-async function oracles(dir, work) {
-  const vars = { dir, repo: REPO, block: blockDir, work };
-  const tr = await sh([DAFNY, "translate", "js", "--no-verify", "--include-runtime", cfg.translate, "-o", join(dir, "out/core")], { cwd: dir, env });
-  if (tr.code !== 0) return { compiled: false, failed: ["compile"] };
-  const failed = [];
-  for (const o of cfg.oracles) {
-    const e = { ...env }; for (const [k, v] of Object.entries(o.env ?? {})) e[k] = fill(v, vars);
-    const r = await sh(o.cmd.map((c) => fill(c, vars)), { cwd: REPO, env: e });
-    let ok = r.code === 0;
-    // An oracle's verdict is its stdout JSON; stderr (warnings) is diagnostics only.
-    if (ok && o.jsonEq) { try { const j = JSON.parse(r.stdout.slice(r.stdout.indexOf("{"))); ok = j[o.jsonEq[0]] === j[o.jsonEq[1]]; } catch { ok = false; } }
-    if (!ok) failed.push(o.name);
-  }
-  return { compiled: true, failed };
-}
 // A copy of <root>'s sources (laws/ and blocks/), so every relative include resolves as in the source tree.
 function copyBlock(dst) {
   mkdirSync(dst, { recursive: true });
@@ -312,9 +291,9 @@ if (recheck) {
   if (rs.length !== generated.length || rs.some((r) => !generated.some((m) => m.id === r.id))) fail("report's mutant set differs from the generated set");
   const bogus = rs.filter((r) => r.accepted && !cfg.accepted?.[r.id]); if (bogus.length) fail(`acceptances not in mutate.json: ${bogus.map((r) => r.id).join(", ")}`);
   const vs = rs.filter((r) => r.status !== "stillborn"), cnt = (st) => vs.filter((r) => r.status === st && !r.accepted).length;
-  const derived = { mutants: rs.length, stillborn: rs.length - vs.length, valid: vs.length, killed: cnt("killed"), lawGap: cnt("law-gap"), survived: cnt("survived"), accepted: vs.filter((r) => r.accepted).length,
+  const derived = { mutants: rs.length, stillborn: rs.length - vs.length, valid: vs.length, killed: cnt("killed"), survived: cnt("survived"), accepted: vs.filter((r) => r.accepted).length,
     unknown: vs.filter((r) => ["unknown-timeout", "unmapped", "verifier-error"].includes(r.status)).length };
-  derived.pass = recheck.summary.filter == null && vs.length > 0 && derived.stillborn / rs.length <= 0.4 && derived.lawGap === 0 && derived.survived === 0 && derived.unknown === 0;
+  derived.pass = recheck.summary.filter == null && vs.length > 0 && derived.stillborn / rs.length <= 0.4 && derived.survived === 0 && derived.unknown === 0;
   for (const [k, v] of Object.entries(derived)) if (recheck.summary[k] !== v) fail(`summary.${k} ${recheck.summary[k]} but results imply ${v}`);
   // (2) stillborn claims: resolve each one; it must not resolve.
   const sdir = mkdtempSync(join(tmpdir(), "mutate-sb-")); copyBlock(sdir);
@@ -336,9 +315,8 @@ const doctor = await sh(["/bin/bash", join(REPO, "tools/proof/bootstrap.sh"), "d
 if (doctor.code !== 0) { console.error(`pinned toolchain unavailable: ${doctor.out.trim()}`); process.exit(2); }
 const work = mkdtempSync(join(tmpdir(), "mutate-"));
 const t0 = Date.now();
-// Baseline: the unmutated block must pass every law and every oracle, or the run means nothing.
+// Baseline: the unmutated block must pass every law, or the run means nothing.
 copyBlock(join(work, "base"));
-for (const s of cfg.setup ?? []) { const r = await sh(s.map((c) => fill(c, { repo: REPO, block: blockDir, work, dir: join(work, "base") })), { cwd: REPO, env }); if (r.code) { console.error(`setup failed: ${s.join(" ")}\n${r.out}`); process.exit(2); } }
 // Every implementation function the build compiles must be mutated or excluded with a reason.
 {
   const t = tokenize(implSrc); const compiled = [];
@@ -350,8 +328,7 @@ for (const s of cfg.setup ?? []) { const r = await sh(s.map((c) => fill(c, { rep
 const bv = await verify(join(work, "base"));
 const notCovered = Object.keys(cfg.laws).filter((l) => !bv.passedLaws.includes(l));
 if (notCovered.length) { console.error(`BASELINE: laws with no Passed verifier row (lemma names wrong?): ${notCovered.join(", ")}`); process.exit(2); }
-const bo = flag("--no-oracle") ? { failed: [] } : await oracles(join(work, "base"), work);
-if (bv.stillborn || bv.failedLaws.length || bv.unmapped.length || bv.timeouts || bv.wf || bv.error || bo.failed.length) { console.error(`BASELINE FAILS: laws ${JSON.stringify(bv)} oracles ${JSON.stringify(bo)}`); process.exit(2); }
+if (bv.stillborn || bv.failedLaws.length || bv.unmapped.length || bv.timeouts || bv.wf || bv.error) { console.error(`BASELINE FAILS: laws ${JSON.stringify(bv)}`); process.exit(2); }
 console.error(`baseline ok; ${all.length} mutants; ${jobs} jobs; work ${work}`);
 
 const results = []; let next = 0, done = 0; // `all` is reassigned for the retry pass
@@ -360,15 +337,14 @@ async function worker() {
     const m = all[next++]; const dir = join(work, `m${m.hash}`);
     copyBlock(dir); writeFileSync(join(dir, cfg.impl), m.src);
     const v = await verify(dir);
-    const o = v.stillborn || v.failedLaws.length || v.wf || flag("--no-oracle") ? { failed: [] } : await oracles(dir, work);
     // Only a failing law (or the build rejecting the impl itself) kills; timeouts, unmapped lemmas and
     // verifier errors never do, so they cannot mask a weak law.
     const lawKill = v.failedLaws.length > 0 || v.wf;
-    const status = v.stillborn ? "stillborn" : lawKill ? "killed" : v.timeouts ? "unknown-timeout" : v.unmapped.length ? "unmapped" : v.error ? "verifier-error" : o.failed.length ? "law-gap" : "survived";
-    // An acceptance counts only if it holds: "equivalent" needs a verified equivalence lemma (and an
-    // oracle disagreement refutes it); "out-of-contract" is allowed only for leaf blocks.
+    const status = v.stillborn ? "stillborn" : lawKill ? "killed" : v.timeouts ? "unknown-timeout" : v.unmapped.length ? "unmapped" : v.error ? "verifier-error" : "survived";
+    // An acceptance counts only if it holds: "equivalent" needs a verified equivalence lemma; "out-of-contract"
+    // is allowed only for leaf blocks.
     let accepted; const acc = cfg.accepted?.[m.id];
-    if (acc && (status === "law-gap" || status === "survived")) {
+    if (acc && status === "survived") {
       if (acc.kind === "equivalent") {
         // Beside the impl, so its relative includes resolve.
         const equiv = join(dirname(cfg.impl), "Equiv.dfy");
@@ -379,7 +355,7 @@ async function worker() {
         if (!proven) acc.unproven = (acc.unproven ?? []).concat(r.out.split("\n").filter((l) => /Error|finished/.test(l)).slice(0, 3));
       } else if (acc.kind === "out-of-contract" && cfg.tier === "leaf") accepted = `out-of-contract: ${acc.reason} [${acc.reviewer}]`;
     }
-    results.push({ id: m.id, sym: m.sym, op: m.op, line: m.line, col: m.col, from: m.from, to: m.to, note: m.note, status, accepted, acceptanceRejected: acc && !accepted && status !== "killed" ? (acc.unproven ?? ["acceptance not allowed for this tier"]) : undefined, killedBy: v.failedLaws.concat(v.wf ? ["build: impl well-formedness"] : []), unmapped: v.unmapped, timeouts: v.timeouts, error: v.error, oracleFailed: o.failed });
+    results.push({ id: m.id, sym: m.sym, op: m.op, line: m.line, col: m.col, from: m.from, to: m.to, note: m.note, status, accepted, acceptanceRejected: acc && !accepted && status !== "killed" ? (acc.unproven ?? ["acceptance not allowed for this tier"]) : undefined, killedBy: v.failedLaws.concat(v.wf ? ["build: impl well-formedness"] : []), unmapped: v.unmapped, timeouts: v.timeouts, error: v.error });
     rmSync(dir, { recursive: true, force: true });
     if (++done % 25 === 0) console.error(`  ${done}/${all.length}`);
   }
@@ -410,24 +386,24 @@ const n = (s) => valid.filter((r) => r.status === s && !r.accepted).length;
 const laws = Object.keys(cfg.laws);
 const perLaw = laws.map((l) => ({ law: l, killed: valid.filter((r) => r.killedBy.includes(l)).length, only: valid.filter((r) => r.killedBy.length === 1 && r.killedBy[0] === l).length }));
 const other = [...new Set(valid.flatMap((r) => r.killedBy).filter((l) => !laws.includes(l)))];
-const summary = { block: cfg.block, tier: cfg.tier, laws: lawsOverride ?? cfg.verify.join(","), oracle: !flag("--no-oracle") && cfg.oracles.length > 0, toolHash: toolHash(), mutants: results.length, stillborn: results.length - valid.length, valid: valid.length, killed: n("killed"), lawGap: n("law-gap"), survived: n("survived"), accepted: valid.filter((r) => r.accepted).length, seconds: Math.round((Date.now() - t0) / 1000) };
+const summary = { block: cfg.block, tier: cfg.tier, laws: lawsOverride ?? cfg.verify.join(","), toolHash: toolHash(), mutants: results.length, stillborn: results.length - valid.length, valid: valid.length, killed: n("killed"), survived: n("survived"), accepted: valid.filter((r) => r.accepted).length, seconds: Math.round((Date.now() - t0) / 1000) };
 summary.score = valid.length ? +(summary.killed / valid.length).toFixed(3) : 0;
 summary.unknown = valid.filter((r) => ["unknown-timeout", "unmapped", "verifier-error"].includes(r.status)).length;
 summary.stillbornRatio = results.length ? +(summary.stillborn / results.length).toFixed(3) : 0;
 // Zero valid mutants proves nothing; too many stillborn mutants means the generator is not testing the code.
 // A filtered run (--only) is diagnostic: it never passes, so a partial run cannot stand in for the gate.
 summary.filter = opt("--only") ?? null; summary.generated = generated.length;
-summary.pass = summary.filter === null && summary.mutants === summary.generated && summary.valid > 0 && summary.stillbornRatio <= 0.4 && summary.lawGap === 0 && summary.survived === 0 && summary.unknown === 0;
+summary.pass = summary.filter === null && summary.mutants === summary.generated && summary.valid > 0 && summary.stillbornRatio <= 0.4 && summary.survived === 0 && summary.unknown === 0;
 // Binds this report to the exact block inputs (packet.mjs shows it STALE after any edit); a --laws or
 // --config override is recorded and never matches the block's own hash.
 summary.inputsHash = lawsOverride || opt("--config") ? `override:${blockHash(root, cfg)}` : blockHash(root, cfg);
-const byOp = {}; for (const r of results) { const o = (byOp[r.op] ??= { valid: 0, killed: 0, lawGap: 0, survived: 0, unknown: 0, accepted: 0 }); if (r.status === "stillborn") continue; o.valid++; if (r.accepted) o.accepted++; else if (r.status === "law-gap") o.lawGap++; else if (r.status === "killed" || r.status === "survived") o[r.status]++; else o.unknown++; }
-const md = [`# Mutation report: ${cfg.block} (${cfg.tier})`, "", `laws: \`${summary.laws}\`; oracle tests: ${summary.oracle ? cfg.oracles.map((o) => o.name).join(", ") : "off"}; generated by \`scripts/tron proof mutate\``, "",
-  `**${summary.pass ? "PASS" : "FAIL"}**: ${summary.mutants} mutants, ${summary.stillborn} stillborn, ${summary.valid} valid: ${summary.killed} killed by laws, ${summary.lawGap} law-gap (oracle only), ${summary.survived} survived, ${summary.unknown} unknown (timeout/unmapped/error), ${summary.accepted} accepted (proven). Score ${summary.score}. ${summary.seconds} s.`, "",
+const byOp = {}; for (const r of results) { const o = (byOp[r.op] ??= { valid: 0, killed: 0, survived: 0, unknown: 0, accepted: 0 }); if (r.status === "stillborn") continue; o.valid++; if (r.accepted) o.accepted++; else if (r.status === "killed" || r.status === "survived") o[r.status]++; else o.unknown++; }
+const md = [`# Mutation report: ${cfg.block} (${cfg.tier})`, "", `laws: \`${summary.laws}\`; generated by \`scripts/tron proof mutate\``, "",
+  `**${summary.pass ? "PASS" : "FAIL"}**: ${summary.mutants} mutants, ${summary.stillborn} stillborn, ${summary.valid} valid: ${summary.killed} killed by laws, ${summary.survived} survived, ${summary.unknown} unknown (timeout/unmapped/error), ${summary.accepted} accepted (proven). Score ${summary.score}. ${summary.seconds} s.`, "",
   "| Law | Mutants killed | Killed only by this law |", "|---|---|---|", ...perLaw.map((p) => `| ${p.law} | ${p.killed} | ${p.only} |`), ...other.map((o) => `| ${o} (not a law: impl well-formedness / proof helper) | ${valid.filter((r) => r.killedBy.includes(o)).length} | - |`), "",
-  "| Operator | Generated | Stillborn | Valid | Killed | Law-gap | Survived | Unknown | Accepted |", "|---|---|---|---|---|---|---|---|---|", ...Object.entries(byOp).map(([o, c]) => `| ${o} | ${results.filter((r) => r.op === o).length} | ${results.filter((r) => r.op === o && r.status === "stillborn").length} | ${c.valid} | ${c.killed} | ${c.lawGap} | ${c.survived} | ${c.unknown} | ${c.accepted} |`), ""];
+  "| Operator | Generated | Stillborn | Valid | Killed | Survived | Unknown | Accepted |", "|---|---|---|---|---|---|---|---|", ...Object.entries(byOp).map(([o, c]) => `| ${o} | ${results.filter((r) => r.op === o).length} | ${results.filter((r) => r.op === o && r.status === "stillborn").length} | ${c.valid} | ${c.killed} | ${c.survived} | ${c.unknown} | ${c.accepted} |`), ""];
 const bad = valid.filter((r) => r.status !== "killed" || r.accepted);
-if (bad.length) md.push("| Not killed by a law | Where | Change | Oracle | Status |", "|---|---|---|---|---|", ...bad.map((r) => `| \`${r.id}\` | ${r.sym} ${r.line}:${r.col} | \`${r.from}\` -> \`${r.to}\` | ${r.oracleFailed.join(", ") || (r.status === "killed" ? "-" : "passes")} | ${r.accepted ? `accepted: ${r.accepted}` : r.status + (r.acceptanceRejected ? ` (acceptance rejected: ${r.acceptanceRejected.join(" ").replace(/\|/g, "/")})` : "")} |`), "");
+if (bad.length) md.push("| Not killed by a law | Where | Change | Status |", "|---|---|---|---|", ...bad.map((r) => `| \`${r.id}\` | ${r.sym} ${r.line}:${r.col} | \`${r.from}\` -> \`${r.to}\` | ${r.accepted ? `accepted: ${r.accepted}` : r.status + (r.acceptanceRejected ? ` (acceptance rejected: ${r.acceptanceRejected.join(" ").replace(/\|/g, "/")})` : "")} |`), "");
 const outPath = opt("--out");
 if (outPath) { writeFileSync(outPath, JSON.stringify({ summary, perLaw, results }, null, 1)); writeFileSync(outPath.replace(/\.json$/, ".md"), md.join("\n")); }
 console.log(md.join("\n"));

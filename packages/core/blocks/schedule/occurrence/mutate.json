@@ -51,7 +51,6 @@
     "PeriodsFit"
   ],
   "translate": "blocks/schedule/occurrence/Block.dfy",
-  "oracles": [],
   "accepted": {},
   "report": "blocks/schedule/occurrence/MUTATION.json",
   "kinds": {

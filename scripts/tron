@@ -23,9 +23,8 @@ usage() {
 Usage: scripts/tron <command> [options]
 
 Commands:
-  dev [start|restart|status|preflight|stop|handoff] [--proof-traffic]
+  dev [start|restart|status|preflight|stop|handoff]
                                     Own the immutable Debug Gateway on port 9848;
-                                    --proof-traffic records proof seams (tools/proof)
                                     status/preflight are read-only; users initiate
                                     every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
@@ -108,10 +107,8 @@ Commands:
   proof mutate <block> [options]    Mutation gate: every change to a block's compiled functions
                                     must be killed by a law (tools/proof/README.md)
   proof packet <block> [options]    Render a block's hash-bound law review packet (LAWS.md)
-  proof shadow <block> [options]    Compare a block's compiled core with the TypeScript it models;
-                                    writes the hash-bound SHADOW.json
   proof facade <block> [--check]    Generate (or check) a block's compiled core and its typed
-                                    TypeScript façade, in its shell or packages/core/dist/<block>
+                                    TypeScript façade in its shell
   health [<rev>] [--baseline <rev>] [--github] [--evidence] [--deploy-log <jsonl>]
          [--home-sessions <dir>] [--backtest <t0>] [--csv <dir>]
                                     Read-only outcome and diagnostic health signals diffed
@@ -283,7 +280,6 @@ case "$cmd" in
       check) shift; use_pinned_node; exec node "$ROOT/tools/proof/lawcheck/lawcheck.mjs" "$@" ;;
       mutate) shift; use_pinned_node; exec node "$ROOT/tools/proof/mutate/mutate.mjs" "$@" ;;
       packet) shift; use_pinned_node; exec node "$ROOT/tools/proof/packet/packet.mjs" "$@" ;;
-      shadow) shift; use_pinned_node; exec node "$ROOT/tools/proof/shadow/shadow.mjs" "$@" ;;
       facade) shift; use_pinned_node; exec node "$ROOT/tools/proof/dafny2wire/facade.mjs" "$@" ;;
       *) usage >&2; exit 64 ;;
     esac

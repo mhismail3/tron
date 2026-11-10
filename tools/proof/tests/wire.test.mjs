@@ -18,7 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseWire } from "../dafny2wire/dafny2wire.mjs";
-import { mulberry32 } from "../oracles/random.mjs";
+import { mulberry32 } from "./random.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const FIXTURE = join(ROOT, "tools/proof/tests/fixtures/wire/Wire.dfy");

@@ -4,8 +4,7 @@
 // the real laws PASS (with six proven equivalences); a weakened law FAILS with a survivor; a false
 // equivalence claim is REJECTED; a mutant only an unmapped helper catches is not a kill; a law proof that
 // runs out of resources (fixture block demo/timeout) is unknown, never a kill; and the packet renders each
-// law from the laws file and shows the review and the mutation report STALE after an impl or a law edit;
-// and `proof shadow` records a match or mismatch only from a comparison that ran and agrees with its exit status.
+// law from the laws file and shows the review and the mutation report STALE after an impl or a law edit.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -26,7 +25,7 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   const cli = (...args) => spawnSync(join(ROOT, "scripts/tron"), ["proof", ...args, "--root", root], { encoding: "utf8" });
   const mutate = (out, ...args) => {
     const block = args[0] === "demo/timeout" ? args.shift() : "demo/clamp";
-    const run = cli("mutate", block, "--no-oracle", "--jobs", "2", "--out", out, ...args);
+    const run = cli("mutate", block, "--jobs", "2", "--out", out, ...args);
     const report = JSON.parse(readFileSync(out, "utf8"));
     return { status: run.status, summary: report.summary, byId: Object.fromEntries(report.results.map((r) => [r.id, r])) };
   };
@@ -88,7 +87,7 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   assert.equal(reviewed.hash, before.hash);
   assert.match(reviewed.proof, /\| PASS: blocks\/demo\/clamp\/Block\.dfy: Dafny program verifier finished with \d+ verified, 0 errors/);
   assert.equal(reviewed.review, "| Independent review | NOT ACCEPTED: reviewer transcript (reviewer.session) missing: identity unverifiable |");
-  assert.match(reviewed.mutation, /^\| Mutation check \| PASS: 16 valid mutants, 10 killed by laws, 0 law-gap, 0 survived, 6 accepted /);
+  assert.match(reviewed.mutation, /^\| Mutation check \| PASS: 16 valid mutants, 10 killed by laws, 0 survived, 6 accepted /);
 
   const block = join(root, "blocks/demo/clamp/Block.dfy");
   writeFileSync(block, readFileSync(block, "utf8").replace("// Definition and proofs", "// Definition and the proofs"));
@@ -105,23 +104,4 @@ test("mutation and packet gates fail for the right reasons", (t) => {
   const lawEdited = packet();
   assert.notEqual(lawEdited.hash, before.hash);
   assert.match(lawEdited.review, new RegExp(`NOT ACCEPTED: STALE \\(reviewed ${before.hash}, current ${lawEdited.hash}\\)`));
-
-  // 7. Shadow: the comparison's own exit status and output decide; a crash, garbage, nothing compared or an
-  // exit status that contradicts the counts is an error, never a match, and the previous result is gone.
-  const config = join(root, "blocks/demo/clamp/mutate.json");
-  const shadowFile = join(root, "blocks/demo/clamp/SHADOW.json");
-  const shadow = (mode) => {
-    const cfg = JSON.parse(readFileSync(config, "utf8"));
-    writeFileSync(config, JSON.stringify({ ...cfg, shadow: { cmd: ["node", variant("shadow-stub.mjs"), mode], source: "fixture" } }));
-    const run = cli("shadow", "demo/clamp");
-    return [run.status, JSON.parse(readFileSync(shadowFile, "utf8")).status];
-  };
-  assert.deepEqual(shadow("match"), [0, "match"]);
-  assert.deepEqual(shadow("mismatch"), [1, "mismatch"]);
-  for (const mode of ["crash", "garbage", "none", "lie"]) assert.deepEqual(shadow(mode), [1, "error"], mode);
-  // A failed run replaces the previous match with its error record, never leaving the old result.
-  assert.deepEqual(shadow("match"), [0, "match"]);
-  writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, "utf8")), shadow: { cmd: ["/nonexistent/comparison"], source: "fixture" } }));
-  assert.equal(cli("shadow", "demo/clamp").status, 1);
-  assert.match(JSON.parse(readFileSync(shadowFile, "utf8")).error, /did not run/);
 });

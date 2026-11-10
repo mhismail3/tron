@@ -1,85 +1,18 @@
 // Integration test for `scripts/tron proof facade` (tools/proof/dafny2wire/README.md "Façade") on a copy of the fixture
-// block demo/counter (tests/fixtures/facade; test input, not a core block): the generated façade exposes
-// exactly the compiled declarations of the laws (a multi-line datatype in full, an opaque function, not a
-// ghost function or a commented-out one), marshals values both ways (sequences as arrays, also nested and as
-// datatype fields), refuses unknown constructors,
-// non-integers, negative naturals and a broken precondition before calling the core, and a result outside
-// the safe integers after it; --check fails on a
-// hand edit of either file; and laws the façade cannot translate faithfully are refused.
-// A block a shell runs (fixture demo/meter, block.json "shell") is generated into the shell's directory as a
-// module with no import: the compiler's module-only output byte for byte, plus the one closed runtime helper it
-// calls; its numbers cross as numbers of their newtype's range; a linked list crosses as an array, of any
-// length; and a block that would need the Dafny runtime is refused, naming the function.
+// block demo/meter (tests/fixtures/facade; test input, not a core block; block.json "shell"): it is generated into the
+// shell's directory as a module with no import: the compiler's module-only output byte for byte, plus the one closed
+// runtime helper it calls; its numbers cross as numbers of their newtype's range and preconditions are checked; a
+// linked list crosses as an array, of any length; --check fails on a hand edit of either file; and laws the façade
+// cannot translate faithfully, or a block that would need the Dafny runtime, are refused, naming the function.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { tmpdir } from "node:os";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-
-test("the generated façade is complete, faithful and refuses what it cannot carry", async (t) => {
-  const base = mkdtempSync(join(tmpdir(), "tron-proof-facade-"));
-  t.after(() => rmSync(base, { recursive: true, force: true }));
-  const root = join(base, "packages/core");
-  cpSync(join(ROOT, "tools/proof/tests/fixtures/facade"), root, { recursive: true });
-  cpSync(join(ROOT, "packages/core/package.json"), join(root, "package.json"));
-  symlinkSync(join(ROOT, "packages/core/node_modules"), join(root, "node_modules"));
-  const facade = (...args) => spawnSync(join(ROOT, "scripts/tron"), ["proof", "facade", "demo/counter", "--root", root, ...args], { encoding: "utf8" });
-
-  assert.equal(facade().status, 0);
-  const source = readFileSync(join(root, "dist/demo/counter/facade.ts"), "utf8");
-  assert.match(source, /export type Color = "Red" \| "Green" \| "Blue";/);
-  assert.match(source, /^export interface Core \{\n  Valid\(b: Box\): boolean;\n  Apply\(b: Box, s: Step\): Box;\n  Shade\(c: Color\): Color;\n  Delta\(a: number, b: number\): number;\n  Counts\(bs: readonly Box\[\]\): readonly number\[\];\n  Echo\(r: Run\): Run;\n\}$/m);
-  assert.match(source, /^export interface Run \{ readonly steps: readonly Step\[\]; readonly marks: readonly \(readonly number\[\]\)\[\] \}$/m);
-  const { core } = await import(pathToFileURL(join(root, "dist/demo/counter/facade.ts")).href);
-  assert.deepEqual(core.Apply({ count: 3, color: "Blue" }, { $: "Inc", amount: 4 }), { count: 7, color: "Blue" });
-  assert.deepEqual(core.Apply({ count: 3, color: "Red" }, { $: "Reset" }), { count: 0, color: "Red" });
-  assert.deepEqual(["Red", "Green", "Blue"].map((c) => core.Shade(c)), ["Green", "Blue", "Red"]);
-  assert.equal(core.Delta(-(2 ** 52), 2 ** 52 - 1), -(2 ** 53) + 1);
-  assert.throws(() => core.Delta(-(2 ** 52), 2 ** 52), { name: "RangeError", message: "core returned an integer outside the safe range" });
-  assert.equal(core.Valid({ count: 101, color: "Red" }), false);
-  assert.deepEqual(core.Counts([{ count: 3, color: "Red" }, { count: 0, color: "Blue" }]), [3, 0]);
-  assert.deepEqual(core.Counts([]), []);
-  const run = { steps: [{ $: "Inc", amount: 2 }, { $: "Reset" }], marks: [[1, -2], [], [2 ** 53 - 1]] };
-  assert.deepEqual(core.Echo(run), run);
-  assert.throws(() => core.Counts({ count: 1, color: "Red" }), { name: "TypeError", message: 'not an array: {"count":1,"color":"Red"}' });
-  assert.throws(() => core.Echo({ steps: [], marks: [[1.5]] }), { name: "RangeError", message: "not a safe integer: 1.5" });
-  assert.throws(() => core.Counts([{ count: -1, color: "Red" }]), { name: "RangeError", message: "not a natural number: -1" });
-  assert.throws(() => core.Shade("Purple"), { name: "TypeError", message: 'not a Color: "Purple"' });
-  assert.throws(() => core.Apply({ count: 1, color: "Red" }, { $: "Double" }), { name: "TypeError", message: 'not a Step: {"$":"Double"}' });
-  assert.throws(() => core.Apply({ count: -1, color: "Red" }, { $: "Reset" }), { name: "RangeError", message: "not a natural number: -1" });
-  assert.throws(() => core.Delta(1.5, 0), { name: "RangeError", message: "not a safe integer: 1.5" });
-  assert.throws(() => core.Apply({ count: 101, color: "Red" }, { $: "Reset" }), { name: "RangeError", message: "precondition Valid(b) of Apply does not hold" });
-
-  assert.equal(facade("--check").status, 0);
-  for (const file of ["facade.ts", "core.js"]) {
-    const path = join(root, "dist/demo/counter", file);
-    const text = readFileSync(path, "utf8");
-    writeFileSync(path, `${text}// hand edit\n`);
-    const stale = facade("--check");
-    assert.equal(stale.status, 1);
-    assert.match(stale.stderr, new RegExp(`${file.replace(".", "\\.")} in .* differ from the sources`));
-    writeFileSync(path, text);
-  }
-
-  const laws = join(root, "laws/demo/Counter.dfy");
-  const original = readFileSync(laws, "utf8");
-  for (const [from, to, message] of [
-    ["  function Shade(c: Color): Color", "  function method Shade(c: Color): Color", /'function method' is not Dafny 4 syntax/],
-    ["    requires Valid(b)", "    requires b.count < 50", /precondition 'b.count < 50' cannot be checked by the façade/],
-    ["  function Delta(a: int, b: int): int", "  function Delta(a: int, b: real): int", /unsupported Dafny type real/],
-    ["  function Echo(r: Run): Run", "  function Echo(r: Run): Run\n  method Sweep(marks: seq<int>, seen: array<bool>) returns (n: int)\n    requires seen.Length == |marks|\n    modifies seen", /Sweep: a compiled method needs a block a shell runs/],
-  ]) {
-    writeFileSync(laws, original.replace(from, to));
-    const refused = facade();
-    assert.equal(refused.status, 2, refused.stderr);
-    assert.match(refused.stderr, message);
-  }
-});
 
 test("a block a shell runs compiles to a module that needs no Dafny runtime", async (t) => {
   const base = mkdtempSync(join(tmpdir(), "tron-proof-facade-"));
@@ -91,7 +24,6 @@ test("a block a shell runs compiles to a module that needs no Dafny runtime", as
 
   const written = facade();
   assert.equal(written.status, 0, written.stderr);
-  assert.equal(existsSync(join(root, "dist")), false);
   const core = readFileSync(join(shell, "core.mjs"), "utf8");
   // No package and no runtime: nothing is imported, and the only runtime code is the helper the block calls.
   assert.doesNotMatch(core, /\brequire\s*\(|^\s*import\b/m);
@@ -176,6 +108,7 @@ test("a block a shell runs compiles to a module that needs no Dafny runtime", as
     [block, "{ at / every }", "{ if equals(at, every) then 0 else at / every }\n  function equals(a: Ms, b: Ms): bool { [a] == [b] }", /equals needs the Dafny runtime/],
     [block, "{ at / every }", "{ if Box.IntegerRange(at) then at / every else 0 }\n  datatype Box = Box(n: Ms) { static function IntegerRange(a: Ms): bool { [a] == [a] } }", /IntegerRange needs the Dafny runtime/],
     [block, "{ at / every }", "{ if Box(at).equals(every) then 0 else at / every }\n  datatype Box = Box(n: Ms) { function equals(b: Ms): bool { [n] == [b] } }", /equals needs the Dafny runtime/],
+    [laws, "function Compare(a: Reading, b: Reading): Trend", "function method Compare(a: Reading, b: Reading): Trend", /'function method' is not Dafny 4 syntax/],
     // A parameter may not take one of the façade's own names.
     [laws, "function Slot(at: Ms, every: Ms): Ms\n    requires Recent(at) && Period(every)", "function Slot(at: Ms, bool: Ms): Ms\n    requires Recent(at) && Period(bool)", /Slot: parameter name bool is reserved by the façade/],
     [laws, "predicate Recent(at: Ms) { -1000 < at < 1000 }", "predicate Recent(inMs: Ms) { -1000 < inMs < 1000 }", /Recent: parameter name inMs is reserved by the façade/],
