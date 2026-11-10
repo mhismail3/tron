@@ -9,7 +9,6 @@ import SwiftUI
 @MainActor @Observable
 final class HostedDeliveredNotificationFixture: NSObject, UNUserNotificationCenterDelegate {
     var summary = "starting"
-    var badge = -1
     private let prefix = "read-fixture-\(UUID().uuidString)-"
     private var names = ["ordinary", "other-chat", "other-machine", "home", "sealed-home", "unrouted"]
     private let center = UNUserNotificationCenter.current()
@@ -19,7 +18,6 @@ final class HostedDeliveredNotificationFixture: NSObject, UNUserNotificationCent
         guard try await center.requestAuthorization(options: [.alert, .provisional]) else {
             throw CocoaError(.userCancelled)
         }
-        try await center.setBadgeCount(7)
         try await deliver("ordinary", session: "ordinary-session")
         try await deliver("other-chat", session: "chat-recent-unread")
         try await deliver("other-machine", session: "ordinary-session", machine: "other-machine")
@@ -40,7 +38,6 @@ final class HostedDeliveredNotificationFixture: NSObject, UNUserNotificationCent
 
     func inspect() async {
         let rows = await center.deliveredNotifications()
-        badge = UIApplication.shared.applicationIconBadgeNumber
         summary = rows.map(\.request.identifier).filter { $0.hasPrefix(prefix) }
             .map { String($0.dropFirst(prefix.count)) }.sorted().joined(separator: ",")
     }
@@ -87,7 +84,6 @@ struct HostedDeliveredNotificationControls: View {
     var body: some View {
         VStack {
             Text(fixture.summary).accessibilityIdentifier("fixture.delivered-notifications")
-            Text("badge:\(fixture.badge)").accessibilityIdentifier("fixture.delivered-badge")
             HStack {
                 Button("Inspect delivered") { Task { await fixture.inspect() } }
                 Button("Deliver later") { Task { try? await fixture.later(home: home) } }
