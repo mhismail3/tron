@@ -171,6 +171,40 @@ private struct HostedAskUserFixture {
     let receipt: HostedAskUserFixtureReceipt
     let model: AppModel
 
+    /// Stores this question's draft (Staging chosen) and around it one
+    /// unreadable record, an older duplicate of its scope with nothing chosen,
+    /// and 32 older drafts for other sessions, one more than the store keeps.
+    @MainActor
+    private static func storeDraftsBesideBadRecords(
+        form: ExtensionFormDescriptor, interaction: ExtensionInteraction, in defaults: UserDefaults
+    ) {
+        let key = ExtensionInteractionDraftStore.documentKey
+        func storedEntries(_ save: (ExtensionInteractionDraftStore) -> Void) -> [Any] {
+            defaults.removeObject(forKey: key)
+            save(ExtensionInteractionDraftStore(defaults: defaults))
+            let document = try! JSONSerialization.jsonObject(with: defaults.data(forKey: key)!) as! [String: Any]
+            return document["entries"] as! [Any]
+        }
+        let empty = StoredExtensionFormDraft(draft: ExtensionFormDraft(form: form), activeOtherQuestionIDs: [], currentQuestionIndex: 0)
+        let others = storedEntries { store in
+            for index in 0..<32 { store.saveForm(empty, sessionID: "other-session-\(index)", interaction: interaction) }
+        }
+        let duplicate = storedEntries { store in
+            store.saveForm(empty, sessionID: "hosted-ask-user-session", interaction: interaction)
+        }
+        var chosen = ExtensionFormDraft(form: form)
+        chosen.toggle(optionID: "environment-a", for: form.questions[0])
+        let newest = storedEntries { store in
+            store.saveForm(
+                StoredExtensionFormDraft(draft: chosen, activeOtherQuestionIDs: [], currentQuestionIndex: 0),
+                sessionID: "hosted-ask-user-session", interaction: interaction
+            )
+        }
+        let unreadable: [String: Any] = ["scope": ["sessionID": "hosted-ask-user-session"], "updatedAt": "not a time"]
+        let document: [String: Any] = ["version": 1, "entries": newest + [unreadable] + duplicate + others]
+        defaults.set(try! JSONSerialization.data(withJSONObject: document), forKey: key)
+    }
+
     var pendingFormTool: ChatToolPresentation {
         ChatToolPresentation(id: "hosted-form-call", title: "Ask User",
             toolName: "ask_user", subtitle: "Running",
@@ -268,11 +302,15 @@ private struct HostedAskUserFixture {
         let tokens = HostedAskUserTokenStore(token: token)
         let profiles = GatewayProfileStore(metadata: metadata, tokens: tokens)
         let root = FileManager.default.temporaryDirectory.appending(path: "tron-hosted-ask-user-\(UUID().uuidString)")
+        let draftDefaults = UserDefaults(suiteName: UUID().uuidString)!
+        if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-stored-drafts") {
+            Self.storeDraftsBesideBadRecords(form: form, interaction: interaction, in: draftDefaults)
+        }
         self.model = AppModel(
             client: client,
             profiles: profiles,
             cache: SnapshotCache(root: root),
-            extensionInteractionDrafts: ExtensionInteractionDraftStore(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+            extensionInteractionDrafts: ExtensionInteractionDraftStore(defaults: draftDefaults)
         )
         self.snapshot = SessionSnapshot(
             sessionId: "hosted-ask-user-session",

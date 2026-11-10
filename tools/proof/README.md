@@ -125,7 +125,6 @@ one). Seams (shell files under `packages/gateway/src/`), with the oracle each bl
 | Block | Seam | Recorded | Oracle's generated inputs |
 |---|---|---|---|
 | `schedule/calendar` | `next/first/classifyDueOccurrence` (`automations/schedule.ts`) | calendar triggers only (once and interval triggers are decided by block `schedule/occurrence`, which its shell runs); nested calls are not seams | core fed `automations/zone-table.ts`'s Intl table (also on replay); TS throws (a skipped civil date) counted as `tsRefused` |
-| `settings/tool-selection` | `toolSelectionType().compose/encode` (`kernel/settings/settings-types.ts`) | `toolSelectionFacts` (empty name 0); a non-list below/current is none; a list holding a non-string is not recorded | plain names, modifiers, repeats and the empty name over every kind of selection below |
 | `receipts/invocation-lifecycle` | `invocationProjection` (`kernel/receipts/invocation-receipts.ts`) | `invocationLifecycleFacts` and the projections or refusal reason; not above 64 receipts, once per history (snapshots refold branches) | legal moves with duplicate/contradictory terminals, orphans, foreign owners, renames, origin changes, rebinds; 1 in 10 with tokens shifted sparse or past the core's array limit (its fallback) |
 
 - **Enabled only on the Debug Gateway:** `scripts/tron dev start|restart --proof-traffic` sets
@@ -226,8 +225,7 @@ TypeScript rejects each at its path and Swift rejects or reads each as stated.
 outside an opted-in Debug Gateway (Stable channel, no channel, other values, the Stable home), that a
 seeded schedule journey through the real seams writes one record per calendar call under `schedule/calendar` (none for
 nested calls or for once and interval triggers, which their block decides), that replays through the same TypeScript to the recorded outputs,
-that tool-selection compose and encode calls (direct and through a real resolution) record name tokens, never names,
-and nothing for a value outside the block's domain, that invocation receipt folds record tokens and refusal
+that invocation receipt folds record tokens and refusal
 reasons, once per history and not above the receipt bound, and
 that the daily cap and retention hold.
 
@@ -239,10 +237,11 @@ either file; and `function method`, an uncheckable precondition and an unsupport
 fixture block `demo/meter`, which names a shell: its `core.mjs` lands in the shell's directory, imports nothing,
 holds the compiler's module output byte for byte and exactly one copied helper, and loads with no
 `node_modules` above it; numbers cross only as integers of their newtype's range and preconditions are checked;
+a linked list crosses as an array in order, 200,000 items long without touching the call stack;
 `--check` fails on a hand edit of either file; the copied helper stands alone and a helper that names anything
 but its parameters, locals and `Math` does not; and datatype equality, building a sequence, a function named
-like a runtime member that uses the runtime, an `int` and a newtype whose range is not literal are each refused,
-naming the function, with nothing written.
+like a runtime member that uses the runtime, an `int`, a newtype whose range is not literal and a generic datatype
+that is not a linked list are each refused, naming the function or type, with nothing written.
 
 `scripts/tron-node exec node --test tools/proof/tests/replay.test.mjs` replays a corpus of recorder-format
 calendar calls of the shipped schedule functions through the real block `schedule/calendar`: two faithful days are a real-traffic match

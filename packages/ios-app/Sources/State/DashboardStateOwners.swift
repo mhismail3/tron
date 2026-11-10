@@ -343,7 +343,6 @@ enum DashboardServerFilterPreferences {
     }
 
     static let documentKey = "dashboard.serverFilter.preferences.v2"
-    static let legacySortModeKey = "dashboard.serverFilter.sortMode.v1"
     private static let version = 1
     private static let maximumProfileCount = 128
     private static let maximumProfileIDBytes = 160
@@ -363,10 +362,7 @@ enum DashboardServerFilterPreferences {
                 sortMode: sortMode
             )
         }
-        let legacy = defaults.string(forKey: legacySortModeKey)
-            .flatMap(DashboardSessionSortMode.init(rawValue:))
-            ?? .home
-        return DashboardServerFilterState(sortMode: legacy)
+        return DashboardServerFilterState(sortMode: .home)
     }
 
     static func save(_ state: DashboardServerFilterState, to defaults: UserDefaults = .standard) {
@@ -376,7 +372,6 @@ enum DashboardServerFilterPreferences {
         let document = Document(version: version, sortMode: state.sortMode.rawValue, selectedProfileIDs: selected)
         guard let data = try? JSONEncoder().encode(document), data.count <= maximumDocumentBytes else { return }
         defaults.set(data, forKey: documentKey)
-        defaults.removeObject(forKey: legacySortModeKey)
     }
 
     private static func admitsProfileID(_ value: String) -> Bool {

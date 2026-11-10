@@ -242,28 +242,17 @@ enum GatewayProfileStoreError: Error {
 final class UserDefaultsGatewayProfileMetadataStore: GatewayProfileMetadataStoring {
     private let defaults: UserDefaults
     private let documentKey = "gatewayProfiles.v2"
-    private let legacyProfilesKey = "gatewayProfiles.v1"
-    private let legacySelectedKey = "selectedGateway.v1"
 
     init(defaults: UserDefaults) { self.defaults = defaults }
 
     func load() throws -> GatewayProfileDocument? {
-        if let data = defaults.data(forKey: documentKey) {
-            return try JSONDecoder.gateway.decode(GatewayProfileDocument.self, from: data)
-        }
-        guard let legacy = defaults.data(forKey: legacyProfilesKey) else { return nil }
-        let profiles = try JSONDecoder.gateway.decode([GatewayProfile].self, from: legacy)
-        return GatewayProfileDocument(
-            profiles: profiles,
-            selectedProfileID: defaults.string(forKey: legacySelectedKey)
-        )
+        guard let data = defaults.data(forKey: documentKey) else { return nil }
+        return try JSONDecoder.gateway.decode(GatewayProfileDocument.self, from: data)
     }
 
     func save(_ document: GatewayProfileDocument) throws {
         let data = try JSONEncoder.gateway.encode(document)
         defaults.set(data, forKey: documentKey)
-        defaults.removeObject(forKey: legacyProfilesKey)
-        defaults.removeObject(forKey: legacySelectedKey)
     }
 }
 
