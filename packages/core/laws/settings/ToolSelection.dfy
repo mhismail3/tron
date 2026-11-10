@@ -26,8 +26,11 @@ abstract module SettingsToolSelectionLaws {
 
   // Assumption A1: the shell gives each distinct tool name of one call one token, the empty name token 0 and
   // every other name a positive token, and maps tokens back to the same names; `defaults` are the tokens of
-  // pi's default tools (read, bash, edit, write). The shell calls the block only for lists of strings (a
-  // stored value of another shape never reaches compose or encode as a selection).
+  // pi's default tools (read, bash, edit, write). Entries reach the block only from lists of strings (the shell
+  // refuses any other list before calling it); the selection below is an earlier Compose result or a declared
+  // default, so its names are strings too. Of what a layer holds now, Encode asks only whether an entry is a
+  // plain name, and only for a choice of plain names: the shell may pass those entries up to the first plain
+  // name and none for a choice that holds a modifier.
 
   // Elems: the items of a linked list, in order.
   ghost function Elems<T>(l: List<T>): seq<T> {
@@ -159,8 +162,8 @@ abstract module SettingsToolSelectionLaws {
   lemma C4EmptyIsNoTools(below: Below, defaults: seq<Token>)
     ensures Compose(below, [], defaults) == []
 
-  // B1 no-duplicates: when the list the entries start from has no tool twice (the plain names, the selection
-  // below, or the defaults), the composed selection has no tool twice.
+  // B1 no-duplicates: when the layer's plain names, the selection below it and the defaults each have no tool
+  // twice, the composed selection has no tool twice.
   lemma B1NoDuplicates(below: Below, es: seq<Entry>, defaults: seq<Token>)
     requires Nodup(Plains(es)) && (below.Names? ==> Nodup(below.names)) && Nodup(defaults)
     ensures Nodup(Compose(below, es, defaults))
