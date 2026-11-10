@@ -2239,7 +2239,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(alternative.isEnabled, "A competing model choice stays unavailable while Effort owns its receipt")
         alternative.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let pickerReset = app.buttons["settings-row-model.ref_role_chat_-picker-reset"]
-        XCTAssertTrue(pickerReset.exists)
+        XCTAssertTrue(pickerReset.exists, app.debugDescription)
         XCTAssertFalse(pickerReset.isEnabled, "Picker reset must not compete with the pending Effort receipt")
         pickerReset.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(search.exists, "Refused choices and resets must not dismiss browsing")
