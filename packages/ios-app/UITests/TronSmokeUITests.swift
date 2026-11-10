@@ -112,6 +112,7 @@ final class TronSmokeUITests: XCTestCase {
             let mediumY = done.frame.midY
             XCTAssertGreaterThan(mediumY, app.windows.firstMatch.frame.height * 0.4)
             let manageMediumTop = assertHomeLoadingSurface(app, name: "\(appearance)-manage-medium", done: done)
+            releaseHeldTaskList()
             XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 20))
             XCTAssertFalse(app.descendants(matching: .any)["sheet-loading"].exists, "Arrived content retires the pulse")
             // Independent Manage Home reads travel together, not one round trip each.
@@ -129,6 +130,7 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertLessThan(assertHomeLoadingSurface(app, name: "\(appearance)-tasks-large", done: taskDone), tasksMediumTop - 100,
                               "The pulse re-centers in the larger visible sheet")
             let largeDoneY = taskDone.frame.midY
+            releaseHeldTaskList()
             XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 20))
             XCTAssertEqual(taskDone.frame.midY, largeDoneY, accuracy: 2, "Arriving content must not move sheet chrome")
             keepScreenshot(named: "sheet-\(appearance)-tasks-loaded-large")
@@ -176,6 +178,12 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 5))
             app.terminate()
         }
+    }
+
+    /// Answers the fixture's next held Tasks read (`-home-sheet-presentation-loading`).
+    private func releaseHeldTaskList() {
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-task-list" as CFString), nil, nil, true)
     }
 
     /// Asserts the one shared sheet pulse is exactly centered in the visible sheet

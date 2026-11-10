@@ -186,6 +186,27 @@ struct HostedChatDisplayFixture: View {
 }
 
 /// Retains the actual mounted Manage Home action to exercise a callback after route replacement.
+/// Holds each presentation-loading `home.taskList` read (one per Manage Home or
+/// Tasks sheet load) until the UI test releases it. Each Darwin notification
+/// grants one read, so a release posted before its read arrives is kept, not
+/// lost; the hold has no deadline of its own.
+@MainActor
+enum HostedHomeTaskListRelease {
+    private static var permits = 0
+    private static var waiters: [CheckedContinuation<Void, Never>] = []
+
+    static func observe() {
+        DarwinTrigger.observe("com.tron.mobile.fixture.home.release-task-list") {
+            if waiters.isEmpty { permits += 1 } else { waiters.removeFirst().resume() }
+        }
+    }
+
+    static func wait() async {
+        if permits > 0 { permits -= 1; return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+}
+
 @MainActor
 final class HostedHomeActionProbe {
     var pause: (() -> Void)?
@@ -237,6 +258,7 @@ struct HostedHomeDashboardFixture: View {
             emptyContext: arguments.contains("-home-context-empty"),
             sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""))
         self.gateway = gateway
+        if arguments.contains("-home-sheet-presentation-loading") { HostedHomeTaskListRelease.observe() }
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture"), token: "fixture-token")
@@ -735,9 +757,10 @@ private actor HostedHomeShellGateway {
                 let active = HostedHomeTaskHistoryFixture.row(taskSummary("active"))
                 return (.object(["items": .array(params["filter"]?.stringValue == "finished" ? [] : [active])]), nil)
             }
-            // Hold the real sheet's read at the socket boundary, not its view state.
-            // Both Manage Home and its nested Tasks sheet must lay out before data.
-            if sheetState == "presentation-loading" { try await Task.sleep(for: .seconds(12)) }
+            // Hold the real sheet's read at the socket boundary, not its view state,
+            // until the test has observed the loading layout and releases it; a
+            // wall-clock hold expires mid-assertion on a loaded host (#2410).
+            if sheetState == "presentation-loading" { await HostedHomeTaskListRelease.wait() }
             if sheetState == "tasks-error", taskListReads == 2 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Task list unavailable"), "retryable": .bool(true)]))
             }
