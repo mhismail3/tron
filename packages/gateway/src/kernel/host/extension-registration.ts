@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { withExtensionOwner } from "./extension-execution-context.js";
-import type { EntryRenderer, Extension, LoadExtensionsResult, MarkdownTransformer, MessageRenderer, RegisteredCommand, RegisteredTool, ToolDefinition } from "../pi/coding-agent.js";
+import type { EntryRenderer, Extension, LoadExtensionsResult, MarkdownTransformerRegistration, MessageRenderer, RegisteredCommand, RegisteredTool, ToolDefinition } from "../pi/coding-agent.js";
 import { adaptedExtensionEventHandler, adaptedToolDefinition, adaptMcpAuthCommandHandler } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../../protocol/types.js";
 import type { BrowserResultObservation } from "../projection/tool-result.js";
@@ -158,8 +158,8 @@ function admitRenderer<T extends MessageRenderer | EntryRenderer>(state: Registr
   return ownCallback(renderer, state);
 }
 
-function admitMarkdownTransformer(state: RegistrationAdmission, transformer: MarkdownTransformer): MarkdownTransformer {
-  return ownCallback(transformer, state);
+function admitMarkdownTransformer(state: RegistrationAdmission, registration: MarkdownTransformerRegistration): MarkdownTransformerRegistration {
+  return { ...registration, transformer: ownCallback(registration.transformer, state) };
 }
 
 /**

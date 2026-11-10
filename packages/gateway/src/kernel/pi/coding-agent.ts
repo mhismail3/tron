@@ -57,7 +57,7 @@ export type {
   KeybindingsManager,
   LoadExtensionsResult,
   MarkdownTransformContext,
-  MarkdownTransformer,
+  MarkdownTransformerRegistration,
   MessageRenderer,
   MessageRenderOptions,
   PackageSource,

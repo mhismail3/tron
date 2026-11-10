@@ -1,6 +1,6 @@
-pi-coding-agent 1.5.0 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
+pi-coding-agent 1.5.1 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
 
-Apply with git apply at tag v1.5.0 (f9a26365568127461c47a07a37dcb42c140a3ac5).
+Apply with git apply at tag v1.5.1 (dd30101cfc5b0609411dd80b6f93adbc14db14cf).
 
 1. projectDir. Upstream proposal commit 7a795da1c69cbc2df30485c173d14d2266ead2ba (parent a447ba1).
    A session can run in a subdirectory (cwd) while its project .pi comes from projectDir:
@@ -8,18 +8,7 @@ Apply with git apply at tag v1.5.0 (f9a26365568127461c47a07a37dcb42c140a3ac5).
    start in projectDir. Tools, context files, .agents/skills discovery and session grouping
    keep cwd. Extensions read ctx.projectDir. projectDir defaults to cwd.
 
-2. Image-only queue delivery (Tron #974). AgentSession dequeued a delivered steer or follow-up
-   only when its text was non-empty, so an image-only queued message stayed in
-   getSteeringMessages()/getFollowUpMessages() after delivery. Empty text now dequeues too.
-
-3. Queued image normalization (Tron #408). A steer or follow-up queued while the agent runs normalizes its
-   images for the active model as prompt() does (_normalizePromptImages resizes each once before history), so a
-   photo above a provider's inline limit never enters canonical history. Its hints trail the images as a separate
-   text block, because the first text block is the queue entry that delivery dequeues (item 2). The photos are
-   prepared before the queue publish: prompt() prepares them before its final streaming check, and a run that ends
-   meanwhile starts a prompt instead of queueing into an idle agent.
-
-4. Idle systemPrompt keeps extension sections (Tron #1312). A before_agent_start handler sets
+2. Idle systemPrompt keeps extension sections (Tron #1312). A before_agent_start handler sets
    systemPromptOptions.sections for its run (the built-in MCP extension's mcp_servers listing),
    and the transcript keeps a section until a later run stops setting it, but settlement dropped
    the run options so session.systemPrompt rendered only the base options between runs. Between
@@ -29,7 +18,7 @@ Apply with git apply at tag v1.5.0 (f9a26365568127461c47a07a37dcb42c140a3ac5).
    transcript section with a built-in name is left to the base options, which the next diff
    applies; a handler that overrides a built-in section therefore shows only during its run.
 
-5. Revocable run start (Tron #1340). Pi 1.2 counts a run busy from _startRun, and calls a
+3. Revocable run start (Tron #1340). Pi 1.2 counts a run busy from _startRun, and calls a
    host's prompt preflightResult("started") after preparing it but outside the start's
    failure cleanup. A host that revokes the prepared prompt by throwing there (the Gateway
    does when Stop arrived during preflight compaction or before_agent_start) left the
@@ -37,12 +26,12 @@ Apply with git apply at tag v1.5.0 (f9a26365568127461c47a07a37dcb42c140a3ac5).
    now runs inside that cleanup: a throw ends the start like a failed preparation, the
    session is idle again, and the prompt is neither appended nor sent.
 
-6. Config-read lifetime (Tron #2199). Registration refreshes load models.json
+4. Config-read lifetime (Tron #2199). Registration refreshes load models.json
    asynchronously before downstream provider supersession. Serialize fresh config
    reads in admission order, so an older detached refresh cannot start store work
    after a newer awaited readiness pass. Independent targeted refreshes are retained.
 
-7. Explicit pending loadout names (Tron #2181). Reapplying a saved selection may remove
+5. Explicit pending loadout names (Tron #2181). Reapplying a saved selection may remove
    newly autoactivated direct tools before MCP servers register. When that narrows the
    loadout, preserve pending restored names explicitly requested by the same call, while
    discarding unrequested ones. Addition-only discovery updates still keep pending names.
@@ -149,10 +138,10 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c1608c512 100644
+index f76247d5647a6ab17923425ebb0cee5b4ca6495b..4e9c0d010095c040985b3191242f3f81bcd5043f 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -140,6 +140,7 @@ import {
+@@ -141,6 +141,7 @@ import {
  import type { SlashCommandInfo } from "./slash-commands.ts";
  import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type SourceInfo } from "./source-info.ts";
  import {
@@ -160,7 +149,7 @@ index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c
  	buildSystemPrompt,
  	buildSystemPromptSections,
  	diffSystemPromptSections,
-@@ -267,6 +268,8 @@ export interface AgentSessionConfig {
+@@ -268,6 +269,8 @@ export interface AgentSessionConfig {
  	sessionManager: SessionManager;
  	settingsManager: SettingsManager;
  	cwd: string;
@@ -169,7 +158,7 @@ index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c
  	/** Models to cycle through with Ctrl+P (from --models flag) */
  	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
  	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
-@@ -450,6 +453,7 @@ export class AgentSession {
+@@ -470,6 +473,7 @@ export class AgentSession {
  	private _customTools: ToolDefinition[];
  	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
  	private _cwd: string;
@@ -177,7 +166,7 @@ index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c
  	private _extensionRunnerRef?: { current?: ExtensionRunner };
  	private _initialActiveToolNames?: string[];
  	/**
-@@ -503,6 +507,7 @@ export class AgentSession {
+@@ -523,6 +527,7 @@ export class AgentSession {
  		this._resourceLoader = config.resourceLoader;
  		this._customTools = config.customTools ?? [];
  		this._cwd = config.cwd;
@@ -185,43 +174,7 @@ index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
-@@ -1137,20 +1142,22 @@ export class AgentSession {
- 		// This ensures the UI sees the updated queue state
- 		if (event.type === "message_start" && event.message.role === "user") {
- 			this._overflowRecoveryAttempted = false;
--			const messageText = contentText(event.message.content, "");
--			if (messageText) {
--				// Check steering queue first
--				const steeringIndex = this._steeringMessages.indexOf(messageText);
--				if (steeringIndex !== -1) {
--					this._steeringMessages.splice(steeringIndex, 1);
-+			// A queued message's entry is its first text block, which is empty for an
-+			// image-only message; that entry must dequeue too, or it stays queued forever.
-+			const messageText = typeof event.message.content === "string"
-+				? event.message.content
-+				: (event.message.content.find((block) => block.type === "text")?.text ?? "");
-+			// Check steering queue first
-+			const steeringIndex = this._steeringMessages.indexOf(messageText);
-+			if (steeringIndex !== -1) {
-+				this._steeringMessages.splice(steeringIndex, 1);
-+				this._emitQueueUpdate();
-+			} else {
-+				// Check follow-up queue
-+				const followUpIndex = this._followUpMessages.indexOf(messageText);
-+				if (followUpIndex !== -1) {
-+					this._followUpMessages.splice(followUpIndex, 1);
- 					this._emitQueueUpdate();
--				} else {
--					// Check follow-up queue
--					const followUpIndex = this._followUpMessages.indexOf(messageText);
--					if (followUpIndex !== -1) {
--						this._followUpMessages.splice(followUpIndex, 1);
--						this._emitQueueUpdate();
--					}
- 				}
- 			}
- 		}
-@@ -1501,9 +1508,17 @@ export class AgentSession {
+@@ -1550,9 +1555,17 @@ export class AgentSession {
  		return !this._isAgentRunActive && !this.isCompacting;
  	}
  
@@ -241,7 +194,7 @@ index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c
  	}
  
  	/** Current retry attempt (0 if not retrying) */
-@@ -1554,10 +1569,16 @@ export class AgentSession {
+@@ -1603,10 +1616,16 @@ export class AgentSession {
  	setActiveToolsByName(toolNames: string[]): void {
  		const previous = this.getActiveToolNames();
  		this._setActiveTools(toolNames);
@@ -261,7 +214,7 @@ index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c
  	}
  
  	private _setActiveTools(toolNames: string[]): void {
-@@ -1897,8 +1918,13 @@ export class AgentSession {
+@@ -1946,8 +1965,13 @@ export class AgentSession {
  		let messages: AgentMessage[];
  		try {
  			messages = await this._prepareRun(trigger);
@@ -275,7 +228,7 @@ index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c
  			this._flushPendingBashMessages();
  			this._flushPendingCustomMessages();
  			this._resolveIdleWaitIfIdle();
-@@ -1908,7 +1934,6 @@ export class AgentSession {
+@@ -1957,7 +1981,6 @@ export class AgentSession {
  		// have while idle. No run exists yet, so they cannot split a tool call from its result.
  		this._flushPendingBashMessages();
  		this._flushPendingCustomMessages();
@@ -283,111 +236,7 @@ index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c
  
  		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
  		this._failedResponse = undefined;
-@@ -2154,20 +2179,26 @@ export class AgentSession {
- 			expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
- 		}
- 
--		// If streaming, queue via steer() or followUp() based on option
-+		// If streaming, queue via steer() or followUp() based on option. Photos are prepared
-+		// before the final streaming check, so the check and the queue publish share one
-+		// synchronous step. If the run ended while they were prepared, the prompt starts a run
-+		// below, and its images are prepared again for the model that starts it.
- 		if (this.isStreaming) {
- 			if (!options?.streamingBehavior) {
- 				throw new Error(
- 					"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
- 				);
- 			}
--			if (options.streamingBehavior === "followUp") {
--				await this._queueFollowUp(expandedText, currentImages);
--			} else {
--				await this._queueSteer(expandedText, currentImages);
-+			const queuedContent = await this._queuedMessageContent(expandedText, currentImages);
-+			if (this.isStreaming) {
-+				if (options.streamingBehavior === "followUp") {
-+					this._queueFollowUp(expandedText, queuedContent);
-+				} else {
-+					this._queueSteer(expandedText, queuedContent);
-+				}
-+				preflightResult?.("queued");
-+				return;
- 			}
--			preflightResult?.("queued");
--			return;
- 		}
- 
- 		// Validate model
-@@ -2276,10 +2307,11 @@ export class AgentSession {
- 		let expandedText = this._expandSkillCommand(processedInput.text);
- 		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
- 
-+		const queuedContent = await this._queuedMessageContent(expandedText, processedInput.images);
- 		if (behavior === "steer") {
--			await this._queueSteer(expandedText, processedInput.images);
-+			this._queueSteer(expandedText, queuedContent);
- 		} else {
--			await this._queueFollowUp(expandedText, processedInput.images);
-+			this._queueFollowUp(expandedText, queuedContent);
- 		}
- 		return "queued";
- 	}
-@@ -2318,15 +2350,12 @@ export class AgentSession {
- 	}
- 
- 	/**
--	 * Internal: Queue a steering message (already expanded, no extension command check).
-+	 * Internal: Publish a prepared steering message (already expanded, no extension command check).
-+	 * Synchronous: the caller prepared `content` and checked the run state after its last await.
- 	 */
--	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
-+	private _queueSteer(text: string, content: (TextContent | ImageContent)[]): void {
- 		this._steeringMessages.push(text);
- 		this._emitQueueUpdate();
--		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
--		if (images) {
--			content.push(...images);
--		}
- 		this.agent.steer({
- 			role: "user",
- 			content,
-@@ -2335,18 +2364,30 @@ export class AgentSession {
- 	}
- 
- 	/**
--	 * Internal: Queue a follow-up message (already expanded, no extension command check).
-+	 * Internal: Publish a prepared follow-up message (already expanded, no extension command check).
-+	 * Synchronous, like `_queueSteer`.
- 	 */
--	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
-+	private _queueFollowUp(text: string, content: (TextContent | ImageContent)[]): void {
- 		this._followUpMessages.push(text);
- 		this._emitQueueUpdate();
--		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
--		if (images) {
--			content.push(...images);
--		}
- 		this.agent.followUp({ role: "user", content, timestamp: Date.now() });
- 	}
- 
-+	/**
-+	 * Content of a queued steer or follow-up, prepared before its queue publish. Its images are
-+	 * normalized for the active model as a prompt's are (`prompt()` resizes them once before
-+	 * history). The hints about them trail the images, because the first text block is the queue
-+	 * entry that delivery dequeues. Nothing is queued until this resolves, so a failure leaves no entry.
-+	 */
-+	private async _queuedMessageContent(text: string, images: ImageContent[] | undefined): Promise<(TextContent | ImageContent)[]> {
-+		const normalized = await this._normalizePromptImages(images);
-+		const content: (TextContent | ImageContent)[] = [{ type: "text", text }, ...normalized.images];
-+		if (normalized.hints.length > 0) {
-+			content.push({ type: "text", text: normalized.hints.join("\n") });
-+		}
-+		return content;
-+	}
-+
- 	/**
- 	 * Throw an error if the text is an extension command.
- 	 */
-@@ -2509,6 +2550,11 @@ export class AgentSession {
+@@ -2591,6 +2614,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -399,7 +248,7 @@ index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3721,6 +3767,7 @@ export class AgentSession {
+@@ -3795,6 +3823,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),
@@ -408,7 +257,7 @@ index dbe36c3658a316d1156be664d5c192a3e7478432..205e1885e0a5291aea6240068632481c
  		if (this._extensionRunnerRef) {
  			this._extensionRunnerRef.current = this._extensionRunner;
 diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
-index 77712e677f91dde65d4d4db906a26b16bbd9de9c..4d4deaf611a8fc124e3a4e13d78d4519baf5cf90 100644
+index bf2c6380835fccb77a1896d6ef89469ca359f1e4..792b7cd4649fe326e315119b1d385365dbc9f7d6 100644
 --- a/packages/coding-agent/src/core/extensions/runner.ts
 +++ b/packages/coding-agent/src/core/extensions/runner.ts
 @@ -367,6 +367,7 @@ export class ExtensionRunner {
@@ -433,7 +282,7 @@ index 77712e677f91dde65d4d4db906a26b16bbd9de9c..4d4deaf611a8fc124e3a4e13d78d4519
  		this.sessionManager = sessionManager;
  		this.modelRegistry = modelRegistry;
  	}
-@@ -902,6 +905,10 @@ export class ExtensionRunner {
+@@ -909,6 +912,10 @@ export class ExtensionRunner {
  				runner.assertActive();
  				return runner.cwd;
  			},
@@ -445,10 +294,10 @@ index 77712e677f91dde65d4d4db906a26b16bbd9de9c..4d4deaf611a8fc124e3a4e13d78d4519
  				runner.assertActive();
  				return runner.sessionManager;
 diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
-index 098f7fb0d02fd55660c6200c2d503ea75ba30e9e..8c613acf6dcaa159520a4761c50f6412656a3d9b 100644
+index 7fcc870a99f799ebd19f3a4d51b300d63088ca78..780f8ad503a7d31231a29465c32073ff512266fd 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
-@@ -351,6 +351,11 @@ export interface ExtensionContext {
+@@ -352,6 +352,11 @@ export interface ExtensionContext {
  	hasUI: boolean;
  	/** Current working directory */
  	cwd: string;
@@ -461,7 +310,7 @@ index 098f7fb0d02fd55660c6200c2d503ea75ba30e9e..8c613acf6dcaa159520a4761c50f6412
  	sessionManager: ReadonlySessionManager;
  	/** Model registry for API key resolution */
 diff --git a/packages/coding-agent/src/core/model-runtime.ts b/packages/coding-agent/src/core/model-runtime.ts
-index 8e03f4d1f4d5166db8a10265f34602f4b542ff4e..b284be2bc1b1e6b53acb1a11064a48fffc2f7103 100644
+index ff5f42b3984a289c665855fe3ec676265bc8c4b9..b5cc3be9696f2df296e6987704980fb3abb42471 100644
 --- a/packages/coding-agent/src/core/model-runtime.ts
 +++ b/packages/coding-agent/src/core/model-runtime.ts
 @@ -184,6 +184,9 @@ export class ModelRuntime implements Models {
@@ -474,7 +323,7 @@ index 8e03f4d1f4d5166db8a10265f34602f4b542ff4e..b284be2bc1b1e6b53acb1a11064a48ff
  	private snapshot: ModelRuntimeSnapshot = {
  		all: [],
  		available: [],
-@@ -854,7 +857,11 @@ export class ModelRuntime implements Models {
+@@ -883,7 +886,11 @@ export class ModelRuntime implements Models {
  	}
  
  	async refresh(options: ModelsRefreshOptions = {}): Promise<ModelsRefreshResult> {
@@ -488,10 +337,10 @@ index 8e03f4d1f4d5166db8a10265f34602f4b542ff4e..b284be2bc1b1e6b53acb1a11064a48ff
  		if (options.providers) {
  			for (const providerId of new Set(options.providers)) this.recomposeProvider(providerId);
 diff --git a/packages/coding-agent/src/core/package-manager.ts b/packages/coding-agent/src/core/package-manager.ts
-index 5f4229b24993613ce9838cf2476e17a7c09f7588..81311e8abe4727ae9193d543aa5923bdde728e95 100644
+index 5fd93754ec14ac0a3a93872629cb830853cd75da..9c772632cc35c5c190467e82314b92e2cfef6532 100644
 --- a/packages/coding-agent/src/core/package-manager.ts
 +++ b/packages/coding-agent/src/core/package-manager.ts
-@@ -149,7 +149,10 @@ export interface PackageManager {
+@@ -156,7 +156,10 @@ export interface PackageManager {
  }
  
  interface PackageManagerOptions {
@@ -502,7 +351,7 @@ index 5f4229b24993613ce9838cf2476e17a7c09f7588..81311e8abe4727ae9193d543aa5923bd
  	agentDir: string;
  	settingsManager: SettingsManager;
  	/** Names of built-in extensions, resolved as `builtin:<name>` extension resources. */
-@@ -865,6 +868,7 @@ function applyAutoloadDisabledPatterns(allPaths: string[], patterns: string[], b
+@@ -881,6 +884,7 @@ function applyAutoloadDisabledPatterns(allPaths: string[], patterns: string[], b
  
  export class DefaultPackageManager implements PackageManager {
  	private cwd: string;
@@ -510,7 +359,7 @@ index 5f4229b24993613ce9838cf2476e17a7c09f7588..81311e8abe4727ae9193d543aa5923bd
  	private agentDir: string;
  	private settingsManager: SettingsManager;
  	private builtinExtensions: string[];
-@@ -874,6 +878,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -890,6 +894,7 @@ export class DefaultPackageManager implements PackageManager {
  
  	constructor(options: PackageManagerOptions) {
  		this.cwd = resolvePath(options.cwd);
@@ -518,7 +367,7 @@ index 5f4229b24993613ce9838cf2476e17a7c09f7588..81311e8abe4727ae9193d543aa5923bd
  		this.agentDir = resolvePath(options.agentDir);
  		this.settingsManager = options.settingsManager;
  		this.builtinExtensions = options.builtinExtensions ?? [];
-@@ -990,7 +995,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -1006,7 +1011,7 @@ export class DefaultPackageManager implements PackageManager {
  		const installFailures = await this.resolvePackageSources(packageSources, accumulator, onMissing);
  
  		const globalBaseDir = this.agentDir;
@@ -527,7 +376,7 @@ index 5f4229b24993613ce9838cf2476e17a7c09f7588..81311e8abe4727ae9193d543aa5923bd
  
  		for (const resourceType of RESOURCE_TYPES) {
  			const target = this.getTargetMap(accumulator, resourceType);
-@@ -1659,7 +1664,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -1720,7 +1725,7 @@ export class DefaultPackageManager implements PackageManager {
  		const stdout = await this.runCommandCapture(
  			npmCommand.command,
  			[...npmCommand.args, "view", packageSpec, "version", "--json"],
@@ -536,7 +385,7 @@ index 5f4229b24993613ce9838cf2476e17a7c09f7588..81311e8abe4727ae9193d543aa5923bd
  		);
  		const raw = stdout.trim();
  		if (!raw) throw new Error("Empty response from npm view");
-@@ -2227,7 +2232,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2288,7 +2293,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -545,7 +394,7 @@ index 5f4229b24993613ce9838cf2476e17a7c09f7588..81311e8abe4727ae9193d543aa5923bd
  		}
  		return join(this.agentDir, "npm");
  	}
-@@ -2268,7 +2273,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2329,7 +2334,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -554,7 +403,7 @@ index 5f4229b24993613ce9838cf2476e17a7c09f7588..81311e8abe4727ae9193d543aa5923bd
  		}
  		return join(this.agentDir, "npm", "node_modules", source.name);
  	}
-@@ -2308,7 +2313,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2369,7 +2374,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -563,7 +412,7 @@ index 5f4229b24993613ce9838cf2476e17a7c09f7588..81311e8abe4727ae9193d543aa5923bd
  		}
  		return join(this.agentDir, "git");
  	}
-@@ -2334,7 +2339,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2395,7 +2400,7 @@ export class DefaultPackageManager implements PackageManager {
  	private getBaseDirForScope(scope: SourceScope): string {
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -794,10 +643,10 @@ index f0721efefd954e13c2b502168a2682e544298a2d..572cabf6e5b71b2721129f407d7c67e3
  		return true;
  	}
 diff --git a/packages/coding-agent/src/extensions/mcp/index.ts b/packages/coding-agent/src/extensions/mcp/index.ts
-index 8a97d7fb2fa32180ca6d034a5c49bbb77452b5e8..ab0f2707ce37829290ab630649ed851a1ac7431c 100644
+index 1a2db568a126e31f1d69417e3b3ecadd2d767570..00ce5f4a0ecbe33888b75cbbfb1a37e1452d241e 100644
 --- a/packages/coding-agent/src/extensions/mcp/index.ts
 +++ b/packages/coding-agent/src/extensions/mcp/index.ts
-@@ -67,7 +67,7 @@ import { type McpMenu, type McpUi, showMcpManager } from "./ui.ts";
+@@ -68,7 +68,7 @@ import { type McpMenu, type McpUi, showMcpManager } from "./ui.ts";
  export type { McpTransportFactory } from "./runtime.ts";
  
  export interface McpExtensionOptions {
@@ -806,7 +655,7 @@ index 8a97d7fb2fa32180ca6d034a5c49bbb77452b5e8..ab0f2707ce37829290ab630649ed851a
  	loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
  	/** Defaults to stdio and streamable HTTP transports built from the server config. */
  	createTransport?: McpTransportFactory;
-@@ -293,8 +293,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -294,8 +294,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  		/** Whether a prompt already waited for the startup connections since the session started. */
  		let waitedForStartup = false;
  		const startupWaitMs = options.startupWaitMs ?? DEFAULT_STARTUP_WAIT_MS;
@@ -817,7 +666,7 @@ index 8a97d7fb2fa32180ca6d034a5c49bbb77452b5e8..ab0f2707ce37829290ab630649ed851a
  		let credentials = options.credentials;
  		/** The session's model registry, which resolves `auth.provider` tokens. */
  		let modelRegistry: ModelRegistry | undefined;
-@@ -567,7 +567,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -568,7 +568,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  			if (!isCurrent()) return undefined;
  			const connection = new runtime.McpServerConnection({
  				entry: server.entry,
@@ -826,7 +675,7 @@ index 8a97d7fb2fa32180ca6d034a5c49bbb77452b5e8..ab0f2707ce37829290ab630649ed851a
  				createTransport: options.createTransport ?? runtime.createDefaultTransport,
  				credentials: getCredentials(runtime),
  				providerToken: async (provider) => modelRegistry?.getApiKeyForProvider(provider),
-@@ -1118,7 +1118,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -1119,7 +1119,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  			autoEnableCodemode = loaded.autoEnableCodemode ?? true;
  			warnedUnreachable = false;
  			waitedForStartup = false;
@@ -835,7 +684,7 @@ index 8a97d7fb2fa32180ca6d034a5c49bbb77452b5e8..ab0f2707ce37829290ab630649ed851a
  			modelRegistry = ctx.modelRegistry;
  			session = new AbortController();
  			const { signal } = session;
-@@ -1341,7 +1341,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -1342,7 +1342,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  }
  
  function defaultLoadConfig(ctx: ExtensionContext): LoadedMcpConfig {
@@ -845,10 +694,10 @@ index 8a97d7fb2fa32180ca6d034a5c49bbb77452b5e8..ab0f2707ce37829290ab630649ed851a
  
  export default createMcpExtension();
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-index 6c6fbcf370a1795050aa6f363e7b0007c16f399b..28dc1dcbd51d73a1ddc311342bcec29e4dc9c128 100644
+index 2459c10df86459b63e749878db5ea140cac0ab07..19e4630259f1a4e1b534bb597a0e8edf797b1944 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2349,6 +2349,7 @@ export class InteractiveMode {
+@@ -2383,6 +2383,7 @@ export class InteractiveMode {
  			mode: "tui",
  			hasUI: true,
  			cwd: this.sessionManager.getCwd(),
