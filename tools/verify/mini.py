@@ -232,6 +232,15 @@ def remote_status() -> int:
     return 0
 
 
+def signal_group(pgid: int, signum: int) -> bool:
+    """Signal a process group; False once it has no live member (macOS answers EPERM for an exited, unreaped one)."""
+    try:
+        os.killpg(pgid, signum)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
 def remote_main(job: dict) -> int:
     nonce, sha = job['nonce'], job['sha']
     home = Path.home()
@@ -251,7 +260,7 @@ def remote_main(job: dict) -> int:
         cancelled.set()
         for child in running:
             if child.poll() is None:
-                child.send_signal(signal.SIGTERM)
+                signal_group(child.pid, signal.SIGTERM)
     threading.Thread(target=watch, daemon=True).start()
 
     def finish(code: int) -> int:
@@ -269,14 +278,23 @@ def remote_main(job: dict) -> int:
     def run(*command: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(command, cwd=cwd, env=clean, stdin=subprocess.DEVNULL, text=True, capture_output=True)
 
-    def stream(*command: str, cwd: Path) -> int:
-        """Run a long child with its output streamed, stopped by a cancel; a signal exit is 128+n."""
-        with subprocess.Popen(command, cwd=cwd, env=clean, stdin=subprocess.DEVNULL) as child:
+    def stream(*command: str, cwd: Path, env: dict | None = None) -> int:
+        """Run a long child in its own process group with its output streamed; a cancel stops the whole group, as
+        verify stops a local step. Whatever is left of the group is killed before the job lock is released, so
+        nothing still runs in the checkout the next job cleans. A signal exit is 128+n."""
+        with subprocess.Popen(command, cwd=cwd, env=env or clean, stdin=subprocess.DEVNULL, start_new_session=True) as child:
             running.append(child)
-            if cancelled.is_set():
-                child.send_signal(signal.SIGTERM)
-            code = child.wait()
-            running.remove(child)
+            try:
+                if cancelled.is_set():
+                    signal_group(child.pid, signal.SIGTERM)
+                code = child.wait()
+            finally:
+                running.remove(child)
+                signal_group(child.pid, signal.SIGKILL)
+                for _ in range(100):
+                    if not signal_group(child.pid, 0):
+                        break
+                    time.sleep(0.1)
         return 128 - code if code < 0 else code
 
     if not (repository / 'HEAD').is_file():
@@ -362,7 +380,9 @@ def remote_main(job: dict) -> int:
 
             if job['lane'] == 'python':
                 # One stream, so each file's unittest summary (stderr) stays after its marker (stdout).
-                return finish(stream('/bin/bash', '-c', 'exec 2>&1\n' + job['args'][0], cwd=checkout))
+                # The pinned Node first on PATH: Python tests that start `node` get the commit's own.
+                env = {**clean, 'PATH': f'{node.parent}:{clean["PATH"]}'}
+                return finish(stream('/bin/bash', '-c', 'exec 2>&1\n' + job['args'][0], cwd=checkout, env=env))
             results.mkdir(parents=True, exist_ok=True)
             try:
                 files = [results / f'output-{index}' for index in range(job['outputs'])]
