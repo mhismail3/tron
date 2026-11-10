@@ -136,6 +136,14 @@ export async function createSettingsManager(schema: SettingsSchema, projectDir: 
     },
   };
   const manager = SettingsManager.fromStorage(storage, { projectTrusted });
+  // Pi's own cacheWarming default spends between runs. A missing or invalid value is the
+  // declared run.cacheWarming default, so a chat warms only as the setting Tron shows says.
+  const cacheWarming = schema.KEYS.find(key => key.id === "run.cacheWarming")!.defaultValue as ReturnType<SettingsManager["getCacheWarmingMode"]>;
+  const piCacheWarming = manager.getCacheWarmingMode.bind(manager);
+  manager.getCacheWarmingMode = () => {
+    const mode = piCacheWarming();
+    return manager.getGlobalSettings().cacheWarming === mode ? mode : cacheWarming;
+  };
   if (projectTrusted) await validateProjectSettings(schema, manager.getProjectSettings() as Record<string, unknown>);
   return manager;
 }

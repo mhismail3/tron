@@ -405,7 +405,7 @@ describe("gateway/home scenario lock", () => {
     expect(callers.filter((caller) => caller === "worker"), "the worker reports in one request").toEqual(["worker"]);
     expect(homeHeadings, "every Home request carries Home's prompt and the learned profile").toEqual([
       ["home-input", ["## Tron Home", "## Learned profile"]], ["home-delegated", ["## Tron Home", "## Learned profile"]], ["home-wake", ["## Tron Home", "## Learned profile"]]]);
-    const OPTIONS = { headers: {}, identity: { attribution: { categories: ["cli-agent"], name: "pi", url: "https://pi.dev" }, userAgent: "detailed", version: "1.5.0" },
+    const OPTIONS = { headers: {}, identity: { attribution: { categories: ["cli-agent"], name: "pi", url: "https://pi.dev" }, userAgent: "detailed", version: "1.5.1" },
       maxRetryDelayMs: 60000, sessionId: "<id>", timeoutMs: 300000, toolExecution: "parallel", transport: "auto",
       model: { api: "<api>", baseUrl: "http://localhost:0", contextWindow: 128000, cost: { cacheRead: "<value>", cacheWrite: "<value>", input: "<value>", output: "<value>" },
         id: "<id>", input: ["text", "image"], maxTokens: 16384, name: "Faux Model", provider: LOCK_PROVIDER, reasoning: false } };

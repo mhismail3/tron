@@ -62,7 +62,10 @@ Code version a subscription request claims (Fable 5.2 needs 2.1.290 or later), s
 owns that one value: `src/providers/claude-code-identity.json`, sent as Pi's `user-agent`
 request header on stored-OAuth `anthropic` requests (`installClaudeCodeIdentity` in
 `createProviderModelRuntime`) and by the usage card. Pi's other request shaping is unchanged and
-API-key logins keep Pi's identity. Raise the version to the current `@anthropic-ai/claude-code`
+API-key logins keep Pi's identity. Every Anthropic Messages request carries its full context:
+`installAnthropicFullContext` in the same runtime turns Pi's message threads
+(`compat.supportsMessageThreads`, on by default for api.anthropic.com) off for chats, Home,
+workers and cache-warm requests, so no request sends a `thread` or the threads beta. Raise the version to the current `@anthropic-ai/claude-code`
 release when Anthropic raises its floor. Every Pi bump runs `scripts/tron provider-smoke`
 ([tool](../../../tools/claude-provider-smoke/README.md)): it reports Fable 5.2 and the Claude Code
 versions Pi and Tron send, fails when Pi lists a model Tron's version cannot serve, and runs the
@@ -73,8 +76,7 @@ names the new floor when Anthropic refuses the version.
 
 Until a release ships them, `pi-coding-agent` is a Tron-built tarball at the family's version
 carrying: the `projectDir` option ([project root](../src/machine/README.md#project-root)),
-dequeuing a delivered image-only steer or follow-up, normalizing queued images for the active
-model, an idle `session.systemPrompt` that keeps transcript-provided extension sections, and a
+an idle `session.systemPrompt` that keeps transcript-provided extension sections, and a
 run start that `preflightResult("started")` can revoke, and FIFO `ModelRuntime`
 config reads. A newer awaited refresh cannot overtake an older registration-triggered
 config read and let that continuation start storage work after readiness. Each call
@@ -177,7 +179,8 @@ candidate's issue. Seams: `StreamFn` wrappers (`src/runtime/`), canonical entrie
 projections (`src/sessions/`), provider catalogs and media, extension registration
 (`src/extensions/compatibility-manifest.ts`). Standing decisions: `context_edit` entries are
 canonical but not chat rows; import uses `SessionManager.forkFrom` with a new identity; the SDK
-resizes images, so the Gateway keeps the upload and never resizes twice. Every Pi union Tron
+resizes images, so the Gateway keeps the upload and never resizes twice; an unset or invalid
+`cacheWarming` is `run.cacheWarming`'s declared default (`off`), not Pi's, in `createSettingsManager`. Every Pi union Tron
 switches over ends in a `never` default (`compatibility-manifest.ts`, `projection.ts`,
 `history.ts`, `runtime-slot.ts`; node kinds `satisfies Record<…>`), so a new member fails `npm run build`.
 

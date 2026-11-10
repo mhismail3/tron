@@ -174,9 +174,10 @@ export list is the patch-removal checklist.
 | Patch item | Tron call sites |
 |---|---|
 | 1 `projectDir` | `createAgentSessionServices({projectDir})` `runtime-slot.ts:2373`; `SettingsManager.create(projectDir, …)` `:2330`, `runtime/compaction-policy.ts:133`, `admin/trust-service.ts:83`, `admin/package-service.ts:107`, `admin/session-free-extensions.ts:41`; `DefaultPackageManager({projectDir})` `admin/package-service.ts:115`, `:172`; `hasTrustRequiringProjectResources(cwd, projectDir)` `admin/trust-service.ts:81`; `session.projectDir` `runtime-slot.ts:1278` |
-| 2 image-only dequeue, 3 queued image normalization | `session.steer/followUp(text, images)` `runtime-slot.ts:9746-9747` |
-| 4 idle `systemPrompt` keeps extension sections | `session.systemPrompt` `runtime-slot.ts:8826`, `:8844`, `:10383`, `:10406` |
-| 5 revocable run start | throwing from `preflightResult` `runtime-slot.ts:8871-8888` |
+| 2 idle `systemPrompt` keeps extension sections | `session.systemPrompt` `runtime-slot.ts:8826`, `:8844`, `:10383`, `:10406` |
+| 3 revocable run start | throwing from `preflightResult` `runtime-slot.ts:8871-8888` |
+| 4 serialized config reads | `ModelRuntime.refresh` `admin/global-provider-resources.ts:170`, `providers/openai-model-eligibility.ts:272`, `transport/gateway-service.ts:2062` |
+| 5 explicitly requested pending tool names | `session.setActiveToolsByName` `kernel/run/run-operations.ts:155`, `kernel/run/runtime-slot.ts:959`, `:1529` |
 
 **Pi internals adapted** (named adapters, order unchanged): `SessionManager._appendEntry`
 guard (`runtime-slot.ts:1012-1033`, private); `ModelRuntime.streamSimple` rebound

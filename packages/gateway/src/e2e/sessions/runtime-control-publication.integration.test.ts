@@ -12,7 +12,7 @@ import { TrustService } from "../../kernel/resources/trust-service.js";
 const disposals: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposals.splice(0).reverse()) await dispose(); });
 
-async function fixture(extension = false) {
+async function fixture(extension = false, { cacheWarming = "streaming" as string | null } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-control-publication-"));
   const agentDir = join(root, "agent"), cwd = join(root, "project"), tronHome = join(root, "tron");
   await mkdir(agentDir); await mkdir(cwd);
@@ -25,7 +25,7 @@ async function fixture(extension = false) {
     else process.env.TMPDIR = previousTmp;
     await rm(root, { recursive: true, force: true });
   });
-  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ enabledModels: ["tron-control-publication/first"], cacheWarming: "streaming", compaction: { enabled: false } }));
+  await writeFile(join(agentDir, "settings.json"), JSON.stringify({ enabledModels: ["tron-control-publication/first"], ...(cacheWarming === null ? {} : { cacheWarming }), compaction: { enabled: false } }));
   if (extension) {
     await mkdir(join(agentDir, "extensions"));
     await writeFile(join(agentDir, "extensions", "navigate.ts"), `export default pi => {
@@ -66,6 +66,29 @@ describe("runtime control publication through canonical settings", () => {
     ]);
     await f.slot.setModel(f.faux.provider.id, "second");
     expect(f.session.model?.id).toBe("second");
+  });
+
+  it("keeps cache warming off for a chat when the setting is unset, whatever Pi's own default", async () => {
+    const f = await fixture(false, { cacheWarming: null });
+    (f.runtime.getModel(f.faux.provider.id, "first")! as unknown as { promptCache: { short: number } }).promptCache = { short: 11 };
+    const warmCalls: number[] = [];
+    const response = (text: string) => (_context: unknown, options: { maxTokens?: number } | undefined) => {
+      if (options?.maxTokens === 1) warmCalls.push(Date.now());
+      return fauxAssistantMessage(text);
+    };
+    expect(f.session.cacheWarmingStatus).toMatchObject({ state: "inactive", reason: "cache warming disabled" });
+    // The same prime-then-stream sequence that warms under "streaming" in the next case.
+    f.faux.setResponses([response("primed")]);
+    await f.slot.prompt("context ".repeat(1_000));
+    await waitFor(() => !f.slot.isBusy, "first request idle");
+    f.faux.setResponses(Array.from({ length: 6 }, () => response("streaming reply ".repeat(120))));
+    await f.slot.prompt("second request");
+    await waitFor(() => !f.slot.isBusy, "streaming request idle");
+    expect(warmCalls).toEqual([]);
+    expect(f.session.cacheWarmingStatus).toMatchObject({ state: "inactive", reason: "cache warming disabled" });
+    // Settings shows the value the chat runs with.
+    const resolved = await f.settingsModel.resolve({ kind: "global" }, undefined, ["run.cacheWarming"]);
+    expect(resolved.keys[0]).toMatchObject({ value: "off", layer: "global" });
   });
 
   it("applies cache warming off to a new session without changing an existing session", async () => {

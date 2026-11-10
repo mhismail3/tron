@@ -48,7 +48,8 @@ Run `--live` only with the maintainer's approval. It costs subscription usage.
   the maintainer names Stable or Debug) and never writes it. It refuses a token that expires within 30
   minutes. Every request goes through a fetch that refuses the OAuth token endpoint, so the
   stored login is never refreshed or rotated.
-- **Requests.** Each carries Tron's Claude Code version. It reads `/api/oauth/usage` before
+- **Requests.** Each carries Tron's Claude Code version and, like the Gateway, its full context
+  (no Anthropic message thread). It reads `/api/oauth/usage` before
   and after, and sends:
   - a Haiku 5.5 tool call;
   - the same call again, which must read at least 90% of the prefix from the cache;
