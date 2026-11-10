@@ -21,17 +21,6 @@ import UIKit
         HostedPresentationProbe.nativeView = { AnyView(ForegroundSheetNativeProbe(identity: $0)) }
     }
 
-    static func recordHomeRead(_ state: HomeSheetReadOwner.State, owner: HomeSheetReadOwner) {
-        let description: String
-        switch state {
-        case .idle: description = "idle " + Thread.callStackSymbols.prefix(12).joined(separator: " | ")
-        case .loading(let read, let content): description = "loading retained=\(content != nil) request=\(read.requestID) token=\(read.identity.surfaceToken)"
-        case .loaded(let read, _): description = "loaded request=\(read.requestID) token=\(read.identity.surfaceToken)"
-        case .failed: description = "failed"
-        }
-        record("home-read-state", "\(ObjectIdentifier(owner)) \(description)")
-    }
-
     static func record(_ event: String, _ identity: String) {
         guard enabled, count < 20_000 else { return }
         count += 1

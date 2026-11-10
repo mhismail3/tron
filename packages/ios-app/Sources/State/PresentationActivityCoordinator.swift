@@ -141,8 +141,6 @@ final class PresentationActivityCoordinator {
         return order.contains { $0.id == id && isDescendant($0, of: parent) }
     }
 
-    var mountedSurfaceCount: Int { order.count }
-
     func refreshDependencies(for token: PresentationSurfaceToken?) -> Set<PresentationRefreshDependency> {
         token.flatMap { surfaces[$0]?.dependencies } ?? []
     }

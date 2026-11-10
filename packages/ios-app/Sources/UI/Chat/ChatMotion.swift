@@ -20,14 +20,8 @@ enum ChatMotion {
     static func floatingDisplayArrive(reduceMotion: Bool) -> Animation {
         reduceMotion ? .linear(duration: 0.10) : .smooth(duration: 0.22)
     }
-    static func notificationArrive(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.22)
-    }
     static func attachmentArrive(reduceMotion: Bool) -> Animation {
         reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.22)
-    }
-    static func eventArrive(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .smooth(duration: 0.24)
     }
     static func attachmentPreview(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .easeInOut(duration: 0.16)
@@ -72,7 +66,6 @@ enum ChatMotion {
         reduceMotion ? .easeOut(duration: 0.12) : questionProgressControl
     }
     static let extensionSelectionControl = Animation.smooth(duration: 0.24)
-    static let extensionQuestionControl = Animation.easeInOut(duration: 0.18)
 
     // Scroll positioning remains owned by ChatScrollCoordinator, not row motion.
     static func catchUpScroll(reduceMotion: Bool) -> ChatScrollAnimation {

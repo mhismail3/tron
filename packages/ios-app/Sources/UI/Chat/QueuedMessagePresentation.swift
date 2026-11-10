@@ -188,19 +188,6 @@ enum QueuedMessageManagementPolicy {
         )
     }
 
-    static func mutationCommit(
-        for installed: InstalledChatTranscript?,
-        mutation: (inout [SessionSnapshot.QueuedMessage]) throws -> Void
-    ) throws -> QueuedMessageManagementCommit? {
-        guard let installedCommit = installedCommit(for: installed) else { return nil }
-        var items = installedCommit.items
-        try mutation(&items)
-        return QueuedMessageManagementCommit(
-            expectedRevision: installedCommit.expectedRevision,
-            items: items
-        )
-    }
-
     /// Returns only operations whose content/behavior changed or whose row was
     /// removed. Pure reordering preserves causal settlement lineage.
     static func changedOperationIDs(
