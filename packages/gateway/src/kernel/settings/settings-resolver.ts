@@ -4,21 +4,7 @@ import { keyForHome, keyDefault, type SettingsSchema, type Binding, type KeyDecl
 import { LAYER_LABELS, type FormatContext, type StoreLayer, type SettingsStores, type ResolveOptions } from "./settings-types.js";
 import { canonicalSettingsTarget, scopeAdmitted, scopeForStore, instanceId } from "./scope-resolution.js";
 import { projectSettingPath, projectSettingsDiagnostics } from "./settings-project-diagnostics.js";
-import { recordSeam, seamsRecorded } from "../../proof/traffic-recorder.js";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+import { core as precedence, type Entry, type Layer, type Opt, type Value } from "../../core/settings/precedence/facade.js";
 
 const BOTTOM_UP: readonly StoreLayer[] = ["default", "global", "home", "session", "project"];
 
@@ -94,15 +80,9 @@ function nearestTrustDecision(decisions: Record<string, boolean>, project: strin
 
 /** A composing key's value from the layers below `layer`: what that layer's
  * entries are relative to. */
-export function composedBelow(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers, layer: StoreLayer): unknown {
-  let value = keyDefault(key, qualifiers);
-  for (const below of BOTTOM_UP.slice(1, BOTTOM_UP.indexOf(layer))) {
-    const binding = key.layers[below as Exclude<StoreLayer, "default">];
-    if (!binding || !scopeAdmitted(key, below) || !stores.layers.includes(below) || !layerApplied(stores, below).applied) continue;
-    const entry = readBinding(stores, below, binding, qualifiers, false, key.id);
-    if (entry !== undefined) value = key.type.compose ? key.type.compose(value, entry) : entry;
-  }
-  return value;
+export function composedBelow(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers, layer: StoredLayer): unknown {
+  const facts = precedenceFacts(stores, key, qualifiers);
+  return facts.value(precedence.Below(facts.key, facts.layers, CORE_LAYER[layer]));
 }
 
 function layerApplied(stores: SettingsStores, layer: StoreLayer): { applied: boolean; reason?: "untrusted" } {
@@ -110,31 +90,37 @@ function layerApplied(stores: SettingsStores, layer: StoreLayer): { applied: boo
   return { applied: true };
 }
 
-/** The typed facts proof block settings/precedence (packages/core) decides from, for its shadow: each layer's
- * presence, binding, values and whether it applies, for one key instance. Values enter as tokens: equal values
- * (as JSON) of one call share a token, the instance's default is token 0, so no setting value is recorded. */
-export function precedenceFacts(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers) {
-  const classes = new Map<string, number>();
-  const token = (value: unknown): number => {
-    const identity = value === undefined ? "" : JSON.stringify(value);
-    let found = classes.get(identity);
-    if (found === undefined) classes.set(identity, found = classes.size);
-    return found;
-  };
-  token(keyDefault(key, qualifiers));
-  const entry = (layer: Exclude<StoreLayer, "default">) => {
+type StoredLayer = Exclude<StoreLayer, "default">;
+const STORED_LAYERS = ["global", "home", "session", "project"] as const satisfies readonly StoredLayer[];
+const CORE_LAYER = { global: "Global", home: "Home", session: "Session", project: "Project" } as const satisfies Record<StoredLayer, Layer>;
+const STORED_LAYER = { Global: "global", Home: "home", Session: "session", Project: "project" } as const satisfies Record<Layer, StoredLayer>;
+const NO_VALUE: Opt = { $: "None" };
+
+/** One key instance as proof block settings/precedence (packages/core) decides it: each stored layer's presence,
+ * binding, values and whether it applies. The block never sees a value, only its token: 0 is the instance's
+ * default, and the layer at index n from the bottom (Global is 0) has 2n+1 for its per-model value and 2n+2 for
+ * its plain value. `value` turns the block's term over tokens back into a value, composing with the key's own
+ * type. */
+function precedenceFacts(stores: SettingsStores, key: KeyDeclaration, qualifiers: Qualifiers) {
+  const values: unknown[] = [keyDefault(key, qualifiers)];
+  const entry = (layer: StoredLayer, index: number): Entry => {
     const binding = key.layers[layer];
     const inTarget = stores.layers.includes(layer);
-    const read = (qualifiedOnly: boolean) => {
-      const value = binding && inTarget ? readBinding(stores, layer, binding, qualifiers, qualifiedOnly, key.id) : undefined;
-      return value === undefined ? null : token(value);
+    const read = (qualifiedOnly: boolean): Opt => {
+      const found = binding && inTarget ? readBinding(stores, layer, binding, qualifiers, qualifiedOnly, key.id) : undefined;
+      if (found === undefined) return NO_VALUE;
+      const token = 2 * index + (qualifiedOnly ? 1 : 2);
+      values[token] = found;
+      return { $: "Some", v: token };
     };
     return { inTarget, bound: binding !== undefined, qualified: read(true), unqualified: read(false), applied: layerApplied(stores, layer).applied };
   };
+  const value = (term: Value): unknown => term.$ === "Default" ? values[0]
+    : term.$ === "Tok" ? values[term.t] : key.type.compose!(value(term.below), values[term.t]);
   return {
-    input: { key: key.id, projectSettable: key.projectSettable, sessionOverridable: key.sessionOverridable, composes: key.type.compose !== undefined,
-      layers: { global: entry("global"), home: entry("home"), session: entry("session"), project: entry("project") } },
-    token,
+    key: { projectSettable: key.projectSettable, sessionOverridable: key.sessionOverridable, composes: key.type.compose !== undefined },
+    layers: { global: entry("global", 0), home: entry("home", 1), session: entry("session", 2), project: entry("project", 3) },
+    values, value,
   };
 }
 
@@ -215,49 +201,16 @@ function resolveInstance(
   const format = (value: unknown) => key.redacted ? (value === undefined || value === "" ? "Not set" : "Set")
     : value === undefined ? "Not set" : key.type.format(value, options.format);
   const layerValues: LayerValue[] = [];
-  const read = (qualifiedOnly: boolean) => {
-    const found: Array<{ layer: StoreLayer; value: unknown; applied: boolean; reason?: "untrusted" }> = [];
-    for (const layer of BOTTOM_UP) {
-      if (layer === "default" || !stores.layers.includes(layer)) continue;
-      const binding = key.layers[layer as Exclude<StoreLayer, "default">];
-      if (!binding || !scopeAdmitted(key, layer)) continue;
-      const value = readBinding(stores, layer, binding, qualifiers, qualifiedOnly, key.id);
-      if (value === undefined) continue;
-      found.push({ layer, value, ...layerApplied(stores, layer) });
-    }
-    return found;
-  };
-  const qualified = read(true);
-  const unqualified = read(false);
-  // Scope outranks specificity. A model override wins only over the plain
-  // value in its own scope, never over a higher Session/Project/Home value.
-  const shown = BOTTOM_UP.flatMap(layerId => {
-    const entry = qualified.find(candidate => candidate.layer === layerId) ?? unqualified.find(candidate => candidate.layer === layerId);
-    return entry ? [entry] : [];
+  const facts = precedenceFacts(stores, key, qualifiers);
+  const resolution = precedence.Resolve(facts.key, facts.layers);
+  const shown = STORED_LAYERS.flatMap(layer => {
+    const entry = resolution.shown[layer];
+    return entry.$ === "Shown" ? [{ layer, value: facts.values[entry.token], qualified: entry.qualified, ...layerApplied(stores, layer) }] : [];
   });
-  const present = shown;
-
-  const defaultValue = keyDefault(key, qualifiers);
-  let value: unknown = defaultValue;
-  let layer: StoreLayer = "default";
-  for (const entry of present) {
-    if (!entry.applied) continue;
-    value = key.type.compose ? key.type.compose(value, entry.value) : entry.value;
-    layer = entry.layer;
-  }
-  const top = shown[shown.length - 1];
-  const notApplied = top && !top.applied ? top : undefined;
-  if (seamsRecorded()) {
-    try {
-      const facts = precedenceFacts(stores, key, qualifiers);
-      recordSeam("settings/precedence", "resolve", facts.input, {
-        value: key.type.compose ? null : facts.token(value), layer, notApplied: notApplied?.layer ?? null,
-        shown: shown.map(entry => ({ layer: entry.layer, qualified: qualified.includes(entry), token: facts.token(entry.value), applied: entry.applied })),
-      });
-    } catch {
-      // Recording is diagnostic: a value the record cannot be built from must not change resolution.
-    }
-  }
+  let value = facts.value(resolution.value);
+  const layer: StoreLayer = resolution.layer.$ === "FromDefault" ? "default" : STORED_LAYER[resolution.layer.l];
+  const unapplied = resolution.notApplied.$ === "Unapplied" ? STORED_LAYER[resolution.notApplied.l] : undefined;
+  const notApplied = shown.find(entry => entry.layer === unapplied);
 
   for (const layerId of [...BOTTOM_UP].reverse()) {
     if (!stores.layers.includes(layerId) && layerId !== "default") continue;
@@ -312,7 +265,7 @@ function resolveInstance(
   const projectValue = shown.find(entry => entry.layer === "project" && entry.applied);
   const binding = key.layers.project;
   const projectPath = binding?.store === "pi-model-ref" ? "defaultProvider + defaultModel" : binding?.store === "pi"
-    ? projectSettingPath((qualified.some(entry => entry.layer === "project") ? binding.qualified! : binding.path)
+    ? projectSettingPath((shown.some(entry => entry.layer === "project" && entry.qualified) ? binding.qualified! : binding.path)
       .map(segment => segment === "{model}" ? qualifiers.model! : segment)) : undefined;
   return {
     key: key.id,
