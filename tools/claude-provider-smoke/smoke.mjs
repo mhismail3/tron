@@ -2,8 +2,9 @@
 // Claude subscription smoke for the pinned Pi release (scripts/tron provider-smoke): catalog, Claude Code version, Fable 5.2 and the Tron wiring tests.
 //
 // Offline (default) it reads the Gateway's pinned pi-ai: whether Claude Fable 5.2 is in the
-// built-in catalog, Opus 5.5's thinking levels, and the Claude Code version Pi's OAuth
-// requests claim (captured from one request to a local stub, never the network). It then runs
+// built-in catalog, Opus 5.5's thinking levels, and the Claude Code version on the wire, both
+// Pi's own and Tron's (the Gateway's claude-code-identity.json sent as Pi's request header,
+// as the Gateway sends it), captured from requests to a local stub, never the network. It then runs
 // the Gateway tests that prove Tron's wiring on Pi's built-in Anthropic OAuth. `--live` adds at
 // most six short real requests with the current access token from <agent-dir>/auth.json, read
 // only: the OAuth token endpoint is blocked, so the stored login is never refreshed or rotated.
@@ -17,6 +18,9 @@ const GATEWAY = join(ROOT, "packages/gateway");
 const FABLE = "claude-fable-5-2";
 /** Anthropic refuses Fable 5.2 to subscription requests claiming an older Claude Code (`claude_code_version_too_old`, measured 2026-11-09). */
 const FABLE_MIN_CLAUDE_CODE = "2.1.290";
+/** The Claude Code version Tron claims (packages/gateway/src/providers/claude-code-identity.ts). */
+const TRON_CLAUDE_CODE = JSON.parse(readFileSync(join(GATEWAY, "src/providers/claude-code-identity.json"), "utf8")).version;
+const tronHeaders = { "user-agent": `claude-cli/${TRON_CLAUDE_CODE}` };
 const OPUS = "claude-opus-5-5";
 const HAIKU = "claude-haiku-5-5";
 const WIRING_TESTS = ["src/e2e/modules/home/home-anthropic-oauth-wire.integration.test.ts", "src/providers/provider-usage.integration.test.ts"];
@@ -53,22 +57,27 @@ async function probe() {
     await Promise.all([piAi(), piAi("./providers/all"), piAi("./api/anthropic-messages")]);
   const models = getBuiltinModels("anthropic");
   const opus = models.find((model) => model.id === OPUS);
-  let userAgent = null;
-  // One OAuth-shaped request to a stub: the version Pi claims is a fact of the wire, not of Pi's source.
-  await streamSimple(opus, normalizeContext({ systemPrompt: "probe", messages: [user("probe")] }), {
-    apiKey: "sk-ant-oat01-provider-smoke-offline",
-    fetch: async (_input, init) => { userAgent = new Headers(init?.headers).get("user-agent"); return new Response("{}", { status: 503 }); },
-  }).result();
-  const claudeCode = /^claude-cli\/(\d+\.\d+\.\d+)/u.exec(userAgent ?? "")?.[1] ?? null;
+  // OAuth-shaped requests to a stub: the version claimed is a fact of the wire, not of a source file.
+  const wire = async (headers) => {
+    let agent = null;
+    await streamSimple(opus, normalizeContext({ systemPrompt: "probe", messages: [user("probe")] }), {
+      apiKey: "sk-ant-oat01-provider-smoke-offline", headers,
+      fetch: async (_input, init) => { agent = new Headers(init?.headers).get("user-agent"); return new Response("{}", { status: 503 }); },
+    }).result();
+    return { agent, version: /^claude-cli\/(\d+\.\d+\.\d+)/u.exec(agent ?? "")?.[1] ?? null };
+  };
+  const pi = await wire(undefined);
+  const { agent: userAgent, version: claudeCode } = await wire(tronHeaders);
   const listed = models.some((model) => model.id === FABLE);
   const versionOk = claudeCode !== null && newerOrEqual(claudeCode, FABLE_MIN_CLAUDE_CODE);
   const fable = { listed, minimumClaudeCode: FABLE_MIN_CLAUDE_CODE, status: listed ? (versionOk ? "servable" : "listed-but-refused") : "absent" };
   const opusLevels = opus ? getSupportedThinkingLevels(opus) : [];
   const failures = [];
-  if (!claudeCode) failures.push(`Pi's OAuth request carried no Claude Code version (user-agent ${JSON.stringify(userAgent)})`);
-  if (fable.status === "listed-but-refused") failures.push(`Pi lists ${FABLE} but claims Claude Code ${claudeCode}; Anthropic refuses it below ${FABLE_MIN_CLAUDE_CODE}`);
+  if (!pi.version) failures.push(`Pi's OAuth request carried no Claude Code version (user-agent ${JSON.stringify(pi.agent)})`);
+  if (claudeCode !== TRON_CLAUDE_CODE) failures.push(`Pi did not send Tron's Claude Code ${TRON_CLAUDE_CODE} (user-agent ${JSON.stringify(userAgent)})`);
+  if (fable.status === "listed-but-refused") failures.push(`Pi lists ${FABLE} but Tron claims Claude Code ${claudeCode}; Anthropic refuses it below ${FABLE_MIN_CLAUDE_CODE}`);
   if (!["xhigh", "max"].every((level) => opusLevels.includes(level))) failures.push(`${OPUS} lacks xhigh/max: ${opusLevels.join(",")}`);
-  return { piAi: PI_AI_VERSION, claudeCode, userAgent, fable52: fable, opusLevels, anthropicModels: models.map((model) => model.id), failures };
+  return { piAi: PI_AI_VERSION, piClaudeCode: pi.version, claudeCode, userAgent, fable52: fable, opusLevels, anthropicModels: models.map((model) => model.id), failures };
 }
 
 /** The current access token, read only. Refuses a token Pi would refresh during the run. */
@@ -104,7 +113,7 @@ async function live(agentDir, probed) {
   const send = async (name, modelId, context, reasoning) => {
     let headers = {};
     const result = await streamSimple(getBuiltinModel("anthropic", modelId), normalizeContext(context), {
-      apiKey: token, fetch, sessionId: "provider-smoke", cacheRetention: "long", reasoning, maxTokens: 2048,
+      apiKey: token, headers: tronHeaders, fetch, sessionId: "provider-smoke", cacheRetention: "long", reasoning, maxTokens: 2048,
       onResponse: (response) => { headers = response.headers; },
     }).result();
     const step = { name, model: modelId, stopReason: result.stopReason, error: result.errorMessage?.slice(0, 300) ?? null,
@@ -126,7 +135,10 @@ async function live(agentDir, probed) {
   const after = await usage();
   const failures = [];
   for (const step of steps) {
-    if (step.stopReason === "error") failures.push(`${step.name}: ${step.error}`);
+    // Anthropic raised its Claude Code floor: the one value to move is the Gateway's identity version.
+    const floor = /version (\d+\.\d+\.\d+) or newer is required/u.exec(step.error ?? "")?.[1];
+    if (floor) failures.push(`${step.name}: Anthropic now requires Claude Code ${floor}; raise packages/gateway/src/providers/claude-code-identity.json (${TRON_CLAUDE_CODE}) to the current @anthropic-ai/claude-code release`);
+    else if (step.stopReason === "error") failures.push(`${step.name}: ${step.error}`);
     else if (step.unifiedStatus !== "allowed") failures.push(`${step.name}: unified status ${step.unifiedStatus}, not billed to the plan`);
   }
   if (!first.toolCalls.includes("bash")) failures.push(`tool: expected a bash call, got ${JSON.stringify(first.toolCalls)}`);
@@ -162,7 +174,7 @@ async function main(argv) {
   if (flags.has("--json")) console.log(JSON.stringify(result, null, 2));
   else {
     const { probe: p } = result;
-    console.log(`pi-ai ${p.piAi}: claims Claude Code ${p.claudeCode}; ${FABLE} ${p.fable52.status} (needs Claude Code >= ${FABLE_MIN_CLAUDE_CODE}); ${OPUS} levels ${p.opusLevels.join(",")}`);
+    console.log(`pi-ai ${p.piAi}: Pi claims Claude Code ${p.piClaudeCode}, Tron sends ${p.claudeCode}; ${FABLE} ${p.fable52.status} (needs Claude Code >= ${FABLE_MIN_CLAUDE_CODE}); ${OPUS} levels ${p.opusLevels.join(",")}`);
     for (const step of result.live?.steps ?? []) console.log(`live ${step.name}: ${step.stopReason} ${step.unifiedStatus ?? "-"} ${step.claim ?? "-"} read ${step.cacheRead} write ${step.cacheWrite}`);
     if (result.live) console.log(`usage weekly ${result.live.usageBefore.weeklyPercent}% -> ${result.live.usageAfter.weeklyPercent}%`);
     console.log(failures.length ? `FAIL\n${failures.map((failure) => `- ${failure}`).join("\n")}` : "PASS");

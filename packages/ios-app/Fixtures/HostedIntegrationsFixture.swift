@@ -245,7 +245,7 @@ actor HostedIntegrationsSocket: GatewaySocketConnection {
         inbound = [try! JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("hello"), "gatewayVersion": .string("fixture"), "piVersion": .string("fixture"),
             "protocolVersion": .number(8), "minProtocolVersion": .number(8), "machineId": .string(machineID),
-            "machineName": .string("Studio server"), "machineGroupID": .string(machineGroupID ?? machineID), "gatewayChannel": .string("stable"), "capabilities": .array([.string("connections.v1")])]))]
+            "machineName": .string("Studio server"), "machineGroupID": .string(machineGroupID ?? machineID), "gatewayChannel": .string("stable"), "capabilities": .array([])]))]
         Task { await gateway.attach(self) }
     }
     func send(_ data: Data) async throws {

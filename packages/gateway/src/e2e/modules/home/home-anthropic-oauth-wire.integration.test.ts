@@ -7,6 +7,7 @@ import { getSupportedThinkingLevels, type Context, type Message, type Model } fr
 import { afterEach, describe, expect, it } from "vitest";
 import { VIEW_BLOCK_LINES } from "../../../episodic/cache-layout.js";
 import { applyHomeCacheRetention, HOME_NONCE_MARKER } from "../../../modules/home/home-request-policy.js";
+import { CLAUDE_CODE_VERSION } from "../../../providers/claude-code-identity.js";
 import { createTronHomeExtension } from "../../../modules/home/tron-home-extension.js";
 import { sessionRuntimeView } from "../../../providers/openai-model-eligibility.js";
 import { createProviderModelRuntime } from "../../../providers/provider-runtime.js";
@@ -23,6 +24,13 @@ type Block = { type: string; text?: string; name?: string; cache_control?: { typ
 type WireMessage = { role: string; content: Block[] | string };
 
 const ACCESS = "sk-ant-oat01-tron-wire-test";
+/** Anthropic refuses Claude Fable 5.2 to subscription requests claiming an older Claude Code. */
+const FABLE_5_2_MIN_CLAUDE_CODE = [2, 1, 290];
+const atLeast = (version: string, minimum: number[]) => {
+  const parts = version.split(".").map(Number);
+  const differs = minimum.findIndex((part, index) => parts[index] !== part);
+  return differs < 0 || parts[differs]! > minimum[differs]!;
+};
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
@@ -131,7 +139,9 @@ describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
       // Subscription identity: the OAuth bearer, Claude Code's headers, betas and system line.
       expect(headers.authorization).toBe(`Bearer ${ACCESS}`);
       expect(headers["x-api-key"]).toBeUndefined();
-      expect(headers["user-agent"]).toMatch(/^claude-cli\/\d+\.\d+\.\d+$/u);
+      // Tron's own Claude Code version, not the one Pi hardcodes, and new enough for Fable 5.2.
+      expect(headers["user-agent"]).toBe(`claude-cli/${CLAUDE_CODE_VERSION}`);
+      expect(atLeast(CLAUDE_CODE_VERSION, FABLE_5_2_MIN_CLAUDE_CODE)).toBe(true);
       expect(headers["x-app"]).toBe("cli");
       expect(String(headers["anthropic-beta"]).split(",")).toEqual(expect.arrayContaining(["claude-code-20250219", "oauth-2025-04-20"]));
       expect((body.system as Block[])[0]!.text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
@@ -149,8 +159,7 @@ describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
       .find((block) => block.type === "tool_use");
     expect(toolUse?.name).toBe("Bash");
 
-    // The usage card claims the Claude Code version Pi's requests claim, so a Pi bump
-    // that moves it (Anthropic gates models on it) cannot leave the card behind.
+    // The usage card claims the same Claude Code version as the requests.
     let usageAgent: string | null = null;
     const usage = new ProviderUsageOwner({ fetch: async (_input, init) => {
       usageAgent = new Headers(init?.headers).get("user-agent");
@@ -161,7 +170,20 @@ describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
     await mkdir(direct);
     await writeFile(join(direct, "auth.json"), JSON.stringify({ anthropic: { type: "oauth", access: ACCESS, refresh: "sk-ant-ort01-tron-wire-test", expires: Date.now() + 3_600_000 } }), { mode: 0o600 });
     expect((await usage.read(await createProviderModelRuntime(direct), "anthropic")).providers[0]).toMatchObject({ status: "available" });
-    const version = (agent: unknown) => /\/(\d+\.\d+\.\d+)/u.exec(String(agent))?.[1];
-    expect(version(usageAgent)).toBe(version(endpoint.requests[0]!.headers["user-agent"]));
+    expect(usageAgent).toBe(`claude-code/${CLAUDE_CODE_VERSION}`);
+  });
+
+  it("leaves an Anthropic API-key login's identity to Pi", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-anthropic-api-key-wire-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const endpoint = await anthropicEndpoint();
+    await writeFile(join(root, "auth.json"), JSON.stringify({ anthropic: { type: "api_key", key: "sk-ant-api03-tron-wire-test" } }), { mode: 0o600 });
+    await writeFile(join(root, "models.json"), JSON.stringify({ providers: { anthropic: { baseUrl: `http://127.0.0.1:${endpoint.port}` } } }));
+    const runtime = await createProviderModelRuntime(root);
+    const model = runtime.getModels("anthropic").find((candidate) => candidate.id === "claude-opus-5-5")!;
+    await runtime.streamSimple(model, { messages: [{ role: "user", content: [{ type: "text", text: "Run echo ok." }], timestamp: 1 }] }).result();
+    expect(endpoint.requests).toHaveLength(1);
+    expect(endpoint.requests[0]!.headers["x-api-key"]).toBe("sk-ant-api03-tron-wire-test");
+    expect(endpoint.requests[0]!.headers["user-agent"]).not.toMatch(/^claude-cli\//u);
   });
 });

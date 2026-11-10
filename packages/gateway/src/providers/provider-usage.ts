@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { upstreamAccountRefusal } from "../util/upstream-error.js";
 import type { ModelRuntime } from "../kernel/pi/coding-agent.js";
+import { CLAUDE_CODE_VERSION } from "./claude-code-identity.js";
 
 export const PROVIDER_USAGE_CAPABILITY = "provider-usage.v1";
 const MAX_PROVIDERS = 16;
@@ -241,9 +242,8 @@ function anthropicOAuthHeaders(auth: ResolvedAuth): Record<string, string> | und
     Accept: "application/json",
     "Content-Type": "application/json",
     "anthropic-beta": "oauth-2025-04-20",
-    // The Claude Code version Pi's OAuth requests claim; home-anthropic-oauth-wire
-    // fails when a Pi bump moves it (scripts/tron provider-smoke runs that test).
-    "User-Agent": "claude-code/2.1.280",
+    // The same Claude Code version Tron's subscription requests claim.
+    "User-Agent": `claude-code/${CLAUDE_CODE_VERSION}`,
   };
 }
 function codexHeaders(auth: ResolvedAuth): Record<string, string> | undefined {
