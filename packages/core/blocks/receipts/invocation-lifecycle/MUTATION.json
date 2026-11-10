@@ -3,23 +3,21 @@
   "block": "receipts/invocation-lifecycle",
   "tier": "high-stakes",
   "laws": "blocks/receipts/invocation-lifecycle/Block.dfy",
-  "oracle": false,
-  "toolHash": "ee15458abb801a8b",
+  "toolHash": "2eb85aae438a0ad4",
   "mutants": 195,
   "stillborn": 40,
   "valid": 155,
   "killed": 155,
-  "lawGap": 0,
   "survived": 0,
   "accepted": 0,
-  "seconds": 914,
+  "seconds": 572,
   "score": 1,
   "unknown": 0,
   "stillbornRatio": 0.205,
   "filter": null,
   "generated": 195,
   "pass": true,
-  "inputsHash": "c1280ddac3866fba"
+  "inputsHash": "55c084fc5b4201ec"
  },
  "perLaw": [
   {
@@ -92,8 +90,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/branch/TerminalLife(from) || to.NoLife?->true#1",
@@ -111,8 +108,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#1",
@@ -131,8 +127,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/constant/false->true#1",
@@ -150,8 +145,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/branch/settle->false#1",
@@ -169,8 +163,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/branch/settle->true#1",
@@ -188,8 +181,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#2",
@@ -203,8 +195,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#3",
@@ -218,8 +209,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#4",
@@ -233,8 +223,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#5",
@@ -248,8 +237,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#6",
@@ -263,8 +251,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#7",
@@ -278,8 +265,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#8",
@@ -293,8 +279,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#9",
@@ -308,8 +293,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#10",
@@ -323,8 +307,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#11",
@@ -340,8 +323,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#12",
@@ -355,8 +337,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#13",
@@ -370,8 +351,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#14",
@@ -387,8 +367,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/logic/||->&&#15",
@@ -404,8 +383,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Legal/constant/false->true#2",
@@ -421,8 +399,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#1",
@@ -439,8 +416,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#2",
@@ -456,8 +432,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/||->&&#1",
@@ -471,8 +446,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#3",
@@ -488,8 +462,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/||->&&#2",
@@ -503,8 +476,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#4",
@@ -520,8 +492,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/||->&&#3",
@@ -535,8 +506,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#5",
@@ -552,8 +522,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/||->&&#4",
@@ -567,8 +536,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#6",
@@ -584,8 +552,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/||->&&#5",
@@ -599,8 +566,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#7",
@@ -616,8 +582,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/||->&&#6",
@@ -631,8 +596,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#8",
@@ -648,8 +612,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/||->&&#7",
@@ -663,8 +626,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#9",
@@ -680,8 +642,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/||->&&#8",
@@ -695,8 +656,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#10",
@@ -712,8 +672,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/||->&&#9",
@@ -727,8 +686,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#11",
@@ -744,8 +702,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/||->&&#10",
@@ -759,8 +716,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Repeats/logic/&&->||#12",
@@ -776,8 +732,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Changed/logic/&&->||#1",
@@ -793,8 +748,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Changed/logic/!->#1",
@@ -811,8 +765,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Changed/logic/||->&&#1",
@@ -828,8 +781,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Changed/logic/&&->||#2",
@@ -845,8 +797,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Changed/logic/!->#2",
@@ -863,8 +814,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/swap-args/k, if f.life.LifeOf? then f.life.l else Accepted->if f.life.LifeOf? then f.life.l else Accepted, k#1",
@@ -879,8 +829,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/swap-args/if f.life.LifeOf? then f.life.l else Accepted, false->false, if f.life.LifeOf? then f.life.l else Accepted#1",
@@ -895,8 +844,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/branch/f.life.LifeOf?->false#1",
@@ -913,8 +861,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/branch/f.life.LifeOf?->true#1",
@@ -932,8 +879,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constructor/Accepted->Completed#1",
@@ -949,8 +895,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constructor/Accepted->Failed#1",
@@ -966,8 +911,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constructor/Accepted->Interrupted#1",
@@ -983,8 +927,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constructor/Accepted->OutcomeUnknown#1",
@@ -1000,8 +943,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constructor/Accepted->Queued#1",
@@ -1017,8 +959,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constructor/Accepted->Retrying#1",
@@ -1034,8 +975,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constructor/Accepted->Running#1",
@@ -1051,8 +991,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constructor/Accepted->Settling#1",
@@ -1068,8 +1007,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constructor/Accepted->Staged#1",
@@ -1085,8 +1023,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constructor/Accepted->WaitingForInput#1",
@@ -1102,8 +1039,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constant/false->true#1",
@@ -1119,8 +1055,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constant/false->true#2",
@@ -1136,8 +1071,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/swap-args/false, -1->-1, false#1",
@@ -1152,8 +1086,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/swap-args/-1, NoFlag->NoFlag, -1#1",
@@ -1168,8 +1101,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constant/1->0#1",
@@ -1185,8 +1117,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/constant/1->2#1",
@@ -1202,8 +1133,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Begin/swap-args/NoFlag, k->k, NoFlag#1",
@@ -1218,8 +1148,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/s.owned != f.owned->false#1",
@@ -1236,8 +1165,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/s.owned != f.owned->true#1",
@@ -1254,8 +1182,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/relational/!=->==#1",
@@ -1271,8 +1198,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OwnershipChanged->ContradictoryTerminal#1",
@@ -1288,8 +1214,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OwnershipChanged->DuplicateStart#1",
@@ -1305,8 +1230,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OwnershipChanged->EntryBound#1",
@@ -1322,8 +1246,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OwnershipChanged->IllegalTerminal#1",
@@ -1339,8 +1262,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OwnershipChanged->IllegalTransition#1",
@@ -1356,8 +1278,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OwnershipChanged->InvocationBound#1",
@@ -1373,8 +1294,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OwnershipChanged->NameChanged#1",
@@ -1390,8 +1310,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OwnershipChanged->NoStart#1",
@@ -1407,8 +1326,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OwnershipChanged->OriginChanged#1",
@@ -1424,8 +1342,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.kind.Binding? && entryBound->false#1",
@@ -1442,8 +1359,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.kind.Binding? && entryBound->true#1",
@@ -1460,8 +1376,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/&&->||#1",
@@ -1477,8 +1392,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/EntryBound->ContradictoryTerminal#1",
@@ -1494,8 +1408,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/EntryBound->DuplicateStart#1",
@@ -1511,8 +1424,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/EntryBound->IllegalTerminal#1",
@@ -1528,8 +1440,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/EntryBound->IllegalTransition#1",
@@ -1545,8 +1456,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/EntryBound->InvocationBound#1",
@@ -1562,8 +1472,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/EntryBound->NameChanged#1",
@@ -1579,8 +1488,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/EntryBound->NoStart#1",
@@ -1596,8 +1504,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/EntryBound->OriginChanged#1",
@@ -1613,8 +1520,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/EntryBound->OwnershipChanged#1",
@@ -1630,8 +1536,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.kind.Binding? && p.bound->false#1",
@@ -1648,8 +1553,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.kind.Binding? && p.bound->true#1",
@@ -1666,8 +1570,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/&&->||#2",
@@ -1683,8 +1586,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/InvocationBound->ContradictoryTerminal#1",
@@ -1700,8 +1602,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/InvocationBound->DuplicateStart#1",
@@ -1717,8 +1618,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/InvocationBound->EntryBound#1",
@@ -1734,8 +1634,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/InvocationBound->IllegalTerminal#1",
@@ -1751,8 +1650,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/InvocationBound->IllegalTransition#1",
@@ -1768,8 +1666,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/InvocationBound->NameChanged#1",
@@ -1785,8 +1682,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/InvocationBound->NoStart#1",
@@ -1802,8 +1698,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/InvocationBound->OriginChanged#1",
@@ -1819,8 +1714,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/InvocationBound->OwnershipChanged#1",
@@ -1836,8 +1730,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/Changed(f.name, s.name)->false#1",
@@ -1854,8 +1747,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/Changed(f.name, s.name)->true#1",
@@ -1872,8 +1764,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/f.name, s.name->s.name, f.name#1",
@@ -1890,8 +1781,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/NameChanged->ContradictoryTerminal#1",
@@ -1907,8 +1797,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/NameChanged->DuplicateStart#1",
@@ -1924,8 +1813,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/NameChanged->EntryBound#1",
@@ -1941,8 +1829,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/NameChanged->IllegalTerminal#1",
@@ -1958,8 +1845,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/NameChanged->IllegalTransition#1",
@@ -1975,8 +1861,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/NameChanged->InvocationBound#1",
@@ -1992,8 +1877,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/NameChanged->NoStart#1",
@@ -2009,8 +1893,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/NameChanged->OriginChanged#1",
@@ -2026,8 +1909,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/NameChanged->OwnershipChanged#1",
@@ -2043,8 +1925,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/Changed(f.origin, s.origin)->false#1",
@@ -2061,8 +1942,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/Changed(f.origin, s.origin)->true#1",
@@ -2079,8 +1959,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/f.origin, s.origin->s.origin, f.origin#1",
@@ -2097,8 +1976,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OriginChanged->ContradictoryTerminal#1",
@@ -2114,8 +1992,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OriginChanged->DuplicateStart#1",
@@ -2131,8 +2008,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OriginChanged->EntryBound#1",
@@ -2148,8 +2024,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OriginChanged->IllegalTerminal#1",
@@ -2165,8 +2040,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OriginChanged->IllegalTransition#1",
@@ -2182,8 +2056,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OriginChanged->InvocationBound#1",
@@ -2199,8 +2072,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OriginChanged->NameChanged#1",
@@ -2216,8 +2088,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OriginChanged->NoStart#1",
@@ -2233,8 +2104,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/OriginChanged->OwnershipChanged#1",
@@ -2250,8 +2120,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.kind.Terminal? && p.settled && !Repeats(f.life, p.life)->false#1",
@@ -2268,8 +2137,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.kind.Terminal? && p.settled && !Repeats(f.life, p.life)->true#1",
@@ -2286,8 +2154,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/&&->||#3",
@@ -2301,8 +2168,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/&&->||#4",
@@ -2316,8 +2182,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/!->#1",
@@ -2334,8 +2199,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/f.life, p.life->p.life, f.life#1",
@@ -2350,8 +2214,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/ContradictoryTerminal->DuplicateStart#1",
@@ -2367,8 +2230,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/ContradictoryTerminal->EntryBound#1",
@@ -2384,8 +2246,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/ContradictoryTerminal->IllegalTerminal#1",
@@ -2401,8 +2262,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/ContradictoryTerminal->IllegalTransition#1",
@@ -2418,8 +2278,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/ContradictoryTerminal->InvocationBound#1",
@@ -2435,8 +2294,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/ContradictoryTerminal->NameChanged#1",
@@ -2452,8 +2310,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/ContradictoryTerminal->NoStart#1",
@@ -2469,8 +2326,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/ContradictoryTerminal->OriginChanged#1",
@@ -2486,8 +2342,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/ContradictoryTerminal->OwnershipChanged#1",
@@ -2503,8 +2358,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.kind.Terminal? && !p.settled && !Legal(p.life, f.life, true)->false#1",
@@ -2521,8 +2375,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.kind.Terminal? && !p.settled && !Legal(p.life, f.life, true)->true#1",
@@ -2539,8 +2392,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/&&->||#5",
@@ -2554,8 +2406,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/!->#2",
@@ -2572,8 +2423,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/&&->||#6",
@@ -2587,8 +2437,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/!->#3",
@@ -2605,8 +2454,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/p.life, f.life->f.life, p.life#1",
@@ -2621,8 +2469,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/f.life, true->true, f.life#1",
@@ -2637,8 +2484,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constant/true->false#1",
@@ -2654,8 +2500,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTerminal->ContradictoryTerminal#1",
@@ -2671,8 +2516,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTerminal->DuplicateStart#1",
@@ -2688,8 +2532,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTerminal->EntryBound#1",
@@ -2705,8 +2548,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTerminal->IllegalTransition#1",
@@ -2722,8 +2564,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTerminal->InvocationBound#1",
@@ -2739,8 +2580,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTerminal->NameChanged#1",
@@ -2756,8 +2596,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTerminal->NoStart#1",
@@ -2773,8 +2612,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTerminal->OriginChanged#1",
@@ -2790,8 +2628,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTerminal->OwnershipChanged#1",
@@ -2807,8 +2644,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.kind.Transition? && !Legal(p.life, f.life, false)->false#1",
@@ -2825,8 +2661,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.kind.Transition? && !Legal(p.life, f.life, false)->true#1",
@@ -2843,8 +2678,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/&&->||#7",
@@ -2860,8 +2694,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/!->#4",
@@ -2878,8 +2711,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/p.life, f.life->f.life, p.life#2",
@@ -2894,8 +2726,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/f.life, false->false, f.life#1",
@@ -2910,8 +2741,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constant/false->true#1",
@@ -2927,8 +2757,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTransition->ContradictoryTerminal#1",
@@ -2944,8 +2773,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTransition->DuplicateStart#1",
@@ -2961,8 +2789,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTransition->EntryBound#1",
@@ -2978,8 +2805,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTransition->IllegalTerminal#1",
@@ -2995,8 +2821,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTransition->InvocationBound#1",
@@ -3012,8 +2837,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTransition->NameChanged#1",
@@ -3029,8 +2853,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTransition->NoStart#1",
@@ -3046,8 +2869,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTransition->OriginChanged#1",
@@ -3063,8 +2885,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/constructor/IllegalTransition->OwnershipChanged#1",
@@ -3080,8 +2901,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/||->&&#1",
@@ -3097,8 +2917,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/p.start, if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life->if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life, p.start#1",
@@ -3113,8 +2932,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life, settled->settled, if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life#1",
@@ -3129,8 +2947,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.life.LifeOf? && (f.kind.Terminal? || !settled)->false#1",
@@ -3147,8 +2964,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.life.LifeOf? && (f.kind.Terminal? || !settled)->true#1",
@@ -3166,8 +2982,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/&&->||#8",
@@ -3184,8 +2999,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/||->&&#2",
@@ -3201,8 +3015,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/!->#5",
@@ -3219,8 +3032,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/settled, p.bound || f.kind.Binding?->p.bound || f.kind.Binding?, settled#1",
@@ -3237,8 +3049,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/p.bound || f.kind.Binding?, if f.entry.IndexOf? then k else p.entryAt->if f.entry.IndexOf? then k else p.entryAt, p.bound || f.kind.Binding?#1",
@@ -3253,8 +3064,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/logic/||->&&#3",
@@ -3270,8 +3080,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/if f.entry.IndexOf? then k else p.entryAt, if f.retryable.FlagOf? then f.retryable else p.retryable->if f.retryable.FlagOf? then f.retryable else p.retryable, if f.entry.IndexOf? then k else p.entryAt#1",
@@ -3286,8 +3095,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.entry.IndexOf?->false#1",
@@ -3304,8 +3112,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.entry.IndexOf?->true#1",
@@ -3322,8 +3129,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/swap-args/if f.retryable.FlagOf? then f.retryable else p.retryable, k->k, if f.retryable.FlagOf? then f.retryable else p.retryable#1",
@@ -3338,8 +3144,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.retryable.FlagOf?->false#1",
@@ -3356,8 +3161,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Advance/branch/f.retryable.FlagOf?->true#1",
@@ -3374,8 +3178,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   }
  ]
 }

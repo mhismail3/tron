@@ -1,5 +1,5 @@
 {
- "packetHash": "3402cb3f05b45789",
+ "packetHash": "2faaf56b95d29819",
  "tier": "high-stakes",
  "date": "2026-11-10",
  "writer": {
@@ -7,50 +7,50 @@
   "model": "anthropic/claude-opus-5-5"
  },
  "reviewer": {
-  "agent": "law-reviewer (runs d3dcf804, 37c42366, 680867bc)",
+  "agent": "law-reviewer (runs b126a428, 42c2f2e7)",
   "model": "anthropic/claude-haiku-5-5",
-  "session": "2026-11-10T15-22-45-384Z_01a1c60d-f308-763e-83f4-9c25d4edb092/c0b8af8d-7e4b-4467-98ba-d8b7a3d80044/run-0/session.jsonl"
+  "session": "2026-11-10T15-22-45-384Z_01a1c60d-f308-763e-83f4-9c25d4edb092/a1270f0d-7e53-46f7-9f5b-6626542a1c51/run-0/session.jsonl"
  },
  "laws": {
   "N1 next-sound": {
    "verdict": "ACCEPT",
-   "notes": "Unchanged from round 2. English matches after < x < Horizon and Occ(x). N1+N2+N3 together pin Next exactly."
+   "notes": "The English after < x < Horizon and Occ(x) matches N1NextSound, and the scan window bounds match the Horizon definition."
   },
   "N2 next-least": {
    "verdict": "ACCEPT",
-   "notes": "Unchanged. Matches Occ(y), y > after, Next <= y, with no horizon bound on y. Conditional on Next being Some, as the English presupposes."
+   "notes": "The law matches Occ(y) with y > after implying Next <= y, conditional on Next being Some as the English presupposes, and NextRange covers the scan window."
   },
   "N3 next-complete": {
    "verdict": "ACCEPT",
-   "notes": "Unchanged. Matches. The 14-day parenthetical holds: Horizon - after is at least 14.5 days."
+   "notes": "The law matches, and Horizon minus after is at least 14.5 days so the 14-day parenthetical holds."
   },
   "N4 next-progress": {
    "verdict": "ACCEPT",
-   "notes": "Fixed in round 2 (round 1 REJECT: English said 'a zone whose offset never changes', narrower premise z.changes.Nil?). English 'in a zone with an empty change list (one fixed offset)' matches requires z.changes.Nil?. Eight-day bound holds: less than 7 DAY + 1439 MINUTE < 8 DAY."
+   "notes": "The empty change list premise matches one fixed offset, and the candidate lies within after plus 8 days."
   },
   "P1 prior-sound": {
    "verdict": "ACCEPT",
-   "notes": "Unchanged. Matches Floor(b) <= x <= b and Occ(x)."
+   "notes": "The law matches Floor(b) <= x <= b and Occ(x) with the ScanMax window."
   },
   "P2 prior-greatest": {
    "verdict": "ACCEPT",
-   "notes": "Unchanged. Matches y <= b, Occ(y) gives y <= Prior, conditional on Prior being Some."
+   "notes": "The law matches y <= b implying y <= Prior, conditional on Prior being Some, and holds trivially below Floor."
   },
   "P3 prior-complete": {
    "verdict": "ACCEPT",
-   "notes": "Unchanged. Matches. The 14-day parenthetical holds."
+   "notes": "The law matches, and b minus Floor is at least 14.5 days so the parenthetical holds."
   },
   "F1 first": {
    "verdict": "ACCEPT",
-   "notes": "Matches: First == Next(now-1), with InRange(now-1) excluding exactly the now=-LIMIT case the English notes; 'about 33,700 BC' is correct for -2^50 ms."
+   "notes": "First equals Next(now-1) as implemented, and the -LIMIT parenthetical (about 33,700 BC) is correct."
   },
   "C1 classify-not-due": {
    "verdict": "ACCEPT",
-   "notes": "Unchanged. Exact match with Classify's first branch."
+   "notes": "The law is an exact match with Classify's first branch."
   },
   "C2 classify-due": {
    "verdict": "ACCEPT",
-   "notes": "Unchanged. Exact on both branches. 'Latest' and 'next' are the bounded Prior and Next, whose floor and horizon the P and N laws state. A stale nxt is compared with now only, never checked as an occurrence."
+   "notes": "The law is exact on both policy branches and compares the stored next with now only."
   }
  },
  "acceptedMutants": {
@@ -58,5 +58,5 @@
   "Least/boundary/<=-><#1": "AGREE",
   "Most/boundary/>=->>#1": "AGREE"
  },
- "general": "Round 3 ACCEPT for all ten laws at 3402cb3f05b45789 (round 1 at eb31c4e0657bc19a: N4 REJECT for English broader than its premise, fixed; recovery kind named a non-existent block, fixed; AtLeast off-by-one acceptance removed after the mutation run killed it). Laws are sound and non-vacuous; N1-N3 and P1-P3 pin Next and Prior exactly; the Ms/List/ghost changes do not weaken the years 0000-9999 domain. The #2382 disposition stated in Earliest is accepted: a whole civil date with no instant is skipped, as the maintainer decided; the same rule also skips a date whose clocks jump past the trigger's time across midnight (stated to the maintainer on #2382; no such IANA transition is known). Residual: the zone table's reach and whole-minute claims (A1) and the façade precondition checks (A2) are shell contracts, not proven here; the old-against-new comparison (333,732 calls, 3,019 differences all the #2382 rule) is cited, not verified by the reviewer."
+ "general": "Re-review after the only change since the review at 3402cb3f05b45789: mutate.json lost its empty \"oracles\" list (the mutation tool's oracle path was deleted). All ten laws ACCEPT at 2faaf56b95d29819 by reading statements and definitions, without a Dafny re-run. Residual risks: the zone table and façade preconditions (A1, A2) are shell contracts, and the old-against-new comparison is cited, not verified."
 }

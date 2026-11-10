@@ -1,50 +1,50 @@
 {
-  "packetHash": "869cf4e3481a4418",
-  "tier": "high-stakes",
-  "date": "2026-11-10",
-  "writer": {
-    "agent": "parent",
-    "model": "anthropic/claude-fable-5-2"
+ "packetHash": "8358bfcb2ff969ff",
+ "tier": "high-stakes",
+ "date": "2026-11-10",
+ "writer": {
+  "agent": "parent",
+  "model": "anthropic/claude-fable-5-2"
+ },
+ "reviewer": {
+  "agent": "law-reviewer (runs b126a428, 42c2f2e7)",
+  "model": "anthropic/claude-haiku-5-5",
+  "session": "2026-11-10T15-22-45-384Z_01a1c60d-f308-763e-83f4-9c25d4edb092/a1270f0d-7e53-46f7-9f5b-6626542a1c51/run-0/session.jsonl"
+ },
+ "laws": {
+  "L1 next-sound": {
+   "verdict": "ACCEPT",
+   "notes": "Next is a plus (q+1) periods, strictly after after, and an occurrence, with the once case matching."
   },
-  "reviewer": {
-    "agent": "law-reviewer (run f1249e83)",
-    "model": "anthropic/claude-haiku-5-5",
-    "session": "2026-11-10T08-53-14-181Z_01a1c4a9-5544-763e-83f4-9bfde4bf6d71/8cb3d6ac-657d-4809-adf9-30eaaed7da58/run-0/session.jsonl"
+  "L2 next-minimal": {
+   "verdict": "ACCEPT",
+   "notes": "Any occurrence x > after has k at least q+1, so Next is no later than x."
   },
-  "laws": {
-    "L1 next-sound": {
-      "verdict": "ACCEPT",
-      "notes": "English matches Dafny: Next(after) is strictly after `after` and is an occurrence (anchor plus whole periods, or the once-time). Non-vacuous: Interval(0,1000), after=0 gives 1000. Matches schedule.before.ts nextOccurrence for both kinds."
-    },
-    "L2 next-minimal": {
-      "verdict": "ACCEPT",
-      "notes": "English matches Dafny: any real occurrence x > after yields a Some no later than x. Non-vacuous: Once(10), after=5, x=10. Matches the TS (floor-based interval arithmetic and once comparison)."
-    },
-    "L3 next-none": {
-      "verdict": "ACCEPT",
-      "notes": "English matches Dafny: None iff Once with at <= after; intervals always have a next. Non-vacuous: Once(5), after=10 gives None, as the TS does. Redundant with L1+L2 but it is the readable exact-results statement; keep."
-    },
-    "L4 first-interval": {
-      "verdict": "ACCEPT",
-      "notes": "English matches Dafny: First is a real occurrence >= now and no real occurrence >= now is earlier. First is the anchor when now <= anchor, else Next(now-1), which is the TS rule (anchor >= now ? anchor : next(now-1)). The bounds (now - 1 stays in range) are proven."
-    },
-    "L5 classify-not-due": {
-      "verdict": "ACCEPT",
-      "notes": "English matches Dafny: nxt > now gives only the stored next, unchanged, with nothing dispatched or skipped. Non-vacuous: Once(10), nxt=10, now=5. Matches the TS early return for once and interval."
-    },
-    "L6 classify-due": {
-      "verdict": "ACCEPT",
-      "notes": "English matches Dafny: exactly one of dispatch/skip, chosen by policy; the acted-on occurrence is the Witness (latest due); the new next is Next(now) for intervals and none for once, strictly after now. Matches the TS for both policies and both kinds. Premise A2 (nxt is an occurrence) is a shell precondition, see general. The English does not say that earlier missed interval occurrences are dropped without a record; the TS does the same, so this is clarity, not a defect."
-    },
-    "L7 first-once": {
-      "verdict": "ACCEPT",
-      "notes": "English matches Dafny: First(Once(at)) == Some(at) even when at is in the past. Non-vacuous: at=0, now=0. Matches the TS (firstOccurrence returns the once-time regardless of now)."
-    },
-    "L8 first-after-occurrence": {
-      "verdict": "ACCEPT",
-      "notes": "English matches Dafny: creating at a+k*e+1 yields a+(k+1)*e, a past occurrence is not counted. Non-vacuous: a=0, e=1000, k=0, now=1 gives 1000. Matches the TS (nextOccurrence(now-1)). Not implied by L4 alone because now is not an occurrence; kept as an exact-result law."
-    }
+  "L3 next-none": {
+   "verdict": "ACCEPT",
+   "notes": "Next is None exactly when the trigger is Once with at at or before after."
   },
-  "acceptedMutants": {},
-  "general": "Tier high-stakes confirmed: the block decides when automation runs dispatch or skip. No accepted mutants (mutate.json accepted is empty); none to agree or disagree with. Proof: `dafny verify --verify-included-files blocks/schedule/occurrence/Block.dfy` with the pinned lab toolchain gives 49 verified, 0 errors; there is no assume, axiom, verify-false or extern in Occurrence.dfy or Block.dfy. Range: every shell input I traced is inside the bounds. Gateway timestamps are years 0000-9999 (about 6.2e13 to 2.5e14 ms, inside LIMIT 2^50 ~ 1.1e15 ms); interval periods are 60 to 31536000 s (under LIMIT); the fa\u00e7ade checks Wf and InRange and throws on a non-safe integer before every call; intermediates stay below 2^52, inside the safe range. Missing law kinds: progress and recovery are n/a for pure functions; uncertain-outcomes is n/a (no effects). Stale-inputs is n/a only because of A2. World-model gap: A2 (the stored next is an occurrence of the current trigger) is the sole precondition of L6 and is what keeps a stale record from producing a non-occurrence dispatch. The shell supports it (scheduler classifies only enabled automations; replace recomputes while enabled; enable recomputes unless a retained automatic run carries an identical trigger, in which case the stored occurrence was computed for that same trigger). I found no gateway test that exercises that path, so A2 needs its contract test (already required by the packet) before cut-over. A non-occurrence stored next is not a law the block can state without a product decision on what it should do, so this is a maintainer item rather than a REJECT. Calendar triggers are out of scope of this block."
+  "L4 first-interval": {
+   "verdict": "ACCEPT",
+   "notes": "First is the anchor when now is at or before it, else Next(now-1), and minimality follows from L2."
+  },
+  "L5 classify-not-due": {
+   "verdict": "ACCEPT",
+   "notes": "The law matches the first branch of Classify exactly."
+  },
+  "L6 classify-due": {
+   "verdict": "ACCEPT",
+   "notes": "The Witness is the latest due occurrence, exactly one of dispatch or skip is taken, and the new next equals Next(now) for intervals and none for once."
+  },
+  "L7 first-once": {
+   "verdict": "ACCEPT",
+   "notes": "First of Once is Some(at) regardless of now, matching the definition."
+  },
+  "L8 first-after-occurrence": {
+   "verdict": "ACCEPT",
+   "notes": "Creating at a+k*e+1 gives Next(a+k*e) = a+(k+1)*e, as the English states."
+  }
+ },
+ "acceptedMutants": {},
+ "general": "Re-review after the only change since the review at 869cf4e3481a4418: mutate.json lost its empty \"oracles\" list (the mutation tool's oracle path was deleted). All eight laws ACCEPT at 8358bfcb2ff969ff by reading statements and definitions, without a Dafny re-run. Residual risk: precondition A2 (the stored next is an occurrence of the current trigger) needs its contract test before cut-over, which is a shell matter rather than a law defect."
 }

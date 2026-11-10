@@ -1,58 +1,58 @@
 {
-  "packetHash": "c1280ddac3866fba",
-  "tier": "high-stakes",
-  "date": "2026-11-10",
-  "writer": {
-    "agent": "parent",
-    "model": "anthropic/claude-fable-5-2"
+ "packetHash": "55c084fc5b4201ec",
+ "tier": "high-stakes",
+ "date": "2026-11-10",
+ "writer": {
+  "agent": "parent",
+  "model": "anthropic/claude-fable-5-2"
+ },
+ "reviewer": {
+  "agent": "law-reviewer (runs b126a428, 42c2f2e7)",
+  "model": "anthropic/claude-haiku-5-5",
+  "session": "2026-11-10T15-22-45-384Z_01a1c60d-f308-763e-83f4-9c25d4edb092/a1270f0d-7e53-46f7-9f5b-6626542a1c51/run-0/session.jsonl"
+ },
+ "laws": {
+  "F1 fold-computed": {
+   "verdict": "ACCEPT",
+   "notes": "Unfit occurs only at a position whose fact fails Fit, and the Agrees clause is Project's answer as stated, without a verifier re-run."
   },
-  "reviewer": {
-    "agent": "law-reviewer (run e7a9ec58, rounds 4e7ccec8, bb15ea40)",
-    "model": "anthropic/claude-haiku-5-5",
-    "session": "2026-11-10T08-53-14-181Z_01a1c4a9-5544-763e-83f4-9bfde4bf6d71/24b3874f-cdcd-498c-ae68-6d2e5ad98320/run-0/session.jsonl"
+  "L1 legal-moves": {
+   "verdict": "ACCEPT",
+   "notes": "Legal's per-lifecycle cases equal Allowed, the settle branch matches TerminalLife, and a receipt with no lifecycle moves nothing."
   },
-  "laws": {
-    "F1 fold-computed": {
-      "verdict": "ACCEPT",
-      "notes": "The stronger first ensures, Unfit only at a position 0 <= at < |facts| whose fact fails Fit(f, |facts|), matches the code exactly: Fold returns Unfit(k) at the loop's k, where the test f.inv < 0 || f.inv >= n || (entry bad) is the negation of Fit with n = |facts|. The English names the fact's position and says 'negative or not below the number of facts', which is Fit's negation. The 'Unfit(0)' mutant is now a verification failure, and the second ensures (Agrees otherwise) is unchanged and still holds."
-    },
-    "L1 legal-moves": {
-      "verdict": "ACCEPT",
-      "notes": "Unchanged and equal to its Dafny: no-lifecycle receipts move nothing, settled sources never move, terminals settle any unsettled source into a terminal target, and transitions make exactly the Allowed moves. The premise is satisfiable (Staged to Accepted, settle false), and it matches both branches of legalTransition in the TypeScript; 10 mutants killed, 4 alone."
-    },
-    "S1 start": {
-      "verdict": "ACCEPT",
-      "notes": "Unchanged: a start appends the stated state, a duplicate start is refused, and nothing else changes; the English equals the Dafny. The premise is any start on any state, matching the TypeScript start branch. 0 mutants alone because StepOf is ghost; it is the readable statement of the spec."
-    },
-    "S2 checks": {
-      "verdict": "ACCEPT",
-      "notes": "Unchanged: a later receipt that fails a check is refused for the first failing check, and a passing binding is accepted. The premise holds for a started invocation and a matching receipt, and the check order is the TypeScript order. 0 mutants alone (ghost spec)."
-    },
-    "S3 no-start": {
-      "verdict": "ACCEPT",
-      "notes": "Unchanged: a non-start receipt for an invocation with no start is refused with NoStart, as in the TypeScript, which tests NoStart before ownership. The premise holds for the empty state; 0 mutants alone (ghost spec)."
-    },
-    "S4 settle": {
-      "verdict": "ACCEPT",
-      "notes": "Unchanged: the refusal condition equals the Dafny, and the reasons match the TypeScript (ContradictoryTerminal, IllegalTerminal, IllegalTransition). The premise is satisfiable (Staged start, Completed terminal). 0 mutants alone (ghost spec)."
-    },
-    "S5 update": {
-      "verdict": "ACCEPT",
-      "notes": "Unchanged since 16b0ecad: the ensures r.kind.Terminal? ==> r.life.LifeOf? matches the English sentence 'An accepted terminal receipt always carries a lifecycle', and the update rule still equals StepOf and the TypeScript. The premise is satisfiable; 3 mutants killed, 0 alone."
-    },
-    "P1 progress": {
-      "verdict": "ACCEPT",
-      "notes": "The English now says 'the completion's retryable flag (false)', which is the Dafny's FlagOf(false). The other conjuncts (operation, source, origin and sequence of the start, no name, the binding's time, completed, settled, bound to the entry) equal the Dafny, and the trace is satisfiable and matches the TypeScript. 3 mutants killed, 0 alone."
-    },
-    "I1 settled-stays-settled": {
-      "verdict": "ACCEPT",
-      "notes": "Unchanged and equal to its Dafny: in a non-refused history an invocation that received a terminal receipt ends settled with that receipt's lifecycle. The premise is satisfiable, and it matches the TypeScript (duplicates and later bindings keep the lifecycle); 3 mutants killed, 0 alone."
-    },
-    "I2 one-binding": {
-      "verdict": "ACCEPT",
-      "notes": "Unchanged and equal to its Dafny: in a non-refused history no two bindings share an entry or an invocation. The premise is satisfiable, and it matches the TypeScript boundEntries and boundInvocations checks. 0 mutants alone; a whole-history safety statement."
-    }
+  "S1 start": {
+   "verdict": "ACCEPT",
+   "notes": "The start branch of StepOf equals the stated appended state, and a duplicate start is refused."
   },
-  "acceptedMutants": {},
-  "general": "Reviewed block hash c1280ddac3866fba (commit 670e35eaa, clean tree); the model is anthropic/claude-haiku-5-5, as confirmed from my run record; reviewer model and session fields are left empty. Verdicts: ACCEPT all ten laws. The previous blocking items are resolved: (a) P1 now states the retryable value false; (b) the named-resource progress gap is answered by the differential corpus, which I accept as the evidence for named histories (1,961 accepted histories with a terminal repeating its start's name, 1,951 with an origin equal to the start's, and name and origin refusals on both sides, 0 differences in 316,365 exact comparisons). I have not verified those counts. The law side also holds: AdvanceSpec ties Advance's name and origin checks, through Changed and SameSpec, to StepOf for every input. A residual risk remains: the differential corpus is generated plus recorded traffic, not a proof, so a named-history bug that is absent from both would pass; the owner test pins one such case by hand. Checks at this hash: A1 and A2 match the parser grammar and the shell's reads, as in the prior round; the method mutants (32 listed, including Unfit(0)) are gated by the test, which first checks that the unchanged copy verifies. Proof: scripts/tron proof check printed a cached PASS for this hash; I did not re-run the verifier, and the packet reports 72 obligations verified. Neither .dfy file contains assume, {:axiom}, {:verify false} or {:extern}. Outside the block, unchanged: the shell's invocationReceipts pre-checks can name a later refusal than Project's first when a history has two refusals; the TypeScript reference does the same, so it is not a divergence."
+  "S2 checks": {
+   "verdict": "ACCEPT",
+   "notes": "The check order in Check matches StepOf: ownership, entry bound, invocation bound, name, then origin."
+  },
+  "S3 no-start": {
+   "verdict": "ACCEPT",
+   "notes": "StepOf refuses NoStart when the invocation has no start."
+  },
+  "S4 settle": {
+   "verdict": "ACCEPT",
+   "notes": "The refusal condition and its reasons match StepOf on each branch."
+  },
+  "S5 update": {
+   "verdict": "ACCEPT",
+   "notes": "The update equals StepOf's, and a terminal receipt always carries a lifecycle, since the shell rejects bindings with one."
+  },
+  "P1 progress": {
+   "verdict": "ACCEPT",
+   "notes": "Tracing the five receipts through StepOf gives the stated completed, settled, bound projection with the flag false."
+  },
+  "I1 settled-stays-settled": {
+   "verdict": "ACCEPT",
+   "notes": "A settled invocation cannot move, since transitions are refused, a duplicate terminal must repeat its lifecycle, and bindings keep it."
+  },
+  "I2 one-binding": {
+   "verdict": "ACCEPT",
+   "notes": "BoundRefused and Check reject a repeated entry or invocation, so no two bindings share either."
+  }
+ },
+ "acceptedMutants": {},
+ "general": "Re-review after the only change since the review at c1280ddac3866fba: mutate.json lost its empty \"oracles\" list (the mutation tool's oracle path was deleted). All ten laws ACCEPT at 55c084fc5b4201ec by reading statements and definitions, without a Dafny re-run. Residual risks: the differential corpus is generated plus recorded traffic rather than a proof, and the prior proof result was a cached PASS that I did not re-run."
 }

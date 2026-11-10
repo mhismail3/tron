@@ -3,23 +3,21 @@
   "block": "settings/tool-selection",
   "tier": "high-stakes",
   "laws": "blocks/settings/tool-selection/Block.dfy",
-  "oracle": false,
-  "toolHash": "ee15458abb801a8b",
+  "toolHash": "2eb85aae438a0ad4",
   "mutants": 121,
   "stillborn": 25,
   "valid": 96,
   "killed": 96,
-  "lawGap": 0,
   "survived": 0,
   "accepted": 0,
-  "seconds": 276,
+  "seconds": 556,
   "score": 1,
   "unknown": 0,
   "stillbornRatio": 0.207,
   "filter": null,
   "generated": 121,
   "pass": true,
-  "inputsHash": "8715d2ffa5cf91fc"
+  "inputsHash": "d696d90ade3dda62"
  },
  "perLaw": [
   {
@@ -110,8 +108,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "RevOnto/branch/a.Nil?->true#1",
@@ -128,8 +125,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "RevOnto/swap-args/a.tail, Cons(a.head, b)->Cons(a.head, b), a.tail#1",
@@ -147,8 +143,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "RevOnto/constructor/Cons(a.head, b)->Nil#1",
@@ -165,8 +160,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "RevOnto/swap-args/a.head, b->b, a.head#1",
@@ -181,8 +175,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Has/branch/t.Nil?->false#1",
@@ -200,8 +193,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Has/branch/t.Nil?->true#1",
@@ -218,8 +210,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Has/constant/false->true#1",
@@ -235,8 +226,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Has/branch/t.head == n->false#1",
@@ -253,8 +243,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Has/branch/t.head == n->true#1",
@@ -271,8 +260,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Has/relational/==->!=#1",
@@ -288,8 +276,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Has/off-by-one/n->(n - 1)#1",
@@ -306,8 +293,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Has/off-by-one/n->(n + 1)#1",
@@ -324,8 +310,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Has/constant/true->false#1",
@@ -341,8 +326,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Has/swap-args/t.tail, n->n, t.tail#1",
@@ -357,8 +341,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/branch/t.Nil?->false#1",
@@ -376,8 +359,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/branch/t.Nil?->true#1",
@@ -394,8 +376,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/swap-args/acc, Nil->Nil, acc#1",
@@ -412,8 +393,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/branch/t.head == n->false#1",
@@ -430,8 +410,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/branch/t.head == n->true#1",
@@ -448,8 +427,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/relational/==->!=#1",
@@ -465,8 +443,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/off-by-one/n->(n - 1)#1",
@@ -483,8 +460,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/off-by-one/n->(n + 1)#1",
@@ -501,8 +477,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/swap-args/acc, t.tail->t.tail, acc#1",
@@ -519,8 +494,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/swap-args/t.tail, n->n, t.tail#1",
@@ -535,8 +509,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/swap-args/n, Cons(t.head, acc)->Cons(t.head, acc), n#1",
@@ -551,8 +524,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/constructor/Cons(t.head, acc)->Nil#1",
@@ -569,8 +541,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "WithoutFrom/swap-args/t.head, acc->acc, t.head#1",
@@ -585,8 +556,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/branch/n == 0 || Has(tools, n)->false#1",
@@ -603,8 +573,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/branch/n == 0 || Has(tools, n)->true#1",
@@ -621,8 +590,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/off-by-one/n->(n - 1)#1",
@@ -639,8 +607,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/off-by-one/n->(n + 1)#1",
@@ -657,8 +624,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/relational/==->!=#1",
@@ -674,8 +640,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/constant/0->1#1",
@@ -691,8 +656,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/logic/||->&&#1",
@@ -708,8 +672,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/swap-args/tools, n->n, tools#1",
@@ -724,8 +687,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/swap-args/RevOnto(tools, Nil), Cons(n, Nil)->Cons(n, Nil), RevOnto(tools, Nil)#1",
@@ -742,8 +704,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/swap-args/tools, Nil->Nil, tools#1",
@@ -760,8 +721,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/constructor/Cons(n, Nil)->Nil#1",
@@ -778,8 +738,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/swap-args/n, Nil->Nil, n#1",
@@ -794,8 +753,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/swap-args/tools, n->n, tools#2",
@@ -810,8 +768,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Step/swap-args/n, Nil->Nil, n#2",
@@ -826,8 +783,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ModsList/branch/entries.Nil?->false#1",
@@ -845,8 +801,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ModsList/branch/entries.Nil?->true#1",
@@ -863,8 +818,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ModsList/swap-args/Step(tools, entries.head), entries.tail->entries.tail, Step(tools, entries.head)#1",
@@ -879,8 +833,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ModsList/swap-args/tools, entries.head->entries.head, tools#1",
@@ -895,8 +848,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "PlainsFrom/branch/es.Nil?->false#1",
@@ -914,8 +866,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "PlainsFrom/branch/es.Nil?->true#1",
@@ -932,8 +883,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "PlainsFrom/swap-args/acc, Nil->Nil, acc#1",
@@ -950,8 +900,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "PlainsFrom/swap-args/es.tail, if es.head.Plain? then Cons(es.head.n, acc) else acc->if es.head.Plain? then Cons(es.head.n, acc) else acc, es.tail#1",
@@ -966,8 +915,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "PlainsFrom/branch/es.head.Plain?->false#1",
@@ -984,8 +932,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "PlainsFrom/branch/es.head.Plain?->true#1",
@@ -1002,8 +949,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "PlainsFrom/constructor/Cons(es.head.n, acc)->Nil#1",
@@ -1020,8 +966,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "PlainsFrom/swap-args/es.head.n, acc->acc, es.head.n#1",
@@ -1036,8 +981,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ComposeList/swap-args/entries, Nil->Nil, entries#1",
@@ -1052,8 +996,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ComposeList/swap-args/if plain.Cons? || entries.Nil? then plain else if below.NamesList? then below.names else defaults, entries->entries, if plain.Cons? || entries.Nil? then plain else if below.NamesList? then below.names else defaults#1",
@@ -1068,8 +1011,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ComposeList/branch/plain.Cons? || entries.Nil?->false#1",
@@ -1086,8 +1028,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ComposeList/branch/plain.Cons? || entries.Nil?->true#1",
@@ -1104,8 +1045,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ComposeList/logic/||->&&#1",
@@ -1121,8 +1061,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ComposeList/branch/below.NamesList?->false#1",
@@ -1139,8 +1078,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "ComposeList/branch/below.NamesList?->true#1",
@@ -1158,8 +1096,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasModifier/branch/es.Nil?->false#1",
@@ -1177,8 +1114,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasModifier/branch/es.Nil?->true#1",
@@ -1195,8 +1131,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasModifier/constant/false->true#1",
@@ -1212,8 +1147,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasModifier/branch/IsModifier(es.head)->false#1",
@@ -1230,8 +1164,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasModifier/branch/IsModifier(es.head)->true#1",
@@ -1248,8 +1181,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasModifier/constant/true->false#1",
@@ -1265,8 +1197,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasPlain/branch/es.Nil?->false#1",
@@ -1284,8 +1215,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasPlain/branch/es.Nil?->true#1",
@@ -1302,8 +1232,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasPlain/constant/false->true#1",
@@ -1319,8 +1248,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasPlain/branch/es.head.Plain?->false#1",
@@ -1337,8 +1265,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasPlain/branch/es.head.Plain?->true#1",
@@ -1355,8 +1282,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "HasPlain/constant/true->false#1",
@@ -1372,8 +1298,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/branch/a.Nil?->false#1",
@@ -1391,8 +1316,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/branch/a.Nil?->true#1",
@@ -1409,8 +1333,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/swap-args/a.tail, b->b, a.tail#1",
@@ -1428,8 +1351,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/swap-args/b, plus->plus, b#1",
@@ -1444,8 +1366,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/swap-args/plus, if Has(b, a.head) then acc else Cons(if plus then Plus(a.head) else Minus(a.head), acc)->if Has(b, a.head) then acc else Cons(if plus then Plus(a.head) else Minus(a.head), acc), plus#1",
@@ -1460,8 +1381,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/branch/Has(b, a.head)->false#1",
@@ -1478,8 +1398,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/branch/Has(b, a.head)->true#1",
@@ -1496,8 +1415,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/swap-args/b, a.head->a.head, b#1",
@@ -1512,8 +1430,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/constructor/Cons(if plus then Plus(a.head) else Minus(a.head), acc)->Nil#1",
@@ -1530,8 +1447,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/swap-args/if plus then Plus(a.head) else Minus(a.head), acc->acc, if plus then Plus(a.head) else Minus(a.head)#1",
@@ -1546,8 +1462,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/branch/plus->false#1",
@@ -1564,8 +1479,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "MarksFrom/branch/plus->true#1",
@@ -1582,8 +1496,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Same/branch/a.Nil?->false#1",
@@ -1601,8 +1514,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Same/branch/a.Nil?->true#1",
@@ -1619,8 +1531,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Same/branch/b.Nil?->false#1",
@@ -1638,8 +1549,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Same/branch/b.Nil?->true#1",
@@ -1656,8 +1566,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Same/constant/false->true#1",
@@ -1673,8 +1582,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Same/branch/a.head != b.head->false#1",
@@ -1691,8 +1599,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Same/branch/a.head != b.head->true#1",
@@ -1709,8 +1616,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Same/relational/!=->==#1",
@@ -1726,8 +1632,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Same/constant/false->true#2",
@@ -1743,8 +1648,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "Same/swap-args/a.tail, b.tail->b.tail, a.tail#1",
@@ -1762,8 +1666,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "DeltaList/swap-args/MarksFrom(base, chosen, false, MarksFrom(chosen, base, true, Nil)), Nil->Nil, MarksFrom(base, chosen, false, MarksFrom(chosen, base, true, Nil))#1",
@@ -1780,8 +1683,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "DeltaList/swap-args/base, chosen->chosen, base#1",
@@ -1798,8 +1700,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "DeltaList/swap-args/chosen, false->false, chosen#1",
@@ -1814,8 +1715,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "DeltaList/constant/false->true#1",
@@ -1831,8 +1731,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "DeltaList/swap-args/false, MarksFrom(chosen, base, true, Nil)->MarksFrom(chosen, base, true, Nil), false#1",
@@ -1847,8 +1746,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "DeltaList/swap-args/chosen, base->base, chosen#1",
@@ -1865,8 +1763,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "DeltaList/swap-args/base, true->true, base#1",
@@ -1881,8 +1778,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "DeltaList/constant/true->false#1",
@@ -1898,8 +1794,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "DeltaList/swap-args/true, Nil->Nil, true#1",
@@ -1914,8 +1809,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/branch/HasModifier(chosen) || HasPlain(current)->false#1",
@@ -1932,8 +1826,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/branch/HasModifier(chosen) || HasPlain(current)->true#1",
@@ -1950,8 +1843,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/logic/||->&&#1",
@@ -1967,8 +1859,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/constructor/HoldsList(chosen)->NothingList#1",
@@ -1985,8 +1876,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/branch/below.NamesList?->false#1",
@@ -2003,8 +1893,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/branch/below.NamesList?->true#1",
@@ -2022,8 +1911,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/swap-args/chosen, Nil->Nil, chosen#1",
@@ -2038,8 +1926,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/swap-args/names, base->base, names#1",
@@ -2056,8 +1943,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/branch/!Same(ModsList(base, delta), names)->false#1",
@@ -2074,8 +1960,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/branch/!Same(ModsList(base, delta), names)->true#1",
@@ -2092,8 +1977,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/logic/!->#1",
@@ -2110,8 +1994,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/swap-args/ModsList(base, delta), names->names, ModsList(base, delta)#1",
@@ -2128,8 +2011,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/swap-args/base, delta->delta, base#1",
@@ -2144,8 +2026,7 @@
    "killedBy": [],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/constructor/HoldsList(chosen)->NothingList#2",
@@ -2162,8 +2043,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/branch/delta.Cons?->false#1",
@@ -2180,8 +2060,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/branch/delta.Cons?->true#1",
@@ -2198,8 +2077,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   },
   {
    "id": "EncodeList/constructor/HoldsList(delta)->NothingList#1",
@@ -2216,8 +2094,7 @@
    ],
    "unmapped": [],
    "timeouts": 0,
-   "error": null,
-   "oracleFailed": []
+   "error": null
   }
  ]
 }
