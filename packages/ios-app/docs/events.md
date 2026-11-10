@@ -54,7 +54,10 @@ state, reconnect, foreground reconciliation, serial retire/close transitions and
 - **Identity.** Pairing responses, hellos and `system.info` must assert a `stable` or `dev` channel
   matching the saved endpoint; mismatches fail closed. Hellos carry the private-LAN lanes
   (`lanEndpoints`) and certificate pin (`lanPin`), replaced on every hello and never read from an
-  unauthenticated route. An epoch the LAN lane carried routes that connection's authenticated HTTP
+  unauthenticated route. The LAN certificate is self-signed, so the pin is that lane's whole trust:
+  the leaf's public key must hash to `lanPin`, a mismatch cancels the challenge during TLS before
+  the bearer-carrying request is written, and a missing or malformed pin (not base64 of 32 bytes)
+  or an unexportable key leaves no trusted LAN lane. An epoch the LAN lane carried routes that connection's authenticated HTTP
   (live view, media, uploads) through the same pinned endpoint.
 - **Schedule.** Each executor owns one `GatewayReconnectSchedule`. The focused profile starts at
   2 s, grows ×1.7 to 15 s with independent 80–120% jitter. A pool entry follows the same curve

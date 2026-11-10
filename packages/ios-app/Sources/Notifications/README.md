@@ -26,7 +26,8 @@ notification inbox.
   rejections stop without credential churn; APNs tokens are preserved. Registration reconciles on
   connection, foreground, profile, permission and token changes; Worker failure leaves it pending.
 - **Secrets.** App Attest keys, token bytes and grants use a Keychain namespace separate from Gateway
-  credentials. Settings shows only a fixed local stage label; the app accepts no relay URL or push
+  credentials; an unreadable Keychain document is never overwritten with an empty one (push fails
+  closed while the Gateway stays usable). Settings shows only a fixed local stage label; the app accepts no relay URL or push
   credential from settings.
 - **Alerts.** No badge, background fetch or notification approval actions. Exact changes
   are reviewed in the shared in-chat native card. The bundled `tron-notification.caf` sound; ask pushes are Time

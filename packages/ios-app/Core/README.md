@@ -60,7 +60,8 @@ the hosted test targets link.
   transport.
 - **Profile store.** One transactional boundary: atomic Keychain upsert before a single metadata
   commit, exact rollback on failure, corrupt metadata self-cleans, legacy metadata migrates on the
-  next write.
+  next write. A missing token means unpaired; a Keychain that cannot be read yet (before first
+  unlock) throws instead, so the profile stays paired and offline and the next foreground rereads it.
 - **Share handoff.** At most 32 providers, 64 KiB per UTF-8 fragment and 128 KiB in total; prompts
   ≤ 192 KiB; `PendingShareStoring` rejects documents above 256 KiB and reports save failure, so the
   extension opens the app only after a successful write. One slot, cleared after confirmed send.
