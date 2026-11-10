@@ -99,6 +99,9 @@ describe("calendar occurrences", () => {
       .toStrictEqual({ dispatchAt: "2026-11-09T08:00:00.000Z", nextOccurrenceAt: "2026-11-11T08:00:00.000Z", skipped: [] });
     expect(classifyDueOccurrence(trigger, "2026-11-02T08:00:00.000Z", now, "skip"))
       .toStrictEqual({ nextOccurrenceAt: "2026-11-11T08:00:00.000Z", skipped: ["2026-11-09T08:00:00.000Z"] });
+    expect(() => nextAutomationOccurrence(trigger, Number.NaN)).toThrow("Schedule boundary is invalid");
+    expect(() => firstAutomationOccurrence(trigger, Number.NaN)).toThrow("Schedule boundary is invalid");
+    expect(() => classifyDueOccurrence(trigger, "2026-11-02T08:00:00.000Z", Number.NaN, "latest")).toThrow("Schedule boundary is invalid");
   });
 
   it("skips a civil date the timezone skips entirely and keeps scheduling on the dates that exist (#2382)", () => {
