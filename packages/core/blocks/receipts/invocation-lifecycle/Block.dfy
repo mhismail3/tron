@@ -1,33 +1,14 @@
-// Block receipts/invocation-lifecycle: definitions and proofs of laws/receipts/InvocationLifecycle.dfy.
+// Block receipts/invocation-lifecycle: the compiled fold the shell runs, and the proofs of
+// laws/receipts/InvocationLifecycle.dfy.
 include "../../../laws/receipts/InvocationLifecycle.dfy"
 
 module ReceiptsInvocationLifecycle refines ReceiptsInvocationLifecycleLaws {
   // ---------- definitions (compiled to JS) ----------
 
-  // Machine integers (compiled to JS numbers) for the by-method loop indices and tokens.
-  newtype i53 = x: int | -0x20_0000_0000_0000 < x < 0x20_0000_0000_0000
-  const LIMIT: i53 := 0x10_0000
-
-  // The receipt's invocation and entry tokens are array indices below n.
-  ghost predicate InRange(r: Receipt, n: i53) {
-    0 <= r.inv < n as int && (r.entry.Some? ==> 0 <= r.entry.v < n as int)
-  }
-
-  // The index of the first state of invocation inv, or -1.
-  function FindIndex(projs: seq<Proj>, inv: int): int
-    decreases |projs|
-    ensures -1 <= FindIndex(projs, inv) < |projs|
-  {
-    if |projs| == 0 then -1
-    else if projs[0].inv == inv then 0
-    else var k := FindIndex(projs[1..], inv); if k < 0 then -1 else k + 1
-  }
-
   predicate Legal(from: Life, to: MaybeLife, settle: bool) {
     if TerminalLife(from) || to.NoLife? then false
     else if settle then TerminalLife(to.l)
     else
-      // Written without set literals: the compiled code would build a set on every call.
       var t := to.l;
       match from
       case Staged => t.Accepted? || t.Queued? || t.Running? || t.WaitingForInput? || t.Retrying? || t.Settling?
@@ -39,36 +20,149 @@ module ReceiptsInvocationLifecycle refines ReceiptsInvocationLifecycleLaws {
       case _ => false
   }
 
-  function StepOf(st: State, r: Receipt): Step {
-    var i := FindIndex(st.projs, r.inv);
-    if r.kind.Start? then
-      if i >= 0 then Refused(DuplicateStart)
-      else Next(st.(projs := st.projs + [Proj(r.inv, r.op, r.src, r.name, r.origin,
-        if r.life.LifeOf? then r.life.l else Accepted, None, NoFlag, r.sequence, r.at, false)]))
-    else if i < 0 then Refused(NoStart)
-    else
-      var p := st.projs[i];
-      if p.op != r.op || p.src != r.src then Refused(OwnershipChanged)
-      else if r.kind.Binding? && r.entry in st.entries then Refused(EntryBound)
-      else if r.kind.Binding? && r.inv in st.bound then Refused(InvocationBound)
-      else if r.name.Some? && r.name != p.name then Refused(NameChanged)
-      else if r.origin.Some? && r.origin != p.origin then Refused(OriginChanged)
-      else if r.kind.Terminal? && p.terminal && r.life != LifeOf(p.life) then Refused(ContradictoryTerminal)
-      else if r.kind.Terminal? && !p.terminal && !Legal(p.life, r.life, true) then Refused(IllegalTerminal)
-      else if r.kind.Transition? && !Legal(p.life, r.life, false) then Refused(IllegalTransition)
-      else
-        var settled := p.terminal || r.kind.Terminal?;
-        Next(State(st.projs[i := p.(
-            life := if r.life.LifeOf? && (r.kind.Terminal? || !settled) then r.life.l else p.life,
-            entry := if r.entry.Some? then r.entry else p.entry,
-            retryable := if r.retryable.FlagOf? then r.retryable else p.retryable,
-            updated := r.at, terminal := settled)],
-          if r.kind.Binding? then st.entries + [r.entry] else st.entries,
-          if r.kind.Binding? then st.bound + [r.inv] else st.bound))
+  predicate SameLife(a: Life, b: Life) {
+    match a
+    case Staged => b.Staged?
+    case Accepted => b.Accepted?
+    case Queued => b.Queued?
+    case Running => b.Running?
+    case WaitingForInput => b.WaitingForInput?
+    case Retrying => b.Retrying?
+    case Settling => b.Settling?
+    case Completed => b.Completed?
+    case Failed => b.Failed?
+    case Interrupted => b.Interrupted?
+    case OutcomeUnknown => b.OutcomeUnknown?
   }
 
+  predicate SameMark(a: Mark, b: Mark) {
+    match a
+    case Absent => b.Absent?
+    case Same => b.Same?
+    case Differs => b.Differs?
+  }
+
+  // The cell of an invocation whose start is the fact f at position k.
+  function Begin(f: Fact, k: Index): Cell {
+    Cell(k, if f.life.LifeOf? then f.life.l else Accepted, false, false, -1, NoFlag, k)
+  }
+
+  datatype Verdict = Refuse(why: Refusal) | Accept(cell: Cell)
+
+  // A later fact f at position k against its invocation's cell p, whose start is the fact s; entryBound says
+  // whether f's entry is already bound.
+  function Advance(s: Fact, p: Cell, f: Fact, k: Index, entryBound: bool): Verdict {
+    if s.owned != f.owned then Refuse(OwnershipChanged)
+    else if f.kind.Binding? && entryBound then Refuse(EntryBound)
+    else if f.kind.Binding? && p.bound then Refuse(InvocationBound)
+    else if !f.name.Absent? && !SameMark(f.name, s.name) then Refuse(NameChanged)
+    else if !f.origin.Absent? && !SameMark(f.origin, s.origin) then Refuse(OriginChanged)
+    else if f.kind.Terminal? && p.settled && !(f.life.LifeOf? && SameLife(f.life.l, p.life)) then Refuse(ContradictoryTerminal)
+    else if f.kind.Terminal? && !p.settled && !Legal(p.life, f.life, true) then Refuse(IllegalTerminal)
+    else if f.kind.Transition? && !Legal(p.life, f.life, false) then Refuse(IllegalTransition)
+    else
+      var settled := p.settled || f.kind.Terminal?;
+      Accept(Cell(p.start,
+        if f.life.LifeOf? && (f.kind.Terminal? || !settled) then f.life.l else p.life,
+        settled, p.bound || f.kind.Binding?,
+        if f.entry.IndexOf? then k else p.entryAt,
+        if f.retryable.FlagOf? then f.retryable else p.retryable, k))
+  }
+
+  // The cells below `count` as a list, in order, before `tail`.
+  method Collect(cells: array<Cell>, count: Index) returns (list: List<Cell>)
+    requires 0 <= count as int <= cells.Length
+    ensures Elems(list) == cells[..count]
+  {
+    list := Nil;
+    var i := count;
+    while i > 0
+      invariant 0 <= i <= count && Elems(list) == cells[i..count]
+    {
+      i := i - 1;
+      list := Cons(cells[i], list);
+      assert cells[i..count] == [cells[i]] + cells[i + 1..count];
+    }
+  }
+
+  method Fold(facts: seq<Fact>, cells: array<Cell>, slots: array<Index>, entries: array<bool>) returns (out: Folding)
+  {
+    var n := |facts| as Index;
+    ghost var rs := ReceiptsOf(facts);
+    // Nothing the arrays held is read: every slot and entry mark is reset, and a cell is read only below `count`.
+    var k: Index := 0;
+    while k < n
+      invariant 0 <= k <= n
+      invariant forall t | 0 <= t < k :: slots[t] == -1 && !entries[t]
+    {
+      slots[k] := -1;
+      entries[k] := false;
+      k := k + 1;
+    }
+    var noneBound := false;
+    var count: Index := 0;
+    ghost var st := State([], [], []);
+    k := 0;
+    while k < n
+      invariant 0 <= count <= k <= n && |st.projs| == count as int
+      invariant forall i | 0 <= i < count :: Held(cells[i], st, i as int, rs, k as int)
+      invariant forall t | 0 <= t < n :: slots[t] as int == FindIndex(st.projs, t as int)
+      invariant forall t | 0 <= t < n :: entries[t] == (Some(t as int) in st.entries)
+      invariant noneBound == (None in st.entries)
+      invariant forall x | x in st.bound :: FindIndex(st.projs, x) >= 0
+      invariant RunAt(st, rs, k as int) == RunAt(State([], [], []), rs, 0)
+    {
+      var f := facts[k];
+      if f.inv < 0 || f.inv >= n || (f.entry.IndexOf? && (f.entry.i < 0 || f.entry.i >= n)) {
+        return Unfit(k);
+      }
+      ghost var r := rs[k];
+      assert r == ReceiptOf(f, k as int);
+      var i := slots[f.inv];
+      FindIndexSpec(st.projs, r.inv);
+      if f.kind.Start? {
+        if i >= 0 {
+          RunAtProject(rs);
+          return Stopped(DuplicateStart, k);
+        }
+        ghost var p := Proj(r.inv, r.op, r.src, r.name, r.origin, if r.life.LifeOf? then r.life.l else Accepted, None, NoFlag, r.sequence, r.at, false);
+        FindIndexAppend(st.projs, p);
+        BeginSpec(facts, k as int);
+        cells[count] := Begin(f, k);
+        slots[f.inv] := count;
+        st := st.(projs := st.projs + [p]);
+        count := count + 1;
+      } else {
+        if i < 0 {
+          RunAtProject(rs);
+          return Stopped(NoStart, k);
+        }
+        var p := cells[i];
+        var entryBound := if f.entry.IndexOf? then entries[f.entry.i] else noneBound;
+        AdvanceSpec(st, facts, k as int, i as int, p, entryBound);
+        var verdict := Advance(facts[p.start], p, f, k, entryBound);
+        if verdict.Refuse? {
+          RunAtProject(rs);
+          return Stopped(verdict.why, k);
+        }
+        FindIndexUpdate(st.projs, i as int, ProjOf(verdict.cell, rs));
+        cells[i] := verdict.cell;
+        if f.kind.Binding? {
+          if f.entry.IndexOf? { entries[f.entry.i] := true; } else { noneBound := true; }
+        }
+        st := StepOf(st, r).st;
+      }
+      k := k + 1;
+    }
+    RunAtProject(rs);
+    var list := Collect(cells, count);
+    return Finished(list);
+  }
+
+  // ---------- proofs: Fold computes Project ----------
+
   // The receipts from position k folded into the state.
-  function RunAt(st: State, rs: seq<Receipt>, k: nat): Outcome
+  ghost function RunAt(st: State, rs: seq<Receipt>, k: nat): Outcome
     requires k <= |rs|
     decreases |rs| - k
   {
@@ -78,96 +172,65 @@ module ReceiptsInvocationLifecycle refines ReceiptsInvocationLifecycleLaws {
       case Next(st2) => RunAt(st2, rs, k + 1)
   }
 
-  function Project(rs: seq<Receipt>): Outcome {
-    ProjectFast(rs)
+  lemma RunAtProject(rs: seq<Receipt>)
+    ensures RunAt(State([], [], []), rs, 0) == Project(rs)
+  { RunAtRun(State([], [], []), rs, 0); assert rs[0..] == rs; }
+
+  // Held: cell c is the fold's cell for the state's i-th invocation, with positions before k: it stands for that
+  // invocation's state, says whether the invocation is bound, and no other state is of the same invocation.
+  ghost predicate Held(c: Cell, st: State, i: int, rs: seq<Receipt>, k: int)
+    requires 0 <= i < |st.projs|
+  {
+    Placed(c, rs) && c.start as int < k && c.entryAt as int < k && c.updated as int < k
+    && ProjOf(c, rs) == st.projs[i]
+    && c.bound == (st.projs[i].inv in st.bound)
+    && FindIndex(st.projs, st.projs[i].inv) == i
   }
 
-  // The fold, compiled from the method below and proven equal to RunAt. (Dafny 4.11 drops a `by method` on a
-  // function that refines a laws declaration, neither verifying nor compiling it, so it sits on this function.)
-  function ProjectFast(rs: seq<Receipt>): Outcome {
-    RunAt(State([], [], []), rs, 0)
-  } by method {
-    // The same fold with mutable arrays indexed by the call's tokens and machine-integer indices, so each receipt
-    // costs O(1) when the tokens are dense, as the shell numbers them (arrays are sized by the largest token); tokens
-    // outside [0, LIMIT) take the fold above.
-    if |rs| >= LIMIT as int { return RunAt(State([], [], []), rs, 0); }
-    var len := |rs| as i53;
-    var n: i53 := 1;
-    var k: i53 := 0;
-    while k < len
-      invariant 0 <= k <= len && 1 <= n <= LIMIT
-      invariant forall j | 0 <= j < k as int :: InRange(rs[j], n)
-    {
-      var r := rs[k];
-      if !(0 <= r.inv < LIMIT as int) || (r.entry.Some? && !(0 <= r.entry.v < LIMIT as int)) {
-        return RunAt(State([], [], []), rs, 0);
-      }
-      if r.inv as i53 >= n { n := r.inv as i53 + 1; }
-      if r.entry.Some? && r.entry.v as i53 >= n { n := r.entry.v as i53 + 1; }
-      k := k + 1;
-    }
-    var slot := new i53[n](_ => -1);
-    var invBound := new bool[n](_ => false);
-    var entryBound := new bool[n](_ => false);
-    var noneBound := false;
-    var projs := new Proj[len](_ => Proj(0, 0, 0, None, None, Staged, None, NoFlag, 0, 0, false));
-    var count: i53 := 0;
-    ghost var st := State([], [], []);
-    k := 0;
-    while k < len
-      invariant 0 <= count <= k <= len && st.projs == projs[..count]
-      invariant forall t | 0 <= t < n :: slot[t] as int == FindIndex(st.projs, t as int)
-      invariant forall t | 0 <= t < n :: invBound[t] == (t as int in st.bound)
-      invariant forall t | 0 <= t < n :: entryBound[t] == (Some(t as int) in st.entries)
-      invariant noneBound == (None in st.entries)
-      invariant RunAt(st, rs, k as int) == RunAt(State([], [], []), rs, 0)
-    {
-      var r := rs[k];
-      assert InRange(r, n);
-      var inv := r.inv as i53;
-      var i := slot[inv];
-      assert i as int == FindIndex(st.projs, r.inv);
-      if r.kind.Start? {
-        if i >= 0 { return Rejected(DuplicateStart, k as int); }
-        var p := Proj(r.inv, r.op, r.src, r.name, r.origin, if r.life.LifeOf? then r.life.l else Accepted, None, NoFlag, r.sequence, r.at, false);
-        FindIndexAppend(st.projs, p);
-        projs[count] := p;
-        slot[inv] := count;
-        st := st.(projs := st.projs + [p]);
-        count := count + 1;
-        assert st.projs == projs[..count];
-      } else {
-        if i < 0 { return Rejected(NoStart, k as int); }
-        var p := projs[i];
-        var entryIn := if r.entry.Some? then entryBound[r.entry.v as i53] else noneBound;
-        if p.op != r.op || p.src != r.src { return Rejected(OwnershipChanged, k as int); }
-        if r.kind.Binding? && entryIn { return Rejected(EntryBound, k as int); }
-        if r.kind.Binding? && invBound[inv] { return Rejected(InvocationBound, k as int); }
-        if r.name.Some? && r.name != p.name { return Rejected(NameChanged, k as int); }
-        if r.origin.Some? && r.origin != p.origin { return Rejected(OriginChanged, k as int); }
-        if r.kind.Terminal? && p.terminal && r.life != LifeOf(p.life) { return Rejected(ContradictoryTerminal, k as int); }
-        if r.kind.Terminal? && !p.terminal && !Legal(p.life, r.life, true) { return Rejected(IllegalTerminal, k as int); }
-        if r.kind.Transition? && !Legal(p.life, r.life, false) { return Rejected(IllegalTransition, k as int); }
-        var settled := p.terminal || r.kind.Terminal?;
-        var q := p.(life := if r.life.LifeOf? && (r.kind.Terminal? || !settled) then r.life.l else p.life,
-          entry := if r.entry.Some? then r.entry else p.entry,
-          retryable := if r.retryable.FlagOf? then r.retryable else p.retryable,
-          updated := r.at, terminal := settled);
-        FindIndexUpdate(st.projs, i as int, q);
-        projs[i] := q;
-        if r.kind.Binding? {
-          invBound[inv] := true;
-          if r.entry.Some? { entryBound[r.entry.v as i53] := true; } else { noneBound := true; }
-        }
-        st := StepOf(st, r).st;
-        assert st.projs == projs[..count];
-      }
-      k := k + 1;
-    }
-    return Projected(projs[..count]);
+  // A start's cell stands for the state StepOf appends.
+  lemma BeginSpec(fs: seq<Fact>, k: int)
+    requires 0 <= k < |fs| < 0x1_0000_0000
+    ensures var rs := ReceiptsOf(fs); var r := rs[k]; var c := Begin(fs[k], k as Index);
+      Placed(c, rs) && c.start as int == k && c.entryAt == -1 && c.updated as int == k && !c.bound
+      && ProjOf(c, rs) == Proj(r.inv, r.op, r.src, r.name, r.origin, if r.life.LifeOf? then r.life.l else Accepted, None, NoFlag, r.sequence, r.at, false)
+  {}
+
+  lemma SameLifeSpec(a: Life, b: Life)
+    ensures SameLife(a, b) <==> a == b
+  {}
+
+  lemma SameMarkSpec(a: Mark, b: Mark)
+    ensures SameMark(a, b) <==> MarkOf(a) == MarkOf(b)
+  {}
+
+  // Advance decides a later receipt as StepOf does, and its cell stands for the updated state.
+  lemma AdvanceSpec(st: State, fs: seq<Fact>, k: int, i: int, p: Cell, entryBound: bool)
+    requires 0 <= k < |fs| < 0x1_0000_0000 && !fs[k].kind.Start?
+    requires 0 <= i < |st.projs| && FindIndex(st.projs, fs[k].inv as int) == i
+    requires Held(p, st, i, ReceiptsOf(fs), k)
+    requires entryBound == (ReceiptsOf(fs)[k].entry in st.entries)
+    ensures var rs := ReceiptsOf(fs);
+      var verdict := Advance(fs[p.start], p, fs[k], k as Index, entryBound);
+      (verdict.Refuse? ==> StepOf(st, rs[k]) == Refused(verdict.why))
+      && (verdict.Accept? ==> (StepOf(st, rs[k]).Next?
+        && Placed(verdict.cell, rs) && verdict.cell.start as int < k + 1 && verdict.cell.entryAt as int < k + 1 && verdict.cell.updated as int < k + 1
+        && StepOf(st, rs[k]).st == State(st.projs[i := ProjOf(verdict.cell, rs)],
+          if fs[k].kind.Binding? then st.entries + [rs[k].entry] else st.entries,
+          if fs[k].kind.Binding? then st.bound + [rs[k].inv] else st.bound)
+        && ProjOf(verdict.cell, rs).inv == st.projs[i].inv
+        && verdict.cell.bound == (p.bound || fs[k].kind.Binding?)))
+  {
+    var rs := ReceiptsOf(fs);
+    var f, s, r := fs[k], fs[p.start], rs[k];
+    FindIndexSpec(st.projs, r.inv);
+    SameMarkSpec(f.name, s.name);
+    SameMarkSpec(f.origin, s.origin);
+    if f.life.LifeOf? { SameLifeSpec(f.life.l, p.life); }
+    assert st.projs[i] == ProjOf(p, rs);
+    assert rs[p.start] == ReceiptOf(s, p.start as int);
   }
 
-  // ---------- proofs ----------
+  // ---------- proofs: what the fold does ----------
 
   // Appending a new invocation's state finds it at the end and finds every other invocation where it was.
   lemma FindIndexAppend(projs: seq<Proj>, p: Proj)
@@ -231,9 +294,6 @@ module ReceiptsInvocationLifecycle refines ReceiptsInvocationLifecycleLaws {
     }
   }
 
-  lemma H1History(rs: seq<Receipt>)
-  { RunAtRun(State([], [], []), rs, 0); assert rs[0..] == rs; }
-
   lemma S1Start(st: State, r: Receipt)
   { FindIndexSpec(st.projs, r.inv); }
 
@@ -274,6 +334,7 @@ module ReceiptsInvocationLifecycle refines ReceiptsInvocationLifecycleLaws {
     assert RunAt(st1, rs, 2) == RunAt(st2, rs, 3);
     assert RunAt(State([p0], [], []), rs, 1) == RunAt(st1, rs, 2);
     assert RunAt(st0, rs, 0) == RunAt(State([p0], [], []), rs, 1);
+    RunAtProject(rs);
   }
 
   // Settled: the state holds a settled state of inv with lifecycle l.
@@ -334,7 +395,6 @@ module ReceiptsInvocationLifecycle refines ReceiptsInvocationLifecycleLaws {
 
   lemma I1SettledStays(rs: seq<Receipt>, k: int)
   {
-    H1History(rs);
     RunSettles(State([], [], []), rs, 0, k);
   }
 
@@ -386,7 +446,6 @@ module ReceiptsInvocationLifecycle refines ReceiptsInvocationLifecycleLaws {
 
   lemma I2OneBinding(rs: seq<Receipt>, j: int, k: int)
   {
-    H1History(rs);
     RunOneBinding(State([], [], []), rs, 0, j, k);
   }
 }

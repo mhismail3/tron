@@ -69,7 +69,8 @@ function packet(root, block, opts = {}) {
   // A law's statement and English live in the block's laws (block.json interface); a refining proof repeats only its name.
   const { interface: lawPaths, shell } = JSON.parse(readFileSync(join(dir, "block.json"), "utf8"));
   const lawFiles = new Set(lawPaths);
-  const named = (sym) => all.filter((d) => d.kind === "lemma" && d.name === sym.split(".").pop());
+  // A law is a lemma, or a compiled method whose contract is the law.
+  const named = (sym) => all.filter((d) => (d.kind === "lemma" || d.kind === "method") && d.name === sym.split(".").pop());
   const lemma = (sym) => named(sym).find((d) => lawFiles.has(d.file)) ?? named(sym)[0];
   const laws = Object.entries(cfg.laws).map(([law, syms]) => ({ law, items: syms.map((s) => lemma(s) ?? (problems.push(`${law}: lemma ${s} not found`), null)).filter(Boolean) }));
   for (const { law, items } of laws) if (items[0] && !items[0].comment) problems.push(`${law}: no plain-English comment above ${items[0].name}`);
@@ -78,7 +79,7 @@ function packet(root, block, opts = {}) {
   const helpers = new Set(cfg.helpers ?? []);
   // Every lemma outside the impl is either part of a listed law or a declared helper; nothing hides.
   for (const d of all) if (d.kind === "lemma" && !listed.has(d.name) && !helpers.has(d.name)) problems.push(`lemma ${d.name} (${d.file}) is neither in mutate.json laws nor in helpers`);
-  for (const d of all) if (d.kind === "lemma" && LAW_ID.test(d.comment) && !listed.has(d.name)) problems.push(`lemma ${d.name} is marked as law "${d.comment.slice(0, 20)}..." but not listed in mutate.json laws`);
+  for (const d of all) if ((d.kind === "lemma" || d.kind === "method") && LAW_ID.test(d.comment) && !listed.has(d.name)) problems.push(`lemma ${d.name} is marked as law "${d.comment.slice(0, 20)}..." but not listed in mutate.json laws`);
   for (const { f, src } of sources) { const n = (src.replace(/\/\/[^\n]*/g, "").match(/\bassume\b|\{:axiom\}|\{:verify\s+false\}|\{:extern[^}]*\}/g) ?? []).length; if (n) problems.push(`${f}: ${n} escape hatch(es) (assume/axiom/verify false/extern) need a maintainer decision`); }
   // Law kinds (LAW-WRITING.md): high-stakes blocks must account for every kind.
   const kinds = cfg.kinds ?? {};
