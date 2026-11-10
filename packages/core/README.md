@@ -10,7 +10,7 @@ block is shadowed against the TypeScript it models until its gates allow a cut-o
 laws/<area>/<Block>.dfy          L0: abstract modules: types, signatures, law lemmas with plain-English comments
 blocks/<area>/<block>/           L1: one directory per block
   Block.dfy                      `module X refines XLaws`: definitions and proofs
-  block.json                     {"interface": [...], "impl": [...], "deps": [...]}
+  block.json                     {"interface": [...], "impl": [...], "deps": [...], "shell": "<dir>" (once a shell runs it)}
   mutate.json                    gate config: tier, laws map, mutated symbols, oracle, shadow and replay
                                  commands, report path
   LAWS.md                        the generated law review packet (scripts/tron proof packet --write)
@@ -70,7 +70,8 @@ proof check PASS; `proof mutate` PASS (every mutant killed by a law or proven eq
 reviewer (a different agent and, for high-stakes, a different model from the writer) ACCEPTs every law;
 `proof shadow` matches (a shadowed block); and `LAWS.md` is regenerated. `tools/proof/tests/test-core.py`
 enforces this on every change here and on every change to a generated core. A cut-over needs the block
-compiled without the runtime and a comparison with the TypeScript it replaces that shows no difference.
+compiled without the runtime; from then on the shell's own test pins what its callers see around the block (for
+`schedule/occurrence`, `packages/gateway/src/automations/schedule.test.ts`).
 
 ## Check
 

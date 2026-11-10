@@ -1,4 +1,4 @@
-// Integration test for `scripts/tron proof facade` (tools/proof/README.md "Façade") on a copy of the fixture
+// Integration test for `scripts/tron proof facade` (tools/proof/dafny2wire/README.md "Façade") on a copy of the fixture
 // block demo/counter (tests/fixtures/facade; test input, not a core block): the generated façade exposes
 // exactly the compiled declarations of the laws (a multi-line datatype in full, an opaque function, not a
 // ghost function or a commented-out one), marshals values both ways (sequences as arrays, also nested and as
@@ -129,6 +129,15 @@ test("a block a shell runs compiles to a module that needs no Dafny runtime", as
     writeFileSync(path, text);
   }
 
+  // A copied runtime helper must stand alone: only its parameters, its locals and Math.
+  const { closedHelper } = await import(join(ROOT, "tools/proof/dafny2wire/facade.mjs"));
+  const division = /^  EuclideanDivisionNumber: (function[\s\S]*?\n  \}),$/m.exec(core)[1];
+  assert.equal(closedHelper(division), true);
+  for (const open of ["function(a, b) { return _dafny.ZERO; }", "function(a, b) { return Seq.of(a, b); }", "function(a, b) { return this.x; }",
+    "function(a, b) { return new BigNumber(a); }", "function(a, b) { return a + $module.b; }", "function(a) { return 'text'; }", "(a) => a", "not a function"]) {
+    assert.equal(closedHelper(open), false, open);
+  }
+
   // What would need the Dafny runtime is refused before anything is written, naming the function.
   const edit = (file, from, to) => { const text = readFileSync(file, "utf8"); assert.ok(text.includes(from)); writeFileSync(file, text.replace(from, to)); return () => writeFileSync(file, text); };
   const block = join(root, "blocks/demo/meter/Block.dfy");
@@ -136,6 +145,14 @@ test("a block a shell runs compiles to a module that needs no Dafny runtime", as
   for (const [file, from, to, message] of [
     [block, "    else Flat", "    else if a == b then Flat else Flat", /Compare needs the Dafny runtime \(compiled line \d+: .*_dafny\.areEqual/],
     [block, "{ at / every }", "{ Total([at, every]) }\n  function Total(s: seq<Ms>): Ms { if |s| == 0 then 0 else s[0] }", /Slot needs the Dafny runtime \(compiled line \d+: .*_dafny\.Seq\.of/],
+    // A block's own function is never exempt, whatever its name or owner: only the compiler's datatype and newtype
+    // members are.
+    [block, "{ at / every }", "{ if equals(at, every) then 0 else at / every }\n  function equals(a: Ms, b: Ms): bool { [a] == [b] }", /equals needs the Dafny runtime/],
+    [block, "{ at / every }", "{ if Box.IntegerRange(at) then at / every else 0 }\n  datatype Box = Box(n: Ms) { static function IntegerRange(a: Ms): bool { [a] == [a] } }", /IntegerRange needs the Dafny runtime/],
+    [block, "{ at / every }", "{ if Box(at).equals(every) then 0 else at / every }\n  datatype Box = Box(n: Ms) { function equals(b: Ms): bool { [n] == [b] } }", /equals needs the Dafny runtime/],
+    // A parameter may not take one of the façade's own names.
+    [laws, "function Slot(at: Ms, every: Ms): Ms\n    requires Recent(at) && Period(every)", "function Slot(at: Ms, bool: Ms): Ms\n    requires Recent(at) && Period(bool)", /Slot: parameter name bool is reserved by the façade/],
+    [laws, "predicate Recent(at: Ms) { -1000 < at < 1000 }", "predicate Recent(inMs: Ms) { -1000 < inMs < 1000 }", /Recent: parameter name inMs is reserved by the façade/],
     [laws, "function Compare(a: Reading, b: Reading): Trend", "function Compare(a: Reading, b: Reading): Trend\n  function Wide(x: int): int", /unsupported Dafny type int/],
     [laws, "newtype Level = x: int | 0 <= x <= 100", "newtype Level = x: int | 0 <= x <= Top()\n  ghost function Top(): int { 100 }", /cannot read newtype as a literal integer range within the safe integers/],
   ]) {

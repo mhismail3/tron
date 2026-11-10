@@ -174,72 +174,10 @@ the TypeScript it was compared with is gone. Oracles clear `TRON_PROOF_TRAFFIC` 
 the corpus, and exit 2 on a corpus file they cannot read. The compiled core's runtime dependency `bignumber.js` is pinned in `packages/core/package.json`
 (`scripts/tron-node exec npm --prefix packages/core ci` prepares a worktree).
 
-## Façade
+## Façade and wire
 
-`dafny2wire/facade.mjs` (`proof facade <block> [--check] [--root <dir>]`) writes a block's compiled core and
-`facade.ts`, a typed TypeScript wrapper generated from the datatypes and compiled signatures of the block's laws.
-The façade exposes every compiled function and predicate of the laws (ghost and commented-out declarations are
-not compiled, so not exposed) and checks each stated precondition before calling, because compiled code does not
-check `requires`. Refused before anything is written: Dafny 3 `function method` syntax, preconditions other than
-a call of a compiled predicate on parameters, generic functions, and any Dafny type the block's kind does not
-carry (an unused generic datatype is ignored). `--check` regenerates into a temporary directory and exits 1 if
-the checked-in files differ.
-
-**A block its shell runs** (`block.json` `shell`, a directory relative to the repository) is written there as
-`core.mjs` and `facade.ts`. `core.mjs` imports nothing: it is the output of `dafny translate js` without the
-Dafny runtime, byte for byte, after a generated header and before one `export { <module> as compiled }` line.
-The compiled functions of such a block may not use the runtime, with one exception: a runtime helper that is a
-closed function (it names nothing else of the runtime; today integer division and modulo on numbers) is copied
-verbatim into the header from the runtime the same compiler emits. Any other use (an unbounded `int`, building a
-sequence, datatype `==`, a tuple) is refused, naming the function and the compiled line; only the members the
-compiler emits for the runtime's own use (`toString`, `equals`, a newtype's `_Is` and `IntegerRange`) may mention
-it. Types: a newtype over a literal integer range within the JavaScript safe integers -> `number`, checked to be
-an integer in that range in both directions; `bool` -> `boolean`; `seq<T>` -> a readonly array of `T`; a datatype
-of nullary constructors -> a string union of their names, a one-constructor datatype named like its type -> a
-plain object, any other datatype -> an object tagged by `$`; an unknown constructor is a `TypeError` in either
-direction. `bind(compiled)` binds the façade to another translation of the block; `core` is the checked-in one.
-
-**A shadowed block** is written to `packages/core/dist/<block>` as `core.js`, compiled with the Dafny runtime
-(unedited, with a generated header), and a `facade.ts` that evaluates it: `load(corePath)` binds it to any
-compiled core (the checked-in one, or a mutant or fresh translation for oracles), and `core` is the bound
-checked-in one. Types there: `int` -> `number` and `nat` -> `number >= 0` (safe integers, converted to and from
-the runtime's BigNumber and checked both ways), and the datatype, `bool` and `seq<T>` forms above. No shell can
-run such a core, because the runtime needs the `bignumber.js` package: a block is rewritten to the form above
-before its cut-over, and this form goes with the last shadowed block.
-
-## Wire
-
-The Gateway protocol's value types have one source, `packages/core/wire/Protocol.dfy`: `proof wire --protocol`
-writes `packages/gateway/src/protocol/types.ts` (types, decoders and encoders, generated; never edited) and
-`--check` exits 1 when that file is not what the source generates. The Gateway still writes frames with
-`JSON.stringify` of the values it builds, so the generated encoders serve the codec tests only and the
-decoders are the protocol's validators. A type another module owns (the display contract, the upstream error)
-is marked `import=<path>`: types.ts imports it and fails to compile unless it equals the stated shape. The
-Swift codec is generated and proven against the TypeScript one in the test below; the iOS app still decodes
-with its own models.
-
-`dafny2wire/dafny2wire.mjs` (`proof wire --generate`) turns `// @wire` Dafny datatypes into `wire.ts` and
-`Wire.swift` codecs: records; `// @wire enum` (a JSON literal per constructor: `{:wire "x"}`, `{:wire 1}`,
-`{:wire true}`, else the constructor name); `// @wire tag=<field>` tagged unions (a tag value may be a string,
-number or boolean); `// @wire bykind` unions
-split by JSON kind (a nullary constructor is `null`; this is how open JSON values are written). Field types:
-`string`, `bool`, `int`/`nat` (safe-range JSON integers), `real` (float64), `seq<T>`, `map<string, T>` (or
-`map<E, T>` with E a string enum: only E's values are keys),
-`Option<T>` (absent key), `Nullable<T>` (JSON null) and `Absent` (the key never appears); a trailing `_`
-escapes a Dafny keyword or a shared destructor name. Canonical JSON: keys in declaration order with the tag
-first, no whitespace, JSON.stringify string escaping, ECMAScript Number::toString (`-0` as `0`; non-finite
-numbers refused by both encoders). Maps keep JavaScript's property order (array-index keys ascending, then
-insertion order; a duplicate key keeps its first position and last value), also when built in Swift, so the
-Swift codec parses JSON itself rather than through Foundation; an overflowing number literal (`1e400`)
-parses as infinity and is rejected at its path by both decoders. The TypeScript decoders are strict: they
-reject unknown and absent-only fields, missing fields, wrong kinds, out-of-range integers and unknown
-constructors at a named JSON path. The Swift decoders are tolerant, the iOS decoding policy: unknown fields are
-ignored; an absent field, or a null one whose type cannot hold null (not `Nullable<T>`, not a union with a null
-constructor), takes its type's default (`""`, `0`, `false`, empty, `null`, the `unknown` value of an enum that
-has one, an enum's only value, a record of defaults); an unknown value of an enum with an `unknown` value is
-`unknown`. A field with no default (another enum, a union) is still required, and wrong kinds, unknown tags and
-unknown map keys are still refused; invariants beyond the shape belong to a validator layer, not the decoder.
-Limits: Swift refuses a lone UTF-16 surrogate, which JavaScript strings can hold.
+[dafny2wire/README.md](dafny2wire/README.md) owns `proof facade` (a block's compiled core and typed façade, in
+its shell or in `packages/core/dist`) and `proof wire` (the protocol's generated TypeScript and Swift codecs).
 
 ## Verify
 
@@ -286,8 +224,8 @@ TypeScript rejects each at its path and Swift rejects or reads each as stated.
 
 `scripts/tron test gateway src/proof/traffic-recorder.integration.test.ts` proves the recorder is refused
 outside an opted-in Debug Gateway (Stable channel, no channel, other values, the Stable home), that a
-seeded schedule journey through the real seams writes one record per call (none for nested calls), each under
-its trigger's block (`schedule/occurrence` or `schedule/calendar`), that replays through the same TypeScript to the recorded outputs,
+seeded schedule journey through the real seams writes one record per calendar call under `schedule/calendar` (none for
+nested calls or for once and interval triggers, which their block decides), that replays through the same TypeScript to the recorded outputs,
 that tool-selection compose and encode calls (direct and through a real resolution) record name tokens, never names,
 and nothing for a value outside the block's domain, that invocation receipt folds record tokens and refusal
 reasons, once per history and not above the receipt bound, and
@@ -301,8 +239,10 @@ either file; and `function method`, an uncheckable precondition and an unsupport
 fixture block `demo/meter`, which names a shell: its `core.mjs` lands in the shell's directory, imports nothing,
 holds the compiler's module output byte for byte and exactly one copied helper, and loads with no
 `node_modules` above it; numbers cross only as integers of their newtype's range and preconditions are checked;
-`--check` fails on a hand edit of either file; and datatype equality, building a sequence, an `int` and a
-newtype whose range is not literal are each refused, naming the function, with nothing written.
+`--check` fails on a hand edit of either file; the copied helper stands alone and a helper that names anything
+but its parameters, locals and `Math` does not; and datatype equality, building a sequence, a function named
+like a runtime member that uses the runtime, an `int` and a newtype whose range is not literal are each refused,
+naming the function, with nothing written.
 
 `scripts/tron-node exec node --test tools/proof/tests/replay.test.mjs` replays a corpus of recorder-format
 calendar calls of the shipped schedule functions through the real block `schedule/calendar`: two faithful days are a real-traffic match
