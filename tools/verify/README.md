@@ -92,7 +92,7 @@ live; the Vitest output files come back with paths rewritten to this checkout, a
 unreachable mini exits 2; once a lane is on the mini, a failed push, an off-pin toolchain or a session without a result exits 2, never falling back here. Stopping verify, or killing
 its whole process group, ends the session and SIGTERMs the mini job's child. Setup: `git config tron.verify.mini <user@host>` and
 `tron.verify.miniIdentity <key file>`, and a bare `~/tron-ci/tron.git` on the mini; until the pinned Node and Dafny are
-installed there, a job refuses with the `scripts/tron-node install` or (Python lanes) `scripts/tron proof bootstrap` command for its checkout. `verify --batch` and `mutate` run their lanes here.
+installed there, a job refuses with the `scripts/tron-node install` or (Python lanes) `scripts/tron proof bootstrap` command for its checkout. `verify --batch` runs its Gateway default/nested lanes and their case probes on the pool too, and records each lane's host (`gatewayHost`); `mutate` runs its lanes here.
 
 ## Run output
 

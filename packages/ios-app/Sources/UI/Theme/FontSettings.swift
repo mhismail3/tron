@@ -192,15 +192,10 @@ final class AppearanceSettings {
         didSet { UserDefaults.standard.set(themeColor.rawValue, forKey: "themeColor") }
     }
     var mode: AppearanceMode {
-        didSet {
-            UserDefaults.standard.set(mode.rawValue, forKey: "appearanceMode")
-            UserDefaults.standard.removeObject(forKey: "appearance.v1")
-        }
+        didSet { UserDefaults.standard.set(mode.rawValue, forKey: "appearanceMode") }
     }
     private init() {
         themeColor = UserDefaults.standard.string(forKey: "themeColor").flatMap(ThemeColor.init(rawValue:)) ?? .emerald
-        if let saved = UserDefaults.standard.string(forKey: "appearanceMode").flatMap(AppearanceMode.init(rawValue:)) { mode = saved }
-        else if let legacy = UserDefaults.standard.string(forKey: "appearance.v1") { mode = legacy == "system" ? .auto : AppearanceMode(rawValue: legacy) ?? .dark }
-        else { mode = .dark }
+        mode = UserDefaults.standard.string(forKey: "appearanceMode").flatMap(AppearanceMode.init(rawValue:)) ?? .dark
     }
 }

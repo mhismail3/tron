@@ -8,7 +8,7 @@ notification inbox.
 ## Owns
 
 `AppDelegate`, `PushNotificationCoordinator`, `NotificationInboxCoordinator`,
-`RetiredNotificationBadge`, `DeliveredNotificationRead`.
+`DeliveredNotificationRead`.
 
 ## Contract
 
@@ -31,7 +31,7 @@ notification inbox.
   Sensitive (entitlement in every build configuration). A foreground synchronized chat's
   presentation lease suppresses its own agent-terminal alert at the Gateway. Push Notifications
   settings toggle Input needed, Finished and Waiting through `push.registration.upsert`, rolling
-  back on failure. A zero badge is written at launch to clear the retired badge implementation.
+  back on failure.
 - **Icon.** iOS owns the small app icon in system notifications; there is no per-notification
   theme color or icon override in Tron's payload. Theme selection uses bundled alternate app
   icons through UIKit, not a notification extension or communication-avatar workaround. Apple
@@ -43,8 +43,7 @@ notification inbox.
   matching admitted machine/session routes at or before that visibility. Home membership comes
   from `home.chapterList`, not dashboard names or rows; a failed ledger read never widens cleanup.
   Profile, connection and presentation currency fence native reads and removal. Only captured
-  request IDs are removed, leaving other routes and later deliveries intact; the existing retired
-  badge owner restores zero. This is native presentation cleanup, not proof of canonical inbox
+  request IDs are removed, leaving other routes and later deliveries intact. This is native presentation cleanup, not proof of canonical inbox
   persistence: the Gateway's independent captured-ID read retries remain authoritative.
 - **Taps.** Admission rejects partial, oversized or non-opaque routes, resolves the machine only
   against a paired profile, marks the inbox row read without delaying navigation, and joins an

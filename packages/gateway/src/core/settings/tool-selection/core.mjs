@@ -14,17 +14,11 @@ let SettingsToolSelection = (function() {
     }
     static RevOnto(a, b) {
       TAIL_CALL_START: while (true) {
-        let _source0 = a;
-        {
-          if (_source0.is_Nil) {
-            return b;
-          }
-        }
-        {
-          let _0_head = (_source0).head;
-          let _1_tail = (_source0).tail;
-          let _in0 = _1_tail;
-          let _in1 = SettingsToolSelection.List.create_Cons(_0_head, b);
+        if ((a).is_Nil) {
+          return b;
+        } else {
+          let _in0 = (a).dtor_tail;
+          let _in1 = SettingsToolSelection.List.create_Cons((a).dtor_head, b);
           a = _in0;
           b = _in1;
           continue TAIL_CALL_START;
@@ -87,17 +81,11 @@ let SettingsToolSelection = (function() {
     };
     static ModsList(tools, entries) {
       TAIL_CALL_START: while (true) {
-        let _source0 = entries;
-        {
-          if (_source0.is_Nil) {
-            return tools;
-          }
-        }
-        {
-          let _0_e = (_source0).head;
-          let _1_rest = (_source0).tail;
-          let _in0 = SettingsToolSelection.__default.Step(tools, _0_e);
-          let _in1 = _1_rest;
+        if ((entries).is_Nil) {
+          return tools;
+        } else {
+          let _in0 = SettingsToolSelection.__default.Step(tools, (entries).dtor_head);
+          let _in1 = (entries).dtor_tail;
           tools = _in0;
           entries = _in1;
           continue TAIL_CALL_START;
@@ -106,17 +94,11 @@ let SettingsToolSelection = (function() {
     };
     static PlainsFrom(es, acc) {
       TAIL_CALL_START: while (true) {
-        let _source0 = es;
-        {
-          if (_source0.is_Nil) {
-            return SettingsToolSelection.__default.RevOnto(acc, SettingsToolSelection.List.create_Nil());
-          }
-        }
-        {
-          let _0_e = (_source0).head;
-          let _1_rest = (_source0).tail;
-          let _in0 = _1_rest;
-          let _in1 = (((_0_e).is_Plain) ? (SettingsToolSelection.List.create_Cons((_0_e).dtor_n, acc)) : (acc));
+        if ((es).is_Nil) {
+          return SettingsToolSelection.__default.RevOnto(acc, SettingsToolSelection.List.create_Nil());
+        } else {
+          let _in0 = (es).dtor_tail;
+          let _in1 = ((((es).dtor_head).is_Plain) ? (SettingsToolSelection.List.create_Cons(((es).dtor_head).dtor_n, acc)) : (acc));
           es = _in0;
           acc = _in1;
           continue TAIL_CALL_START;
@@ -125,11 +107,7 @@ let SettingsToolSelection = (function() {
     };
     static ComposeList(below, entries, defaults) {
       let _0_plain = SettingsToolSelection.__default.PlainsFrom(entries, SettingsToolSelection.List.create_Nil());
-      if (((_0_plain).is_Cons) || ((entries).is_Nil)) {
-        return SettingsToolSelection.__default.ModsList(_0_plain, entries);
-      } else {
-        return SettingsToolSelection.__default.ModsList((((below).is_NamesList) ? ((below).dtor_names) : (defaults)), entries);
-      }
+      return SettingsToolSelection.__default.ModsList(((((_0_plain).is_Cons) || ((entries).is_Nil)) ? (_0_plain) : ((((below).is_NamesList) ? ((below).dtor_names) : (defaults)))), entries);
     };
     static HasModifier(es) {
       TAIL_CALL_START: while (true) {
@@ -195,9 +173,7 @@ let SettingsToolSelection = (function() {
       return SettingsToolSelection.__default.RevOnto(SettingsToolSelection.__default.MarksFrom(base, chosen, false, SettingsToolSelection.__default.MarksFrom(chosen, base, true, SettingsToolSelection.List.create_Nil())), SettingsToolSelection.List.create_Nil());
     };
     static EncodeList(chosen, below, current, defaults) {
-      if (SettingsToolSelection.__default.HasModifier(chosen)) {
-        return SettingsToolSelection.HeldList.create_HoldsList(chosen);
-      } else if (SettingsToolSelection.__default.HasPlain(current)) {
+      if ((SettingsToolSelection.__default.HasModifier(chosen)) || (SettingsToolSelection.__default.HasPlain(current))) {
         return SettingsToolSelection.HeldList.create_HoldsList(chosen);
       } else {
         let _0_base = (((below).is_NamesList) ? ((below).dtor_names) : (defaults));
