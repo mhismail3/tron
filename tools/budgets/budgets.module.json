@@ -1,7 +1,0 @@
-{
-  "layer": "L5",
-  "purpose": "Reports documentation size budgets for a commit; verify runs it as a static step.",
-  "owns": [
-    "**"
-  ]
-}

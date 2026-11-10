@@ -266,7 +266,6 @@ class SchemaTests(OwnershipCase):
             "dynamicEdges": [{"to": "p/gone", "kind": "magic", "via": "nowhere.ts", "why": " ", "extra": 1},
                              {"to": "p/x"}, "edge"],
             "capabilities": ["runs.prompt"], "verify": ["npm test"], "riskClass": ["scary"],
-            # Budgets read no manifest exceptions, so the field is not part of the schema.
             "exceptions": [{"path": "f.ts", "budget": "lines", "reason": "r", "exit": "e"}],
         })
         m = "packages/p/c/c.module.json: "

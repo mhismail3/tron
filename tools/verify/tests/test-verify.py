@@ -2,7 +2,7 @@
 """CLI tests for `scripts/tron verify` (tools/verify/README.md).
 
 Each case copies the real `scripts/tron`, `tools/verify` and the checkers it runs
-(`tools/ownership`, `tools/budgets`, `tools/metrics`, `tools/layers`, `tools/work`,
+(`tools/ownership`, `tools/metrics`, `tools/layers`, `tools/work`,
 the documentation policy and privacy guard) into a disposable Git repository whose
 modules own real Python tests, and runs verify as a worker would:
 
@@ -47,7 +47,7 @@ ROOT = Path(__file__).resolve().parents[3]
 ARTIFACTS = ROOT / "test-results" / "verify-cli"
 COPIED = ["scripts/tron", "scripts/check-documentation-policy.py", "scripts/check-agent-policy.sh", "scripts/personal-info-guard.sh",
           "scripts/ios-test-build-identity.py", "tools/work/work.json",
-          *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/budgets", "tools/metrics", "tools/layers", "tools/work", "tools/docs", "tools/home-layout")
+          *[str(p.relative_to(ROOT)) for d in ("tools/verify", "tools/ownership", "tools/metrics", "tools/layers", "tools/work", "tools/docs", "tools/home-layout")
             for p in (ROOT / d).glob("*.py")]]
 PASSING = "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\nunittest.main()\n"
 AGENTS = "# Charter\n\nNever SIGSTOP Gateway-owned work. Never bypass simulator leases via XcodeBuildMCP.\n"
@@ -599,8 +599,8 @@ class SelectionTests(VerifyCase):
         self.assertEqual(report["delta"], {"sourceLines": {"added": 1, "removed": 1}, "testLines": {"added": 0, "removed": 0},
                                            "docLines": {"added": 0, "removed": 0},
                                            "addedTestFiles": [], "deletedTestFiles": [], "besideExistingOwner": {}, "compatAdditions": []})
-        self.assertEqual([step["name"] for step in report["steps"]][:9],
-                         ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy",
+        self.assertEqual([step["name"] for step in report["steps"]][:8],
+                         ["ownership", "worktree residue", "documentation policy", "generated docs", "agent policy",
                           "home layout", "privacy guard", "git diff --check"])
         self.assertIn("[1/", passed.stdout)
         r.write("mods/alpha/test-alpha.py", FAILING)

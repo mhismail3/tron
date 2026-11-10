@@ -1241,7 +1241,7 @@ def main(argv: list[str]) -> int:
         print("  python-here lane: on this Mac (its tests read this Mac's Pi session store)", flush=True)
     if "mac-terminal" in groups and not skipped_group("mac-terminal"):
         print("  mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", flush=True)
-    plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
+    plan_steps = ["ownership", "worktree residue", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios source policy", "ios build"] if ios_lane else []) + ["layers ios"] \
         + [name for group in sorted(groups) for name in test_step_names(group, shards, skipped_group(group))]
@@ -1255,7 +1255,6 @@ def main(argv: list[str]) -> int:
     checks = [
         ("ownership", [tron, "ownership"], {}),
         ("worktree residue", [tron, "tidy", "--here", "--landing"], {}),
-        ("budgets", [tron, "budgets", "HEAD"], {}),
         ("documentation policy", ["python3", "scripts/check-documentation-policy.py"], {}),
         ("generated docs", [tron, "docs", "check", *([] if baseline_docs else ["--base", base])]
          if baseline_docs or selection["docInputs"] or gateway_touched else None, {}),
