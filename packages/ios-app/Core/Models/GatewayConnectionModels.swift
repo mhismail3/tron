@@ -300,7 +300,6 @@ package struct AdministrativeDrainSnapshot: Codable, Hashable, Sendable {
 package struct GatewayRestartResponse: Codable, Hashable, Sendable {
     package let restarting: Bool
     package let scheduled: Bool
-    let activeSessionIds: [String]?
     let restartNow: Bool?
     package let drain: AdministrativeDrainSnapshot?
 }
@@ -412,7 +411,6 @@ package struct IosDeviceInstallConfiguredTarget: Codable, Hashable, Sendable {
     let name: String
     let deviceType: String
     let connectionState: String
-    let developerModeEnabled: Bool
 }
 
 package struct IosDeviceInstallConfig: Codable, Hashable, Sendable {

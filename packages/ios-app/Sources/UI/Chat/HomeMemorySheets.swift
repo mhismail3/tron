@@ -275,20 +275,20 @@ enum HomeMemoryPresentation {
 /// Relative time for the Home rows, from the Gateway's ISO timestamps.
 enum HomeSheetTime {
     static func relative(_ timestamp: String?, now: Date = .now) -> String? {
-        guard let timestamp, let date = HomeChapterPresentation.parse(timestamp) else { return nil }
+        guard let timestamp, let date = GatewayTimestamp.parse(timestamp) else { return nil }
         return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: now)
     }
 
     /// "Oct 13, 2026 at 10:30 PM · 2 days ago", for a detail row that names one instant.
     static func absolute(_ timestamp: String, now: Date = .now) -> String {
-        guard let date = HomeChapterPresentation.parse(timestamp) else { return timestamp }
+        guard let date = GatewayTimestamp.parse(timestamp) else { return timestamp }
         let when = date.formatted(date: .abbreviated, time: .shortened)
         return "\(when) · \(RelativeDateTimeFormatter().localizedString(for: date, relativeTo: now))"
     }
 
     /// "Mar 3 – Mar 9", or one date when the range is a single day.
     static func range(_ first: String?, _ last: String?) -> String? {
-        let dates = [first, last].compactMap { $0.flatMap(HomeChapterPresentation.parse) }
+        let dates = [first, last].compactMap { $0.flatMap(GatewayTimestamp.parse) }
         guard let start = dates.first else { return nil }
         let style = Date.FormatStyle().month(.abbreviated).day()
         let end = dates.last ?? start

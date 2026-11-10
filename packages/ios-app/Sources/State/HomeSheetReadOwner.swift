@@ -384,10 +384,10 @@ enum HomeChapterPresentation {
 
     /// `createdAt` to `sealedAt`, or open-ended for the chapter still being written.
     static func dateRange(_ chapter: HomeChapterListDTO.Chapter) -> String {
-        guard let start = parse(chapter.createdAt) else { return "Dates unavailable" }
+        guard let start = GatewayTimestamp.parse(chapter.createdAt) else { return "Dates unavailable" }
         let style = Date.FormatStyle.dateTime.day().month(.abbreviated).year()
         guard let sealed = chapter.sealedAt else { return "Since \(start.formatted(style))" }
-        guard let end = parse(sealed) else { return "Dates unavailable" }
+        guard let end = GatewayTimestamp.parse(sealed) else { return "Dates unavailable" }
         let from = start.formatted(style)
         let to = end.formatted(style)
         return from == to ? from : "\(from) – \(to)"
@@ -409,13 +409,6 @@ enum HomeChapterPresentation {
     private static func ratio(_ value: Int, _ limit: Int) -> Int {
         guard limit > 0 else { return 0 }
         return Int((Double(value) / Double(limit) * 100).rounded())
-    }
-
-    static func parse(_ timestamp: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: timestamp) { return date }
-        return ISO8601DateFormatter().date(from: timestamp)
     }
 }
 

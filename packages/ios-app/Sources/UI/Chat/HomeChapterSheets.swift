@@ -132,9 +132,9 @@ extension HomeChapterPresentation {
 
     /// "Oct 20 – now" for the active chapter, "Oct 14 – Oct 19" once sealed.
     static func shortRange(_ chapter: HomeChapterListDTO.Chapter) -> String? {
-        guard let start = parse(chapter.createdAt) else { return nil }
+        guard let start = GatewayTimestamp.parse(chapter.createdAt) else { return nil }
         let style = Date.FormatStyle().month(.abbreviated).day()
-        guard let sealed = chapter.sealedAt.flatMap(parse) else { return "\(start.formatted(style)) – now" }
+        guard let sealed = chapter.sealedAt.flatMap(GatewayTimestamp.parse) else { return "\(start.formatted(style)) – now" }
         return HomeSheetTime.range(chapter.createdAt, chapter.sealedAt) ?? sealed.formatted(style)
     }
 }

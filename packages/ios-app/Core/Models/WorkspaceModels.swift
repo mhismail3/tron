@@ -95,7 +95,6 @@ package struct SessionWorkspaceDirectoryEntry: Codable, Hashable, Identifiable, 
     package let kind: SessionWorkspaceEntryKind
     package let hidden: Bool
     package let size: Int?
-    let modifiedAt: String?
     package var id: String { path }
 }
 
@@ -200,7 +199,6 @@ package struct SessionWorkspaceCommitDetail: Codable, Hashable, Sendable {
     package let subject: String
     package let message: String
     package let authorName: String
-    let authorEmail: String?
     package let authoredAt: String
     let decorations: [String]
     package let changes: [SessionWorkspaceCommitChange]

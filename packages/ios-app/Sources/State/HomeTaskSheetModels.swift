@@ -36,7 +36,7 @@ struct HomeTaskCheckinDTO: Decodable, Equatable, Sendable {
     let refs: Refs?
     var valid: Bool {
         [id, taskId, sessionId, operationId].allSatisfy(homeID)
-            && HomeChapterPresentation.parse(at) != nil && homeText(step, bytes: 256)
+            && GatewayTimestamp.parse(at) != nil && homeText(step, bytes: 256)
             && homeText(done, bytes: 512) && homeText(next, bytes: 512)
             && (blocker.map { homeText($0, bytes: 512) } ?? true)
             && (needsAttention != true || blocker != nil)

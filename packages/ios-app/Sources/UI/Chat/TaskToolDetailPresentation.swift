@@ -126,7 +126,7 @@ extension HomeToolDetailPresentation {
     }
 
     private static func relativeTaskTime(_ at: String) -> String {
-        guard let date = HomeChapterPresentation.parse(at) else { return at }
+        guard let date = GatewayTimestamp.parse(at) else { return at }
         return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: .now)
     }
 

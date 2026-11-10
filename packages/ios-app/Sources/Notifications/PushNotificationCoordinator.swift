@@ -372,7 +372,6 @@ struct PushRegistrationStatus: Decodable, Sendable {
     let registered: Bool
     let deviceRegistered: Bool
     let enabledDeviceCount: Int
-    let pendingCount: Int
     let notifyWhenAskPresented: Bool
     let notifyWhenFinished: Bool
     let notifyWhenWaiting: Bool

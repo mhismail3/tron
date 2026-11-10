@@ -322,7 +322,6 @@ package struct GatewayAutomationRun: Codable, Hashable, Identifiable, Sendable {
     let retryAt: String?
     package let preAdmissionAttemptCount: Int
     package let hostEpoch: String?
-    let claimId: String?
     package let operationId: String?
     package let invocationId: String?
     package let assistantCompletionId: String?
