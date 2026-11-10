@@ -53,7 +53,6 @@ package struct ExtensionActivityOmissions: Codable, Hashable, Sendable {
 /// Strict, bounded admission is separate from Codable so optional malformed
 /// activity rows can be omitted without rejecting the entire session snapshot.
 package enum ExtensionActivityAdmissionPolicy {
-    static let capability = "extension-activity-history.v1"
     static let maximumActivities = 32
     static let maximumChildren = 32
     static let maximumDescendants = 64
