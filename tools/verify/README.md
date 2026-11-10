@@ -123,9 +123,9 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
    baselines check every block without `--base` (loaded generators need Gateway dependencies).
 4. the privacy guard over `git diff <base>..HEAD`
 5. `git diff --check`
-7. When the selection touches the Gateway: `npm run check` (production and test
+6. When the selection touches the Gateway: `npm run check` (production and test
    support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
-8. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
+7. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
    below). A selection without the iOS lane runs it only when a fresh index
    exists; otherwise it is reported as skipped, never as passed.
 
