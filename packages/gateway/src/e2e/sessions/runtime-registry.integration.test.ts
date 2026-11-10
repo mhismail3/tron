@@ -6135,8 +6135,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await initial;
 
     // Persisted user-message order, not a private SDK queue, proves the requested order survived the rebuild.
-    const userTexts = canonicalUserContents(slot).map(message => message[0]?.type === "text" ? message[0].text.split("\n\n")[0] : undefined);
-    expect(userTexts).toEqual(["initial", "steer photo", "steer text"]);
+    const userTexts = canonicalUserContents(slot).map(message => message[0]?.type === "text" ? message[0].text : undefined);
+    expect(userTexts).toEqual(["initial", expect.stringMatching(/^steer photo\n\n\[Image[^\n]*\]$/u), "steer text"]);
     const photoText = canonicalUserContents(slot)[1]!.flatMap(part => part.type === "text" ? [part.text] : []).join("\n");
     expect(photoText.match(/\[Image/gu)).toHaveLength(1);
     expect(canonicalUserContents(slot)[2]).toEqual([{ type: "text", text: "steer text" }]);
@@ -6162,7 +6162,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await initial;
 
     const delivered = canonicalUserContents(slot).find(message => message.some(part => part.type === "text"
-      && part.text.startsWith("steer with undecodable photo")));
+      && /^steer with undecodable photo\n\n\[Image omitted[^\n]*\]$/u.test(part.text)));
     expect(delivered).toBeDefined();
     expect(delivered!.some(part => part.type === "image")).toBe(false);
     expect(delivered!.some(part => part.type === "text" && part.text.includes("[Image omitted"))).toBe(true);
