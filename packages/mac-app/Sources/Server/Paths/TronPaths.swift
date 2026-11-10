@@ -11,8 +11,6 @@ enum TronPaths {
     static let tronDataDirEnv = "TRON_DATA_DIR"
     static let tronHomeNameEnv = "TRON_HOME_NAME"
     static let piCodingAgentDirEnv = "PI_CODING_AGENT_DIR"
-    /// Recognized only to refuse wrapper ownership of an old unsupported profile.
-    static let retiredAgentDirNameEnv = "TRON_AGENT_DIR_NAME"
     static let gatewaySupervisionEnv = "TRON_GATEWAY_SUPERVISED"
     static let gatewaySupervisionValue = "1"
     /// Selects the externally staged payload namespace under the selected Tron home.
@@ -161,7 +159,6 @@ enum TronPaths {
         let environment = ProcessInfo.processInfo.environment
         return environment[tronDataDirEnv] == nil
             && environment[tronHomeNameEnv] == nil
-            && environment[retiredAgentDirNameEnv] == nil
             && (environment[piCodingAgentDirEnv]?.isEmpty != false || environment[piCodingAgentDirEnv]!.hasPrefix("/"))
     }
 
