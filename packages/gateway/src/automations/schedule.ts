@@ -21,7 +21,6 @@ function calendarOf(trigger: CalendarTrigger): Calendar {
   return { minute: hour * 60 + minute, weekdays: trigger.weekdays };
 }
 
-// The trigger's timezone as a table of offsets around `at`, which must be an instant.
 function zone(trigger: CalendarTrigger, at: number): Zone {
   if (!Number.isFinite(at)) throw new Error("Schedule boundary is invalid");
   return zoneTable(trigger.timezone, at);

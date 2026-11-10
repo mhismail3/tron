@@ -9,11 +9,6 @@
  * instant is a whole minute. Changes are found by sampling every SAMPLE_MS and bisecting a sampled difference to
  * the minute; two changes closer together than SAMPLE_MS that cancel out are not seen (no IANA zone has one in
  * the years automations use; the old-against-new comparison at the block's cut-over found none).
- *
- * A table covers the UTC day of the instant asked about plus ZONE_TABLE_REACH_MS either side, so every instant
- * of that day gets the same table: it is a pure function of the timezone and the day (Intl's zone data is fixed
- * for the process), kept for the most recent TABLES_KEPT of them, since building one reads Intl about a hundred
- * times and the scheduler asks about the same few days again and again.
  */
 export interface ZoneTable {
   readonly base: number;
@@ -64,7 +59,6 @@ export function zoneTable(timezone: string, at: number): ZoneTable {
   return table;
 }
 
-/** The zone of `timezone` from `start` to `end`, both whole minutes. */
 function build(timezone: string, start: number, end: number): ZoneTable {
   const base = offsetAt(timezone, start);
   const changes: { at: number; offset: number }[] = [];

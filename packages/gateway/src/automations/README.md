@@ -12,8 +12,10 @@ definition, retry or ledger. iOS and the first-party `schedule` tool (including 
 `automation-service.ts`, `automation-scheduler.ts`, `automation-executor.ts`,
 `automation-store.ts`, `automation-home-trigger.ts`, `schedule.ts`,
 `schedule-module.ts` (optional-owner descriptor), `tron-schedule-extension.ts` and `zone-table.ts` (a timezone's
-UTC offsets around an instant, from Intl: the trusted input of proof block `schedule/calendar`; a table is a pure
-function of the timezone and the UTC day, and the 64 most recent are kept). `schedule.ts` decides occurrences by
+UTC offsets around an instant, from Intl: the trusted input of proof block `schedule/calendar`; a table covers the
+UTC day of the instant asked about plus 19 days either side, so it is a pure function of the timezone and the day,
+and the 64 most recently built are kept, since a build reads Intl about a hundred times and the scheduler asks
+about the same few days again and again). `schedule.ts` decides occurrences by
 calling proof blocks `schedule/occurrence` (once and interval triggers) and `schedule/calendar` (calendar triggers)
 ([`gateway/core`](../core/schedule), generated from `packages/core`): it converts timestamps to milliseconds and
 back and holds no copy of that arithmetic (`schedule.test.ts` pins the text and shape of what its callers get

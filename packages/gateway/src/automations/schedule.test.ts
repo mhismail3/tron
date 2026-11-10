@@ -105,7 +105,6 @@ describe("calendar occurrences", () => {
   });
 
   it("skips a civil date the timezone skips entirely and keeps scheduling on the dates that exist (#2382)", () => {
-    // Pacific/Apia went from UTC-10 to UTC+14 at the end of Thursday 2011-12-29: Friday 2011-12-30 has no instants.
     const fridays = calendar("Pacific/Apia", "09:00", [5]);
     expect(nextAutomationOccurrence(fridays, Date.parse("2011-12-23T19:00:00Z"))).toBe("2012-01-05T19:00:00.000Z");
     expect(nextAutomationOccurrence(calendar("Pacific/Apia", "09:00", daily), Date.parse("2011-12-29T21:00:00Z")))
