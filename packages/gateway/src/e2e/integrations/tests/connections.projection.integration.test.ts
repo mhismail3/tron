@@ -62,7 +62,7 @@ it("removes retired setup operations, receipts and Raindrop mappings once, behin
   const root = await mkdtemp(join(tmpdir(), "tron-connections-residue-"));
   try {
     const home = join(root, "tron"), directory = join(home, "gateway", "integrations"), path = join(directory, "connections.json");
-    expect(await planConnectionsResidue(home)).toMatchObject({ setupOperations: 0, receipts: 0, collectionMappings: 0, after: undefined });
+    expect(await planConnectionsResidue(home)).toEqual({ path, setupOperations: 0, receipts: 0, collectionMappings: 0 });
     const at = "2026-01-01T00:00:00.000Z";
     const instance = { id: "raindrop", definitionId: "knowledge.raindrop", implementation: "knowledge-connector", providerAccountId: "1", credentialRef: "connector:raindrop:kept",
       policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false }, health: "ready", createdAt: at, updatedAt: at, setupRevision: 2,
@@ -93,7 +93,7 @@ it("removes retired setup operations, receipts and Raindrop mappings once, behin
     const { credentialRef: _credentialRef, ...projected } = kept;
     expect(await new ConnectionOwner(home).snapshot()).toEqual({ definitions: [], capabilities: [], stateRevision: 8, setupOperations: [],
       instances: [{ ...projected, credentialConfigured: true, credentialAvailability: "unknown", providerIdentity: "unknown" }] });
-    expect(await planConnectionsResidue(home)).toMatchObject({ setupOperations: 0, receipts: 0, collectionMappings: 0, after: undefined });
+    expect(await planConnectionsResidue(home)).toEqual({ path, setupOperations: 0, receipts: 0, collectionMappings: 0 });
 
     expect(await restoreConnectionsResidue(backup)).toBe(true);
     expect(await readFile(path)).toEqual(original);

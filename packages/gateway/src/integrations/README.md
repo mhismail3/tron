@@ -29,9 +29,12 @@ connection RPCs or mutations.
 
 The agent `connections` tool (`workspace/tron-core-extension.ts`). Production has no
 built-in connection definitions or X/Raindrop adapters and advertises no capabilities
-for historical instances. Existing connection state and credential references remain
-untouched; this retirement neither migrates nor deletes them. Native settings expose
-MCP servers, not retired Connected Services setup.
+for historical instances. Native settings expose MCP servers, not retired Connected
+Services setup. `scripts/tron migrate connections-residue` (`connections-residue-migration.ts`)
+is the maintainer's one-shot, backed-up removal of retired setup operations, receipts and
+Raindrop collection mappings; instances and credential references stay. Dry run unless
+`--apply --backup <new dir>`; `--restore --backup <dir>` puts back only bytes it published.
+It and the Raindrop mapping validator are deleted once the live run is verified.
 
 ## Signals
 
