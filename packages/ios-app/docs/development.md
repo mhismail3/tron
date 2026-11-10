@@ -38,7 +38,8 @@ constants keeps its path in `scripts/gateway_protocol_contract.py`.
 ### Type-checking cost
 
 One slow `some View` body slows every incremental build (keep `@Observable` classes small, as
-`AppModel`; split long modifier chains). Find hotspots in a throwaway DerivedData, then delete it:
+`AppModel`, whose behavior lives in extensions because the macro re-expands the whole class body
+per member; split long modifier chains). Find hotspots in a throwaway DerivedData, then delete it:
 
 ```bash
 cd packages/ios-app && xcodebuild build -project TronMobile.xcodeproj -scheme "Tron UI Validation" \

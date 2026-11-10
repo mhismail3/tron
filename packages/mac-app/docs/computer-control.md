@@ -8,7 +8,9 @@ input-recovery mirror. Browser automation remains with `agent_browser`.
 ## Owners and permissions
 
 One bundled `Tron Native Host.app` is an accessory Aqua application. The wrapper
-alone requests permissions and controls helper registration/retirement. The
+alone requests permissions and controls helper registration/retirement; permission requests occur
+only from an explicit user action, never from status polling, setup readiness checks or view
+appearance. The
 Native Host needs Accessibility and Screen Recording; Full Disk Access remains
 part of the Mac wrapper's core setup. Input Monitoring is not requested for an
 unused event-observer implementation. Existing OS grants are never reset by an
@@ -28,7 +30,8 @@ an owned parent-liveness stdin pipe. The Gateway never launches the daemon. Cua'
 telemetry is disabled in both daemon and CLI environments. History, PiP, browser,
 agent, installer and backend-configuration surfaces are not exposed by `computer`.
 The native helper owns a private0700 directory and a fresh UUID-scoped socket for
-each child generation. It exposes only a running, same-user UNIX socket. No
+each child generation; the pathname stays below macOS's 104-byte `sockaddr_un` limit, otherwise
+automation is disabled. It exposes only a running, same-user UNIX socket. No
 endpoint is reused after restart. Startup failure leaves permission/capture
 services available. Retirement seals startup, closes the pipe, and shares one
 retained wait for actual child exit across every caller; it does not equate a

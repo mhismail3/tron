@@ -71,7 +71,9 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 - **Drafts.** `ComposerDraftScope(profileID, sessionID)` keys text, staged resources and unsent
   attachments with monotonic revisions and a 24-inactive-draft LRU. `ComposerDraftStore` persists
   ≤ 256 KiB text plus the 10-item / 25 MiB attachment budget under a 24-draft / 256 MiB disk LRU
-  (metadata manifest, digest-verified payload files, atomic swap). Text above the Gateway's
+  (metadata manifest, digest-verified payload files, atomic swap: the manifest is replaced by one
+  `rename(2)` beside the draft directories, so an interrupted write keeps the previous complete
+  manifest; typing rewrites only the manifest and never rehashes payloads). Text above the Gateway's
   192 KiB limit is rejected before any clearing. Staged upload IDs survive remount and reconnect to
   the same Mac (#916) and are never persisted. The hosted composer upload journey verifies
   exact user-entered text after an awaited checkpoint and a new app process, using a UUID-owned

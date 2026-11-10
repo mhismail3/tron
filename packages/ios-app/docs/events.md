@@ -33,7 +33,8 @@ its replacement. Application RPCs are definitely unsent until hello admission an
   with no fully delivered inbound frame since the ping retires the epoch. This keeps
   Tailscale/iOS idle paths alive; the Gateway pings only a client that has gone quiet.
 - **Admission.** Decoded frames above the Gateway's 1 MiB ceiling retire the epoch
-  (`frame_too_large`, after `permessage-deflate` inflation). Dynamic `JSONValue` is capped at depth
+  (`frame_too_large`, after `permessage-deflate` inflation: CFNetwork's `maximumMessageSize` bounds
+  only compressed bytes, and an uncompressed oversized receive fails in CFNetwork as a disconnect). Dynamic `JSONValue` is capped at depth
   64, 32,768 nodes, 8,192 members, 1 MiB per string and 4 MiB aggregate. The ordered event hub
   admits the Gateway's 1,024-event quarantine under a 2 MiB byte ceiling; overflow retires the epoch
   and rebaselines rather than dropping sequence.
@@ -157,7 +158,9 @@ transcript paging and session-keyed context/tree/resources/commands.
   is never causal settlement. `session.operationFailed` restores only its exact admission.
   `compactionQueued` is Gateway-owned pending maintenance, never a fabricated entry.
 - **Stop.** Carries the authoritative operation ID as its fence; the Gateway rejects a stale tap
-  and acknowledges only after every foreground controller and owned bash process settles.
+  and acknowledges only after every foreground controller and owned bash process settles. It is the
+  one live command that bypasses the mounted-authority presentation gate; the Gateway fences its
+  route session and operation IDs instead.
 - **Resources.** Skills, prompt templates and extension commands travel as typed
   `resourceInvocations` (#311); arguments are the exact visible text (≤ 5,000 UTF-8 bytes) and are
   never rewritten. `session.resourcesChanged` revokes command-catalog readiness and reloads it.

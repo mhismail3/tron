@@ -16,11 +16,15 @@ The Tron menu and the Automations sheet (list, detail, run detail, create/edit) 
   Automations and Apps, each a sheet over the dashboard; New Session. On the Home dashboard
   the one floating Tron button is Home's: a tap opens the Home chat; a 0.2 s hold
   (`menuHoldDuration`) opens the same menu through a menu-primary sibling button, its only
-  presenter.
+  presenter: a menu on the touch button adds UIKit's own context-menu hold and opens late without
+  the haptic. `UIButton.menu` is assigned only when it changes, because reassigning it during a
+  SwiftUI refresh collapses submenu navigation.
 - **Dashboard title.** `DashboardChrome` hides the navigation bar and draws the "Tron" title in
   the top safe-area inset. In iPadOS windowed mode the title row drops by the window's top-leading
   container corner inset (`containerCornerInsets`) so the system window controls never overlap it,
   at rest or collapsed. Without window controls that inset is zero and the layout is unchanged.
+  The scroll inset is a constant `contentMargins`, never a translated scroll view, whose safe-area
+  insets would change mid-gesture.
 - **Automations sheet.** Medium and large detents; every identity-qualified, connected Gateway
   advertising `automations.v2` contributes rows (others are absent, never a warning). Active
   Automations list first, then paused, drafts and finished ones (attention, running, next

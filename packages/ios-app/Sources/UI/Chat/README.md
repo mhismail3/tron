@@ -33,6 +33,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   (red, no destructive role); every one confirms through the shared sheet and nothing is staged
   locally. **Archived (N)** appears after every workspace only for a non-zero count, reads
   `archived: "only"` pages per server, and scrolls the list only for the user's own expansion.
+  A newer archive authority retires an in-flight pass and starts a fresh first-page pass; a
+  continuation refused as `invalid_request` is not retried, and that server restarts from page
+  one while retaining rows already shown.
   Search filters titles locally (`SessionTitleSearch`); content search is Home's `session_search`.
   The floating Home button's resting logo and working orb share `tronPrimary`; its waiting-for-user
   glyph keeps semantic amber.
@@ -91,7 +94,9 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   `ChatAnnotationPresenter` + a detached `ChatScrollCoordinator` reveal, then flashes it (#2387).
   Staged selections anchor by run-scoped UTF-16 range for their highlight (not persisted). Code blocks, tables and blockquotes keep their own renderers, and a selection
   does not cross them (#1112). Camera, photo and file attachments stage locally (10 items, 25 MiB);
-  `CameraModel` drives one `AVCaptureSession` (#937). The context ring opens Manage Session.
+  `CameraModel` drives one `AVCaptureSession` (#937), created lazily on first use because SwiftUI
+  may construct and discard the sheet model every render; on a camera switch the first-frame
+  detector is armed before the session commit. The context ring opens Manage Session.
 - **Tools.** Calls and results join by `toolCallId` into one chip; consecutive calls with equal
   nonempty segments form one run chip whose aggregate sheet lists bounded summary rows. Resting
   run tint follows only the latest invocation's error: canonical transcript group order, then finalized
