@@ -193,8 +193,9 @@ The compiled functions of such a block may not use the runtime, with one excepti
 closed function (it names nothing else of the runtime; today integer division and modulo on numbers) is copied
 verbatim into the header from the runtime the same compiler emits. Any other use (an unbounded `int`, building a
 sequence, datatype `==`, a tuple) is refused, naming the function and the compiled line; only the members the
-compiler emits for the runtime's own use (`toString`, `equals`, a newtype's `_Is` and `IntegerRange`) may mention
-it. Types: a newtype over a literal integer range within the JavaScript safe integers -> `number`, checked to be
+compiler emits for the runtime's own use (a datatype's `toString` and `equals`, a newtype's `_Is` and
+`IntegerRange`) may mention it: nothing a core or its façade runs calls them, and one that names the runtime
+would throw. A block's own function is never exempt, whatever its name. Types: a newtype over a literal integer range within the JavaScript safe integers -> `number`, checked to be
 an integer in that range in both directions; `bool` -> `boolean`; `seq<T>` -> a readonly array of `T`; a datatype
 of nullary constructors -> a string union of their names, a one-constructor datatype named like its type -> a
 plain object, any other datatype -> an object tagged by `$`; an unknown constructor is a `TypeError` in either
@@ -304,8 +305,10 @@ either file; and `function method`, an uncheckable precondition and an unsupport
 fixture block `demo/meter`, which names a shell: its `core.mjs` lands in the shell's directory, imports nothing,
 holds the compiler's module output byte for byte and exactly one copied helper, and loads with no
 `node_modules` above it; numbers cross only as integers of their newtype's range and preconditions are checked;
-`--check` fails on a hand edit of either file; and datatype equality, building a sequence, an `int` and a
-newtype whose range is not literal are each refused, naming the function, with nothing written.
+`--check` fails on a hand edit of either file; the copied helper stands alone and a helper that names anything
+but its parameters, locals and `Math` does not; and datatype equality, building a sequence, a function named
+like a runtime member that uses the runtime, an `int` and a newtype whose range is not literal are each refused,
+naming the function, with nothing written.
 
 `scripts/tron-node exec node --test tools/proof/tests/replay.test.mjs` replays a corpus of recorder-format
 calendar calls of the shipped schedule functions through the real block `schedule/calendar`: two faithful days are a real-traffic match

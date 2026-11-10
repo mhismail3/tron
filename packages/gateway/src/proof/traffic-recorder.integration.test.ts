@@ -73,12 +73,14 @@ describe("proof traffic recorder", () => {
     };
     const outputs = calls.map((call) => run(recorded, call));
 
-    // One record per calendar seam call (the helper first() calls above included) and none for a nested internal
-    // call. Once and interval triggers are decided by proof block schedule/occurrence itself and record nothing.
+    // One record per calendar seam call and none for a nested internal call. Once and interval triggers are decided
+    // by proof block schedule/occurrence itself and record nothing. Building each calendar trigger's classify call
+    // above made one first() call, recorded before the journey's own calls.
     const calendar = calls.map((call, index) => ({ call, index })).filter(({ call }) => (call[1][0] as { kind: string }).kind === "calendar");
+    const helperCalls = calendar.filter(({ call }) => call[0] === "classify").length;
     expect(readdirSync(join(dataDir, "gateway/proof-traffic/schedule"))).toEqual(["calendar"]);
     const records = corpus(dataDir, "schedule/calendar").sort((left, right) => (left.seq as number) - (right.seq as number));
-    expect(records).toHaveLength(calendar.length + calendar.length / 3);
+    expect(records).toHaveLength(calendar.length + helperCalls);
     expect(new Set(records.map((r) => r.schema))).toEqual(new Set([TRAFFIC_SCHEMA]));
     expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i + 1));
     expect(records.every((r) => ["next", "first", "classify"].includes(r.seam as string))).toBe(true);
@@ -98,7 +100,7 @@ describe("proof traffic recorder", () => {
         : [input.trigger, input.nextOccurrenceAt, input.nowMs, input.policy];
       expect(JSON.parse(JSON.stringify(run(plain, [record.seam as string, args]) ?? null))).toEqual(record.output);
     }
-    const journey = records.slice(calendar.length / 3);
+    const journey = records.slice(helperCalls);
     expect(journey.map((r) => r.output)).toEqual(calendar.map(({ index }) => JSON.parse(JSON.stringify(outputs[index] ?? null))));
   });
 

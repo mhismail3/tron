@@ -6,7 +6,7 @@ Block hash: `869cf4e3481a4418` (over `blocks/schedule/occurrence/Block.dfy`, `la
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/schedule/occurrence/Block.dfy: Dafny program verifier finished with 49 verified, 0 errors;  |
-| Independent review | NOT ACCEPTED: STALE (reviewed edee583831e67e12, current 869cf4e3481a4418); reviewer transcript never mentions the current block hash (it did not review this version) |
+| Independent review | ACCEPT by law-reviewer (run f1249e83) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (anthropic/claude-fable-5-2); 2026-11-10 |
 | Mutation check | PASS: 115 valid mutants, 115 killed by laws, 0 law-gap, 0 survived, 0 accepted (blocks/schedule/occurrence/MUTATION.json) |
 | Cut over | the only implementation: `packages/gateway/src/core/schedule/occurrence` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -22,7 +22,7 @@ lemma L1NextSound(t: Trigger, after: Ms)
 
 **Mutation results.** kills 30 of 115 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: Unchanged: English = Dafny. Non-vacuous (Interval(0,1000), after=0 gives 1000). Matches nextAutomationOccurrence. Kills 32, 3 alone.
+**Reviewer notes.** ACCEPT: English matches Dafny: Next(after) is strictly after `after` and is an occurrence (anchor plus whole periods, or the once-time). Non-vacuous: Interval(0,1000), after=0 gives 1000. Matches schedule.before.ts nextOccurrence for both kinds.
 
 ## L2 next-minimal
 
@@ -36,7 +36,7 @@ lemma L2NextMinimal(t: Trigger, after: Ms, x: int)
 
 **Mutation results.** kills 16 of 115 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English = Dafny (occurrence x > after gives Some(v) with v <= x). Non-vacuous (Once(10), after=5, x=10). Matches the TS. Kills 19.
+**Reviewer notes.** ACCEPT: English matches Dafny: any real occurrence x > after yields a Some no later than x. Non-vacuous: Once(10), after=5, x=10. Matches the TS (floor-based interval arithmetic and once comparison).
 
 ## L3 next-none
 
@@ -50,7 +50,7 @@ lemma L3NextNone(t: Trigger, after: Ms)
 
 **Mutation results.** kills 11 of 115 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English = Dafny (None iff Once with at <= after). Non-vacuous (Once(5), after=10). Matches the TS. Implied by L1+L2 but it is the readable exact-results statement; keep.
+**Reviewer notes.** ACCEPT: English matches Dafny: None iff Once with at <= after; intervals always have a next. Non-vacuous: Once(5), after=10 gives None, as the TS does. Redundant with L1+L2 but it is the readable exact-results statement; keep.
 
 ## L4 first-interval
 
@@ -65,7 +65,7 @@ lemma L4FirstInterval(t: Trigger, now: Ms)
 
 **Mutation results.** kills 12 of 115 valid mutants; 4 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English = Dafny. First(Interval) = Next(now-1) matches the TS (anchor >= now ? anchor : next(now-1)). Non-vacuous. Kills 6.
+**Reviewer notes.** ACCEPT: English matches Dafny: First is a real occurrence >= now and no real occurrence >= now is earlier. First is the anchor when now <= anchor, else Next(now-1), which is the TS rule (anchor >= now ? anchor : next(now-1)). The bounds (now - 1 stays in range) are proven.
 
 ## L5 classify-not-due
 
@@ -79,7 +79,7 @@ lemma L5ClassifyNotDue(t: Trigger, nxt: Ms, now: Ms, p: Policy)
 
 **Mutation results.** kills 7 of 115 valid mutants; 3 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English = Dafny (nxt > now gives (None, Some(nxt), None)). Non-vacuous (nxt=10, now=5). Matches the TS early return. Exact-results kind is right. Kills 7, 6 alone.
+**Reviewer notes.** ACCEPT: English matches Dafny: nxt > now gives only the stored next, unchanged, with nothing dispatched or skipped. Non-vacuous: Once(10), nxt=10, now=5. Matches the TS early return for once and interval.
 
 ## L6 classify-due
 
@@ -128,7 +128,7 @@ lemma NoOccBetween(a: int, e: int, j: nat, k: nat, q: int, now: int)
 
 **Mutation results.** kills 68 of 115 valid mutants; 36 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English = Dafny at this hash: the English says a new stored next occurrence is strictly after now, and the ensures (d.next.Some? ==> d.next.v > now) states it. Proof via L1NextSound(t, now) in the interval case; Once gives None. Non-vacuous (Interval(0,1000), nxt=1000, now=2500). Matches the TS for both policies and both trigger kinds. Kills 82, 57 alone. L6IntervalResult is a verified named-term helper listed under L6.
+**Reviewer notes.** ACCEPT: English matches Dafny: exactly one of dispatch/skip, chosen by policy; the acted-on occurrence is the Witness (latest due); the new next is Next(now) for intervals and none for once, strictly after now. Matches the TS for both policies and both kinds. Premise A2 (nxt is an occurrence) is a shell precondition, see general. The English does not say that earlier missed interval occurrences are dropped without a record; the TS does the same, so this is clarity, not a defect.
 
 ## L7 first-once
 
@@ -142,7 +142,7 @@ lemma L7FirstOnce(at: Ms, now: Ms)
 
 **Mutation results.** kills 1 of 115 valid mutants; 1 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English = Dafny (First(Once(at), now) == Some(at), even when past). Matches firstAutomationOccurrence. Killed alone by the constructor mutant First/constructor/Some(at)->None.
+**Reviewer notes.** ACCEPT: English matches Dafny: First(Once(at)) == Some(at) even when at is in the past. Non-vacuous: at=0, now=0. Matches the TS (firstOccurrence returns the once-time regardless of now).
 
 ## L8 first-after-occurrence
 
@@ -156,7 +156,7 @@ lemma L8FirstAfterOccurrence(a: Ms, e: Ms, k: nat)
 
 **Mutation results.** kills 32 of 115 valid mutants; 0 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: English = Dafny: any a, any e > 0, any occurrence a+k*e, a creation time one ms later gives First = a+(k+1)*e. Non-vacuous (a=0, e=1000, k=0, now=1 gives 1000). Matches the TS. Not a special case of L4, because now need not be an occurrence. Kills 33, 2 alone.
+**Reviewer notes.** ACCEPT: English matches Dafny: creating at a+k*e+1 yields a+(k+1)*e, a past occurrence is not counted. Non-vacuous: a=0, e=1000, k=0, now=1 gives 1000. Matches the TS (nextOccurrence(now-1)). Not implied by L4 alone because now is not an occurrence; kept as an exact-result law.
 
 ## Proof helpers (statements only; not laws, but part of what is proven)
 
@@ -313,12 +313,4 @@ ghost predicate Witness(t: Trigger, nxt: int, now: int, L: int) {
 
 ## Reviewer: general notes
 
-Round 4 review at block hash edee583831e67e12. Tier: high-stakes CONFIRMED. No accepted mutants. No missing law kinds: progress and recovery are n/a for pure functions; stale-inputs is n/a with reason A2, which is acceptable.
-
-Scope of this round: the only change since 88ecabd339a63d34 is the replay entry in mutate.json. Checked in tron-p1-8: packages/core/laws/schedule/Occurrence.dfy and packages/core/blocks/schedule/occurrence/Block.dfy show no diff against origin/main, and the replay entry adds only a shadow command (node tools/proof/oracles/schedule-occurrence.mjs {core} --replay {corpus}). The oracle script handles --replay. Replay does not change any law, so the law verdicts stand.
-
-A1 and A2: unchanged, and accepted as in round 3. A2's contract test, covering the persisted-record reader and the no-other-writer assumption, is still required before cut-over.
-
-Shadow: the 20000-input generated run is 20000/20000 at this hash, and realTraffic is false. The replay gate becomes cut-over evidence only when run on recorded Debug-Gateway traffic over the tier window (7 days, high-stakes). It is not evidence yet.
-
-Mutation: 118 mutants, 113 valid, all killed by laws, 0 unknown, at this hash. Nothing blocking remains.
+Tier high-stakes confirmed: the block decides when automation runs dispatch or skip. No accepted mutants (mutate.json accepted is empty); none to agree or disagree with. Proof: `dafny verify --verify-included-files blocks/schedule/occurrence/Block.dfy` with the pinned lab toolchain gives 49 verified, 0 errors; there is no assume, axiom, verify-false or extern in Occurrence.dfy or Block.dfy. Range: every shell input I traced is inside the bounds. Gateway timestamps are years 0000-9999 (about 6.2e13 to 2.5e14 ms, inside LIMIT 2^50 ~ 1.1e15 ms); interval periods are 60 to 31536000 s (under LIMIT); the façade checks Wf and InRange and throws on a non-safe integer before every call; intermediates stay below 2^52, inside the safe range. Missing law kinds: progress and recovery are n/a for pure functions; uncertain-outcomes is n/a (no effects). Stale-inputs is n/a only because of A2. World-model gap: A2 (the stored next is an occurrence of the current trigger) is the sole precondition of L6 and is what keeps a stale record from producing a non-occurrence dispatch. The shell supports it (scheduler classifies only enabled automations; replace recomputes while enabled; enable recomputes unless a retained automatic run carries an identical trigger, in which case the stored occurrence was computed for that same trigger). I found no gateway test that exercises that path, so A2 needs its contract test (already required by the packet) before cut-over. A non-occurrence stored next is not a law the block can state without a product decision on what it should do, so this is a maintainer item rather than a REJECT. Calendar triggers are out of scope of this block.

@@ -129,6 +129,15 @@ test("a block a shell runs compiles to a module that needs no Dafny runtime", as
     writeFileSync(path, text);
   }
 
+  // A copied runtime helper must stand alone: only its parameters, its locals and Math.
+  const { closedHelper } = await import(join(ROOT, "tools/proof/dafny2wire/facade.mjs"));
+  const division = /^  EuclideanDivisionNumber: (function[\s\S]*?\n  \}),$/m.exec(core)[1];
+  assert.equal(closedHelper(division), true);
+  for (const open of ["function(a, b) { return _dafny.ZERO; }", "function(a, b) { return Seq.of(a, b); }", "function(a, b) { return this.x; }",
+    "function(a, b) { return new BigNumber(a); }", "function(a, b) { return a + $module.b; }", "function(a) { return 'text'; }", "(a) => a", "not a function"]) {
+    assert.equal(closedHelper(open), false, open);
+  }
+
   // What would need the Dafny runtime is refused before anything is written, naming the function.
   const edit = (file, from, to) => { const text = readFileSync(file, "utf8"); assert.ok(text.includes(from)); writeFileSync(file, text.replace(from, to)); return () => writeFileSync(file, text); };
   const block = join(root, "blocks/demo/meter/Block.dfy");
@@ -136,6 +145,8 @@ test("a block a shell runs compiles to a module that needs no Dafny runtime", as
   for (const [file, from, to, message] of [
     [block, "    else Flat", "    else if a == b then Flat else Flat", /Compare needs the Dafny runtime \(compiled line \d+: .*_dafny\.areEqual/],
     [block, "{ at / every }", "{ Total([at, every]) }\n  function Total(s: seq<Ms>): Ms { if |s| == 0 then 0 else s[0] }", /Slot needs the Dafny runtime \(compiled line \d+: .*_dafny\.Seq\.of/],
+    // A block's own function is never exempt, whatever its name: only the compiler's datatype and newtype members are.
+    [block, "{ at / every }", "{ if equals(at, every) then 0 else at / every }\n  function equals(a: Ms, b: Ms): bool { [a] == [b] }", /equals needs the Dafny runtime/],
     [laws, "function Compare(a: Reading, b: Reading): Trend", "function Compare(a: Reading, b: Reading): Trend\n  function Wide(x: int): int", /unsupported Dafny type int/],
     [laws, "newtype Level = x: int | 0 <= x <= 100", "newtype Level = x: int | 0 <= x <= Top()\n  ghost function Top(): int { 100 }", /cannot read newtype as a literal integer range within the safe integers/],
   ]) {
