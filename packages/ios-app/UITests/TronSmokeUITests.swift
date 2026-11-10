@@ -4222,6 +4222,17 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["extension.respond cancelled=false selected=environment-a other=local canary"].exists)
     }
 
+    /// #2296 item 17: an unreadable record, an older duplicate of the
+    /// question's scope and one record over the bound each cost only
+    /// themselves; the question's newest stored draft still restores.
+    @MainActor
+    func testAskUserStoredDraftSurvivesBadNeighbourRecords() {
+        let app = launchAskUser(storedDrafts: true)
+        waitForAskUserForm(in: app)
+        XCTAssertEqual(app.buttons["Staging"].value as? String, "Selected", app.debugDescription)
+        XCTAssertNotEqual(app.buttons["Production"].value as? String, "Selected")
+    }
+
     @MainActor
     func testAskUserWithoutAllowCancelHasSendOnlyAndSwipeCloses() {
         let app = launchAskUser(noCancel: true)
@@ -4441,7 +4452,7 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false, copyable: Bool = false, long: Bool = false) -> XCUIApplication {
+    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false, copyable: Bool = false, long: Bool = false, storedDrafts: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-ask-user-fixture"]
         if noCancel { app.launchArguments.append("-tron-ask-user-no-cancel") }
@@ -4449,6 +4460,7 @@ final class TronSmokeUITests: XCTestCase {
         if multiple { app.launchArguments.append("-tron-ask-user-multiple") }
         if copyable { app.launchArguments.append("-tron-ask-user-copyable") }
         if long { app.launchArguments.append("-tron-ask-user-long") }
+        if storedDrafts { app.launchArguments.append("-tron-ask-user-stored-drafts") }
         app.launch()
         return app
     }
