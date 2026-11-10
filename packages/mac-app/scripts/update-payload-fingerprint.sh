@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Replace exactly one payloadFingerprint value without reserializing the JSON.
-# This preserves launcher-sensitive strings such as `app/**` verbatim.
 set -euo pipefail
 
 manifest="${1:-}"

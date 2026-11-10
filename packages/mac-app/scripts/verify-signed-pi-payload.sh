@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Read-only smoke test for a built and signed TronMac.app. It executes only the
-# host-native embedded Node and Pi projection; it never starts the Gateway or
-# invokes the foreign architecture.
+# Read-only smoke test for a built and signed TronMac.app.
 set -euo pipefail
 APP_PATH="${1:-}"
 [[ -n "$APP_PATH" && "$APP_PATH" == *.app ]] || {

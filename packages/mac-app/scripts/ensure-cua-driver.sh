@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
 # Build staging only: never install, launch, or re-sign the upstream executor.
+set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PIN="$ROOT/cua-driver-release.json"
 read -r VERSION REVISION SHA256 BINARY_SHA256 SIGNER ARCHITECTURES < <(python3 - "$PIN" <<'PY'

@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Isolated publication-policy fixtures. This copies the generated payload to a
-# temporary tree and never modifies generated resources or user state.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
@@ -17,8 +15,6 @@ make_writable() {
         return 1
     }
     [[ -e "$root" || -L "$root" ]] || return 0
-    # -P is deliberate: fixture symlinks are adversarial inputs and must never
-    # make cleanup follow a link outside the mktemp tree.
     find -P "$root" \( -type d -exec chmod u+rwx {} + \) -o \( -type f -exec chmod u+w {} + \)
 }
 trap 'make_writable "$TMP" || true; rm -rf "$TMP"' EXIT
@@ -34,8 +30,6 @@ EXPECTED_CHANNEL="$(plutil -extract channel raw -o - "$SOURCE_PAYLOAD/manifest.j
 [[ "$EXPECTED_CHANNEL" == stable || "$EXPECTED_CHANNEL" == dev ]] || { echo "generated payload channel is invalid" >&2; exit 2; }
 copy_tree() {
     local source="$1" destination="$2"
-    # APFS clone-on-write keeps this adversarial matrix fast; ordinary cp is a
-    # byte-for-byte fallback on non-APFS runners and older macOS images.
     if cp -cR "$source" "$destination" 2>/dev/null; then return 0; fi
     cp -R "$source" "$destination"
 }
@@ -46,12 +40,7 @@ reset_fixture() {
     mkdir -p "$PAYLOAD" "$APP"
     copy_tree "$SOURCE_PAYLOAD/." "$PAYLOAD/"
     copy_tree "$SOURCE_APP/." "$APP/"
-    # Existing generated resources may predate the current checkout; this test
-    # fixture keeps payload bytes immutable but binds its manifest to the
-    # source revision that the verifier authenticates.
     if [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
-        # The copied tree is immutable; restore only this fixture before the
-        # temporary manifest write. SOURCE_PAYLOAD is never passed here.
         make_writable "$PAYLOAD"
         sed "s/\"sourceRevision\":\"[^\"]*\"/\"sourceRevision\":\"$SOURCE_REVISION\"/" \
             "$PAYLOAD/manifest.json" > "$PAYLOAD/manifest.tmp"
@@ -68,8 +57,6 @@ expect_rejected() {
 }
 
 reset_fixture
-# The strict verifier owns validity. Its baseline failure is a fixture-input
-# precondition, not an adversarial result or permission to repair staged bytes.
 if ! "$VERIFY" "$PAYLOAD" "$HELPER" "$EXPECTED_CHANNEL" >"$TMP/baseline.log" 2>&1; then
     echo "payload verifier fixtures: generated-input precondition failed; adversarial matrix not run" >&2
     cat "$TMP/baseline.log" >&2
@@ -85,8 +72,6 @@ chmod a-w "$PAYLOAD/app/dist/index.js"
 expect_rejected tampered-app-file
 
 reset_fixture
-# The early publication-mode check owns any write bit, including owner-only, so
-# an owner-writable payload fails there instead of after the compiled verifier.
 chmod u+w "$PAYLOAD/app/package.json"
 expect_rejected owner-writable-payload
 grep -q 'published payload tree is writable' "$TMP/owner-writable-payload.err" || {
@@ -102,18 +87,12 @@ for write_mode in g+w o+w; do
 done
 
 reset_fixture
-# A failed physical scan is not an empty result. No compiler or signed-helper
-# fallback may hide an unreadable subtree from the early publication check.
 chmod 000 "$PAYLOAD/runtime/npm-x64/lib"
 expect_rejected unreadable-subtree
-# Darwin find can open a directory before running its chmod action; restore
-# this deliberately unreadable fixture before the generic physical cleanup.
 chmod 555 "$PAYLOAD/runtime/npm-x64/lib"
 grep -q 'cannot inspect published payload permissions' "$TMP/unreadable-subtree.err"
 
 reset_fixture
-# Preserve a valid universal Mach-O container while changing its bytes; the
-# verifier must reject this forged helper by canonical byte identity.
 chmod u+w "$APP/Contents/MacOS" "$HELPER"
 printf 'forged-byte' >> "$HELPER"
 chmod 755 "$HELPER"
@@ -132,8 +111,6 @@ mv "$PAYLOAD/manifest.tmp" "$PAYLOAD/manifest.json"
 chmod -R a-w "$PAYLOAD" "$APP"
 expect_rejected valid-version-tamper
 
-# This remains a valid semver and does not alter the payload fingerprint, so
-# rejection proves the manifest/source version binding rather than checksum.
 reset_fixture
 make_writable "$PAYLOAD"
 sed 's/"nodeVersion":"[^"]*"/"nodeVersion":"99.99.99"/' "$PAYLOAD/manifest.json" > "$PAYLOAD/manifest.tmp"

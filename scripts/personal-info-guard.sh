@@ -1,26 +1,5 @@
 #!/usr/bin/env bash
 # personal-info-guard.sh — fail when personal-developer identifiers leak into source.
-#
-# Scans the source tree for high-impact patterns that would break or embarrass
-# when shipped to a different user:
-#
-#   /Users/<developer>     — raw filesystem path that won't exist for other users
-#   -Users-<developer>-    — Claude-Code-encoded form of the same path
-#   github.com/<developer> — personal GitHub handle
-#   mhismail3              — personal GitHub handle, including split-string forms
-#   mhismail.com           — personal feedback domain
-#   bare developer username in product source, docs, or examples
-#
-# The guard constructs the developer-username needle from fragments so the guard
-# itself does not normalize the source-identity string it bans.
-#
-# Exit codes: 0 = clean, 1 = offenders found, 2 = setup error.
-#
-# Usage:
-#   scripts/personal-info-guard.sh                # full repo scan
-#   scripts/personal-info-guard.sh --staged       # only staged changes (pre-commit)
-#   scripts/personal-info-guard.sh --stdin < text # text about to be published
-
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,7 +8,6 @@ cd "$ROOT"
 DEV_USER='m''oose'
 DEV_USER_ENCODED='-Users-'"$DEV_USER"'-'
 
-# Patterns to ban. Split at the final | so regex alternations remain intact.
 PATTERNS=(
     "/Users/${DEV_USER}|raw home path; use /Users/<USER> or runtime-resolved home paths"
     "${DEV_USER_ENCODED}|Claude-Code encoded developer path"
@@ -42,16 +20,12 @@ PATTERNS=(
     '"tron@"[[:space:]]*\+[[:space:]]*"mh"|split personal feedback email construction'
 )
 
-# Only this needle-definition file is exempt. Git owns source membership and
-# ignored generated output; tracked files must not disappear behind an allowlist.
 EXCLUDE_SELF=':(top,exclude,literal)scripts/personal-info-guard.sh'
 
 mode="${1:-full}"
 offenders_total=0
 
 if [ "$mode" = "--stdin" ]; then
-    # Public GitHub text (gate evidence, pull request bodies) is outside the repository
-    # inventory, so the same needles run over it before it is posted.
     text=$(mktemp "${TMPDIR:-/tmp}/tron-personal-info-guard.XXXXXX") || {
         echo "personal-info-guard: could not allocate a text buffer" >&2
         exit 2
@@ -83,13 +57,10 @@ path_list=$(mktemp "${TMPDIR:-/tmp}/tron-personal-info-guard.XXXXXX") || {
 }
 trap 'rm -f "$path_list"' EXIT
 if [ "$mode" = "--staged" ]; then
-    # The index, not later working-tree edits, owns what will be committed.
     inventory=(git diff --cached --name-only --diff-filter=ACMR -z)
     grep_mode=(--cached)
 else
     inventory=(git ls-files --cached --others --exclude-standard -z)
-    # Inventory already excluded ignored untracked files. Reapplying ignore
-    # rules in grep also hides force-tracked files, violating the full scan.
     grep_mode=(--untracked --no-exclude-standard)
 fi
 if ! "${inventory[@]}" > "$path_list"; then
@@ -112,8 +83,6 @@ scan_pattern() {
     if [ "${#SCAN_PATHS[@]}" -eq 0 ]; then
         return
     fi
-    # NUL-delimited inventory becomes literal pathspecs, including newlines,
-    # spaces and glob characters. No independently maintained root allowlist.
     if hits=$(git grep "${grep_mode[@]}" -nE -e "$pattern" -- \
         "${SCAN_PATHS[@]}" "$EXCLUDE_SELF" 2>&1); then
         grep_status=0

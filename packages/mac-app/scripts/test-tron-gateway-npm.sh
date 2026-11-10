@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Verify the exact npm CLI projected beside the bundled Node runtime can perform
-# the SDK package-manager removal operation without an ambient PATH.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
@@ -29,8 +27,6 @@ ln -s ../npm-arm64/bin/npm-cli.js "$RUNTIME/bin-arm64/npm"
 printf '%s\n' '{"name":"synthetic-package","version":"1.0.0"}' > "$PROJECT/node_modules/synthetic-package/package.json"
 printf '%s\n' '{"name":"fixture-project","version":"1.0.0","dependencies":{"synthetic-package":"file:node_modules/synthetic-package"}}' > "$PROJECT/package.json"
 
-# Deliberately omit the host PATH. npm itself and node are both resolved only
-# through the architecture-specific bundle projection.
 PATH="$RUNTIME/bin-arm64:/usr/bin:/bin" \
 HOME="$TMP/home" \
 npm_config_cache="$TMP/cache" \

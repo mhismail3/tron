@@ -1,10 +1,9 @@
 #!/bin/bash
+# Host tooling, not an iOS compilation input.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/tron-theme-icons.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
-# Host tooling, not an iOS compilation input. Compile the real app palette with
-# this generator so icon names and light/dark ink have only one source.
 cat >"$tmp/GenerateThemeIcons.swift" <<'SWIFT'
 import Foundation
 

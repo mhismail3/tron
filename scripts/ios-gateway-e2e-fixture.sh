@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
 # Sourced by ios-gateway-e2e-test; uses its resolved gateway_dir.
-
-# Prepare Home through its real owners, not raw Home/session store writes. The
-# journey tests the editor and inbound chip; first-designation routing and the
-# background-queue editor have their own journeys. This uses only the isolated
-# fixture's local credential, never the live Mac wrapper or phone credentials.
 prepare_home_automation_fixture() {
-  # An optional task budget (output tokens) is seeded through the same Home-scoped
-  # settings RPC, so a later agent raise needs the shared change card (#2232).
   "$NODE_BIN" --input-type=module - "$gateway_dir" "$TRON_E2E_TRON_HOME" "$TRON_E2E_AGENT_DIR" "$TRON_E2E_PORT" "${1:-}" <<'JS'
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';

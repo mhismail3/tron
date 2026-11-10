@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-# Regression for #638: running the Gateway toolchain through scripts/tron must
-# not write interpreter caches into the pinned npm tree. node-gyp's Python writes
-# __pycache__ next to its sources, which changes the content digest that
-# scripts/hash-npm-runtime.py pins.
-#
-# Failure modes:
-#   1. scripts/tron starts npm without PYTHONDONTWRITEBYTECODE, so the npm child's
-#      Python writes __pycache__ into the npm tree.
-#   2. The digest skips interpreter caches, so a polluted or tampered tree still
-#      verifies as the pinned archive.
-#   3. A refactor drops the flag from scripts/tron and no test notices.
-# The mutant control removes the flag and must reproduce failure 1, so a passing
-# run proves the probe can see pollution.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tron-npm-bytecode.XXXXXX")"
@@ -22,10 +9,6 @@ fail() {
   exit 1
 }
 
-# Stand-in for npm: imports a module from the npm tree the way node-gyp's gyp
-# does. Apple's /usr/bin/python3 redirects bytecode to a cache directory, so the
-# probe clears that redirect to exercise the next-to-source layout of other Python
-# installs, and the test does not depend on the developer's interpreter config.
 mkdir -p "$TMP/fakebin"
 cat > "$TMP/fakebin/npm" <<'NPM'
 #!/usr/bin/env bash
@@ -33,9 +16,6 @@ set -euo pipefail
 python3 -c 'import sys; sys.pycache_prefix = None; sys.path.insert(0, sys.argv[1]); import gyp_probe' "$TRON_TEST_NPM_TREE"
 NPM
 chmod +x "$TMP/fakebin/npm"
-# scripts/tron runs its Gateway commands under the pinned Node that
-# scripts/tron-node selects; this stand-in is that toolchain, so the npm above
-# is the one the command reaches.
 printf '#!/bin/sh\necho "v%s"\n' "$(<"$ROOT/.node-version")" > "$TMP/fakebin/node"
 chmod +x "$TMP/fakebin/node"
 
@@ -49,8 +29,6 @@ make_tree() {
 
 run_toolchain() {
   local tron="$1" tree="$2"
-  # A caller (verify's prelude, a developer shell) may already export the flag;
-  # only scripts/tron's own export may protect the tree, or the mutant proves nothing.
   env -u PYTHONDONTWRITEBYTECODE PATH="$TMP/fakebin:$PATH" TRON_NODE_BIN="$TMP/fakebin/node" TRON_TEST_NPM_TREE="$tree" "$tron" build gateway >"$TMP/ci.log" 2>&1 \
     || { cat "$TMP/ci.log" >&2; fail "scripts/tron build gateway failed"; }
 }
@@ -69,8 +47,6 @@ run_toolchain "$ROOT/scripts/tron" "$TMP/clean"
 has_pycache "$TMP/clean" && fail "scripts/tron wrote __pycache__ into the npm tree"
 [[ "$(digest "$TMP/clean")" == "$clean_digest" ]] || fail "scripts/tron changed the npm tree digest"
 
-# Mutant control: the same entry point without the flag must pollute the tree
-# and move its digest, otherwise the probe above proves nothing.
 mkdir -p "$TMP/mutant/scripts" "$TMP/mutant/packages/gateway"
 sed '/^export PYTHONDONTWRITEBYTECODE=1$/d' "$ROOT/scripts/tron" > "$TMP/mutant/scripts/tron"
 chmod +x "$TMP/mutant/scripts/tron"

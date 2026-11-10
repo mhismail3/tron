@@ -33,7 +33,6 @@ for tool in "$@"; do
         || { echo "xcodegen setting presets are incomplete" >&2; exit 1; }
       ;;
     release)
-      # The maintainer's manual iOS release (packages/ios-app/docs/development.md) archives with this exact Xcode.
       [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] \
         || { echo "a release archives on an Apple silicon Mac" >&2; exit 1; }
       for executable in python3 security codesign xcodebuild xcrun /usr/libexec/PlistBuddy; do
