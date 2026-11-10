@@ -1,4 +1,4 @@
-// Integration test for `scripts/tron proof wire` (tools/proof/README.md "Wire").
+// Integration test for `scripts/tron proof wire` (tools/proof/dafny2wire/README.md "Wire").
 // 1. Protocol: packages/gateway/src/protocol/types.ts is exactly what packages/core/wire/Protocol.dfy generates,
 //    and the protocol's own TypeScript and Swift codecs agree byte for byte on a seeded corpus of values of
 //    every datatype (TypeScript encodes, each side decodes and re-encodes), the TypeScript encoder writes what

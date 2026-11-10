@@ -6,8 +6,9 @@ import { DAILY_RECORD_CAP, RETAINED_DAYS, TRAFFIC_SCHEMA, openTrafficRecorder } 
 
 /**
  * The Debug-only proof traffic recorder (tools/proof/README.md "Traffic corpus"): refused everywhere but an
- * opted-in Debug Gateway; a seeded schedule journey through the real seams writes a corpus that replays
- * through the same TypeScript to the recorded outputs; the daily cap and retention hold.
+ * opted-in Debug Gateway; a seeded schedule journey through the real seams writes a corpus (of its calendar
+ * calls: once and interval triggers are decided by their proof block and are not seams) that replays through
+ * the same TypeScript to the recorded outputs; the daily cap and retention hold.
  */
 const homes: string[] = [];
 const home = (): string => { const dir = mkdtempSync(join(tmpdir(), "tron-proof-traffic-")); homes.push(dir); return dir; };
@@ -72,19 +73,22 @@ describe("proof traffic recorder", () => {
     };
     const outputs = calls.map((call) => run(recorded, call));
 
-    // One record per seam call (the 200 helper first() calls above included) and none for a nested internal
-    // call; once and interval triggers go to block schedule/occurrence, calendar triggers to schedule/calendar.
-    const records = [...corpus(dataDir, "schedule/occurrence"), ...corpus(dataDir, "schedule/calendar")]
-      .sort((left, right) => (left.seq as number) - (right.seq as number));
-    expect(records).toHaveLength(calls.length + 200);
+    // One record per calendar seam call and none for a nested internal call. Once and interval triggers are decided
+    // by proof block schedule/occurrence itself and record nothing. Building each calendar trigger's classify call
+    // above made one first() call, recorded before the journey's own calls.
+    const calendar = calls.map((call, index) => ({ call, index })).filter(({ call }) => (call[1][0] as { kind: string }).kind === "calendar");
+    const helperCalls = calendar.filter(({ call }) => call[0] === "classify").length;
+    expect(readdirSync(join(dataDir, "gateway/proof-traffic/schedule"))).toEqual(["calendar"]);
+    const records = corpus(dataDir, "schedule/calendar").sort((left, right) => (left.seq as number) - (right.seq as number));
+    expect(records).toHaveLength(calendar.length + helperCalls);
     expect(new Set(records.map((r) => r.schema))).toEqual(new Set([TRAFFIC_SCHEMA]));
     expect(records.map((r) => r.seq)).toEqual(records.map((_, i) => i + 1));
     expect(records.every((r) => ["next", "first", "classify"].includes(r.seam as string))).toBe(true);
     for (const record of records) {
-      const kind = ((record.input as Record<string, unknown>).trigger as { kind: string }).kind;
-      expect(record.block).toBe(kind === "calendar" ? "schedule/calendar" : "schedule/occurrence");
+      expect(record.block).toBe("schedule/calendar");
+      expect(((record.input as Record<string, unknown>).trigger as { kind: string }).kind).toBe("calendar");
     }
-    expect(records.filter((r) => r.block === "schedule/calendar").length).toBeGreaterThan(100);
+    expect(records.length).toBeGreaterThan(100);
 
     // Replay: the same TypeScript, recorder off, gives every recorded output back.
     vi.unstubAllEnvs();
@@ -96,43 +100,8 @@ describe("proof traffic recorder", () => {
         : [input.trigger, input.nextOccurrenceAt, input.nowMs, input.policy];
       expect(JSON.parse(JSON.stringify(run(plain, [record.seam as string, args]) ?? null))).toEqual(record.output);
     }
-    const journey = records.slice(200);
-    expect(journey.map((r) => r.output)).toEqual(outputs.map((o) => JSON.parse(JSON.stringify(o ?? null))));
-  });
-
-  it("records the settings precedence fold of every resolved key, with tokens instead of values", async () => {
-    const dataDir = home();
-    vi.stubEnv("TRON_PROOF_TRAFFIC", "1");
-    vi.stubEnv("TRON_GATEWAY_CHANNEL", "dev");
-    vi.stubEnv("TRON_DATA_DIR", dataDir);
-    vi.resetModules();
-    const { resolveSettings, targetLayers } = await import("../kernel/settings/settings-resolver.js");
-    const { scopeForStore } = await import("../kernel/settings/scope-resolution.js");
-    const { TEST_SETTINGS_SCHEMA } = await import("../../test-support/settings-schema.js");
-    const target = { kind: "session" as const, sessionId: "s" };
-    // An untrusted project whose per-model thinking value would beat the chat's own value.
-    const resolution = resolveSettings(TEST_SETTINGS_SCHEMA, target, {
-      layers: targetLayers(target, { project: true }), gateway: {}, trust: {}, macTerminal: {},
-      global: { defaultProvider: "anthropic", defaultModel: "sentinel-model-id", defaultThinkingLevel: "low" },
-      project: { root: "/sentinel-project", document: { modelThinkingLevels: { "anthropic/sentinel-model-id": "high" } }, applied: false },
-      session: { thinking: "minimal", settings: {} },
-    }, { format: { modelName: () => undefined }, options: { clamp: (_source, _dependency, value) => value } });
-
-    const records = corpus(dataDir, "settings/precedence");
-    expect(records.every((r) => r.schema === TRAFFIC_SCHEMA && r.block === "settings/precedence" && r.seam === "resolve")).toBe(true);
-    // Exactly one record per resolved key instance, in resolution order, after the chat model's own resolution
-    // (which the model-qualified keys read), each with the fold's layer and not-applied layer.
-    expect(records.map((r) => (r.input as { key: string }).key)).toEqual(["model.ref[role=chat]", ...resolution.keys.map((row) => row.key)]);
-    for (const [index, row] of resolution.keys.entries()) {
-      const output = records[index + 1]!.output as { layer: string; notApplied: string | null };
-      expect(scopeForStore(output.layer as never)).toBe(row.layer);
-      expect(output.notApplied === null).toBe(row.applied);
-    }
-    const thinking = records.find((r) => (r.input as { key: string }).key === "model.thinking[role=chat]")!;
-    expect(thinking.output).toMatchObject({ layer: "session", notApplied: "project" });
-    // No setting value, model id or project path is recorded: values are tokens.
-    const text = JSON.stringify(records);
-    for (const secret of ["sentinel", "minimal", "high", "anthropic"]) expect(text).not.toContain(secret);
+    const journey = records.slice(helperCalls);
+    expect(journey.map((r) => r.output)).toEqual(calendar.map(({ index }) => JSON.parse(JSON.stringify(outputs[index] ?? null))));
   });
 
   it("records tool selection compose and encode calls with tool names as tokens", async () => {

@@ -6,6 +6,8 @@ final class TronChatAnnotationUITests: XCTestCase {
     @MainActor func testSelectionAcrossMarkdownBlocksCanBeAnnotated() {
         continueAfterFailure = false
         let app = launch(); defer { app.terminate() }
+        keepScreenshot(app, "2415-model-chip")
+        XCTAssertTrue(app.staticTexts["Anthropic / Claude Fable 5.2"].exists, app.debugDescription)
 
         let heading = assistantBlock(app, containing: "Retry policy")
         let listItem = assistantBlock(app, containing: "Accepted prompts continue")

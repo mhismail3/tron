@@ -8,7 +8,10 @@
 abstract module SettingsPrecedenceLaws {
   // The four stored layers, lowest first; the built-in default lies below all of them.
   datatype Layer = Global | Home | Session | Project
-  datatype Opt = None | Some(v: int)
+  // Token: the name the shell gives one value of one call. The block passes tokens on and never compares or
+  // computes with them. A JavaScript number in the compiled block.
+  newtype Token = x: int | 0 <= x < 0x1_0000_0000
+  datatype Opt = None | Some(v: Token)
   // One layer's facts for one setting: whether the target (Global, a project, a chat, Home) has the layer,
   // whether the setting is stored in that layer at all, the layer's per-model and plain values (tokens) if
   // set, and whether the layer is applied (a project's settings apply only while the project is trusted).
@@ -17,23 +20,26 @@ abstract module SettingsPrecedenceLaws {
   // What the setting's declaration says: whether a project may set it, whether a chat or Home may override
   // it, and whether a layer's value composes with the value below it (a tool selection's +name/-name).
   datatype Key = Key(projectSettable: bool, sessionOverridable: bool, composes: bool)
-  datatype Value = Default | Tok(t: int) | Compose(below: Value, t: int)
+  datatype Value = Default | Tok(t: Token) | Compose(below: Value, t: Token)
   datatype Origin = FromDefault | FromLayer(l: Layer)
   datatype Unapplied = AllApplied | Unapplied(l: Layer)
-  datatype Shown = Shown(layer: Layer, qualified: bool, token: int, applied: bool)
-  datatype Resolution = Resolution(value: Value, layer: Origin, notApplied: Unapplied, shown: seq<Shown>)
+  // What one layer shows for the setting: nothing, or its value (a token), whether that is the per-model value,
+  // and whether the layer is applied.
+  datatype Shown = Hidden | Shown(qualified: bool, token: Token, applied: bool)
+  datatype Shows = Shows(global: Shown, home: Shown, session: Shown, project: Shown)
+  datatype Resolution = Resolution(value: Value, layer: Origin, notApplied: Unapplied, shown: Shows)
 
-  // Assumption A1: in one call the shell gives each value read the token of its JSON text (JSON.stringify), the
-  // default value token 0, and turns a Compose term into a value by calling the setting type's own compose. The
-  // block decides which values take part and in what order; it never sees, compares or combines values, so two
-  // equal values that JSON writes differently (another key order) get two tokens and change no decision.
+  // Assumption A1: in one call the shell gives each value it reads its own token (a layer's per-model value and
+  // its plain value are two tokens), the default value token 0, and turns a Compose term into a value by calling
+  // the setting type's own compose. The block decides which values take part and in what order; it never sees,
+  // compares or combines values, so whether two tokens stand for equal values changes no decision.
   // Assumption A2: an entry's qualified token is the layer's value for the chat's model (a per-model value),
   // its plain token the layer's ordinary value, both read by the shell from the layer's store; `applied` is
   // false only for the Project layer of an untrusted project.
 
   // Rank: the precedence order, Global 1 < Home 2 < Session 3 < Project 4 (Project above Session, decided by
   // Mohsin, H1); the default is below every layer.
-  function Rank(l: Layer): int {
+  ghost function Rank(l: Layer): int {
     match l
     case Global => 1
     case Home => 2
@@ -60,8 +66,8 @@ abstract module SettingsPrecedenceLaws {
     e.inTarget && e.bound && Admitted(k, l) && (e.qualified.Some? || e.unqualified.Some?)
   }
 
-  // Token: a layer's shown value: its per-model value when it has one, else its plain value.
-  ghost function Token(e: Entry): int
+  // TokenOf: a layer's shown value: its per-model value when it has one, else its plain value.
+  ghost function TokenOf(e: Entry): Token
     requires e.qualified.Some? || e.unqualified.Some?
   { if e.qualified.Some? then e.qualified.v else e.unqualified.v }
 
@@ -70,19 +76,28 @@ abstract module SettingsPrecedenceLaws {
 
   // Step: the value after one more applied layer: the layer's value composed with the value below it for a
   // composing setting, else the layer's value alone.
-  ghost function Step(k: Key, below: Value, t: int): Value { if k.composes then Compose(below, t) else Tok(t) }
+  ghost function Step(k: Key, below: Value, t: Token): Value { if k.composes then Compose(below, t) else Tok(t) }
 
   // Folded: the value after applied layers with tokens ts, lowest first, starting from v.
-  ghost function Folded(k: Key, v: Value, ts: seq<int>): Value
+  ghost function Folded(k: Key, v: Value, ts: seq<Token>): Value
     decreases |ts|
   { if |ts| == 0 then v else Folded(k, Step(k, v, ts[0]), ts[1..]) }
 
   // The tokens of the applied layers that take part, lowest first.
-  ghost function LiveTokens(k: Key, ls: Layers): seq<int> {
-    (if Live(k, ls, Global) then [Token(ls.global)] else [])
-    + (if Live(k, ls, Home) then [Token(ls.home)] else [])
-    + (if Live(k, ls, Session) then [Token(ls.session)] else [])
-    + (if Live(k, ls, Project) then [Token(ls.project)] else [])
+  ghost function LiveTokens(k: Key, ls: Layers): seq<Token> {
+    (if Live(k, ls, Global) then [TokenOf(ls.global)] else [])
+    + (if Live(k, ls, Home) then [TokenOf(ls.home)] else [])
+    + (if Live(k, ls, Session) then [TokenOf(ls.session)] else [])
+    + (if Live(k, ls, Project) then [TokenOf(ls.project)] else [])
+  }
+
+  // What the resolution shows for layer l.
+  ghost function ShownAt(s: Shows, l: Layer): Shown {
+    match l
+    case Global => s.global
+    case Home => s.home
+    case Session => s.session
+    case Project => s.project
   }
 
   // The setting's resolution in the target.
@@ -105,7 +120,7 @@ abstract module SettingsPrecedenceLaws {
   lemma R1Winner(k: Key, ls: Layers, l: Layer)
     requires Live(k, ls, l) && forall m: Layer | Rank(m) > Rank(l) :: !Live(k, ls, m)
     ensures Resolve(k, ls).layer == FromLayer(l)
-    ensures !k.composes ==> Resolve(k, ls).value == Tok(Token(At(ls, l)))
+    ensures !k.composes ==> Resolve(k, ls).value == Tok(TokenOf(At(ls, l)))
 
   // R2 default: when no applied layer takes part, the setting resolves to its default, from the default layer.
   lemma R2Default(k: Key, ls: Layers)
@@ -118,8 +133,9 @@ abstract module SettingsPrecedenceLaws {
     requires k.composes
     ensures Resolve(k, ls).value == Folded(k, Default, LiveTokens(k, ls))
 
-  // R4 untrusted-inert: a layer that is not applied never changes the resolved value or layer: two targets
-  // that differ only in the values held by an unapplied layer resolve the same.
+  // R4 untrusted-inert: a layer that is not applied never changes the resolved value or the layer it comes from:
+  // two targets that differ only in the values held by an unapplied layer resolve to the same value from the same
+  // layer. (What is shown, and which layer is reported as not applied, may differ: R6 and R7 say what they are.)
   lemma R4UntrustedInert(k: Key, ls: Layers, ls2: Layers, l: Layer)
     requires !At(ls, l).applied
     requires At(ls2, l) == At(ls, l).(qualified := At(ls2, l).qualified, unqualified := At(ls2, l).unqualified)
@@ -133,15 +149,12 @@ abstract module SettingsPrecedenceLaws {
     requires forall m: Layer | Rank(m) >= Rank(l) :: At(ls2, m) == At(ls, m)
     ensures Resolve(k, ls2).value == Resolve(k, ls).value && Resolve(k, ls2).layer == Resolve(k, ls).layer
 
-  // R6 shown: the layers shown are exactly those that take part, lowest first, each with its per-model value
-  // when it has one (else its plain value), whether that value is the per-model one, and whether it applies.
-  lemma R6Shown(k: Key, ls: Layers)
-    ensures var s := Resolve(k, ls).shown;
-      (forall i, j | 0 <= i < j < |s| :: Rank(s[i].layer) < Rank(s[j].layer))
-      && (forall l: Layer :: Visible(k, ls, l) <==> exists i | 0 <= i < |s| :: s[i].layer == l)
-      && (forall i | 0 <= i < |s| :: var e := At(ls, s[i].layer);
-            Visible(k, ls, s[i].layer) && s[i].token == Token(e) && s[i].qualified == e.qualified.Some?
-            && s[i].applied == e.applied)
+  // R6 shown: a layer is shown exactly when it takes part, with its per-model value when it has one (else its
+  // plain value), whether that value is the per-model one, and whether the layer applies.
+  lemma R6Shown(k: Key, ls: Layers, l: Layer)
+    ensures var s := ShownAt(Resolve(k, ls).shown, l); var e := At(ls, l);
+      (s.Shown? <==> Visible(k, ls, l))
+      && (s.Shown? ==> s.token == TokenOf(e) && s.qualified == e.qualified.Some? && s.applied == e.applied)
 
   // R7 not-applied: a layer is reported as not applied exactly when it is the highest layer that takes part
   // and it is not applied (an untrusted project's value would win); the resolution then comes from below it.
@@ -151,14 +164,16 @@ abstract module SettingsPrecedenceLaws {
     ensures Resolve(k, ls).notApplied == Unapplied(l) ==>
       Resolve(k, ls).layer.FromDefault? || Rank(Resolve(k, ls).layer.l) < Rank(l)
 
-  // R8 below: the value below layer l composes, lowest first, the plain values (never per-model ones) of the
-  // applied layers strictly below l that take part.
+  // R8 below: the value below layer l is the default with the plain values (never per-model ones) of the applied
+  // layers strictly below l that take part folded over it, lowest first. For a composing setting that is their
+  // composition over the default; for an ordinary setting it is the plain value of the highest such layer, or the
+  // default when there is none.
   lemma R8Below(k: Key, ls: Layers, l: Layer)
     ensures Below(k, ls, l) == Folded(k, Default, BelowTokens(k, ls, l))
 
   // The plain-value tokens of the applied, admitted layers strictly below l that are in the target, bound and
   // hold a plain value, lowest first.
-  ghost function BelowTokens(k: Key, ls: Layers, l: Layer): seq<int> {
+  ghost function BelowTokens(k: Key, ls: Layers, l: Layer): seq<Token> {
     (if PlainLive(k, ls, Global, l) then [ls.global.unqualified.v] else [])
     + (if PlainLive(k, ls, Home, l) then [ls.home.unqualified.v] else [])
     + (if PlainLive(k, ls, Session, l) then [ls.session.unqualified.v] else [])

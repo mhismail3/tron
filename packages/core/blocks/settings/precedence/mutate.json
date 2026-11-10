@@ -5,15 +5,14 @@
   "impl": "blocks/settings/precedence/Block.dfy",
   "symbols": [
     "Admitted",
-    "ShownAt",
-    "Fold",
+    "ShownOf",
+    "Over",
+    "Top",
     "Resolve",
-    "PlainBelow",
-    "FoldTokens",
+    "PlainOver",
     "Below"
   ],
   "excludeSymbols": {
-    "Rank": "the precedence order is stated in the laws file (the H1 law itself), not implementation",
     "At": "field selection stated in the laws file, not implementation"
   },
   "verify": [
@@ -26,9 +25,7 @@
     "R1 winner": [
       "SettingsPrecedence.R1Winner",
       "SettingsPrecedence.ResolveSteps",
-      "SettingsPrecedence.FoldOne",
-      "SettingsPrecedence.FoldAppend",
-      "SettingsPrecedence.ShownAtSpec"
+      "SettingsPrecedence.ShownOfSpec"
     ],
     "R2 default": [
       "SettingsPrecedence.R2Default"
@@ -43,19 +40,14 @@
       "SettingsPrecedence.R5HigherScopeWins"
     ],
     "R6 shown": [
-      "SettingsPrecedence.R6Shown",
-      "SettingsPrecedence.AllShownFacts",
-      "SettingsPrecedence.AllShownSorted",
-      "SettingsPrecedence.AllShownSpec",
-      "SettingsPrecedence.AllShownHas",
-      "SettingsPrecedence.SortedAppend"
+      "SettingsPrecedence.R6Shown"
     ],
     "R7 not-applied": [
       "SettingsPrecedence.R7NotApplied"
     ],
     "R8 below": [
       "SettingsPrecedence.R8Below",
-      "SettingsPrecedence.FoldTokensFolded"
+      "SettingsPrecedence.FoldedPlain"
     ]
   },
   "helpers": [
@@ -64,42 +56,9 @@
     "OriginLive"
   ],
   "translate": "blocks/settings/precedence/Block.dfy",
-  "oracles": [
-    {
-      "name": "diff-vs-gateway-settings-resolver.ts(300)",
-      "cmd": [
-        "node",
-        "tools/proof/oracles/settings-precedence.mjs",
-        "{dir}/out/core.js",
-        "300"
-      ],
-      "jsonEq": [
-        "agree",
-        "requests"
-      ]
-    }
-  ],
+  "oracles": [],
   "accepted": {},
   "report": "blocks/settings/precedence/MUTATION.json",
-  "shadow": {
-    "cmd": [
-      "node",
-      "tools/proof/oracles/settings-precedence.mjs",
-      "{core}",
-      "2000"
-    ],
-    "source": "compiled core vs packages/gateway/src/kernel/settings/settings-resolver.ts (resolveSettings and composedBelow over a synthetic schema, random stores and targets) on 2,000 generated resolutions (not real traffic)"
-  },
-  "replay": {
-    "cmd": [
-      "node",
-      "tools/proof/oracles/settings-precedence.mjs",
-      "{core}",
-      "--replay",
-      "{corpus}"
-    ],
-    "source": "compiled core vs the resolveInstance seam's recorded Debug-Gateway folds (packages/gateway/src/kernel/settings/settings-resolver.ts)"
-  },
   "kinds": {
     "safety": [
       "S1 admission",

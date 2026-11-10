@@ -54,8 +54,10 @@ function findBlocks(root) {
       else if (name === "block.json") {
         const spec = JSON.parse(readFileSync(path, "utf8"));
         const blockName = relative(base, dir).split(sep).join("/");
-        const keys = Object.keys(spec).sort().join(",");
-        if (keys !== "deps,impl,interface") throw new UsageError(`${blockName}: block.json keys must be interface, impl, deps (got ${keys})`);
+        const keys = Object.keys(spec).filter((key) => key !== "shell").sort().join(",");
+        if (keys !== "deps,impl,interface" || ("shell" in spec && typeof spec.shell !== "string")) {
+          throw new UsageError(`${blockName}: block.json keys must be interface, impl, deps and, for a block a shell runs, shell (got ${Object.keys(spec).sort().join(",")})`);
+        }
         for (const f of [...spec.interface, ...spec.impl]) {
           if (!existsSync(join(root, f))) throw new UsageError(`${blockName}: missing file ${f}`);
         }

@@ -1,8 +1,8 @@
 // Integration test for `scripts/tron proof shadow <block> --days N` (tools/proof/README.md "Shadow and oracles"):
-// the real block schedule/occurrence replays a corpus of tron-proof-traffic/1 records, as the Debug recorder writes
-// them, of calls to the shipped packages/gateway/src/automations/schedule.ts. A faithful corpus over two days is a
-// real-traffic match covering two days; one hand-corrupted recorded output is a mismatch naming that record; a
-// malformed line, a foreign record and an empty corpus are errors, never a match.
+// the real block schedule/calendar replays a corpus of tron-proof-traffic/1 records, as the Debug recorder writes
+// them, of calendar-trigger calls to the shipped packages/gateway/src/automations/schedule.ts. A faithful corpus
+// over two days is a real-traffic match covering two days; one hand-corrupted recorded output is a mismatch
+// naming that record; a malformed line, a foreign record and an empty corpus are errors, never a match.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -25,18 +25,15 @@ test("replayed Debug traffic is a real-traffic shadow that catches a corrupted r
     const lines = [];
     for (let i = 0; i < 300; i++) {
       const anchor = start + Math.floor(rnd() * 2e9);
-      // Stored triggers may use any timestamp form the Gateway admits (offsets, other fraction lengths).
-      const stamp = (ms) => [new Date(ms).toISOString(), new Date(ms).toISOString().replace(".000Z", "Z"),
-        new Date(ms + 3_600_000).toISOString().replace(/\.(\d{3})Z$/, ".$1000+01:00")][Math.floor(i / 3) % 3];
-      const trigger = rnd() < 0.3 ? { kind: "once", at: stamp(anchor) }
-        : { kind: "interval", anchorAt: stamp(anchor), everySeconds: [60, 900, 3600, 86400][Math.floor(rnd() * 4)] };
+      const trigger = { kind: "calendar", timezone: ["UTC", "America/New_York", "Australia/Lord_Howe"][Math.floor(rnd() * 3)],
+        localTime: `0${Math.floor(rnd() * 10)}:${10 + Math.floor(rnd() * 50)}`, weekdays: [1, 2, 3, 4, 5, 6, 7].filter((weekday) => weekday === 3 || rnd() < 0.3) };
       const now = anchor + Math.floor((rnd() - 0.2) * 1e8);
       const seam = ["next", "first", "classify"][i % 3];
       const input = seam === "next" ? { trigger, afterMs: now } : seam === "first" ? { trigger, nowMs: now }
         : { trigger, nextOccurrenceAt: ts.firstAutomationOccurrence(trigger, anchor - 1), nowMs: now, policy: rnd() < 0.5 ? "latest" : "skip" };
       const output = seam === "next" ? ts.nextAutomationOccurrence(trigger, now) : seam === "first" ? ts.firstAutomationOccurrence(trigger, now)
         : ts.classifyDueOccurrence(trigger, input.nextOccurrenceAt, now, input.policy);
-      lines.push(JSON.stringify({ schema: "tron-proof-traffic/1", block: "schedule/occurrence", seam, seq: i + 1, at: `${d}T12:00:00.000Z`, input, output: output ?? null }));
+      lines.push(JSON.stringify({ schema: "tron-proof-traffic/1", block: "schedule/calendar", seam, seq: i + 1, at: `${d}T12:00:00.000Z`, input, output: output ?? null }));
     }
     return lines;
   };
@@ -47,7 +44,7 @@ test("replayed Debug traffic is a real-traffic shadow that catches a corrupted r
   write();
   const out = join(base, "SHADOW.json");
   const shadow = (days = 7) => {
-    const run = spawnSync(join(ROOT, "scripts/tron"), ["proof", "shadow", "schedule/occurrence", "--days", String(days), "--corpus", corpus, "--out", out], { encoding: "utf8" });
+    const run = spawnSync(join(ROOT, "scripts/tron"), ["proof", "shadow", "schedule/calendar", "--days", String(days), "--corpus", corpus, "--out", out], { encoding: "utf8" });
     return { status: run.status, result: JSON.parse(readFileSync(out, "utf8")) };
   };
 
@@ -84,11 +81,11 @@ test("replayed Debug traffic is a real-traffic shadow that catches a corrupted r
   const without = (key) => { const r = { ...good }; delete r[key]; return r; };
   for (const [line, cause] of [
     ["{", /not JSON/],
-    [JSON.stringify({ ...good, block: "other/block" }), /not a schedule\/occurrence tron-proof-traffic\/1 record/],
+    [JSON.stringify({ ...good, block: "other/block" }), /not a schedule\/calendar tron-proof-traffic\/1 record/],
     [JSON.stringify(without("output")), /seq, at \(on the file's day\) or output missing or malformed/],
     [JSON.stringify({ ...good, at: "2026-11-06T12:00:00.000Z" }), /on the file's day/],
     [JSON.stringify({ ...good, input: { ...good.input, afterMs: undefined } }), /next input or output is not what the seam records/],
-    [JSON.stringify({ ...good, input: { ...good.input, trigger: { kind: "once", at: "soon" } } }), /next input or output is not what the seam records/],
+    [JSON.stringify({ ...good, input: { ...good.input, trigger: { ...good.input.trigger, localTime: "soon" } } }), /next input or output is not what the seam records/],
   ]) {
     writeFileSync(join(corpus, "2026-11-07.jsonl"), `${line}\n`);
     const broken = shadow();
@@ -99,5 +96,5 @@ test("replayed Debug traffic is a real-traffic shadow that catches a corrupted r
   rmSync(corpus, { recursive: true });
   const empty = shadow();
   assert.deepEqual([empty.status, empty.result.status], [1, "error"]);
-  assert.match(empty.result.error, /no recorded traffic for schedule\/occurrence/);
+  assert.match(empty.result.error, /no recorded traffic for schedule\/calendar/);
 });

@@ -50,47 +50,65 @@ module ScheduleOccurrence refines ScheduleOccurrenceLaws {
     if D <= -1 { MulLeMono(D, -1, e); }
   }
 
+  // The whole periods in a span that is not negative are not negative, no more than the span, and together
+  // no longer than it.
+  lemma PeriodsFit(x: int, e: int)
+    requires x >= 0 && e > 0
+    ensures 0 <= x / e <= x && 0 <= (x / e) * e <= x
+  {
+    DivMod(x, e);
+    DivNonNeg(x, e);
+    MulNonNeg(x / e, e);
+    if x / e > 0 { MulLeMono(1, e, x / e); }
+  }
+
   // ---------- definitions (compiled to JS) ----------
 
-  function Next(t: Trigger, after: int): Opt
+  // The whole periods of e in a span that is not negative.
+  function Periods(span: Ms, e: Ms): (q: Ms)
+    requires 0 <= span <= 2 * LIMIT && 0 < e <= LIMIT
+    ensures q as int == span as int / e as int && 0 <= q as int * e as int <= span as int
+  {
+    PeriodsFit(span as int, e as int);
+    span / e
+  }
+
+  function Next(t: Trigger, after: Ms): Opt
   {
     match t
     case Once(at) => if at > after then Some(at) else None
-    case Interval(a, e) =>
-      if after < a then Some(a) else Some(a + ((after - a) / e + 1) * e)
+    case Interval(a, e) => if after < a then Some(a) else Some(a + Periods(after - a, e) * e + e)
   }
 
-  function First(t: Trigger, now: int): Opt
+  function First(t: Trigger, now: Ms): Opt
   {
     match t
     case Once(at) => Some(at)
-    // The first occurrence at or after now is the next one after now - 1; this already yields the anchor
-    // when a >= now.
-    case Interval(a, e) => Next(t, now - 1)
+    // The first occurrence at or after now is the anchor when it is not before now, else the next one after
+    // now - 1.
+    case Interval(a, e) => if now <= a then Some(a) else Next(t, now - 1)
   }
 
-  function Classify(t: Trigger, nxt: int, now: int, p: Policy): Result
+  function Classify(t: Trigger, nxt: Ms, now: Ms, p: Policy): Result
   {
     if nxt > now then Result(None, Some(nxt), None)
     else match t
     case Once(at) =>
-      if p == Latest then Result(Some(nxt), None, None) else Result(None, None, Some(nxt))
+      if p.Latest? then Result(Some(nxt), None, None) else Result(None, None, Some(nxt))
     case Interval(a, e) =>
-      var q := (now - nxt) / e;
-      var latest := nxt + q * e;
-      var n2 := nxt + (q + 1) * e;
-      if p == Skip then Result(None, Some(n2), Some(latest))
-      else Result(Some(latest), Some(n2), None)
+      var latest := nxt + Periods(now - nxt, e) * e;
+      if p.Skip? then Result(None, Some(latest + e), Some(latest))
+      else Result(Some(latest), Some(latest + e), None)
   }
 
   // ---------- proofs ----------
 
   // The anchor plus any whole number of periods is an occurrence.
-  lemma OccInterval(a: int, e: int, k: nat)
-    ensures Occ(Interval(a, e), a + k * e)
+  lemma OccInterval(a: Ms, e: Ms, k: nat)
+    ensures Occ(Interval(a, e), a as int + k * (e as int))
   {}
 
-  lemma L1NextSound(t: Trigger, after: int)
+  lemma L1NextSound(t: Trigger, after: Ms)
   {
     match t {
       case Once(at) => {}
@@ -98,69 +116,79 @@ module ScheduleOccurrence refines ScheduleOccurrenceLaws {
         if after < a {
           OccInterval(a, e, 0);
         } else {
-          DivNonNeg(after - a, e);
-          DivMod(after - a, e);
-          var k: nat := (after - a) / e + 1;
+          var span, ei := (after - a) as int, e as int;
+          PeriodsFit(span, ei);
+          DivMod(span, ei);
+          var k: nat := span / ei + 1;
+          assert k * ei == (span / ei) * ei + ei;
+          assert Next(t, after).v as int == a as int + k * ei;
           OccInterval(a, e, k);
         }
     }
   }
 
-  lemma L2NextMinimal(t: Trigger, after: int, x: int)
+  lemma L2NextMinimal(t: Trigger, after: Ms, x: int)
   {
     match t {
       case Once(at) => {}
       case Interval(a, e) =>
+        var k: nat :| x == a as int + k * (e as int);
         if after < a {
-          var k: nat :| x == a + k * e;
-          MulNonNeg(k, e);
+          MulNonNeg(k, e as int);
         } else {
-          var k: nat :| x == a + k * e;
-          DivNonNeg(after - a, e);
-          DivMod(after - a, e);
-          var q := (after - a) / e;
+          DivNonNeg((after - a) as int, e as int);
+          DivMod((after - a) as int, e as int);
+          var q := (after - a) as int / e as int;
           if k <= q {
-            MulLeMono(k, q, e);
+            MulLeMono(k, q, e as int);
           } else {
-            MulLeMono(q + 1, k, e);
+            MulLeMono(q + 1, k, e as int);
           }
         }
     }
   }
 
-  lemma L3NextNone(t: Trigger, after: int)
+  lemma L3NextNone(t: Trigger, after: Ms)
   {}
 
-  lemma L4FirstInterval(t: Trigger, now: int)
+  lemma L4FirstInterval(t: Trigger, now: Ms)
   {
-    // First(t, now) is the next occurrence after now - 1: sound by L1, minimal by L2.
-    L1NextSound(t, now - 1);
-    forall x: int | Occ(t, x) && x >= now ensures First(t, now).v <= x {
-      L2NextMinimal(t, now - 1, x);
+    var a, e := t.anchor, t.every;
+    if now <= a {
+      OccInterval(a, e, 0);
+      forall x: int | Occ(t, x) && x >= now as int ensures a as int <= x {
+        var k: nat :| x == a as int + k * (e as int);
+        MulNonNeg(k, e as int);
+      }
+    } else {
+      // First(t, now) is the next occurrence after now - 1: sound by L1, minimal by L2.
+      L1NextSound(t, now - 1);
+      forall x: int | Occ(t, x) && x >= now as int ensures First(t, now).v as int <= x {
+        L2NextMinimal(t, now - 1, x);
+      }
     }
   }
 
-  lemma L8FirstAfterOccurrence(a: int, e: int, k: nat)
+  lemma L8FirstAfterOccurrence(a: Ms, e: Ms, k: nat)
   {
     // First is the next occurrence after a + k*e, and (k*e)/e == k.
-    MulNonNeg(k, e);
-    ShiftDiv(0, k, e);
-    assert (a + k * e - a) / e == k;
+    MulNonNeg(k, e as int);
+    ShiftDiv(0, k, e as int);
+    assert (a as int + k * (e as int) - a as int) / e as int == k;
   }
 
-  lemma L7FirstOnce(at: int, now: int)
+  lemma L7FirstOnce(at: Ms, now: Ms)
   {}
 
-  lemma L5ClassifyNotDue(t: Trigger, nxt: int, now: int, p: Policy)
+  lemma L5ClassifyNotDue(t: Trigger, nxt: Ms, now: Ms, p: Policy)
   {}
 
-  lemma L6ClassifyDue(t: Trigger, nxt: int, now: int, p: Policy)
+  lemma L6ClassifyDue(t: Trigger, nxt: Ms, now: Ms, p: Policy)
   {
     match t {
       case Once(at) => {}
       case Interval(a, e) =>
-        var j: nat :| nxt == a + j * e;
-        L6IntervalResult(t, nxt, now, p);
+        var j: nat :| nxt as int == a as int + j * (e as int);
         L6IntervalLatest(a, e, j, now);
         L6IntervalNext(a, e, j, now);
         L1NextSound(t, now);
@@ -168,32 +196,24 @@ module ScheduleOccurrence refines ScheduleOccurrenceLaws {
   }
 
   // Proof helpers for L6 (Interval case), split so each obligation stays small and solver-portable.
-  // Classify's due interval result in named terms: the latest due occurrence nxt + q*e and the next nxt + (q+1)*e.
-  lemma L6IntervalResult(t: Trigger, nxt: int, now: int, p: Policy)
-    requires t.Interval? && t.every > 0 && nxt <= now
-    ensures var q := (now - nxt) / t.every;
-      Classify(t, nxt, now, p) == if p == Skip then Result(None, Some(nxt + (q + 1) * t.every), Some(nxt + q * t.every))
-        else Result(Some(nxt + q * t.every), Some(nxt + (q + 1) * t.every), None)
-  {}
-
   // latest := nxt + q*e (q = (now - nxt)/e) is an occurrence in [nxt, now] with none in (latest, now].
-  lemma L6IntervalLatest(a: int, e: int, j: nat, now: int)
-    requires e > 0 && a + j * e <= now
-    ensures var nxt := a + j * e; var q := (now - nxt) / e;
-      q >= 0 && Witness(Interval(a, e), nxt, now, nxt + q * e)
+  lemma L6IntervalLatest(a: Ms, e: Ms, j: nat, now: Ms)
+    requires e > 0 && a as int + j * (e as int) <= now as int
+    ensures var nxt := a as int + j * (e as int); var q := (now as int - nxt) / e as int;
+      q >= 0 && Witness(Interval(a, e), nxt, now as int, nxt + q * (e as int))
   {
     var t := Interval(a, e);
-    var nxt := a + j * e;
-    DivNonNeg(now - nxt, e);
-    DivMod(now - nxt, e);
-    var q := (now - nxt) / e;
-    MulNonNeg(q, e);
+    var nxt := a as int + j * (e as int);
+    DivNonNeg(now as int - nxt, e as int);
+    DivMod(now as int - nxt, e as int);
+    var q := (now as int - nxt) / e as int;
+    MulNonNeg(q, e as int);
     var m: nat := j + q;
     OccInterval(a, e, m);
-    assert a + m * e == nxt + q * e;
-    forall x: int | Occ(t, x) && nxt + q * e < x <= now ensures false {
-      var k: nat :| x == a + k * e;
-      NoOccBetween(a, e, j, k, q, now);
+    assert a as int + m * (e as int) == nxt + q * (e as int);
+    forall x: int | Occ(t, x) && nxt + q * (e as int) < x <= now as int ensures false {
+      var k: nat :| x == a as int + k * (e as int);
+      NoOccBetween(a as int, e as int, j, k, q, now as int);
     }
   }
 
@@ -214,18 +234,18 @@ module ScheduleOccurrence refines ScheduleOccurrenceLaws {
     }
   }
 
-  // next(t, now) == nxt + (q+1)*e.
-  lemma L6IntervalNext(a: int, e: int, j: nat, now: int)
-    requires e > 0 && a + j * e <= now
-    ensures var nxt := a + j * e; var q := (now - nxt) / e;
-      Next(Interval(a, e), now) == Some(nxt + (q + 1) * e)
+  // The next occurrence after now is one period after the latest due one: nxt + (q+1)*e.
+  lemma L6IntervalNext(a: Ms, e: Ms, j: nat, now: Ms)
+    requires Wf(Interval(a, e)) && InRange(now) && a as int + j * (e as int) <= now as int
+    ensures var nxt := a as int + j * (e as int); var q := (now as int - nxt) / e as int;
+      Next(Interval(a, e), now).Some? && Next(Interval(a, e), now).v as int == nxt + (q + 1) * (e as int)
   {
-    var nxt := a + j * e;
-    var q := (now - nxt) / e;
-    MulNonNeg(j, e);
-    ShiftDiv(now - nxt, j, e);
-    assert now - a == (now - nxt) + j * e;
-    assert (now - a) / e == q + j;
-    assert a + ((now - a) / e + 1) * e == nxt + (q + 1) * e;
+    var nxt := a as int + j * (e as int);
+    var q := (now as int - nxt) / e as int;
+    MulNonNeg(j, e as int);
+    ShiftDiv(now as int - nxt, j, e as int);
+    assert now as int - a as int == (now as int - nxt) + j * (e as int);
+    assert (now as int - a as int) / e as int == q + j;
+    assert a as int + ((now as int - a as int) / e as int + 1) * (e as int) == nxt + (q + 1) * (e as int);
   }
 }
