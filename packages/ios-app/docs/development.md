@@ -121,7 +121,7 @@ A synthesized tap or drag returns only after the app is idle, so a sheet detent 
 directly afterwards. A predicate expectation polls first after about 1 s, and each poll takes
 accessibility snapshots that cost seconds under host load, so a short window over already-settled
 state fails on load, not behaviour (#2410). UI tests therefore wait through the one `waitUntil`
-(`UITests/WaitUntil.swift`), which reads at once and then polls; `scripts/test-source-policy.sh` refuses
+(`packages/ios-app/UITests/WaitUntil.swift`), which reads at once and then polls; `packages/ios-app/scripts/test-source-policy.sh` refuses
 predicate expectations in UI tests. A fixture that holds a reply to expose a loading state holds it
 until the test releases it, never for a fixed time.
 
