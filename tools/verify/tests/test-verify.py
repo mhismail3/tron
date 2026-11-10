@@ -693,6 +693,24 @@ class FastPathTests(VerifyCase):
         self.assertEqual(mixed.returncode, 0, mixed.stdout)
         self.assertEqual(r.report()["selection"]["tests"], ["mods/alpha/test-alpha.py"])
 
+    def test_the_privacy_guard_reads_the_change_except_its_own_needles_and_still_fails_a_leak(self) -> None:
+        r = self.repo
+        handle = "mhis" + "mail3"
+        guard = (r.path / "scripts/personal-info-guard.sh").read_text()
+        r.write("scripts/personal-info-guard.sh", guard + f"# {handle}\n")
+        r.commit("guard names its needle")
+        r.git("branch", "-f", "base")
+        r.write("scripts/personal-info-guard.sh", guard)
+        r.write("mods/alpha/alpha.py", "VALUE = 'changed'\n")
+        r.commit("guard needle removed")
+        own = r.verify("--changed")
+        self.assertEqual({step["name"]: step["status"] for step in r.report()["steps"]}["privacy guard"], "ok", own.stdout)
+        r.write("mods/alpha/alpha.py", f"VALUE = '{handle}'\n")
+        r.commit("leak")
+        leaked = r.verify("--changed")
+        self.assertEqual(leaked.returncode, 1, leaked.stdout)
+        self.assertIn("privacy guard FAILED", leaked.stdout)
+
     def test_a_gateway_golden_change_selects_only_the_lock_that_reads_it(self) -> None:
         r = self.repo
         base = "packages/gateway/src/e2e"

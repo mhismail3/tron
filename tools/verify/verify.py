@@ -1191,7 +1191,8 @@ def main(argv: list[str]) -> int:
          if baseline_docs or selection["docInputs"] or gateway_touched else None, {}),
         ("agent policy", ["bash", "scripts/check-agent-policy.sh"], {}),
         ("home layout", [tron, "home-layout", "check"], {}),
-        ("privacy guard", f"git diff {base}..HEAD | scripts/personal-info-guard.sh --stdin", {}),
+        ("privacy guard", f"git diff {base}..HEAD -- . ':(exclude,top,literal)scripts/personal-info-guard.sh' "
+                          "| scripts/personal-info-guard.sh --stdin", {}),
         ("git diff --check", ["git", "diff", "--check", f"{base}..HEAD"], {}),
     ]
     gateway_checks = [("gateway typecheck", node + ["npm", "run", "check"]),

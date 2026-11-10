@@ -121,7 +121,8 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
 3. documentation policy and `scripts/check-agent-policy.sh`; `scripts/tron docs check
    --base <base>` when Markdown, a manifest or the Gateway changed; `--all` and empty-diff
    baselines check every block without `--base` (loaded generators need Gateway dependencies).
-4. the privacy guard over `git diff <base>..HEAD`
+4. the privacy guard over `git diff <base>..HEAD`, except the guard's own needle file, which its
+   full and staged scans exempt too
 5. `git diff --check`
 6. When the selection touches the Gateway: `npm run check` (production and test
    support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
