@@ -5,14 +5,16 @@ import { expect, it, vi } from "vitest";
 import { startLockGateway } from "../../../../test-support/gateway-lock-harness.js";
 import { ConnectionOwner } from "../../../integrations/connection-owner.js";
 
-// A write landing between the migration's backup and its publication: the hook
-// runs once, as the next temporary file beside connections.json is opened.
-const beforePublish = vi.hoisted(() => ({ hook: undefined as undefined | (() => Promise<void>) }));
+// Faults at the migration's publication: `hook` runs once as the temporary file
+// beside connections.json opens (a write after the backup); `directorySync` fails
+// the directory open after the rename once.
+const beforePublish = vi.hoisted(() => ({ hook: undefined as undefined | (() => Promise<void>), directorySync: undefined as undefined | string }));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
     const hook = beforePublish.hook;
     if (hook && String(args[0]).includes("connections.json.migration-")) { beforePublish.hook = undefined; await hook(); }
+    if (beforePublish.directorySync === String(args[0])) { beforePublish.directorySync = undefined; throw new Error("directory sync failed"); }
     return actual.open(...args);
   } };
 });
@@ -101,7 +103,13 @@ it("removes retired setup operations, receipts and Raindrop mappings once, behin
     beforePublish.hook = () => writeFile(path, concurrent, { mode: 0o600 });
     await expect(applyConnectionsResidue(await planConnectionsResidue(home), join(root, "late"))).rejects.toThrow(/changed since it was read/);
     expect(await readFile(path, "utf8")).toBe(concurrent);
-    await expect(restoreConnectionsResidue(join(root, "late"))).rejects.toThrow(/ENOENT/);
+    await expect(restoreConnectionsResidue(join(root, "late"))).rejects.toThrow(/ENOENT.*manifest\.json/);
+    await writeFile(path, original, { mode: 0o600 });
+    beforePublish.directorySync = directory;
+    await expect(applyConnectionsResidue(await planConnectionsResidue(home), join(root, "unsynced"))).rejects.toThrow(/directory sync failed/);
+    expect(await planConnectionsResidue(home)).toEqual({ path, setupOperations: 0, receipts: 0, collectionMappings: 0 });
+    expect(await restoreConnectionsResidue(join(root, "unsynced"))).toBe(true);
+    expect(await readFile(path)).toEqual(original);
     await writeFile(path, original, { mode: 0o600 });
     await writeFile(path, JSON.stringify({ ...state, setupOperations: { jev: { ...state.setupOperations.jev, status: "unknown" } } }), { mode: 0o600 });
     await expect(planConnectionsResidue(home)).rejects.toThrow(/Setup operation is invalid/);

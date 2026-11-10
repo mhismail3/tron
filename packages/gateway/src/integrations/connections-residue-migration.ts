@@ -55,9 +55,13 @@ export async function applyConnectionsResidue(plan: ResiduePlan, backup: string)
   if (!(await readFile(original)).equals(plan.before)) throw new Error(`${plan.path} changed while it was backed up; rerun with a new backup directory`);
   const manifest: Manifest = { version: 1, path: plan.path, before: digest(plan.before), after: digest(plan.after) };
   await writeFile(join(backup, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-  // A manifest names only a published migration, so restore never acts on a refused one.
+  // A manifest names only a published migration, so restore never acts on a
+  // refused one; a failure after the rename (directory sync) keeps it.
   try { await publish(plan.path, plan.after, plan.before); }
-  catch (error) { await rm(join(backup, "manifest.json"), { force: true }); throw error; }
+  catch (error) {
+    if (!(await readFile(plan.path)).equals(plan.after)) await rm(join(backup, "manifest.json"), { force: true });
+    throw error;
+  }
   return true;
 }
 
