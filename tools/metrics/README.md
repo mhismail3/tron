@@ -59,8 +59,8 @@ Rules use only the path, the Git file mode and the blob bytes.
 Paths are Git's bytes decoded as UTF-8; undecodable bytes are kept as escapes.
 
 **Hand-written** = `production + tests + tooling + docs`. `fixtures` (golden and
-fixture data) is reported separately so adding locks does not fight the size
-target. `data`, `lockfile`, `thirdParty` and `binary` are excluded from
+fixture data) is reported separately so locks do not distort the hand-written
+signal. `data`, `lockfile`, `thirdParty` and `binary` are excluded from
 hand-written totals but reported with file, line and byte counts.
 
 Known consequences: SwiftPM `Package.swift` counts as code by its suffix;

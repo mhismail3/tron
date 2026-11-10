@@ -262,9 +262,6 @@ export class NotificationService {
 
   async initialize(): Promise<void> {
     await this.store.initialize();
-    for (const kind of this.store.takeMigratedLegacyKinds()) {
-      this.reportDelivery({ kind, outcome: "failed", relayReason: "schema_upgrade" });
-    }
     const now = this.now();
     await this.update((document) => retainRevocationAuthority(prune(document, now), now));
     this.timer = setInterval(() => void this.drain(), 2_000);
