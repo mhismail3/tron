@@ -32,7 +32,7 @@
 // they reject unknown fields, wrong kinds, non-finite numbers, non-safe integers and unknown constructors,
 // naming the JSON path. Swift decoders are tolerant (the iOS policy): unknown fields are ignored, an absent
 // or null field takes its type's default, an enum with an `unknown` value maps unknown values to it (see
-// tools/proof/README.md "Wire"). Swift parses JSON itself so that order and duplicates (last wins, at the
+// tools/proof/dafny2wire/README.md "Wire"). Swift parses JSON itself so that order and duplicates (last wins, at the
 // first key's position) follow JSON.parse.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
