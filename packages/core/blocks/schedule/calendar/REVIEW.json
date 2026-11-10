@@ -1,63 +1,62 @@
 {
-  "packetHash": "a94bb889432a500f",
-  "tier": "high-stakes",
-  "date": "2026-11-09",
-  "writer": {
-    "agent": "parent",
-    "model": "anthropic/claude-opus-5-5"
+ "packetHash": "3402cb3f05b45789",
+ "tier": "high-stakes",
+ "date": "2026-11-10",
+ "writer": {
+  "agent": "parent",
+  "model": "anthropic/claude-opus-5-5"
+ },
+ "reviewer": {
+  "agent": "law-reviewer (runs d3dcf804, 37c42366, 680867bc)",
+  "model": "anthropic/claude-haiku-5-5",
+  "session": "2026-11-10T15-22-45-384Z_01a1c60d-f308-763e-83f4-9c25d4edb092/c0b8af8d-7e4b-4467-98ba-d8b7a3d80044/run-0/session.jsonl"
+ },
+ "laws": {
+  "N1 next-sound": {
+   "verdict": "ACCEPT",
+   "notes": "Unchanged from round 2. English matches after < x < Horizon and Occ(x). N1+N2+N3 together pin Next exactly."
   },
-  "reviewer": {
-    "agent": "law-reviewer (run ba5d22b5)",
-    "model": "openai/gpt-6-luna",
-    "session": "2026-11-09T09-25-13-804Z_01a1bfa0-43cb-7473-beb1-ed93d992bcce/55c97bb9-e8c6-4818-b05f-2ec6d50ba27f/run-0/session.jsonl"
+  "N2 next-least": {
+   "verdict": "ACCEPT",
+   "notes": "Unchanged. Matches Occ(y), y > after, Next <= y, with no horizon bound on y. Conditional on Next being Some, as the English presupposes."
   },
-  "laws": {
-    "N1 next-sound": {
-      "verdict": "ACCEPT",
-      "notes": "English matches the strict-after, strict-before-horizon and calendar-occurrence postcondition. Concrete witness: UTC constant offset 0, Monday 09:00, after 2026-11-09 08:00Z yields that date at 09:00; 124 mutants killed (54 only here). The zone resolver semantics intentionally extend TS's date-order scan to the earliest qualifying instant within a broader horizon."
-    },
-    "N2 next-least": {
-      "verdict": "ACCEPT",
-      "notes": "The quantified Dafny condition exactly says every occurrence strictly after after, including beyond the horizon, is not earlier than Next; concrete witness is the N1 UTC/Monday case with y at the following Monday. It is sound for TS's first date-order match under ordinary calendar offsets, and the least-instant choice is the intended generalization across date-order anomalies; 17 mutants killed."
-    },
-    "N3 next-complete": {
-      "verdict": "ACCEPT",
-      "notes": "English and Dafny agree that an occurrence strictly inside the bounded horizon implies Next exists; UTC constant offset and Monday 09:00 with after Monday 08:00 is a satisfying input. This is stronger than TS's error-on-no-match behavior only within the oversized bounded horizon and mutation evidence supports it (13 killed, though none exclusively)."
-    },
-    "N4 next-progress": {
-      "verdict": "ACCEPT",
-      "notes": "The premises are satisfiable (UTC/no changes, Monday in weekdays), and the conclusion guarantees a bounded next result; the 8-day bound is appropriate for a static zone and nonempty weekdays. The only mismatch is an intended strengthening of TS's 14-date search; 51 mutants killed, though none exclusively."
-    },
-    "P1 prior-sound": {
-      "verdict": "ACCEPT",
-      "notes": "The statement exactly requires a real occurrence in [Floor,b]; UTC/no changes, Monday 09:00 and b Monday 10:00 is a concrete witness. It matches TS's prior result within its scan window and explicitly bounds it; 50 mutants killed (17 only here)."
-    },
-    "P2 prior-greatest": {
-      "verdict": "ACCEPT",
-      "notes": "The universal occurrence-at-or-before-b condition and greatest-result conclusion match the English; with the same UTC Monday case and b Monday 10:00, y at Monday 09:00 satisfies the premises. Occurrences before Floor are automatically no later than the sound result, so this is stronger/generalized compared with TS's 15-day date scan; 21 mutants killed."
-    },
-    "P3 prior-complete": {
-      "verdict": "ACCEPT",
-      "notes": "English and Dafny match for any occurrence in [Floor,b]; UTC/no changes with Monday 09:00 and b Monday 10:00 provides a witness. It guarantees totality over the bounded lookback, consistent with intended bounded prior semantics; 22 mutants killed (2 exclusively)."
-    },
-    "F1 first": {
-      "verdict": "ACCEPT",
-      "notes": "Equality of First and Next(now-1) is exactly the stated boundary rule, including occurrence exactly now; UTC Monday 09:00 with now exactly 09:00 satisfies the intended case. This directly matches TS's calendar branch and all 6 mutants are exclusively killed here."
-    },
-    "C1 classify-not-due": {
-      "verdict": "ACCEPT",
-      "notes": "For nxt>now, exact result equality is precisely the English and matches TS's early return; e.g. UTC any valid calendar, now 08:00 and nxt 09:00 satisfies it. Six mutants are exclusively killed here."
-    },
-    "C2 classify-due": {
-      "verdict": "ACCEPT",
-      "notes": "The branch equality states the latest/skip result exactly and does not require stale nxt to be an actual calendar occurrence, matching TS's compare-only gate; UTC Monday 09:00, now 10:00, nxt 08:00 is a witness. This covers stale-input behavior and kills 12 mutants exclusively."
-    }
+  "N3 next-complete": {
+   "verdict": "ACCEPT",
+   "notes": "Unchanged. Matches. The 14-day parenthetical holds: Horizon - after is at least 14.5 days."
   },
-  "acceptedMutants": {
-    "AtLeast/boundary/>=->>#1": "AGREE",
-    "AtLeast/off-by-one/x->(x + 1)#1": "AGREE",
-    "Least/boundary/<=-><#1": "AGREE",
-    "Most/boundary/>=->>#1": "AGREE"
+  "N4 next-progress": {
+   "verdict": "ACCEPT",
+   "notes": "Fixed in round 2 (round 1 REJECT: English said 'a zone whose offset never changes', narrower premise z.changes.Nil?). English 'in a zone with an empty change list (one fixed offset)' matches requires z.changes.Nil?. Eight-day bound holds: less than 7 DAY + 1439 MINUTE < 8 DAY."
   },
-  "general": "High-stakes is appropriate: this decides automation dispatch/skip, feeding a task lifecycle. All six law kinds are accounted for; recovery and uncertain-outcomes are reasonably n/a for this pure stateless calculation, though their owning lifecycle block must prove restart/effect handling. N3/P3 establish existence conditionally rather than totality for empty weekdays; valid shell calendars exclude empty weekdays, but WfCal itself does not, so keep the fa\u00e7ade validation contract tested. A1's Intl parity, 19-day table reach, minute-granularity and <=18h offsets need shell contract tests; zone-table sampling could miss two offset transitions cancelling within 12 hours, as its own comment acknowledges. The 19,896/19,896 generated shadow is not real traffic and excludes 104 throwing Apia skipped-date cases (#2382); this residual remains a cut-over blocker, as does the required >=7-day real-traffic replay. TS scans dates d0..d0+14 / d0..d0-14 and returns first date-order match; this block instead selects least/greatest instant across an expanded horizon and defines gaps as first later local minute and folds as earliest instant. The differential oracle supports the changed behavior on compared inputs, but ordering differences and Apia exclusion require explicit product disposition before cut-over. Mutant evidence: 207/211 killed, zero gaps/survivors; all four accepted equivalences are valid branch-choice identities, not dead code."
+  "P1 prior-sound": {
+   "verdict": "ACCEPT",
+   "notes": "Unchanged. Matches Floor(b) <= x <= b and Occ(x)."
+  },
+  "P2 prior-greatest": {
+   "verdict": "ACCEPT",
+   "notes": "Unchanged. Matches y <= b, Occ(y) gives y <= Prior, conditional on Prior being Some."
+  },
+  "P3 prior-complete": {
+   "verdict": "ACCEPT",
+   "notes": "Unchanged. Matches. The 14-day parenthetical holds."
+  },
+  "F1 first": {
+   "verdict": "ACCEPT",
+   "notes": "Matches: First == Next(now-1), with InRange(now-1) excluding exactly the now=-LIMIT case the English notes; 'about 33,700 BC' is correct for -2^50 ms."
+  },
+  "C1 classify-not-due": {
+   "verdict": "ACCEPT",
+   "notes": "Unchanged. Exact match with Classify's first branch."
+  },
+  "C2 classify-due": {
+   "verdict": "ACCEPT",
+   "notes": "Unchanged. Exact on both branches. 'Latest' and 'next' are the bounded Prior and Next, whose floor and horizon the P and N laws state. A stale nxt is compared with now only, never checked as an occurrence."
+  }
+ },
+ "acceptedMutants": {
+  "AtLeast/boundary/>=->>#1": "AGREE",
+  "Least/boundary/<=-><#1": "AGREE",
+  "Most/boundary/>=->>#1": "AGREE"
+ },
+ "general": "Round 3 ACCEPT for all ten laws at 3402cb3f05b45789 (round 1 at eb31c4e0657bc19a: N4 REJECT for English broader than its premise, fixed; recovery kind named a non-existent block, fixed; AtLeast off-by-one acceptance removed after the mutation run killed it). Laws are sound and non-vacuous; N1-N3 and P1-P3 pin Next and Prior exactly; the Ms/List/ghost changes do not weaken the years 0000-9999 domain. The #2382 disposition stated in Earliest is accepted: a whole civil date with no instant is skipped, as the maintainer decided; the same rule also skips a date whose clocks jump past the trigger's time across midnight (stated to the maintainer on #2382; no such IANA transition is known). Residual: the zone table's reach and whole-minute claims (A1) and the façade precondition checks (A2) are shell contracts, not proven here; the old-against-new comparison (333,732 calls, 3,019 differences all the #2382 rule) is cited, not verified by the reviewer."
 }

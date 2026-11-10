@@ -142,8 +142,8 @@ abstract module ScheduleCalendarLaws {
     requires Wf(z) && WfCal(c) && InRange(after) && Occ(z, c, y) && after as int < y < Horizon(z, after as int)
     ensures Next(z, c, after).Some?
 
-  // N4 next-progress: in a zone whose offset never changes, a calendar with at least one weekday always has a
-  // next occurrence, at most eight days after the given time.
+  // N4 next-progress: in a zone with an empty change list (one fixed offset), a calendar with at least one
+  // weekday always has a next occurrence, at most eight days after the given time.
   lemma N4NextProgress(z: Zone, c: Calendar, after: Ms)
     requires Wf(z) && WfCal(c) && InRange(after) && z.changes.Nil? && c.weekdays.Cons?
     ensures Next(z, c, after).Some? && Next(z, c, after).v as int <= after as int + 8 * DAY as int
@@ -166,7 +166,7 @@ abstract module ScheduleCalendarLaws {
     ensures Prior(z, c, b).Some?
 
   // F1 first: the first occurrence for a trigger created at `now` is the next one after one millisecond
-  // before now, so an occurrence exactly at now counts. (At now = -LIMIT, about 33,000 BC, that time is out
+  // before now, so an occurrence exactly at now counts. (At now = -LIMIT, about 33,700 BC, that time is out
   // of range and the law says nothing.)
   lemma F1First(z: Zone, c: Calendar, now: Ms)
     requires Wf(z) && WfCal(c) && InRange(now) && InRange(now - 1)

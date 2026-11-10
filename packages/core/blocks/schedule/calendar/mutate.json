@@ -86,11 +86,6 @@
       "reason": "AtLeast(lo, x) = max(lo.v, x): where the mutation changes the branch taken (equal values) both branches return the same value",
       "reviewer": "the independent law reviewer (REVIEW.json acceptedMutants)"
     },
-    "AtLeast/off-by-one/x->(x + 1)#1": {
-      "kind": "equivalent",
-      "reason": "AtLeast(lo, x) = max(lo.v, x): on integers lo.v >= x + 1 is lo.v > x, and at lo.v == x both branches return x",
-      "reviewer": "the independent law reviewer (REVIEW.json acceptedMutants)"
-    },
     "Least/boundary/<=-><#1": {
       "kind": "equivalent",
       "reason": "Least keeps the lesser of two optional instants: where the mutation changes the branch taken (equal values) both branches return the same value",
@@ -113,7 +108,7 @@
     "progress": [
       "N4 next-progress"
     ],
-    "recovery": "n/a: stateless; the scheduler's restart behaviour is the automation-run lifecycle block (P4)",
+    "recovery": "n/a: stateless; restart and recovery of automation runs belong to the Gateway automation store and scheduler (packages/gateway/src/automations), which store the next occurrence and call Classify again after a restart",
     "stale-inputs": [
       "C2 classify-due"
     ],

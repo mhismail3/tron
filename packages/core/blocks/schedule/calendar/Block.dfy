@@ -277,13 +277,13 @@ module ScheduleCalendar refines ScheduleCalendarLaws {
     assert Earliest(z, d, c.minute as int, r.v as int);
   }
 
-  // A candidate is an occurrence on its date, strictly between the bounds.
   // A candidate lies strictly between the bounds.
   lemma CandidateBounds(z: Zone, c: Calendar, d: Ms, lo: Ms, hi: Ms)
     requires Wf(z) && WfCal(c) && DateOk(d as int) && Candidate(z, c, d, lo, hi).Some?
     ensures lo < Candidate(z, c, d, lo, hi).v < hi
   {}
 
+  // A candidate is an occurrence on its date, strictly between the bounds.
   lemma CandidateOcc(z: Zone, c: Calendar, d: Ms, lo: Ms, hi: Ms)
     requires Wf(z) && WfCal(c) && DateOk(d as int) && Candidate(z, c, d, lo, hi).Some?
     ensures var x := Candidate(z, c, d, lo, hi).v as int; lo as int < x < hi as int && LDate(z, x) == d as int && Occ(z, c, x)
