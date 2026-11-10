@@ -15,8 +15,9 @@ import { validateConnectionState } from "./connection-contract.js";
  * every setup operation and receipt and each instance's `raindropCollections`,
  * keeping the instances and their credential references. It is idempotent (a
  * second run plans nothing), clones the original into an empty backup directory
- * with a digest manifest before publishing, publishes atomically only while the
- * file is unchanged, and `--restore` puts back only bytes it published. Delete
+ * with a digest manifest before publishing, replaces the file by rename only if its
+ * bytes are unchanged when checked just before, and `--restore` puts back only
+ * bytes it published. Run it with no other writer of the file. Delete
  * this module, with the Raindrop mapping validator, once the live run is verified.
  */
 
@@ -54,7 +55,9 @@ export async function applyConnectionsResidue(plan: ResiduePlan, backup: string)
   if (!(await readFile(original)).equals(plan.before)) throw new Error(`${plan.path} changed while it was backed up; rerun with a new backup directory`);
   const manifest: Manifest = { version: 1, path: plan.path, before: digest(plan.before), after: digest(plan.after) };
   await writeFile(join(backup, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-  await publish(plan.path, plan.after, plan.before);
+  // A manifest names only a published migration, so restore never acts on a refused one.
+  try { await publish(plan.path, plan.after, plan.before); }
+  catch (error) { await rm(join(backup, "manifest.json"), { force: true }); throw error; }
   return true;
 }
 

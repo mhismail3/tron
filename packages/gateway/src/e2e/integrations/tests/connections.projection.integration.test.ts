@@ -101,6 +101,7 @@ it("removes retired setup operations, receipts and Raindrop mappings once, behin
     beforePublish.hook = () => writeFile(path, concurrent, { mode: 0o600 });
     await expect(applyConnectionsResidue(await planConnectionsResidue(home), join(root, "late"))).rejects.toThrow(/changed since it was read/);
     expect(await readFile(path, "utf8")).toBe(concurrent);
+    await expect(restoreConnectionsResidue(join(root, "late"))).rejects.toThrow(/ENOENT/);
     await writeFile(path, original, { mode: 0o600 });
     await writeFile(path, JSON.stringify({ ...state, setupOperations: { jev: { ...state.setupOperations.jev, status: "unknown" } } }), { mode: 0o600 });
     await expect(planConnectionsResidue(home)).rejects.toThrow(/Setup operation is invalid/);

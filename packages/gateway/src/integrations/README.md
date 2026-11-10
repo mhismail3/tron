@@ -48,7 +48,8 @@ scripts/tron verify --module gateway/integrations
 scripts/tron test gateway src/e2e/integrations/tests/connections.projection.integration.test.ts
 ```
 
-The projection test seeds retained historical state, reads it through the real agent
+The same file proves the residue migration (backup, raced and refused publications,
+restore) and the retired RPCs' refusal. The projection test seeds retained historical state, reads it through the real agent
 `connections` tool, and proves an empty projection without creating storage, exact
 redaction of the credential reference and byte-identical state after the read.
 
