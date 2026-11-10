@@ -2,24 +2,22 @@
 
 ## Purpose
 
-Read-only projection of retained connection definitions, account envelopes and
-setup operations. This owner does not hold credentials or run provider operations.
+Read-only projection of retained connection account envelopes and setup operations. This owner does not hold credentials or run provider operations.
 
 ## Owns
 
 `ConnectionOwner` reads `<tronHome>/gateway/integrations/connections.json`. The
 [pure L1 contract](../modules/integrations/contract.ts) owns schema/public/private
-values, the shared credential-service identifier and the read-only `ConnectionAccess`
-consumed by the agent `connections` tool. `connection-contract.ts` retains runtime
-validation of persisted state and definitions. The missing file is an empty read
+values and the read-only `ConnectionAccess` consumed by the agent `connections` tool.
+`connection-contract.ts` retains runtime validation of persisted state. The missing file is an empty read
 projection; the owner never creates, migrates or writes storage.
 
 ## Contract
 
-`snapshot()` returns definitions, redacted instances, setup operations, capability
-availability and the state revision. Presentation snapshots omit the opaque credential
-reference. A disabled, disconnected or unadmitted instance cannot advertise an
-available capability. There are no connection RPCs or mutations.
+`snapshot()` returns redacted instances, setup operations and the state revision, with
+`definitions` and `capabilities` always empty: production has no connection definitions
+or adapters. Presentation snapshots omit the opaque credential reference. There are no
+connection RPCs or mutations.
 
 ## Invariants
 
