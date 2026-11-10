@@ -1408,6 +1408,46 @@ class ShardedIosProbeTests(unittest.TestCase):
             result = batch.execute(root, lane, root / 'probe')
         self.assertEqual(result['exit'], 0, result)
 
+    def test_a_verifier_ios_step_probe_builds_its_products_before_running_the_case(self):
+        """#2438: a probe worktree starts without iOS test products, and `tron-ios-test run` only reuses
+        them, so the probe of a failed verifier iOS step builds first, as the verifier did."""
+        import sys
+        sys.path.insert(0, str(ROOT / 'tools/verify'))
+        import batch
+        build = 'import pathlib; pathlib.Path("products").write_text("built")\n'
+        run = ('import json, pathlib, sys\n'
+               'if not pathlib.Path("products").exists(): sys.exit("error: test products are missing; run build first")\n'
+               'out = pathlib.Path("run"); out.mkdir()\n'
+               '(out / "summary.json").write_text(json.dumps({"passedTests": 1}))\n'
+               'print("iOS test run complete: " + str(out.resolve()))\n')
+        with tempfile.TemporaryDirectory(prefix='tron-batch-ios-probe-') as temporary:
+            verifier, probe = Path(temporary) / 'verifier', Path(temporary) / 'probe'
+            for root in (verifier, probe):
+                root.mkdir()
+                (root / 'build.py').write_text(build)
+                (root / 'run.py').write_text(run)
+            subprocess.run(['git', 'init', '-q'], cwd=verifier, check=True)
+            subprocess.run(['git', '-c', 'user.name=F', '-c', 'user.email=f@example.invalid', 'commit', '-q',
+                            '--allow-empty', '-m', 'x'], cwd=verifier, check=True)
+            sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=verifier, text=True).strip()
+            report = {'commit': sha, 'verdict': 'failed', 'message': 'tests: ios 1/2 failed', 'passingTests': 1, 'selection': {},
+                      'steps': [{'name': 'ios build', 'status': 'ok', 'command': ['python3', 'build.py'], 'cwd': '.'},
+                                {'name': 'tests: ios 1/2', 'status': 'failed', 'command': ['python3', 'run.py', 'A/B/testC'],
+                                 'cwd': '.'}]}
+            writer = verifier / 'verifier.py'
+            writer.write_text(f'import pathlib; p = pathlib.Path("test-results/verify"); p.mkdir(parents=True)\n'
+                              f'(p / "{sha}.json").write_text({json.dumps(json.dumps(report))})\n')
+            verified = batch.execute(verifier, {'name': 'full verify', 'command': ['python3', 'verifier.py']}, Path(temporary) / 'lane')
+            self.assertIn('probe', verified, verified)
+            probed = batch.execute(probe, {**verified['probe'], 'probe': True}, Path(temporary) / 'attempt')
+            self.assertEqual(probed['exit'], 0, (Path(temporary) / 'attempt/output.log').read_text())
+            self.assertTrue((probe / 'run/summary.json').exists())
+            report['steps'][1]['name'] = 'tests: ios-journeys'
+            writer.write_text(f'import pathlib; p = pathlib.Path("test-results/verify"); p.mkdir(parents=True, exist_ok=True)\n'
+                              f'(p / "{sha}.json").write_text({json.dumps(json.dumps(report))})\n')
+            journeys = batch.execute(verifier, {'name': 'full verify', 'command': ['python3', 'verifier.py']}, Path(temporary) / 'journeys')
+            self.assertEqual(journeys['probe']['command'], ['python3', 'run.py', 'A/B/testC'], 'a journey probe runs its own harness, with no build')
+
     def test_only_an_exact_case_vitest_head_control_requires_a_selection(self):
         import sys
         sys.path.insert(0, str(ROOT / 'tools/verify'))
