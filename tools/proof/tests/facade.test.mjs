@@ -145,8 +145,14 @@ test("a block a shell runs compiles to a module that needs no Dafny runtime", as
   for (const [file, from, to, message] of [
     [block, "    else Flat", "    else if a == b then Flat else Flat", /Compare needs the Dafny runtime \(compiled line \d+: .*_dafny\.areEqual/],
     [block, "{ at / every }", "{ Total([at, every]) }\n  function Total(s: seq<Ms>): Ms { if |s| == 0 then 0 else s[0] }", /Slot needs the Dafny runtime \(compiled line \d+: .*_dafny\.Seq\.of/],
-    // A block's own function is never exempt, whatever its name: only the compiler's datatype and newtype members are.
+    // A block's own function is never exempt, whatever its name or owner: only the compiler's datatype and newtype
+    // members are.
     [block, "{ at / every }", "{ if equals(at, every) then 0 else at / every }\n  function equals(a: Ms, b: Ms): bool { [a] == [b] }", /equals needs the Dafny runtime/],
+    [block, "{ at / every }", "{ if Box.IntegerRange(at) then at / every else 0 }\n  datatype Box = Box(n: Ms) { static function IntegerRange(a: Ms): bool { [a] == [a] } }", /IntegerRange needs the Dafny runtime/],
+    [block, "{ at / every }", "{ if Box(at).equals(every) then 0 else at / every }\n  datatype Box = Box(n: Ms) { function equals(b: Ms): bool { [n] == [b] } }", /equals needs the Dafny runtime/],
+    // A parameter may not take one of the façade's own names.
+    [laws, "function Slot(at: Ms, every: Ms): Ms\n    requires Recent(at) && Period(every)", "function Slot(at: Ms, bool: Ms): Ms\n    requires Recent(at) && Period(bool)", /Slot: parameter name bool is reserved by the façade/],
+    [laws, "predicate Recent(at: Ms) { -1000 < at < 1000 }", "predicate Recent(inMs: Ms) { -1000 < inMs < 1000 }", /Recent: parameter name inMs is reserved by the façade/],
     [laws, "function Compare(a: Reading, b: Reading): Trend", "function Compare(a: Reading, b: Reading): Trend\n  function Wide(x: int): int", /unsupported Dafny type int/],
     [laws, "newtype Level = x: int | 0 <= x <= 100", "newtype Level = x: int | 0 <= x <= Top()\n  ghost function Top(): int { 100 }", /cannot read newtype as a literal integer range within the safe integers/],
   ]) {

@@ -273,10 +273,12 @@ function emitRuntimeFacade({ datatypes, functions }, module, source, packageJson
 }
 
 // Members the compiler emits in every datatype class (instance toString and equals) and newtype class (static
-// _Is and IntegerRange) for the Dafny runtime's own use. Nothing a core runs calls them, so they alone may name
-// the runtime; a block's own functions are static members of the module's __default class and are never exempt.
-const runtimeOnly = (owner, name, isStatic) => owner !== "__default"
-  && (isStatic ? name === "_Is" || name === "IntegerRange" : name === "toString" || name === "equals");
+// _Is and the generator IntegerRange) for the Dafny runtime's own use. Nothing a core runs calls them, so they
+// alone may name the runtime. No declaration of a block compiles to one of these: its module-level functions are
+// members of __default, the compiler renames a member called toString or equals, a Dafny name cannot start with
+// an underscore, and a member function is never a generator.
+const runtimeOnly = (owner, name, isStatic, isGenerator) => owner !== "__default"
+  && (isStatic ? (name === "_Is" && !isGenerator) || (name === "IntegerRange" && isGenerator) : !isGenerator && (name === "toString" || name === "equals"));
 
 // A runtime helper stands alone when it is a function whose every name is a parameter, a local or JavaScript's own
 // Math, so it means the same outside the runtime.
@@ -312,9 +314,9 @@ export function compileCore(root, translate, env = process.env) {
     let owner = null, member = null, exempt = false;
     compiled.split("\n").forEach((line, i) => {
       const cls = /^ {2}\$module\.([\w$]+) = class /.exec(line);
-      const header = /^ {4}(static )?(?:get )?\*?([\w$]+) ?\(.*\) \{$/.exec(line);
+      const header = /^ {4}(static )?(?:get )?(\*)?([\w$]+) ?\(.*\) \{$/.exec(line);
       if (cls) { owner = cls[1]; member = null; exempt = false; }
-      else if (header) { member = header[2]; exempt = runtimeOnly(owner, member, header[1] !== undefined); }
+      else if (header) { member = header[3]; exempt = runtimeOnly(owner, member, header[1] !== undefined, header[2] !== undefined); }
       else if (/^ {0,2}\S/.test(line)) { member = null; exempt = false; }
       if (exempt) return;
       const rest = line.replace(/\b_dafny\.([\w$]+)\(/g, (_, name) => { if (!helpers.has(name)) helpers.set(name, needs(member, i, line)); return "("; });
