@@ -23,7 +23,8 @@ import verify
 
 ROOT = verify.ROOT
 # The host's one full-Gateway run at a time. A batch takes it only around each lane or probe
-# marked `gatewayLock` (a full Gateway Vitest run), in arrival order with every other Gateway
+# marked `gatewayLock` (a full Gateway Vitest run, which the test-host pool may place on the mini
+# or here; the lock covers the run here), in arrival order with every other Gateway
 # Vitest run (tools/verify/host_lock.py owns the lock), and marks that subprocess
 # HELD_BY_CALLER so its runner does not wait on the batch. Every other subprocess runs
 # unmarked: Gateway runs inside it (the verifier's Gateway groups) queue for the lock themselves.
@@ -70,8 +71,9 @@ def lanes(root: Path, base: str) -> list[dict]:
     lane_only = {key: apple[key] for key in ('TRON_IOS_TEST_LANE', 'TRON_IOS_TEST_LANE_REPOSITORY')}
     # Required lanes never disappear when a checkout/tool is missing.
     result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base]}]
+    # Gateway Vitest lanes and their case probes run on the test-host pool (mini.py), like every Gateway lane.
     for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
-        result.append({'name': name, 'chain': 'node', 'command': ['python3', 'tools/verify/gateway.py', *config],
+        result.append({'name': name, 'chain': 'node', 'command': ['python3', 'tools/verify/mini.py', 'pool', *config],
                        'vitest': True, 'gatewayLock': True, 'requires': 'packages/gateway/package-lock.json'})
     result.extend([
         {'name': 'Mac integration', 'chain': 'node', 'command': ['python3', 'tools/verify/mac.py'], 'requires': 'packages/mac-app/project.yml'},
@@ -331,6 +333,8 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             result['signature'] = signature(report['message'], failures, detail, root)
     elif lane.get('vitest'):
         output = log.read_text(errors='replace')
+        if host := re.search(r'^gateway lane: (.+)$', output, re.M):
+            result['gatewayHost'] = host.group(1)
         # The owning parser normalizes only the repo prefix and rejects suite errors.
         previous = verify.ROOT
         verify.ROOT = root
