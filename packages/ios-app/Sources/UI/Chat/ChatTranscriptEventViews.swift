@@ -272,4 +272,3 @@ private struct ChatPreparedMarkdownDetail: View {
         model.lifecycleRecordDiagnostic(event: "detail.preparation", message: "detailID=\(detailID) \(message)")
     }
 }
-
