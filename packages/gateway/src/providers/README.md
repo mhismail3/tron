@@ -73,7 +73,9 @@ and before worker controls, reading canonical fixed settings and the worker fact
   state (account, OAuth flag, slugs, names) or the stored-credential set changes, never per read, so `provider.list`
   and `model.list` cost does not grow with the open sessions.
 - **Runtime construction.** `createProviderModelRuntime` supplies canonical auth/model paths,
-  offline refresh defaults and Kimi-then-Jev policy wrapping for Gateway and session runtimes.
+  offline refresh defaults and Kimi, Claude Code identity, then Jev policy wrapping for Gateway and
+  session runtimes. The identity policy sends the Gateway's Claude Code version
+  (`claude-code-identity.json`) as the `user-agent` of stored-OAuth `anthropic` requests.
   The registry receives this factory from composition; injected raw factories use the same policies.
 - **Moonshot Kimi K3** caps the completion reservation at 32,768 tokens via
   `max_completion_tokens` (Moonshot TPM counts the reservation). Account and org quota
