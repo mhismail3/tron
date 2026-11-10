@@ -187,8 +187,8 @@ abstract module ReceiptsInvocationLifecycleLaws {
     var rs := ReceiptsOf(fs);
     match Project(rs)
     case Rejected(why, at) => out.Stopped? && out.why == why && out.at as int == at
-    case Projected(projs) => out.Finished? && |Elems(out.cells)| == |projs|
-      && forall i | 0 <= i < |projs| :: Placed(Elems(out.cells)[i], rs) && ProjOf(Elems(out.cells)[i], rs) == projs[i]
+    case Projected(projs) => (out.Finished? && |Elems(out.cells)| == |projs|
+      && forall i | 0 <= i < |projs| :: Placed(Elems(out.cells)[i], rs) && ProjOf(Elems(out.cells)[i], rs) == projs[i])
   }
 
   // F1 fold-computed: for any facts, Fold answers exactly what Project answers for the history they stand for: the
