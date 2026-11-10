@@ -24,7 +24,9 @@ sequence, datatype `==`, a tuple) is refused, naming the function and the compil
 compiler emits for the runtime's own use (a datatype's `toString` and `equals`, a newtype's `_Is` and
 `IntegerRange`) may mention it: nothing a core or its façade runs calls them, and one that names the runtime
 would throw. A block's own function is never exempt, whatever its name. Types: a newtype over a literal integer range within the JavaScript safe integers -> `number`, checked to be
-an integer in that range in both directions; `bool` -> `boolean`; `seq<T>` -> a readonly array of `T`; a datatype
+an integer in that range in both directions; `bool` -> `boolean`; `seq<T>` -> a readonly array of `T`; a linked
+list, a generic datatype of the shape `L<T> = Nil | Cons(head: T, tail: L<T>)` under any names, -> a readonly
+array of `T`, converted in a loop in both directions (no other generic datatype has a shape); a datatype
 of nullary constructors -> a string union of their names, a one-constructor datatype named like its type -> a
 plain object, any other datatype -> an object tagged by `$`; an unknown constructor is a `TypeError` in either
 direction. `bind(compiled)` binds the façade to another translation of the block; `core` is the checked-in one.

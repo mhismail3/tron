@@ -6,6 +6,9 @@ abstract module MeterLaws {
   newtype Level = x: int | 0 <= x <= 100
   datatype Reading = Reading(at: Ms, level: Level)
   datatype Trend = Rising(step: Level) | Falling(step: Level) | Flat
+  // A linked list: the form in which such a block reads and builds lists.
+  datatype Chain<T> = End | Link(first: T, rest: Chain<T>)
+  datatype Series = Series(name: Level, readings: Chain<Reading>)
 
   // Recent: a time within a second of zero.
   predicate Recent(at: Ms) { -1000 < at < 1000 }
@@ -18,4 +21,7 @@ abstract module MeterLaws {
     requires Recent(at) && Period(every)
 
   function Compare(a: Reading, b: Reading): Trend
+
+  // The levels of a series, latest reading first.
+  function Levels(s: Series): Chain<Level>
 }

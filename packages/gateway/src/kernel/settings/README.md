@@ -28,8 +28,11 @@ setting and is not an approval queue.
   a grouped Undo requires exactly its unique, consistently sized members.
 - `tool-contract.ts`: layer, qualifier, model-reference/queue and typed tool/result
   vocabulary. `settings-types.ts` owns value formatting/composition and immutable,
-  disclosed before/after reviews whose digest binds identity and every shown field. The tool selection's compose
-  and encode are shadowed by proof block `settings/tool-selection` through Debug-only seams (`toolSelectionFacts`).
+  disclosed before/after reviews whose digest binds identity and every shown field. How a tool selection's
+  entries compose, and the form a chosen selection is stored in, are decided by proof block
+  `settings/tool-selection` ([`gateway/core`](../../core/settings/tool-selection/facade.ts), generated from
+  `packages/core`): `settings-types.ts` names each tool of a call with a token and writes the block's answer back
+  as names, and holds no copy of the merge (`settings-types.test.ts` pins the names and failures around it).
 - `scope-resolution.ts`: declared binding admission, canonical targets and sorted
   qualifier identities. `settings-admission.ts` owns operational model/thinking
   selection and synchronous compaction validation.

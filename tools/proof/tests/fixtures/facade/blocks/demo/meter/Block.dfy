@@ -7,4 +7,10 @@ module Meter refines MeterLaws {
     else if b.level < a.level then Falling(a.level - b.level)
     else Flat
   }
+  function LevelsOnto(readings: Chain<Reading>, levels: Chain<Level>): Chain<Level> {
+    match readings
+    case End => levels
+    case Link(first, rest) => LevelsOnto(rest, Link(first.level, levels))
+  }
+  function Levels(s: Series): Chain<Level> { LevelsOnto(s.readings, End) }
 }
