@@ -1128,7 +1128,7 @@ while other and not Path('test-results/started-'+other).exists() and time.time()
         """#2253: the UI journey lane takes three host-slot lanes and, from the second batch on,
         the previous batch's per-journey seconds."""
         self.land('scripts/ios-gateway-e2e-test', '#!/bin/sh\nmkdir -p test-results\necho boundary-$1 >> test-results/executed\n'
-                  'if [ "$1" = run-ui ]; then echo "lanes=$TRON_IOS_E2E_UI_LANES seconds=${TRON_IOS_E2E_UI_JOURNEY_SECONDS:-none}" >> test-results/ui-env;\n'
+                  'if [ "$1" = run-ui ]; then echo "lanes=$TRON_IOS_E2E_UI_LANES keep=${TRON_IOS_E2E_UI_KEEP_GOING:-none} seconds=${TRON_IOS_E2E_UI_JOURNEY_SECONDS:-none}" >> test-results/ui-env;\n'
                   '  echo "Real-UI journey TronMobileUITests/RealGatewayPairAndChatUITests/testSlow completed in 200s (status 0); evidence: /nowhere"\n'
                   '  echo "Real-UI journey TronMobileUITests/RealGatewayPairAndChatUITests/testQuick completed in 40s (status 0); evidence: /nowhere"; fi\n')
         first = self.run_batch('--base', self.base)
@@ -1136,9 +1136,9 @@ while other and not Path('test-results/started-'+other).exists() and time.time()
         second = self.run_batch('--repeat')
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
         environments = (self.root / 'test-results/ui-env').read_text().splitlines()
-        self.assertEqual(environments[0], 'lanes=3 seconds=none')
-        lanes, seconds = environments[1].split(' ')
-        self.assertEqual(lanes, 'lanes=3')
+        self.assertEqual(environments[0], 'lanes=3 keep=1 seconds=none')
+        lanes, keep, seconds = environments[1].split(' ')
+        self.assertEqual((lanes, keep), ('lanes=3', 'keep=1'))
         self.assertEqual(json.loads(Path(seconds.split('=', 1)[1]).read_text()), {
             'TronMobileUITests/RealGatewayPairAndChatUITests/testSlow': 200,
             'TronMobileUITests/RealGatewayPairAndChatUITests/testQuick': 40})
