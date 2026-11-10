@@ -2,7 +2,6 @@ import CryptoKit
 import Foundation
 import MacTerminalSSH
 
-// Test-only CLI exercising the application's SSH implementation against real sshd.
 struct ConnectRequest: Decodable {
     let endpoint: MacTerminalEndpoint
     let privateKeyPEM: String
@@ -46,8 +45,6 @@ case "connect":
         let resize = request.resize.flatMap { $0.count == 2 ? $0 : nil }
         var awaitingResize = resize != nil
         var lastSize = "no size response"
-        // RFC 4254 window-change is fire-and-forget. Observe the real pane,
-        // not local send completion, before issuing size-sensitive input.
         let sizePattern = try NSRegularExpression(pattern: "TRON_PTY_SIZE_5:([0-9]+) +([0-9]+)")
         let resizePoll: Task<Void, Error>? = resize.map { size in
             session.resize(columns: size[0], rows: size[1])
@@ -55,7 +52,6 @@ case "connect":
                 let end = ContinuousClock.now.advanced(by: .seconds(5))
                 while ContinuousClock.now < end {
                     try Task.checkCancellation()
-                    // Echoed input cannot satisfy the expanded output marker.
                     session.write(Array("printf \"\\nTRON_PTY_SIZE_$((2+3)):%s\\n\" \"$(stty size)\"\n".utf8))
                     try await Task.sleep(for: .milliseconds(100))
                 }

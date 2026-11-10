@@ -1,8 +1,5 @@
 import XCTest
 
-/// Measures the Automations inventory on 400 Automations: time to the first
-/// rows, the time of a fixed fling sequence, then scroll hitches and memory. A
-/// measurement, not a validation gate; run it explicitly.
 final class TronAutomationsListPerformanceUITests: XCTestCase {
     @MainActor func testLargeInventoryScrollPerformance() {
         continueAfterFailure = false
@@ -18,8 +15,6 @@ final class TronAutomationsListPerformanceUITests: XCTestCase {
             .waitForExistence(timeout: 15), app.debugDescription)
         let firstRows = Date().timeIntervalSince(opened)
         expandSheet(app, title: "Automations")
-        // A fixed fling sequence through the inventory: per-swipe time grows when
-        // rows are expensive to build as they scroll into view.
         let started = Date()
         let swipes = 40
         for _ in 0..<swipes { app.swipeUp(velocity: .fast) }
@@ -33,8 +28,6 @@ final class TronAutomationsListPerformanceUITests: XCTestCase {
         add(attachment)
         let options = XCTMeasureOptions()
         options.iterationCount = 5
-        // App CPU while flinging through rows that build as they scroll in:
-        // the cost a scrolling row's body and layout put on the main thread.
         measure(metrics: [XCTCPUMetric(application: app), XCTOSSignpostMetric.scrollDecelerationMetric,
                           XCTMemoryMetric(application: app)], options: options) {
             for _ in 0..<3 { app.swipeDown(velocity: .fast) }

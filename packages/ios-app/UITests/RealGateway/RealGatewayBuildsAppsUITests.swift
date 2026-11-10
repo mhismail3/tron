@@ -1,9 +1,6 @@
 import XCTest
 import CryptoKit
 
-/// Production chat artifact → exact review → install → Apps → real interpreter,
-/// using only the isolated fixture Gateway. Synthetic publisher files are never
-/// opened by iOS: Install Build is inspected, not tapped or claimed installed.
 extension RealGatewayPairAndChatUITests {
     @MainActor func testPendingAppReviewInstallLight() throws { try pendingAppJourney(dark: false) }
     @MainActor func testPendingAppReviewInstallDark() throws { try pendingAppJourney(dark: true) }
@@ -14,7 +11,6 @@ extension RealGatewayPairAndChatUITests {
         let root = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).deletingLastPathComponent()
         let appDirectory = root.appendingPathComponent("tron/workspace/state/apps/builds")
         let suffix = dark ? "dark" : "light"
-        // Apps is independent of the chat-only Run Swift files experiment.
         let app = launchApp(additionalArguments: ["-appearanceMode", suffix, "-tron.experimental.swiftApps", "NO"])
         defer { app.terminate() }
         open(fixture.invitationLink())
@@ -22,7 +18,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
         try buildsPrompt(app, "BUILDS-APP-JOURNEY")
-        // Leave the producing chat without ever opening its inline offer card.
         app.buttons["Back"].tap()
         buildsOpenApps(app)
         let pending = app.buttons["pending-app-row-builds"]
@@ -111,7 +106,6 @@ extension RealGatewayPairAndChatUITests {
         let installBuild = app.buttons["Install Build"]
         XCTAssertTrue(installBuild.waitForExistence(timeout: 20) && installBuild.isEnabled, app.debugDescription)
         keepScreenshot(app, name: "1162-live-detail-\(suffix)")
-        // Do not tap Install Build: that would leave the hermetic UI boundary.
         app.navigationBars.buttons.element(boundBy: 0).tap()
         let query = app.textFields["Title, branch or commit"]
         buildsReveal(app, query)
@@ -125,8 +119,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(query.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertEqual(query.value as? String, "fixture", "AppStorage must survive reopen")
         try seedBuild(tron: tron, second: true)
-        // Native List pull-to-refresh must obtain a new Gateway feed without a
-        // source reinstall, keeping the persisted search intact.
         let liveList = try XCTUnwrap(app.collectionViews.allElementsBoundByIndex.first(where: { $0.isHittable }))
         liveList.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.35)).press(forDuration: 0.1,
             thenDragTo: liveList.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.9)),
@@ -205,12 +197,8 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(app.staticTexts["No apps are installed on this Mac yet. Ask Tron to build one and install it."].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(FileManager.default.fileExists(atPath: appDirectory.path), "Remove must remove source and data")
         if !dark && !large {
-            // Revisit the SAME completed offer. A retained success must not
-            // replace fresh consent with Open after this instance was removed.
             buildsClose(app)
             let original = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "session-row-", ":\(originalSessionID)")).firstMatch
-            // Let the exact row be admitted after Apps dismisses before
-            // scrolling. An immediate absence is not dashboard readiness.
             buildsReveal(app, original); original.tap()
             XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription); card.tap()
             XCTAssertTrue(review.waitForExistence(timeout: 30), app.debugDescription)
@@ -265,18 +253,12 @@ extension RealGatewayPairAndChatUITests {
         composer.tap(); composer.typeText(text)
         XCTAssertTrue(waitForEnabled(app.buttons["Send message"], timeout: 30), app.debugDescription)
         app.buttons["Send message"].tap()
-        // The terminal reply adds its footer and moves the bottom-pinned card.
-        // Acquire the review target only after that canonical turn is complete.
-        // The reply's paragraph inside its selectable text view: a StaticText on
-        // iOS 26, typed TextView on iOS 27, so match it by label within the view.
         let reply = app.textViews.matching(identifier: "chat.assistant.selectable-text")
             .descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Builds app ready for review."))
         XCTAssertTrue(reply.firstMatch.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertTrue(app.buttons["Stop Tron"].waitForNonExistence(timeout: 60), app.debugDescription)
     }
     @MainActor func buildsDismissReview(_ app: XCUIApplication) {
-        // Review has Info/Install, not Done. Dismiss its own toolbar, never a
-        // similarly titled control in the chat or an underlying sheet.
         let review = app.scrollViews["apps.install.review"]
         let bar = app.navigationBars.containing(.button, identifier: "apps.install.confirm").firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 15), app.debugDescription)

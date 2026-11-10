@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Push Notifications: this iPhone's agent-alert readiness and the alert policy
-/// it registers with the paired Mac. Its own Settings row (#939); the rows and
-/// toggles take the opening group's accent from the settings theme.
 struct PushNotificationsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(PushNotificationCoordinator.self) private var pushNotifications

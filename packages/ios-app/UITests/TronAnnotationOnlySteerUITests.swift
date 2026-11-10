@@ -1,7 +1,5 @@
 import XCTest
 
-/// Production ChatView over the fixture socket: an annotation is the queued
-/// prompt's content, not a separate row above a header-only editor affordance.
 @MainActor final class TronAnnotationOnlySteerUITests: XCTestCase {
     func testAnnotationOnlySteerBelongsToCardAndRemainsEditable() {
         for mode in ["light", "dark"] {
@@ -23,7 +21,6 @@ import XCTest
             XCTAssertGreaterThan(annotation.frame.minY, arrow.frame.maxY,
                 "The annotation must be content beneath the queue header, inside its card, not detached above it")
 
-            // The chip retains its own detail action, separate from editing the queue.
             annotation.tap()
             XCTAssertTrue(app.staticTexts["chat.annotation.comment"].waitForExistence(timeout: 5), app.debugDescription)
             app.buttons["Done"].firstMatch.tap()
@@ -67,8 +64,6 @@ import XCTest
         }
     }
 
-    /// A long steer is cut like a user prompt bubble (#2370): the card stays
-    /// bounded and its editor still opens with the whole text.
     func testLongSteerTruncatesLikeUserPrompt() {
         for mode in ["light", "dark"] {
             for large in [false, true] {
@@ -87,8 +82,6 @@ import XCTest
                 guard text.waitForExistence(timeout: 15) else { XCTFail(app.debugDescription); return }
                 Thread.sleep(forTimeInterval: 0.6)
                 keep(app, "long-steer-\(mode)-\(large ? "large" : "standard")")
-                // Uncut, 80 lines are several screens tall (1852 points); the prompt cut
-                // keeps 20 lines, well under these bounds at both sizes.
                 XCTAssertLessThan(text.frame.height, app.windows.firstMatch.frame.height * (large ? 1.6 : 0.75),
                                   "The steer text must be cut like a user prompt: \(text.frame)")
                 text.tap()

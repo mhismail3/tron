@@ -1,6 +1,5 @@
 import Foundation
 
-/// Stamped into the signed app at build time; never inferred from the connected Gateway.
 package enum IOSBuildIdentity {
     package static func sourceRevision(bundle: Bundle = .main) -> String? {
         guard let url = bundle.url(forResource: "TronBuildIdentity", withExtension: "json"),

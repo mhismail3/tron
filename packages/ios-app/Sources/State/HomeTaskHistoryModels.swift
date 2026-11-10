@@ -1,7 +1,6 @@
 import Foundation
 import TronMobileCore
 
-/// Bounded read projection; the Gateway reconstructs this from canonical evidence.
 struct HomeTaskHistoryPageDTO: Decodable, Equatable, Sendable {
     struct Item: Decodable, Equatable, Sendable, Identifiable {
         let id: String

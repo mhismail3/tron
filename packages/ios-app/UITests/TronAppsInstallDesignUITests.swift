@@ -1,7 +1,5 @@
 import XCTest
 
-/// Native approval captures, not installed-app/transport acceptance. Both
-/// sources run through the actual interpreter and shared runner sheet.
 final class TronAppsInstallDesignUITests: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
 
@@ -10,8 +8,6 @@ final class TronAppsInstallDesignUITests: XCTestCase {
     @MainActor func testLightXXXLReview() throws { try captureReview(dark: false, large: true) }
     @MainActor func testDarkXXXLReview() throws { try captureReview(dark: true, large: true) }
 
-    /// Existing production document surface, with a faux transport only. Main
-    /// has Run but no Install App action; there is no former install-review screen.
     @MainActor func testCaptureSourceBeforeInstallReview() throws {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "BuildsPreview", withExtension: "swift", subdirectory: "builds-preview"))
         for dark in [false, true] {

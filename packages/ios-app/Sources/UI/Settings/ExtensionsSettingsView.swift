@@ -39,8 +39,6 @@ struct ExtensionsSettingsView: View {
                       refreshGeneration: refreshGeneration, foregroundGeneration: model.foregroundReconciliationGeneration)
     }
 
-    /// Modules are session-free, so their read identity is the same sheet-wide
-    /// refresh identity without the package target.
     private struct ModuleLoadID: Equatable {
         let profileRevision: Int
         let refreshGeneration: Int
@@ -53,8 +51,6 @@ struct ExtensionsSettingsView: View {
                      foregroundGeneration: model.foregroundReconciliationGeneration)
     }
 
-    /// A Gateway that predates `modules.list` simply has no module list to
-    /// show; it never renders as an empty container.
     private var supportsModules: Bool {
         model.gatewayInfo?.capabilities.contains("modules.v1") == true
     }
@@ -65,9 +61,6 @@ struct ExtensionsSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            // An ordinary stack: these bounded cards host presenters (presentation-parity
-            // Surfaces). As a lazy stack, a swipe could leave it re-enqueuing its own
-            // prefetch phase mutation every pass, so the sheet never went idle (#2250).
             TronSettingsSections(alignment: .leading, spacing: 18, hidesLoneHeading: true) {
                 resolutionSection
                 BuiltinExtensionsSettingsSection(projectCWD: projectCWD)
@@ -93,8 +86,6 @@ struct ExtensionsSettingsView: View {
                     }
                 }
 
-                // The npm command is how Pi installs the packages listed above; it keeps
-                // its own card beside them, without a second heading.
                 SettingsRendererView(target: settingsTarget, writeLayer: settingsWriteLayer, projectCWD: projectCWD,
                                      presentation: .keys([Self.npmCommandKey]), detailedKeys: true)
                     .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.06)
@@ -104,9 +95,6 @@ struct ExtensionsSettingsView: View {
                     modulesSection
                 }
 
-                // The schema's remaining Sources keys (search paths), with where each
-                // comes from. Installed above is the one package list: the `packages`
-                // setting omits the bundled provider the inventory includes.
                 SettingsRendererView(target: settingsTarget, writeLayer: settingsWriteLayer, projectCWD: projectCWD,
                                      presentation: .section("sources"), embedded: true,
                                      selection: .editable(excluding: [Self.packagesKey, Self.npmCommandKey]))
@@ -181,7 +169,6 @@ struct ExtensionsSettingsView: View {
             accent: .tronBlue,
             surfaceStyle: .glass
         ) {
-            // Project Trust is one Settings row beside Extensions, not repeated here.
             TronValueRow(icon: "scope", title: "Scope", value: projectCWD == nil ? "Global resources" : "Current project")
         }
     }
@@ -205,7 +192,6 @@ struct ExtensionsSettingsView: View {
         let loaded = await model.loadPackages(target: request.target, surfaceError: false)
         guard refreshIsCurrent(request) else { return }
         guard loaded else {
-            // Superseded/coalesced reads have no error to publish.
             refreshError = model.packageError(for: request.target)
             return
         }
@@ -215,12 +201,9 @@ struct ExtensionsSettingsView: View {
     }
 
     private func refreshIsCurrent(_ request: PackageLoadID) -> Bool {
-        // A successful foreground/reconnect pass invalidates even a late offline
-        // failure. Only reads restart; accepted package commands are not replayed.
         !Task.isCancelled && presentationActivity.allowsPresentationPublication && request == loadID
     }
 
-    /// The read-only module list reported by the Gateway.
     private var modulesSection: some View {
         TronSettingsGroup("Tron Modules", detail: modulesDetail, accent: .tronPurple, surfaceStyle: .glass) {
             if let modules {
@@ -258,8 +241,6 @@ struct ExtensionsSettingsView: View {
         return "\(modules.modules.count) loaded module\(modules.modules.count == 1 ? "" : "s")"
     }
 
-    /// No Tron module registers a command today, so tools carry the row and
-    /// commands appear only when a module actually has them.
     private func moduleRow(_ module: TronModuleSummary) -> some View {
         let tools = module.tools.isEmpty ? "No tools" : "Tools: \(module.tools.joined(separator: ", "))"
         let commands = module.commands.isEmpty ? nil : "Commands: \(module.commands.map { "/\($0)" }.joined(separator: ", "))"
@@ -368,7 +349,6 @@ struct ExtensionsSettingsView: View {
                 accent: .tronBlue
             ) {
                 if package.isBundled {
-                    // Tron ships and updates it; the Gateway refuses Update and Remove.
                     EmptyView()
                 } else if isMutating(package) {
                     TronPulseLoadingIndicator(size: 18)
@@ -388,8 +368,6 @@ struct ExtensionsSettingsView: View {
         .accessibilityHint("Opens the resources this package provides")
     }
 
-    /// Themes no installed package owns: every package's themes are listed in
-    /// its own detail sheet, so this group appears only while some remain.
     @ViewBuilder
     private func localThemesGroup(_ inventory: PackageInventory) -> some View {
         let items = PackageThemesPresentation.localItems(

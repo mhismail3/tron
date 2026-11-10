@@ -3,12 +3,6 @@ import SwiftUI
 import XCTest
 @testable import TronMobile
 
-/// Typing in the mounted chat composer: each keystroke goes through
-/// `AppModel`'s composer entry point into the production
-/// `ComposerDraftCoordinator`, whose 200 ms debounce persists the draft into
-/// the real `ComposerDraftStore` on a temporary root. Four other drafts hold
-/// image attachments, as they would after a user staged photos in other chats.
-/// Keyboard and text-input system work is not part of this scenario.
 @MainActor
 final class ProfileComposerScenarioTests: XCTestCase {
     func testComposerTyping() throws {
@@ -20,8 +14,6 @@ final class ProfileComposerScenarioTests: XCTestCase {
 
 @MainActor
 final class ProfileComposerRun: ProfileScenarioRun {
-    /// One character every 110 ms within a word, then a 400 ms pause: longer
-    /// than the 200 ms persistence debounce, so every word is saved.
     static let keystrokeInterval = Duration.milliseconds(110)
     static let wordPause = Duration.milliseconds(400)
     static let otherDrafts = 4
@@ -78,8 +70,6 @@ final class ProfileComposerRun: ProfileScenarioRun {
         var text = ""
         var offset = Duration.milliseconds(50)
         var keystrokes: [(Duration, String)] = []
-        // Stop early enough that the last word's debounced save lands inside
-        // the window.
         while true {
             let word = words.sentence(1).dropLast().lowercased() + " "
             let end = offset + keystrokeInterval * (word.count - 1)
@@ -116,9 +106,6 @@ final class ProfileComposerRun: ProfileScenarioRun {
         try await profileSleep(until: window, from: start)
     }
 
-    /// The chat stays pinned and the composer's text view shows the typed
-    /// text: a composer that stopped mirroring the draft would measure
-    /// persistence without its rendering.
     func renderCheck() -> ProfileRenderCheck {
         var check = chat.renderCheck()
         let typed = typed
@@ -130,7 +117,6 @@ final class ProfileComposerRun: ProfileScenarioRun {
         return check
     }
 
-    /// The last word must have been persisted by the debounced save.
     func verify() async throws {
         let scope = ComposerDraftScope(profileID: chat.fixture.profile.id, sessionID: chat.snapshot.sessionId)
         let manifest = await store.hostedPath(for: scope).appending(path: "manifest.json")

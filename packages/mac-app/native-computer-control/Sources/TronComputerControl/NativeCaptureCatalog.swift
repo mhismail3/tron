@@ -3,8 +3,6 @@ import CoreGraphics
 import Foundation
 import ScreenCaptureKit
 
-/// Display-only strings are bounded in bytes, not graphemes (one combining
-/// cluster can otherwise be arbitrarily large). Invalid trailing UTF-8 is omitted.
 public enum NativeCaptureText {
     public static func bounded(_ value: String) -> String {
         var bytes = Array(value.utf8.prefix(256))
@@ -16,8 +14,6 @@ public enum NativeCaptureText {
     }
 }
 
-/// The external host can enumerate capture-only sources, never supply a PID or
-/// window ID. Each source retains the initially observed SCK object/filter.
 public final class NativeCaptureSource: Sendable {
     public enum Kind: String, Sendable { case window, display }
     public let kind: Kind
@@ -44,17 +40,12 @@ public final class NativeCaptureSource: Sendable {
 public enum NativeCaptureCatalog {
     public static let maximumSources = 32
 
-    /// SCK includes inactive layer-zero utility/menu surfaces in its all-window
-    /// inventory. They cannot serve the visible-window picker and can consume
-    /// the entire bounded catalog before actual app windows are considered.
     internal static func admitsWindow(layer: Int, onScreen: Bool, frame: CGRect) -> Bool {
         onScreen && layer == 0 && !frame.isNull && !frame.isInfinite
             && frame.origin.x.isFinite && frame.origin.y.isFinite
             && frame.size.width.isFinite && frame.size.height.isFinite && frame.size.width > 0 && frame.size.height > 0
     }
 
-    /// Explicit, bounded, transient inventory. Identity is captured before the
-    /// SDK await; new/replaced applications cannot enter this result afterward.
     public static func load(admission: @escaping @Sendable () -> Bool) async throws -> [NativeCaptureSource] {
         guard #available(macOS 15.2, *) else { throw NativeWindowCaptureError.unsupportedSystem }
         guard admission() else { throw NativeWindowCaptureError.stopped }
@@ -104,8 +95,6 @@ public enum NativeCaptureCatalog {
     }
 }
 
-/// Narrow public capture lifetime facade. No raw target selectors cross the
-/// host boundary and no stream starts on construction.
 public final class NativeCaptureStream: Sendable {
     private let owner: NativeWindowCapture
     internal init(selection: NativeWindowCaptureSelection, admission: @escaping @Sendable () -> Bool) throws {

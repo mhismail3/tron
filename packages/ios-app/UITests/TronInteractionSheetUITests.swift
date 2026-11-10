@@ -1,8 +1,5 @@
 import XCTest
 
-/// Hosted interaction-sheet journeys over the real AppModel, receipt executor and
-/// fixture socket: the dedicated native change card and the generic ask_user form.
-/// Gateway authorization and effects are proved by the Gateway E2E suites.
 final class TronInteractionSheetUITests: XCTestCase {
     @MainActor
     private func keep(_ app: XCUIApplication, _ name: String) {
@@ -12,15 +9,12 @@ final class TronInteractionSheetUITests: XCTestCase {
         add(attachment)
     }
 
-    /// Large detent, so a capture shows the whole request rather than its first rows.
     @MainActor
     private func expand(_ app: XCUIApplication, title: String) {
         app.navigationBars.staticTexts[title].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)))
     }
 
-    /// Rendered native fixture + real AppModel/receipt/socket path, not proof
-    /// of Gateway authorization or command effects.
     @MainActor
     func testNativeChangeCardSendsExactScopedAnswer() {
         continueAfterFailure = false

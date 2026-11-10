@@ -32,9 +32,6 @@ enum PushNavigationFailureAdmission {
 }
 
 enum PushNavigationPresentationPolicy {
-    /// A tap for the conversation already presented keeps that chat, whether it
-    /// shows as Home or as an ordinary chat on Home's chapter, so a tap never
-    /// remounts the chat the user is reading.
     static func retainsCurrent(
         presented: AppModel.SessionNavigationRoute?,
         target: AppModel.SessionNavigationRoute
@@ -102,9 +99,6 @@ struct SessionShellView: View {
     @State private var mountedHomeChatRouteID: String?
     @State private var homeSectionSheet: HomeDashboardSections.Section?
     @State private var showingHomeUsageProviders = false
-    /// When the Home view's first-appearance stagger began. Nil while the view's
-    /// list is unmounted or another view is selected, so each entry fades its
-    /// sections in once; live catalog refreshes leave it alone.
     @State private var homeRevealStart: Date?
 
     init() {
@@ -139,8 +133,6 @@ struct SessionShellView: View {
         }
     }
 
-    /// A Home conversation follows the chapter Home now names. Replacing the
-    /// route remounts the chat on that session, under the same logical route.
     private func followHomeRoute() {
         guard let route = presentedSession, route.isHome,
               let profileID = model.profiles.selected?.id,
@@ -250,9 +242,6 @@ struct SessionShellView: View {
             }
             .onChange(of: activity, initial: true) { _, current in
                 dashboardPresentationIsActive = current.allowsPresentationPublication
-                // View All consumes this projection while it covers the dashboard.
-                // Publish bounded catalog data down the active lineage without
-                // restarting covered-surface reads, clocks or animations.
                 dashboardProjectionIsActive = current.allowsPresentationPublication
                     || (homeSectionSheet != nil && current.allowsDataPublication)
                 if dashboardProjectionIsActive {
@@ -266,7 +255,6 @@ struct SessionShellView: View {
                 dashboardReconcileTask?.cancel()
                 dashboardReconcileTask = nil
             }
-            // Warm settings only for the visible dashboard; covered reads wait for reveal.
             .task(id: activity.allowsPresentationPublication && model.connectionState == .connected ? model.settingsFreshness : nil) {
                 guard activity.allowsPresentationPublication, model.connectionState == .connected else { return }
                 model.resumeDeferredSessionCatalogRead()
@@ -301,8 +289,6 @@ struct SessionShellView: View {
             do {
                 let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID)
                 guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
-                // Retire the Automations sheet (and its detail) before the
-                // Sessions dashboard pushes the chat beneath it.
                 showingAutomations = false
                 present(route)
             } catch is CancellationError {
@@ -390,9 +376,6 @@ struct SessionShellView: View {
         )
         switch action {
         case .present(let admitted):
-            // Same-route delivery is a navigation no-op. Preserve the mounted
-            // route inputs, authority, and draft instead of replacing a value
-            // that will not receive an onDisappear/remount boundary.
             presentedSession = current?.id == admitted.id ? current : admitted
         case .dismissCurrent:
             if let current,
@@ -436,17 +419,11 @@ struct SessionShellView: View {
         projectSettings = nil
 
         do {
-            // Keep the current chat mounted while the target transport is being
-            // prepared. A slow reconnect must not strand the user on an empty
-            // dashboard, and an exact same-route tap is a navigation no-op.
             let route = try await model.navigationRoute(for: request.tap)
             try Task.checkCancellation()
             guard model.pushNavigationRequest?.id == request.id,
                   model.ownsNavigationRoute(route) else { return }
             if !PushNavigationPresentationPolicy.retainsCurrent(presented: presentedSession, target: route) {
-                // The replacement owner mounts the target only after the current
-                // chat retires: a covered chat still restoring its open must not
-                // contend with the target for the one presentation authority.
                 present(route)
             }
             model.consumePushNavigation(request.id)
@@ -500,10 +477,6 @@ struct SessionShellView: View {
         }
     }
 
-    /// Runs only after the user confirms. Archive state is a reversible display
-    /// change, so this applies only the authoritative response: the row leaves
-    /// the dashboard when that response is accepted, and the Gateway's own list
-    /// change is what returns it, or its count, from canonical truth.
     private func setArchived(_ session: SessionSummary, archived: Bool) {
         Task {
             do { try await model.setSessionArchived(session, archived: archived) }
@@ -512,8 +485,6 @@ struct SessionShellView: View {
         }
     }
 
-    /// Opens an archived row. The dashboard identity is server-qualified, so the
-    /// route is built for the exact Gateway that supplied the row.
     private func openArchivedSession(_ session: SessionSummary) {
         guard openingSessionID == nil else { return }
         openingSessionID = session.dashboardID
@@ -533,9 +504,6 @@ struct SessionShellView: View {
         }
     }
 
-    /// Every archive-capable server the dashboard shows, with its live
-    /// connection state. Capability comes only from a handshake, so a server
-    /// that cannot archive is never offered the container.
     private var archivedContainerSources: [ArchivedSessionsProfileSource] {
         model.dashboardServerSources
             .filter { model.supportsSessionArchive(profileID: $0.profileID) }
@@ -582,13 +550,7 @@ struct SessionShellView: View {
     }
 
     private var sessionList: some View {
-        // Derive the visible projection once per body evaluation. Each access of
-        // `filteredSessions` re-filters the whole dashboard, and this list needs
-        // it for both its rows and its animation key.
         let filtered = filteredSessions
-        // The reader is what lets the archived container reveal the rows it
-        // expands into; the scroll modifier stays on the List itself, because it
-        // reads that scroll owner's geometry.
         return ScrollViewReader { proxy in
             List {
                 if serverFilter.sortMode == .home {
@@ -623,8 +585,6 @@ struct SessionShellView: View {
                 dashboardPresentationIsActive ? TronDashboardContentMotion.animation(reduceMotion: reduceMotion) : nil,
                 value: filtered.map(\.dashboardID)
             )
-            // Runs after the list mounts, so the hidden first frame is committed
-            // before the stagger animates it in.
             .task(id: serverFilter.sortMode == .home) {
                 homeRevealStart = serverFilter.sortMode == .home ? Date() : nil
             }
@@ -734,7 +694,6 @@ struct SessionShellView: View {
     @ViewBuilder
     private func homeSections(_ filtered: [SessionSummary]) -> some View {
         let sections = HomeDashboardSections(sessions: filtered)
-        // The usage card is order 0; present sections follow it in order.
         let order = sections.revealOrder
         if let inProgressOrder = order[.inProgress] {
             Section {
@@ -759,9 +718,6 @@ struct SessionShellView: View {
         }
     }
 
-    /// Recently Completed and Other Sessions: the first rows, with View All in the
-    /// header, once the section exceeds its cap, opening the shared sheet of
-    /// every row in the section.
     private func cappedHomeSection(
         _ section: HomeDashboardSections.Section,
         rows: [SessionSummary],
@@ -785,9 +741,6 @@ struct SessionShellView: View {
         }
     }
 
-    /// The View All sheet of a capped Home section. Its rows are computed here,
-    /// once per parent update, and handed to an equatable view, so a catalog
-    /// change that leaves the section's rows unchanged re-renders nothing in it.
     private func homeSectionRowsSheet(_ section: HomeDashboardSections.Section) -> some View {
         HomeSectionRowsSheet(
             section: section,
@@ -803,8 +756,6 @@ struct SessionShellView: View {
         .equatable()
     }
 
-    /// One container row after every workspace group, owned by
-    /// `ArchivedSessionsContainerSection`.
     private func archivedContainerSection(onRevealRows: @escaping () -> Void) -> some View {
         ArchivedSessionsContainerSection(
             count: model.archivedSessionCount,
@@ -849,7 +800,6 @@ struct SessionShellView: View {
         .tronSectionHeading()
         .foregroundStyle(Color.tronPrimary)
         .textCase(nil)
-        // Symmetric insets: View All lines up with the rows' trailing timestamps.
         .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
         .padding(.top, SessionDashboardLayout.headerTopPadding)
         .padding(.bottom, SessionDashboardLayout.headerBottomPadding)
@@ -885,8 +835,6 @@ struct SessionShellView: View {
         .transition(.opacity)
     }
 
-    /// Opens (or sets up) Home. The pinned row and the Home view's floating
-    /// button share this one route decision.
     private func openHome() {
         guard openingSessionID == nil,
               let profileID = model.profiles.selected?.id else { return }
@@ -1164,7 +1112,6 @@ struct SessionShellView: View {
     }
 }
 
-/// A section header's trailing action, drawn in the header's own font and tint.
 struct DashboardSectionHeaderAction {
     let title: String
     let accessibilityLabel: String
@@ -1173,14 +1120,11 @@ struct DashboardSectionHeaderAction {
     let action: () -> Void
 }
 
-/// Dashboard row geometry, shared with the archived container's rows so both
-/// surfaces keep one layout.
 enum SessionDashboardLayout {
     static let rowContainerHorizontalInset: CGFloat = 16
     static let rowContentHorizontalPadding: CGFloat = 12
     static let iconColumnWidth: CGFloat = 18
     static let iconTextSpacing: CGFloat = 8
-    /// The gap between consecutive rows: the dashboard list's row insets.
     static var rowSpacing: CGFloat { rowInsets.top + rowInsets.bottom }
     static let headerIconSize: CGFloat = 14
     static let headerChevronSize: CGFloat = 10
@@ -1276,7 +1220,6 @@ struct SessionListExpansionControls: View {
                 .transition(.opacity)
             }
         }
-        // Keep both actions together, away from the lower-right dashboard logo.
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, SessionDashboardLayout.expansionControlLeadingPadding)
         .padding(.trailing, SessionDashboardLayout.expansionControlTrailingPadding)
@@ -1339,9 +1282,6 @@ enum DashboardSessionIndicatorPresentation {
     static let subagentOrbSize = TronTypography.sizeBody3
 }
 
-/// The one status-indicator transition: a session row's status icon and the
-/// floating Home button swap their indicator through this view, so every state
-/// change scales and fades the same way.
 struct DashboardIndicatorSwap<State: Hashable, Content: View>: View {
     let state: State
     @ViewBuilder let content: (State) -> Content
@@ -1388,10 +1328,7 @@ struct HistoricalSessionRow: View {
                 sceneActive: scenePhase == .active,
                 viewportVisible: isVisible
             ) {
-                // The whole row re-renders so its accessibility label ages too.
                 TimelineView(clock) { timeline in
-                    // A summary may arrive between ticks; the last scheduled
-                    // tick must not make its newer timestamp look future-dated.
                     row(relativeActivity: clock.label(relativeTo: max(timeline.date, .now)))
                 }
             } else {
@@ -1454,8 +1391,6 @@ struct HistoricalSessionRow: View {
             Image(systemName: "exclamationmark.circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                 .foregroundStyle(Color.tronAmber)
-        // A settled Home worker reads as finished work; an ordinary session
-        // keeps the open circle.
         case .idleUnread:
             Image(systemName: session.isHomeWorker ? "checkmark.circle.fill" : "circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))

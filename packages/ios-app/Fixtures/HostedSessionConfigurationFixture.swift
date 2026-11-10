@@ -2,8 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Actual Stop RPC and Manage Session consumer, with explicit synthetic receipt
-/// settlement. No timer infers completion and no canonical runtime is opened.
 @MainActor
 struct HostedSessionConfigurationFixture: View {
     @State private var model: AppModel
@@ -46,8 +44,6 @@ struct HostedSessionConfigurationFixture: View {
     var body: some View {
         NavigationStack {
             if ready {
-                // A running chat whose Gateway keeps rebaselining (full session
-                // snapshots, as tool boundaries publish) while Manage Session is open.
                 Button("Manage running session") {
                     presented = true
                     Task { await socket.streamRunningRebaselines() }
@@ -63,7 +59,6 @@ struct HostedSessionConfigurationFixture: View {
         .tronManagedSheet(isPresented: $presented, identity: "session-configuration") {
             SessionContextSheet(sessionID: snapshot.sessionId, onForkCreated: { _ in })
                 .safeAreaInset(edge: .bottom) {
-                    // Review captures (#1655) show the sheet without these probes.
                     if !HostedManageSessionReview.enabled { probes }
                 }
         }
@@ -107,8 +102,6 @@ struct HostedSessionConfigurationFixture: View {
             Text("decisions:\(decisionState)").accessibilityIdentifier("fixture.session-settings-decisions")
             Text("Model requests: \(modelRequests)").accessibilityIdentifier("fixture.model-requests")
         }
-        // Fixture controls stay at the default size so an accessibility
-        // type size measures the sheet's own content, not these probes.
         .dynamicTypeSize(.large)
         .task {
             for await count in socket.modelRequestCounts {
@@ -129,8 +122,6 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     private var pendingThinking: (id: String, revision: Int)?
     private var modelRequests = 0
     private var modelDelivery: Task<Void, Error>?
-    /// Scripted model receipts wait for the test's explicit release (#2173), so the
-    /// pending state is observed without racing a timer.
     nonisolated static var gatesModelReceipts: Bool {
         ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("-model-ack-") }
     }
@@ -143,9 +134,6 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         self.snapshot = snapshot
         (modelRequestCounts, modelRequestContinuation) = AsyncStream.makeStream(of: Int.self)
     }
-    /// The reported chat (#1651): 27 of 52 tools and High thinking overridden, an
-    /// unset context window, and the repository's ignored `defaultTools`, which the
-    /// Gateway reports on every Session and Project resolution of that workspace.
     private static let scopeReviewCatalog = HostedSettingsReviewSchema.tools + (16...52).map { "tool_\($0)" }
     private static func scopeReviewResolution(project: Bool) -> JSONValue {
         let thinking = HostedSettingsReviewSchema.additionalKeys.filter { $0.objectValue?["key"]?.stringValue == "model.thinking[role=chat]" }
@@ -225,7 +213,6 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "key": .string("context.compaction.enabled"), "group": .string("context"),
                 "value": .bool(true), "display": .string("On"), "layer": .string("global"),
                 "applied": .bool(false), "badges": .array([]),
-                // Canonical scope and recovery metadata remain, without an app editor.
                 "layers": .array([.object(["layer": .string("session")]), .object(["layer": .string("global")])]),
                 "presentation": .object(["label": .string("Automatic compaction"), "help": .string("Automatic compaction policy."),
                     "order": .number(10), "importance": .string("essential"),
@@ -239,7 +226,6 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             ] + HostedSettingsReviewSchema.additionalKeys.filter {
                 !["model.thinking[role=chat]", "context.compaction.enabled", "permissions.budget.task"].contains($0.objectValue?["key"]?.stringValue ?? "")
             }), "sections": .array(HostedSettingsReviewSchema.sections)])
-            // An ordinary session edits a row it holds at its own Session scope.
             if var resolution = result.objectValue, let keys = resolution["keys"]?.arrayValue {
                 resolution["keys"] = .array(keys.map { value in
                     guard var row = value.objectValue, var presentation = row["presentation"]?.objectValue else { return value }
@@ -289,11 +275,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                     throw GatewayFailure(code: "invalid_request", message: "Model change lacked its session fence", retryable: false, details: nil)
                 }
                 let scenario = ProcessInfo.processInfo.arguments.first { $0.hasPrefix("-model-ack-") } ?? "-model-ack-snapshot-first"
-                // The remote delivery outlives request-send cancellation on receipt.
-                // close() still owns and cancels it with this isolated socket.
                 modelDelivery = Task {
-                    // Hold only at the scripted socket boundary: the native picker must
-                    // remain pending until both its receipt and projection have arrived.
                     if Self.gatesModelReceipts {
                         await withTaskCancellationHandler { await self.awaitModelReceiptRelease() }
                             onCancel: { Task { await self.releaseModelReceipt() } }
@@ -351,7 +333,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             }
             snapshot.revision += 1
             pendingThinking = (id, snapshot.revision)
-            return // Hold the original success while a second client supersedes it.
+            return
         case "session.processHistory.list" where ProcessInfo.processInfo.arguments.contains("-history-long"):
             try await Task.sleep(for: .milliseconds(750))
             result = .object(["historyRevision": .string("fixture-history"),
@@ -362,7 +344,6 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         case "session.history.entry" where HostedLargeHistory.enabled:
             result = try HostedLargeHistory.entry(params, runtime: snapshot.runtimeGeneration)
         case "session.history.list" where ProcessInfo.processInfo.arguments.contains("-history-empty"):
-            // A session with no canonical entries yet.
             result = try JSONValue.encode(SessionHistoryPage(runtimeGeneration: snapshot.runtimeGeneration,
                 nodes: [], older: nil, newer: nil, totalEntries: 0))
         case "session.history.list":
@@ -405,8 +386,6 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             "result": fixtureSettingsChangeResult(key: "model.thinking[role=chat]", revision: pendingThinking.revision)]))
         return true
     }
-    /// Running, still locked, with only usage moving: each frame is a full
-    /// `session.snapshot`, as the Gateway sends at tool boundaries.
     func streamRunningRebaselines() async {
         for step in 1...40 {
             guard !closed else { return }
@@ -447,8 +426,6 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     }
 }
 
-/// One fixture control above every sheet, so a test can release a held receipt
-/// while the picker it observes stays presented. Touches elsewhere pass through.
 private struct HostedReceiptGateWindowInstaller: UIViewRepresentable {
     let release: () -> Void
     final class Coordinator { var window: UIWindow? }
@@ -475,8 +452,6 @@ private struct HostedReceiptGateWindowInstaller: UIViewRepresentable {
             let window = PassthroughWindow(windowScene: scene)
             window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.normal.rawValue + 3)
             window.backgroundColor = .clear
-            // A UIKit control: a SwiftUI hosting view would receive every touch as
-            // its root view, which this window passes through.
             let host = UIViewController()
             host.view.backgroundColor = .clear
             let button = UIButton(type: .system, primaryAction: UIAction(title: "Deliver model receipt") { _ in release() })

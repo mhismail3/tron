@@ -1,9 +1,6 @@
 import XCTest
 import UIKit
 
-/// Purple-burgundy dark ink keeps a 3:1 floor; small primary text is an explicit AA
-/// exception. Light ink retains 4.5:1. Read actual native pixels through
-/// Home -> Manage Home -> Home Settings, not token probes.
 @MainActor final class TronBurgundyGlassUITests: XCTestCase {
     func testWineGlassKeepsInkReadableAndLightBurgundyUnchanged() {
         continueAfterFailure = false
@@ -63,13 +60,9 @@ import UIKit
         let a = luminance(foreground), b = luminance(backdrop)
         let contrast = (max(a, b) + 0.05) / (min(a, b) + 0.05)
         print("WINE_GLASS \(name)-\(mode) ink=\(foreground) background=\(backdrop) contrast=\(contrast)")
-        // The fixed native fixture retains the previous 3.236:1 worst-case
-        // contrast (allowing pixel quantization), not merely the 3:1 theme floor.
         XCTAssertGreaterThanOrEqual(contrast, mode == "dark" ? 3.23 : 4.5,
                                   "\(name) primary ink must retain contrast on actual glass")
         if mode == "dark" {
-            // Purple-leaning burgundy replaces crimson at the approved darkness;
-            // its hue is independent of the deeper red-violet glass surface role.
             let inkHue = (foreground[2] - foreground[1]) / max(foreground[0] - foreground[1], 1)
             XCTAssertGreaterThanOrEqual(inkHue, 0.35, "Primary ink must lean purple-burgundy, not crimson")
             XCTAssertLessThanOrEqual(inkHue, 0.63, "Primary ink must remain burgundy, not turn violet")
@@ -77,13 +70,11 @@ import UIKit
                                        "Primary ink must stay saturated, not pastel")
             XCTAssertGreaterThanOrEqual(a, 0.16, "Primary ink must not darken beyond the approved appearance")
             XCTAssertLessThanOrEqual(a, 0.165, "Primary ink must not brighten beyond the approved appearance")
-            // The approved surface is red-violet wine, not the old near-red
-            // salmon tint. Normalize away material brightness/opacity.
             let wineHue = (backdrop[2] - backdrop[1]) / max(backdrop[0] - backdrop[1], 1)
             XCTAssertGreaterThanOrEqual(wineHue, 0.30, "Dark glass must use the wine surface role, not lifted salmon ink")
             XCTAssertLessThan(wineHue, 0.80, "Wine glass must stay red-dominant, not turn violet")
         } else {
-            let unchanged = [87.0, 21.0, 47.0] // Approved light #57152F, observed through native pixels.
+            let unchanged = [87.0, 21.0, 47.0]
             XCTAssertLessThan(zip(foreground, unchanged).map { abs($0 - $1) }.max()!, 8,
                               "Light Burgundy must not change while refining dark mode")
         }

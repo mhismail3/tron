@@ -18,11 +18,6 @@ struct WizardPresentationRequestFence: Equatable, Sendable {
     }
 }
 
-/// Pairing-info step. The shell owns the icon, title, progress pill,
-/// and the bottom action bar (Back / "I'm paired", with the primary
-/// gated by `state.pairingPayload != nil` in `WizardShell`). This view
-/// contributes the description, the QR + info side-by-side panels,
-/// and copy controls for the resolved pairing values.
 struct PairingInfoStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
@@ -33,9 +28,6 @@ struct PairingInfoStep: View {
     @State private var resolvedQRCode: NSImage?
     @State private var refreshFence = WizardPresentationRequestFence()
 
-    /// Why we couldn't render a pairing payload. Drives the warning
-    /// panel copy so the user knows whether to wait (server still
-    /// starting) vs. fix Tailscale.
     enum PairingFailureReason {
         case noCode
         case serverUnreachable
@@ -59,9 +51,6 @@ struct PairingInfoStep: View {
         }
         .task { await refresh(delayForInitialTransition: true) }
         .onDisappear {
-            // A cancelled view task may still return from an owner that does
-            // not observe cancellation. Retire its presentation lease before
-            // the successor view can publish anything.
             refreshFence.retire()
             isRefreshing = false
         }
@@ -261,9 +250,6 @@ struct PairingInfoStep: View {
             guard refreshFence.accepts(request), !Task.isCancelled else { return }
         }
 
-        // Fresh installs may not have a settings file yet. Prefer live and
-        // current-session state, then fall back to server/settings state;
-        // cache the selected host for later wrapper and server reads.
         guard refreshFence.accepts(request), !Task.isCancelled else { return }
         guard let localToken = setup.readBearerToken(), !localToken.isEmpty else {
             fail(.localAuthenticationFailed, request: request)
@@ -316,10 +302,6 @@ struct PairingInfoStep: View {
             state.tailscaleStatus = liveTailscale
         }
 
-        // Re-observe immediately before reading the one-time invitation and
-        // generating the QR. A restart or host transition after the first
-        // admission invalidates the pinned pairing presentation rather than
-        // publishing a stale endpoint/runtime combination.
         if let admitted = debugAdmission {
             let currentObservation = await setup.observeDebugGateway(localToken)
             guard refreshFence.accepts(request), !Task.isCancelled else { return }
@@ -360,8 +342,6 @@ struct PairingInfoStep: View {
             return
         }
 
-        // This shared host projection belongs to the current presentation
-        // request; an older request must not overwrite a newer admission.
         setup.cacheTailscaleIP(host)
 
         let payload = PairingPayload(
@@ -456,8 +436,6 @@ private struct PairingResolvingSpinner: View {
 }
 
 enum PairingInfoStepLayout {
-    /// QR code rendered side dimension. Picked to fit alongside the
-    /// info panel inside the shell's fixed-height content area.
     static let qrSize: CGFloat = 170
     static let columnSpacing: CGFloat = 20
     static let valueColumnWidth: CGFloat = 218
@@ -473,9 +451,6 @@ enum PairingInfoStepLayout {
             .combined(with: .scale(scale: 0.96, anchor: .center))
             .combined(with: .offset(y: 8))
     }
-    /// Avoids the first fast refresh racing the shell's page-slide
-    /// transition, which made the QR appear at its final coordinate
-    /// before the rest of the step finished entering.
     static let initialResolveDelayNanoseconds: UInt64 = 500_000_000
     static let copyCheckInAnimationSeconds = 0.06
     static let copyCheckOutAnimationSeconds = 0.12

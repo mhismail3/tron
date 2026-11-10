@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Shared metadata presentation for technical-detail and tool-detail sheets. The
-/// sheet owner supplies canonical values; this component owns only consistent
-/// chrome, typography, spacing, and accessibility.
 struct TronTechnicalMetadataItem: Identifiable, Equatable {
     let title: String
     let value: String
@@ -11,9 +8,6 @@ struct TronTechnicalMetadataItem: Identifiable, Equatable {
     var id: String { title }
 }
 
-/// One row of a metadata/value table. Icon-led tables (runtime facts, tool
-/// metadata) use `icon`; the generalized JSON tables qualify the title with
-/// `type` instead, because a value's JSON type is what the reader needs there.
 struct TronMetadataTableRow: Identifiable {
     let id: String
     let title: String
@@ -30,23 +24,16 @@ struct TronMetadataTableRow: Identifiable {
     }
 }
 
-/// How a table renders its trailing value. Canonical tables wrap and allow
-/// selection; a preview table keeps one bounded line per row so a long JSON
-/// value cannot displace its siblings.
 enum TronMetadataValueStyle {
     case wraps
     case preview
 }
 
-/// The standard metadata/value table: an optional uppercase section label, one
-/// divided glass card, and one row geometry for every table in the app.
 struct TronMetadataTable: View {
     var title: String?
     let accent: Color
     let rows: [TronMetadataTableRow]
     var valueStyle: TronMetadataValueStyle = .wraps
-    /// When set, each row is a progressive target for its own detail value
-    /// instead of a static label/value pair.
     var onSelect: ((TronMetadataTableRow) -> Void)?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -66,8 +53,6 @@ struct TronMetadataTable: View {
     @ViewBuilder
     private func rowContent(_ row: TronMetadataTableRow) -> some View {
         if let onSelect {
-            // Keep the button element: overriding the label must not drop the
-            // trait that tells VoiceOver the row is actionable.
             Button { onSelect(row) } label: { rowLayout(row) }
                 .buttonStyle(.plain)
                 .accessibilityLabel([row.title, row.type, row.value].compactMap { $0 }.joined(separator: ", "))
@@ -80,8 +65,6 @@ struct TronMetadataTable: View {
     }
 
     private func rowLayout(_ row: TronMetadataTableRow) -> some View {
-        // Text-led tables need a separate value line at accessibility sizes,
-        // with or without a JSON type qualifier. Icon-led facts retain their row.
         let stacks = dynamicTypeSize.isAccessibilitySize && row.icon == nil
         let layout = stacks
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: TronSpacing.md))
@@ -121,8 +104,6 @@ struct TronMetadataTable: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         case .preview:
-            // Hug the value instead of claiming the row's slack: a preview must
-            // never squeeze the title into wrapping.
             Text(row.value)
                 .font(TronTypography.code(size: TronTypography.sizeBody3))
                 .foregroundStyle(Color.tronTextSecondary)
@@ -133,8 +114,6 @@ struct TronMetadataTable: View {
     }
 }
 
-/// The icon-led form of the standard table, used by every technical-detail
-/// sheet and the server info sheet.
 struct TronTechnicalMetadataSection: View {
     let title: String
     let items: [TronTechnicalMetadataItem]
@@ -166,10 +145,6 @@ struct TronTechnicalSectionLabel: View {
     }
 }
 
-/// The top-leading toolbar button that opens a sheet's technical details or
-/// metadata. Every sheet with that affordance uses this one button, so its
-/// symbol, size, placement and spoken label read the same everywhere. A nil
-/// accent follows the settings theme accent.
 struct TronSheetInfoButton: View {
     let accessibilityLabel: String
     var accent: Color?

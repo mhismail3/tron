@@ -1,8 +1,6 @@
 import Foundation
 import TronMobileCore
 
-/// Display-only names from the resource projection. Raw names, paths, package
-/// sources, and invocations stay intact in the detail sheet and canonical data.
 enum ProjectResourceTitlePresentation {
     static func title(kind: ProjectResourceKind, value: JSONValue) -> String {
         let object = value.objectValue ?? [:]
@@ -10,8 +8,6 @@ enum ProjectResourceTitlePresentation {
         if kind == .tools, let name {
             return ToolDetailPresentation.displayTitle(for: name, label: nonempty(object["label"]?.stringValue) ?? nonempty(object["title"]?.stringValue))
         }
-        // Pi registers some tools (codemode, tool_search) with their raw name
-        // as the label; only a label that differs from the name is authored.
         for key in ["label", "title"] {
             if let text = nonempty(object[key]?.stringValue), text != name { return text }
         }
@@ -27,8 +23,6 @@ enum ProjectResourceTitlePresentation {
         return "Unnamed \(kind.rawValue.dropLast())"
     }
 
-    /// Package resolution has paths, not authored titles. Use the same friendly
-    /// fallback as session resources without inventing a new canonical name.
     static func resourcePathTitle(_ path: String) -> String {
         let file = (path as NSString).lastPathComponent
         let candidate = file.lowercased() == "skill.md"
@@ -37,9 +31,6 @@ enum ProjectResourceTitlePresentation {
         return ComposerResourceNameFormatter.friendly(candidate)
     }
 
-    /// Extension identities come from package resolutions or inline factory
-    /// paths, so they need their own naming rule; the Hooks sheet owns this
-    /// presentation now that Resources lists no extensions.
     static func extensionTitle(name: String?, object: [String: JSONValue]) -> String {
         let path = nonempty(object["path"]?.stringValue)
             ?? nonempty(object["resolvedPath"]?.stringValue) ?? name ?? ""
@@ -58,7 +49,6 @@ enum ProjectResourceTitlePresentation {
             if !entry.isEmpty, !genericEntries.contains(entry) {
                 return "\(label) · \(ComposerResourceNameFormatter.friendly(entry))"
             }
-            // Do not present implementation directories as extension names.
             let containers: Set<String> = ["", "src", "dist", "lib", "build", "extensions", "extension", package]
             return containers.contains(parentName)
                 ? label
@@ -76,8 +66,6 @@ enum ProjectResourceTitlePresentation {
         else if source.hasPrefix("https://") || source.hasPrefix("ssh://") || source.hasPrefix("git@") { value = source }
         else { return nil }
         value = value.components(separatedBy: "://").last ?? value
-        // The leading @ in an npm scope or SSH user is not a version delimiter.
-        // A Git ref may itself contain slashes, so compare to the first path slash.
         if let at = value.lastIndex(of: "@"), at != value.startIndex,
            value.firstIndex(of: "/").map({ at > $0 }) ?? true {
             value = String(value[..<at])

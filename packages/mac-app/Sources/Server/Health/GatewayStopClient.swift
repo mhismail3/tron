@@ -1,7 +1,5 @@
 import Foundation
 
-/// Authenticated intentional stop and its canonical drain observation. Acceptance
-/// is not completion; the Quit owner separately verifies the exact process exit.
 enum GatewayStopClient {
     struct Response: Codable, Equatable, Sendable {
         let stopping: Bool

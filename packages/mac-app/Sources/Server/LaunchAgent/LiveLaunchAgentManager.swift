@@ -1,9 +1,6 @@
 import Foundation
 import ServiceManagement
 
-/// Live `LaunchAgentManaging` implementation. Registration goes through
-/// `SMAppService`; `launchctl` is used only for diagnostics and explicit
-/// restart/kickstart.
 struct LiveLaunchAgentManager: LaunchAgentManaging {
     let profile: TronGatewayProfile
 
@@ -139,8 +136,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         if status == .requiresApproval {
             return .refuse(message: "Approve Tron Agent in Login Items to finish installation.")
         }
-        // Missing observation is not evidence of a stale running process.
-        // In particular, a cancelled/timed-out ps must never authorize bootout.
         if runtimeInfo?.pid != nil, runtimeInfo?.processCommand?.isEmpty != false {
             return .refuse(message: "Could not verify the running Gateway command. No registration changes were made.")
         }
@@ -184,9 +179,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         return .refuse(message: "Tron Agent is currently managed by \(parent). Stop that build before installing this one.")
     }
 
-    /// Executes the already-resolved plan without re-reading launchd state.
-    /// This is the live load path's only step loop. Stop on the first reported
-    /// failure; do not add retries or caller-cancellation checks between accepted steps.
     static func execute(
         _ steps: [LaunchAgentRegistrationPlan.Step],
         perform: (LaunchAgentRegistrationPlan.Step) async -> LaunchAgentOutcome?
@@ -348,8 +340,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         let payloadRoot = String(executable[..<runtimeRange.lowerBound])
         if let expectedPayloadRoot,
            payloadRoot != expectedPayloadRoot.standardizedFileURL.path { return false }
-        // The same launcher argv admission requires; a second copy here once let
-        // a launcher argv change mark every running Gateway stale.
         guard StableGatewayProvenance.processCommand(
             command, owns: URL(fileURLWithPath: payloadRoot), expectedHost: "tailscale", profile: profile
         ) else { return false }
@@ -458,8 +448,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     enum ObservationFailure: Error { case unavailable }
 
     static func runtimeOutputAvailable(_ result: ProcessResult) throws -> Bool {
-        // Negative status belongs to the capture owner (launch, cancellation,
-        // timeout, limit or decode failure), not launchctl's not-loaded result.
         guard result.exitCode >= 0 else { throw ObservationFailure.unavailable }
         return result.exitCode == 0
     }

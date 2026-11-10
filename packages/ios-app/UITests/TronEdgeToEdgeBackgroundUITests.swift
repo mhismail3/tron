@@ -1,7 +1,5 @@
 import XCTest
 
-/// The app's background runs under the status bar and home indicator: no edge
-/// of the full-screen window is a solid black bar, on the dashboard and in a chat.
 @MainActor
 final class TronEdgeToEdgeBackgroundUITests: XCTestCase {
     func testDashboardBackgroundReachesEveryWindowEdge() {
@@ -40,9 +38,6 @@ final class TronEdgeToEdgeBackgroundUITests: XCTestCase {
         return app
     }
 
-    /// The background is one surface to the window's edge: along every edge the
-    /// line 10 px in matches the line 80 px in on average. A clipped safe-area
-    /// strip (the window behind showing through) differs from the background.
     private func assertEdgeToEdge(_ app: XCUIApplication, _ name: String) {
         let shot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: shot)
@@ -58,24 +53,13 @@ final class TronEdgeToEdgeBackgroundUITests: XCTestCase {
             for (x, y) in points { let p = bytes + y * rowBytes + x * bpp; sum += Int(p[0]) + Int(p[1]) + Int(p[2]) }
             return Double(sum) / Double(points.count * 3)
         }
-        let band = 120 ... 220 // skip the corners and the status bar's leading glyphs
+        let band = 120 ... 220
         func horizontal(_ y: Int) -> [(Int, Int)] { (band.lowerBound ..< (w - band.lowerBound)).filter { $0 % 3 == 0 }.map { ($0, y) } }
-        // The home indicator is system chrome drawn over the background, not a strip of
-        // the window behind. It is about 134 pt wide, about 40% of an iPhone portrait bottom
-        // line, so a median taken across it reads an upper quantile of the background's
-        // grain instead of the background. The bottom lines skip a 160 pt centre column; a
-        // clipped strip spans the whole line, so the rest of the line still shows it.
         let screen = XCUIApplication(bundleIdentifier: "com.apple.springboard").frame
         let scale = Double(max(w, h)) / Double(max(screen.width, screen.height))
         let indicator = (w / 2 - Int(80 * scale)) ..< (w / 2 + Int(80 * scale))
         func bottom(_ y: Int) -> [(Int, Int)] { horizontal(y).filter { !indicator.contains($0.0) } }
         func vertical(_ x: Int) -> [(Int, Int)] { (band.lowerBound ..< (h - band.lowerBound)).filter { $0 % 3 == 0 }.map { (x, $0) } }
-        // Only the safe-area band is read (a status bar is 26 pt, a home indicator 17 pt):
-        // beyond it the composer's own pill spans the line and would be the step.
-        // A clipped safe-area strip is a step across the whole line where the
-        // window behind starts. Compare each line with the next, position by
-        // position, and take the median so content crossing a line (text, the
-        // composer) cannot decide it; a smooth background gradient moves little.
         func steps(_ line: (Int) -> [(Int, Int)]) -> Double {
             var worst = 0.0
             for depth in stride(from: 4, through: 48, by: 2) {

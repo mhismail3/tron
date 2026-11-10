@@ -1,11 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// One kind of resource an installed package provides, in the order the detail
-/// sheet presents them. Skills, subagents, prompts, tools and commands reuse the
-/// Resources kind they share a name with, so their group icon and colour
-/// cannot drift from that sheet's; themes have no Resources kind and
-/// keep the terminal-theme icon/colour Extensions and Locations already use.
 enum PackageProvidesKind: String, CaseIterable, Identifiable, Sendable {
     case skills = "Skills"
     case subagents = "Subagents"
@@ -30,9 +25,6 @@ enum PackageProvidesKind: String, CaseIterable, Identifiable, Sendable {
     var icon: String { projectResourceKind?.icon ?? "paintpalette" }
     @MainActor var accent: Color { projectResourceKind?.accent ?? .tronTeal }
 
-    /// What the group's names are, in this session-free read's own terms: a
-    /// package's tools and commands exist when its extensions load, not in the
-    /// session Resources describes.
     var detail: String {
         switch self {
         case .skills: "Guidance the agent can load when a task matches."
@@ -63,10 +55,6 @@ struct PackageProvidesGroup: Identifiable, Equatable, Sendable {
     var id: String { kind.rawValue }
 }
 
-/// One package's Provides projection: the non-empty groups in presentation
-/// order, plus whether the Gateway reported `provides` at all. An older Gateway
-/// that omits the field supplies no groups and no placeholder, while a package
-/// whose reported kinds are all empty says so in one line.
 struct PackageProvidesContent: Equatable, Sendable {
     static let absent = PackageProvidesContent(groups: [], reported: false)
 
@@ -89,14 +77,10 @@ enum PackageProvidesPresentation {
     }
 }
 
-/// What one Installed row opened: the source and scope the row shows, then the
-/// names the package provides. Every row here is external, so the shared
-/// distribution tag labels the header once instead of repeating on each name.
 struct PackageDetailSheet: View {
     let package: PackageSummary
     let providesDiagnostic: String?
     @Environment(\.dismiss) private var dismiss
-    /// The opening group's accent (Tools & Extensions); blue only when opened alone (#939).
     @Environment(\.tronSettingsVisualTheme) private var theme
     private var accent: Color { theme?.accent ?? .tronBlue }
 
@@ -109,8 +93,6 @@ struct PackageDetailSheet: View {
             ScrollView(.vertical, showsIndicators: true) {
                 TronSettingsSections(alignment: .leading, spacing: TronSpacing.section, lazy: true, hidesLoneHeading: true) {
                     header
-                    // The diagnostic explains missing kinds before the reader
-                    // infers that the package contributes none of them.
                     if let conflict = package.conflict {
                         TronSettingsNotice(message: conflict.message)
                     }
@@ -195,8 +177,6 @@ struct PackageDetailSheet: View {
                 }
             }
         }
-        // Resource kinds keep their own accents; the sheet theme belongs to the
-        // package chrome, as it does on Resources.
         .environment(\.tronSettingsVisualTheme, nil)
     }
 }

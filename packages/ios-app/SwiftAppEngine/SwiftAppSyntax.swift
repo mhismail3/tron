@@ -1,18 +1,11 @@
 import Foundation
 
-// Experimental single-file SwiftUI interpreter (#889). This file owns the
-// lexer and AST; `SwiftAppParser` builds the AST and `SwiftAppRuntime`
-// evaluates it. The language is a bounded SwiftUI subset documented in
-// docs/swift-apps.md; anything outside it is a readable diagnostic, never a
-// crash and never native code execution.
-
 struct SwiftAppSyntaxError: Error, CustomStringConvertible {
     let message: String
     let line: Int
     var description: String { "Line \(line): \(message)" }
 }
 
-/// A refused parse, never a runnable partial program.
 struct SwiftAppUnsupportedSyntax: Error, CustomStringConvertible {
     let diagnostics: [SwiftAppSyntaxError]
     let reachedLimit: Bool
@@ -24,8 +17,6 @@ struct SwiftAppUnsupportedSyntax: Error, CustomStringConvertible {
 
 enum SwiftAppStringPart {
     case text(String)
-    /// Raw source of one `\( … )` segment, parsed as an argument list so
-    /// `\(value, specifier: "%.1f")` works.
     case interpolation(String, line: Int)
 }
 
@@ -179,8 +170,6 @@ enum SwiftAppLexer {
     }
 }
 
-// MARK: - AST
-
 struct SwiftAppArgument {
     let label: String?
     let value: SwiftAppExpr
@@ -214,7 +203,6 @@ indirect enum SwiftAppExpr {
     case member(SwiftAppExpr, String)
     case optional(SwiftAppExpr)
     case force(SwiftAppExpr)
-    /// Ends only this postfix chain; parentheses naturally nest another boundary.
     case chain(SwiftAppExpr)
     case call(SwiftAppExpr, [SwiftAppArgument], line: Int)
     case subscripted(SwiftAppExpr, SwiftAppExpr, defaultValue: SwiftAppExpr?)
@@ -236,7 +224,6 @@ enum SwiftAppCondition {
 
 indirect enum SwiftAppPattern {
     case value(SwiftAppExpr), binding(String), wildcard
-    /// nil omits payload matching; [] is an explicit empty argument list.
     case enumeration(String?, String, [SwiftAppPatternArgument]?)
 
     var bindsOrIgnores: Bool {
@@ -254,7 +241,6 @@ struct SwiftAppPatternArgument {
 }
 
 struct SwiftAppSwitchCase {
-    /// `nil` is `default`.
     let patterns: [SwiftAppPattern]?
     let body: [SwiftAppStmt]
 }
@@ -296,16 +282,12 @@ package final class SwiftAppFunction {
 
 struct SwiftAppStoredProperty {
     let name: String
-    /// Property wrapper name without `@`, such as `State` or `Binding`.
     let wrapper: String?
-    /// `name` in `@Environment(\.name)`.
     let environmentKey: String?
     let typeName: String?
     let initialValue: SwiftAppExpr?
     let isStatic: Bool
-    /// `var x: T?` without a default starts as nil, as in Swift.
     var isImplicitNil = false
-    /// A literal persistent key; @Persisted without one uses Type.property.
     var persistenceKey: String? = nil
 }
 
@@ -319,7 +301,6 @@ package final class SwiftAppTypeDeclaration {
     var functions: [String: SwiftAppFunction] = [:]
     var initializer: SwiftAppFunction?
     var cases: [String] = []
-    /// Labels only: payload types are erased like other annotations.
     var payloads: [String: [String?]] = [:]
     var rawValues: [String: SwiftAppExpr] = [:]
     init(name: String, kind: Kind) {

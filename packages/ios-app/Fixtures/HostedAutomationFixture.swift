@@ -58,8 +58,6 @@ enum AutomationPresentationFixture {
     }
 }
 
-/// The real profile owner with test-only in-memory stores: no credentials or
-/// profile metadata are written by the hosted Automation detail regression.
 final class AutomationFixtureProfileStore: GatewayProfileMetadataStoring, GatewayTokenStoring {
     private var document: GatewayProfileDocument?
     private var tokens: [String: String] = [:]
@@ -70,8 +68,6 @@ final class AutomationFixtureProfileStore: GatewayProfileMetadataStoring, Gatewa
     func delete(profileID: String) throws { tokens.removeValue(forKey: profileID) }
 }
 
-/// Native UI tests exercise the real inventory, detail reads, tables and run
-/// routing without opening a canonical session or sending a mutation.
 struct HostedAutomationFixtureView: View {
     private let profile = GatewayProfile(id: "automation-fixture", label: "Studio server", host: "localhost", port: 9847, machineId: "fixture-automation")
     @State private var model: AppModel
@@ -87,9 +83,6 @@ struct HostedAutomationFixtureView: View {
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
-        // The inventory orders Automations by lifecycle. "A paused digest" sorts
-        // first by name and "Zeta enabled check" last, so only the lifecycle
-        // grouping puts the idle enabled row above the paused one.
         let base = try! [
             AutomationPresentationFixture.record(),
             AutomationPresentationFixture.record(last: false, notification: true),
@@ -98,7 +91,6 @@ struct HostedAutomationFixtureView: View {
             AutomationPresentationFixture.record(activation: "enabled"),
         ]
         let names = ["Daily workspace review", "Daily reminder", "Project report", "A paused digest", "Zeta enabled check"]
-        // A measurement catalog: many Automations across every lifecycle.
         let large = arguments.contains("-automation-large")
         let records = try! (large ? (0..<400).map { base[$0 % base.count] } : base).enumerated().map { index, record in
             var fields = try JSONValue.encode(record).objectValue!
@@ -125,10 +117,6 @@ struct HostedAutomationFixtureView: View {
 
     var body: some View {
         TronPresentationSurface(id: "hosted-automation-fixture") {
-            // One stable view tree from the first frame: only the menu button
-            // waits for the Gateway connection. Swapping the whole tree after
-            // an async connect remounts the presenters' native sheet nodes
-            // while the surface settles, and their sheets are never presented.
             VStack {
                 if let openedSession {
                     Text("Opened \(openedSession)").accessibilityIdentifier("automation-fixture-opened-session")
@@ -142,7 +130,6 @@ struct HostedAutomationFixtureView: View {
                 HStack {
                     Spacer()
                     if ready {
-                        // The real dashboard menu opens the real Automations sheet.
                         DashboardModeMenuButton(
                             onOpenAutomations: { automationsPresented = true },
                             onOpenApps: {},
@@ -163,7 +150,6 @@ struct HostedAutomationFixtureView: View {
                     openedSession = "\(profileID):\(sessionID)"
                 }
             )
-            // Enter the real editor without the catalog/detail AX trees.
             .tronManagedSheet(isPresented: $dateControlsPresented, identity: "automation.fixture.date-controls") {
                 AutomationFormView(selection: dateControlsSelection, onSaved: {})
                     .background(AutomationDateControlsViewport(onReady: { dateControlsReady = true }))
@@ -189,9 +175,6 @@ struct HostedAutomationFixtureView: View {
     }
 }
 
-/// Avoid native animated scrolling through a long Liquid Glass form in the
-/// visual harness. The real editor and controls are unchanged; jump its real
-/// scroll view to the schedule before asking AX to inspect or tap those fields.
 private struct AutomationDateControlsViewport: UIViewRepresentable {
     let onReady: () -> Void
     func makeUIView(context: Context) -> UIView { UIView() }
@@ -204,8 +187,6 @@ private struct AutomationDateControlsViewport: UIViewRepresentable {
                     try Task.checkCancellation()
                     if let window = view?.window,
                        let scroll = Self.scroll(in: window), scroll.contentSize.height > scroll.bounds.height + 600 {
-                        // The schedule sits about 900 points down; a shorter form
-                        // stops at its end, where the schedule is still on screen.
                         let end = scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom
                         scroll.setContentOffset(CGPoint(x: 0, y: min(900, end)), animated: false)
                         onReady()
@@ -245,12 +226,10 @@ private actor HostedAutomationSocket: GatewaySocketConnection {
         case "automation.status":
             result = .object(["ready": .bool(true), "degraded": .bool(false), "automationCount": .number(Double(records.count)), "aggregateBytes": .number(1_024), "malformedRecordCount": .number(0), "catalogRevision": .number(1)])
         case "automation.list":
-            // Pages of at most 100, as the Gateway serves them.
             let offset = frame["params"]?.objectValue?["cursor"]?.stringValue.flatMap(Int.init) ?? 0
             let page = records[offset..<min(records.count, offset + 100)]
             let summaries = try page.map { record -> JSONValue in
                 var fields = try JSONValue.encode(AutomationPresentationFixture.summary(record)).objectValue!
-                // The record read has a newer update timestamp than inventory.
                 fields["updatedAt"] = .string("2026-09-01T08:00:00Z")
                 return .object(fields)
             }
@@ -265,7 +244,6 @@ private actor HostedAutomationSocket: GatewaySocketConnection {
             guard let run = record?.lastRun else { throw CancellationError() }
             result = try JSONValue.encode(run)
         default:
-            // This fixture intentionally never accepts automation mutations.
             enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(id), "ok": .bool(false),
                 "error": .object(["code": .string("unsupported"), "message": .string("Read-only fixture"), "retryable": .bool(false)]),

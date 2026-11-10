@@ -1,7 +1,6 @@
 import Foundation
 import OSLog
 
-/// The Mac process's sole JSONL writer. All filesystem work runs off the main actor.
 final class TronLog: @unchecked Sendable {
     enum Level: String, Sendable { case info, warning, error }
 
@@ -23,7 +22,6 @@ final class TronLog: @unchecked Sendable {
         let outcome: String?
     }
 
-    // Rare lifecycle transitions fit several days in four 1 MiB segments, below Gateway retention.
     private static let segmentMaximumBytes = 1 * 1_024 * 1_024
     private static let segmentCount = 4
     private static let maxMessageBytes = 2_000
@@ -100,7 +98,6 @@ final class TronLog: @unchecked Sendable {
             try handle.write(contentsOf: data)
             currentBytes += Int64(data.count)
         } catch {
-            // Diagnostics must not change or block the operation being observed.
         }
     }
 
@@ -127,8 +124,6 @@ final class TronLog: @unchecked Sendable {
         let clean = redact(value)
         guard let data = clean.data(using: .utf8), data.count > maxMessageBytes else { return clean }
         let prefix = data.prefix(maxMessageBytes - 3)
-        // A UTF-8 scalar spans at most four bytes. Complete the boundary
-        // without dropping the entire leading diagnostic or exceeding its cap.
         for trailingBytes in 0...3 {
             if let text = String(data: prefix.dropLast(trailingBytes), encoding: .utf8) {
                 return text + "…"

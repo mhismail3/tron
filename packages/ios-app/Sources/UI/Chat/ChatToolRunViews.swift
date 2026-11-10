@@ -184,8 +184,6 @@ struct ToolRunResolvedState: Equatable {
     let tools: [ChatToolPresentation]
 }
 
-/// The outer tool sheet owns this deferred user intent until native dismissal.
-/// A replaced connection/surface must never publish it.
 struct ToolDisplayHandoff {
     private var pending: (command: DisplayPresentationCommand, toolID: String, runtime: String, installation: Int, profile: String?)?
     mutating func stage(_ command: DisplayPresentationCommand, toolID: String, runtime: String, installation: Int, profile: String?) {
@@ -199,24 +197,13 @@ struct ToolDisplayHandoff {
               pending.command.route.sessionID == source.sessionId,
               source.transcript.last(where: { $0.role == .toolResult && $0.toolCallId == pending.toolID })?.display
                 == pending.command.route.display else { return nil }
-        // Re-resolve the selected canonical result, not all transcript layout:
-        // unrelated streaming must not cancel a valid user's viewer activation.
         return pending.command
     }
 }
 
-/// One visual segment of a tool run. A run's calls stay one transcript row (its
-/// identity, patch sites and sheet ownership belong to the projection kernel),
-/// but display calls never hide behind the grouped tool sheet: each maximal
-/// stretch of consecutive display calls renders its own preview chips side by
-/// side, and the other calls between them keep their grouped tool chip.
 enum ToolRunSegment: Identifiable, Equatable {
-    /// Consecutive generic calls, shown as one grouped tool chip.
     case tools(ChatToolRunPresentation)
-    /// Consecutive display calls, shown as one horizontally scrolling chip row.
     case displays([ChatToolDescriptor])
-    /// A completed inline display whose card spans the transcript width, as it
-    /// does when shown alone; it cannot sit inside a chip row.
     case wideDisplay(ChatToolDescriptor)
 
     var id: String {
@@ -234,8 +221,6 @@ enum ToolRunSegment: Identifiable, Equatable {
         var displays: [ChatToolDescriptor] = []
         func flushGeneric() {
             guard let first = generic.first else { return }
-            // A generic stretch is a sub-run of the row: its sheet route needs an
-            // identity distinct from the row's and from any sibling stretch.
             segments.append(.tools(ChatToolRunPresentation(
                 tools: generic, anchorID: "\(run.anchorID)~\(first.id)", visibleCallsOnly: true
             )))
@@ -277,8 +262,6 @@ struct ToolRunView: View {
             displayView(tool)
         } else {
             let segments = ToolRunSegment.segments(of: run)
-            // A stable stack keeps each segment's identity while streaming calls
-            // join the run, so a new chip appends without remounting its siblings.
             VStack(alignment: .leading, spacing: ChatTranscriptLayoutConstants.rowSpacing) {
                 ForEach(segments) { segment in
                     switch segment {
@@ -308,7 +291,6 @@ struct ToolRunView: View {
         .environment(\.displayPresentationHandler, displayHandler(for: tool))
     }
 
-    /// Grouped and lone inline images use the same thumbnail control.
     @ViewBuilder
     private func stripDisplayView(_ tool: ChatToolDescriptor) -> some View {
         if let display = tool.display, display.kind == .image, !tool.error, !tool.isRunning,
@@ -320,12 +302,10 @@ struct ToolRunView: View {
         }
     }
 
-    /// An inline approval/display keeps technical details scoped to its own call.
     private func singleCallRun(_ tool: ChatToolDescriptor) -> ChatToolRunPresentation {
         run.tools.count == 1 ? run : ChatToolRunPresentation(tools: [tool], anchorID: "\(run.anchorID)~\(tool.id)", visibleCallsOnly: true)
     }
 
-    /// Resolve only the selected call's read-only payload on activation.
     private func displayHandler(for tool: ChatToolDescriptor) -> DisplayPresentationHandler {
         { command in
             var route = command.route
@@ -342,10 +322,6 @@ struct ToolRunView: View {
         } else { openDetails(run) }
     }
 
-    /// The detail sheet belongs to the transcript, not to this row: streaming
-    /// pushes the row out of lazy realization, and the sheet — with its deferred
-    /// display handoff — must outlive it. The row resolves the run it just asked
-    /// for and hands the route to the transcript's host.
     private func openDetails(_ run: ChatToolRunPresentation) {
         if let sessionID,
            let presentPendingInteraction,
@@ -372,13 +348,8 @@ struct ToolRunView: View {
     }
 }
 
-/// A visible detail owns only its selected calls. Chat can stop installing
-/// transcript frames without freezing the detail or its technical descendants.
 struct LiveToolRunDetails: View {
     let initial: ToolRunResolvedState
-    // A transcript outlives many chips. Only this managed presentation owns
-    // its chosen detent: retain it through info/back and scene rebuilds, then
-    // discard it on dismissal so the next chip starts at medium (#1309).
     @PresentationState private var detent: PresentationDetent = .medium
     let onDisplay: (String, DisplayPresentationCommand) -> Void
     let onDismiss: () -> Void
@@ -423,8 +394,6 @@ struct LiveToolRunDetails: View {
         .background {
             if activity.allowsDataPublication {
                 Color.clear.onChange(of: source, initial: true) { _, source in
-                    // An offline gap retains the last complete read-only
-                    // detail. A proven replacement runtime retires its owner.
                     guard let source else { return }
                     guard source.runtimeGeneration == initial.installationTag.runtimeGeneration else {
                         currentTools = nil
@@ -439,8 +408,6 @@ struct LiveToolRunDetails: View {
     }
 }
 
-/// Read-only child transcripts share the canonical run chip and detail sheets
-/// without manufacturing a mutable main-chat installation tag.
 struct ReadOnlyToolRunView: View {
     let run: ChatToolRunPresentation
     let tools: [ChatToolPresentation]
@@ -528,8 +495,6 @@ struct ToolActivityChip: View {
             cornerRadius: ChatToolChipShapePolicy.cornerRadius,
             style: .continuous
         ))
-        // Keep the native glass surface's vertical hit geometry intrinsic
-        // before attaching its transcript-chip tap.
         .fixedSize(horizontal: false, vertical: true)
         .chatCompactPillInteraction(
             accessibilityLabel: accessibilityLabel(visual),
@@ -557,9 +522,6 @@ struct ToolActivityChip: View {
         let animation = ChatMotion.toolValueReplace(reduceMotion: reduceMotion)
         var transaction = Transaction(animation: animation)
         transaction.admitsChatToolChipAnimation = true
-        // Admit the shallow state in the same MainActor turn as the latest
-        // projection. Native interactive glass remains the sole touch owner;
-        // no deferred task may interrupt its press/drag transaction.
         withTransaction(transaction) { displayedState = target }
     }
 
@@ -656,9 +618,6 @@ struct ToolRunDetailSheet: View {
     }
 }
 
-/// Reads the selected presentation through a binding so same-call progress
-/// updates refresh an already-open detail sheet without changing its route,
-/// detent, or scroll ownership.
 private struct ToolRunSelectedDetailSheet: View {
     @Binding var tool: ChatToolPresentation?
     @Binding var detailDetent: PresentationDetent
@@ -712,9 +671,6 @@ enum ToolRowPreviewFadeEdge {
     case bottom
 }
 
-/// Bounded text uses the same partial edge mask as the compact thinking tail.
-/// Primary values fade at the bottom when more follows; result tails fade at
-/// the top when older output was omitted.
 struct ToolRowPreviewViewport<Content: View>: View {
     let edge: ToolRowPreviewFadeEdge
     let sourceIsBounded: Bool
@@ -802,8 +758,6 @@ struct ToolRowPreviewViewport<Content: View>: View {
     }
 }
 
-/// One bounded, noninteractive row surface for an aggregate tool run. The
-/// button owns the complete row so no nested controls compete for activation.
 private struct ToolRunSummaryRow: View {
     let tool: ChatToolPresentation
     let action: () -> Void
@@ -981,25 +935,13 @@ struct ToolElapsedClock: Equatable {
     }
 }
 
-/// A running tool timer's `TimelineView` schedule. Below one minute of elapsed
-/// time it is exactly the view's historical `.periodic(from: .now, by:)` clock,
-/// started when the body ran, so the tenths it shows keep their cadence and
-/// phase. From the first periodic tick at one minute the label shows only whole
-/// seconds (whole minutes from one hour), so the schedule fires exactly when
-/// that text changes instead of polling.
 struct ToolElapsedTimelineSchedule: TimelineSchedule {
-    /// Below this the label shows milliseconds or tenths of a second.
     static let periodicLimitMilliseconds = 60_000
-    /// Past the periodic limit the label changes at least once a minute; an
-    /// unchanged horizon entry only re-renders the same text.
     static let changeSearchHorizon: TimeInterval = 61
 
     let periodic: PeriodicTimelineSchedule
-    /// Wall-clock and uptime instants read together. They map a future render
-    /// date to the uptime the view's clocks will read at that date.
     let anchorDate: Date
     let anchorUptime: TimeInterval
-    /// The view's displayed elapsed value for a render at `date` and `uptime`.
     let milliseconds: @Sendable (_ date: Date, _ uptime: TimeInterval) -> Int?
 
     init(
@@ -1014,9 +956,6 @@ struct ToolElapsedTimelineSchedule: TimelineSchedule {
         self.milliseconds = milliseconds
     }
 
-    /// Reads uptime before the date, so a mapped uptime never runs ahead of the
-    /// uptime a render at that date reads and a change entry never renders the
-    /// previous text.
     init(
         interval: TimeInterval,
         milliseconds: @escaping @Sendable (_ date: Date, _ uptime: TimeInterval) -> Int?
@@ -1059,8 +998,6 @@ struct ToolElapsedTimelineSchedule: TimelineSchedule {
                 return change
             }
             guard let tick = periodic.next() else { return nil }
-            // The first periodic tick at a minute still fires, exactly as
-            // today, so the transition out of tenths is unchanged.
             if let elapsed = schedule.milliseconds(renderedAt: tick),
                elapsed >= ToolElapsedTimelineSchedule.periodicLimitMilliseconds {
                 tracksChanges = true
@@ -1295,7 +1232,6 @@ struct ToolDetailRoute: Identifiable, Hashable {
 
 private struct ToolDetailSheetHost: ViewModifier {
     @Binding var route: ToolDetailRoute?
-    /// The presenting card: tool cards repeat in one transcript surface.
     let instance: String
     @Binding var detent: PresentationDetent
     let tool: ChatToolPresentation?

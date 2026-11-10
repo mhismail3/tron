@@ -21,16 +21,12 @@ package struct BoundedHTTPFileTransport: Sendable {
         self.downloadForRequest = downloadForRequest
     }
 
-    /// A transport that never pins (see `BoundedHTTPDataTransport`).
     package init(
         downloadForRequest: @escaping @Sendable (URLRequest, Int) async throws -> BoundedHTTPDownloadedFile
     ) {
         self.init { request, maximumBytes, _ in try await downloadForRequest(request, maximumBytes) }
     }
 
-    /// `pin` is the public key the served certificate must hash to while this
-    /// route runs over a pinned LAN lane (E-3c); nil keeps the platform's own
-    /// TLS evaluation, which is what the saved endpoint gets.
     func download(
         for request: URLRequest,
         maximumBytes: Int,
@@ -55,16 +51,10 @@ package struct BoundedHTTPFileTransport: Sendable {
     }
 }
 
-/// The sessions one bounded file transport configuration runs on (see
-/// `BoundedHTTPReadSession`).
 struct BoundedHTTPFileSessions: Sendable {
     package let configuration: URLSessionConfiguration
     let readSession: URLSession
 
-    /// Fresh sessions made from one configuration object share its cookie
-    /// storage and cache, and a configuration copy keeps those same storage
-    /// objects, so the shared read session sees exactly what a fresh one
-    /// would. Downloads are never answered from the cache.
     package init(configuration: URLSessionConfiguration) {
         self.configuration = configuration
         readSession = URLSession(configuration: BoundedHTTPReadSession.configured(configuration))
@@ -220,15 +210,11 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
     private let sessions: BoundedHTTPFileSessions
     private var continuation: CheckedContinuation<BoundedHTTPDownloadedFile, Error>?
     private var session: URLSession?
-    /// Whether `session` is a fresh session this request owns rather than the
-    /// shared read session.
     private var ownsSession = false
     private var task: URLSessionDownloadTask?
     private var stagedURL: URL?
     private var remainingResumeAttempts = 2
     private var terminalResult: Result<BoundedHTTPDownloadedFile, Error>?
-    /// The public key this download's certificate must hash to, or nil to keep
-    /// the platform's own trust evaluation (E-3c).
     private let pinnedPublicKey: String?
 
     private init(
@@ -280,8 +266,6 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         self.continuation = continuation
         lock.unlock()
 
-        // A pinned download owns a fresh session (see
-        // `BoundedURLSessionDataLoader.start`).
         let ownsSession = pinnedPublicKey != nil || !BoundedHTTPReadSession.admits(request)
         let session = ownsSession
             ? URLSession(configuration: sessions.configuration, delegate: self, delegateQueue: nil)
@@ -356,8 +340,6 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
                 return
             }
             do {
-                // Keep cancellation serialized with publication so a cancelled
-                // move cannot recreate a file after its reservation is retired.
                 try FileManager.default.moveItem(at: location, to: destination)
                 try FileManager.default.setAttributes(
                     [.protectionKey: FileProtectionType.complete],
@@ -432,7 +414,6 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         if ownsSession {
             session?.invalidateAndCancel()
         } else if case .failure = result {
-            // Retire only this download; the shared session continues.
             task?.cancel()
         }
         if case .failure = result, let stagedURL {

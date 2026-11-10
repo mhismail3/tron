@@ -11,10 +11,7 @@ struct NewSessionSheet: View {
     @PresentationState private var useDefaultWorkspace = true
     @PresentationState private var selectedModel: ModelRef?
     @PresentationState private var configuredModel: ModelRef?
-    /// Explicit model intent, retained across configuration re-runs. See
-    /// `NewSessionModelChoice`.
     @PresentationState private var modelChoice = NewSessionModelChoice()
-    /// The scope the currently admitted configuration belongs to.
     @PresentationState private var configuredScope: NewSessionModelScope?
     @PresentationState private var sourceControl = SessionSourceControlSelection.existing
     @PresentationState private var sourceControlScope: NewSessionModelScope?
@@ -275,9 +272,6 @@ struct NewSessionSheet: View {
                 if let pinnedProfileID, model.profiles.selected?.id != pinnedProfileID { return }
                 guard let profileID = selectedServerID,
                       model.profiles.selected?.id == profileID else {
-                    // A quick project selection can target another server. Do
-                    // not issue settings, trust, or Git reads through the old
-                    // connection while Gateway is switching profiles.
                     return
                 }
                 configurationOwner.begin(profileID: profileID, workspace: workspace)
@@ -297,10 +291,6 @@ struct NewSessionSheet: View {
                 configurationRequestID = requestID
                 configurationNotice = nil
                 let readIdentity = model.knowledgePresentationIdentity
-                // A revision-only re-run (profile revision, trust invalidation, or
-                // presentation activity) re-derives the scope default but must not
-                // discard a model the user just chose. Only a real scope change
-                // clears explicit intent; see NewSessionModelChoice.
                 let modelScope = NewSessionModelScope(profileID: profileID, workspace: requestedWorkspace, lifecycleGeneration: model.knowledgeDestinationIdentity.lifecycleGeneration)
                 if sourceControlScope != modelScope {
                     sourceControl = .existing
@@ -327,9 +317,6 @@ struct NewSessionSheet: View {
                         inspectedGit = try await model.gatewayDiagnostics.inspectGit(path: requestedWorkspace)
                         gitFailed = false
                     } catch {
-                        // A profile transition can close the old socket while
-                        // this read is suspended. The new profile will rerun
-                        // the load after its revision is published.
                         inspectedGit = nil
                         gitFailed = true
                     }
@@ -416,15 +403,11 @@ struct NewSessionSheet: View {
         NewSessionTrustPolicy.requiresDecision(trustInspection)
     }
 
-    /// The picker records explicit intent for the scope being configured, so a
-    /// later revision-only re-run restores it instead of the scope default.
     private var modelSelection: Binding<ModelRef?> {
         Binding(
             get: { selectedModel },
             set: { selection in
                 selectedModel = selection
-                // Attribute the choice to the admitted scope, falling back to the
-                // live scope if a pick somehow precedes configuration admission.
                 modelChoice.choose(selection, scope: configuredScope ?? NewSessionModelScope(
                     profileID: activeProfileID,
                     workspace: workspace,
@@ -573,9 +556,6 @@ struct NewSessionSheet: View {
             #if HOSTED_TEST
             await model.hostedBeforeNewSessionSubmission?()
             #endif
-            // A gesture's Task can start after its Mac/foreground retired. Check
-            // the original submission before even the implicit trust command;
-            // the post-trust namespace fence is too late to prevent retargeting.
             guard !Task.isCancelled, !creationOwner.isRetired,
                   presentationActivity.allowsPresentationPublication,
                   model.profiles.selected?.id == submittedScope.profileID,
@@ -602,7 +582,6 @@ struct NewSessionSheet: View {
             ) else { return }
             publishCreatedRouteIfAdmitted()
         } catch is CancellationError {
-            // The original receipt/namespace owns any accepted command.
         } catch {
             guard !creationOwner.isRetired, currentModelScope == submittedScope else { return }
             model.presentError(error)
@@ -624,8 +603,6 @@ struct NewSessionSheet: View {
     private func publishCreatedRouteIfAdmitted() {
         if let pendingScope = creationOwner.pendingScope,
            creationOwner.discardResultOutside(currentModelScope) {
-            // A newer workspace on this Mac can report the canonical creation,
-            // but a successor namespace must not receive the old outcome.
             guard pendingScope.profileID == model.knowledgeDestinationIdentity.profileID,
                   pendingScope.lifecycleGeneration == model.knowledgeDestinationIdentity.lifecycleGeneration,
                   pendingScope.profileID == currentModelScope.profileID else { return }

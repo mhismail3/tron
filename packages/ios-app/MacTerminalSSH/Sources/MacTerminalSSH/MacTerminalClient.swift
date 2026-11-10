@@ -5,22 +5,10 @@ import NIOCore
 import NIOSSH
 import NIOTransportServices
 
-/// Mac Terminal's SSH client: one interactive login shell on the paired Mac's
-/// private user-level sshd, reached over Tailscale IPv4 without the
-/// Gateway. The iPhone app and the `mac-terminal-probe` journey binary share
-/// this code, so the real-sshd test exercises the exact handshake, host-key
-/// pin, key authentication and PTY channel the app uses.
-///
-/// The Mac's address, user and host keys are learned once from the Gateway at
-/// enrollment (`MacTerminalEndpoint`); nothing here talks to the Gateway.
-
-/// Where and as whom to connect, and which host keys the Mac may present.
 public struct MacTerminalEndpoint: Codable, Equatable, Sendable {
-    /// Explicitly pinned numeric Tailscale IPv4 destinations only.
     public var hosts: [String]
     public var port: Int
     public var username: String
-    /// The Mac's sshd host public keys in OpenSSH form, pinned at enrollment.
     public var hostKeys: [String]
 
     public init(hosts: [String], port: Int = 44222, username: String, hostKeys: [String]) {
@@ -31,9 +19,6 @@ public struct MacTerminalEndpoint: Codable, Equatable, Sendable {
     }
 }
 
-/// Every way a connection fails, each with the text the sheet shows. A failure
-/// is classified once, at the boundary that observed it, so the sheet never
-/// guesses from a generic transport error.
 public enum MacTerminalError: Error, Equatable, Sendable, LocalizedError {
     case notOnTailnet
     case macUnreachable
@@ -72,9 +57,6 @@ public enum MacTerminalError: Error, Equatable, Sendable, LocalizedError {
     }
 }
 
-/// The iPhone's client key. On a device it lives in the Secure Enclave and
-/// never leaves it; a software key exists only for the Simulator and the
-/// journey probe, neither of which has one.
 public enum MacTerminalPrivateKey: Sendable {
     case secureEnclave(SecureEnclave.P256.Signing.PrivateKey)
     case software(P256.Signing.PrivateKey)
@@ -86,21 +68,15 @@ public enum MacTerminalPrivateKey: Sendable {
         }
     }
 
-    /// The `ecdsa-sha2-nistp256 AAAA…` line the Gateway writes to authorized_keys.
     public var openSSHPublicKey: String { String(openSSHPublicKey: sshKey.publicKey) }
 }
 
-/// What the shell or command produces.
 public enum MacTerminalEvent: Sendable, Equatable {
     case output([UInt8])
-    /// A command's stderr (an exec channel's extended data). A PTY shell has
-    /// none: its stderr is the terminal.
     case diagnostic([UInt8])
-    /// The shell ended; `status` is its exit status when the Mac sent one.
     case closed(status: Int?)
 }
 
-/// OpenSSH's `SHA256:` fingerprint of a public key, as `ssh-keygen -l` prints it.
 public func macTerminalFingerprint(_ key: NIOSSHPublicKey) -> String {
     let line = String(openSSHPublicKey: key)
     let parts = line.split(separator: " ")
@@ -109,8 +85,6 @@ public func macTerminalFingerprint(_ key: NIOSSHPublicKey) -> String {
     return "SHA256:" + digest.replacingOccurrences(of: "=", with: "")
 }
 
-/// Whether this device holds a Tailscale IPv4 address (100.64.0.0/10). It is the early, precise "not on tailnet" signal:
-/// without it every dial would only time out.
 public func macTerminalHasTailnetAddress() -> Bool {
     var head: UnsafeMutablePointer<ifaddrs>?
     guard getifaddrs(&head) == 0, let first = head else { return false }
@@ -129,8 +103,6 @@ public func macTerminalHasTailnetAddress() -> Bool {
     return false
 }
 
-/// Numeric Tailscale destinations only. Merely having another tailnet interface
-/// does not make an arbitrary DNS result or cached LAN address safe to dial.
 public func macTerminalIsTailnetHost(_ host: String) -> Bool {
     var v4 = in_addr()
     if host.withCString({ inet_pton(AF_INET, $0, &v4) }) == 1 {
@@ -139,7 +111,6 @@ public func macTerminalIsTailnetHost(_ host: String) -> Bool {
     return false
 }
 
-/// One live shell. `events` ends after `.closed`.
 public final class MacTerminalSession: Sendable {
     public let events: AsyncStream<MacTerminalEvent>
     private let connection: Channel
@@ -167,16 +138,12 @@ public final class MacTerminalSession: Sendable {
         shell.triggerUserOutboundEvent(request, promise: nil)
     }
 
-    /// Closes only the SSH attachment. The tmux server retains the shell.
     public func close() {
         connection.close(promise: nil)
     }
 }
 
 public enum MacTerminalClient {
-    /// Opens a login shell. Each host is dialed in turn; the first that
-    /// completes the handshake wins. A pinned-key mismatch or a refused key
-    /// stops at once: another address of the same Mac would answer the same.
     public static func connect(
         endpoint: MacTerminalEndpoint,
         privateKey: MacTerminalPrivateKey,
@@ -190,8 +157,6 @@ public enum MacTerminalClient {
               sessionName.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) || $0 == 45 }) else {
             throw MacTerminalError.invalidEndpoint
         }
-        // A dedicated tmux socket prevents user tmux configuration from changing
-        // the mobile session's lifecycle. There is no unpersisted-shell fallback.
         let command = "export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; "
             + "if ! command -v tmux >/dev/null 2>&1; then printf 'TRON_TMUX_MISSING\\n'; exit 127; fi; "
             + "printf 'TRON_TMUX_READY\\n'; exec tmux -L tron-mobile -f /dev/null -u new-session -A -s \(sessionName) \\; set-option -t \(sessionName) status off"
@@ -245,8 +210,6 @@ public enum MacTerminalClient {
         let group = NIOTSEventLoopGroup.singleton
         let bootstrap = NIOTSConnectionBootstrap(group: group)
             .connectTimeout(connectTimeout)
-            // Fail on the first unsatisfied path instead of waiting for one, so
-            // a refused port or a missing route surfaces as its own error.
             .channelOption(NIOTSChannelOptions.waitForActivity, value: false)
             .channelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
@@ -272,8 +235,6 @@ public enum MacTerminalClient {
         }
 
         let (events, continuation) = AsyncStream.makeStream(of: MacTerminalEvent.self, bufferingPolicy: .bufferingOldest(256))
-        // The dial timeout ends at TCP; an sshd that accepts and then never
-        // answers the handshake or the shell request must not hang the sheet.
         let deadline = connection.eventLoop.scheduleTask(in: handshakeTimeout) {
             outcome.record(.disconnected("The Mac accepted the connection but did not complete the SSH handshake."))
             connection.close(promise: nil)
@@ -283,8 +244,6 @@ public enum MacTerminalClient {
             let shell = try await connection.eventLoop.flatSubmit {
                 let promise = connection.eventLoop.makePromise(of: Channel.self)
                 let ready = connection.eventLoop.makePromise(of: Void.self)
-                // A channel that never opens (the handshake failed) must still
-                // settle `ready`; NIO treats an abandoned promise as a bug.
                 promise.futureResult.whenFailure { ready.fail($0) }
                 do {
                     let ssh = try connection.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
@@ -302,7 +261,6 @@ public enum MacTerminalClient {
                 }
                 return promise.futureResult.flatMap { child in ready.futureResult.map { child } }
             }.get()
-            // The shell's end, or a broken connection, ends the session.
             connection.closeFuture.whenComplete { _ in continuation.finish() }
             return MacTerminalSession(events: events, connection: connection, shell: shell)
         } catch {
@@ -328,8 +286,6 @@ public enum MacTerminalClient {
     }
 }
 
-/// The handshake's own verdict, recorded by the delegate that reached it so
-/// the generic channel error that follows is not what the user sees.
 private final class HandshakeOutcome: @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: MacTerminalError?
@@ -341,7 +297,6 @@ private final class HandshakeOutcome: @unchecked Sendable {
     }
 }
 
-/// Accepts only a host key pinned at enrollment.
 private final class PinnedHostKey: NIOSSHClientServerAuthenticationDelegate {
     let pinned: Set<NIOSSHPublicKey>
     let outcome: HandshakeOutcome
@@ -362,7 +317,6 @@ private final class PinnedHostKey: NIOSSHClientServerAuthenticationDelegate {
     }
 }
 
-/// Offers the enrolled key once. A second request means the Mac refused it.
 private final class PinnedKeyAuthentication: NIOSSHClientUserAuthenticationDelegate {
     let username: String
     let privateKey: NIOSSHPrivateKey
@@ -404,13 +358,10 @@ private final class ConnectionErrorHandler: ChannelInboundHandler {
     }
 }
 
-/// What a session channel asks sshd for.
 enum ChannelRequest: Sendable {
-    /// A PTY, then the login shell.
     case shell(term: String, columns: Int, rows: Int, command: String)
 }
 
-/// Requests a PTY and executes the tmux attachment, then streams bytes.
 private final class ShellHandler: ChannelInboundHandler {
     typealias InboundIn = SSHChannelData
 
@@ -461,7 +412,7 @@ private final class ShellHandler: ChannelInboundHandler {
                     context.triggerUserOutboundEvent(SSHChannelRequestEvent.ExecRequest(command: command, wantReply: true), promise: nil)
                 }
             case .shell:
-                break // Startup output below distinguishes missing tmux before publishing the session.
+                break
             case .running:
                 break
             }
@@ -503,18 +454,12 @@ private final class ShellHandler: ChannelInboundHandler {
             foundStartupMarker = true
         }
         if stage != .running {
-            // The prelude only proves tmux exists. Its first terminal output
-            // proves attachment has started, so early input cannot be flushed
-            // when tmux switches the remote PTY into raw mode.
             guard !bytes.isEmpty else { return }
             stage = .running
             ready?.succeed(())
             ready = nil
         }
         if case .dropped = continuation.yield(message.type == .stdErr ? .diagnostic(bytes) : .output(bytes)) {
-            // Never let a suspended/slow consumer grow memory without bound or
-            // silently continue an emulator after lost bytes. tmux retains the
-            // screen; a fresh attachment will repaint it.
             context.close(promise: nil)
         }
     }
@@ -524,7 +469,6 @@ private final class ShellHandler: ChannelInboundHandler {
         ready = nil
         continuation.yield(.closed(status: exitStatus))
         continuation.finish()
-        // The shell owns the connection: when it ends, so does the session.
         context.channel.parent?.close(promise: nil)
         context.fireChannelInactive()
     }

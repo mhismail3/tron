@@ -3,7 +3,6 @@ import SwiftUI
 import TronMobileCore
 
 struct ProcessHistorySheet: View {
-    /// The one label of this sheet's title and the Manage Session row that opens it.
     static let title = "Subagent History"
     let sessionID: String
     @Environment(AppModel.self) private var model
@@ -76,7 +75,6 @@ struct ProcessHistorySheet: View {
         var id: String { process.id }
     }
 
-    /// One newest-first feed: live and recent runs, then earlier canonical history.
     private func rows(_ store: SessionProcessHistoryStore) -> [HistoryRow] {
         let mounted = mountedProcesses
         let sections = SessionProcessProjection.sections(mounted)
@@ -130,7 +128,6 @@ struct ProcessHistorySheet: View {
         }
     }
 
-    /// A state that heads the feed, or replaces an empty one centred in the sheet.
     private func hasPlaceholder(_ store: SessionProcessHistoryStore, empty: Bool) -> Bool {
         switch store.status {
         case .conflict, .unavailable, .disconnected: true
@@ -173,7 +170,6 @@ struct ProcessHistorySheet: View {
     }
 }
 
-/// A read-only subagent session's in-card state.
 private struct SessionProcessPlaceholder: View {
     let title: String
     let detail: String
@@ -194,9 +190,6 @@ enum SessionProcessRowTone: Equatable, Sendable {
 }
 
 enum SessionProcessRowPresentation {
-    /// A Subagent History row: the agent as its title, its latest output line (else its
-    /// current action) as the preview, lifecycle as the one pill, and mode and
-    /// duration as tags. The Gateway sends no task text yet (#1697).
     @MainActor static func listContent(_ process: SessionProcessActivity, now: Date = .now,
                                        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TronListRowContent {
         let output = (outputPreview(process.outputTail)?.text ?? "")
@@ -222,20 +215,14 @@ enum SessionProcessRowPresentation {
             accessibilityValueHoldsDetails: true)
     }
 
-    /// An Activity row: the History row plus the details Activity keeps — model and
-    /// thinking, tools, turns and mode as two quiet lines under the title — with the
-    /// live state worded "Live". VoiceOver reads the full lifecycle, timing, details
-    /// and labelled output, as the row always has.
     @MainActor static func activityContent(_ process: SessionProcessActivity, now: Date = .now,
                                            uptime: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TronListRowContent {
         var content = listContent(process, now: now, uptime: uptime)
         if let status = content.status {
             content.status = TronListStatus(text: statusText(for: process.lifecycle), tone: status.tone, live: status.live)
         }
-        // The mode moves from a tag into the counts line, where it always read.
         content.tags = content.tags.filter { $0.mono }
         let output = outputPreview(process.outputTail)
-        // The preview shows the latest output line; the current tool stays visible beside it.
         let action = output == nil ? nil : latestAction(for: process)
         content.detailLines = [metadataLine(for: process), countsLine(for: process), action].compactMap { $0 }
         content.accessibilityValueOverride = [
@@ -284,15 +271,12 @@ enum SessionProcessRowPresentation {
     static func tone(for lifecycle: SessionProcessLifecycle) -> SessionProcessRowTone {
         switch lifecycle.state {
         case .queued, .running: .inProgress
-        // A paused run without its process-exit proof is still pausing; only a
-        // settled one is quiet resumable history.
         case .paused: lifecycle.isSettled ? .pausedSettled : .inProgress
         case .completed: .succeeded
         case .failed, .stopped, .rejected, .interrupted, .unknown: .unsuccessful
         }
     }
 
-    /// Explicit lifecycle text for the row heading and VoiceOver.
     static func statusText(for lifecycle: SessionProcessLifecycle) -> String {
         switch lifecycle.state {
         case .running: "Live"
@@ -304,7 +288,6 @@ enum SessionProcessRowPresentation {
 
     static func durationText(_ milliseconds: Int) -> String {
         guard milliseconds >= 3_600_000 else { return ToolTiming.format(milliseconds: milliseconds) }
-        // Keep the live tick visible even after a subagent has run for an hour.
         let seconds = milliseconds / 1_000
         return "\(seconds / 3_600)h \((seconds % 3_600) / 60)m \(seconds % 60)s"
     }
@@ -333,7 +316,6 @@ enum SessionProcessRowPresentation {
                 uptime: uptime
             )
         }
-        // Queued/paused samples and terminal results never accrue local runtime.
         return ToolTiming.resolvedDuration(
             startedAt: process.startedAt,
             completedAt: process.lifecycle.terminalAt,
@@ -408,9 +390,6 @@ struct ReadOnlySubagentSessionSheet: View {
     @PresentationState private var detent: PresentationDetent = .medium
     @PresentationState private var stopRequested = false
     @PresentationState private var invalidationSinkID: UUID?
-    /// This transcript's own row-sheet owner: a child transcript's thinking
-    /// detail and event detail must survive the lazy row that asked for them,
-    /// exactly as the parent chat's do.
     @PresentationState private var sheetRoutes = ChatTranscriptSheetRouteOwner()
 
     private let tailID = "read-only-subagent-tail"
@@ -482,7 +461,6 @@ struct ReadOnlySubagentSessionSheet: View {
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
-        // Prefer reading at medium; UIKit still owns edge-pull dismissal.
         .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.hidden)
         .tronPresentation()
@@ -612,7 +590,6 @@ struct ReadOnlySubagentSessionSheet: View {
                                 toolPayloads: store.presentation.toolPayloads
                             )
                             .environment(\.chatTranscriptSheetRoutes, sheetRoutes)
-                            // Transcript/tool semantics are not navigation chrome.
                             .environment(\.tronSettingsVisualTheme, nil)
                             .padding(.bottom, compactIDs.contains(entry.item.id) ? 0 : ChatTranscriptLayoutConstants.rowSpacing)
                             #if HOSTED_TEST
@@ -645,7 +622,6 @@ struct ReadOnlySubagentSessionSheet: View {
             }
             .tronScrollEdgeChrome()
         }
-        // Thinking/event routes remain outside the lazy spine and render flip.
         .modifier(ChatTranscriptSheetHost(
             routes: sheetRoutes,
             resolveThinkingTrace: { store.resolveThinkingTrace($0) },

@@ -1,12 +1,7 @@
 import Darwin
 import Foundation
 
-/// Reads the wrapper-only bearer token from `gateway/local-auth.json`.
-/// Schema validation remains deliberately separate from the secure file read.
 enum OwnerOnlyJSONReader {
-    /// Reads one owner-only JSON file without reopening a path after checking
-    /// it. The descriptor is opened without following symlinks, then every
-    /// bound is checked from that descriptor before any bytes are consumed.
     static func readData(at url: URL, maximumBytes: Int) -> Data? {
         guard url.isFileURL, maximumBytes > 0,
               maximumBytes <= Int(off_t.max) else { return nil }
@@ -37,7 +32,6 @@ enum OwnerOnlyJSONReader {
             data.append(buffer, count: count)
         }
 
-        // A writer racing this read must not be able to append unnoticed.
         while true {
             let count = buffer.withUnsafeMutableBytes { bytes in
                 read(descriptor, bytes.baseAddress, 1)

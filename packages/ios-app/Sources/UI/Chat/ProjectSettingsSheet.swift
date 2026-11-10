@@ -1,16 +1,12 @@
 import SwiftUI
 import TronMobileCore
 
-/// One project surface for Manage Session, the dashboard and pre-chat setup.
-/// The caller supplies its exact workspace and Gateway; this view never changes
-/// cwd, discovers a different root, or infers settings state from Git history.
 struct ProjectSettingsRoute: Identifiable {
     let cwd: String
     let profileID: String
     var id: String { "\(profileID)|\(cwd)" }
 }
 
-/// New Session's setup card for the chosen workspace's Project Settings.
 struct ProjectSettingsLink: View {
     static let setupCardCaption = "Read-only repository overrides in .pi."
     let cwd: String
@@ -28,7 +24,6 @@ struct ProjectSettingsLink: View {
                                value: URL(fileURLWithPath: cwd).lastPathComponent,
                                caption: Self.setupCardCaption, accent: accent)
         }
-        // The link's label is its title; the card's value and subtext stay readable.
         .accessibilityValue("\(URL(fileURLWithPath: cwd).lastPathComponent), \(Self.setupCardCaption)")
         .accessibilityIdentifier("project-settings-link")
     }
@@ -59,7 +54,6 @@ struct ProjectSettingsSheet: View {
     }
 }
 
-/// The standalone Project Settings page (New Session, the dashboard).
 struct ProjectSettingsContent: View {
     let cwd: String
     let profileID: String
@@ -74,17 +68,11 @@ struct ProjectSettingsContent: View {
     }
 }
 
-/// The project's trust, workspace and read-only repository values. Project
-/// Settings shows them alone; Session Settings shows them under its own groups,
-/// where Manage Session's Workspace row already names the branch.
 struct ProjectSettingsSections: View {
     let cwd: String
     let profileID: String
     let showsWorkspace: Bool
-    /// Session Settings supplies its rows to the one group that also owns trust.
-    /// Standalone Project Settings keeps its existing project/workspace layout.
     var sessionSettings: AnyView? = nil
-    /// More Settings follows Project Trust in the same Session settings card.
     var sessionSettingsAfterTrust: AnyView? = nil
     var sessionSettingsFooter: String? = nil
     @Environment(AppModel.self) private var model
@@ -122,15 +110,12 @@ struct ProjectSettingsSections: View {
                     Task { await model.switchGateway(profile) }
                 }
             } else {
-                // The rows are fixed once the overrides arrive (the sheet's pulse
-                // hides them until then); trust and Git fill values in place.
                 TronSettingsGroup(sessionSettings == nil ? "Project" : nil,
                                   detail: sessionSettings == nil ? cwd : nil, accent: .tronPrimary) {
                     if let sessionSettings {
                         sessionSettings
                         TronSettingsDivider()
                     }
-                    // The row opens the project's one trust editor; its own look is unchanged.
                     TronProgressiveSheetLink(accessibilityLabel: "Project Trust", identity: "project.settings.trust.\(profileID).\(cwd)",
                                              destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
                         TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: sessionSettings == nil ? (trust?.stateTitle ?? "Trust") : "Project Trust",

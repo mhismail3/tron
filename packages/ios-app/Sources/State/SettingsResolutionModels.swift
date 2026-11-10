@@ -1,12 +1,10 @@
 import Foundation
 import TronMobileCore
 
-/// One badge as the resolver returns it; iOS maps `kind` to a style only.
 struct SettingsBadge: Decodable, Hashable, Sendable {
     struct Action: Decodable, Hashable, Sendable {
         let kind: String
         let label: String
-        /// The record entry an action applies to (Apply again names its outside change).
         var changeId: String? = nil
     }
     let kind: String
@@ -19,7 +17,6 @@ struct SettingsBadge: Decodable, Hashable, Sendable {
     }
 }
 
-/// One resolved key instance from `settings.resolve` (docs/settings-model.md 3.1).
 struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
     let key: String
     let qualifiers: [String: String]?
@@ -32,9 +29,7 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
     let badges: [SettingsBadge]
     struct Layer: Decodable, Equatable, Sendable {
         let layer: String
-        /// This layer's own stored value; absent when the layer holds none.
         let value: JSONValue?
-        /// Redacted settings still expose whether this layer holds a value.
         let display: String?
         var applied: Bool? = nil
         var reason: String? = nil
@@ -48,13 +43,9 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
 
     func badge(_ kind: String) -> SettingsBadge? { badges.first { $0.kind == kind } }
 
-    /// The served value, or one layer's own value for a surface that edits that
-    /// layer and must not show what a higher layer overrides.
     func value(at layer: String) -> JSONValue? { layers.first { $0.layer == layer }?.value }
 }
 
-/// `settings.resolve`: the key instances and the sections that summarize them in
-/// the Gateway's order.
 struct SettingsProjectSource: Decodable, Equatable, Sendable {
     let file: String
     let path: String
@@ -81,7 +72,6 @@ struct SettingsResolution: Decodable, Sendable {
     let diagnosticsTruncated: Bool
     private enum CodingKeys: String, CodingKey { case keys, sections, projectNotice, diagnostics, diagnosticsTruncated }
 
-    /// The row for an unqualified schema key, when the Gateway served it for this target.
     func setting(_ key: String) -> ResolvedSetting? { keys.first { $0.key == key } }
 
     init(from decoder: any Decoder) throws {

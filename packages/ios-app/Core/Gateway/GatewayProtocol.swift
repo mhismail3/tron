@@ -13,18 +13,11 @@ package struct GatewayRequest: Encodable, Sendable {
     }
 }
 
-/// The `cancel` control frame (protocol 6): this client no longer waits for the
-/// named request, so the Gateway may stop computing its answer. It has no reply.
 struct GatewayCancelFrame: Encodable, Sendable {
     let type = "cancel"
     let id: String
 }
 
-/// Reads whose answer nothing consumes once the caller abandons them, so the
-/// Gateway may abandon the work with them. Every entry only projects state and
-/// settles nothing durable. Accepted mutations and admitted prompts are never
-/// here: those keep their owner on the Gateway and settle durably, whatever the
-/// phone does with the wait.
 enum GatewayDisposableReadPolicy {
     static let disposableReadMethods: Set<String> = [
         "session.open",
@@ -43,17 +36,9 @@ enum GatewayDisposableReadPolicy {
 
     static func admits(_ method: String) -> Bool { disposableReadMethods.contains(method) }
 
-    /// A shed disposable read is answered `busy` with a retry hint (`G-12`). One
-    /// retry is what the hint is for; a Gateway that keeps shedding is telling
-    /// the caller the truth about its capacity rather than asking to be hammered.
     static let busyRetryLimit = 1
-    /// The longest wait a server-supplied hint can impose, so one shed read
-    /// cannot park a caller behind an unbounded Gateway answer.
     static let maximumRetryAfterDelay = Duration.seconds(10)
 
-    /// The wait this failure asks for, or nil when the failure is not a shed
-    /// disposable read: a locally minted failure has no hint, and a mutation or
-    /// prompt is never retried from here — its owner settles it durably.
     static func retryAfterDelay(for failure: GatewayFailure, method: String) -> Duration? {
         guard admits(method),
               failure.code == "busy",
@@ -74,9 +59,6 @@ package struct GatewayResponse: Decodable, Sendable, Equatable {
     package let error: GatewayFailure?
 }
 
-/// Local transport provenance for an operation whose bytes definitely did not
-/// leave the client's queued state. This type is intentionally not Codable and
-/// cannot be forged by a Gateway application-error response.
 package struct GatewayDefinitelyNotSentError: Error, Hashable, Sendable, LocalizedError {
     package let failure: GatewayFailure
 
@@ -87,9 +69,6 @@ package struct GatewayDefinitelyNotSentError: Error, Hashable, Sendable, Localiz
     package var errorDescription: String? { failure.message }
 }
 
-/// Local transport provenance for an operation whose bytes may have reached the
-/// Gateway. This type is intentionally not Codable and cannot be forged by a
-/// Gateway application-error response.
 package struct GatewayPossiblySentError: Error, Hashable, Sendable, LocalizedError {
     package let failure: GatewayFailure
 
@@ -105,16 +84,8 @@ package struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedErro
     package let message: String
     package let retryable: Bool
     package let details: JSONValue?
-    /// Whether this failure is the Gateway's own answer: the decoded error of a
-    /// response the Gateway sent, rather than a code the phone's transport
-    /// minted locally for a request that never got an answer. The wire failure
-    /// has no such field, so the client stamps it where it decodes an answer;
-    /// `session.open.failure` reports `gatewayCode` only from a stamped failure.
     package var answeredByGateway: Bool? = nil
 
-    /// Phone-local provenance, so it is not a wire key: a response frame cannot
-    /// stamp or clear it, and an encoded failure never carries it. The client is
-    /// the only writer (see `stampedAsGatewayAnswer`).
     private enum CodingKeys: String, CodingKey {
         case code, message, retryable, details
     }
@@ -129,7 +100,6 @@ package struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedErro
 
     package var errorDescription: String? { message }
 
-    /// The same failure stamped as the Gateway's own answer.
     var stampedAsGatewayAnswer: GatewayFailure {
         var stamped = self
         stamped.answeredByGateway = true
@@ -185,7 +155,6 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
     package let topic: String
     package let sessionId: String?
     package let payload: JSONValue
-    /// Trusted encoded frame size supplied before synchronization admission.
     let admittedBytes: Int
     package let preparation: GatewayEventPreparation
 
@@ -202,10 +171,6 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
         preparation = Self.prepare(topic: topic, adapter: JSONValuePayloadAdapter(payload: payload))
     }
 
-    /// Stamps transport admission metadata without reparsing the payload. The
-    /// network decoder has already prepared typed session data from the original
-    /// Decoder; rebuilding through JSONValue here would repeat expensive work and
-    /// can lose decoder-specific numeric/date representation.
     func withAdmittedBytes(_ bytes: Int) -> Self {
         Self(
             type: type,
@@ -429,9 +394,6 @@ package enum GatewayTokenAdmissionPolicy {
     static let maximumUTF8Bytes = 200
 
     package static func admit(_ token: String) -> Bool {
-        // Keep scalar membership explicit: Xcode 27's optimized app build
-        // miscompiles the bound CharacterSet.contains predicate and rejects
-        // valid tokens, preventing both sync acknowledgement and cleanup.
         !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && token.utf8.count <= maximumUTF8Bytes
             && !token.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
@@ -456,9 +418,6 @@ package struct GatewayEventDelivery: Sendable, Equatable {
     }
 }
 
-/// A snapshot of the Gateway transport epoch, including the disconnected state.
-/// Optional reads use this value so a request captured while offline cannot
-/// attach itself to a later connection.
 package struct GatewayConnectionAdmission: Equatable, Sendable {
     let connectionID: Int?
 
@@ -470,7 +429,6 @@ package struct GatewayConnectionAdmission: Equatable, Sendable {
 package struct GatewayConnectionIdentity: Sendable, Equatable {
     package let id: Int
     package let info: GatewayInfo
-    /// The Gateway's key for this connection's records (O-1 correlation).
     package let gatewayConnectionID: String?
 
     package init(id: Int, info: GatewayInfo, gatewayConnectionID: String?) {
@@ -494,14 +452,8 @@ package struct GatewayHello: Decodable, Sendable {
     let sourceRevision: String?
     let buildFingerprint: String?
     let runtimeEpoch: String?
-    /// The advertised grant projection revision; absence means this Gateway
-    /// cannot say whether its stored grants changed, so the phone re-sends.
     let pushRegistrationRevision: String?
-    /// Diagnostic only, so its absence never fails the handshake.
     let connectionId: String?
-    /// The LAN lane the Gateway serves right now (E-3b). Every hello replaces
-    /// what the profile stored, so an empty list is the lane being switched
-    /// off, and a Gateway that never advertises leaves the profile as it was.
     let lanEndpoints: [GatewayLanEndpoint]
     let lanPin: String?
 

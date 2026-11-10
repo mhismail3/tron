@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Why a retained transcript is not live. `ChatView.retainedRecoveryStatus`
-/// is its only producer; transient app notices never own this state.
 enum ChatRetainedRecoveryStatus: Equatable {
     case waitingForConnection
     case unavailable(String)
@@ -28,11 +26,6 @@ enum ChatRetainedRecoveryStatus: Equatable {
     }
 }
 
-/// A one-line recovery capsule in the chat title's place in the navigation
-/// chrome. The whole capsule is the Retry control, so its touch target is the
-/// visible glass rather than one small word. Liquid Glass matches the bar's own
-/// back and settings controls and keeps the line legible over the scrolled
-/// transcript. VoiceOver reads the reason, its full explanation, then Retry.
 struct ChatRecoveryStatusLine: View {
     let status: ChatRetainedRecoveryStatus
     let retry: () -> Void
@@ -61,9 +54,6 @@ struct ChatRecoveryStatusLine: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .capsule)
-        // Like the system bar items beside it, the fixed-height bar stops
-        // growing at the largest standard size; the large content viewer and
-        // the VoiceOver value carry the reason beyond it.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .accessibilityShowsLargeContentViewer {
             Label(status.title, systemImage: "exclamationmark.triangle.fill")

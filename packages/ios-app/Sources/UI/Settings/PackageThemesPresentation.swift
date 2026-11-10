@@ -19,10 +19,6 @@ struct PackageThemeItem: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Resolved theme files. Pi themes style the terminal, not this app (Appearance
-/// owns the app's color mode and fonts), so a theme an installed package owns is
-/// listed in that package's detail sheet and the Extensions sheet keeps one
-/// Local themes group for the themes no package owns.
 enum PackageThemesPresentation {
     static func items(from resources: JSONValue) -> [PackageThemeItem] {
         let values = resources.objectValue?["themes"]?.arrayValue ?? []
@@ -40,9 +36,6 @@ enum PackageThemesPresentation {
         }
     }
 
-    /// Themes no installed package owns. A theme whose package is gone from the
-    /// listing has no detail sheet to appear in, so it stays local rather than
-    /// vanishing from the app.
     static func localItems(from resources: JSONValue, packages: [PackageSummary]) -> [PackageThemeItem] {
         items(from: resources).filter { item in
             !packages.contains { package in
@@ -63,8 +56,6 @@ enum PackageThemesPresentation {
         return disabled == 0 ? "\(items.count) ready to use" : "\(items.count - disabled) ready · \(disabled) turned off"
     }
 
-    /// Shared provenance appears once as a caption; only a mixed source list
-    /// repeats it per row.
     static func caption(for items: [PackageThemeItem]) -> String? {
         guard !items.isEmpty else { return nil }
         let scopes = Set(items.map { $0.scope == "user" ? "global" : $0.scope })

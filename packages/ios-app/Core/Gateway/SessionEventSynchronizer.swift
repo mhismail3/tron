@@ -1,8 +1,5 @@
 import Foundation
 
-/// Owns one authoritative synchronization attempt per session, including its
-/// intent, shared outcome, and quarantined event suffix. This replaces token
-/// polling and keeps synchronization state from leaking across AppModel fields.
 @MainActor
 package final class SessionSynchronizationCoordinator {
     package enum Intent: Equatable, Sendable {

@@ -2,7 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Synthetic tool-boundary data rendered by the production sheets and transcript chips.
 struct HostedWorkerToolFixture: View {
     let surface: String
     @State private var showing = true

@@ -1,11 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// A Home tool call's detail body inside the standard tool detail sheet: a header
-/// card with the call's outcome pill, then its failure, rows, Markdown texts and
-/// line lists. Everything is a shared settings group, row, pill or Markdown view
-/// in the tool sheet's accent; a long text opens whole in the shared reader, as a
-/// Manage Home brief does.
 struct HomeToolDetailSections: View {
     let presentation: HomeToolDetailPresentation
     let accent: Color
@@ -117,7 +112,6 @@ struct HomeToolDetailSections: View {
         VStack(spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                 if index > 0 { TronSettingsDivider(accent: accent) }
-                // Title over value, as every Home detail row reads.
                 TronSettingsRow(icon: row.icon, title: row.title, subtitle: row.value, subtitleLineLimit: nil, accent: accent)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("home-tool-row-\(row.title)")
@@ -125,7 +119,6 @@ struct HomeToolDetailSections: View {
         }
     }
 
-    /// Markdown text, its opening lines previewed; a long text opens whole from View All.
     private func textGroup(id: String, title: String, text: String, detail: String?, prompt: Bool = false) -> some View {
         let preview = ToolTextHeadPreview.make(text)
         return TronSettingsGroup(title, inlineDetail: detail, accent: accent) {

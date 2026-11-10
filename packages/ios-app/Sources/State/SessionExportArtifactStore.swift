@@ -1,8 +1,6 @@
 import Foundation
 
 enum SessionExportArtifactPolicy {
-    // Session exports are disk-backed archival artifacts, not media blobs. Keep
-    // their capacity policy independent from the 25 MiB attachment/image bound.
     static let maximumEncodedBytes = 2 * 1_024 * 1_024 * 1_024
     static let legacyMaximumEncodedBytes = 25 * 1_048_576
     static let maximumTotalBytes: Int64 = 4 * 1_024 * 1_024 * 1_024
@@ -98,10 +96,6 @@ actor SessionExportArtifactStore {
         return reservation
     }
 
-    /// Stores an already-redacted, device-local export without contacting the
-    /// Gateway. Diagnostics use this owner for every share preparation so
-    /// retained evidence remains exportable offline; the bounded artifact
-    /// keeps ShareLink files private, finite, and distinct from session data.
     func writeText(_ text: String, suggestedName: String) throws -> URL {
         let data = Data(text.utf8)
         try prepareForIncoming(byteCount: Int64(data.count), additionalDiskBytes: 0)

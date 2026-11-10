@@ -2,8 +2,6 @@ import Foundation
 import Observation
 import TronMobileCore
 
-/// Configuration edits are commands, not presentation tasks. One profile-owned
-/// queue survives sheet dismissal; only its waiting debounce is cancellable.
 @MainActor @Observable
 final class ConfigurationAutosaveCoordinator {
     enum Key: Hashable {
@@ -28,16 +26,11 @@ final class ConfigurationAutosaveCoordinator {
     private(set) var activeKey: Key?
     private(set) var capacityError: String?
 
-    // Retirement is synchronous; facade profile notifications can follow an
-    // async connection transition. Old input must already be revoked then.
     var inputGeneration: Int { generation }
 
     func error(for key: Key) -> String? { messages[key] ?? capacityError }
     func canRetry(_ key: Key) -> Bool { failed[key] != nil }
 
-    /// Patches contain only this user event's changed fields. Merge consecutive
-    /// edits, including reversions, without manufacturing writes from a reload.
-    /// A nil patch denotes a full-document operation whose latest closure wins.
     @discardableResult
     func submit(
         key: Key, patch: JSONValue? = nil,
@@ -55,8 +48,6 @@ final class ConfigurationAutosaveCoordinator {
         if let last = pending.last, last.key == key {
             pending[pending.count - 1] = merging(last, next)
         } else {
-            // User-driven settings routes are few; never accumulate an
-            // unbounded queue while a disconnected request is settling.
             guard pending.count + failed.count + (writing == nil ? 0 : 1) < 64 else {
                 capacityError = "Too many pending configuration changes. Wait for the current request before editing again."
                 return false
@@ -76,7 +67,6 @@ final class ConfigurationAutosaveCoordinator {
         flush()
     }
 
-    /// Leaving an editor or submitting a field need not wait out its debounce.
     func flush() {
         timer?.cancel()
         timer = nil
@@ -94,8 +84,6 @@ final class ConfigurationAutosaveCoordinator {
         capacityError = nil
         activeKey = nil
         writing = nil
-        // The accepted write remains with its mutation/receipt owner. Its old
-        // generation cannot publish or dispatch another edit into this profile.
     }
 
     private func schedule() {
@@ -134,8 +122,6 @@ final class ConfigurationAutosaveCoordinator {
                 if (error as? GatewayFailure)?.code == "outcome_unknown" {
                     requiresExplicitRetry.insert(batch.key)
                 }
-                // No automatic retry loop. A correction or explicit Retry may
-                // resubmit a rejected edit; uncertain receipts require Retry.
                 didFail?(error)
             }
             guard generation == admittedGeneration, writing == token else { return }
@@ -149,8 +135,6 @@ final class ConfigurationAutosaveCoordinator {
     private func merging(_ older: Batch, _ newer: Batch) -> Batch {
         var result = newer
         if let old = older.patch, let new = newer.patch { result.patch = Self.merge(old, new) }
-        // Earlier presentation observers are disposable; the merged command
-        // retains their fields, not entire dismissed sheet hierarchies.
         return result
     }
 

@@ -2,9 +2,6 @@ import Foundation
 import Observation
 import TronMobileCore
 
-/// The sheet filter and the server window it renders. `unread` is a real
-/// `notification.inbox.list` filter, so the Unread list is never a client-side
-/// filter of the `all` page.
 enum NotificationInboxFilter: String, Codable, CaseIterable, Identifiable, Sendable {
     case all
     case unread
@@ -19,9 +16,6 @@ enum NotificationInboxFilter: String, Codable, CaseIterable, Identifiable, Senda
     }
 }
 
-/// One keyset position in the canonical inbox order: newest `createdAt` first,
-/// then ascending `id`. `cursor` is byte-identical to the Gateway's inbox
-/// cursor, so a client-built cut is directly comparable with Gateway pages.
 struct NotificationInboxPosition: Hashable, Comparable {
     let milliseconds: Int
     let id: String
@@ -71,9 +65,6 @@ extension GatewayNotificationInboxItem {
     }
 }
 
-/// One profile's bounded server-backed projection window. `nextCursor` is the
-/// keyset position to fetch the next older page, or nil once the window end is
-/// known; a keyset cursor stays valid across inbox changes.
 struct NotificationInboxWindow: Codable, Sendable, Equatable {
     var rows: [GatewayNotificationInboxItem] = []
     var nextCursor: String?
@@ -84,16 +75,12 @@ struct NotificationInboxWindowID: Hashable, Sendable {
     let filter: NotificationInboxFilter
 }
 
-/// One profile's pending older page in one window. The cursor is part of the
-/// identity so a mounted sentinel re-fires after every appended page.
 struct NotificationInboxOlderPage: Hashable, Sendable {
     let profileID: String
     let filter: NotificationInboxFilter
     let cursor: String
 }
 
-/// One profile's `readAll` cut: the newest row the profile has shown. Only
-/// unread rows at or older than it are marked, so newer arrivals stay unread.
 struct NotificationInboxReadAllTarget: Hashable, Sendable {
     let profileID: String
     let through: String
@@ -110,7 +97,6 @@ struct NotificationInboxItem: Hashable, Identifiable, Sendable {
 
 enum NotificationInboxGatewayClient {
     #if HOSTED_TEST
-    // Gate the real between-page suspension in one task, never global test state.
     @TaskLocal static var hostedAfterPage: (@Sendable () async -> Void)?
     #endif
 
@@ -187,8 +173,6 @@ enum NotificationInboxGatewayClient {
         )
     }
 
-    /// Only unread rows at or older than `through` are marked, so a cut captures
-    /// exactly what the caller has shown and newer arrivals stay unread.
     static func markAllRead(client: GatewayClient, commandID: String, through: String) async throws {
         let _: ReadAllResponse = try await client.request(
             "notification.inbox.readAll",
@@ -228,8 +212,6 @@ final class NotificationInboxCoordinator {
     private(set) var buckets: [String: Bucket] = [:]
     private(set) var loadingProfileIDs = Set<String>()
     private(set) var isMarkingAllRead = false
-    // One coordinator-wide counter makes every admission unique without
-    // retaining historical generations for removed profiles.
     private var nextRefreshGeneration = 0
     private var requestGenerationByProfile: [String: Int] = [:]
     private var refreshTasks: [String: Task<Void, Never>] = [:]
@@ -255,9 +237,6 @@ final class NotificationInboxCoordinator {
                 && bucket.unreadCount <= NotificationInboxAdmissionPolicy.maximumRetainedCount
         }
         guard Self.retainedRowCount(retained) <= NotificationInboxAdmissionPolicy.maximumRetainedCount else { return }
-        // Keyset cursors stay valid across connections, so restored windows keep
-        // them; dropping one would make a refresh merge treat the cached tail as
-        // the window's end and stop paging.
         buckets = retained.mapValues { cached in
             var current = cached
             current.connectionID = nil
@@ -265,7 +244,6 @@ final class NotificationInboxCoordinator {
         }
     }
 
-    /// One filter's server window across every profile bucket, newest first.
     func notifications(filter: NotificationInboxFilter) -> [NotificationInboxItem] {
         buckets.flatMap { profileID, bucket in
             bucket.window(filter).rows.map {
@@ -280,26 +258,18 @@ final class NotificationInboxCoordinator {
         .sorted { $0.notification.inboxPosition < $1.notification.inboxPosition }
     }
 
-    /// The aggregate `all` window, which is the shared row source for history.
     var notifications: [NotificationInboxItem] { notifications(filter: .all) }
 
     var unreadCount: Int {
         min(NotificationInboxAdmissionPolicy.maximumRetainedCount, buckets.values.reduce(0) { $0 + $1.unreadCount })
     }
 
-    /// Whether the inbox is loading with no window installed for any profile.
-    /// A refresh once any window is shown (an empty Unread window after Mark
-    /// Read, a change event, another Mac still connecting) is not a load: the
-    /// sheet keeps its settled rows or empty state instead of hiding its
-    /// content under the loading pulse.
     var isLoadingFirstWindows: Bool { !loadingProfileIDs.isEmpty && buckets.isEmpty }
 
-    /// Whether this filter's window still has older server pages to fetch.
     func hasOlderPages(filter: NotificationInboxFilter) -> Bool {
         buckets.values.contains { $0.window(filter).nextCursor != nil }
     }
 
-    /// One keyset trigger per profile whose window has a next cursor.
     func olderPageTriggers(filter: NotificationInboxFilter) -> [NotificationInboxOlderPage] {
         buckets.compactMap { profileID, bucket in
             bucket.window(filter).nextCursor.map {
@@ -322,10 +292,6 @@ final class NotificationInboxCoordinator {
         return nextRefreshGeneration
     }
 
-    /// Install or refresh both server windows for one profile. Each window is
-    /// merged into the loaded projection, so already-loaded older pages and
-    /// their keyset cursors survive a refresh while rows the refreshed range no
-    /// longer shows are dropped.
     func merge(
         profile: GatewayProfile,
         all: NotificationInboxGatewayClient.Snapshot,
@@ -356,20 +322,15 @@ final class NotificationInboxCoordinator {
         persist()
     }
 
-    /// Merge one refreshed first page into a loaded window. The page replaces
-    /// every row it covers, in canonical order, and drops rows the refreshed
-    /// range no longer shows (read or evicted). Rows older than the page stay.
     private static func merged(
         existing: NotificationInboxWindow,
         page: [GatewayNotificationInboxItem],
         nextCursor: String?
     ) -> NotificationInboxWindow {
         guard let boundary = page.last?.inboxPosition else {
-            // An empty first page covers nothing, so the window has no rows.
             return NotificationInboxWindow()
         }
         guard nextCursor != nil else {
-            // One page covered the whole window: it is the complete current set.
             return NotificationInboxWindow(rows: page, nextCursor: nil)
         }
         let pageIDs = Set(page.map(\.id))
@@ -380,10 +341,6 @@ final class NotificationInboxCoordinator {
         )
     }
 
-    /// Apply one `notification.inbox.changed` payload and answer whether a
-    /// refresh is still needed. The count is Gateway authority for the bell; an
-    /// equal revision is the Gateway confirming the projection, so it only
-    /// settles the count. An undecodable payload is a real invalidation.
     @discardableResult
     func applyInboxChanged(profileID: String, change: NotificationInboxChanged?) -> Bool {
         guard var bucket = buckets[profileID] else { return true }
@@ -394,10 +351,6 @@ final class NotificationInboxCoordinator {
         return change.revision != bucket.revision
     }
 
-    /// Append one older page to a loaded window. Answers whether the page no
-    /// longer fits the window (the history changed under it), which the caller
-    /// repairs with a refresh. A failed read is optional presentation work: the
-    /// window keeps its rows and its trigger re-arms with the presentation.
     @discardableResult
     func loadNextPage(
         profileID: String,
@@ -435,9 +388,6 @@ final class NotificationInboxCoordinator {
             window.rows.append(contentsOf: snapshot.notifications)
             window.nextCursor = snapshot.nextCursor
             current.setWindow(filter, window)
-            // The page carries the whole inbox's unread count, which stays the
-            // bell's authority; its revision is not adopted because this read
-            // did not cover the newest rows.
             current.unreadCount = snapshot.unreadCount
             buckets[profileID] = current
             persist()
@@ -463,8 +413,6 @@ final class NotificationInboxCoordinator {
             var currentProfile = profile
             var currentGeneration = generation
             defer {
-                // Retired work must neither strand its loading flag nor clear
-                // a remove/re-add successor's task, pending pass or generation.
                 if self.requestGenerationByProfile[profile.id] == currentGeneration {
                     self.refreshTasks[profile.id] = nil
                     self.pendingRefreshProfiles[profile.id] = nil
@@ -513,11 +461,7 @@ final class NotificationInboxCoordinator {
         persist()
     }
 
-    /// Mark one row read in both windows: the row stays in `all`, leaves
-    /// `unread`, and the server count drops by one. Reconciliation stays with
-    /// the owning change event or refresh; the bucket is never replaced whole.
     func markReadOptimistically(_ item: NotificationInboxItem) {
-        // An old unread row may be loaded only in the `unread` window.
         guard var bucket = buckets[item.profileID],
               (bucket.all.rows + bucket.unread.rows).contains(where: { $0.id == item.notification.id && $0.isUnread })
         else { return }
@@ -531,8 +475,6 @@ final class NotificationInboxCoordinator {
         persist()
     }
 
-    /// The `readAll` cut for every profile with unread rows and a loaded window:
-    /// the newest row that profile has shown, across both loaded windows.
     var readAllTargets: [NotificationInboxReadAllTarget] {
         buckets.compactMap { profileID, bucket in
             guard bucket.unreadCount > 0,
@@ -547,8 +489,6 @@ final class NotificationInboxCoordinator {
 
     func finishMarkingAllRead() { isMarkingAllRead = false }
 
-    /// Rows at or older than the profile's own cut become read; newer arrivals
-    /// are outside the cut and stay unread.
     func markAllReadOptimistically(_ target: NotificationInboxReadAllTarget) {
         guard var bucket = buckets[target.profileID],
               let cut = NotificationInboxPosition(cursor: target.through) else { return }
@@ -579,7 +519,6 @@ final class NotificationInboxCoordinator {
 
     private func persist() {
         var retained = buckets
-        // One aggregate row budget across every window, newest first.
         var windowRows: [(windowID: NotificationInboxWindowID, row: GatewayNotificationInboxItem)] = []
         for (profileID, bucket) in retained {
             for row in bucket.all.rows {
@@ -599,8 +538,6 @@ final class NotificationInboxCoordinator {
             for filter in NotificationInboxFilter.allCases {
                 var window = bucket.window(filter)
                 let kept = window.rows.filter { retainedRows.contains("\(profileID):\(filter.rawValue):\($0.id)") }
-                // A trimmed tail resumes paging from the last kept row, so the
-                // restored window neither skips rows nor claims a false end.
                 if kept.count != window.rows.count {
                     window.nextCursor = kept.last?.inboxPosition.cursor
                     window.rows = kept

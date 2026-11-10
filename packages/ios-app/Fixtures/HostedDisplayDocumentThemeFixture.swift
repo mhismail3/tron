@@ -2,8 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Scripted bytes only; the chat chips, display route, loader, Markdown and
-/// document navigation are the production owners.
 enum HostedDisplayDocumentThemeFixture {
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-theme") }
     static var home: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-home") }
@@ -64,8 +62,6 @@ enum HostedDisplayDocumentThemeFixture {
     }
 }
 
-/// Test controls are outside the reader's content. They change the real
-/// appearance owner while the same production document sheet stays mounted.
 struct HostedDisplayDocumentThemeChanges: View {
     @State private var showingReader = false
     @State private var dark = true
@@ -84,8 +80,6 @@ struct HostedDisplayDocumentThemeChanges: View {
                         Button("Switch reader theme") {
                             AppearanceSettings.shared.themeColor =
                                 AppearanceSettings.shared.themeColor == .burgundy ? .oliveGold : .burgundy
-                            // This command-line fixture owns its theme input. Keep
-                            // the live mutation from coloring later test launches.
                             UserDefaults.standard.removeObject(forKey: "themeColor")
                         }
                         Button("Switch reader appearance") { dark.toggle() }

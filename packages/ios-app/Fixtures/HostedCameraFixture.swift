@@ -3,14 +3,6 @@
 import TronMobileCore
 import UIKit
 
-/// Scripted camera hardware for the hosted camera journey (#937). With
-/// `-tron-camera-fixture`, the real camera sheet and `CameraModel` run against
-/// a granted permission and a provider whose feed becomes live after
-/// `-camera-fixture-latency-ms` (default 800), like a camera warming up; the
-/// first start may be slower (`-camera-fixture-start-latency-ms`) so a journey
-/// can observe the opening state. Its
-/// frames are solid colours: the back camera red (with a torch), the front
-/// camera blue (without one). The preview layer itself stays black.
 enum HostedCameraFixture {
     @MainActor static func model() -> CameraModel? {
         let arguments = ProcessInfo.processInfo.arguments

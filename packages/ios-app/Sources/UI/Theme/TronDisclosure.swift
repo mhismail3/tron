@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Shared expanding/collapsing section primitive. The dashboard's workspace
-/// groups and the model picker's provider sections both use it, so collapse
-/// timing, stale-completion safety, and the chevron have one implementation.
 enum TronDisclosureDirection: Equatable {
     case collapse
     case expand
@@ -14,9 +11,6 @@ struct TronDisclosureTransition: Equatable {
     let generation: Int
 }
 
-/// Keeps a section's rows mounted until they have finished fading out.
-/// Generations make delayed animation completions harmless after refreshes or
-/// rapid state changes.
 struct TronDisclosureState: Equatable {
     private enum Phase: Equatable {
         case expanded
@@ -76,18 +70,12 @@ struct TronDisclosureState: Equatable {
 
 enum TronDisclosureLayout {
     static let expansionAnimation = Animation.smooth(duration: 0.18)
-    /// Scroll-view sections that insert and remove their own rows (the model
-    /// picker) use a longer settle so neighbouring content glides rather than
-    /// jumps. The dashboard's `List` keeps `expansionAnimation`.
     static let contentAnimation = Animation.smooth(duration: 0.34)
 }
 
-/// The shared expanding/collapsing chevron: one symbol, size, and rotation
-/// treatment for every toggling section header.
 struct TronDisclosureChevron: View {
     let isExpanded: Bool
     var size: CGFloat = 10
-    /// Matches the rotation to the owning section's row motion.
     var animation: Animation = TronDisclosureLayout.expansionAnimation
 
     var body: some View {

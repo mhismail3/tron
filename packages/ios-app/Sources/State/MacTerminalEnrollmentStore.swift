@@ -3,18 +3,6 @@ import Foundation
 import MacTerminalSSH
 import Security
 
-/// Mac Terminal's local state on this iPhone (README "Mac Terminal"): for each
-/// paired Mac, the client key and what enrollment learned from its Gateway.
-/// Both are read without the Gateway, which is the point of the feature.
-///
-/// - The key is a Secure Enclave P-256 key. Only its Secure Enclave-wrapped
-///   `dataRepresentation` is stored, in this device's Keychain; it cannot be
-///   used on any other device and the private key is never exported. The
-///   Simulator has no Secure Enclave, so there (and only there) the key is a
-///   software key in the same Keychain item.
-/// - The enrollment (MagicDNS name, Tailscale addresses, user, pinned host
-///   keys) is not secret and lives in this app's defaults. Host keys are pinned
-///   once, at enrollment; nothing replaces them silently.
 struct MacTerminalEnrollment: Codable, Equatable, Sendable {
     let machineID: String
     let deviceID: String
@@ -39,7 +27,6 @@ final class MacTerminalEnrollmentStore {
         if let data = try? JSONEncoder().encode(values) { defaults.set(data, forKey: Self.enrollmentsKey) }
     }
 
-    /// Forgets the enrollment and destroys the key: a later enrollment makes a new one.
     func remove(machineID: String) throws {
         var values = try all()
         values.removeValue(forKey: machineID)
@@ -48,7 +35,6 @@ final class MacTerminalEnrollmentStore {
         guard status == errSecSuccess || status == errSecItemNotFound else { throw MacTerminalKeyError(status: status) }
     }
 
-    /// This Mac's client key, created on first use.
     func key(machineID: String) throws -> MacTerminalPrivateKey {
         if let stored = try storedKey(machineID) { return stored }
         let (key, representation) = try Self.makeKey()
@@ -60,7 +46,6 @@ final class MacTerminalEnrollmentStore {
         return key
     }
 
-    /// The existing key only; nil before enrollment created one.
     func existingKey(machineID: String) throws -> MacTerminalPrivateKey? { try storedKey(machineID) }
 
     private func all() throws -> [String: MacTerminalEnrollment] {

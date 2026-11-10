@@ -3,8 +3,6 @@ import Foundation
 import Observation
 import TronMobileCore
 
-/// One presentation owns its player and staged file. Retiring or superseding a
-/// request invalidates both download completions and queued AVFoundation callbacks.
 @MainActor
 @Observable
 final class DisplayVideoPlayback {
@@ -25,8 +23,6 @@ final class DisplayVideoPlayback {
                 return
             }
             fileURL = url
-            // Staging deliberately has opaque, extensionless names. Carry the
-            // Gateway's admitted media type into AVFoundation, not the filename.
             let asset = AVURLAsset(url: url, options: [AVURLAssetOverrideMIMETypeKey: mimeType])
             let item = AVPlayerItem(asset: asset)
             player = AVPlayer(playerItem: item)
@@ -65,8 +61,6 @@ final class DisplayVideoPlayback {
     }
 
     private func fail(stage: String, error: NSError?, status: Int?, request: String) {
-        // The first observed failure retires the item before its file. No retry
-        // or parallel player survives the presentation's unavailable state.
         guard !failed else { return }
         releaseMedia()
         failed = true
@@ -83,8 +77,6 @@ final class DisplayVideoPlayback {
         guard let error else { return "domain=none code=none" }
         let domains = [AVFoundationErrorDomain, NSOSStatusErrorDomain, NSURLErrorDomain, NSCocoaErrorDomain]
         let domain = domains.contains(error.domain) ? error.domain : "other"
-        // Error descriptions/userInfo can contain authenticated URLs and local
-        // paths. Only known domains and numeric codes belong in exported logs.
         return "domain=\(domain) code=\(error.code)"
     }
 }

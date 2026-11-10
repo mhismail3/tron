@@ -7,16 +7,7 @@ enum SnapshotCachePolicy {
     static let maximumSessionCount = 250
     static let maximumEncodedSessionBytes = 128 * 1_024
     static let envelopeReserveBytes = 4 * 1_024
-    /// Archived rows are never cached; the Gateway-owned count is the only
-    /// archive projection this cache retains, within the catalog's row bound.
     static let maximumArchivedCount = SessionCatalogLoadBounds.maximumRows
-    /// A live `session.summary` checkpoint trails the first unsaved summary by
-    /// this fixed window, so a burst (several summaries per tool call) becomes
-    /// one write of its newest rows. The window is not extended by later
-    /// summaries, so a continuous stream still saves every two seconds. Scene
-    /// inactivation, backgrounding and profile retirement write it at once,
-    /// so only an abrupt process death inside the window can lose it; the
-    /// next authoritative page replaces cached rows either way.
     static let summaryCheckpointDelay: Duration = .seconds(2)
 }
 
@@ -88,9 +79,6 @@ actor SnapshotCache {
                 )
                 return .empty
             }
-            // Admission is intentionally lossy: malformed or oversized rows
-            // and duplicate IDs are dropped in stored order, while a malformed
-            // envelope still discards the whole file in the outer catch.
             let admittedSessions = Self.admittedSessions(document.sessions).map(\.summary)
             performanceSignposts.end(
                 interval,
@@ -124,11 +112,6 @@ actor SnapshotCache {
         let interval = performanceSignposts.begin(.cacheSave)
         do {
             try prepareRoot()
-            // Session summaries are the only persisted projection. Archive
-            // membership is Gateway-owned display state: archived rows are
-            // never cached, only its bounded count. Admission already encoded
-            // each admitted row once; the document reuses those exact bytes
-            // instead of encoding every row a second time.
             let rows = Self.admittedSessions(sessions)
             let data = Self.encodedDocument(
                 rows: rows.map(\.encoded),
@@ -152,7 +135,6 @@ actor SnapshotCache {
             )
         } catch {
             performanceSignposts.end(interval, result: .failure, metrics: .none)
-            // This cache is disposable. Live gateway snapshots remain canonical.
         }
     }
 
@@ -184,8 +166,6 @@ actor SnapshotCache {
         return value
     }
 
-    /// Load and save share this admission so both keep the same row, byte and
-    /// duplicate bounds; save writes the returned encodings verbatim.
     private static func admittedSessions(
         _ sessions: [SessionSummary]
     ) -> [(summary: SessionSummary, encoded: Data)] {
@@ -208,9 +188,6 @@ actor SnapshotCache {
         return admitted
     }
 
-    /// The version 4 `Document` envelope assembled from already-encoded rows.
-    /// It decodes to exactly what `JSONEncoder.gateway.encode(Document)` would
-    /// produce; a nil count is omitted, as synthesized `Codable` omits it.
     private static func encodedDocument(rows: [Data], archivedCount: Int?) -> Data {
         var data = Data(#"{"version":4,"sessions":["#.utf8)
         data.reserveCapacity(rows.reduce(64) { $0 + $1.count + 1 })

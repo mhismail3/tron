@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// One ordinary settings window; it does not remount or rewrite onboarding.
 @MainActor
 final class PermissionSettingsWindow: NSWindowController, NSWindowDelegate {
     private let onClose: () -> Void
@@ -21,8 +20,6 @@ final class PermissionSettingsWindow: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
     func windowWillClose(_ notification: Notification) {
-        // Detach the hosted surface so its probes/notification token retire;
-        // accepted consent remains owned by NativeHostCoordinator.
         window?.contentViewController = nil
         onClose()
     }

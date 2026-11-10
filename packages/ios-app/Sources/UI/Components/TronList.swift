@@ -1,52 +1,35 @@
 import SwiftUI
 import TronMobileCore
 
-// The one list standard for Manage Home and Manage Session subsheets (#1691):
-// short fixed sets are glass groups of joined rows, one container per section; unbounded
-// feeds are separate glass cards that load themselves. Every row has the same
-// anatomy, so sheets only map their data into `TronListRowContent`.
-
-/// A quiet metadata pill: kind, scope or project. Mono only for IDs, paths and durations.
 struct TronListTag: Hashable, Sendable {
     let text: String
     var mono = false
 }
 
-/// The one status pill a row may carry, top-right.
 struct TronListStatus: Equatable {
     let text: String
     let tone: Color
-    /// Work in progress shows a dot before the word.
     var live = false
 }
 
 enum TronListLeading: Equatable {
-    /// A kind icon; only where the kind varies within the section.
     case icon(String, Color)
-    /// A reading-order number (Instructions).
     case ordinal(Int)
 }
 
 struct TronListRowContent: Equatable {
     var leading: TronListLeading?
     let title: String
-    /// Content rows show up to three regular lines instead of a two-line title.
     var preview = false
     var monoTitle = false
     var status: TronListStatus?
     var subtext: String?
-    /// A path or ID subtext reads in mono and shortens in the middle.
     var monoSubtext = false
     var tags: [TronListTag] = []
     var timestamp: String?
     var accessibilityHint: String?
-    /// Name the row by its title alone and read status and details as its value,
-    /// for rows whose title is a stable name (a subagent) rather than content.
     var accessibilityValueHoldsDetails = false
-    /// Quiet secondary lines under the title, above the subtext: what a row keeps
-    /// beyond its preview (a subagent's model, tools and turns).
     var detailLines: [String] = []
-    /// A row whose lifecycle and output read best as one spoken sentence names it whole.
     var accessibilityValueOverride: String?
 
     private var details: [String] {
@@ -71,19 +54,13 @@ enum TronListMetrics {
     static let minimumHeight: CGFloat = 48
     static let feedGap: CGFloat = 8
     static let cornerRadius: CGFloat = 16
-    /// Between a grouped list's section containers, and from a header to its container.
     static let sectionGap: CGFloat = 18
     static let headerGap: CGFloat = 8
-    /// Dividers start at the text column.
     static func dividerInset(hasLeading: Bool) -> CGFloat {
         hasLeading ? horizontalPadding + leadingWidth + slotGap : horizontalPadding
     }
 }
 
-/// A row's anatomy: leading slot (vertically centred) → title or preview with
-/// one status pill top-right → subtext → tags on the left and time on the right.
-/// A row with neither status nor time (a fixed set: Instructions, Resources)
-/// carries its tags top-right instead, so it reads in two lines.
 struct TronListRow: View {
     let content: TronListRowContent
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -109,8 +86,6 @@ struct TronListRow: View {
                         .foregroundStyle(Color.tronTextSecondary)
                         .lineLimit(content.monoSubtext ? 1 : 2)
                         .truncationMode(content.monoSubtext ? .middle : .tail)
-                        // Keep measurement and placement at the same line-limited
-                        // height; compressing this later leaves space below metadata.
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -131,8 +106,6 @@ struct TronListRow: View {
 
     @ViewBuilder private var titleLine: some View {
         if tagsOnTitleLine {
-            // Tags ride the title line when both fit on it; otherwise they wrap
-            // below the whole title rather than squeezing it or dropping a tag.
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 10) { titleText; TronListTags(tags: content.tags) }
                 VStack(alignment: .leading, spacing: TronListMetrics.lineGap) { titleText; TronListTags(tags: content.tags) }
@@ -201,7 +174,6 @@ private struct TronListLeadingView: View {
     }
 }
 
-/// Exactly one per row, tinted by state.
 struct TronListStatusPill: View {
     let status: TronListStatus
     var body: some View {
@@ -219,11 +191,9 @@ struct TronListStatusPill: View {
     }
 }
 
-/// Neutral pills, never tinted by state.
 struct TronListTags: View {
     let tags: [TronListTag]
     var body: some View {
-        // Tags that do not fit drop from the end rather than wrapping the line.
         ViewThatFits(in: .horizontal) {
             ForEach(Array(stride(from: tags.count, through: 0, by: -1)), id: \.self) { count in
                 HStack(spacing: 5) {
@@ -248,11 +218,6 @@ struct TronListTagPill: View {
     }
 }
 
-// MARK: - Grouped lists
-
-/// One section of a grouped list: rows plus an optional header above its container.
-/// A section whose rows are one category (a Resources kind) carries that category's
-/// tint on its header and container instead of the sheet's emerald.
 struct TronListSection<Row: Identifiable> {
     let title: String?
     let rows: [Row]
@@ -260,9 +225,6 @@ struct TronListSection<Row: Identifiable> {
     var id: String { title ?? "rows" }
 }
 
-/// Short, fixed sets: each section is its own glass container of joined rows with
-/// inset dividers. A titled section's header and row count sit above its container,
-/// on the container's edges.
 struct TronListGroup<Row: Identifiable, RowView: View>: View {
     let sections: [TronListSection<Row>]
     @Environment(\.tronSettingsSectionCount) private var sectionCount
@@ -329,8 +291,6 @@ struct TronListDivider: View {
     }
 }
 
-/// A row as a tappable grouped-list or feed entry, with an optional long-press menu
-/// that must offer exactly the actions its detail subsheet holds.
 struct TronListButton<Menu: View>: View {
     let content: TronListRowContent
     let identifier: String
@@ -354,7 +314,6 @@ struct TronListButton<Menu: View>: View {
     }
 }
 
-/// A feed entry: one uniform glass card per row.
 struct TronFeedCard<Content: View>: View {
     @ViewBuilder let content: () -> Content
     var body: some View {
@@ -364,9 +323,6 @@ struct TronFeedCard<Content: View>: View {
     }
 }
 
-// MARK: - Feeds
-
-/// The tail of a feed: loading, failed with Retry, or the end.
 enum TronFeedTail: Equatable {
     case idle
     case loading
@@ -412,8 +368,6 @@ struct TronFeedStateRow: View {
     }
 }
 
-/// Where the reader is in a long feed. Kept outside the feed's own view state so
-/// scrolling republishes only the chip, never the row collection.
 @MainActor @Observable
 final class TronFeedPosition {
     var newest: Int?
@@ -422,9 +376,6 @@ final class TronFeedPosition {
     static let hysteresis: CGFloat = 60
 }
 
-/// Room for the floating chip below the last row once the feed is long, so the
-/// end scrolls clear of it; it reads only `long`, which changes once, never the
-/// scrolling range.
 private struct TronFeedChipSpace: View {
     let position: TronFeedPosition
     @ScaledMetric(relativeTo: .caption) private var height = TronFeedPositionChip.height
@@ -433,15 +384,8 @@ private struct TronFeedChipSpace: View {
     }
 }
 
-/// Labelled item positions, never a mixture of catalog addresses and row counts.
-/// A loaded lower bound carries `+` visually and “at least” in VoiceOver.
-/// The capsule's 44-pt target takes every touch on it; beside it, rows stay live.
 struct TronFeedPositionChip: View {
     static let target: CGFloat = 44
-    /// iOS draws a medium-detent sheet slightly shrunk (observed 386 of a 402-pt
-    /// screen, about 0.96), so a 44-pt layout target measures about 42 on screen.
-    /// The chip grows by the measured shrink to keep 44 screen points; this floor
-    /// only stops a transient presentation transform from ballooning it.
     static let minimumPresentedScale: CGFloat = 0.9
     static let height: CGFloat = target + 4
     let position: TronFeedPosition
@@ -449,7 +393,6 @@ struct TronFeedPositionChip: View {
     let totalIsExact: Bool
     let jump: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    /// Drawn size over layout size: 1 except in a presentation iOS shrinks.
     @State private var presentedScale: CGFloat = 1
 
     var body: some View {
@@ -470,10 +413,7 @@ struct TronFeedPositionChip: View {
                 .monospacedDigit()
                 .padding(.horizontal, 13).padding(.vertical, 6).frame(minHeight: 30)
                 .glassEffect(.regular.interactive(), in: Capsule())
-                // The chip overlays live row text. Keep its existing glass, with
-                // an opaque semantic surface underneath instead of text bleed.
                 .background(Color.tronSurfaceElevated, in: Capsule())
-                // Rounded up so floating-point error never leaves 43.99 on screen.
                 .frame(minWidth: Self.target, minHeight: (Self.target / presentedScale).rounded(.up))
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     guard proxy.size.width > 0 else { return 1 }
@@ -501,8 +441,6 @@ struct TronFeedPositionChip: View {
     }
 }
 
-/// A feed with nothing to list: its header stays at the top and the shared
-/// placeholder is centred in the rest of the visible sheet, never inside a card.
 struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
     let identifier: String
     @ViewBuilder let header: () -> Header
@@ -517,8 +455,6 @@ struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
-                // At least the visible height, so the placeholder centres in it; taller
-                // text still scrolls.
                 .frame(minHeight: proxy.size.height)
             }
             .tronScrollEdgeChrome()
@@ -527,12 +463,9 @@ struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
     }
 }
 
-/// An unbounded feed: newest first, one card per row, loading itself before the
-/// reader reaches the bottom. Rows render lazily; only the chip observes scrolling.
 struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID: Hashable & Sendable {
     let items: [Item]
     let identifier: String
-    /// Canonical ordinal shown in the chip (1 = oldest), or a 1-based position when unknown.
     let ordinal: (Item) -> Int
     let total: Int?
     var totalIsExact = true
@@ -545,8 +478,6 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
     @State private var ordinals: [Item.ID: Int] = [:]
 
     var body: some View {
-        // Prefetch while five rows remain; the tail row also asks, so a fast
-        // fling past the trigger still loads.
         let trigger = items.count > 5 ? items[items.count - 5].id : items.last?.id
         ScrollViewReader { reader in
             ScrollView {
@@ -564,12 +495,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                 .scrollTargetLayout()
                 .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 24)
             }
-            // Name the scroll view itself; the floating chip keeps its own identifier.
             .accessibilityIdentifier(identifier)
-            // The chip is an overlay: updating it never lays out the scroll view or
-            // re-places rows (a pinned header and then an inset both fed back into the
-            // lazy layout). It sits above the bottom safe area; its space is a fixed
-            // spacer after the last row.
             .overlay(alignment: .bottom) {
                 TronFeedPositionChip(position: position, total: total, totalIsExact: totalIsExact) {
                     guard let first = items.first?.id else { return }
@@ -577,15 +503,11 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                 }
             }
             .tronScrollEdgeChrome()
-            // The chip adds its own height, so it hides only well below the threshold
-            // that shows it; otherwise a feed near one screen would toggle it forever.
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height - $0.containerSize.height } action: { _, excess in
                 if position.long { if excess < -TronFeedPosition.hysteresis { position.long = false } }
                 else if excess > 1 { position.long = true }
             }
             .onScrollTargetVisibilityChange(idType: Item.ID.self, threshold: 0.3) { visible in
-                // Keep the last range while no row is visible, and publish only a
-                // real change: the chip must never resize the feed under the reader.
                 let values = visible.compactMap { ordinals[$0] }
                 guard let newest = values.max(), let oldest = values.min(),
                       newest != position.newest || oldest != position.oldest else { return }
@@ -598,8 +520,6 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
     }
 }
 
-// MARK: - Geometry markers (hosted UI tests only)
-
 enum TronListMarkerKind: String { case leading, status, tags, title, metadata, subtext, container }
 
 private struct TronListMarkerKey: PreferenceKey {
@@ -610,8 +530,6 @@ private struct TronListMarkerKey: PreferenceKey {
 }
 
 extension View {
-    /// Publishes a slot's frame so a hosted UI test can measure the real layout;
-    /// the combined row element otherwise hides its children.
     func tronListMarker(_ kind: TronListMarkerKind) -> some View {
         #if HOSTED_TEST
         anchorPreference(key: TronListMarkerKey.self, value: .bounds) { [kind: $0] }
@@ -641,10 +559,7 @@ extension View {
     }
 }
 
-// MARK: - Time
-
 enum TronListTime {
-    /// "38m ago" under a day, then "Oct 21" (with the year when not this year).
     static func short(_ date: Date, now: Date = .now) -> String {
         let seconds = now.timeIntervalSince(date)
         if seconds < 60 && seconds > -60 { return "now" }

@@ -26,8 +26,6 @@ struct NestedToolCallPresentation: Hashable, Sendable, Identifiable {
     let arguments: JSONValue?
     let argumentsBytes: Int?
 
-    /// The argument that identifies what the call did (command, file,
-    /// pattern...), chosen by the same rule as a top-level tool's detail.
     var primary: (label: String, value: String)? {
         ToolDetailPresentation.primary(
             kind: ToolDetailPresentation.kind(for: toolName),
@@ -191,9 +189,6 @@ struct ToolTextPreview: Hashable, Sendable {
     }
 }
 
-/// The opening lines of a long text, for a preview whose full text opens in
-/// its own sheet. Splitting stops after `maximumLines`, so a huge source is
-/// never split whole.
 struct ToolTextHeadPreview: Hashable, Sendable {
     static let maximumLines = 8
     static let maximumLineCharacters = 220
@@ -379,8 +374,6 @@ struct ToolDiffPresentation: Hashable, Sendable {
         private var hasInvalidUnitEvidence = false
         private(set) var hasChangeContent = false
 
-        // Combined/malformed hunks and ambiguous file headers cannot provide
-        // trustworthy +/- totals even though their source remains readable.
         var hasReliableLineKinds: Bool { !hasInvalidUnitEvidence }
 
         var exactDiffUnitCount: Int? {
@@ -412,9 +405,6 @@ struct ToolDiffPresentation: Hashable, Sendable {
             }
             if isUnifiedFileHeader(line) {
                 if isInsideHunk {
-                    // This may be source content or the start of another file
-                    // in a header-light multi-file patch. Preserve its visible
-                    // +/- semantics, but never admit the patch inline.
                     hasInvalidUnitEvidence = true
                 } else {
                     if line.hasPrefix("+++ ") || line.hasPrefix("+++\t") { fileHeaderCount += 1 }
@@ -501,14 +491,10 @@ struct ToolDiffPresentation: Hashable, Sendable {
         mutating func append(_ line: (ToolDiffLineKind, String)) {
             let sourceLine = SourceLine(sourceIndex: totalCount, kind: line.0, text: line.1)
             totalCount += 1
-            // Count the admitted source before head/tail retention discards
-            // rows; expanding the sheet must never change the totals.
             if line.0 == .addition { additions += 1 }
             if line.0 == .removal { removals += 1 }
             if line.0 == .addition || line.0 == .removal { hasChangeContent = true }
             if case .metadata = line.0 {
-                // File headers remain available in the expanded/full diff but
-                // do not consume the medium-detent semantic glance budget.
             } else {
                 compactSemanticCount += 1
                 if compactHead.count < ToolDiffPresentation.compactHeadLines {
@@ -662,8 +648,6 @@ private enum BoundedLineScanner {
                 }
             }
         }
-        // A final newline terminates a diff line, rather than adding a blank
-        // change. Plain text previews still preserve that terminal separator.
         if characterCount > 0 || preserveTrailingEmptyLine { emit() }
     }
 }
@@ -687,10 +671,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
     let nestedCallsComplete: Bool
     let tronNestedComplete: Bool?
     let classifyCostUSD: Double?
-    /// Codemode is identified by its invocation name; its display title is a
-    /// presentation choice that may change.
     let isCodemode: Bool
-    /// A Home tool's purpose-built detail; nil keeps the generic sections.
     let home: HomeToolDetailPresentation?
 
     init(tool: ChatToolPresentation) {
@@ -719,8 +700,6 @@ struct ToolDetailPresentation: Hashable, Sendable {
         readableResult = Self.readableResult(tool: tool)
         readableResultPreview = readableResult.map(ToolTextPreview.make)
         structuredResult = Self.structuredResult(tool: tool, readableResult: readableResult)
-        // Prose/live output must not disappear behind an extension's metadata.
-        // Actual JSON text still gets the compact structured presentation.
         prefersStructuredResult = kind == .generic && structuredResult != nil
             && (readableResult == nil || Self.parsedJSON(readableResult ?? "") != nil)
         let nested = Self.nestedCalls(tool.nestedCalls)
@@ -753,8 +732,6 @@ struct ToolDetailPresentation: Hashable, Sendable {
         kind: ToolDetailKind,
         request: [String: JSONValue]?
     ) -> (label: String, value: String)? {
-        // A bounded JSON preview is not an executable request. In particular,
-        // missing paths must not become the built-in default directory ".".
         if request?["truncated"]?.boolValue == true { return nil }
         return switch kind {
         case .read, .write, .edit:
@@ -774,7 +751,6 @@ struct ToolDetailPresentation: Hashable, Sendable {
         }
     }
 
-    /// One identity catalog for transcript chips, nested calls and tool sheets.
     private static let identities: [String: (title: String, icon: String)] = [
         "read": ("Read file", "doc.text"),
         "read_file": ("Read file", "doc.text"),
@@ -857,8 +833,6 @@ struct ToolDetailPresentation: Hashable, Sendable {
         return humanized(name)
     }
 
-    /// Dynamic extensions have no finite catalog. Keep authored prose, but never
-    /// expose separator-delimited or camelCase invocation identifiers as labels.
     private static func humanized(_ name: String) -> String {
         let spaced = name.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
             .replacingOccurrences(of: "[_.:/-]+", with: " ", options: .regularExpression)
@@ -1013,8 +987,6 @@ struct ToolDetailPresentation: Hashable, Sendable {
                        && $0.objectValue?["text"]?.stringValue != nil
                }),
                Set(object.keys).isSubset(of: ["content", "details"]) {
-                // SDK result envelopes aren't user data. Empty content/details
-                // means no output yet, not a table of empty transport fields.
                 if let details = object["details"], details != .null { return details }
                 return readableResult.flatMap(parsedJSON)
             }
@@ -1039,8 +1011,6 @@ struct ToolDetailPresentation: Hashable, Sendable {
     private static func nestedCalls(_ value: JSONValue?) -> (calls: [NestedToolCallPresentation], complete: Bool) {
         guard let object = value?.objectValue,
               let rawCalls = object["calls"]?.arrayValue else { return ([], true) }
-        // The Gateway owns the bound (every call Pi records, up to 256) and
-        // reports dropped calls through `complete`.
         let complete = object["complete"]?.boolValue ?? false
         let calls = rawCalls.compactMap { item -> NestedToolCallPresentation? in
             guard let fields = item.objectValue,
@@ -1066,9 +1036,6 @@ struct ToolDetailPresentation: Hashable, Sendable {
     }
 }
 
-/// A bounded suffix preview shared by tool and subagent cards. This intentionally keeps
-/// only the newest nonempty logical lines: live output is a current display
-/// frame, not an append-only log, and the full result remains in the detail view.
 struct ToolOutputTailPreview: Hashable, Sendable {
     static let maximumLines = 2
     static let maximumLineCharacters = 180
@@ -1099,20 +1066,12 @@ struct ToolOutputTailPreview: Hashable, Sendable {
                     omittedLines = true
                 }
             }
-            // Clear even blank logical lines; otherwise trailing whitespace
-            // would leak into the next retained line while walking backwards.
             current.removeAll(keepingCapacity: true)
             hasNonWhitespace = false
             lineWasBounded = false
         }
 
-        // Walk from the suffix so a pathological output frame never requires
-        // an unbounded split array. Each retained line is bounded before it is
-        // materialized; after the requested lines are complete, stop at the
-        // first older non-whitespace character needed to prove omission.
         for character in source.reversed() {
-            // Swift represents CRLF as one extended grapheme cluster, so
-            // recognize both forms while scanning the suffix.
             if character == "\n" || character == "\r\n" {
                 finishLine()
                 continue
@@ -1143,8 +1102,6 @@ struct ToolOutputTailPreview: Hashable, Sendable {
     }
 }
 
-/// Lightweight aggregate-sheet data. It deliberately extracts only bounded
-/// semantic fields and never prepares diffs or full technical JSON.
 struct ToolRunRowPresentation: Hashable, Sendable {
     let id: String
     let title: String

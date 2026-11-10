@@ -1,7 +1,5 @@
 import XCTest
 
-/// Production approval card on a simulator, over hosted socket data.
-/// Gateway native-change E2Es own effect authorization, expiry and Undo.
 @MainActor
 final class TronD4ReviewUITests: XCTestCase {
     func testSharedCardLight() { card(mode: "light", large: false) }

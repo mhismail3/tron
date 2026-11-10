@@ -1,15 +1,8 @@
 import Foundation
 
-/// The only URLs an interpreted program may open (#1160): an over-the-air
-/// install manifest or an https page, both on the paired Gateway's host. The
-/// host comes from the paired profile when the runner opens, never from the
-/// program, so a file cannot widen its own reach. Everything else diagnoses.
 package struct SwiftAppLinkPolicy {
-    /// The selected Gateway profile's host, or nil when no Gateway is paired.
     let host: String?
 
-    /// nil is the existing source-only/v1 profile policy; an installed v2 app
-    /// receives only the exact manifests in its current declared feed snapshot.
     let manifestURLs: Set<String>?
 
     package init(host: String?, manifestURLs: [String]? = nil) {
@@ -17,8 +10,6 @@ package struct SwiftAppLinkPolicy {
         self.manifestURLs = manifestURLs.map(Set.init)
     }
 
-    /// An admitted link. An install opens directly, because iOS asks before
-    /// installing; a page asks first in the runner (`needsConfirmation`).
     package struct Link: Identifiable, Equatable {
         package let id = UUID()
         package let url: URL

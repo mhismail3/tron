@@ -1,8 +1,5 @@
 import XCTest
 
-/// Failure modes: an add receipt may settle after the draft changes or its Mac
-/// is replaced. Neither the token follow-up nor local cleanup may use that new
-/// draft/authority. A socket-only background handoff must retain unsent fields.
 final class TronMCPServerSheetsUITests: XCTestCase {
     @MainActor
     func testHeldAddUsesSubmittedTokenAndPreservesNewerSameMacDraft() {
@@ -82,15 +79,12 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("mcp-auth-consume"); defer { app.terminate() }
         openAuth(app)
-        // Establish the prompt on the rejoined sheet, independently of the
-        // initial prompt/begin acknowledgement ordering.
         XCUIDevice.shared.press(.home); app.activate()
         XCTAssertTrue(counters(app, owner: "original", contain: "authResumes:1"))
         let code = app.textFields["Fixture code"]
         XCTAssertTrue(code.waitForExistence(timeout: 10)); code.tap(); code.typeText("fixture-only-code")
         app.buttons["Complete Login"].tap()
         XCTAssertTrue(counters(app, owner: "original", contain: "answers:1"))
-        // The progress step is the shared sheet pulse, labelled with the operation.
         let completing = app.descendants(matching: .any)["sheet-loading"]
         XCTAssertTrue(completing.waitForExistence(timeout: 10), "Prompt consumption is not operation completion")
         XCTAssertEqual(completing.label, "Completing provider login…")

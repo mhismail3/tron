@@ -2,7 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Visual review data only. All destinations below are the production views.
 struct HostedToolSheetsPolishFixture: View {
     @State private var showing = false
     @State private var routes = ChatTranscriptSheetRouteOwner()
@@ -52,7 +51,6 @@ struct HostedToolSheetsPolishFixture: View {
         .task { showing = !scenario.hasPrefix("picker") && scenario != "prompt" && scenario != "short-prompt" }
     }
 
-    /// Production picker and the actual Manage Home row component, without a live catalog.
     private var pickerComparison: some View {
         VStack(spacing: 20) {
             ForEach(0..<3) { index in
@@ -161,7 +159,6 @@ struct HostedToolSheetsPolishFixture: View {
         }
         let args = try! JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: request))
         let result = try! JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: details))
-        // No live extensionOrigin: this is the canonical reloaded-call shape.
         return ChatToolPresentation(id: "review-\(name)", title: name, toolName: name, subtitle: "Completed", request: args,
                                     response: result, content: scenario == "task-refused" ? "task steer: photo-readiness is settled, so steer does not apply. Use resume to continue it in place." : scenario == "delegate" ? "Delegated photo-readiness to worker-session using explicit model and thinking admission." : "Completed", fallbackContent: nil, details: result,
                                     error: scenario == "task-refused", startedAt: "2026-10-18T02:00:00Z", completedAt: "2026-10-18T02:04:06Z", durationMs: 246000,

@@ -2,9 +2,6 @@ import Foundation
 import SwiftUI
 import TronMobileCore
 
-/// A sheet source declares a shared read that its foremost editor depends on.
-/// The native surface owns admission/cancellation; the existing read owner
-/// deduplicates the target and publishes one complete snapshot.
 @MainActor
 struct PresentationDependencyRead {
     struct ID: Hashable { let target: JSONValue; let freshness: SettingsFreshness }
@@ -23,10 +20,7 @@ extension EnvironmentValues {
     }
 }
 
-/// A foremost presentation can require underlying session authority without
-/// asking covered views to refresh their own presentation work.
 enum PresentationRefreshDependency: Hashable {
-    /// The catalog is consumed by its declared surface, not inherited by editors.
     case sessionCatalog
     case session(String)
     case queuedMessage(sessionID: String, messageID: String)
@@ -39,15 +33,11 @@ enum PresentationRefreshDependency: Hashable {
     }
 }
 
-/// Read admission can change without replacing what a presentation is showing.
-/// Retained content is display-only; each read and mutation still requires current admission.
 protocol PresentationReadIdentity: Equatable {
     func retainsContent(from previous: Self) -> Bool
 }
 
 extension AppModel {
-    /// Disposable visible reads wait for the replacement transport to settle.
-    /// Accepted operations and session restoration use their own admissions.
     var admitsForegroundPresentationRead: Bool {
         admitsSessionPresentationOpen && !isReconcilingForeground
     }

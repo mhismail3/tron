@@ -39,14 +39,10 @@ package struct SessionCreationOrigin: Codable, Hashable, Sendable {
     }
 }
 
-/// Gateway contract that owns archived-session display state. Archive controls
-/// stay hidden for a profile that does not advertise it.
 package enum SessionArchiveCapability {
     package static let name = "session-archive.v1"
 }
 
-/// Authoritative `session.archive.set` response. Archive membership is
-/// Gateway-owned display state; iOS never derives it from a local row.
 package struct SessionArchiveState: Codable, Sendable {
     package let archived: Bool
     package let archivedAt: String?
@@ -61,30 +57,21 @@ package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     package let kind: Kind
     package let parentSessionId: String?
     package let creationOrigin: SessionCreationOrigin?
-    /// The Home task that created this worker session (Gateway task ledger).
     package let homeTaskId: String?
     package let createdAt: String
     package let updatedAt: String
-    /// Stable Gateway-observed start of the current active dashboard period.
     package let activeSince: String?
     package let messageCount: Int
     package let firstMessage: String
     package let phase: SessionPhase
-    /// Narrow foreground phase. A settled value while `phase` remains active
-    /// means detached subagents are the only remaining dashboard work.
     package let foregroundPhase: SessionPhase?
     package let hasActiveSubagents: Bool
-    /// Gateway truth that a semantic interaction is awaiting a user response.
     package let waitingForUser: Bool
     package let summaryRevision: Int?
     package let completionRevision: Int
     package let attentionRevision: Int
     package let isUnread: Bool
-    /// Set only on a row from the Gateway's `archived: "only"` projection. The
-    /// dashboard's default list projection omits archived sessions entirely, so
-    /// a row carrying this field can never come from the dashboard read.
     package let archivedAt: String?
-    /// Dashboard-only ownership metadata. Gateway payloads omit these fields.
     package let gatewayProfileID: String?
     package let gatewayProfileLabel: String?
 
@@ -239,9 +226,6 @@ package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
                 case (nil, _?):
                     return false
                 default:
-                    // Identity deterministically resolves equivalent or invalid
-                    // instants. Older Gateways omit activeSince, so this also
-                    // keeps their active rows stable as live updatedAt advances.
                     return left.summary.dashboardID < right.summary.dashboardID
                 }
             }
@@ -287,7 +271,6 @@ package struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     package let phase: SessionPhase
     package let foregroundPhase: SessionPhase?
     package let hasActiveSubagents: Bool
-    /// Gateway truth that a semantic interaction is awaiting a user response.
     package let waitingForUser: Bool
     package let name: String?
     package let updatedAt: String

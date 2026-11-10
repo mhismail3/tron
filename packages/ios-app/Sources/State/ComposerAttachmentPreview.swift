@@ -3,9 +3,6 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Immutable decoded composer thumbnail prepared off-main. `CGImage` is safe to
-/// share after construction; the wrapper is unchecked only because CoreGraphics
-/// does not annotate that immutable contract as `Sendable`.
 struct ComposerPreparedAttachmentThumbnail: @unchecked Sendable {
     let encodedData: Data
     let image: CGImage
@@ -73,9 +70,6 @@ enum ComposerAttachmentPreviewPolicy {
             kCGImageSourceThumbnailMaxPixelSize: maximumPixelDimension,
             kCGImageSourceShouldCacheImmediately: true,
         ]
-        // Index zero is the first image or document page. ImageIO covers photos,
-        // PDFs, and other platform-supported paged formats without loading later
-        // pages into the composer.
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 

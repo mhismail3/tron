@@ -1,8 +1,5 @@
 import Foundation
 
-/// The small authenticated administrative client used by the Mac wrapper.
-/// Gateway restart is a drain request; launchd remains the process owner and
-/// is responsible for relaunching the Gateway after it exits.
 enum GatewayRestartClient {
     static let protocolVersion = TronGatewayProtocolContract.protocolVersion
     static let minimumProtocolVersion = TronGatewayProtocolContract.minimumProtocolVersion
@@ -63,9 +60,6 @@ enum GatewayRestartClient {
         case malformed
     }
 
-    /// Performs one authenticated Gateway handshake and requests a drain-aware
-    /// restart. The command ID is bounded before any network activity, and the
-    /// socket is always closed by the caller's defer.
     static func restart(
         host: String,
         port: Int,
@@ -210,8 +204,6 @@ enum GatewayRestartClient {
                 case .ignore:
                     continue
                 case .error, .malformed:
-                    // A failed or unreadable command-status frame has always
-                    // been reported as an invalid protocol response here.
                     throw Failure.malformedResponse
                 }
             }
@@ -264,9 +256,6 @@ enum GatewayRestartClient {
         }
     }
 
-    /// The Gateway's own error object (`packages/gateway/src/errors.ts`) is this
-    /// client's failure taxonomy: a code and a message the user can read. The
-    /// Gateway never sends either empty, so an empty one is an unusable frame.
     private static func gatewayFailure(_ error: GatewayResponseDecoder.ErrorFrame?) -> Failure? {
         guard let code = error?.code, let message = error?.message, !code.isEmpty, !message.isEmpty else {
             return nil

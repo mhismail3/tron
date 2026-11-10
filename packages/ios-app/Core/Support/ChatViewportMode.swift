@@ -13,8 +13,6 @@ package enum ChatViewportMode: Equatable, Sendable {
     case pinned
     case anchored
 
-    /// A detached reader owns its installed projection, not canonical intake.
-    /// Catch-up holds the same boundary until its native return has settled.
     package func defersAutomaticProjectionIntake(catchingUp: Bool = false) -> Bool {
         self == .anchored || catchingUp
     }

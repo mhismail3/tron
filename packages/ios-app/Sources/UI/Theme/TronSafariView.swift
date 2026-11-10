@@ -1,8 +1,6 @@
 import SafariServices
 import SwiftUI
 
-/// The in-app browser for an external page. Closing Safari dismisses the
-/// presenting sheet; the page never inherits Tron credentials.
 struct TronSafariView: UIViewControllerRepresentable {
     let url: URL
     @Environment(\.dismiss) private var dismiss
@@ -22,8 +20,6 @@ struct TronSafariView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: SFSafariViewController, context: Context) {
-        // Only native browser controls belong to Tron; never inject theme CSS
-        // into the author-owned public page.
         controller.preferredControlTintColor = UIColor(Color.tronPrimary)
     }
 

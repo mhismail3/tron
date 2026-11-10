@@ -222,8 +222,6 @@ final class TronDiagnosticsExportUITests: XCTestCase {
         app.buttons["fixture.inspect-export-artifacts"].tap()
         XCTAssertTrue(observe(app, "fixture.export-artifacts", "files:0 local:false warnings:\(expectsRemoteFailure ? 1 : 0)"))
         XCTAssertTrue(observe(app, "fixture.export-original", "exports:\(expectsRemoteFailure ? 1 : 0) commands:\(expectsRemoteFailure ? 1 : 0) repeats:0"))
-        // The one-artifact owner would reject preparation if native dismissal
-        // had left the prior lease active. Initiate a second explicit gesture.
         app.buttons["Export Diagnostics"].tap()
         XCTAssertTrue(close.waitForExistence(timeout: 15), app.debugDescription)
         close.tap()

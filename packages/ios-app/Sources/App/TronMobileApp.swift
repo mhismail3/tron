@@ -5,10 +5,6 @@ import TronMobileCore
 @main
 struct TronMobileApp: App {
     #if HOSTED_TEST
-    /// The hosted app's no-fixture arm: the production scene, built by the one
-    /// owner the shipping arm also builds. Only this arm constructs that owner -
-    /// and with it the push coordinator and the path observer - so every fixture
-    /// arm below stays inert.
     private struct HostedProductionScene: View {
         @StateObject private var owner: ProductionSceneOwner
 
@@ -24,31 +20,20 @@ struct TronMobileApp: App {
     @State private var hostedModel: AppModel
 
     init() {
-        // Static locks also disable transactions in each retained sheet canvas.
-        // UIKit alone does not govern SwiftUI's independently hosted sheets.
         if ProcessInfo.processInfo.environment["TRON_UI_LOCK_RENDERING"] == "1" {
             UIView.setAnimationsEnabled(false)
         }
-        // The fixture arms keep their own hosted views and this memory-only
-        // model; the no-fixture arm renders the production scene with the same
-        // owner the shipping app builds (`ProductionSceneRoot`).
         _hostedModel = State(initialValue: AppModel())
-        // The dashboard view is a persisted preference, and hosted journeys share
-        // one app's defaults. Each launch states its view: `-dashboard-view-home`
-        // opens the Home view; every other journey runs on project grouping.
         if !ProcessInfo.processInfo.arguments.contains("-preserve-dashboard-preferences") {
             DashboardServerFilterPreferences.save(DashboardServerFilterState(
                 sortMode: ProcessInfo.processInfo.arguments.contains("-dashboard-view-home") ? .home : .projectServer
             ))
         }
-        // Every journey starts with the usage card showing all its providers.
         UserDefaults.standard.removeObject(forKey: HomeUsageCardPreferences.hiddenProvidersKey)
     }
 
     var body: some Scene {
         WindowGroup {
-            // Fixtures mount sheet content directly, without `SceneRootView`, so
-            // they host the shared sheet-loading pulse at their own root.
             Group {
             if ProcessInfo.processInfo.arguments.contains("-tron-tool-sheets-polish-fixture") {
                 HostedToolSheetsPolishFixture().environment(hostedModel)
@@ -140,9 +125,6 @@ struct TronMobileApp: App {
     @State private var scene: ProductionSceneOwner
 
     init() {
-        // Incident retention is explicitly composed by the production app owner;
-        // tests and scripted clients remain memory-only unless they inject a sink.
-        // Everything else the scene needs is built by its one owner below.
         let store = IOSClientDiagnosticStore(defaults: .standard)
         let model = AppModel(client: GatewayClient(diagnosticStore: store), diagnosticStore: store,
                              notificationInbox: NotificationInboxCoordinator(defaults: .standard))
@@ -151,15 +133,12 @@ struct TronMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
-            // The production scene, composed once in `ProductionSceneOwner`, so
-            // the app a real-UI journey drives is the app the user runs.
             ProductionSceneRoot(owner: scene, pushDelegate: appDelegate)
         }
     }
     #endif
 }
 
-// Internal rather than private: the production scene owner composes it.
 struct SceneRootView: View {
     let model: AppModel
     let colorScheme: ColorScheme?
@@ -167,8 +146,6 @@ struct SceneRootView: View {
 
     var body: some View {
         RootView()
-            // The outermost host of the shared sheet-loading pulse: managed sheets
-            // and registered surfaces host their own first.
             .modifier(TronSheetLoadingHostModifier())
             .background {
                 InAppNoticeWindowInstaller(
@@ -194,7 +171,6 @@ private struct RootView: View {
         .tronManagedSheet(
             isPresented: $showOnboarding,
             identity: "app.onboarding",
-            // Launch and connection state present it, never a user's tap.
             presentationHaptic: nil
         ) {
             OnboardingView(selectedDetent: $onboardingDetent) {

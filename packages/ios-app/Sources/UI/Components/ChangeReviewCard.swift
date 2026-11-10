@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// The shared plaintext before/after card. It renders the exact Gateway projection;
-/// generic forms never supply its actions or grant authority.
 struct ChangeReviewCard: View {
     let title: String
     let reason: String?
@@ -18,8 +16,6 @@ struct ChangeReviewCard: View {
         self.submitting = submitting; self.approve = approve; self.cancel = cancel; self.undo = undo
     }
 
-    /// Read-only history uses its server-formatted values, never an invented
-    /// confirmation digest or inverse. Actions stay with the typed receipt owner.
     init(title: String, reason: String?, before: String, after: String) {
         self.title = title; self.reason = reason
         items = [.init(label: title, before: before, after: after)]
@@ -69,7 +65,6 @@ struct ChangeReviewCard: View {
                         Button(action: approve) {
                             if submitting { TronPulseLoadingIndicator(size: 18) } else { Text("Approve") }
                         }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronPrimary))
-                            // The pulse is hidden from VoiceOver, so the button keeps its name while submitting.
                             .accessibilityLabel("Approve")
                             .accessibilityIdentifier("change-review-approve")
                     }
@@ -79,7 +74,6 @@ struct ChangeReviewCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: .tronPrimary, tintOpacity: 0.08)
-        // A containing element keeps each action's own identifier.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("change-review-card")
     }
@@ -95,8 +89,6 @@ struct ChangeReviewCard: View {
     }
 }
 
-/// The one sheet that presents an exact review. Its owner answers Approve with the
-/// review's digest through the typed RPC; Cancel or dismissal applies nothing.
 struct ChangeReviewSheet: View {
     let review: ChangeReview
     var submitting = false

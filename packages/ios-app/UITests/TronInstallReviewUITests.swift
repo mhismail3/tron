@@ -13,7 +13,6 @@ final class TronInstallReviewUITests: XCTestCase {
         if play { card.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap() }
         else { card.tap() }
         XCTAssertTrue(app.scrollViews["apps.install.review"].waitForExistence(timeout: 20), app.debugDescription)
-        // Dismiss so the passive observation on the presenting root is readable.
         app.navigationBars.firstMatch.swipeDown()
         let probe = app.otherElements["fixture.install-review-titles"]
         XCTAssertTrue(probe.waitForExistence(timeout: 10), app.debugDescription)

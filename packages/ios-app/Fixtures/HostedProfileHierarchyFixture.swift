@@ -2,10 +2,7 @@
 import Foundation
 import SwiftUI
 
-/// Extra illustrative rows for the native hierarchy review only. Never a live profile.
-/// The normal Home fixture and its existing mutation journeys keep their original rows.
 enum HostedProfileHierarchyFixture {
-    /// Scope the explicit size to this review flag; ordinary fixture journeys keep Large.
     static var typeSize: DynamicTypeSize {
         let arguments = ProcessInfo.processInfo.arguments
         guard let key = arguments.firstIndex(of: "-UIPreferredContentSizeCategoryName"), key + 1 < arguments.count else { return .large }

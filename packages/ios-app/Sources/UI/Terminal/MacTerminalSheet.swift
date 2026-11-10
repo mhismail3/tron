@@ -2,9 +2,6 @@ import MacTerminalSSH
 import SwiftUI
 import TronMobileCore
 
-/// The Settings › System row. Mac Terminal is the terminal sheet itself,
-/// presented directly like Manage Session's terminal, not wrapped in a
-/// settings destination's navigation stack and Done.
 struct MacTerminalSettingsRow: View {
     @PresentationState private var isPresented = false
     @Environment(\.tronSettingsVisualTheme) private var theme
@@ -26,20 +23,9 @@ struct MacTerminalSettingsRow: View {
     }
 }
 
-/// Mac Terminal (Settings › System): login shells on the paired
-/// Mac over the private user SSH service on Tailscale, in the session terminal's
-/// chrome and emulator. Only enabling and removing it use the Gateway; the
-/// shell lives in tmux, so it keeps running when this sheet
-/// closes or the app leaves the foreground, and while Tron.app or the Gateway
-/// is quit, crashed or being replaced (#1075). The controller is app-scoped
-/// (`AppModel.macTerminal`); this sheet only presents it.
 struct MacTerminalSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    // Presentation-scoped (#1073): SwiftUI rebuilds this content when the app
-    // returns from the background while the sheet stays presented; the keyboard,
-    // emulator and alerts belong to the presentation, not the view. The shells
-    // and their output belong to the app-scoped controller (#1075).
     @PresentationState private var keyboard = TerminalKeyboardController()
     @PresentationState private var emulator = TerminalEmulatorHost()
     @PresentationState private var confirmRemove = false
@@ -58,13 +44,9 @@ struct MacTerminalSheet: View {
         } menu: {
             menu
         }
-        // Idempotent: a rebuilt sheet finds its link already open. Dismissal
-        // (not a rebuild, #1073) only detaches; the shell stays on the Mac.
         .task { controller.present(model: model) }
         .onPresentationRetire { controller.conceal() }
         .onChange(of: scenePhase) { _, phase in
-            // iOS suspends the app's sockets in the background. The shell stays
-            // on the Mac; the link closes here and reattaches on return.
             switch phase {
             case .active: controller.present(model: model)
             case .background: controller.conceal()
@@ -119,8 +101,6 @@ struct MacTerminalSheet: View {
             if controller.chunks.isEmpty && controller.link == .connecting {
                 TronSheetLoadingState(label: "Connecting to your Mac…", accent: accent)
             } else {
-                // One emulator per shell view for the presentation: switching
-                // attachment gets a fresh one.
                 let identity = controller.rendererGeneration
                 TerminalSurface(
                     chunks: controller.chunks,

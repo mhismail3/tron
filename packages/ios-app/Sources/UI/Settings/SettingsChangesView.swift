@@ -1,11 +1,8 @@
 import SwiftUI
 import TronMobileCore
 
-/// The feed owns its sheet chrome, rather than nesting a second navigation
-/// stack and Done button inside a progressive settings destination.
 struct SettingsChangesLink: View {
     let scope: SettingsChangesScope
-    /// The row's subtitle; without one the link is a toolbar icon.
     var subtitle: String?
     var accent: Color = .tronPrimary
     var onOpenSession: ((AppModel.SessionNavigationRoute) -> Void)?
@@ -35,8 +32,6 @@ struct SettingsChangesLink: View {
     }
 }
 
-/// The native audit feed is a disposable projection of `settings.history`; all
-/// decisions continue through the existing receipt-bound settings owners.
 struct SettingsChangesView: View {
     let scope: SettingsChangesScope
     var onOpenSession: ((AppModel.SessionNavigationRoute) -> Void)?
@@ -63,11 +58,9 @@ struct SettingsChangesView: View {
         let profileID: String
     }
     @PresentationState private var errorMessage: String?
-    /// A surface starts loading: its empty state waits for the first read.
     @PresentationState private var loading = true
     @PresentationState private var loadGeneration = 0
 
-    /// Empty filtered pages one load follows before it offers Load more.
     private static let maximumPagesPerLoad = 10
 
     private struct LoadID: Hashable {
@@ -99,13 +92,10 @@ struct SettingsChangesView: View {
                     if let errorMessage {
                         TronSettingsNotice(message: errorMessage, title: "Changes unavailable", retry: retry)
                     }
-                    // An empty page with a cursor is not the end: only the end is "No changes".
                     if rows.isEmpty && cursor == nil && !loading && errorMessage == nil {
                         TronPlaceholderState(title: "No changes", detail: "Changes matching this scope and its filters will appear here.", icon: "clock.arrow.circlepath")
                             .frame(maxWidth: .infinity)
                     }
-                    // Lazy: a feed of several pages builds only the rows on screen,
-                    // so presenting Filters over it does not rebuild every card.
                     if !rows.isEmpty {
                         LazyVStack(alignment: .leading, spacing: SettingsChangeRowView.spacing) {
                             ForEach(rows) { row in historyRow(row) }
@@ -261,7 +251,6 @@ struct SettingsChangesView: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("settings-change-\(row.id)")
-        // Visible summaries truncate; VoiceOver and Details retain every fact.
         .accessibilityLabel(isNew ? "\(row.accessibilityLabel), Since you last looked" : row.accessibilityLabel)
     }
 
@@ -286,10 +275,6 @@ struct SettingsChangesView: View {
         let currentCursor = reset ? nil : cursor
         let request = loadID
         do {
-            // The Gateway filters within its record pages and this feed filters
-            // by scope, so a page can be empty yet not the end. Follow a bounded
-            // run of empty pages, so opening the sheet shows its first entries
-            // instead of a bare Load more.
             var pageCursor = currentCursor
             var visible: [SettingsChangeRow] = []
             let workerTitles = SettingsChangeRow.workerTitles(model.sessions)
@@ -459,7 +444,6 @@ private struct SettingsChangeDetailView: View {
     private var statusAccent: Color { entry.status == "failed" ? .tronError : .tronPrimary }
     private var divider: some View { TronSettingsDivider() }
 
-    /// A readable local time and how long ago, never the raw ISO timestamp.
     private var whenText: String {
         guard let date = entry.date else { return entry.at }
         return "\(date.formatted(date: .abbreviated, time: .shortened)) · \(Self.relative(entry))"
@@ -470,14 +454,11 @@ private struct SettingsChangeDetailView: View {
         return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: .now)
     }
 
-    /// One labelled value in the standard row: the label as the title, the value
-    /// in the row's subtext.
     private func detailRow(_ icon: String, _ title: String, _ value: String) -> some View {
         TronSettingsRow(icon: icon, title: title, subtitle: value, subtitleLineLimit: nil)
             .textSelection(.enabled)
     }
 
-    /// The requesting chat, the owning task and Undo (or Apply again), as rows.
     @ViewBuilder private var actions: some View {
         TronGlassCard(accent: .tronPrimary) {
             VStack(spacing: 0) {

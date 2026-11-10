@@ -1,11 +1,5 @@
 import SwiftUI
 
-/// `-home-push-tap-on-foreground` (#1684): after the Home dashboard fixture returns
-/// from the background, delivers the push tap the production handler delivers while
-/// the scene activates (`ProductionSceneRoot`): for Home's chapter, or with
-/// `-home-push-ordinary` for the ordinary chat. The fixture Gateway then answers
-/// `session.open` with a device-sized latency, so the push target overlaps the
-/// restoring Home chat's open.
 struct HostedHomePushTap: ViewModifier {
     nonisolated static let openLatency: Duration? = ProcessInfo.processInfo.arguments.contains("-home-push-tap-on-foreground")
         ? .milliseconds(300) : nil
@@ -26,7 +20,6 @@ struct HostedHomePushTap: ViewModifier {
                         .accessibilityIdentifier("fixture.home-push")
                         .font(.system(size: 1)).opacity(0.01)
                 }
-                // Push navigation admits taps only once the app has started.
                 .task { await model.start() }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background { backgrounded = true }

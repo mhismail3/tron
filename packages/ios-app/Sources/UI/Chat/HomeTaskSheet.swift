@@ -1,11 +1,7 @@
 import SwiftUI
 import TronMobileCore
 
-/// A managed task projection and its controls share one installed read intent.
-/// Receipted mutations outlive the sheet; reads and errors do not. The task list,
-/// task detail and permissions are this one owner's three presentations.
 struct HomeTaskSheet: View {
-    /// Nil embeds delegation rows in Home Settings without another sheet.
     let destination: HomeSheetDestination?
     let profileID: String
     var onOpenSession: ((String) -> Void)?
@@ -18,14 +14,11 @@ struct HomeTaskSheet: View {
     @PresentationState var requestID = UUID()
     @PresentationState var query: HomeSheetReadQuery
     @PresentationState var failure: String?
-    /// The brief opened whole in the shared document sheet.
     @PresentationState private var reading: HomeTextReading?
     @PresentationState private var checkinHistory: HomeSheetDestination?
     @Environment(\.tronSettingsVisualTheme) private var visualTheme
     @PresentationState var revoking: PendingRevocation?
 
-    /// A standing scope or one-use grant the user is about to revoke, with the
-    /// admission its tap captured before the confirmation covered this sheet.
     struct PendingRevocation: Identifiable {
         enum Target {
             case scope(String), grant(String)
@@ -54,7 +47,6 @@ struct HomeTaskSheet: View {
     }
 
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
-    /// The family accent of the Manage Home row that opened this branch (#925).
     private var accent: Color { visualTheme?.accent ?? .tronPrimary }
     private var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     var canMutate: Bool {
@@ -63,7 +55,6 @@ struct HomeTaskSheet: View {
               case .loaded(let read, _) = owner.state else { return false }
         return read.requestID == requestID && read.identity == identity
     }
-    /// The loaded task's worker chat, when this sheet can open it.
     private var openableWorkerSession: String? {
         guard onOpenSession != nil, case .loaded(let read, .task(let task?, _)) = owner.state,
               read.identity == identity else { return nil }
@@ -83,8 +74,6 @@ struct HomeTaskSheet: View {
             guard active, let identity, let coordinator else { owner.retireLoading(); return }
             let currentID = requestID; let currentQuery = query
             if destination != nil && owner.holds(requestID: currentID, identity: identity) { return }
-            // Delegation has no event stream. Refresh only while its settings
-            // surface is visible, preserving the installed rows between reads.
             repeat {
                 await owner.load(requestID: currentID, identity: identity, coordinator: coordinator,
                                  isCurrent: { self.identity == identity && self.requestID == currentID }) {
@@ -131,7 +120,6 @@ struct HomeTaskSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if let worker = openableWorkerSession {
-                    // Stop and steer belong to the worker's own chat (#911).
                     ToolbarItem(placement: .topBarLeading) {
                         Button { onOpenSession?(worker) } label: {
                             TronToolbarTextLabel("Open Session", systemImage: "arrow.up.right.square")
@@ -177,8 +165,6 @@ struct HomeTaskSheet: View {
         }
     }
 
-    /// Permissions embedded in Home Settings load in their own section: they never ask the
-    /// surface to hide the settings rows beside them. A Home sheet owns its whole content.
     @ViewBuilder private func loadingState(_ label: String) -> some View {
         if destination == nil {
             TronLoadingState(label: label, accent: accent)
@@ -187,9 +173,6 @@ struct HomeTaskSheet: View {
         }
     }
 
-    /// Task recovery as one row when it is open; a placeholder names the refusal when not.
-    /// Shown only when task recovery needs attention: an available recovery is the
-    /// normal state and would be noise on every task and permission sheet.
     @ViewBuilder func recovery(_ status: HomeStatusDTO) -> some View {
         if !status.available || status.taskRecovery?.available != true {
             TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery?.reason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
@@ -235,8 +218,6 @@ struct HomeTaskSheet: View {
         .accessibilityIdentifier("home-task-detail")
     }
 
-    /// The brief's opening lines, markdown rendered; a long brief opens whole
-    /// from a View All row, as a tool's script or result does.
     private func briefCard(_ text: String) -> some View {
         let preview = ToolTextHeadPreview.make(text)
         return TronSettingsGroup("Brief", accent: accent) {
@@ -259,7 +240,6 @@ struct HomeTaskSheet: View {
         }
     }
 
-    /// The worker: its model, its subagents, the runs live right now and its token spend.
     @ViewBuilder private func workerCard(_ task: HomeTaskDTO) -> some View {
         let runs = task.subagentRuns.flatMap { $0.total > 0 ? $0 : nil }
         TronSettingsGroup("Worker", accent: accent) {
@@ -282,7 +262,6 @@ struct HomeTaskSheet: View {
                     if !rows.isEmpty { TronSettingsDivider(accent: accent) }
                     ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                         if index > 0 { TronSettingsDivider(accent: accent) }
-                        // Title over value, as every other Home detail row reads.
                         TronSettingsRow(icon: row.icon, title: row.title, subtitle: row.value,
                                         subtitleLineLimit: nil, accent: accent, subtitleFont: TronTypography.subheadline)
                             .accessibilityElement(children: .combine)
@@ -321,7 +300,6 @@ struct HomeTaskSheet: View {
         return rows
     }
 
-    /// Explicitly delivers an unadmitted result to the current Home after replacement.
     @ViewBuilder private func redeliverCard(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
         let redeliverable = status.enabled && task.homeId == status.homeId ? status.routeGeneration.flatMap { route in
             task.wake.flatMap { wake in wake.canRedeliver && wake.routeGeneration != route ? route : nil }
@@ -339,7 +317,6 @@ struct HomeTaskSheet: View {
         }
     }
 
-    /// Dates in the Gateway's clock, relative, one line.
     private func dateLine(created: Int, updated: Int) -> String {
         "Created \(HomeSheetTime.relative(milliseconds: created)) · updated \(HomeSheetTime.relative(milliseconds: updated))"
     }
@@ -368,7 +345,6 @@ struct HomeTaskSheet: View {
 
     func reload() { query = destination?.initialQuery ?? .permissions; requestID = UUID() }
 
-    /// A standard action row: a chevron-free row that performs one action.
     func actionRow(title: String, subtitle: String? = nil, icon: String, destructive: Bool = false,
                    id: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         TronGlassCard(accent: destructive ? .tronError : accent) {
@@ -384,7 +360,6 @@ struct HomeTaskSheet: View {
         }
     }
 
-    /// Admits a mutation against the installed read; nil while the read is not current.
     func admitMutation() -> HomeControlAdmission? {
         guard canMutate, let identity, let coordinator,
               let authority = try? model.homeMutations.authority(profileID: profileID) else { return nil }
@@ -413,7 +388,6 @@ struct HomeTaskSheet: View {
         }
     }
 
-    /// Asks before a revocation; the tap's admission carries the mutation through the confirmation.
     func requestRevocation(_ target: PendingRevocation.Target) {
         guard let admission = admitMutation() else { return }
         revoking = PendingRevocation(target: target, admission: admission)
@@ -443,7 +417,6 @@ struct HomeTaskSheet: View {
 }
 
 extension HomeSheetTime {
-    /// Relative time for the Gateway's millisecond clock.
     static func relative(milliseconds: Int, now: Date = .now) -> String {
         RelativeDateTimeFormatter().localizedString(for: Date(timeIntervalSince1970: Double(milliseconds) / 1000), relativeTo: now)
     }

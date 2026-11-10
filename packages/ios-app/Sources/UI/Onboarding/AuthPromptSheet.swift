@@ -2,11 +2,6 @@ import SwiftUI
 import UIKit
 import TronMobileCore
 
-/// Answered provider choice prompts stay visible so the user can change an
-/// earlier answer. The SDK login is a sequential prompt stream, so changing a
-/// choice restarts the same method and replays the kept answers, matching each
-/// replayed prompt by message and option IDs. A prompt that no longer matches
-/// ends the replay and the user continues from there.
 struct ProviderAuthSelectionTrail: Equatable {
     struct Step: Equatable {
         let message: String
@@ -29,8 +24,6 @@ struct ProviderAuthSelectionTrail: Equatable {
         steps.append(Step(message: prompt.message, options: prompt.options, chosenID: chosenID))
     }
 
-    /// Replaces the answer at `index`, dropping later answers, and queues the
-    /// resulting answers for the restarted operation.
     mutating func change(stepAt index: Int, to optionID: String) {
         guard steps.indices.contains(index),
               steps[index].chosenID != optionID,
@@ -40,14 +33,11 @@ struct ProviderAuthSelectionTrail: Equatable {
         replay = steps
     }
 
-    /// The queued answer for this prompt, without consuming it.
     func replayAnswer(for prompt: ProviderAuthPromptState) -> String? {
         guard let next = replay.first, matches(next, prompt) else { return nil }
         return next.chosenID
     }
 
-    /// Consumes the queued answer for this prompt. A non-matching prompt ends
-    /// the replay and discards the answers it can no longer confirm.
     mutating func consumeReplay(for prompt: ProviderAuthPromptState) -> String? {
         guard let next = replay.first else { return nil }
         guard matches(next, prompt) else {
@@ -66,13 +56,9 @@ struct ProviderAuthSelectionTrail: Equatable {
     }
 }
 
-/// One standard settings group of selectable rows, shared by provider
-/// connection methods and provider choice prompts. Every option stays visible;
-/// the chosen row carries a checkmark and busy work disables the group.
 struct ProviderChoiceGroup: View {
     struct Choice: Identifiable {
         let id: String
-        /// Nil for plain prompt options, which use a radio indicator instead.
         let icon: String?
         let title: String
         let subtitle: String?
@@ -116,10 +102,6 @@ struct ProviderChoiceGroup: View {
     }
 }
 
-/// The visible provider configuration sheet owns this operation-keyed auth
-/// content so selecting a credential method never opens an unrelated presenter.
-/// Answered choices remain in place above the current step; nothing animates
-/// in or out, so each step simply appears below the last.
 struct ProviderAuthFlowContent: View {
     @Environment(AppModel.self) private var model
     let trail: ProviderAuthSelectionTrail
@@ -167,7 +149,6 @@ struct ProviderAuthFlowContent: View {
         }
     }
 
-    /// SDK prompt messages are written as terminal questions ("Select …:").
     static func title(_ message: String) -> String {
         var title = message.trimmingCharacters(in: .whitespacesAndNewlines)
         if title.hasSuffix(":") { title.removeLast() }
@@ -179,9 +160,6 @@ struct ProviderAuthFlowContent: View {
     }
 }
 
-/// Shown when the Gateway recovered an earlier login for this provider instead
-/// of starting another. The flow below continues it; Restart and Cancel are
-/// explicit because a reconnect or reopened sheet must never restart OAuth.
 private struct RecoveredAuthControls: View {
     @Environment(AppModel.self) private var model
     let operationID: String
@@ -276,7 +254,6 @@ private struct AuthPromptContent: View {
         submitting = true
         Task {
             defer { submitting = false }
-            // The button captured this challenge's value, not a successor's.
             guard model.knowledgeDestinationIdentity == destination, model.authPrompt == prompt else { return }
             do { try await model.answerAuth(response) }
             catch is CancellationError { }

@@ -10,8 +10,6 @@ struct AttachmentImageFilePreview: @unchecked Sendable {
 struct AttachmentPDFPreview: @unchecked Sendable {
     let document: PDFDocument
     let pageCount: Int
-    /// The PDF source bytes `PDFDocument` retains, so the prepared value's store
-    /// accounting is the memory it actually holds.
     let sourceBytes: Int
 }
 
@@ -38,8 +36,6 @@ struct PreparedAttachmentFilePreview: Sendable {
 }
 
 extension PreparedAttachmentFilePreview: ChatInlineArtifact {
-    /// The retained document's own bytes: the decoded image, the PDF source the
-    /// `PDFDocument` holds, or the decoded text the renderer keeps.
     var accountedBytes: Int {
         switch content {
         case .image(let preview):
@@ -105,8 +101,6 @@ enum AttachmentFilePreviewPolicy {
         guard ChatMediaPolicy.admitsEncodedByteCount(data.count) else {
             throw ChatMediaLoadError.encodedPayloadTooLarge
         }
-        // A retired surface must not start new decode work; the detached
-        // preparation cannot observe outer cancellation once it has begun.
         try Task.checkCancellation()
         return try await Task.detached(priority: .userInitiated) {
             try prepareSynchronously(data: data, name: name, mimeType: mimeType, rendersMarkdownImages: rendersMarkdownImages)
@@ -258,7 +252,6 @@ struct AttachmentFilePreviewSheet: View {
         .onDisappear { cancelRemoteLoad() }
     }
 
-    /// Experimental: a displayed `.swift` file can run as an interpreted app (#889).
     private var runAction: TronDocumentSheetAction? {
         guard SwiftAppExperiment.shared.canRun(fileNamed: name),
               case .prepared(let preview) = phase,
@@ -341,7 +334,6 @@ struct AttachmentFilePreviewSheet: View {
     }
 
     private func load() async {
-        // Covered or retired surfaces neither start nor publish this work.
         guard presentationActivity.allowsPresentationPublication else { return }
         let admission: KnowledgePresentationIdentity?
         if case .remote(let identity, _) = source {
@@ -349,8 +341,6 @@ struct AttachmentFilePreviewSheet: View {
                   model.chatMediaDestinationIdentity(blobID: identity.blobID, sessionID: identity.sessionID) == identity else { return }
             admission = model.knowledgePresentationIdentity
         } else { admission = nil }
-        // A completed attempt for this exact source stays mounted: the sheet is
-        // the one bounded surface for the file and reopening the route retries.
         if loadedSourceID == source.loadID {
             switch phase {
             case .prepared, .unavailable: return
@@ -393,7 +383,6 @@ struct AttachmentFilePreviewSheet: View {
             phase = .prepared(prepared)
             loadedSourceID = sourceID
         } catch is CancellationError {
-            // Interrupted work publishes nothing, so the next activation retries.
             return
         } catch AttachmentFilePreviewError.unsupported {
             guard admitsLoad(generation, admission: admission),
@@ -429,8 +418,6 @@ struct AttachmentPDFView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PDFView {
         let view = PDFView()
-        // PDF pages own their paper color; the surrounding viewport belongs
-        // to the native sheet material, just like text and Markdown previews.
         view.backgroundColor = .clear
         view.autoScales = true
         view.displayMode = .singlePageContinuous

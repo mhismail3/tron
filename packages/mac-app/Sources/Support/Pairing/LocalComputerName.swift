@@ -1,11 +1,6 @@
 import Foundation
 import SystemConfiguration
 
-/// Resolves the user-facing Mac name that should appear in pairing.
-///
-/// macOS exposes a few related names: the Sharing "Computer Name",
-/// localized host name, and lower-level host name. Pairing wants the
-/// friendly Sharing name first because that is what users recognize.
 enum LocalComputerName {
     static let defaultName = "My Mac"
 

@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Native presentation for Pi's semantic interaction APIs. This intentionally
-/// models semantic questions and the separate built-in native change card; arbitrary remote components and
-/// overlays use a separate, currently deferred capability.
 struct ExtensionInteractionSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -184,10 +181,6 @@ struct ExtensionInteractionSheet: View {
                 Text(interaction.method == .editor ? "Response" : "Answer")
                     .font(TronTypography.bodySM)
                     .foregroundStyle(Color.tronTextMuted)
-                // Never `.disabled` while focused: flipping a first responder's
-                // interaction off inside a layout pass resigns the keyboard
-                // re-entrantly and hung the app (see ExtensionFormSheet). Edits
-                // are refused instead, and submission releases focus first.
                 TextField(interaction.placeholder ?? "Response", text: Binding(
                     get: { text },
                     set: { value in
@@ -286,16 +279,12 @@ struct ExtensionInteractionSheet: View {
     }
 
     private func respond(value: JSONValue?) {
-        // Release the keyboard through SwiftUI's focus owner before any
-        // submission state changes, so UIKit and FocusState agree.
         textFocused = false
         submitting = true
         submissionError = nil
         let expectedToken = presentationSurfaceToken
         Task { @MainActor in
             do {
-                // The accepted mutation remains owned by SessionMutationService;
-                // only callbacks for this exact managed presentation may publish.
                 try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false)
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }

@@ -22,8 +22,6 @@ enum MenuBarLogReader {
     static let requestID = "mac-system-logs"
     static let supportedProtocolVersion = TronGatewayProtocolContract.protocolVersion
     static let minimumProtocolVersion = TronGatewayProtocolContract.minimumProtocolVersion
-    // Preserve URLSession's existing 1-MiB capacity: ordinary 200-record logs
-    // can exceed the shared health probe's smaller 256-KiB admission limit.
     static let maximumFrameBytes = 1_048_576
 
     static func fetchRecentLogs(
@@ -45,8 +43,6 @@ enum MenuBarLogReader {
         }
 
         do {
-            // One transport-owned deadline covers hello, send, and every read.
-            // Cancellation closes the socket even while receive is suspended.
             let deadline = GatewayWebSocketTransport.Deadline(timeout: timeout)
             let connection = try await GatewayWebSocketTransport.connect(
                 request: request,
@@ -82,8 +78,6 @@ enum MenuBarLogReader {
         } catch GatewayWebSocketTransport.Failure.invalidHello {
             return .failure(.unreadableOutput("Gateway protocol is not compatible."))
         } catch {
-            // This best-effort API retains its existing nonthrowing failure
-            // presentation; the transport has already retired cancelled work.
             return .failure(.serverUnavailable)
         }
     }

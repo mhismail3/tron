@@ -18,13 +18,16 @@ notification inbox.
   and transfers only the returned endpoint-scoped installation grant to the authenticated Gateway.
   A grant records the relay origin and route that issued it; a mismatched grant is replaced through
   the Worker, never transferred. A Gateway whose relay origin differs is treated as unavailable.
+  The stored registration acknowledgement is dropped before a register request is sent, because a
+  lost response may mean the Gateway already removed the grant; a re-allowed permission re-registers.
 - **Retries.** One bounded, profile-generation-owned operation: a fresh challenge and proof per
   attempt, two backoffs for timeouts and retryable 5xx, no commit across a profile or token change.
   An assertion 401 or the typed invalid-key code clears only the App Attest key, once. Other
   rejections stop without credential churn; APNs tokens are preserved. Registration reconciles on
   connection, foreground, profile, permission and token changes; Worker failure leaves it pending.
 - **Secrets.** App Attest keys, token bytes and grants use a Keychain namespace separate from Gateway
-  credentials. Settings shows only a fixed local stage label; the app accepts no relay URL or push
+  credentials; an unreadable Keychain document is never overwritten with an empty one (push fails
+  closed while the Gateway stays usable). Settings shows only a fixed local stage label; the app accepts no relay URL or push
   credential from settings.
 - **Alerts.** No badge, background fetch or notification approval actions. Exact changes
   are reviewed in the shared in-chat native card. The bundled `tron-notification.caf` sound; ask pushes are Time

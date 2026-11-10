@@ -2,7 +2,6 @@
 import Foundation
 import TronMobileCore
 
-/// One learned-profile item as the fixture Gateway stores it (the `home.profileList` row).
 struct HostedProfileItem: Codable, Equatable, Sendable {
     var id: String
     var revisionId: String
@@ -15,15 +14,10 @@ struct HostedProfileItem: Codable, Equatable, Sendable {
     var updatedAt: String
 }
 
-/// The Home fixture's chat transcript of every Home tool call (`-home-tool-transcript`),
-/// with each result's text and typed details as the Gateway's tools return them, and
-/// the learned profile `home.profileList` answers. Synthetic data only.
 enum HostedHomeToolFixture {
     static var transcript: [TranscriptItem] {
         let items = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(transcriptJSON.utf8))
         guard ProcessInfo.processInfo.arguments.contains("-home-tool-paged-transcript") else { return items }
-        // Canonical replay has no live extensionOrigin. Both the empty catalog
-        // and adjacent one-message zoom have recognized custom shapes.
         let historical = #"""
         [
           {"id":"routing-list-call","presentationId":"routing-list-call","timestamp":"2026-10-13T21:59:00Z","kind":"message","role":"assistant","content":[{"id":"routing-list-part","ordinal":0,"type":"toolCall","toolCallId":"routing-list","name":"task","arguments":{"action":"list"}}]},
@@ -36,7 +30,6 @@ enum HostedHomeToolFixture {
         return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(historical.utf8)) + items
     }
 
-    /// The same profile as mutable rows, for the fixture Gateway's `home.profileChange`.
     static var profileItems: [HostedProfileItem] {
         struct List: Decodable { let items: [HostedProfileItem] }
         let items = try! JSONDecoder.gateway.decode(List.self, from: Data(profileJSON.utf8)).items

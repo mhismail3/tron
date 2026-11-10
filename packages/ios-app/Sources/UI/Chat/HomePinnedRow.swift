@@ -3,12 +3,8 @@ import TronMobileCore
 
 struct HomePinnedRow: View {
     let status: HomeStatusDTO?
-    /// A Home command is running for this profile. It and `hasUnresolvedCommand`
-    /// are exclusive: the mutation coordinator holds one state per profile.
     let isChanging: Bool
     var hasUnresolvedCommand = false
-    /// The mounted read reached a Gateway whose status could not be read or
-    /// admitted; the row must not keep saying it is loading.
     var isStatusUnavailable = false
 
     private var action: HomePinnedRowAction {

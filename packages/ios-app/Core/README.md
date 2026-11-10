@@ -37,7 +37,10 @@ the hosted test targets link.
   declarations stay `internal` behind `@testable import TronMobileCore`. A type has exactly one
   owner: no duplicate copies, re-export shims or compatibility typealiases.
 - **Transport.** Epoch ownership, deadlines, the shared ping grid, frame and `JSONValue` ceilings
-  and decoding are specified in [Gateway connection and events](../docs/events.md).
+  and decoding are specified in [Gateway connection and events](../docs/events.md). Bounded waits
+  and cancellation close the socket before awaiting the operation, because URLSession callbacks
+  need not honor task cancellation. `close()` bumps the generation and clears profile and token
+  before its first suspension, so a late older close never erases a replacement connection's profile.
 - **Event delivery.** One `GatewayEventHub` owns buffering, coalescing, epoch retirement,
   cancellation and stream completion for its client lifetime. `GatewayEventStream` construction
   is Core-internal through its explicit initializer; the backing hub stays file-private.
@@ -45,7 +48,9 @@ the hosted test targets link.
   failure after send begins is a local, non-Codable possibly-sent error the Gateway cannot forge.
 - **HTTP.** Idempotent bodiless GET/HEAD (media, exports, live-view frames) share one long-lived
   session per configuration with per-task byte ceilings and no cache, cookie or credential storage;
-  uploads, POSTs and DELETEs use a fresh session per request. Blob reads and upload staging are
+  uploads, POSTs and DELETEs use a fresh session per request: CFNetwork may replay a reused
+  connection after the server has closed it, surfacing `networkConnectionLost`, so mutations
+  never share the reusable read session. Blob reads and upload staging are
   paired-profile operations, so a same-profile reconnect does not disturb them. Response bodies are
   bounded (64 KiB for API responses, 25 MiB for media).
 - **Pairing.** Only `tron://pair` invitations with host, port and an 8–32-character one-time code;
@@ -55,7 +60,8 @@ the hosted test targets link.
   transport.
 - **Profile store.** One transactional boundary: atomic Keychain upsert before a single metadata
   commit, exact rollback on failure, corrupt metadata self-cleans, legacy metadata migrates on the
-  next write.
+  next write. A missing token means unpaired; a Keychain that cannot be read yet (before first
+  unlock) throws instead, so the profile stays paired and offline and the next foreground rereads it.
 - **Share handoff.** At most 32 providers, 64 KiB per UTF-8 fragment and 128 KiB in total; prompts
   ≤ 192 KiB; `PendingShareStoring` rejects documents above 256 KiB and reports save failure, so the
   extension opens the app only after a successful write. One slot, cleared after confirmed send.

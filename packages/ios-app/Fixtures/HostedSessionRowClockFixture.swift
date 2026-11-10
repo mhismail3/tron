@@ -2,14 +2,8 @@
 import SwiftUI
 import TronMobileCore
 
-/// Hosted journey for the session row's relative-time label. It renders the
-/// real `HistoricalSessionRow` for one long-titled in-progress session at a
-/// gateway clock slightly ahead of the phone, just now, and seconds and minutes
-/// ago, plus the real `SessionRowRelativeTime` label that a button steps
-/// through ticking values, so the journey can read its laid-out width.
 struct HostedSessionRowClockFixture: View {
     private static let title = "Refactor the gateway reconnect handshake so phones resume cleanly"
-    /// Seconds relative to launch; positive is a gateway clock ahead of the phone.
     private static let rowOffsets: [TimeInterval] = [3, 0, -12, -47 * 60]
     private static let probeOffsets: [TimeInterval] = [2, 0, -1, -5, -59, -60, -12 * 60, -3 * 3_600]
 
@@ -25,8 +19,6 @@ struct HostedSessionRowClockFixture: View {
         }
     }
 
-    /// Real shared rows beside independently styled reference text. XCUI measures
-    /// the painted text frames, not a diagnostic claiming which font was chosen.
     private var typographyRows: some View {
         VStack(spacing: 20) {
             ForEach(["iiiiiiii", "WWWWWWWW"], id: \.self) { sample in
@@ -71,8 +63,6 @@ struct HostedSessionRowClockFixture: View {
                     Spacer()
                     SessionRowRelativeTime(text: probeLabel, isWaiting: false)
                         .accessibilityIdentifier("row-clock-label")
-                        // The accessibility frame covers only the visible text;
-                        // the laid-out width is what the title competes with.
                         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { probeWidth = $0 }
                 }
                 Text(String(format: "%.2f", probeWidth))
@@ -83,8 +73,6 @@ struct HostedSessionRowClockFixture: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Color.tronBackground)
-        // A covered branch renders each label once instead of running the row
-        // clock, which would keep XCUI from ever observing quiescence.
         .environment(\.tronPresentationActivity, .covered)
     }
 

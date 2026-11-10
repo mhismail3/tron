@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// A value projection only: inventory uses its catalog summary, while the open
-/// detail uses the authoritative record read. Neither surface caches the other.
 struct AutomationSummaryPresentation {
     let name: String
     let actionKind: AutomationActionKind?
@@ -20,8 +18,6 @@ struct AutomationSummaryPresentation {
         activation == .blocked || currentState == .outcomeUnknown || failureCount > 0
     }
 
-    /// The one status word: a state worth reading first (blocked, unresolved,
-    /// in flight), otherwise the lifecycle.
     var status: String {
         if activation == .blocked { return activation.label }
         if let currentState, currentState == .outcomeUnknown || currentState.isInFlight { return currentState.label }
@@ -40,8 +36,6 @@ struct AutomationSummaryPresentation {
         return text
     }
 
-    /// The inventory row in the shared list anatomy: kind icon, name with its
-    /// status pill, cadence, the Gateway tag and when it last ran.
     @MainActor func listContent(now: Date) -> TronListRowContent {
         TronListRowContent(
             leading: .icon(icon, needsAttention ? .tronError : .tronPrimary),
@@ -60,8 +54,6 @@ extension AutomationSummaryPresentation {
             name: summary.name, actionKind: summary.typedActionKind,
             activation: summary.activation, currentState: summary.currentRun?.state,
             cadence: summary.trigger.summary,
-            // A running execution is newer than the previous terminal run.
-            // Never substitute a future occurrence for the last execution.
             lastRunAt: summary.currentRun?.startedAt ?? summary.lastRun?.startedAt
                 ?? summary.lastRun?.terminalAt ?? summary.lastRun?.scheduledFor,
             updatedAt: summary.updatedAt, server: server,
@@ -86,8 +78,6 @@ extension AutomationRunState {
     var isInFlight: Bool { [.queued, .waiting, .admitting, .running, .cancelling].contains(self) }
 }
 
-/// One inventory row, projected once per catalog or filter change: every
-/// string a row draws or speaks is computed here, never while it scrolls.
 struct AutomationInventoryRow: Identifiable, Equatable {
     let selection: AutomationSummarySelection
     let content: TronListRowContent
@@ -96,7 +86,6 @@ struct AutomationInventoryRow: Identifiable, Equatable {
 }
 
 enum AutomationInventory {
-    /// Active Automations first, then paused, then drafts, then finished ones.
     static func lifecycleRank(_ activation: AutomationActivation) -> Int {
         switch activation {
         case .enabled, .blocked: 0
@@ -106,8 +95,6 @@ enum AutomationInventory {
         }
     }
 
-    /// Within a lifecycle group: needing attention, then running, then the
-    /// soonest next occurrence, then name and identity for a stable order.
     static func precedes(_ left: GatewayAutomationSummary, _ right: GatewayAutomationSummary) -> Bool {
         func key(_ summary: GatewayAutomationSummary) -> (Int, Int, Int, String, String, String) {
             (lifecycleRank(summary.activation), summary.isAttentionRequired ? 0 : 1,
@@ -143,8 +130,6 @@ enum AutomationInventory {
     }
 }
 
-/// The header of an Automation or run detail: its name, one status pill and a
-/// line of context, as Home's task detail opens.
 struct AutomationHeaderCard: View {
     let title: String
     let status: String
@@ -182,12 +167,10 @@ struct AutomationHeaderCard: View {
     }
 }
 
-/// One fact of a detail sheet, read title over value.
 struct AutomationFact: Identifiable {
     let icon: String
     let title: String
     let value: String
-    /// IDs and paths read in mono; everything else in the row's body type.
     var isIdentifier = false
     var id: String { title }
 }
@@ -198,8 +181,6 @@ struct AutomationFactSection: Identifiable {
     var id: String { title }
 }
 
-/// A titled settings group of title-over-value rows, the reading layout of
-/// every Home and Settings detail.
 struct AutomationFactsGroup<Footer: View>: View {
     let section: AutomationFactSection
     @ViewBuilder var footer: () -> Footer
@@ -230,8 +211,6 @@ extension AutomationFactsGroup where Footer == EmptyView {
     init(_ section: AutomationFactSection) { self.init(section) { EmptyView() } }
 }
 
-/// One action of a detail's Controls group: a standard row that performs it,
-/// red when destructive, as Manage Home's controls read.
 struct AutomationActionRow: View {
     let icon: String
     let title: String
@@ -253,7 +232,6 @@ struct AutomationActionRow: View {
 }
 
 extension AutomationFactSection {
-    /// Facts the header does not carry, grouped as the editor's sections are.
     static func detail(record: GatewayAutomationRecord, server: String, targetLabel: String) -> [Self] {
         var basics: [AutomationFact] = []
         if let description = record.description, !description.isEmpty {

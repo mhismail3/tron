@@ -1,18 +1,11 @@
 import Foundation
 
-/// One `ps` read of a live process for a runtime fence.
 struct ProcessFenceRead: Equatable, Sendable {
-    /// Exact `ps -o lstart=` value: the process's start identity.
     let startIdentity: String
-    /// `ps -o etime=` value from the same read. The menu's uptime must come
-    /// from the current cycle, never from a cached earlier probe.
     let elapsedTime: String
 }
 
-/// Reads launchd-owned process metadata for menu-bar diagnostics.
 enum ServerProcessProbe {
-    /// Returns every PID with a listening TCP socket on the exact port. An
-    /// admission requires this set to contain exactly the expected owner PID.
     static func listenerPIDs(port: Int) async -> Set<Int> {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/usr/sbin/lsof"),
@@ -47,11 +40,6 @@ enum ServerProcessProbe {
         return identity.isEmpty ? nil : identity
     }
 
-    /// One `ps` read for both runtime-fence values. The fence runs every poll
-    /// cycle, so start identity and elapsed time share one bounded spawn;
-    /// `etime` never contains a space, so the first token is elapsed time and
-    /// the remainder is `lstart`. Returns `nil` when either is missing, so no
-    /// caller treats an unproven runtime as stable.
     static func processFenceRead(pid: Int) async -> ProcessFenceRead? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/ps"),

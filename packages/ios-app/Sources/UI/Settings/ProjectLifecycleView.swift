@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Presentation-local advisory reads. The Gateway and the existing receipt owner
-/// retain every effect, including work accepted offscreen; the shared exact card
-/// is the only tap that confirms a project action.
 @MainActor
 struct ProjectLifecycleView: View {
     enum Route: Hashable {
@@ -18,8 +15,6 @@ struct ProjectLifecycleView: View {
     @PresentationState private var listing: ProjectLifecycleListing?
     @PresentationState private var project: ProjectLifecycleRow?
     @PresentationState private var error: String?
-    /// A confirmed command's refusal. Disposable reads own `error` and clear it
-    /// whenever they reload; they must not erase an accepted command's outcome.
     @PresentationState private var refusal: String?
     @PresentationState private var name = ""
     @PresentationState private var submitting = false
@@ -45,7 +40,6 @@ struct ProjectLifecycleView: View {
             } else { content }
         }
         .disabled(submitting)
-        // The presenting sheet's theme carries through; only a standalone presentation falls back.
         .tronSettingsVisualTheme(inheriting: .tronPrimary)
         .tronManagedSheet(item: $reviewing, identity: { "settings.projects.\($0.id)" }) { reviewed in
             ChangeReviewSheet(review: reviewed.review, submitting: submitting,
@@ -112,7 +106,6 @@ struct ProjectLifecycleView: View {
     }
 
     private func presentation(_ row: ProjectLifecycleRow, root: String) -> ProjectLifecycleProject {
-        // Display abbreviation never becomes an RPC path or mutation identity.
         let home = URL(fileURLWithPath: root).deletingLastPathComponent().path
         let display = row.path.hasPrefix(home + "/") ? "~" + row.path.dropFirst(home.count) : row.path
         return ProjectLifecycleProject(name: row.name, path: row.path, displayPath: display, trusted: row.trust?.effectiveDecision == true,
@@ -140,9 +133,6 @@ struct ProjectLifecycleView: View {
                     .filter { $0.key == TrustedProjectsSettingsView.key }.compactMap { $0.qualifiers?["project"] } ?? []
                 let archive = URL(fileURLWithPath: page.workspace).appendingPathComponent(".archive").path
                 for path in Set(saved).subtracting(listed).sorted() {
-                    // Saved decisions under the hidden archive folder are not
-                    // projects; the listing owner hides that folder too. Other
-                    // saved unsupported folders remain.
                     guard path != archive, !path.hasPrefix(archive + "/") else { continue }
                     let row = try await model.settingsTrust.inspectProject(path: path)
                     guard admits() else { return }
@@ -167,14 +157,10 @@ struct ProjectLifecycleView: View {
         guard !submitting, activity.allowsDataPublication else { return }
         submitting = true
         let identity = model.knowledgeDestinationIdentity
-        // Settings events retire disposable reads, not this accepted mutation.
-        // The existing surface owner fences its eventual presentation instead.
         func admitsPresentation() -> Bool {
             identity == model.knowledgeDestinationIdentity && PresentationPublicationPolicy.allows(
                 ambient: activity, coordinator: presentationCoordinator, token: surfaceToken)
         }
-        // This task is not the disposable read task. Its accepted command stays
-        // with the canonical receipt executor even after this sheet disappears.
         Task { @MainActor in
             defer { submitting = false }
             do {
@@ -188,11 +174,6 @@ struct ProjectLifecycleView: View {
         }
     }
 
-    /// The maintainer's tap on the exact card. Like every shared review, Approve
-    /// retires the sheet and answers once: while the card covers this page its
-    /// presentation publication is closed, so retirement cannot wait for the
-    /// outcome. The accepted command stays with the receipt executor; an
-    /// uncertain outcome is shown, never retried here.
     private func confirm(_ reviewed: ProjectLifecycleReview) {
         guard !submitting, reviewing?.id == reviewed.id, activity.allowsDataPublication else { return }
         submitting = true
@@ -200,9 +181,6 @@ struct ProjectLifecycleView: View {
         refusal = nil
         let identity = model.knowledgeDestinationIdentity
         let coordinator = presentationCoordinator, token = surfaceToken
-        // The outcome is this page's own data: it may land while the retiring
-        // card still covers the page (a presenting descendant), never after
-        // the page itself is gone or another destination owns the model.
         func admitsOutcome() -> Bool {
             guard identity == model.knowledgeDestinationIdentity else { return false }
             guard let coordinator else { return activity.allowsDataPublication }

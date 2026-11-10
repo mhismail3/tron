@@ -1,8 +1,5 @@
 import Foundation
 
-/// Bounded projections of the Mac app replacement journal (#984). The Mac-side
-/// orchestrator owns the journal; the Gateway reads it and these types decode
-/// only the fields the progress sheet shows.
 package struct MacReplacementStep: Codable, Hashable, Sendable, Identifiable {
     package let name: String
     package let title: String
@@ -75,7 +72,6 @@ package struct MacReplacementOperation: Codable, Hashable, Sendable {
 
     package var isTerminal: Bool { ["succeeded", "failed", "rolled-back", "rollback-failed"].contains(state) }
 
-    /// While these steps run, the Gateway this iPhone talks to is expected to be down.
     package var swapsGateway: Bool {
         guard !isTerminal, let currentStep else { return false }
         return ["stop-gateway", "swap-app", "start", "rebuild"].contains(currentStep)
@@ -86,7 +82,6 @@ package struct MacReplacementWorker: Codable, Hashable, Sendable, Identifiable {
     package let taskId: String
     package let sessionId: String
     package let title: String
-    /// `resumable`, `resumed`, `stopping` or `unavailable`.
     package let state: String
 
     package var id: String { taskId }
@@ -112,7 +107,6 @@ package struct MacReplacementStatus: Codable, Hashable, Sendable {
 }
 
 package struct MacReplacementPlan: Codable, Hashable, Sendable {
-    /// `quick`, `full` or `none`.
     package let path: String
     package let reason: String
     package let revision: String

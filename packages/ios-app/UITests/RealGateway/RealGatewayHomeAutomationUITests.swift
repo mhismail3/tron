@@ -1,8 +1,6 @@
 import Foundation
 import XCTest
 
-/// The production editor, scheduler, canonical message and inbound chip cross
-/// the fixture's real Gateway/socket. Only the model is faux; no hosted UI data.
 extension RealGatewayPairAndChatUITests {
     @MainActor
     func testHomeAutomationEditorAndAttributedMessageLight() throws {
@@ -26,8 +24,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitForHittable(home, timeout: 90), app.debugDescription)
         home.tap()
         let ring = app.buttons["session-context-button"]
-        // The fixture prepares a real Home chapter through Gateway RPC. This
-        // journey owns the new editor/fire/chip boundary, not Home onboarding.
         XCTAssertTrue(waitForEnabled(ring, timeout: 60), app.debugDescription)
         XCTAssertTrue(assistantReply(app, containing: "Home automation fixture ready.").waitForExistence(timeout: 60), app.debugDescription)
         app.buttons["Back"].tap()
@@ -44,14 +40,11 @@ extension RealGatewayPairAndChatUITests {
         let action = app.textViews.firstMatch
         action.tap()
         action.typeText("Review the fixture queue. This message is not approval.")
-        // Scroll the form from its left gutter, above the keyboard, rather
-        // than swiping on the keyboard or the nested prompt editor.
         let form = app.scrollViews.containing(.button, identifier: "Destination").firstMatch
         form.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).press(
             forDuration: 0.05,
             thenDragTo: form.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.05))
         )
-        // The combined row also reports Button; its label is not the menu.
         let destinationRow = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Destination'")).firstMatch
         let destination = destinationRow.buttons["Destination"]
         revealBelowNavigationBar(app, destination)
@@ -71,8 +64,8 @@ extension RealGatewayPairAndChatUITests {
         run.tap()
         XCTAssertTrue(app.buttons["Run"].waitForExistence(timeout: 15), app.debugDescription)
         app.buttons["Run"].tap()
-        dismissTopSheet(app) // Automation detail
-        dismissTopSheet(app) // Automations
+        dismissTopSheet(app)
+        dismissTopSheet(app)
         XCTAssertTrue(waitForHittable(home, timeout: 30), app.debugDescription)
         home.tap()
         let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Automation · UI Home journey'")).firstMatch

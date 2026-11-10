@@ -1,15 +1,8 @@
 import Foundation
 
-/// Sanitization shared by retained interactive extension frames. Ambient
-/// extension widgets are retired, but native interaction content still uses
-/// these bounded text and URL rules.
 enum NativeExtensionText {
     private static let navigationGlyphs = "↓←→↑↔⇣⇡⇠⇢"
 
-    // Compiled once. These run per frame line on the render path, and a frame may
-    // carry 120 lines and 4096 runs, so per-call ICU pattern compilation was the
-    // dominant cost of drawing one large frame. The literals stay the single
-    // source of each pattern: they are the fallback if compilation ever fails.
     private static let pressHintLiteral = #"^press\b[^\n]*\blive\s+detail\b\s*[.!…]*$"#
     private static let inspectHintLiteral = #"\bto\s+inspect\b"#
     private static let collapseLiteral = #"\s+"#

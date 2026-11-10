@@ -8,8 +8,6 @@ enum ChatTranscriptProjectionMode: String, Hashable, Sendable {
     case isolatedStreamingSuffix
 }
 
-/// Aggregate-only evidence about disposable transcript projection work. These
-/// counters intentionally cannot carry transcript, tool, path, or session data.
 struct ChatTranscriptProjectionWorkReport: Hashable, Sendable {
     let mode: ChatTranscriptProjectionMode
     let sourceEntriesExamined: Int
@@ -23,9 +21,6 @@ struct ChatTranscriptProjectionWorkReport: Hashable, Sendable {
 
 typealias ChatTranscriptProjectionWorkRecorder = @Sendable (ChatTranscriptProjectionWorkReport) -> Void
 
-/// Ordered source-level facts. They deliberately stop before row grouping:
-/// call/result joining, bootstrap filtering, ordinals, grouping, and semantic
-/// maps remain global assembler responsibilities.
 enum ChatTranscriptProjectionRawAtom: Hashable, Sendable {
     case conversationStart
     case configuration
@@ -71,9 +66,6 @@ fileprivate enum ChatToolPatchClassification: Hashable, Sendable {
     case unanchoredRuntime
 }
 
-/// Row ownership is kept separate from semantic identity. Canonical rows may
-/// be enriched by live execution facts, but runtime-only and streaming rows
-/// remain in the live region until canonical JSONL owns their exact calls.
 fileprivate enum ChatTranscriptRowOrigin: Hashable, Sendable {
     case canonical
     case live
@@ -125,9 +117,6 @@ struct ChatTranscriptProjectionCandidate: Sendable {
     }
 }
 
-/// The sole deterministic transcript projector and global assembler. Incremental
-/// paths may reuse exact source fragments or patch assembler-proven tool sites,
-/// but no path constructs a competing complete timeline.
 struct ChatReadOnlyTranscriptProjection: Hashable, Sendable {
     let timeline: ChatTranscriptTimeline
     let toolPayloads: ChatToolPayloadIndex
@@ -153,9 +142,6 @@ struct ChatReadOnlyTranscriptProjection: Hashable, Sendable {
 }
 
 enum ChatTranscriptProjectionKernel {
-    /// Resolve only a visible descendant's exact calls, independently of the
-    /// covered transcript installation. Share canonical/result precedence and
-    /// terminal/segment semantics with the main assembler, not a second renderer.
     static func detailTools(
         retained: [ChatToolPresentation],
         source: SessionToolDetailSource
@@ -179,8 +165,6 @@ enum ChatTranscriptProjectionKernel {
         }
         let executions = Dictionary(source.executions.map { ($0.toolCallId, $0) }, uniquingKeysWith: { _, latest in latest })
         return retained.map { previous in
-            // A canonical result may enter the admitted tail after its call
-            // scrolled out. Retain the known request metadata for that exact ID.
             let base: ChatToolPresentation
             if let joined = canonical[previous.id] {
                 base = !previous.isRunning && joined.isRunning ? previous : joined
@@ -226,8 +210,6 @@ enum ChatTranscriptProjectionKernel {
         if item.kind == .message, item.role != .toolResult {
             for part in ChatTranscriptPresentation.messageParts(in: item) {
                 if case .content(let content) = part, let callID = content.toolCallId {
-                    // Any content reference carrying a call ID suppresses its
-                    // joined result row, including malformed extension content.
                     atoms.append(.toolCall(callID))
                 }
                 atoms.append(.messagePart(part))
@@ -255,10 +237,6 @@ enum ChatTranscriptProjectionKernel {
             .map(ChatTranscriptRenderItem.notification)
     }
 
-    /// Read-only child sessions use the same canonical assembler as the main
-    /// chat without fabricating a mutable runtime snapshot. Their JSONL page
-    /// supplies canonical entries only; parent process activity supplies the
-    /// narrow active/inactive fact needed to present an unresolved invocation.
     static func readOnlyTranscript(
         _ transcript: [TranscriptItem],
         transcriptStart: Int,
@@ -270,9 +248,6 @@ enum ChatTranscriptProjectionKernel {
         let assembly = assemble(
             phase: isActive ? .running : .idle,
             toolExecutions: [],
-            // Once the canonical child transcript carries segment metadata, an
-            // active child with no open declaration segment must interrupt older
-            // unresolved calls rather than falling back to broad process activity.
             acceptsQueuedPrompts: segmentAuthority.hasSegmentMetadata ? false : nil,
             activeToolSegmentId: isActive ? segmentAuthority.activeSegmentId : nil,
             transcriptStart: transcriptStart,
@@ -313,17 +288,11 @@ enum ChatTranscriptProjectionKernel {
                         activeSegmentId = nil
                         continue
                     }
-                    // Parent activity is the only live child evidence. Keep the
-                    // newest declared segment eligible even when that assistant
-                    // includes trailing visible content; a later canonical item
-                    // still retires it before another segment can be admitted.
                     activeSegmentId = message.content[lastToolIndex].toolSegmentId
                 default:
                     activeSegmentId = nil
                 }
             default:
-                // Visible custom messages, compaction, command/status entries,
-                // and direct bash rows are canonical conversation barriers.
                 activeSegmentId = nil
             }
         }
@@ -343,10 +312,6 @@ enum ChatTranscriptProjectionKernel {
         )
     }
 
-    /// The worker may request the proven isolated storage topology on its first
-    /// build. The public cold oracle above always feeds streaming through the
-    /// global assembler, so differential parity never compares an optimization
-    /// with itself.
     static func coldForWorker(
         snapshot: SessionSnapshot,
         performanceSignposts: any PerformanceSignposting,
@@ -396,10 +361,6 @@ enum ChatTranscriptProjectionKernel {
         }
     }
 
-    /// The worker calls this only for a basis in the same cache/session/
-    /// presentation/runtime scope. `canonicalSourceUnchanged` is the canonical
-    /// generation and exact-window fast proof; every other source change still
-    /// aligns fragments by ordinal or an explicitly conservative ordered spine.
     static func incremental(
         snapshot: SessionSnapshot,
         previous: ChatTranscriptProjectionCandidate,
@@ -499,8 +460,6 @@ enum ChatTranscriptProjectionKernel {
     }
 
     #if HOSTED_TEST
-    /// Test oracle for the isolated streaming suffix. Production assembly uses
-    /// the fragment overload below and does not expose this seam.
     static func isolatedStreamingTimeline(_ item: TranscriptItem) -> ChatTranscriptTimeline? {
         isolatedStreamingTimeline(fragment: fragment(for: item))
     }
@@ -518,7 +477,6 @@ enum ChatTranscriptProjectionKernel {
             return false
         }) else { return nil }
 
-        // Errors must join the adjacent canonical run in the global assembler.
         guard (item.errorMessage ?? "").isEmpty else { return nil }
         let hasFooter = false
         let rendered: [ChatTranscriptRenderItem]
@@ -559,8 +517,6 @@ enum ChatTranscriptProjectionKernel {
         var exactIncomingRange: Range<Int>?
         var previousIndexByIncomingIndex: [Int: Int] = [:]
 
-        // Exact windows use global ordinal intersection. They do not consult IDs
-        // for alignment, and equality is required at the proven ordinal.
         let previousBounds = previous.sourceWindow
         let incomingBounds = exactWindow(
             start: snapshot.transcriptStart,
@@ -618,9 +574,6 @@ enum ChatTranscriptProjectionKernel {
         let incoming: Int
     }
 
-    /// Legacy/inexact bounds may reuse only one unique, contiguous ordered spine.
-    /// IDs establish position, never equality: the caller still requires the
-    /// complete `TranscriptItem` to match before reusing a fragment.
     private static func conservativeOrderedAlignment(
         previous: [ChatTranscriptProjectionFragment],
         incoming: [TranscriptItem]
@@ -655,14 +608,6 @@ enum ChatTranscriptProjectionKernel {
         streamingFragment: ChatTranscriptProjectionFragment?,
         allowsIsolatedStreamingSuffix: Bool = true
     ) -> AssembledProjection {
-        // The Gateway can publish a canonical assistant entry one snapshot
-        // before clearing the matching streaming projection. Canonical
-        // ownership wins that handoff regardless of row shape; assembling both
-        // would duplicate finalized tool-group identities and make the expected
-        // overlap look like malformed authoritative data. Presentation identity
-        // is the primary proof, while an exact nonempty call-membership subset
-        // closes the narrow handoff where canonical persistence is visible
-        // before its deferred live presentation binding is installed.
         let canonicalToolCallIDs = Set(fragments.flatMap(\.toolCallIDs))
         if let streamingFragment,
            snapshot.transcript.contains(where: { item in
@@ -697,9 +642,6 @@ enum ChatTranscriptProjectionKernel {
                 fragments: fragments,
                 streamingFragment: nil
             )
-            // A live tool without a canonical call anchor belongs after the
-            // streaming message. It must use the common assembler so status
-            // changes cannot move that row across the streaming boundary.
             if !hasUnanchoredRuntimeTool(metadata: base.patchMetadata) {
                 let overlapsCanonical = live.ids.contains { base.timeline.containsID($0) }
                 return AssembledProjection(
@@ -807,10 +749,6 @@ enum ChatTranscriptProjectionKernel {
                   old.groupFinalized == new.groupFinalized else { return nil }
         }
         for callID in changed {
-            // Runtime-only calls retain their physical tail site through
-            // terminal settlement. Canonical ownership, when it arrives,
-            // takes over through the full assembler; status-only changes patch
-            // the existing row in place.
             guard previous.patchMetadata.sitesByCallID[callID]?.count == 1 else { return nil }
         }
         return measured(performanceSignposts: performanceSignposts, workRecorder: workRecorder) {
@@ -957,9 +895,6 @@ enum ChatTranscriptProjectionKernel {
             .union(additionalVisibleCallIDs)
         var conversationHasBegun = (transcriptStart ?? 0) > 0
         return fragments.filter { fragment in
-            // Internal custom state and producer-hidden context are canonical
-            // facts, not ordinary chat rows. They remain available to Gateway
-            // receipts/audit but cannot create physical transcript rows.
             if fragment.source.semantic?.direction == .hiddenInternal { return false }
             if fragment.beginsConversation { conversationHasBegun = true }
             if fragment.isConfiguration { return conversationHasBegun }
@@ -1016,8 +951,6 @@ enum ChatTranscriptProjectionKernel {
         var pendingTools: [PreparedTool] = []
 
         func appendRendered(_ item: ChatTranscriptRenderItem, origin: ChatTranscriptRowOrigin) {
-            // The sole error grouping cut: every other rendered row is a barrier.
-            // Keep the first identity while the run grows, including live handoff.
             if case .notification(let incoming) = item, let next = incoming.errorRun,
                case .notification(let previous)? = rendered.last, let prior = previous.errorRun {
                 rendered[rendered.count - 1] = .notification(
@@ -1050,11 +983,6 @@ enum ChatTranscriptProjectionKernel {
                 anchoredCallIDs.insert(value.presentation.id)
                 payloadsByCallID[value.presentation.id] = value.presentation.payload
                 if let index = pendingToolIndexByCallID[value.presentation.id] {
-                    // Ordinary source overlap for one call resolves to the
-                    // newest evidence. A repeated exact identity carrying
-                    // finalized group metadata is different: it may represent
-                    // two malformed group slots and must survive assembly so
-                    // mergeFinalizedToolRuns can fail the candidate closed.
                     if pendingTools[index].presentation.groupFinalized == true
                         || value.presentation.groupFinalized == true {
                         pendingTools.append(value)
@@ -1094,17 +1022,10 @@ enum ChatTranscriptProjectionKernel {
             return tool.presentation.groupId
         }
 
-        /// Segment identity is the Gateway-owned authority for cross-message
-        /// aggregation. Exact finalized groups may join without it, while
-        /// legacy ungrouped calls may join only inside one source fragment.
-        /// Missing or conflicting segment identity fails closed to a new row.
         func appendToolRunMember(
             _ tool: PreparedTool,
             allowsLegacyContinuation: Bool
         ) {
-            // Explicit display producers own a rich physical row. Isolate it
-            // from generic tool grouping so its pill may morph inline without
-            // changing or expanding neighboring tool calls.
             if tool.presentation.isDisplayTool {
                 flushTools()
                 appendTools([tool])
@@ -1115,10 +1036,6 @@ enum ChatTranscriptProjectionKernel {
                 let existingIsCanonical = first.classification == .canonical
                     && pendingTools.allSatisfy { $0.classification == .canonical }
                 let incomingIsCanonical = tool.classification == .canonical
-                // Segment/group identity can preserve one physical row only
-                // inside one ownership region. Never pull a runtime-only call
-                // into the committed ledger, or demote canonical history into
-                // the live suffix, merely because producer metadata matches.
                 if existingIsCanonical != incomingIsCanonical {
                     flushTools()
                 }
@@ -1228,7 +1145,6 @@ enum ChatTranscriptProjectionKernel {
             }
 
             for part in fragment.messageParts {
-                // Empty provider text is not visible content and cannot split an error run.
                 if item.errorMessage != nil, case .content(let value) = part, value.type == .text,
                    value.attachment == nil, (value.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
                 if case .content(let canonical) = part, canonical.type == .toolCall,
@@ -1246,8 +1162,6 @@ enum ChatTranscriptProjectionKernel {
                 appendRendered(.notification(ChatProviderErrorRun(occurrences: [error]).notification),
                                origin: streaming ? .live : .canonical)
             }
-            // Only exact Gateway segment identity may continue into a later
-            // assistant fragment. Legacy groups remain locally bounded.
             if pendingTools.contains(where: { $0.presentation.toolSegmentId == nil }) {
                 flushTools()
             }
@@ -1258,11 +1172,6 @@ enum ChatTranscriptProjectionKernel {
             transcriptStart: transcriptStart,
             additionalVisibleCallIDs: streamingFragment?.toolCallIDs ?? []
         ).map { $0.source.id })
-        // The Gateway gap is in canonical projected-entry coordinates. Own it
-        // on the following page ([start, end)); a terminal non-empty page also
-        // owns gap == total so the marker remains visible at the true tail.
-        // Empty transcript [0, 0] is the sole empty-page exception. Malformed
-        // bounds fail closed rather than allowing ordinal arithmetic to trap.
         let pageStart = max(0, transcriptStart ?? 0)
         let (computedPageEnd, pageEndOverflow) = pageStart.addingReportingOverflow(fragments.count)
         let pageEnd = pageEndOverflow ? pageStart : computedPageEnd
@@ -1279,15 +1188,10 @@ enum ChatTranscriptProjectionKernel {
         var boundaryInserted = false
         func insertForkBoundary() {
             guard !boundaryInserted, boundaryInPage, let forkBoundary else { return }
-            // A boundary is also a tool-group barrier: inherited tool-only rows
-            // must never merge with the child run across this pill.
             flushTools()
             appendRendered(.notification(ChatNotificationPresentation.forkBoundary(forkBoundary)), origin: .canonical)
             boundaryInserted = true
         }
-        // A projected tool result can be folded into an earlier call's row.
-        // Insert the boundary before visibility filtering so that folding (or
-        // bootstrap-configuration suppression) cannot swallow the fork pill.
         for (offset, fragment) in fragments.enumerated() {
             let (globalOrdinal, ordinalOverflow) = pageStart.addingReportingOverflow(offset)
             if let forkBoundary, boundaryInPage, !ordinalOverflow,
@@ -1323,10 +1227,6 @@ enum ChatTranscriptProjectionKernel {
         } ?? []
         toolsInspected += streamingTools.count
         let streamingCallIDs = Set(streamingTools.map { $0.presentation.id })
-        // Runtime evidence remains displayable through terminal settlement.
-        // Canonical/streaming ownership wins atomically when it appears, while
-        // a terminal runtime-only call is still an admitted exact call rather
-        // than stale data eligible for silent dropping.
         let unanchoredLive = liveByID.values
             .filter {
                 !anchoredCallIDs.contains($0.toolCallId)
@@ -1379,10 +1279,6 @@ enum ChatTranscriptProjectionKernel {
             }
             switch original {
             case .message(let message):
-                // Message slices are presentation rows derived from one
-                // canonical message, not protocol call identities. Preserve
-                // their established source-derived disambiguation so thinking
-                // and content barriers retain stable physical IDs.
                 var disambiguated = "\(message.id)#\(message.item.id)"
                 if seenRenderedIDs.contains(disambiguated) { disambiguated += "#\(index)" }
                 guard seenRenderedIDs.insert(disambiguated).inserted else {
@@ -1400,12 +1296,6 @@ enum ChatTranscriptProjectionKernel {
                 )))
                 collisionSafeOrigins.append(origin)
             case .toolRun(let run):
-                // A finalized group may be split between immutable canonical
-                // ownership and the live suffix while its later members run.
-                // Preserve those authorities as distinct source rows with one
-                // deterministic live-only identity; the physical boundary
-                // projection composes them back into the canonical host. Every
-                // other duplicate remains malformed and fails closed below.
                 if origin == .live,
                    collisionSafe.last?.id == original.id,
                    let prior = firstToolRunByID[original.id], prior.origin == .canonical,
@@ -1425,9 +1315,6 @@ enum ChatTranscriptProjectionKernel {
                 collisionSafe.append(original)
                 collisionSafeOrigins.append(origin)
             case .transcript, .notification:
-                // Canonical transcript and notification IDs are exact. Keep
-                // malformed duplicates so installation fails closed instead of
-                // fabricating an alias.
                 collisionSafe.append(original)
                 collisionSafeOrigins.append(origin)
             }
@@ -1436,10 +1323,6 @@ enum ChatTranscriptProjectionKernel {
         rendered = merged.items
         renderedOrigins = merged.origins
 
-        // Keep the canonical ledger and the live region as separate physical
-        // collections. Their concatenated order is still deterministic, but a
-        // runtime row can no longer become committed merely because assembly
-        // appended it after the canonical tail.
         let canonicalRendered = rendered.enumerated().compactMap { index, item in
             renderedOrigins[index] == .canonical ? item : nil
         }
@@ -1447,10 +1330,6 @@ enum ChatTranscriptProjectionKernel {
             renderedOrigins[index] == .live ? item : nil
         }
 
-        // Patch sites are recorded while assembling, so rebase them onto the
-        // unchanged row spine before a later sparse tool update indexes the
-        // timeline. Invalid duplicate identities remain visible to admission
-        // rather than being silently removed.
         var rebasedSitesByCallID: [String: [ChatToolPatchSite]] = [:]
         func rebasePatchSites(
             in items: [ChatTranscriptRenderItem],
@@ -1524,9 +1403,6 @@ enum ChatTranscriptProjectionKernel {
                 }
             }
         }
-        // `canonicalRendered`/`liveRendered` intentionally use the same
-        // identities and payloads as the assembled array; only ownership and
-        // physical placement change at this boundary.
         return Assembly(
             timeline: ChatTranscriptTimeline(
                 items: ChatTranscriptItems(canonical: canonicalRendered, live: liveRendered),
@@ -1545,10 +1421,6 @@ enum ChatTranscriptProjectionKernel {
         )
     }
 
-    /// A finalized producer group can be split across streaming and runtime
-    /// sources during handoff. Merge only adjacent tool runs that carry the
-    /// same exact group and ownership origin. Canonical/live ownership, a
-    /// barrier row, or an unrelated group makes relocation unsafe.
     private struct MergedToolRuns {
         let items: [ChatTranscriptRenderItem]
         let origins: [ChatTranscriptRowOrigin]
@@ -1584,17 +1456,9 @@ enum ChatTranscriptProjectionKernel {
                     invalidGroups.insert(groupID)
                 }
                 if let origin = signature.origin, origin != origins[itemIndex] {
-                    // Canonical and live ownership may never be merged. Exact
-                    // producer identity is insufficient permission to move a
-                    // canonical row into the mutable suffix or vice versa.
                     invalidGroups.insert(groupID)
                 }
                 let index = groupIndex
-                // A protocol call ID is an exact identity, not a merge key.
-                // Repeating it in another group slot (or repeating a slot)
-                // makes this finalized group malformed. Do not filter the
-                // duplicate while assembling: leave the candidate invalid so
-                // the owner refuses to expose it to SwiftUI.
                 if signature.indexOwner.updateValue(tool.id, forKey: index) != nil
                     || !signature.memberIDs.insert(tool.id).inserted {
                     invalidGroups.insert(groupID)
@@ -1682,7 +1546,6 @@ enum ChatTranscriptProjectionKernel {
                 guard let groupID = tool.groupId else { return true }
                 return !groups.contains(groupID)
             }
-            // A segment continuation left behind by its moved anchor group takes its own calls' identity (#1486).
             if remaining.isEmpty { removedIndices.insert(index) }
             else { result[index] = .toolRun(ChatToolRunPresentation(tools: remaining, anchorID: groups.contains(run.anchorID) ? nil : run.anchorID)) }
         }
@@ -1697,10 +1560,6 @@ enum ChatTranscriptProjectionKernel {
 
     private static func resolved(_ canonical: ChatToolPresentation, live: ToolExecutionState?) -> ChatToolPresentation {
         guard let live else { return canonical }
-        // Once canonical JSONL has a terminal result, its status and readable
-        // payload are authoritative. A late runtime snapshot can still supply
-        // missing timing/identity metadata, but it must not resurrect a
-        // spinner, replace output, or turn a successful result into failure.
         let canonicalIsTerminal = !canonical.isRunning
         let response = canonicalIsTerminal
             ? canonical.response
@@ -1727,8 +1586,6 @@ enum ChatTranscriptProjectionKernel {
             usage: canonical.usage ?? live.result?.objectValue?["usage"],
             error: error, startedAt: canonical.startedAt ?? live.startedAt,
             completedAt: canonical.completedAt ?? live.completedAt,
-            // Canonical and live values are both monotonic Gateway samples when
-            // present. Never let source handoff replace a larger accepted sample.
             durationMs: ToolTiming.maximum(canonical.durationMs, live.durationMs),
             durationSampleAnchor: live.durationSampleAnchor,
             lastProgressAt: canonical.lastProgressAt ?? live.lastProgressAt ?? live.updatedAt,
@@ -1771,10 +1628,6 @@ enum ChatTranscriptProjectionKernel {
         switch status { case .running: "Running"; case .completed: "Completed"; case .failed: "Failed" }
     }
 
-    /// An inactive authoritative snapshot cannot leave a live tool presentation
-    /// running. A later active operation likewise cannot revive an unresolved
-    /// declaration outside its exact Gateway-owned tool segment. Cached projections
-    /// preserve their explicitly retained activity.
     private static func foregroundPresentation(
         _ tool: ChatToolPresentation,
         phase: SessionPhase,
@@ -1787,17 +1640,10 @@ enum ChatTranscriptProjectionKernel {
         if tool.subtitle != "Invocation" {
             isSupersededInvocation = false
         } else if phase != .running {
-            // Retry and compaction are active session phases, but neither owns a
-            // currently executable declaration from a preceding tool segment.
-            // Legacy Gateways omit both ownership facts and retain their original
-            // broad phase fallback until an authoritative replacement arrives.
             isSupersededInvocation = activeToolSegmentId != nil || acceptsQueuedPrompts != nil
         } else if let activeToolSegmentId {
             isSupersededInvocation = tool.toolSegmentId != activeToolSegmentId
         } else {
-            // Exact false proves there is no streaming agent/tool segment during
-            // a running-phase settlement gap. Nil remains the legacy compatibility
-            // case for Gateways predating segment authority.
             isSupersededInvocation = acceptsQueuedPrompts == false
         }
         guard !phase.isActive || isSupersededInvocation else { return tool }
@@ -1820,11 +1666,8 @@ enum ChatTranscriptProjectionKernel {
         case .bash:
             return []
         case .customMessage:
-            // custom_message is inbound model context, never a tool run.
             return []
         case .customEntry:
-            // appendEntry is context-free extension state and is hidden unless
-            // a future explicit status adapter promotes it to a notification.
             return []
         case .message where item.role == .toolResult:
             return [toolResultPresentation(item)]
@@ -1845,9 +1688,6 @@ enum ChatTranscriptProjectionKernel {
                         usage: result.usage,
                         error: result.isError == true, startedAt: result.startedAt ?? item.timestamp,
                         completedAt: result.completedAt ?? result.timestamp,
-                        // Keep missing runtime metadata distinguishable from an
-                        // exact Gateway duration. elapsedMilliseconds derives the
-                        // canonical call-to-result interval only as a fallback.
                         durationMs: result.durationMs,
                         lastProgressAt: result.lastProgressAt, progressSequence: result.progressSequence,
                         display: result.display,

@@ -1,12 +1,8 @@
 import SwiftUI
 import TronMobileCore
 
-/// The chapter ledger and one chapter's detail. The active chapter is the chat
-/// the user is in, so only a sealed chapter offers its transcript. A chapter's
-/// detail comes from the row the ledger already loaded; it never reads again.
 extension HomeSheet {
     func chapters(_ list: HomeChapterListDTO) -> some View {
-        // The sheet's title already names the list: one intro line, then the rows.
         VStack(alignment: .leading, spacing: 10) {
             TronSettingsCaption("Newest first. Sealed chapters stay readable and refuse changes.").containerValue(\.tronSettingsSection, false)
             TronListGroup(Array(list.chapters.reversed()), identifier: "home-chapter-list") { chapter in
@@ -48,7 +44,6 @@ extension HomeSheet {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("home-chapter-browse-memory")
-                    // The active chapter is the chat this sheet was opened from.
                     if chapter.state == .sealed, chapter.sessionPresent, let onOpenSession {
                         divider()
                         Button { onOpenSession(chapter.sessionId) } label: {
@@ -65,7 +60,6 @@ extension HomeSheet {
         .accessibilityIdentifier("home-chapter-detail")
     }
 
-    /// The chapter's name, state and dates, with its size against the rollover limit.
     private func chapterHeader(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> some View {
         let percent = HomeChapterPresentation.limitPercent(chapter, limits: limits)
         return VStack(alignment: .leading, spacing: 9) {
@@ -117,7 +111,6 @@ extension HomeSheet {
 }
 
 extension HomeChapterPresentation {
-    /// A chapter row: its state as the pill, its newest topic as subtext, counts as tags.
     static func rowContent(_ chapter: HomeChapterListDTO.Chapter, accent: Color) -> TronListRowContent {
         let contents = chapter.contents
         let tags = [contents?.userMessages.map { "\($0.formatted()) \($0 == 1 ? "message" : "messages")" },
@@ -130,7 +123,6 @@ extension HomeChapterPresentation {
             tags: tags, timestamp: shortRange(chapter))
     }
 
-    /// "Oct 20 – now" for the active chapter, "Oct 14 – Oct 19" once sealed.
     static func shortRange(_ chapter: HomeChapterListDTO.Chapter) -> String? {
         guard let start = GatewayTimestamp.parse(chapter.createdAt) else { return nil }
         let style = Date.FormatStyle().month(.abbreviated).day()

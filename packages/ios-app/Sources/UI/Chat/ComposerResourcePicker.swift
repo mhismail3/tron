@@ -9,7 +9,6 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
     let kind: Kind
     let displayName: String
     let friendlyName: String
-    /// The catalog row this entry presents; staging and detail reads send it back as is.
     let commandInfo: CommandInfo
     var invocationName: String { commandInfo.name }
     var description: String? { commandInfo.description }
@@ -41,7 +40,6 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
         self.id = command.id
         self.kind = kind
         self.displayName = displayName
-        // A skill's authored title replaces only the derived name, never the invocation.
         friendlyName = command.title ?? ComposerResourceNameFormatter.friendly(displayName)
         commandInfo = command
         normalizedName = displayName.lowercased()
@@ -70,8 +68,6 @@ enum ComposerResourceContentPresentation {
         let isTruncated: Bool
     }
 
-    /// Prompt and skill instructions retain their full admitted body. Only
-    /// extension source uses a short excerpt instead of the transport allowance.
     static func preview(_ content: String, source: CommandInfo.Source, sourceTruncated: Bool) -> Preview {
         let text = body(content, source: source)
         guard source == .extension else { return Preview(text: text, isTruncated: sourceTruncated) }
@@ -90,10 +86,6 @@ enum ComposerResourceContentPresentation {
     static func body(_ content: String, source: CommandInfo.Source) -> String {
         guard source != .extension else { return content }
 
-        // Markdown resources may begin with a UTF-8 BOM decoded as U+FEFF.
-        // Remove it at the Unicode-scalar boundary: U+FEFF can share a Swift
-        // grapheme cluster with the opening hyphens and is not reliably found
-        // as a standalone Character substring.
         var normalized = content
         if normalized.unicodeScalars.first?.value == 0xFEFF {
             let firstContentScalar = normalized.unicodeScalars.index(
@@ -132,10 +124,6 @@ enum ComposerResourceContentPresentation {
         return normalizingSoftWraps(in: markdown)
     }
 
-    /// Skill and prompt files are commonly hard-wrapped for source readability.
-    /// Preserve Markdown block boundaries and intentional hard breaks while
-    /// letting SwiftUI choose natural visual wrapping for ordinary prose and
-    /// list continuations.
     static func normalizingSoftWraps(in markdown: String) -> String {
         let lines = markdown.components(separatedBy: "\n")
         guard lines.count > 1 else { return markdown }
@@ -241,8 +229,6 @@ enum ComposerResourceNameFormatter {
     }
 }
 
-/// Immutable, bounded presentation index derived from the authoritative session
-/// command catalog. It owns no fetch path and can be prepared off-main.
 struct ComposerResourceCatalogIdentity: Hashable {
     let commands: [CommandInfo]
     let catalogTarget: SessionPresentationIdentity?
@@ -298,14 +284,10 @@ struct ComposerResourceCatalog: Equatable, Sendable {
         return prefixes.sorted(by: relevanceOrder) + remaining.sorted(by: relevanceOrder)
     }
 
-    /// Slash completion intentionally searches both extension commands and
-    /// prompts; the selected entry retains its canonical source for admission.
     func slashEntries(query: String) -> [ComposerResourceEntry] {
         Self.filtered((commands + prompts).sorted(by: Self.order), query: query)
     }
 
-    /// Both fresh derivation and subsequent typing use the same picker scope.
-    /// An @ mention never admits slash resources, even after catalog replacement.
     func entries(for picker: ComposerResourcePickerSource) -> [ComposerResourceEntry] {
         if case .token(let token) = picker, token.kind == .command {
             return slashEntries(query: token.query)
@@ -322,7 +304,6 @@ struct ComposerResourceCatalog: Equatable, Sendable {
 struct ComposerSuggestionToken: Equatable, Sendable {
     let kind: ComposerResourceEntry.Kind
     let query: String
-    /// UTF-16 range from trigger through the character immediately before the caret.
     let replacementRange: NSRange
 }
 
@@ -336,7 +317,6 @@ enum ComposerSuggestionTriggerPolicy {
         guard triggerLocation != NSNotFound else { return nil }
         let before = (prefix as NSString).substring(to: triggerLocation)
         if candidate.trigger == "/" {
-            // Pi commands are executable only as the leading trimmed token.
             guard before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         } else if !before.isEmpty {
             guard before.last?.isWhitespace == true else { return nil }
@@ -651,8 +631,6 @@ struct ComposerResourcePicker: View {
     }
 }
 
-/// Project scope takes precedence over authorship. User identifies only
-/// directly authored global resources, never a package installation.
 struct ComposerResourceBadges: View {
     let origin: CommandInfo.ResourceOrigin?
     let scope: CommandInfo.ResourceScope?
@@ -886,9 +864,6 @@ struct ComposerResourceDetailSheet: View {
         }
     }
 
-    /// Identity of the reader this sheet displays. A completed detail for this
-    /// exact identity stays mounted across a cover, so returning from the
-    /// nested Info sheet neither blanks content nor refetches the same source.
     private var loadIdentity: String {
         "\(sessionID ?? "-"):\(entry.id)"
     }
@@ -919,7 +894,6 @@ struct ComposerResourceDetailSheet: View {
             detail = loaded
             loadedIdentity = identity
         } catch is CancellationError {
-            // Interrupted work publishes nothing, so the next activation retries.
             return
         } catch {
             guard generation == detailGeneration,
@@ -931,9 +905,6 @@ struct ComposerResourceDetailSheet: View {
     }
 }
 
-/// The one chip for content staged above the composer input (skills,
-/// prompts, commands and annotations): a glass compact pill whose label opens
-/// its detail and whose trailing control removes it. Callers own the sheet.
 struct ComposerStagedChip<Accessory: View>: View {
     static var accessibilityIdentifier: String { "composer.staged-chip" }
 
@@ -1051,9 +1022,6 @@ struct ComposerResourceChip: View {
 }
 
 enum ComposerResourceInvocationPolicy {
-    /// Resolves only a leading, catalog-backed Pi resource command. Extension
-    /// and skill commands use Pi's literal ASCII-space delimiter; prompt
-    /// templates use Pi's whitespace delimiter after extension precedence.
     static func leadingInvocation(
         in text: String,
         commands: [CommandInfo]

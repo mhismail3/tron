@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Task permission controls stay with Home's receipted mutation owner even
-/// though their presentation is embedded in the generic settings surface.
 extension HomeTaskSheet.PendingRevocation.Target {
     var title: String {
         switch self {

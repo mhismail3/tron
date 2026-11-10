@@ -42,8 +42,6 @@ struct GatewayLogsSettingsView: View {
     @PresentationState private var copySucceeded = false
     @PresentationState private var exportInFlight = false
     @PresentationState private var exportGeneration = 0
-    // Local capture and remote-export fallback may finish out of order; dismissals
-    // also retire pending share output, without cancelling an accepted Gateway write.
     @PresentationState private var shareIntentGeneration = 0
     @PresentationState private var localCaptureInFlight = false
     @PresentationState private var localCaptureGeneration = 0
@@ -100,8 +98,6 @@ struct GatewayLogsSettingsView: View {
             }
             .padding(.bottom, 24)
         }
-        // Native pull-to-refresh needs bounce even when there are no rows; it
-        // does not add a fake content height or change the reader's offset.
         .scrollBounceBehavior(.always)
         .refreshable {
             await loadLogs(preserveExistingOnEmpty: false)
@@ -158,7 +154,6 @@ struct GatewayLogsSettingsView: View {
             loadGeneration &+= 1
             loadCoordinator.cancel()
             loading = false
-            // Cover suspends reads, not publication of a user-started capture/export.
         }
         .onDisappear {
             loadGeneration &+= 1
@@ -179,8 +174,6 @@ struct GatewayLogsSettingsView: View {
             while !Task.isCancelled,
                   presentationActivity.allowsPresentationPublication,
                   scenePhase == .active {
-                // Interval is measured after the prior load settles, avoiding
-                // overlapping requests and catch-up storms after a slow read.
                 do {
                     try await Task.sleep(for: .seconds(GatewayLogsLoadPolicy.refreshInterval))
                 } catch {
@@ -292,8 +285,6 @@ struct GatewayLogsSettingsView: View {
         let destination = model.knowledgeDestinationIdentity
         exportInFlight = true
         Task { @MainActor in
-            // The generation fences publication, not the accepted export's busy
-            // ownership. Presentation retirement cannot admit a second write.
             defer { exportInFlight = false }
             do {
                 let appRecords = await model.appLog.snapshot()
@@ -350,15 +341,11 @@ struct GatewayLogsSettingsView: View {
         defer {
             loadCoordinator.release(lease)
             if lease.owner {
-                // A dismissed/replaced Logs surface must not clear the
-                // successor's loading state after its read settles.
                 if generation == loadGeneration, presentationActivity == activity {
                     loading = false
                 }
             }
         }
-        // Publish local evidence first even when a ready socket's remote log
-        // read is stalled. The coordinator shares each phase with joiners.
         guard let local = await loadCoordinator.local(for: lease, operation: {
             await model.loadGatewayLogsResult(limit: 1_000, includeRemote: false)
         }) else { return }
@@ -429,10 +416,6 @@ struct GatewayLogsLoadID: Hashable {
     let isReady: Bool
 }
 
-/// Owns one in-flight Logs read across the automatic loop and pull gesture.
-/// Separate local/remote tasks preserve the fast local projection while both
-/// callers join the same underlying request rather than polling or duplicating
-/// Gateway work.
 @MainActor
 final class GatewayLogsLoadCoordinator {
     struct Lease: Sendable {

@@ -1,7 +1,5 @@
 import Foundation
 
-/// Additive provider account-usage capability. This is intentionally separate
-/// from session context usage and from any local credential projection.
 package enum ProviderUsageCapability {
     package static let name = "provider-usage.v1"
     static let maximumSnapshots = 16
@@ -234,10 +232,6 @@ package struct ProviderUsageResponse: Codable, Sendable {
 }
 
 package enum ProviderUsageOrdering {
-    /// One plan appears once: a configured row whose usage another configured row
-    /// presents is hidden. The Gateway names the borrower only while it qualifies,
-    /// so a lender that is the only login, or sits beside an API-key borrower,
-    /// stays visible, and a signed-out lender stays available to sign in.
     package static func visible(_ providers: [ProviderSummary]) -> [ProviderSummary] {
         let configured = Set(providers.filter(\.configured).map(\.id))
         return providers.filter { provider in

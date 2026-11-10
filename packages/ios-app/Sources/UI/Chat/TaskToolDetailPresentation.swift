@@ -1,8 +1,6 @@
 import Foundation
 import TronMobileCore
 
-// MARK: - task
-
 extension HomeToolDetailPresentation {
     static func task(_ call: Call) -> HomeToolDetailPresentation? {
         let action = call.string("action")
@@ -80,7 +78,6 @@ extension HomeToolDetailPresentation {
             if let text = call.string("text") {
                 sections.append(.prompt(id: "message", title: action == "resume" ? "Instruction" : "Message", text: text, detail: effect))
             } else {
-                // Stop may have no message; retain its effect without an empty identity card.
                 sections.append(.rows(title: nil, detail: effect, rows: []))
             }
             return HomeToolDetailPresentation(header: Header(icon: icon, title: title, subtitle: targetTitle, pill: "Accepted", tone: .success),
@@ -90,8 +87,6 @@ extension HomeToolDetailPresentation {
         }
     }
 
-    /// Control rows intentionally carry no model: never borrow the current Home
-    /// model for a historical worker. Show only fields recorded in this result.
     private static func taskList(_ call: Call) -> HomeToolDetailPresentation? {
         guard let details = call.details, let tasks = details["tasks"]?.arrayValue,
               let counts = details["counts"]?.objectValue,
@@ -174,8 +169,6 @@ extension HomeToolDetailPresentation {
         return HomeToolDetailPresentation(header: header, sections: sections)
     }
 
-    /// One byte page of the task's immutable report. The Gateway pages the report's
-    /// JSON, so the page's `text` value is decoded as far as this page carries it.
     private static func taskReport(page: String, offset: Int, total: Int, next: Int?, identity: [Row], icon: String,
                                    taskID: String?) -> HomeToolDetailPresentation? {
         guard offset >= 0, total >= offset else { return nil }
@@ -198,8 +191,6 @@ extension HomeToolDetailPresentation {
     }
 }
 
-/// The report fields one byte page of a report's JSON carries. A whole report
-/// parses as JSON; a partial page decodes the `text` string as far as it goes.
 struct TaskReportPage: Hashable, Sendable {
     let outcome: String?
     let resultID: String?
@@ -221,7 +212,6 @@ struct TaskReportPage: Hashable, Sendable {
         if let start = page.range(of: "\"text\":\"") {
             text = Self.decodeString(page[start.upperBound...])
         } else if offset > 0 {
-            // A later page usually continues the text value.
             text = Self.decodeString(page[...])
         } else {
             text = nil
@@ -233,7 +223,6 @@ struct TaskReportPage: Hashable, Sendable {
         return decodeString(page[start.upperBound...])
     }
 
-    /// Decodes JSON string escapes up to the closing quote or the end of the page.
     private static func decodeString(_ source: Substring) -> String {
         var result = ""
         var iterator = source.makeIterator()

@@ -1,6 +1,5 @@
 import Foundation
 
-/// Publishes wrapper-owned state without exposing partial or group-readable files.
 enum AtomicFileWriter {
     static func write(_ data: Data, to destination: URL) throws {
         let fileManager = FileManager.default

@@ -1,8 +1,5 @@
 import Foundation
 
-// The Gateway's notification inbox wire projections and their admission
-// bounds. The inbox coordinator that presents them stays in Notifications.
-
 package enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
     case explicit, ask, waiting
     case agentFinished = "agent_finished"
@@ -20,7 +17,6 @@ package enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
         switch self {
         case .explicit: "bell.fill"
         case .ask: "questionmark.bubble.fill"
-        // This category includes errors and interruptions, not just success.
         case .agentFinished: "stop.circle.fill"
         case .waiting: "hourglass"
         }
@@ -113,10 +109,6 @@ package struct GatewayNotificationInboxPage: Decodable, Sendable {
     private enum CodingKeys: String, CodingKey { case notifications, revision, unreadCount, nextCursor }
 }
 
-/// The coalesced `notification.inbox.changed` payload: the Gateway's committed
-/// revision and its total unread count. The count is projected onto the bell
-/// immediately; a refetch happens only when the revision is newer than the
-/// projection's.
 package struct NotificationInboxChanged: Decodable, Sendable, Equatable {
     package let revision: String
     package let unreadCount: Int
@@ -128,11 +120,8 @@ package struct NotificationInboxChanged: Decodable, Sendable, Equatable {
 }
 
 package enum NotificationInboxAdmissionPolicy {
-    // Match the Gateway page limit so one scroll request cannot over-read.
     package static let maximumPageCount = 50
-    // Bound aggregate retained rows across profile buckets and windows.
     package static let maximumRetainedCount = 512
-    // Cap encoded projection size while retaining bounded history.
     package static let maximumAggregateBytes = 512 * 1_024
 
     package static func admits(_ item: GatewayNotificationInboxItem) -> Bool {

@@ -201,7 +201,6 @@ package enum ExtensionInteractionResponsePolicy {
     }
 }
 
-/// Exact immutable before/after projection. Only the dedicated interaction can authorize its effect.
 package struct ChangeReview: Codable, Hashable, Sendable {
     package struct Item: Codable, Hashable, Sendable {
         package let label: String
@@ -290,7 +289,6 @@ package struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-/// Gateway-admitted capability classification, independent of package provenance.
 package enum ExtensionProviderKind: String, Codable, Hashable, Sendable {
     case subagent, `extension`, unknown
     package init(from decoder: Decoder) throws {
@@ -712,7 +710,6 @@ package struct ExtensionPresentationMutation: Codable, Hashable, Sendable {
 package enum ExtensionPresentationPolicy {
     static let maximumSurfaces = 64
     private static let maximumLeaseIDBytes = 512
-    // JSON numbers admitted by the Gateway must remain exactly representable.
     private static let maximumSafeRevision = 9_007_199_254_740_991
     static let maximumColumns = 160
     package static let maximumLines = 120

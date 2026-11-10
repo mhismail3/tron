@@ -1,8 +1,5 @@
 import Foundation
 
-/// The one authority for wrapper startup routing. Lifecycle owners consume
-/// this value rather than independently deriving bundle, command, and marker
-/// state.
 enum MacStartupMode: Equatable, Sendable {
     case testHost
     case command(MacCommandLineMode)
@@ -30,10 +27,6 @@ enum MacStartupMode: Equatable, Sendable {
 
 }
 
-/// The wrapper has three supported operating modes:
-/// - Debug/Xcode (`com.tron.mac.dev`) is a companion and never manages a Gateway.
-/// - Installed Release (`com.tron.mac` at `/Applications/Tron.app`) owns Stable.
-/// - Unsupported/misplaced Release builds fail before registration.
 enum MacRuntimeVariant: Equatable, Sendable {
     case xcodeDebug
     case installedRelease
@@ -88,8 +81,6 @@ enum MacRuntimeVariant: Equatable, Sendable {
         self == .installedRelease && bundleIdentifier != Self.releaseBundleIdentifier
     }
 
-    /// Release owns Stable only. Debug can observe Gateways but never manages
-    /// registration or process lifecycle.
     func canManageLaunchAgent(
         profile: TronGatewayProfile = .stable,
         isIsolatedInstallMode: Bool

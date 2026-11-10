@@ -8,9 +8,6 @@ struct AutomationSummarySelection: Hashable, Identifiable {
 }
 
 extension View {
-    /// The one Automations presentation, opened from the dashboard menu. The
-    /// shell owns whether it is shown and the persisted list filters; the sheet
-    /// owns its filter, create and detail presentations.
     func automationsSheet(
         isPresented: Binding<Bool>,
         preferences: Binding<AutomationDashboardViewPreferences>,
@@ -26,7 +23,6 @@ extension View {
     }
 }
 
-/// Filterable inventory of every connected Gateway's Automations.
 struct AutomationsSheet: View {
     let onOpenSession: @MainActor (String, String) -> Void
     let onDone: () -> Void
@@ -65,8 +61,6 @@ struct AutomationsSheet: View {
     private var isFiltered: Bool { filter != .all || actionFilter != nil || serverFilter != nil }
 
     var body: some View {
-        // The one projection per catalog or filter change; rows draw only
-        // precomputed values while they scroll.
         let rows = AutomationInventory.rows(
             buckets: model.automationCatalog.buckets, eligibleProfileIDs: eligibleProfileIDs,
             profileID: serverFilter, filter: filter, action: actionFilter
@@ -85,7 +79,6 @@ struct AutomationsSheet: View {
             .accessibilityIdentifier("automations.new")
         } content: {
             content(rows)
-                // The floating Filter control must never cover the last row.
                 .padding(.bottom, 64)
         }
         .overlay(alignment: .bottomTrailing) {
@@ -101,8 +94,6 @@ struct AutomationsSheet: View {
             source: scenePhase,
             presentationActive: presentationActivity.allowsDataPublication
         )) {
-            // Descendant detail/form sheets consume the same narrow catalog's
-            // revisions, so the catalog stays active beneath them.
             if presentationActivity.allowsDataPublication, scenePhase == .active {
                 if presentationActivity.allowsPresentationPublication { reconcileViewPreferences() }
                 model.automationCatalog.activate()
@@ -246,9 +237,6 @@ struct AutomationsSheet: View {
     }
 }
 
-/// The inventory's rows, lazily built as they scroll in, one shared list card
-/// each. Equatable on its rows, so a parent update that leaves them unchanged
-/// re-renders nothing here.
 private struct AutomationInventoryList: View, Equatable {
     let rows: [AutomationInventoryRow]
     let onSelect: (AutomationSummarySelection) -> Void

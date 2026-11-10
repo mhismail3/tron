@@ -1,8 +1,6 @@
 import Foundation
 import XCTest
 
-/// #2010: production navigation and the shared queue draft cross a real socket
-/// into the fixture Gateway's canonical store. No user settings are touched.
 extension RealGatewayPairAndChatUITests {
     @MainActor
     func testHomeQueueEditorUsesHomeScopeAndKeepsModelsRoute() throws {
@@ -43,7 +41,6 @@ extension RealGatewayPairAndChatUITests {
         settings.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Home Settings"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertFalse(app.buttons["settings-link-Agent Behavior"].exists, "Global consolidation must not replace Home's routes")
-        // Home Settings embeds its former Models section in place (Settings README).
         XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Home has no first-level Models drill-in")
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
         revealBelowNavigationBar(app, row)
@@ -57,7 +54,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == ["tron-e2e/e2e-alternate"] }, "Home Save must reach the canonical Home profile")
         XCTAssertNil(queue(globalFile, field: "modelQueues"), "A Home edit must not change Global")
         revealBelowNavigationBar(app, row)
-        // Rows stay disabled until an accepted change is canonical.
         XCTAssertTrue(waitForEnabled(edit, timeout: 30), app.debugDescription)
         edit.tap()
         XCTAssertTrue(app.buttons["Remove tron-e2e/e2e-alternate"].waitForExistence(timeout: 15), app.debugDescription)
@@ -69,10 +65,6 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(waitUntil(timeout: 15) { queue(homeFile, field: "modelQueue") == nil }, "Home Revert must remove its override")
         XCTAssertNil(queue(globalFile, field: "modelQueues"))
         keepScreenshot(app, name: "2029-home-queue-scope-and-reopen-\(appearance)")
-        // The fixture's Home task namespace is not initialized, so the embedded
-        // permissions read is refused with the Gateway's typed refusal; the store's
-        // own text stays in local diagnostics. The section names the refusal and
-        // offers Reload, never delegation controls.
         let refusal = app.staticTexts["Home could not be read"]
         revealBelowNavigationBar(app, refusal)
         XCTAssertTrue(refusal.waitForExistence(timeout: 15), app.debugDescription)
@@ -100,8 +92,6 @@ extension RealGatewayPairAndChatUITests {
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
         let store = agent.deletingLastPathComponent().appendingPathComponent("tron/gateway/settings/gateway.json")
-        // Seed only this fresh fixture's retired compaction override, so review
-        // captures show its surviving inspector in the consolidated sheet too.
         let settingsFile = agent.appendingPathComponent("settings.json")
         var settings = try JSONSerialization.jsonObject(with: Data(contentsOf: settingsFile)) as! [String: Any]
         settings["compaction"] = ["reserveTokens": 24_576]
@@ -133,15 +123,12 @@ extension RealGatewayPairAndChatUITests {
             expandAgentSheet(app, title: "Agent Behavior")
             keepScreenshot(app, name: "2010-agent-settings-top-\(appearance)")
             for (role, label) in [("worker", "Worker models"), ("subagent", "Subagent models"), ("background", "Background models")] {
-                // Real resolutions include the fixed role qualifier in the row identity;
-                // synthetic fixtures may omit that suffix. Address the owning row, not its reset child.
                 let row = app.descendants(matching: .any).matching(NSPredicate(
                     format: "identifier BEGINSWITH %@ AND NOT identifier ENDSWITH '-reset'",
                     "settings-row-model.queue_role_\(role)_")).firstMatch
                 revealBelowNavigationBar(app, row)
                 let edit = row.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label != 'Reset'", label)).firstMatch
                 XCTAssertTrue(edit.waitForExistence(timeout: 15), "Queue has no editor: \(row.debugDescription)")
-                // Rows stay disabled until an accepted change is canonical.
                 XCTAssertTrue(waitForEnabled(edit, timeout: 30), app.debugDescription)
                 edit.tap()
                 XCTAssertTrue(app.navigationBars.staticTexts[label].waitForExistence(timeout: 15), app.debugDescription)
@@ -176,8 +163,6 @@ extension RealGatewayPairAndChatUITests {
                 reset.tap()
                 XCTAssertTrue(waitUntil(timeout: 15) { saved(role) == nil }, "Reset must remove, not copy, the inherited value")
             }
-            // The default policy belongs to the shared Trusted Projects owner, not a
-            // duplicate generic row in Agent Behavior.
             XCTAssertFalse(app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"].exists,
                            "Agent Behavior must not duplicate the Trusted Projects policy row")
             let projects = app.buttons["Trusted Projects"]
@@ -196,7 +181,6 @@ extension RealGatewayPairAndChatUITests {
             let changes = app.buttons["Changes"]
             XCTAssertTrue(changes.waitForExistence(timeout: 15), app.debugDescription)
             changes.tap()
-            // The canonical history pages newest first; the latest Background entry is Reset.
             let entry = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label BEGINSWITH 'Background models,'")).firstMatch
             XCTAssertTrue(entry.waitForExistence(timeout: 30), app.debugDescription)
             entry.tap()
@@ -249,12 +233,8 @@ extension RealGatewayPairAndChatUITests {
     private func addQueueModel(_ app: XCUIApplication, named name: String) {
         let add = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Add model'")).firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 15), app.debugDescription)
-        // The glass row also projects as a Button in AX; its trailing Choose
-        // button owns navigation, not the non-interactive title area.
         let choose = add.buttons.matching(NSPredicate(format: "label == 'Add model'")).firstMatch
         choose.tap()
-        // Search expands provider groups and avoids matching a covered Thinking
-        // row named “For <model>” in the sheet below this picker.
         let search = app.buttons["Search models"]
         XCTAssertTrue(search.waitForExistence(timeout: 30), app.debugDescription)
         search.tap()

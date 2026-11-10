@@ -8,7 +8,6 @@ struct HomeDesignationReceipt: Codable, Equatable, Sendable {
     let generation: Int
 }
 
-/// One Home command authority, independent of disposable dashboard/chat reads.
 @MainActor
 @Observable
 final class HomeMutationCoordinator {
@@ -17,9 +16,7 @@ final class HomeMutationCoordinator {
         case revokeScope(String), revokeGrant(String)
         case reconfirmPermissions
         case redeliver(taskID: String, homeID: String, routeGeneration: Int)
-        /// The maintainer's learned-profile changes, one request (gateway settings-model.md 6.4).
         case changeProfile([HomeProfileChange])
-        /// Undo of a profile change is the settings path's own undo of its record entry.
         case undoProfileChange(String)
 
         var method: String {
@@ -43,7 +40,6 @@ final class HomeMutationCoordinator {
         fileprivate let generation: Int
     }
 
-    /// Capture synchronously at the user action, before creating an async task.
     func authority(profileID: String) throws -> Authority {
         try requireAuthority(profileID: profileID)
         return Authority(profileID: profileID, generation: lifecycle.currentLifecycleGeneration)
@@ -55,17 +51,11 @@ final class HomeMutationCoordinator {
         let commandID: String
         let command: Command
     }
-    /// Notice code for a receipt that proves the change was never applied. The
-    /// Home status projection must be reloaded before the caller reports it.
     static let notAppliedCode = "home_change_not_found"
 
     private enum State {
         case idle, running(Invocation), unresolved(Invocation)
     }
-    /// Pending state is owned per profile: each profile is a separate Gateway, so
-    /// one profile's running or unresolved change neither blocks nor re-targets
-    /// another. Idle profiles have no entry, and forgetting a profile retires its
-    /// entry, which keeps this map bounded by the profile store.
     private var pending: [String: State] = [:]
     @ObservationIgnored private let client: GatewayClient
     @ObservationIgnored private let lifecycle: GatewayLifecycleCoordinator
@@ -148,9 +138,6 @@ final class HomeMutationCoordinator {
         }
     }
 
-    /// Checking an unresolved command never creates or re-sends a mutation. A
-    /// missing receipt from the admitted Gateway retires the command as not
-    /// applied; pending or uncertain answers keep it unresolved.
     func checkCompletion(authority: Authority) async throws -> JSONValue {
         let profileID = authority.profileID
         guard case .unresolved(let invocation) = state(for: profileID) else {
@@ -161,7 +148,6 @@ final class HomeMutationCoordinator {
         setState(.running(invocation), for: profileID)
         do {
             let resolution = try await mutationExecutor.resolveReceipt(method: invocation.command.method, commandID: invocation.commandID)
-            // A receipt answer retires its invocation even if its UI is gone.
             setState(.idle, for: profileID)
             try requireAuthority(profileID: profileID, generation: generation)
             switch resolution {
@@ -175,8 +161,6 @@ final class HomeMutationCoordinator {
                 )
             }
         } catch {
-            // Publication cancellation after terminal retirement must not restore
-            // an already-completed receipt as a pending command.
             if case .running = state(for: profileID) { setState(.unresolved(invocation), for: profileID) }
             throw error
         }

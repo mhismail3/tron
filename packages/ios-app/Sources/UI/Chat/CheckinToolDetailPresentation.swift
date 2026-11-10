@@ -2,8 +2,6 @@ import Foundation
 import TronMobileCore
 
 extension HomeToolDetailPresentation {
-    /// Canonical check-ins carry a nested receipt, not a generic object to browse.
-    /// Running/rejected calls may only have arguments; never infer a saved receipt.
     static func checkin(_ call: Call) -> HomeToolDetailPresentation? {
         let receipt = call.details?["checkin"]?.objectValue
         guard receipt != nil || call.running || call.error else { return nil }
@@ -36,7 +34,6 @@ extension HomeToolDetailPresentation {
         }
         if !attentionRows.isEmpty { sections.append(.rows(title: "Attention", detail: nil, rows: attentionRows)) }
         var progress: [Row] = []
-        // Summary/message variants still keep the explicit step, when supplied.
         if let step = text("step"), step != summary {
             progress.append(Row(icon: "flag", title: "Step", value: step))
         }

@@ -1,7 +1,6 @@
 import Foundation
 import Observation
 
-/// One bounded JSON value handed to the installed app's mutation owner.
 package struct SwiftAppPersistenceWrite {
     package let key: String
     package let value: Data
@@ -22,10 +21,6 @@ final class SwiftAppPersistenceSlot {
     }
 }
 
-/// The installed app's loaded state projection. The host owns transport,
-/// revision checks, receipts and unsaved-write presentation; the interpreter
-/// emits a batch only after its synchronous action commits. No UserDefaults,
-/// disk, network or ambient installed-app identity enters the interpreter.
 @MainActor
 package final class SwiftAppPersistence {
     private var entries: [String: Data]
@@ -86,7 +81,6 @@ package final class SwiftAppPersistence {
             restored = initial.resolved
         }
         let slot = SwiftAppPersistenceSlot(key: key, signature: signature, collection: collection, value: restored)
-        // Defaults must be serializable too, but opening an app never writes them.
         try Self.admitJSON(encode(slot, program: program))
         slots[key] = slot
         return slot
@@ -170,8 +164,6 @@ package final class SwiftAppPersistence {
     private struct Envelope: Codable { let version: Int; let value: StoredValue }
     private struct Pair: Codable { let key: StoredValue; let value: StoredValue }
 
-    /// Typed values avoid guessing whether a JSON object is a dictionary or a
-    /// struct, and retain Int/Double identity, dictionary keys and struct names.
     private indirect enum StoredValue: Codable {
         case null, bool(Bool), integer(Int), double(Double), string(String)
         case array([StoredValue]), dictionary([Pair]), record(String, [String: StoredValue])

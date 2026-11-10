@@ -5,9 +5,6 @@ struct FeedbackIssueOpenPlan: Equatable {
     let copiedFullBodyToClipboard: Bool
 }
 
-/// Pure GitHub issue composer for the Mac menu bar feedback action.
-/// Redacts logs and server failure details at the export boundary, without
-/// changing the private log viewer or the URL/clipboard fallback.
 struct FeedbackIssueComposer {
     static let maxPrefilledURLLength = 7_000
     private static let repoOwner = "tron-owner"

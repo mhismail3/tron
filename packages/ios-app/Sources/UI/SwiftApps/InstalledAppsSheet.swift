@@ -1,9 +1,5 @@
 import SwiftUI
 
-/// The Tron menu's Apps sheet: pending reviews and installed apps, opened in
-/// the shared runner with their persisted values. It composes the same shared
-/// document sheet, list rows and settings rows the approved design used; the
-/// catalog and every write belong to `InstalledSwiftApps`.
 struct InstalledAppsSheet: View {
     @Environment(AppModel.self) private var model
     @PresentationState private var managed: InstalledSwiftAppManifest?
@@ -73,7 +69,6 @@ struct InstalledAppsSheet: View {
             }
         }
         .onChange(of: launch == nil) { _, closed in
-            // The catalog is a projection; a closed runner or Manage may have changed it.
             if closed { Task { await reload() } }
         }
         .onChange(of: pendingReview == nil) { _, closed in
@@ -123,8 +118,6 @@ struct InstalledAppsSheet: View {
 
 extension InstalledSwiftAppManifest: Identifiable {}
 
-/// Rename, clear data and remove an installed app. Destructive actions confirm
-/// first; failures stay visible instead of being dropped.
 private struct Notice: Equatable { let message: String; let failed: Bool }
 
 private struct InstalledAppManageSheet: View {

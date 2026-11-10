@@ -80,10 +80,6 @@ private struct ProcessTranscriptPageResponse: Decodable, Sendable {
     }
 }
 
-/// Pure append-aware reconciliation for canonical-live child transcripts.
-/// Existing loaded prefix pages survive an append whenever the refreshed tail
-/// overlaps them exactly. Branch replacement or an unbridgeable gap fails over
-/// to the new canonical tail rather than fabricating continuity.
 enum ReadOnlyProcessTranscriptMerge {
     struct Result: Equatable, Sendable {
         let items: [TranscriptItem]
@@ -161,9 +157,7 @@ final class ReadOnlySubagentSessionStore {
     private var recoveryTask: Task<Void, Never>?
     private var recoveryAttempts = 0
 
-    // Bound local viewer recovery; this is not connection retry admission.
     private static let maximumRecoveryAttempts = 3
-    // Short resource-recovery retries should not delay a read-only viewer behind full reconnect backoff.
     private static let recoveryRetryBaseDelay = Duration.milliseconds(150)
 
     private(set) var status: Status = .idle
@@ -180,8 +174,6 @@ final class ReadOnlySubagentSessionStore {
     private(set) var canAbort = false
     private(set) var revision: String?
     private(set) var items: [TranscriptItem] = []
-    // Bounded render inputs belong to the installed projection. Canonical reads
-    // keep advancing while the shared viewport policy freezes this installation.
     private var installedItems: [TranscriptItem] = []
     private var viewportMode: ChatViewportMode = .pinned
     private(set) var presentation: ChatReadOnlyTranscriptProjection = .empty
@@ -211,9 +203,6 @@ final class ReadOnlySubagentSessionStore {
         }
     }
 
-    /// The trace an open thinking detail follows, resolved from the projection
-    /// this child transcript's own rows render from. Its rows are never
-    /// streaming: a child session is rendered as recorded.
     func resolveThinkingTrace(_ identity: String) -> ChatThinkingTraceContent? {
         guard let resolved = ChatTranscriptDetailResolution.thinkingTrace(
             in: presentation.timeline.items,
@@ -222,13 +211,10 @@ final class ReadOnlySubagentSessionStore {
         return ChatThinkingTraceContent(
             segments: resolved.segments,
             preparedText: preparedText.slice(for: resolved.item),
-            // A child transcript renders a recorded session: its own rows never
-            // pass a streaming flag.
             streaming: false
         )
     }
 
-    /// The presentation an open event detail follows, from the same projection.
     func resolveNotificationDetail(_ eventID: String) -> ChatNotificationPresentation? {
         ChatTranscriptDetailResolution.notificationDetail(
             in: presentation.timeline.items,
@@ -268,9 +254,6 @@ final class ReadOnlySubagentSessionStore {
         retire(sendClose: true, preserveTranscript: retainTranscript)
         generation &+= 1
         let ownedGeneration = generation
-        // Allocate the opaque identity before the request is sent. The Gateway
-        // installs this exact pending owner before its first await, so a late
-        // response can only complete or retire this viewer.
         let viewerID = UUID().uuidString
         openingViewerID = viewerID
         let admittedParentSubscriptionToken = parentSubscriptionToken
@@ -291,9 +274,6 @@ final class ReadOnlySubagentSessionStore {
             } }
             let connectionAdmission = await client.activeConnectionAdmission()
             do {
-                // The negotiated v2 capability is the authority. Capture it
-                // from the existing hello admission; do not issue a second
-                // system.info read before opening the latency-sensitive sheet.
                 guard (await client.info?.capabilities.contains(SessionProcessAdmissionPolicy.transcriptCapability)) == true else {
                     await MainActor.run { [weak self] in
                         guard let self, self.generation == ownedGeneration else { return }
@@ -367,9 +347,6 @@ final class ReadOnlySubagentSessionStore {
                     } else if let failure = error as? GatewayFailure,
                        ["not_found", "unavailable"].contains(failure.code),
                        self.liveActivity?.lifecycle.isActiveWork == true {
-                        // Missing ownership waits for the authoritative nil-to-ref
-                        // activity transition. Once bound, transient file admission
-                        // shares the same finite recovery episode as busy replies.
                         self.status = self.items.isEmpty ? .waiting : .reconnecting
                         if self.liveActivity?.childSessionRef != nil {
                             self.scheduleRecovery(for: .opening, generation: ownedGeneration)
@@ -478,12 +455,8 @@ final class ReadOnlySubagentSessionStore {
             return
         }
         guard let changedRevision = change.revision else { return }
-        // A watcher can announce a dirty baseline before the open response is
-        // installed. Retain that intent and refresh immediately after install.
         guard changedRevision != revision else { return }
         pendingRefreshRevision = changedRevision
-        // Prepend owns its read lane. An append coalesces a refresh intent but
-        // must not cancel a user's in-flight historical page.
         refreshNewestPageIfNeeded()
     }
 
@@ -521,9 +494,6 @@ final class ReadOnlySubagentSessionStore {
     }
 
     private func refreshNewestPageIfNeeded() {
-        // The store is the single read owner. Historical prepend wins its lane;
-        // the dirty revision remains coalesced until that response settles.
-        // Invalidation cannot bypass scheduled recovery or a terminal failure.
         guard status == .open, recoveryTask == nil, pageTask == nil, refreshTask == nil,
               let targetRevision = pendingRefreshRevision,
               targetRevision != revision,
@@ -554,8 +524,6 @@ final class ReadOnlySubagentSessionStore {
                         self.status = .failed("The canonical subagent transcript is invalid.")
                         return
                     }
-                    // A defensive same-revision response is a settled no-op,
-                    // not a request that may leave the mounted viewer waiting.
                     guard response.revision != expectedRevision else {
                         self.refreshTask = nil
                         if self.pendingRefreshRevision == targetRevision { self.pendingRefreshRevision = nil }
@@ -597,9 +565,6 @@ final class ReadOnlySubagentSessionStore {
                 await MainActor.run { [weak self] in
                     guard let self, self.generation == ownedGeneration else { return }
                     self.refreshTask = nil
-                    // Keep the last authoritative page mounted while a
-                    // possibly-sent disposable read is reconciled by the next
-                    // invalidation or reconnect.
                     self.status = .open
                 }
             } catch {
@@ -653,9 +618,6 @@ final class ReadOnlySubagentSessionStore {
                   activity.runId == selectedRunID,
                   selectedToolCallID != nil,
                   selectedRunID != nil else { return }
-            // Gateway can replace a short-lived aggregate with the sole exact
-            // child. Retarget only under the immutable tool/run correlation;
-            // ambiguous candidates are filtered by SessionProcessProjection.
             self.processID = activity.processId
             if let parentSessionID, let parentSubscriptionToken, let presentationGeneration {
                 startOpen(
@@ -674,8 +636,6 @@ final class ReadOnlySubagentSessionStore {
         guard status == .waiting || status == .unavailable else { return }
         if activity.childSessionRef != nil && !hadChildBinding,
            let parentSessionID, let parentSubscriptionToken, let presentationGeneration {
-            // Readiness changes once for this exact child/run. Repeated terminal
-            // updates never reset the recovery allowance or create another viewer.
             startOpen(parentSessionID: parentSessionID, processID: processID,
                       presentationGeneration: presentationGeneration,
                       parentSubscriptionToken: parentSubscriptionToken, activity: activity)
@@ -729,8 +689,6 @@ final class ReadOnlySubagentSessionStore {
         let deferred = viewportMode.defersAutomaticProjectionIntake()
         if deferred {
             guard let earlierItems else { return true }
-            // Explicit history extends the installed cut; it must not admit a
-            // pending live tail or changed retained row text as a side effect.
             installedItems = earlierItems + installedItems
         } else {
             installedItems = items

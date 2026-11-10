@@ -42,9 +42,6 @@ enum SessionHistoryPreview {
     }
 }
 
-
-/// One history entry in the shared list anatomy: a kind icon and colour, the
-/// entry's preview, Current/Other branch as its status, kind and branch facts as tags.
 struct SessionHistoryRowPresentation: Identifiable {
     var id: String { node.id }
     let node: SessionTreeNode
@@ -75,7 +72,6 @@ struct SessionHistoryRowPresentation: Identifiable {
         date = GatewayTimestamp.parse(node.timestamp)
     }
 
-    /// Conversation entries share primary ink; other kinds retain their semantic colour.
     @MainActor var icon: (String, Color) {
         if node.role == .user { return ("person", .tronPrimary) }
         if node.role == .assistant { return ("text.bubble", .tronPrimary) }
@@ -127,14 +123,12 @@ private struct HistoryLoadKey: Hashable {
     let pendingRefresh: String?
 }
 
-/// One entry in the flattened feed with its canonical one-based ordinal.
 private struct HistoryFeedRow: Identifiable {
     var id: String { node.id }
     let node: SessionTreeNode
     let ordinal: Int
 }
 
-/// The actions an entry offers, identical in its detail and its long-press menu.
 struct SessionHistoryEntryActions {
     let navigationTitle: String?
     let bookmarkTitle: String?
@@ -152,7 +146,6 @@ struct SessionHistoryEntryActions {
 }
 
 struct SessionTreeSheet: View {
-    /// The one label of this sheet's title and the Manage Session row that opens it.
     static let title = "Session History"
     let sessionID: String
     let initialEntryID: String?
@@ -171,7 +164,6 @@ struct SessionTreeSheet: View {
     @PresentationState private var initialEntryResolved = false
     @PresentationState private var initialEntryStore = SessionHistoryEntryStore()
     @PresentationState private var forkNavigation = ChatForkNavigationOwner()
-    /// An entry whose page must be re-read once the sheet is active again (after a bookmark).
     @PresentationState private var pendingRefresh: String?
 
     init(sessionID: String, initialEntryID: String? = nil, onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void, onNavigated: @escaping () -> Void) {
@@ -247,7 +239,6 @@ struct SessionTreeSheet: View {
                 if let entryID = pendingRefresh, store.identity == identity, store.hasPage {
                     let index = store.pages.firstIndex { $0.page.nodes.contains { $0.id == entryID } } ?? 0
                     await load(.refresh(index), identity: identity)
-                    // Cleared only after the read: changing the task's id cancels it.
                     if !Task.isCancelled { pendingRefresh = nil }
                     return
                 }
@@ -314,8 +305,6 @@ struct SessionTreeSheet: View {
         .padding(.bottom, 4)
     }
 
-    // One row outside the body's result builder: inline, its closures and
-    // comparisons were solved with the whole sheet body (~1.3 s, #1066).
     private func historyRow(_ node: SessionTreeNode) -> some View {
         let row = SessionHistoryRowPresentation(node: node)
         let current: Bool = node.id == leafID
@@ -389,8 +378,6 @@ struct SessionTreeSheet: View {
         Task { await load(store.failed ?? .reset, identity: identity) }
     }
 
-    /// Re-reads the installed page that holds this entry once the sheet is active,
-    /// keeping every other row and the scroll position.
     private func refresh(entryID: String) { pendingRefresh = entryID }
 
     private func select(_ node: SessionTreeNode, _ action: HistorySelection.Action, initialPage: SessionHistoryEntryPage? = nil) {
@@ -406,7 +393,6 @@ struct SessionTreeSheet: View {
 
     private func saveLabel(_ value: String?, node: SessionTreeNode, expected: SessionHistoryReadIdentity) {
         guard SessionHistoryPolicy.canBookmark(node), expected == identity else { return }
-        // Accepted mutations remain owned by AppModel's receipt coordinator.
         Task {
             guard expected == identity else { return }
             do {
@@ -419,7 +405,6 @@ struct SessionTreeSheet: View {
     }
 }
 
-/// One entry in full: when and what it is, every action it offers, then its content.
 struct HistoryEntryDetailsSheet: View {
     let node: SessionTreeNode
     let identity: SessionHistoryReadIdentity
@@ -537,7 +522,6 @@ struct HistoryEntryDetailsSheet: View {
                 .foregroundStyle(Color.tronTextPrimary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
         }
         .font(TronTypography.bodySM)
-        // Match the header’s 22-point icon column and 8-point title gap.
         .padding(.leading, 22 + 8)
     }
 
@@ -583,7 +567,6 @@ struct HistoryEntryDetailsSheet: View {
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .tronScrollSurface(accent: .tronPrimary, cornerRadius: 16, tintOpacity: 0.06)
-                // Paging remains available only for bounded multipart entries.
                 if page.previousOffset != nil || page.nextOffset != nil {
                     HStack {
                         if let previous = page.previousOffset { Button("Previous part") { offset = previous } }

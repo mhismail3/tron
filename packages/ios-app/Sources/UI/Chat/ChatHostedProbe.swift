@@ -2,16 +2,12 @@
 import SwiftUI
 import TronMobileCore
 
-/// Test-only mounted UIKit evidence, queried at a display boundary. Unlike the
-/// semantic callback cache, this cannot report a frame after native unmount.
 final class ChatHostedNativeRowMarker: UIView {
     var physicalID = ""
     var semanticID = ""
     var hostIdentity = UUID()
 }
 
-/// Sheet rows do not otherwise own a hosted lifetime token. The native marker's
-/// identity is created once per mount, never rewritten by a value update.
 struct ChatHostedStableRowProbe: UIViewRepresentable {
     let id: String
     func makeUIView(context: Context) -> ChatHostedNativeRowMarker { ChatHostedNativeRowMarker() }
@@ -43,7 +39,6 @@ struct ChatHostedNativeRowProbe: UIViewRepresentable {
     }
 }
 
-/// What the profiling scroll harness samples per display frame.
 struct ChatHostedObservation: Sendable {
     let revision: Int
     let visibleRowIDs: [String]
@@ -53,7 +48,6 @@ struct ChatHostedObservation: Sendable {
 
 @MainActor
 final class ChatHostedProbe {
-    /// Hosted journeys exercise ChatView's Reduce Motion paths with this.
     var reducesMotion = false
     private var geometry = ChatTranscriptGeometry.zero
     private var rowFrames: [String: CGRect] = [:]
@@ -170,8 +164,6 @@ final class ChatHostedProbe {
     var fixtureOpenPresentation: (() async throws -> Int)?
 
     func retirePresentation() {
-        // The fixture open closure captures the mounted view and probe; retirement
-        // must break that cycle, not merely stop observing.
         fixtureOpenPresentation = nil
         revision &+= 1
     }

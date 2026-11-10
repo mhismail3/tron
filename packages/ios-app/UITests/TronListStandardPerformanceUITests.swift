@@ -1,10 +1,6 @@
 import XCTest
 
-/// Measures the shared feed (#1691) on 6,733 Session History entries. A
-/// measurement, not a validation gate; run it explicitly.
 final class TronListStandardPerformanceUITests: XCTestCase {
-    /// Session History over 6,733 entries: time to the first rows, time and swipes
-    /// to auto-load 1,000 entries, then scroll hitches and memory with them loaded.
     @MainActor func testLargeHistoryScrollPerformance() {
         continueAfterFailure = false
         let app = XCUIApplication()

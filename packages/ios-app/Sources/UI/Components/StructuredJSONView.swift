@@ -63,9 +63,6 @@ struct StructuredJSONField: Identifiable, Sendable {
 
     var id: StructuredJSONPathComponent { component }
     var typeLabel: String { value.typeName }
-    // Keep the existing bounded preview, but preserve the tail rather than
-    // discarding it before native head truncation. The complete value stays
-    // authoritative for the detail reader and copying.
     var valuePreview: String {
         guard let text = value.stringValue else { return value.preview }
         let tail = text.suffix(180)
@@ -163,9 +160,6 @@ struct JSONFieldSelection: Identifiable {
     var path: String { StructuredJSONPath.display(components) }
 }
 
-/// Progressive, bounded presentation for arbitrary Pi extension/tool JSON.
-/// Known tool fields remain specialized; this is the intentional fallback for
-/// unknown nested values rather than dumping a raw object into one text block.
 struct TronStructuredJSONView: View {
     let value: JSONValue
     var title = "Result"
@@ -197,7 +191,7 @@ struct TronStructuredJSONView: View {
         }
         .tronManagedSheet(
             item: $selectedField,
-            instance: "\(title)|\(path)", // sections repeat in one sheet
+            instance: "\(title)|\(path)",
             identity: { _ in "structured-json.field" }
         ) { selection in
             JSONFieldSheet(
@@ -213,9 +207,6 @@ struct TronStructuredJSONView: View {
         if fields.isEmpty {
             primitive("Empty collection")
         } else {
-            // The generalized JSON table is the standard metadata table without
-            // icons: the value's JSON type qualifies its title and each row is a
-            // progressive target for the complete value.
             let selections = fields.map {
                 JSONFieldSelection(title: $0.label, components: pathComponents + [$0.component])
             }
@@ -249,8 +240,6 @@ struct TronStructuredJSONView: View {
 
 }
 
-/// Shared raw protocol evidence affordance. Raw JSON never expands inline: the
-/// row owns one selectable, scrollable sheet that begins at the medium detent.
 struct TronTechnicalJSONRow: View {
     let value: JSONValue
     var title = "Technical JSON"
@@ -280,7 +269,7 @@ struct TronTechnicalJSONRow: View {
         .accessibilityHint("Opens scrollable JSON details")
         .tronManagedSheet(
             isPresented: $isPresented,
-            instance: "\(title)|\(sheetTitle)", // rows (Request/Response JSON) repeat in one sheet
+            instance: "\(title)|\(sheetTitle)",
             identity: "structured-json.technical"
         ) {
             TechnicalJSONSheet(
@@ -352,8 +341,6 @@ struct TechnicalJSONSheet: View {
         }
         .task(id: PresentationActivityTaskID(source: value, presentationActive: canPublish)) {
             guard canPublish, !Task.isCancelled else { return }
-            // Retain completed content across coverage/foregrounding: clearing
-            // native text here would discard the reader's scroll and selection.
             guard document?.source != value else { return }
             let source = value
             let worker = Task.detached(priority: .userInitiated) { () -> String in

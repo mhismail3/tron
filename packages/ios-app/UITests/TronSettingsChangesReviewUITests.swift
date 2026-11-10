@@ -1,7 +1,5 @@
 import XCTest
 
-/// Changes feed rows and its Filters sheet over the production managed-sheet
-/// path (#1461): realistic audit rows, two Gateway-sized pages.
 final class TronSettingsChangesReviewUITests: XCTestCase {
     @MainActor
     private func launch(dark: Bool = false, large: Bool = false) -> XCUIApplication {
@@ -14,7 +12,6 @@ final class TronSettingsChangesReviewUITests: XCTestCase {
         return app
     }
 
-    /// Opens Changes from Global Settings' toolbar and expands the sheet to its large detent.
     @MainActor
     private func openChanges(_ app: XCUIApplication) {
         let link = app.buttons["Changes"].firstMatch
@@ -45,7 +42,6 @@ final class TronSettingsChangesReviewUITests: XCTestCase {
         return false
     }
 
-    /// Loads the second page so the feed holds 100 rows behind the Filters sheet.
     @MainActor
     private func loadSecondPage(_ app: XCUIApplication) {
         let more = app.buttons["settings-changes-load-more"]
@@ -53,14 +49,11 @@ final class TronSettingsChangesReviewUITests: XCTestCase {
         for _ in 0..<40 where !more.isHittable { app.swipeUp(velocity: .fast) }
         more.tap()
         XCTAssertTrue(more.waitForNonExistence(timeout: 10), app.debugDescription)
-        // The feed is lazy: the last row exists once it scrolls into view.
         let last = app.buttons["settings-change-review-99"]
         for _ in 0..<40 where !last.exists { app.swipeUp(velocity: .fast) }
         XCTAssertTrue(last.exists, app.debugDescription)
     }
 
-    /// Rows (long values, every status, new and old, a known worker title and
-    /// an unknown one), Filters and its Changed by picker, light/dark and large text.
     @MainActor
     func testChangesRowsAndFiltersPreviewLightDarkLargeText() {
         continueAfterFailure = false
@@ -84,8 +77,6 @@ final class TronSettingsChangesReviewUITests: XCTestCase {
         }
     }
 
-    /// Filters' open, nested picker choice, expansion and close, measured as
-    /// interactions (hitches and wall clock) with 100 rows behind the sheet.
     @MainActor
     func testChangesFiltersInteractionMeasurement() {
         continueAfterFailure = false
@@ -112,7 +103,6 @@ final class TronSettingsChangesReviewUITests: XCTestCase {
             timed("open-filters") { filters.tap(); return waitHittable(status) }
             timed("open-status-picker") { status.tap(); return waitHittable(anyStatus) }
             timed("choose-status") { anyStatus.tap(); return anyStatus.waitForNonExistence(timeout: 5) && waitHittable(status) }
-            // Coordinates, not queries: this drag and Done measure the sheet, not an accessibility snapshot.
             timed("expand-filters") {
                 window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.53))
                     .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)))

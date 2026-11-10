@@ -1,38 +1,22 @@
 import SwiftUI
 import TronMobileCore
 
-/// One resolved key, rendered by the control the Gateway negotiated for it
-/// (gateway docs/settings-model.md 7.5). The value always shows as the Gateway's
-/// `display`; a control this app does not implement renders read-only.
 struct SettingsRendererRow: View {
     let setting: ResolvedSetting
     let target: JSONValue
     let editable: Bool
-    /// Detailed rows show the registry's help beside the shared editor.
     var detailed = false
     var modelConfiguration = false
     var modelSelectionAvailability: ModelSelectionAvailability = .ready
-    /// One of several instances of a key (per project, per model): titled by its
-    /// instance, with the key's label and help on the enclosing group.
     var instanced = false
-    /// The title of the instance with no qualifier of its own, beside its
-    /// per-model siblings ("All models"); otherwise it keeps the key's label.
     var baseInstanceTitle: String? = nil
-    /// A live owner can retain its receipt-aware control while this row still
-    /// owns the shared, independent source and inherited-reset affordances.
     var liveControl: AnyView? = nil
     var resetDisabled = false
-    /// Reset removes the owned layer's override, never copies an inherited value.
     var canReset = false
-    /// An instance's own description, when its group's help does not say it
-    /// (an approval level describes the setting it governs).
     var instanceHelp: String? = nil
-    /// The options the key's source serves, read by the renderer with the
-    /// resolution itself, so a row is never without them once it renders.
     let options: SettingsOptionsResponse?
     let error: String?
     let onChange: (JSONValue?) -> Void
-    /// Apply again on an outside change this row's badge names (settings-model.md 5.6).
     var onApplyAgain: ((String) -> Void)? = nil
 
     @Environment(AppModel.self) private var model
@@ -46,9 +30,6 @@ struct SettingsRendererRow: View {
             : (presentation.label)
     }
 
-    /// An instance's name: its scope ("tron" for a project path), else its own
-    /// qualifiers. A qualifier the key id fixes (`role=chat` in
-    /// `model.thinking[role=chat]`) names the key, not the instance.
     static func instanceName(_ setting: ResolvedSetting) -> String? {
         if let scope = setting.badge("scope")?.label {
             return scope.hasPrefix("/") ? URL(fileURLWithPath: scope).lastPathComponent : scope
@@ -58,7 +39,6 @@ struct SettingsRendererRow: View {
         return values.isEmpty ? nil : values.joined(separator: " · ")
     }
 
-    /// The qualifiers a schema key id declares in brackets: `key[a=b,c=d]`.
     private static func fixedQualifiers(_ key: String) -> [String: String] {
         guard let open = key.firstIndex(of: "["), key.hasSuffix("]") else { return [:] }
         let pairs = key[key.index(after: open)..<key.index(before: key.endIndex)].split(separator: ",").compactMap { pair -> (String, String)? in
@@ -70,29 +50,22 @@ struct SettingsRendererRow: View {
 
     private var control: SettingsRowControl {
         let negotiated = editable ? SettingsRowControl(negotiated: presentation.control) : .readOnly
-        // Native lists edit strings only; other shapes use the existing read-only value/source row.
         return negotiated == .list && presentation.valueKind != "stringList" ? .readOnly : negotiated
     }
 
-    /// The key's help and note, on detailed rows only; an instance's help is on its group.
     private var subtitle: String? {
         guard detailed else { return nil }
-        // An instance is titled by its short name; its full scope (a project's path)
-        // describes it when nothing else does.
         let scope = setting.badge("scope")?.label
         let instanceLine = instanceHelp ?? (scope != title ? scope : nil) ?? ""
         let lines = [instanced ? instanceLine : presentation.help, presentation.note ?? ""].filter { !$0.isEmpty }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
-    /// A text row's subtitle also says what to type, on rows that show help.
     private var entrySubtitle: String? {
         guard detailed, let hint = presentation.entry?.hint else { return subtitle }
         return [subtitle, hint].compactMap { $0 }.joined(separator: "\n")
     }
 
-    /// Semantic glyphs share the standard row's tint and fixed icon column.
-    /// Unknown schema keys retain their control-kind fallback.
     static func semanticIcon(for key: String) -> String? {
         switch key {
         case "model.ref[role=chat]": return "cpu"
@@ -139,8 +112,6 @@ struct SettingsRendererRow: View {
         .accessibilityIdentifier(settingsRowIdentifier(setting))
     }
 
-    /// The former Manage model-card header, with the schema renderer still owning
-    /// the value, offered choices, project provenance and independent Revert action.
     private var modelHeader: some View {
         let value = setting.value?.objectValue
         let provider = value?["provider"]?.stringValue
@@ -164,8 +135,6 @@ struct SettingsRendererRow: View {
         .lineLimit(1)
     }
 
-    /// Always present, even empty: the shared row then keeps its value control a
-    /// separate accessibility element instead of combining it into the row.
     private var accessory: (@MainActor @Sendable () -> AnyView)? {
         if let source = setting.projectSetting {
             return { AnyView(
@@ -181,8 +150,6 @@ struct SettingsRendererRow: View {
         return { AnyView(resetButton) }
     }
 
-    /// Session and Home overrides name their state beside the title, never in
-    /// the value's trailing room (#1651); Global values are not overrides.
     private var overriddenStatus: String? {
         !modelConfiguration && canReset && editable && setting.projectSetting == nil
             && target.objectValue?["kind"]?.stringValue != "global" ? "Overridden" : nil
@@ -204,7 +171,6 @@ struct SettingsRendererRow: View {
             .disabled(resetDisabled)
     }
 
-    /// An absent optional value is not a second provenance statement.
     private var display: String {
         return setting.value == nil && setting.display == "Not set" && presentation.redacted != true ? "—" : setting.display
     }
@@ -231,7 +197,6 @@ struct SettingsRendererRow: View {
                 SettingsOption(value: $0.value, label: $0.label, detail: $0.detail, disabledReason: nil, resource: nil)
             } ?? [])
             if choices.isEmpty {
-                // A source with nothing to offer (a model that does not think) is a value, not a menu.
                 readOnlyRow
             } else if presentation.valueKind == "orderedChoice", let value = setting.value {
                 SettingsChoiceSelectionRow(title: title, icon: icon, value: value,
@@ -239,8 +204,6 @@ struct SettingsRendererRow: View {
                                            onChange: { onChange($0) })
                     .controlSize(.small)
             } else {
-                // A picker sheet, not a Menu: section sub-sheets are presented from
-                // other sheets, where SwiftUI menus fail to open (#877).
                 TronChoiceRow(icon: icon, title: title, detail: subtitle,
                               choices: choices.map { TronChoice(id: $0.value, label: $0.label, detail: $0.detail,
                                                                 disabledReason: $0.disabledReason) },
@@ -264,7 +227,6 @@ struct SettingsRendererRow: View {
                 readOnlyRow
             }
         case .checklist:
-            // A tool catalog opens the shared Available Tools list and details (#900).
             if presentation.optionsSource?.name == "catalog.tools", let options, let values = setting.value?.arrayValue,
                values.allSatisfy({ $0.stringValue != nil }) {
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: toolCount(values.compactMap(\.stringValue), of: options.options),
@@ -300,7 +262,6 @@ struct SettingsRendererRow: View {
         }
     }
 
-    /// Model queues add physical models from the same availability-aware picker as chat.
     private var modelEntryPicker: ((@escaping (String) -> Void) -> AnyView)? {
         guard presentation.optionsSource?.name == "catalog.models" else { return nil }
         return { add in
@@ -311,15 +272,12 @@ struct SettingsRendererRow: View {
         }
     }
 
-    /// A tool selection reads as its share of the served catalog; until the
-    /// catalog arrives the Gateway's own summary stands.
     private func toolCount(_ selected: [String], of catalog: [SettingsOption]?) -> String {
         guard let catalog, !catalog.isEmpty else { return display }
         let total = Set(catalog.compactMap(\.value.stringValue)).union(selected).count
         return "\(selected.count) of \(total) tools"
     }
 
-    /// Inspection never offers a shortcut to a different configuration editor.
     @ViewBuilder
     private var readOnlyRow: some View {
         if presentation.optionsSource?.name == "catalog.tools", let values = setting.value?.arrayValue?.compactMap(\.stringValue) {
@@ -341,15 +299,10 @@ struct SettingsRendererRow: View {
         }
     }
 
-    /// Outside-change recovery remains an explicit action; resets live beside
-    /// every owned control, and refusals stay under the attempted row.
     @ViewBuilder
     private var details: some View {
         let actions = setting.badges.compactMap(\.action)
         let applyAgain = onApplyAgain == nil ? [] : actions.filter { $0.kind == "applyAgain" && $0.changeId != nil }
-        // Action primitives are served with the source badge. A future action stays
-        // absent, never an arbitrary RPC; reset reuses the row's dry-run and receipt
-        // owner, Apply again the change record.
         ForEach(Array(applyAgain.enumerated()), id: \.offset) { _, action in
             TronSettingsDivider()
             Button { if let id = action.changeId { onApplyAgain?(id) } } label: {
@@ -372,7 +325,6 @@ struct SettingsRendererRow: View {
     }
 }
 
-/// The same shared rows/chrome as Global; only the repository's file/key are shown.
 struct SettingsProjectInfo: View {
     let source: SettingsProjectSource
     var body: some View {
@@ -405,12 +357,6 @@ func settingsLayerLabel(_ layer: String) -> String {
     }
 }
 
-/// A model key (`catalog.models`) uses the app's one model picker over the
-/// configured providers' catalog, like every other model choice in the app.
-/// Choosing sends the model reference through the row's change owner.
-/// A model key's choices in the shared ModelPicker. The Gateway decides which
-/// models the key accepts (Home's memory takes no virtual model); the provider
-/// catalog supplies how each one is shown.
 private struct SettingsModelPicker: View {
     let setting: ResolvedSetting
     let target: JSONValue
@@ -422,7 +368,6 @@ private struct SettingsModelPicker: View {
     @Environment(\.dismiss) private var dismiss
     @State private var served: [SettingsOption]? // view-local: a rebuilt picker reads the served models again
 
-    /// Every model the Gateway serves for the key, once each page is read.
     private var servedModels: Set<ModelRef>? {
         served.map { Set($0.compactMap { option in
             guard let value = option.value.objectValue, let provider = value["provider"]?.stringValue,
@@ -447,7 +392,6 @@ private struct SettingsModelPicker: View {
             },
             set: { ref in
                 guard let ref, selectionAvailability.canSelect else { return }
-                // A pick closes the picker, as every settings choice does.
                 onChoose(.object(["provider": .string(ref.provider), "id": .string(ref.id)]))
                 dismiss()
             }
@@ -485,7 +429,6 @@ private struct SettingsModelPicker: View {
                     }
                 }
             }
-            // Reads the catalog; it never asks providers to refresh their model lists.
             .task { await model.refreshProviders(target: catalogTarget) }
             .task { await readServedPages() }
     }
@@ -504,12 +447,10 @@ private struct SettingsModelPicker: View {
     }
 }
 
-/// A text value committed when editing ends; the Gateway validates it.
 private struct SettingsRendererTextRow: View {
     let title: String
     let icon: String
     let subtitle: String?
-    /// The schema's realistic example, as the empty field's placeholder.
     let example: String?
     let value: String
     let onCommit: (String) -> Void
@@ -537,8 +478,6 @@ private struct SettingsRendererTextRow: View {
     }
 }
 
-/// A paged catalog over the Gateway's option source. Presentation
-/// uses the same option row as ModelPicker; values and cursors remain opaque.
 private struct SettingsCatalogPicker: View {
     let setting: ResolvedSetting
     let target: JSONValue
@@ -556,7 +495,6 @@ private struct SettingsCatalogPicker: View {
     @State private var requestGeneration = 0
     @State private var reloadTick = 0
     @State private var displayedSource: Source?
-    /// The read whose result is on screen; the same read never runs twice.
     @State private var installedLoad: LoadID?
 
     private struct Source: Hashable {
@@ -620,7 +558,6 @@ private struct SettingsCatalogPicker: View {
         .tronScrollEdgeChrome()
         .tronNavigationTitle(title)
         .onChange(of: source) { _, _ in reset() }
-        // A covering sheet retires the read in flight; what is shown stays.
         .onChange(of: presentationActivity) { _, _ in requestGeneration &+= 1; loading = false }
         .onDisappear { requestGeneration &+= 1 }
         .task(id: PresentationActivityTaskID(
@@ -665,8 +602,6 @@ private struct SettingsCatalogPicker: View {
                 cursor: cursor
             )
             guard isCurrent() else { return }
-            // Values identify rows across pages; overlapping server pages must
-            // not duplicate SwiftUI identity or reorder already-visible choices.
             var seen = Set((cursor == nil ? [] : options ?? []).map(\.id))
             let additions = response.options.filter { seen.insert($0.id).inserted }
             options = (cursor == nil ? [] : options ?? []) + additions

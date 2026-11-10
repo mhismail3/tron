@@ -1,13 +1,7 @@
 import XCTest
 
-/// Settings sheets follow their presenting theme: maintenance containers and workspace
-/// controls take the sheet's chroma, Forget Server stays destructive, and moved settings
-/// stay reachable with their editors; every category destination opens.
 @MainActor
 final class TronSheetThemePreviewUITests: XCTestCase {
-
-    /// Every Settings category destination still opens and expands (the only local
-    /// reachability check for Push Notifications and Hooks).
     func testSettingsSectionColorReviewLightDark() {
         for mode in ["light", "dark"] {
             let app = settings(mode)

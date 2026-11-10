@@ -1,16 +1,7 @@
 import SwiftUI
 
-/// One horizontally scrolling rail of tinted Liquid Glass cards. Every rail in
-/// the app uses this view so card chrome, tint, and press behavior stay
-/// identical; callers supply the accent, the label, and the selection.
-///
-/// The rail adds no horizontal inset: place it inside the surrounding content's
-/// existing padding so its first card lines up with the rows below it.
-/// Titles belong to the caller, which owns its section-header hierarchy.
 struct TronCardRail<Item, ID: Hashable, Content: View>: View {
     let items: [Item]
-    /// Cards are keyed by an explicitly unique identity: a model's display name
-    /// repeats across providers, so `Identifiable` alone would collide.
     let identity: KeyPath<Item, ID>
     let accent: Color
     let cornerRadius: CGFloat
@@ -47,22 +38,14 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            // Eager on purpose: a LazyHStack sizes the rail from the first
-            // cards it builds and clipped a taller card further along.
             HStack(alignment: .top, spacing: 8) {
                 ForEach(items, id: identity) { item in
                     Button { action(item) } label: {
                         content(item)
-                            // A plain button hit-tests only its label's drawn
-                            // content; the whole card, including empty space,
-                            // must select.
                             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .disabled(!isEnabled)
-                    // Callers resolve the accent from their own theme, so the
-                    // card never re-derives a different one from the ambient
-                    // settings theme.
                     .tronGlassSurface(
                         accent: accent,
                         cornerRadius: cornerRadius,
@@ -82,15 +65,11 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
     }
 }
 
-/// The standard rail-card label: a leading name with an optional secondary
-/// detail line, plus the shared selected-state checkmark.
 struct TronRailCardLabel: View {
     let primary: String
     let secondary: String?
     var primaryLineLimit: Int = 1
     var minimumWidth: CGFloat = 92
-    /// Non-nil paints the selected checkmark in that accent; nil leaves the
-    /// trailing space to the text, which is what a selection-free rail wants.
     var selectionAccent: Color?
 
     var body: some View {

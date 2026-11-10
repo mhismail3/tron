@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Ordered values and labels come from the caller's catalog. This is the same
-/// anchored editor for thinking and schema-defined choices, not a second style.
 struct SettingsChoiceSliderRequest {
     let title: String
     let options: [SettingsOption]

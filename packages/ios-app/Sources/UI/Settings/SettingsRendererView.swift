@@ -1,34 +1,18 @@
 import SwiftUI
 import TronMobileCore
 
-/// The generic settings renderer (gateway docs/settings-model.md F1, 7.1-7.5).
-/// Every word, section, order, control and badge is Gateway data from
-/// `settings.resolve`; this view decides layout and style only, so a key, a
-/// section or a choice the Gateway adds needs no app change. It reads the
-/// target's shared `SettingsSnapshot`, so a sheet opened from another surface
-/// shows what that surface already has, and only refreshes when it is stale.
-/// `writeLayer` nil with no `ownedLayers` renders read-only.
 struct SettingsRendererView: View {
     let target: JSONValue
     let writeLayer: String?
-    /// Ordered from the layer this surface prefers to the next owned layer.
     var ownedLayers: [String] = []
     var projectCWD: String? = nil
     let presentation: SettingsRendererPresentation
-    /// Inside a caller's scroll view (a hand-built sheet that shows a section's keys).
     var embedded = false
-    /// Consolidated sheets name every group with the shared heading, without section prose.
     var showsGroupHeadings = false
     var detailedKeys = false
-    /// Manage's model controls and override inspection reuse this renderer's admission and receipts.
     var modelConfiguration = false
-    /// Existing live model/tool owners retain admission and pending controls;
-    /// schema rows supply their single source/reset path, not another editor.
     var liveControl: ((ResolvedSetting) -> AnyView)? = nil
-    /// A live receipt locks inherited-reset mutations, never its browsing or
-    /// dismissal chrome. The live control keeps its own admission policy.
     var resetDisabled = false
-    /// Restricts this projection, never the underlying settings snapshot or schema.
     var selection: SettingsKeySelection = .all
 
     @Environment(AppModel.self) private var model
@@ -40,7 +24,6 @@ struct SettingsRendererView: View {
     @PresentationState private var retryTick = 0
     @PresentationState private var previewGeneration = 0
     @PresentationState private var sliderPresentation = ConfigurationSliderPresentation()
-    /// Gateway refusals of a dry run, shown under their row; nothing was applied.
     @PresentationState private var rowErrors: [String: String] = [:]
     @PresentationState private var changingID: String?
     @PresentationState private var previewingID: String?
@@ -83,8 +66,6 @@ struct SettingsRendererView: View {
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active {
-                // Our confirmation child must retain its pending accepted
-                // choice while only disposable dry-run work is retired.
                 previewGeneration &+= 1
                 previewingID = nil
                 if !presentationActivity.allowsDataPublication { pendingConfirmation = nil }
@@ -111,13 +92,8 @@ struct SettingsRendererView: View {
     @ViewBuilder
     private var rendererContents: some View {
         if isInline {
-            // Rows inside a caller's card: no states of their own while loading.
-            // Before its rows arrive it is still a (zero-height) view, because an
-            // empty one never appears and so would never start its own read.
             if let snapshot { content(snapshot) } else { Color.clear.frame(height: 0) }
         } else if embedded, let snapshot, sectionHasNoRows(snapshot.resolution) {
-            // A section the Gateway serves no rows for is absent, not an empty
-            // stack: the host's section spacing would otherwise still pay for it.
             EmptyView()
         } else {
             TronSettingsSections(alignment: .leading, spacing: 20, hidesLoneHeading: true) {
@@ -128,7 +104,6 @@ struct SettingsRendererView: View {
                                          accent: .tronAmber, actionTitle: "Reload") { loadError = nil; retryTick &+= 1 }
                         .frame(maxWidth: .infinity)
                 } else if embedded {
-                    // A section of an already-visible sheet (Manage Home): a partial load.
                     TronLoadingState(label: "Loading settings…")
                 } else {
                     TronSheetLoadingState(label: "Loading settings…")
@@ -164,29 +139,16 @@ struct SettingsRendererView: View {
         }
     }
 
-    // MARK: Sheets
-
-    /// One section on its own sheet: the essential keys first, then each Gateway
-    /// subgroup and the remaining advanced keys as standard titled groups. A key
-    /// served once per project or model gets its own group, titled by its label
-    /// with its help once, and one row per instance; a key with many instances
-    /// is one row that opens them on their own sheet.
     @ViewBuilder
     private func sectionDetail(_ id: String, resolution: SettingsResolution, options: [String: SettingsOptionsResponse]) -> some View {
         let section = Self.sections(resolution).first { $0.id == id } ?? SettingsRendererSection(id: id)
         let ownsDefaultTools = id == "tools" && target.objectValue?["kind"]?.stringValue == "global" && writeLayer != nil
-        // The moved Default Tools container owns code-mode selection at these
-        // scopes; do not expose a second editor for the same setting beside it.
         let keys = Self.sorted(resolution.keys.filter {
             $0.group == id && selection.includes($0) && !(ownsDefaultTools && $0.key == "tools.codemode.mode")
         })
         let groups = Self.detailGroups(section, keys: keys)
         if !showsGroupHeadings, !ownsDefaultTools, groups.count == 1, let only = groups.first, only.manyInstances == nil,
            Self.rowsNameGroup(only) || only.keys.count == 1, (only.detail ?? section.note) == nil {
-            // The section is one headless group (its rows name it, or its lone
-            // heading is hidden anyway): no repeated heading, and no wrapper that
-            // would take over a lone row's own accessibility identity when
-            // single-child containers collapse.
             TronSettingsGroup(nil) {
                 VStack(spacing: 0) { rows(only.keys, resolution: resolution, options: options, detailed: true, instanced: only.instanced) }
             }
@@ -195,20 +157,15 @@ struct SettingsRendererView: View {
                 if ownsDefaultTools {
                     DefaultToolsSettingsSection(projectCWD: target.objectValue?["cwd"]?.stringValue)
                 }
-                // No per-group accessibility wrapper: a headless group's lone row keeps its own identity.
                 ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
                     Group {
-                        // A key with many instances is one row, titled by the key itself.
                         if let many = group.manyInstances {
                             if groups.count == 1, group.title != section.title {
-                                // A declared section gives a lone instance drill-in its own
-                                // heading; the row still names the governed setting.
                                 TronSettingsGroup(section.title) { instancesLink(many, count: group.keys.count) }
                             } else {
                                 TronGlassCard { instancesLink(many, count: group.keys.count) }
                             }
                         } else {
-                            // Session and Home Settings keep #1478/#1510: a group its rows already name has no heading.
                             TronSettingsGroup(selection == .sessionOverrides && Self.rowsNameGroup(group) ? nil : group.title,
                                               detail: showsGroupHeadings ? nil : group.detail ?? (index == 0 ? section.note : nil)) {
                                 VStack(spacing: 0) {
@@ -224,8 +181,6 @@ struct SettingsRendererView: View {
         }
     }
 
-    /// Every instance of one key. Instances that each govern another setting are
-    /// grouped by that setting's section and described by its help.
     @ViewBuilder
     private func instancesDetail(_ key: String, resolution: SettingsResolution, options: [String: SettingsOptionsResponse]) -> some View {
         let instances = resolution.keys.filter { $0.key == key && selection.includes($0) }
@@ -266,14 +221,9 @@ struct SettingsRendererView: View {
         .accessibilityIdentifier("settings-instances-\(setting.key)-open")
     }
 
-    // MARK: Rows
-
-    /// Rows in Gateway order. Detailed rows carry help; all schema rows keep
-    /// source inspection on the body, beside independent value/reset actions.
     @ViewBuilder
     private func rows(_ keys: [ResolvedSetting], resolution: SettingsResolution, options: [String: SettingsOptionsResponse],
                       detailed: Bool, instanced: Bool = false) -> some View {
-        // A per-model key lists the value for every model first, then each model's own.
         let ordered = instanced ? keys.filter { RowTitle.isBase($0) } + keys.filter { !RowTitle.isBase($0) } : keys
         let baseTitle = instanced && keys.contains { $0.qualifiers?["model"] != nil } ? "All models" : nil
         ForEach(Array(ordered.enumerated()), id: \.element.id) { index, setting in
@@ -299,8 +249,6 @@ struct SettingsRendererView: View {
             modelSelectionAvailability: modelSelectionAvailability,
             instanced: instanced,
             baseInstanceTitle: baseInstanceTitle,
-            // A live control keeps its surface's viewport-wide slider host;
-            // this schema wrapper owns only source/reset, not a nested overlay.
             liveControl: liveControl.map { control in
                 AnyView(control(setting).environment(\.configurationSliderPresentation,
                     inheritedSliderPresentation ?? sliderPresentation))
@@ -316,16 +264,9 @@ struct SettingsRendererView: View {
             },
             onApplyAgain: writableLayer(for: setting) == nil ? nil : { changeID in applyAgain(changeID, rowID: setting.id) }
         )
-        // Keep accepted changes serialized, but let a model card open its picker
-        // to browse while another setting's receipt is pending. `change` still
-        // rejects any new write until the current command completes.
         .disabled((changingID != nil && !(modelConfiguration && setting.key == "model.ref[role=chat]")) || previewingID != nil)
     }
 
-    // MARK: Reads and changes
-
-    /// Brings the shared snapshot up to date. A failure shows only while there is
-    /// nothing to show; otherwise the current snapshot stays and the error is surfaced.
     private func refresh() async {
         let identity = model.knowledgePresentationIdentity
         let activity = presentationActivity
@@ -343,22 +284,14 @@ struct SettingsRendererView: View {
     }
 
     private func writableLayer(for setting: ResolvedSetting) -> String? {
-        // Repository configuration is inspectable, never editable through app navigation.
         guard target.objectValue?["kind"]?.stringValue != "project", setting.projectSetting == nil else { return nil }
         let candidates = ownedLayers.isEmpty ? [writeLayer].compactMap { $0 } : ownedLayers
         return setting.presentation.editable ? candidates.first : nil
     }
 
-    /// A dry run first: the Gateway validates (no client copy of a key's rules),
-    /// a refusal shows under the row and nothing is applied, and a change whose
-    /// key has confirm text asks before it is made (doc 7.5).
     private func change(_ setting: ResolvedSetting, value: JSONValue?) {
-        // A catalog/editor child sends its accepted selection through this mounted
-        // ancestor. Its covered presentation reads stop; the user's command must not.
         guard let writeLayer = writableLayer(for: setting),
               changingID == nil, previewingID == nil, presentationActivity.allowsDataPublication else { return }
-        // Picking the value this layer already stores is not a change; picking an
-        // inherited, default or clamped value still writes it to this layer.
         if let value, setting.value(at: writeLayer) == value {
             rowErrors[setting.id] = nil
             return
@@ -413,7 +346,6 @@ struct SettingsRendererView: View {
         }
     }
 
-    /// Apply again is an accepted command like `commit`: unstructured, then a disposable reload.
     private func applyAgain(_ changeID: String, rowID: String) {
         guard changingID == nil, previewingID == nil, presentationActivity.allowsDataPublication else { return }
         changingID = rowID
@@ -438,15 +370,12 @@ struct SettingsRendererView: View {
         }
     }
 
-    /// Retirement owns preview cleanup; an accepted command is independent and
-    /// must retain its receipt until completion even while this surface is covered.
     private func retirePreview() {
         previewGeneration &+= 1
         previewingID = nil
         pendingConfirmation = nil
     }
 
-    /// The mutation is unstructured so the view cannot cancel it; the reload is a disposable read.
     private func commit(_ change: JSONValue, rowID: String, confirmationDigest: String? = nil) {
         guard changingID == nil else { return }
         changingID = rowID
@@ -460,9 +389,6 @@ struct SettingsRendererView: View {
                 guard identity == model.knowledgePresentationIdentity, requestTarget == target,
                       admittedSurface == surfaceToken, presentationActivity.allowsDataPublication else { return }
                 model.noteSettingsChanged()
-                // Rows stay disabled until the shared snapshot reflects the accepted
-                // change: an editor opened earlier would seed the superseded value,
-                // and saving that draft would silently revert this change.
                 try? await model.refreshSettingsSnapshot(for: requestTarget)
             } catch is CancellationError {
                 return

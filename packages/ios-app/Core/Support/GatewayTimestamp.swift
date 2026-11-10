@@ -1,9 +1,6 @@
 import Foundation
 
 private final class LockedRelativeDateFormatter: @unchecked Sendable {
-    /// Instants this close to the reference, or after it (gateway clock skew),
-    /// read "now". `RelativeDateTimeFormatter` would show "in 0s"/"in 3s" and
-    /// then flip to "1s ago", which reads as a glitch on a live row.
     static let nowWindow: TimeInterval = 5
 
     private let lock = NSLock()
@@ -13,7 +10,6 @@ private final class LockedRelativeDateFormatter: @unchecked Sendable {
         return formatter
     }()
 
-    /// The locale's own word for the present instant ("now").
     private let now: String = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
@@ -47,8 +43,6 @@ package enum GatewayTimestamp {
         date.formatted(fractional)
     }
 
-    /// Compare parsed instants rather than ISO text. The textual tie-breaker
-    /// keeps retention deterministic for equal instants and malformed input.
     package static func isNewer(_ lhs: String, than rhs: String) -> Bool {
         if let left = parse(lhs), let right = parse(rhs), left != right {
             return left > right
@@ -63,15 +57,10 @@ package enum GatewayTimestamp {
         return relativeDescription(date, relativeTo: reference)
     }
 
-    /// Abbreviated past-relative text ("12s ago", "3m ago"); "now" for the
-    /// first few seconds and for future instants. Never future-tense.
     package static func relativeDescription(_ date: Date, relativeTo reference: Date) -> String {
         relative.string(for: date, relativeTo: reference)
     }
 
-    /// The widest labels `relativeDescription` realistically produces, one per
-    /// unit. A live row reserves the widest of these in its own font so the
-    /// ticking label never changes the space left for neighbouring text.
     package static let relativeDescriptionWidthTemplates: [String] = {
         let reference = Date(timeIntervalSinceReferenceDate: 0)
         let day: TimeInterval = 86_400
@@ -80,9 +69,6 @@ package enum GatewayTimestamp {
     }()
 }
 
-/// Presentation-only copy for an invocation boundary. It intentionally accepts
-/// only the producer's start timestamp: progress, result, and completion times
-/// must never make a tool look newly invoked.
 package enum ToolInvocationTimestamp {
     package static func date(_ value: String?) -> Date? {
         value.flatMap(GatewayTimestamp.parse)

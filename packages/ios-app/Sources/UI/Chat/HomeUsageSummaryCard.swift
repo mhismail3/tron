@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// The Home usage card's row metrics. Sizes are `TronTypography` steps: the
-/// provider name one step above the session rows' title, the usage copy one
-/// step below it.
 @MainActor
 enum HomeUsageCardLayout {
     static let nameSize = TronTypography.sizeBody
@@ -11,16 +8,12 @@ enum HomeUsageCardLayout {
     static let columnMinimumWidth: CGFloat = 84
     static let columnSpacing: CGFloat = 12
     static let nameSpacing: CGFloat = 12
-    /// `ProviderUsageProgress`'s own height; the column reserves it under the copy.
     static let barHeight: CGFloat = ProviderUsageProgress.height
     static let barGap: CGFloat = 4
-    /// Status copy without usage windows wraps rather than crowding the name.
     static let statusMaximumWidth: CGFloat = 200
     static let coordinateSpace = "home-usage-card"
 }
 
-/// The providers the Home usage card can show: every configured provider whose
-/// account usage the Gateway supports, in the Providers settings order.
 enum HomeUsageProviders {
     @MainActor
     static func all(_ model: AppModel) -> [ProviderSummary] {
@@ -31,8 +24,6 @@ enum HomeUsageProviders {
     }
 }
 
-/// This iPhone's choice of which providers the Home usage card shows. It
-/// records the hidden ids, so a newly configured provider shows by default.
 enum HomeUsageCardPreferences {
     static let hiddenProvidersKey = "dashboard.homeUsage.hiddenProviders.v1"
 
@@ -47,10 +38,6 @@ enum HomeUsageCardPreferences {
     }
 }
 
-/// A concise usage card for the configured providers whose account usage the
-/// Gateway supports and that this iPhone shows. It reuses the Providers
-/// settings read controller and presentation copy. Tapping it opens
-/// `HomeUsageProvidersSheet`.
 struct HomeUsageSummaryCard: View {
     let onChooseProviders: () -> Void
     @Environment(AppModel.self) private var model
@@ -58,14 +45,10 @@ struct HomeUsageSummaryCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage(HomeUsageCardPreferences.hiddenProvidersKey) private var hiddenProviders = ""
-    /// About a quarter of the card at the default text size; grows with Dynamic Type.
     @ScaledMetric(relativeTo: .footnote) private var columnMinimumWidth: CGFloat = HomeUsageCardLayout.columnMinimumWidth
     @State private var usageController = ProviderUsageReadController()
-    /// A failed catalog read hides the card instead of leaving its pulse up.
     @State private var catalogReadFailed = false
 
-    /// Observed from the model's provider catalog, so the card appears as soon
-    /// as any owner (this card, Settings, the composer) publishes it.
     private var usageProviders: [ProviderSummary] {
         HomeUsageProviders.all(model)
     }
@@ -79,18 +62,12 @@ struct HomeUsageSummaryCard: View {
         model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) == true
     }
 
-    /// The card shows while the provider catalog is still being read, so it
-    /// holds its place in the view, and stays for as long as a configured
-    /// provider supports usage.
     private var showsCard: Bool {
         guard capabilityAvailable else { return false }
         if model.providerCatalog(for: .global) == nil { return !catalogReadFailed }
         return !usageProviders.isEmpty
     }
 
-    /// Only the card's first read shows placeholders: a refresh keeps the
-    /// published snapshots on screen until the new ones replace them. With
-    /// every provider hidden there is nothing to wait for.
     private var isLoading: Bool {
         guard model.providerCatalog(for: .global) != nil else { return true }
         return !shownProviders.isEmpty && usageController.snapshots.isEmpty && !usageController.hasResolved
@@ -105,13 +82,10 @@ struct HomeUsageSummaryCard: View {
     }
 
     var body: some View {
-        // A container, not a Group: an empty Group drops the load task below.
         VStack(spacing: 0) {
             if showsCard {
                 Button(action: onChooseProviders) {
                     VStack(alignment: .leading, spacing: 10) {
-                        // The catalog cannot name a provider before it arrives. Once
-                        // known, names remain visible while only usage is loading.
                         if model.providerCatalog(for: .global) == nil {
                             ProviderUsageLoadingLine()
                         }
@@ -161,10 +135,6 @@ struct HomeUsageSummaryCard: View {
         .onChange(of: model.providerInvalidationGeneration) { _, _ in usageController.begin() }
     }
 
-    /// A provider row: its name on the left, vertically centered against its
-    /// usage columns on the right, one column per usage window, each its copy
-    /// with its own bar beneath. Accessibility text sizes stack the columns
-    /// under the name, as the dashboard's expansion controls do.
     private func providerRow(_ provider: ProviderSummary) -> some View {
         let snapshot = usageController.snapshots[provider.id]
         let layout = dynamicTypeSize.isAccessibilitySize
@@ -181,7 +151,6 @@ struct HomeUsageSummaryCard: View {
     }
 
     private func providerName(_ provider: ProviderSummary) -> some View {
-        // Long names ("Cloudflare AI Gateway") wrap, then scale, before they clip.
         Text(provider.displayName)
             .font(TronTypography.sans(size: HomeUsageCardLayout.nameSize, weight: .medium))
             .foregroundStyle(Color.tronTextPrimary)
@@ -233,15 +202,10 @@ struct HomeUsageSummaryCard: View {
         }
     }
 
-    /// A row's columns together reserve at most two columns' minimum, so a
-    /// plan's third window stays on the name's line instead of crowding it out.
     private func columnMinimumWidth(count: Int) -> CGFloat {
         min(columnMinimumWidth, columnMinimumWidth * 2 / CGFloat(max(count, 1)))
     }
 
-    /// One window's column: its copy with its bar directly beneath, the bar as
-    /// wide as the column. The overlay is proposed the column's own size, so
-    /// the bar matches the copy without a geometry pass.
     private func usageColumn(
         _ part: ProviderUsagePresentation.WindowPart, color: Color, minimumWidth: CGFloat, probe: String?
     ) -> some View {
@@ -275,12 +239,8 @@ struct HomeUsageSummaryCard: View {
     }
 
     private func load() async {
-        // A cold launch mounts before the Gateway connects; the task is keyed on
-        // the connection, so it reads again once connected.
         guard presentationActivity.allowsPresentationPublication, !Task.isCancelled,
               model.admitsForegroundPresentationRead else { return }
-        // The catalog task owns its refresh independently of provider IDs;
-        // changed IDs re-key this usage task, never a second catalog read.
         guard model.providerCatalog(for: .global) != nil else { return }
         guard capabilityAvailable, !usageProviders.isEmpty else { return }
         let identity = ProviderUsageReadIdentity(
@@ -308,8 +268,6 @@ struct HomeUsageSummaryCard: View {
 }
 
 #if HOSTED_TEST
-/// Frames of the usage card's row parts in the card's coordinates, so the UI
-/// journey proves the row layout: names, window columns and their bars.
 @MainActor @Observable
 final class HomeUsageLayoutProbe {
     static let shared = HomeUsageLayoutProbe()
@@ -324,7 +282,6 @@ final class HomeUsageLayoutProbe {
 #endif
 
 extension View {
-    /// Records this part's frame for the hosted UI journey; nothing otherwise.
     @ViewBuilder
     func homeUsageLayoutProbe(_ key: String?) -> some View {
         #if HOSTED_TEST
@@ -341,8 +298,6 @@ extension View {
     }
 }
 
-/// Chooses which providers the Home usage card shows, built like the
-/// dashboard's Filter sheet.
 struct HomeUsageProvidersSheet: View {
     let onDone: () -> Void
     @Environment(AppModel.self) private var model

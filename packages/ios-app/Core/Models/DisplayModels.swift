@@ -120,8 +120,6 @@ package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
 
     package var id: String { displayId }
 
-    /// Tool calls are chat identities; exact producer/view generations own live
-    /// presentation. Later actions cannot reopen a manually dismissed window.
     package var presentationIdentity: String {
         if let liveView {
             let producer = kind == .nativeLive ? "native" : "browser"
@@ -346,12 +344,7 @@ package enum DisplayPresentationPolicy {
             : .sheet
     }
 
-    /// Large local media remains ineligible for automatic inline/floating
-    /// presentation, but an explicit tap on a requested floating result is
-    /// sufficient user intent to begin bounded file staging in the panel.
     package static func activationSurface(for display: DisplayProjection) -> DisplaySurface {
-        // Live tool taps reopen the small window; its expand control owns the
-        // sheet route, including for retained descriptors created as sheets.
         if display.kind.isLive { return .floating }
         if display.presentation.requestedSurface == .floating,
            display.eligibleSurfaces == [.sheet],

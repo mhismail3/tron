@@ -9,7 +9,6 @@ private struct TronSettingsSectionCountKey: EnvironmentKey {
 }
 
 extension View {
-    /// Custom section labels obey the same structural count as grouped cards.
     func tronSectionHeading() -> some View {
         modifier(TronSectionHeadingModifier())
             .containerValue(\.tronSettingsSection, false)
@@ -30,10 +29,6 @@ extension EnvironmentValues {
     }
 }
 
-/// Counts structural sections before lazy layout, never just the currently visible
-/// cards. Only settings drill-in pages opt in to hiding a lone heading.
-/// Each direct section-level subview owns one slot. Standalone explanatory
-/// captions opt out with a container value; lazy visibility never changes count.
 struct TronSettingsSections<Content: View>: View {
     var alignment: HorizontalAlignment = .leading
     var spacing: CGFloat? = nil

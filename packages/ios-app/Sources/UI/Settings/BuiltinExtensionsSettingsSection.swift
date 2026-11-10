@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Built-in extension switches for one scope. The scope's own layer stays
-/// authoritative; loading never writes, and unrelated selectors are preserved.
 struct BuiltinExtensionsSettingsSection: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity

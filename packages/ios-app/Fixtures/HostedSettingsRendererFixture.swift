@@ -2,18 +2,12 @@
 import SwiftUI
 import TronMobileCore
 
-/// The generic settings renderer over a FIXTURE schema (gateway
-/// docs/settings-model.md F1, 7.5): a section, a subgroup, a key, a control and
-/// a badge kind this app has never been told about render from served data
-/// alone. The socket answers `settings.resolve`, `settings.options` and
-/// `settings.change` the way the Gateway does, including a dry-run refusal.
 @MainActor
 struct HostedSettingsRendererFixture: View {
     @State private var model: AppModel
     @State private var push = PushNotificationCoordinator(credentials: UIReviewPushStore(), notifications: .live, appAttest: .live, configuration: nil)
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
-    /// `-sheet-haptics-restored`: the cover is already presented when its presenter mounts.
     @State private var covering = ProcessInfo.processInfo.arguments.contains("-sheet-haptics-restored")
     @State private var nestedSettings = false
     @State private var heldPreviews = 0
@@ -60,7 +54,6 @@ struct HostedSettingsRendererFixture: View {
             .environment(\.tronPresentationActivityCoordinator, activity)
     }
 
-    /// Production provider rows with the reported three-window payload, without a live account.
     private var providerReview: some View {
         ScrollView {
             TronSettingsGroup("Configured", accent: .tronPurple, surfaceStyle: .glass) {
@@ -76,8 +69,6 @@ struct HostedSettingsRendererFixture: View {
         }.tronNavigationTitle("Model Providers", accent: .tronPurple)
     }
 
-    /// Capture the shared primitive with both circular glyphs, including Unset.
-    /// Production currently exposes reset-to-inherited, not a separate Unset button.
     private var controlsReview: some View {
         ScrollView {
             TronSettingsGroup("Mixed controls") {
@@ -149,7 +140,6 @@ struct HostedSettingsRendererFixture: View {
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
                             onOpenSession: { openedRoute = $0 })
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-haptics") {
-                        // The Context sheet itself, so the fixture's cover control stays reachable.
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "global", presentation: .section("context"))
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-nested") {
                         Button("Open Settings") { nestedSettings = true }
@@ -237,7 +227,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var receiver: CheckedContinuation<Data, Error>?
     private var pending: [Data] = []
     private var closed = false
-    // The fixture's stores: one Mac layer over built-ins.
     private var model = "pro"
     private var activeTools = HostedExtensionsReview.builtinOff ? ["read", "+codemode"] : ["read", "retired"]
     private var extensions = HostedExtensionsReview.builtinOff ? ["-builtin:codemode"] : [String]()
@@ -410,7 +399,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private let weights: [String: JSONValue] = ["red": .number(2)]
 
     private func historyEntry() -> JSONValue {
-        // A redacted entry carries no before/after values, so it cannot be undone.
         if ProcessInfo.processInfo.arguments.contains("-settings-changes-redacted") {
             return .object([
                 "changeId": .string("fixture-change"), "at": .string("2026-10-11T12:00:00.000Z"),
@@ -443,8 +431,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model", "catalog", essential: true)]
                 + (ProcessInfo.processInfo.arguments.contains("-agent-behavior-regression")
                     ? HostedSettingsReviewSchema.agentBehaviorKeys : HostedSettingsReviewSchema.additionalKeys)
-                    // `-served-agent-behavior`: the Gateway serves Thinking only for a model that thinks and
-                    // no Compaction rows, leaving Model a single row and Projects directly after Workers.
                     .filter { row in
                         guard ProcessInfo.processInfo.arguments.contains("-served-agent-behavior") else { return true }
                         let key = row.objectValue?["key"]?.stringValue ?? ""
@@ -477,9 +463,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 .object(["id": .string("setup"), "title": .string("Setup"), "order": .number(80)])])])
         }
         if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
-            // Geometry is the generic renderer's contract, not an editing route
-            // for retired compaction keys. Serve the same short/long value shapes
-            // as the primitive gallery through schema-negotiated choice controls.
             let keys = [("inherited", "Inherited value", "16,384 tokens", false),
                         ("short", "Short value", "—", false),
                         ("revert", "Owned value", "High", true),
@@ -495,8 +478,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 "sections": .array(HostedSettingsReviewSchema.sections), "diagnostics": .array([])])
         }
         let keys: [JSONValue] = [
-            // A catalog source the app has no dedicated picker for, so the generic
-            // paged catalog renders it (real model keys use the shared model picker).
             key("model.ref", group: "model", value: .object(["provider": .string("fixture"), "id": .string(model)]), display: modelName,
                 set: true, presentation: presentation("Model", "The model new chats start with.", 10, "essential", "catalog",
                     extra: ["optionsSource": .object(["name": .string("fixture.catalog"), "dependsOn": .array([])])])),
@@ -577,11 +558,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                     "parameters": .object(["type": .string("object"), "properties": .object([field: .object(["type": .string("string"), "description": .string("Fixture \(field) input")])]), "required": .array([.string(field)])]),
                 ])])
             } + activeTools.filter { name in !definitions.contains { $0.0 == name } }.map { name in
-                // The Gateway lists a chosen tool its catalog no longer offers, so it can be cleared.
                 .object(["value": .string(name), "label": .string(name), "disabledReason": .string("Not available here")])
             })])
         case "model.thinking":
-            // A model without reasoning offers no levels.
             let levels = model == "pro" ? [("off", "Off"), ("low", "Low"), ("medium", "Medium"), ("high", "High")] : []
             thinkingOptions = levels.count
             return .object(["key": .string(key), "source": .string("catalog.thinkingLevels"), "dependsOn": .array([.string("model.ref")]),
@@ -596,7 +575,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         let key = change["key"]?.stringValue ?? ""
         let value = change["value"]
         let dryRun = params["dryRun"]?.boolValue == true
-        // Validation is the Gateway's: the client holds no copy of a key's rules.
         if key == "lab.invalidValue", value?.stringValue == "rejected" {
             return .object(["dryRun": .bool(true), "status": .string("applied"), "tier": .string("quiet"), "changes": .array([.object([
                 "changeId": .string(""), "key": .string(key), "layer": .string("global"), "status": .string("failed"), "tier": .string("quiet"),
@@ -622,7 +600,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         }
         var outcome: [String: JSONValue] = ["changeId": .string(dryRun ? "" : "change-\(applied)"), "key": .string(key),
             "layer": .string("global"), "status": .string("applied"), "tier": .string("quiet")]
-        // A dry run that needs the maintainer's exact tap returns a digest-bound review.
         let review: [String: JSONValue] = dryRun && key == "context.images.block" && ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm")
             ? ["review": .object(["digest": .string(String(repeating: "b", count: 64)), "title": .string("Change image delivery"),
                 "requiresTap": .bool(true), "reason": .string("Confirm changing image delivery."),
@@ -633,7 +610,6 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 }.merging(review) { $1 })
     }
 
-    /// `set` is a value saved at Global (its Reset is offered); otherwise the row inherits the default.
     private func key(_ id: String, group: String, subgroup: String? = nil, value: JSONValue?, display: String, layer: String = "global",
                      set: Bool = false, badges: [JSONValue] = [], presentation: JSONValue) -> JSONValue {
         var object: [String: JSONValue] = [

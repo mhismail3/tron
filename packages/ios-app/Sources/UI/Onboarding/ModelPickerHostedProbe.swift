@@ -1,9 +1,6 @@
 #if HOSTED_TEST
 import SwiftUI
 
-/// Hosted tests drive the model picker's mounted callbacks: the search action,
-/// each provider header toggle, and each card or row selection. This is not
-/// touch/VoiceOver automation and is absent from application builds.
 @MainActor
 final class ModelPickerHostedProbe {
     private struct Action {

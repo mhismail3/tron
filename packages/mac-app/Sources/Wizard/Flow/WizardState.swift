@@ -1,9 +1,6 @@
 import Foundation
 import Observation
 
-/// Resume progress + transient state for the wizard. Progress is owned by the
-/// Mac wrapper at `internal/mac/wizard-state.json`; completion remains owned
-/// exclusively by the on-disk `.onboarded` sentinel.
 @MainActor
 @Observable
 final class WizardState {
@@ -23,10 +20,6 @@ final class WizardState {
         }
     }
 
-    /// Direction of the most recent navigation, set BEFORE `step` is
-    /// mutated by every navigation method (`advance`, `goBack`, and
-    /// `skipToPairing`). `WizardShell.slideTransition` reads this single source
-    /// of truth to pick the asymmetric move-edge pair.
     var slideDirection: WizardSlideDirection = .forward
 
     var tailscaleStatus: TailscaleStatus?
@@ -67,15 +60,9 @@ final class WizardState {
             selected = .welcome
         }
         self.step = selected
-        // An unknown/newer record is owned by a future wrapper and must remain
-        // intact. Only a deliberate initial-step override or a known record
-        // that needs the cold-start clamp may replace it.
         let shouldWrite: Bool
         switch persisted {
         case .absent:
-            // An absent record carries no progress: startup shows Welcome and
-            // must leave the file alone. Explicit overrides and navigation
-            // persist through the normal writer.
             shouldWrite = initialStep != nil
         case .valid(let step):
             shouldWrite = initialStep != nil || selected != step
@@ -90,8 +77,6 @@ final class WizardState {
             try Self.write(step: step, to: stateURL)
             TronLog.shared.record(.info, event: "wizard.progress-write", source: "wizard", message: "Wizard progress published", new: step.rawValue, outcome: "success")
         } catch {
-            // Navigation remains visible even when its durable checkpoint fails.
-            // Use the wrapper's sole diagnostic writer, not an unread state mirror.
             TronLog.shared.record(.error, event: "wizard.progress-write", source: "wizard", message: "Wizard progress could not be published", new: step.rawValue, why: error.localizedDescription, outcome: "failure")
         }
     }

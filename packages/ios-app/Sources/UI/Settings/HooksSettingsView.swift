@@ -8,9 +8,6 @@ enum HookViewMode: String, CaseIterable, Identifiable {
     var title: String { self == .byExtension ? "By Extension" : "By Event" }
 }
 
-/// The one `hooks.list` request. An absent `cwd` asks for the global scope, so
-/// an unset or unoffered project scope must never carry a path. A Gateway that
-/// does not advertise `hooks.v1` has nothing to answer, so it gets no request.
 struct HooksListRequest: Equatable {
     static let method = "hooks.list"
     static let capability = "hooks.v1"
@@ -33,11 +30,6 @@ struct HooksListParams: Encodable {
     let cwd: String?
 }
 
-/// Project extension code loads only under a true trust decision: the Gateway's
-/// hook owner passes `projectTrusted: effectiveDecision === true`. An untrusted
-/// or undecided project therefore answers with the global scope alone, which
-/// must not read as "this project has no hooks". The note needs a resolved
-/// inspection, so an unread or failed trust read never claims a project state.
 enum HooksProjectTrustNote {
     static let message = "Project hooks are not loaded until the project is trusted."
     static let linkTitle = "Project Trust"
@@ -48,9 +40,6 @@ enum HooksProjectTrustNote {
     }
 }
 
-/// The sheet's sections in render order. Rendering from this list keeps the
-/// R-0 item map of the surface a session used to show from being dropped or
-/// reordered when the sheet moved into Settings.
 enum HooksSettingsSection: String, CaseIterable, Identifiable, Sendable {
     case omissionsNotice
     case viewMode
@@ -70,12 +59,6 @@ struct HooksSettingsExtensionRow: Identifiable, Equatable, Sendable {
     var id: String { record.id }
 }
 
-/// One scope's hook projection as the sheet's sections, so the sections the
-/// sheet shows are inspectable without mounting it. It carries every item the
-/// R-0 audit mapped to this surface: the two projections, the
-/// unregistered-events toggle, registered extensions with their detail,
-/// lifecycle events, load issues, the bounded-omissions notice and the
-/// standing caption.
 struct HooksSettingsContent {
     static let unavailable = HooksSettingsContent(
         sections: [],
@@ -95,8 +78,6 @@ struct HooksSettingsContent {
 }
 
 enum HooksSettingsPresentation {
-    /// A projection without `hookInventory` is an unanswered read, never an
-    /// empty one; the sheet shows its loading or unavailable state instead.
     static func content(
         from projection: JSONValue?,
         mode: HookViewMode,
@@ -131,13 +112,9 @@ enum HooksSettingsPresentation {
     }
 }
 
-/// Settings → Agent → Hooks: the hook inventory of one scope without a session.
-/// The read is `hooks.list`; a live session's `session.resources` returns the
-/// same fields, so both surfaces decode through one presentation.
 struct HooksSettingsView: View {
     let projectCWD: String?
     @Environment(AppModel.self) private var model
-    /// The opening group's accent (Tools, or the Project card's); teal only when opened alone (#939).
     @Environment(\.tronSettingsVisualTheme) private var theme
     private var accent: Color { theme?.accent ?? .tronPrimary }
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -148,13 +125,10 @@ struct HooksSettingsView: View {
     @PresentationState private var selectedEvent: HookEventRecord?
     @PresentationState private var projection: JSONValue?
     @PresentationState private var loadError: String?
-    /// A surface starts loading: its empty state waits for the first read.
     @PresentationState private var loading = true
     @PresentationState private var refreshGeneration = 0
     @PresentationState private var trust: ProjectTrustSummary?
 
-    /// One scope's read. A scope, trust or refresh change is a new read, and a
-    /// late answer for a superseded scope cannot publish into it.
     private struct HooksLoadID: Hashable {
         let scope: SettingsScope
         let profileRevision: Int
@@ -242,7 +216,6 @@ struct HooksSettingsView: View {
             await refreshTrust(trustLoadID)
         }
         .onChange(of: scope) { _, _ in
-            // The rendered inventory belongs to the scope that produced it.
             selected = nil
             selectedEvent = nil
             projection = nil
@@ -266,8 +239,6 @@ struct HooksSettingsView: View {
             : "Lifecycle hooks registered for every project on this Mac."
     }
 
-    /// The one line that keeps a global-only answer from reading as an empty
-    /// project. Project Trust is the Settings row that owns the decision.
     private var untrustedProjectRow: some View {
         TronSettingsRow(
             icon: "checkmark.shield",

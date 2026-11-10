@@ -120,9 +120,6 @@ struct MenuBarLogReaderTransportTests {
     }
 }
 
-/// Only loopback/ephemeral sockets and synthetic messages. Network.framework
-/// owns WebSocket framing; this fixture does not emulate the production client.
-/// The watchdog releases known-bad clients, but can never make a deadline pass.
 private final class LogPeer: @unchecked Sendable {
     enum Plan: Equatable, Sendable { case holdHello, holdResponse, reply(String), invalidHello, unrelatedFrames }
     enum Event: Sendable { case hello, request, closed }
@@ -166,7 +163,6 @@ private final class LogPeer: @unchecked Sendable {
             capture.value = headers.first { $0.name.lowercased() == "authorization" }?.value
             return NWProtocolWebSocket.Response(status: .accept, subprotocol: nil)
         }
-        // Listener creation snapshots the protocol options, including this hook.
         parameters.defaultProtocolStack.applicationProtocols.insert(options, at: 0)
         listener = try NWListener(using: parameters)
         listener.newConnectionHandler = { [weak self] connection in
@@ -248,8 +244,6 @@ private final class LogPeer: @unchecked Sendable {
                     self.eventSink.yield(.request)
                     if case .reply(let text) = self.plan { self.send(text, on: connection) }
                     if self.plan == .invalidHello {
-                        // A client bypassing hello validation must fail the
-                        // admission oracle, not merely time out in this fixture.
                         self.send(#"{"type":"response","id":"mac-system-logs","ok":true,"result":{"records":[]}}"#, on: connection)
                     }
                     if self.plan == .unrelatedFrames {

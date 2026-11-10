@@ -1,11 +1,7 @@
 import SwiftUI
 import TronMobileCore
 
-/// Manage Home's context ring, state and workers, its sub-sheet destinations and
-/// consolidated settings. Pause and disable live at the bottom of Home Settings.
 extension HomeSheet {
-    /// The state pill's accent: a working or ready Home reads as success, a blocked
-    /// or recovering one as an error, and a paused or disabled one as idle.
     static func statusAccent(_ status: HomeStatusDTO) -> Color {
         switch status.phase {
         case .ready, .active: .tronEmerald
@@ -32,8 +28,6 @@ extension HomeSheet {
         }
     }
 
-    /// The Home sub-sheets, each a standard row in the rows container. A row's
-    /// secondary line is read from this sheet's load, never from a sub-sheet.
     func manageRows(_ read: HomeManageDTO, unresolved: Bool) -> some View {
         let status = read.status
         let memoryBrowser = model.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true
@@ -41,7 +35,6 @@ extension HomeSheet {
         let profileList = model.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
         return TronGlassCard(accent: accent) {
             VStack(spacing: 0) {
-                // What Home has learned about you sits above what it remembers.
                 if profileList {
                     navigationRow(icon: "person.text.rectangle",
                                   subtitle: HomeManageRowPresentation.profile(read.profile),
@@ -77,7 +70,6 @@ extension HomeSheet {
         }
     }
 
-    /// Every setting Home uses, in its own container below the Home sub-sheets.
     @ViewBuilder var settingsRow: some View {
         if let sessionID {
             let title = "Home Settings"
@@ -95,7 +87,6 @@ extension HomeSheet {
         }
     }
 
-    /// A row that presents a managed child sheet, labeled with that sheet's title.
     func navigationRow(icon: String, subtitle: String? = nil,
                        destination: HomeSheetDestination, id: String) -> some View {
         Button { present(destination) } label: {

@@ -66,7 +66,10 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   warning and failure colors remain semantic. Memory kind icons use smaller primary symbols.
   `ProcessActivityOrb` defaults to primary ink for both solving dots and thinking strands;
   dashboard activity and the composer's active/recent activity and extension-content glyph
-  share that identity. Their geometry, motion and neutral glass surfaces stay unchanged.
+  share that identity. Their geometry, motion and neutral glass surfaces stay unchanged. Its Canvas
+  renders synchronously so each frame lands in the composer's matched-geometry transaction.
+  The iPad side-column scene panel is masked, not clipped: a clip stops at the layout frame and
+  leaves black bars under the status bar and home indicator.
 - Section headings are visible by default, including dashboard and top-level Settings groups.
   Settings drill-in pages opt in with `TronSettingsSections(hidesLoneHeading: true)`;
   only a structurally lone section loses its heading, never its explanatory detail.

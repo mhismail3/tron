@@ -1,10 +1,6 @@
 import XCTest
 
-/// Hosted journeys exercise the real chat/composer, pill details, Activity and
-/// read-only child transport. Fixtures are bounded projections, not live workers.
 final class TronSubagentParityUITests: XCTestCase {
-    /// The production History sheet must move one exact row between lifecycle
-    /// sections without retaining a stale live cell from another lazy collection.
     @MainActor
     func testHistoryGroupingVisualCaptures() throws {
         continueAfterFailure = false
@@ -18,7 +14,6 @@ final class TronSubagentParityUITests: XCTestCase {
             open.tap()
             let worker = app.buttons["subagent-row-worker"]
             XCTAssertTrue(worker.waitForExistence(timeout: 5), app.debugDescription)
-            // Expand the real medium-first sheet; live work precedes finished runs.
             app.swipeUp()
             XCTAssertTrue((worker.value as? String)?.contains("Running") == true)
             let completed = app.buttons["subagent-row-completed"]
@@ -37,8 +32,6 @@ final class TronSubagentParityUITests: XCTestCase {
     @MainActor
     func testHistoryQueuedPausedResumedAndTerminalExecutions() throws {
         continueAfterFailure = false
-        // Each terminal outcome ends a distinct execution. Resume gets its own
-        // exact process ID while its settled paused predecessor stays history.
         for outcome in ["completed", "failed", "stopped"] {
             let app = XCUIApplication()
             app.launchArguments = ["-tron-subagent-parity-fixture", "-history-grouping", "-history-lifecycle", "-history-\(outcome)", "-dark"]
@@ -71,7 +64,6 @@ final class TronSubagentParityUITests: XCTestCase {
     private func assertHistoryRow(_ app: XCUIApplication, id: String, status: String, active: Bool,
                                   file: StaticString = #filePath, line: UInt = #line) {
         let row = app.buttons["subagent-row-\(id)"]
-        // Match the lifecycle prefix, not a word in the title/output metadata.
         expectation(for: NSPredicate(format: "value BEGINSWITH %@", "\(status),"), evaluatedWith: row)
         waitForExpectations(timeout: 5)
         XCTAssertEqual(app.buttons.matching(identifier: "subagent-row-\(id)").count, 1, file: file, line: line)
@@ -97,8 +89,6 @@ final class TronSubagentParityUITests: XCTestCase {
         }
     }
 
-    /// A worker result chip caps its title near "Worker · " and three or four
-    /// words (#1461); the accessible label keeps the whole title and status.
     @MainActor
     func testWorkerResultChipTitleWidthLightDarkAndLargeText() throws {
         for (scheme, large) in [("light", false), ("dark", false), ("light", true), ("dark", true)] {
@@ -116,7 +106,6 @@ final class TronSubagentParityUITests: XCTestCase {
             XCTAssertLessThan(long.frame.width, app.windows.firstMatch.frame.width - 40, "A long title stops short of the chat width")
             try capture("1461-worker-chips-\(scheme)-\(large ? "ax-large" : "default")")
             long.tap()
-            // The chip still opens the whole result: its details carry the untruncated title.
             let title = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "every module manifest | outcome: final"))
             XCTAssertTrue(title.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
             try capture("1461-worker-chip-detail-\(scheme)-\(large ? "ax-large" : "default")")
@@ -208,8 +197,6 @@ final class TronSubagentParityUITests: XCTestCase {
         try capture("852-notification-run")
         XCTAssertGreaterThanOrEqual(frames[1].midY - frames[0].midY, 44, "Independent targets must not overlap")
         XCTAssertLessThanOrEqual(frames[1].midY - frames[0].midY, 46, "A contiguous run must not repeat turn spacing")
-        // The AX label can hug the glass; prove the actual 44-point target with
-        // a native tap outside its visible face but within its own clearance.
         let first = errors.element(boundBy: 1)
         first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .withOffset(CGVector(dx: 0, dy: 20)).tap()
@@ -245,8 +232,6 @@ final class TronSubagentParityUITests: XCTestCase {
             try verifyPills(app, scheme: scheme)
             org.tap()
             XCTAssertTrue(app.staticTexts["Running subagents"].waitForExistence(timeout: 5), app.debugDescription)
-            // The shared row is one accessibility element: its title is the label and
-            // the lifecycle, details, current action and output are its value.
             let worker = app.buttons.matching(NSPredicate(format: "label == %@", "Worker")).firstMatch
             XCTAssertTrue(worker.exists, app.debugDescription)
             let workerValue = worker.value as? String ?? ""
@@ -263,7 +248,6 @@ final class TronSubagentParityUITests: XCTestCase {
         }
     }
 
-    /// Activity lists running and finished subagents as shared list rows; captures show both in each appearance.
     @MainActor
     func testActivityRowsCaptures() throws {
         continueAfterFailure = false
@@ -279,8 +263,6 @@ final class TronSubagentParityUITests: XCTestCase {
                 if state == "running" { try capture("2090-composer-\(scheme)") }
                 org.tap()
                 XCTAssertTrue(app.staticTexts[state == "running" ? "Running subagents" : "Completed subagents"].waitForExistence(timeout: 5), app.debugDescription)
-                // Rows are the shared list-entry row: one button per subagent whose value leads with its
-                // lifecycle, and none of the retired bespoke card headings.
                 let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "subagent-row-"))
                 XCTAssertEqual(rows.count, 1, app.debugDescription)
                 XCTAssertTrue((rows.firstMatch.value as? String)?.hasPrefix(state == "running" ? "Live," : "Completed,") == true,

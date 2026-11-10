@@ -1,9 +1,6 @@
 import XCTest
 import UIKit
 
-/// Real SwiftUI usage, attributed instructions and history ink compared with
-/// each sheet's primary title. Attachments are native simulator approval proofs,
-/// not goldens. Emerald and the two non-green themes exercise the same owners.
 @MainActor final class TronSharedPrimaryAccentsUITests: XCTestCase {
     func testBurgundyLight() { journey(theme: "burgundy", mode: "light") }
     func testBurgundyDark() { journey(theme: "burgundy", mode: "dark") }
@@ -57,8 +54,6 @@ import UIKit
             let areas = indices.map { index -> CGRect in
                 let entry = element(instructions, "agent-instructions-entry-\(section).\(index)")
                 XCTAssertTrue(entry.waitForExistence(timeout: 8), instructions.debugDescription)
-                // Source capsules own the trailing edge of the shared settings
-                // row; the leading glyph is themed independently by that row.
                 return CGRect(x: entry.frame.maxX - 70, y: entry.frame.minY,
                               width: 70, height: entry.frame.height)
             }
@@ -102,9 +97,6 @@ import UIKit
         }
     }
 
-    /// Remove neutral glass and normalize chroma to compare hue independently
-    /// of antialiasing and opacity. Does not accept a tinted container as proof
-    /// when its glyph retains a different hue.
     private func ink(_ image: CGImage, area: CGRect, scale: CGFloat) -> [Double]? {
         guard let crop = image.cropping(to: area.applying(CGAffineTransform(scaleX: scale, y: scale))) else { return nil }
         var pixels = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
@@ -116,8 +108,6 @@ import UIKit
         for i in stride(from: 0, to: pixels.count, by: 4) {
             let rgb = [Double(pixels[i]), Double(pixels[i + 1]), Double(pixels[i + 2])]
             let low = rgb.min()!, range = rgb.max()! - low
-            // Foreground ink has at least 60 channel levels of chroma in
-            // every shipped palette; dark Emerald's teal glass must not vote.
             guard range >= 60 else { continue }
             for c in 0..<3 { sum[c] += (rgb[c] - low) / range }
             count += 1

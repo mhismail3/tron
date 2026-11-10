@@ -55,11 +55,6 @@ enum AutomationPromptPresentationPolicy {
         )
     }
 
-    /// Automation identity comes only from the exact Gateway-authored
-    /// invocation receipt bound to this canonical user entry. Display titles
-    /// are intentionally not identity: the owner and operation namespaces are
-    /// durable UUID contracts. Missing or partial provenance fails closed to
-    /// the ordinary user prompt renderer.
     static func admits(_ item: TranscriptItem) -> Bool {
         guard item.kind == .message,
               item.role == .user,
@@ -82,14 +77,6 @@ enum AutomationPromptPresentationPolicy {
     }
 }
 
-/// What `TranscriptRow` has to show for a projected item. The kernel asks this
-/// before it installs a row, because a row whose body is `EmptyView` still costs
-/// a padded lazy child: it takes part in realization, entrance bookkeeping and
-/// tail anchoring while showing nothing. A `customEntry` that is not a command
-/// lifecycle, and a summary/model/thinking/label receipt whose typed
-/// presentation the adapter declined, render nothing, so they are not rows. It
-/// is the same branch the row itself takes, kept next to it so the two cannot
-/// drift.
 enum TranscriptRowPresentationPolicy {
     static func rendersRow(for item: TranscriptItem) -> Bool {
         switch item.kind {
@@ -146,9 +133,6 @@ struct TranscriptRow: View, Equatable {
                     outputTruncated: item.truncated == true
                 ))
             case .customMessage:
-                // Every projected custom_message is model input under Pi's
-                // session semantics. It is not a tool result and is rendered
-                // on the inbound edge with explicit producer provenance.
                 InboundProducerMessageView(item: item)
             case .customEntry:
                 if item.semantic?.kind == .command {
@@ -156,11 +140,6 @@ struct TranscriptRow: View, Equatable {
                 } else if let notification = ChatNotificationPresentation.canonical(item, globalOrdinal: nil) {
                     ChatNotificationView(presentation: notification)
                 } else {
-                    // appendEntry/custom entries are extension state, not chat
-                    // content. Only typed Gateway receipts have a transcript
-                    // presentation; unadapted state remains absent, and
-                    // `TranscriptRowPresentationPolicy` keeps the kernel from
-                    // installing the empty row.
                     EmptyView()
                 }
             case .compaction, .branchSummary, .modelChange, .thinkingChange, .label:
@@ -215,15 +194,12 @@ struct TranscriptRow: View, Equatable {
                             label: preparedText.hiddenThinkingLabel,
                             animatesInsertion: streaming
                         )
-                        // Keep the incremental visibility ledger attached to
-                        // the logical thinking run, not its position among
-                        // parts that may be added while the response streams.
                         .id(run.id)
                     case .content(let part):
                         switch part.type {
                         case .text:
                             if part.attachment != nil {
-                                EmptyView() // Presented together above the prompt text.
+                                EmptyView()
                             } else if item.role == .user {
                                 if let text = UserPromptPresentationPolicy.visibleText(
                                     part.text,
@@ -240,7 +216,6 @@ struct TranscriptRow: View, Equatable {
                                     ),
                                     streaming: streaming
                                 )
-                                // Only canonical assistant response text is quotable.
                                 .environment(
                                     \.chatAnnotationSource,
                                     item.role == .assistant
@@ -249,9 +224,9 @@ struct TranscriptRow: View, Equatable {
                                 )
                             }
                         case .thinking:
-                            EmptyView() // Adjacent thinking is projected as one run above.
+                            EmptyView()
                         case .image:
-                            EmptyView() // Presented together above the prompt text.
+                            EmptyView()
                         case .toolCall:
                             if rendersToolCalls {
                                 if let callID = part.toolCallId, let result = toolResults[callID] {
@@ -306,8 +281,6 @@ struct TranscriptRow: View, Equatable {
     }
 
     var modelAttribution: String? {
-        // Message settlement, not whole-turn idleness, owns attribution. The
-        // Markdown reveal also settles at this same streaming boundary.
         guard !streaming, showsMessageFooter,
               item.role == .assistant,
               displayedMessageParts.contains(where: { part in
@@ -446,10 +419,6 @@ struct UserPromptGlassModifier: ViewModifier {
             cornerRadius: ChatPromptContainerStyle.cornerRadius,
             style: .continuous
         )
-        // Measure once against the bounded proposal: short prompts retain
-        // their intrinsic bubble width, while long prompts wrap immediately.
-        // This replaces ViewThatFits without expanding every prompt to the
-        // maximum width or swapping branches after a large paste.
         BoundedTrailingContentLayout(maxWidth: UserPromptTextLayoutPolicy.maximumWidth) {
             content.fixedSize(horizontal: false, vertical: true)
         }
@@ -462,8 +431,6 @@ struct UserPromptGlassModifier: ViewModifier {
 
 private struct ThinkingBlock: View {
     let segments: [ChatThinkingSegment]
-    /// Presented to the transcript's sheet host, which resolves the trace again
-    /// by it; see `ChatThinkingTraceContent.identity(owner:run:)`.
     let traceIdentity: String
     let preparedText: ChatTextPreparationSnapshot
     let label: String?
@@ -471,19 +438,8 @@ private struct ThinkingBlock: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
 
-    /// The paragraph's measured height and the four reference lines' measured
-    /// height. Each has one purpose, and neither can move a mounted row: the
-    /// reference height decides the overflow flag (the tail mask, the tap target
-    /// and the accessibility trait), and the content height is the trace
-    /// layout's animatable input, which is how the viewport and the tail offset
-    /// interpolate together while the trace streams. The layout measures its own
-    /// subviews in the pass that places them, so its first frame is exact.
     @State private var contentHeight: CGFloat = 0
     @State private var referenceHeight: CGFloat = 0
-    /// Whether a measurement has landed for this trace. A mount's first
-    /// measurement is the height the layout already placed the trace at, so the
-    /// update that publishes it is not growth and must not animate; every later
-    /// change is the trace's own growth.
     @State private var hasMeasuredTrace = false
 
     init(
@@ -519,8 +475,6 @@ private struct ThinkingBlock: View {
                 .contentShape(Rectangle())
                 .onTapGesture { openDetails() }
                 #if HOSTED_TEST
-                // The detail action a hosted test activates; a tap cannot be
-                // injected into a SwiftUI gesture.
                 .modifier(HostedToolActionProbeModifier(
                     id: "thinking-detail:\(traceIdentity)",
                     action: openDetails
@@ -534,10 +488,6 @@ private struct ThinkingBlock: View {
         .accessibilityHint(admitsDetailAction ? "Double-tap to view the full thinking trace" : "")
     }
 
-    /// The full trace belongs to the transcript, not to this row: streaming
-    /// pushes the row out of lazy realization, and the sheet must outlive it.
-    /// The route carries the trace's identity and the content this row resolved,
-    /// and the sheet follows the install's own content from there.
     private func openDetails() {
         guard isOverflowing, let sheetRoutes else { return }
         sheetRoutes.present(.thinkingTrace(ChatThinkingTraceSheetRoute(
@@ -550,8 +500,6 @@ private struct ThinkingBlock: View {
         )))
     }
 
-    /// A row rendered without a transcript host offers no detail action, so its
-    /// trait and hint never claim one.
     private var admitsDetailAction: Bool {
         isOverflowing && sheetRoutes != nil
     }
@@ -562,12 +510,6 @@ private struct ThinkingBlock: View {
         return "\(label). \(paragraph)"
     }
 
-    /// The compact row is a tail projection, not a nested scroll surface:
-    /// full content stays authoritative while only the latest four measured
-    /// lines are presented in the visible viewport. The tail layout measures
-    /// both subviews in the pass that places them, so a freshly mounted row is
-    /// already at its final height and only the trace's own source growth
-    /// animates.
     private func traceViewport(inline: MarkdownPresentation.Inline) -> some View {
         ThinkingTailLayout(contentHeight: contentHeight) {
             paragraph(inline: inline)
@@ -595,13 +537,6 @@ private struct ThinkingBlock: View {
         .accessibilityHidden(true)
     }
 
-    /// The one value whose change animates this trace: the viewport it presents
-    /// and the tail offset it slides by, both derived from the content height the
-    /// layout interpolates. It is the same pair the frame-and-offset animation
-    /// this replaces keyed on, and it matters that it is derived from the
-    /// measurement rather than from the trace's source: the source grows in the
-    /// install that suppresses row animations, while the measurement lands in the
-    /// layout pass that must interpolate.
     private var animatedTraceMotion: CGSize {
         guard contentHeight > 0, referenceHeight > 0 else { return .zero }
         let viewport = ChatThinkingTraceLayoutPolicy.viewportHeight(
@@ -625,8 +560,6 @@ private struct ThinkingBlock: View {
         storage = measured
     }
 
-    /// The viewport's reference height: the four measured lines the policy
-    /// bounds the compact trace to.
     private var referenceLines: some View {
         Text(Array(
             repeating: "Ag",
@@ -686,22 +619,7 @@ private struct ThinkingBlock: View {
     }
 }
 
-/// The compact thinking trace: the paragraph clipped to four measured reference
-/// lines, scrolled to its tail. Both subviews are measured in the pass that
-/// places them, so a mounted row is at its final height in its first frame —
-/// the estimate this replaces left the first mount of a trace 50 pt short and
-/// only a later remount reached the measured viewport.
-///
-/// The viewport height and the paragraph's tail offset are both derived from one
-/// content height, exactly as the frame and offset this replaces were: while the
-/// trace streams, the layout's animatable `contentHeight` interpolates and the
-/// row grows continuously, and a trace past four lines slides its tail instead
-/// of jumping a line per token. A zero `contentHeight` is the first pass of a
-/// mount: the layout then uses the paragraph height it just measured, so no
-/// estimate is ever committed.
 private struct ThinkingTailLayout: Layout, Animatable {
-    /// The trace's content height to interpolate, or zero on the first pass of a
-    /// mount, where the layout's own synchronous measurement is exact.
     var contentHeight: CGFloat
 
     var animatableData: CGFloat {
@@ -718,9 +636,6 @@ private struct ThinkingTailLayout: Layout, Animatable {
     func makeCache(subviews: Subviews) -> Cache { Cache() }
 
     func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        // A payload or Dynamic Type change invalidates both measurements;
-        // animating `contentHeight` alone does not, so one exact measurement
-        // serves every frame of the growth interpolation.
         cache = Cache()
     }
 
@@ -742,11 +657,6 @@ private struct ThinkingTailLayout: Layout, Animatable {
     ) {
         let measured = measure(width: bounds.width, subviews: subviews, cache: &cache)
         let viewport = viewportHeight(measured)
-        // The paragraph keeps its natural height and is offset so its tail —
-        // the newest text — is what the viewport shows. The offset comes from the
-        // same content height as the viewport, so both move in one interpolation:
-        // an offset derived from the paragraph's own, already-measured height
-        // would jump a line per token while the viewport animated.
         subviews[0].place(
             at: CGPoint(
                 x: bounds.minX,
@@ -773,10 +683,6 @@ private struct ThinkingTailLayout: Layout, Animatable {
         )
     }
 
-    /// The one height the viewport and the tail offset are derived from: the
-    /// interpolated content height, or — on the first pass of a mount, before any
-    /// measurement has been published — the exact height of the paragraph the
-    /// same pass measured.
     private func contentHeight(_ measured: (paragraph: CGFloat, reference: CGFloat)) -> CGFloat {
         contentHeight > 0 ? contentHeight : measured.paragraph
     }
@@ -807,8 +713,6 @@ private struct ThinkingTailLayout: Layout, Animatable {
     }
 }
 
-/// The expanded thinking trace. It starts at the beginning of the trace unless
-/// the trace is still arriving, in which case it follows the tail.
 struct ThinkingTraceDetailSheet: View {
     let inline: MarkdownPresentation.Inline
     let identity: String
@@ -816,7 +720,6 @@ struct ThinkingTraceDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private let title = "Thinking"
-    /// Scroll target for tail following; a completed trace never scrolls here.
     private static let traceID = "thinking-detail-trace"
 
     var body: some View {
@@ -828,9 +731,6 @@ struct ThinkingTraceDetailSheet: View {
                             inline: inline,
                             identity: "detail:\(identity)",
                             baseColor: Color.tronTextSecondary,
-                            // The detail surface always shows the complete
-                            // authoritative trace. It must never lag behind
-                            // the source merely because the compact row fades.
                             streaming: false
                         )
                         .font(TronTypography.body)
@@ -845,9 +745,6 @@ struct ThinkingTraceDetailSheet: View {
                 .defaultScrollAnchor(.top)
                 .tronScrollEdgeChrome()
                 .onAppear {
-                    // A completed trace starts at its beginning. Scrolling to it
-                    // here would drop the content padding out of view and start
-                    // the sheet one row down under the top blur.
                     guard streaming else { return }
                     proxy.scrollTo(Self.traceID, anchor: .bottom)
                 }
@@ -977,8 +874,6 @@ private struct TranscriptImageChip: View {
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        // The slot is stable from projection install; thumbnail replacement
-        // must not animate as a second chip insertion during prompt settlement.
         .accessibilityLabel(loadFailed ? "Image attachment unavailable, retry" : "Image attachment")
         .task(id: PresentationActivityTaskID(
             source: loadKey,
@@ -1020,7 +915,6 @@ private struct TranscriptImageChip: View {
 struct TranscriptFileChip: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    /// Names this chip's preview presenter among its siblings (#1652).
     let partID: String
     let name: String
     let mimeType: String

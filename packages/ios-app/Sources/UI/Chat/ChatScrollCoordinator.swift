@@ -19,16 +19,10 @@ struct ChatPrependPage: Equatable, Sendable {
 }
 
 enum ChatHistoryPageLoadResult: Equatable, Sendable {
-    /// Canonical history installed. A page value means a semantic anchor can be
-    /// restored; nil means the authoritative page installed without geometry.
     case installed(ChatPrependPage?)
     case failed
 }
 
-/// Owns explicit viewport intent, catch-up, semantic restore, and prepend
-/// commands. Opening readiness is presentation-owned. Native anchoring owns
-/// payload and size changes, while explicit semantic rows lease their exact
-/// target through the installed layout transaction.
 @Observable
 @MainActor
 final class ChatScrollCoordinator {
@@ -88,32 +82,18 @@ final class ChatScrollCoordinator {
     private(set) var pinnedPositionRevision = 0
 
     private let frameScheduler: DisplayFrameScheduler
-    /// The transcript's origin-anchored layout. Geometry reaches this
-    /// coordinator already adapted by the orientation owner, so every decision
-    /// below reads one model — `distanceFromBottom` is the distance from the
-    /// newest row, which is the exact content origin.
     private let orientation: ChatTranscriptOrientation
     private let clock: MonotonicClock
     private var presentation = 0
     private var viewportActivation = 0
     private var sequence = 0
-    // Per-frame layout evidence. Geometry and row-frame callbacks read and
-    // write these while SwiftUI lays out the transcript, and no view body
-    // reads them. Observing them only let UIKit's layout observation tracking
-    // count every callback as a layout invalidation of the hosting view, which
-    // it reports as a feedback loop once enough rows publish in one pass.
     @ObservationIgnored private var geometry = ChatTranscriptGeometry.zero
     @ObservationIgnored private var geometryRevision = 0
     private var installedPhysicalRowSpine: ChatPhysicalRowSpineIdentity?
-    /// Physical collection positions are diagnostic context only. They are
-    /// supplied by the same row adapter that renders the installed spine so a
-    /// target's relation to the terminal never relies on opaque identity tokens.
     private var installedPhysicalRowPositions: [String: Int] = [:]
     private var installedPhysicalTerminalPosition: Int?
     @ObservationIgnored private var rawSemanticFrames: [String: SemanticFrameSample] = [:]
     @ObservationIgnored private var semanticFrameRevision = 0
-    /// Keeps opening presentation work gated through its validated first-ready
-    /// frame, independently of cosmetic animation completion.
     private var visibleOpeningRevealPending = false
     private var appliedTargetCommandToken: Int?
     private var appliedTargetOrigin: ChatScrollCommand.Origin?
@@ -122,10 +102,7 @@ final class ChatScrollCoordinator {
     private var catchUpPhase: CatchUpPhase = .none
     private var catchUpCommandToken: Int?
     #if HOSTED_TEST
-    /// The distance above the newest end that the last staged catch-up frame
-    /// showed before its smooth final step; read by hosted journeys.
     private(set) var hostedStagedCatchUpGap: CGFloat?
-    /// The reader's distance from the newest end when Catch up was requested.
     private(set) var hostedCatchUpRequestDistance: CGFloat?
     #endif
     private var catchUpUnreadBeforeJump = false
@@ -156,15 +133,12 @@ final class ChatScrollCoordinator {
     }
 }
 
-// Behavior stays out of the @Observable class body; see AppModel (#1066).
 extension ChatScrollCoordinator {
     func configureInteractionTrace(_ trace: ChatInteractionTrace, context: Int) {
         interactionTrace = trace
         interactionTraceContext = context
     }
 
-    /// Diagnostic only: distinguish actual compact completion from the shared
-    /// structural barrier's state when investigating premature target release.
     func recordEntranceDiagnostic(
         _ stage: ChatInteractionTrace.EntranceStage,
         renderedID: String,
@@ -178,9 +152,6 @@ extension ChatScrollCoordinator {
     }
 
     var shouldShowCatchUpButton: Bool { viewportMode == .anchored }
-    /// Canonical session authority continues advancing while a detached reader
-    /// keeps one immutable render commit. Catch-up retains that freeze until its
-    /// explicit tail command settles, then admits one newest projection.
     var defersAutomaticLiveProjectionIntake: Bool {
         viewportMode.defersAutomaticProjectionIntake(catchingUp: catchUpPhase != .none)
     }
@@ -189,7 +160,6 @@ extension ChatScrollCoordinator {
             || visibleOpeningRevealPending
     }
     var latestGeometry: ChatTranscriptGeometry { geometry }
-    /// Native size-change anchoring is intent-based, not overflow-dependent.
     var usesPinnedSizeChangeAnchor: Bool { viewportMode == .pinned }
     var shouldTrackUnreadResponse: Bool { viewportMode == .anchored || catchUpPhase != .none }
     var canAutomaticallyFollow: Bool {
@@ -206,8 +176,6 @@ extension ChatScrollCoordinator {
             && catchUpPhase == .none
             && !visibleOpeningRevealPending
     }
-    /// Async transcript descendants may begin intrinsic-size work only after
-    /// the presentation-owned opening reveal completes.
     var permitsAsynchronousTranscriptContent: Bool {
         !visibleOpeningRevealPending
     }
@@ -232,7 +200,6 @@ extension ChatScrollCoordinator {
         reduceViewport(.presentationReset(retainingViewport: retainingVisibleViewport))
         clearCommand()
         if viewportMode == .pinned { pinnedPositionRevision &+= 1 }
-        // Semantic evidence is scoped to the current presentation epoch.
         advanceLayoutEpoch()
         guard !retainingVisibleViewport else { return }
         isAtBottom = true
@@ -265,22 +232,11 @@ extension ChatScrollCoordinator {
 
     func semanticFrameChanged(renderedID: String, layoutEpoch: Int, frame: CGRect) {
         guard layoutEpoch == self.layoutEpoch else { return }
-        // Rows and the tail marker report the scroll view's own frames. On the
-        // origin-anchored path those measure upward from the visual bottom, so
-        // every consumer below — the reader's anchor row, the marker's
-        // placement against the viewport, a correction's signed residual — is
-        // handed this single transcript-relative coordinate space.
-        // SwiftUI can invoke an observation action again with the same frame
-        // while the row tree settles. Such callbacks are inert unless an exact
-        // active owner is awaiting later temporal evidence from that row.
         let previous = rawSemanticFrames[renderedID]
         let changed = previous?.layoutEpoch != layoutEpoch || previous?.rawFrame != frame
         let hasOwnedWaiter = layoutRestore != nil
             || prepend != nil
 
-        // Ordinary duplicate callbacks are inert. An exact active owner may
-        // still require the later native callback as temporal evidence after
-        // its command/layout epoch, even when the frame value is unchanged.
         guard changed || hasOwnedWaiter else { return }
         semanticFrameRevision &+= 1
         rawSemanticFrames[renderedID] = SemanticFrameSample(
@@ -288,8 +244,6 @@ extension ChatScrollCoordinator {
             revision: semanticFrameRevision,
             rawFrame: frame
         )
-        // Existing samples update in O(1); bounded eviction scans only when a
-        // new sample exceeds capacity.
         if renderedID == "transcript-bottom",
            let marker = semanticFrame(for: renderedID) {
             refreshPhysicalTailEvidence(marker: marker)
@@ -348,12 +302,8 @@ extension ChatScrollCoordinator {
             pinAtTail()
         }
         directPositionOwnership = false
-        // Releasing without moving away from the tail keeps pinned mode and
-        // native size-change anchoring in control.
     }
 
-    /// Tests and explicit opaque tree replacement use the unconditional epoch
-    /// boundary. Mounted chat updates use the physical-spine overload below.
     func projectionInstalled() {
         advanceLayoutEpoch()
         geometryRevision &+= 1
@@ -375,10 +325,6 @@ extension ChatScrollCoordinator {
             return
         }
         guard structure != installedPhysicalRowSpine else {
-            // Streaming text and shallow tool status changes keep the same
-            // physical hosts. Their geometry callbacks update in place;
-            // clearing every semantic frame on each token creates a costly
-            // full-tree feedback loop and is not stale-tree protection.
             geometryRevision &+= 1
             evaluateLayoutRestoreIfReady()
             evaluatePrependIfReady()
@@ -405,8 +351,6 @@ extension ChatScrollCoordinator {
         admitGeometry(current, mayRepresentDirectViewportMovement: false)
     }
 
-    /// Admits a sample whose visible viewport moved independently of content
-    /// layout, including UIKit's status-bar scroll-to-top path.
     func viewportChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
         admitGeometry(current, mayRepresentDirectViewportMovement: true)
     }
@@ -415,16 +359,10 @@ extension ChatScrollCoordinator {
         _ current: ChatTranscriptGeometry,
         mayRepresentDirectViewportMovement: Bool = true
     ) {
-        // SwiftUI may deliver the same native geometry more than once in one
-        // display frame while an observed anchor role settles. Re-publishing an
-        // identical fact feeds that callback back into layout and can create an
-        // OnScrollGeometryChange cycle without adding any evidence.
         if current == geometry {
             let hasOwnedWaiter = layoutRestore != nil
                 || prepend != nil
                     || appliedTargetOrigin != nil
-            // Identical callbacks are inert unless an exact active owner is
-            // waiting for a later native sample after its command/layout epoch.
             guard hasOwnedWaiter else { return }
             geometryRevision &+= 1
             if let marker = semanticFrame(for: "transcript-bottom"), marker.layoutEpoch == layoutEpoch {
@@ -435,10 +373,6 @@ extension ChatScrollCoordinator {
                 return
         }
         let previousGeometry = geometry
-        // The status-bar tap uses UIKit's native scroll-to-top path and may
-        // not publish `isPositionedByUser` or an interacting phase. Treat its
-        // unmistakable retreat from the tail as direct ownership before a
-        // layout update can re-apply the pinned bottom anchor.
         let hasAutomaticViewportTarget = command != nil || appliedTargetOrigin != nil
         if mayRepresentDirectViewportMovement,
            !hasAutomaticViewportTarget,
@@ -467,8 +401,6 @@ extension ChatScrollCoordinator {
             refreshPhysicalTailEvidence(marker: marker)
         }
         geometryRevision &+= 1
-        // Trace the evidence derived from this geometry, never the previous
-        // marker classification paired with the new native dimensions.
         if meaningfulTraceChange {
             traceGeometry(.meaningfulChange)
         }
@@ -493,8 +425,6 @@ extension ChatScrollCoordinator {
         }
     }
 
-    /// Releases an applied explicit target only after its owner has observed a
-    /// display-frame boundary and consumed the exact current lease.
     func consumeTargetRelease() -> Bool {
         guard let token = targetReleaseToken,
               token == appliedTargetCommandToken,
@@ -525,9 +455,6 @@ extension ChatScrollCoordinator {
         #endif
         if !reduceMotion, geometry.distanceFromBottom > threshold {
             let reveal = min(140, max(80, geometry.containerHeight * 0.18))
-            // The pinned end's model offset, which the orientation reflects to the
-            // native origin, so the staged frame shows `reveal` points of gap
-            // whatever the composer and keyboard obstruct.
             let pinnedOffset = geometry.offsetY + geometry.distanceFromBottom
             catchUpPhase = .staged
             publish(.offsetY(max(0, pinnedOffset - reveal)), animation: .disabled, origin: .catchUp)
@@ -560,16 +487,11 @@ extension ChatScrollCoordinator {
         }
     }
 
-    /// The system gesture is direct reader intent, not catch-up or a layout
-    /// correction. Detach before applying an edge so incoming rows stay frozen.
     func requestOldestHistory(reduceMotion: Bool) {
         beginDirectInteraction(allowsBottomRubberBand: false)
         publish(.oldestHistory, animation: ChatMotion.historyScroll(reduceMotion: reduceMotion), origin: .oldestHistory)
     }
 
-    /// Reader intent from an annotation's quote. It detaches like a direct
-    /// scroll, so streaming rows stay frozen, then centers the source row.
-    /// False when that row is not installed (trimmed history): nothing moves.
     func requestAnnotationReveal(row physicalID: String, reduceMotion: Bool) -> Bool {
         guard installedPhysicalRowPositions[physicalID] != nil else { return false }
         beginDirectInteraction(allowsBottomRubberBand: false)
@@ -577,8 +499,6 @@ extension ChatScrollCoordinator {
         return command?.origin == .annotationReveal
     }
 
-    /// Scrolls the detached transcript by `visualOffset` points: content moves
-    /// up by that much (a negative offset moves it down).
     func requestAnnotationReveal(visualOffset: CGFloat, reduceMotion: Bool) -> Bool {
         guard geometry.isValid else { return false }
         beginDirectInteraction(allowsBottomRubberBand: false)
@@ -613,9 +533,6 @@ extension ChatScrollCoordinator {
         traceGeometry(.submissionBaseline)
     }
 
-    /// Retires native callbacks captured by the previous viewport tree. A
-    /// callback can arrive after uncovering with a stale `true` activity value,
-    /// so activity booleans alone are not an admission fence.
     func viewportActivationChanged(_ activation: Int) {
         viewportActivation = activation
     }
@@ -628,7 +545,6 @@ extension ChatScrollCoordinator {
         viewportObservationActive = isActive
     }
 
-    /// Retains pinned ownership and retires targets captured by the old native tree.
     func foregroundViewportBecameActive(activation: Int? = nil) {
         viewportObservationActive = true
         guard viewportMode == .pinned, !isUserInteracting else { return }
@@ -637,22 +553,13 @@ extension ChatScrollCoordinator {
             lastForegroundActivation = activation
         }
         if catchUpPhase != .none {
-            // Background suspension can interrupt before command application;
-            // clear the whole catch-up owner so it cannot block later sends.
             cancelCatchUp(restoringAnchored: false)
         }
-        // A ScrollPosition target is tied to the old native scroll tree. Retain
-        // pinned intent, but retire that stale lease before the new tree emits
-        // evidence; otherwise it can replay against a changed content hierarchy.
-        // Detached readers never enter this branch.
         if command != nil || appliedTargetCommandToken != nil {
             clearCommand()
             retireAppliedTargetWithoutCallback()
             pinnedPositionRevision &+= 1
         }
-        // Native geometry can remain numerically unchanged while the backing
-        // UIScrollView is rebuilt. Rebase the semantic epoch so the next
-        // marker callback measures the new tree instead of trusting stale data.
         advanceLayoutEpoch()
         geometryRevision &+= 1
     }
@@ -661,9 +568,6 @@ extension ChatScrollCoordinator {
         if shouldTrackUnreadResponse { hasUnreadContent = true }
     }
 
-    /// Owns the complete canonical history operation. Geometry is optional
-    /// restoration evidence; a missing or stale anchor never turns an enabled
-    /// history action into a no-op or creates a second untracked loading task.
     @discardableResult
     func beginHistoryPageLoad(
         anchor: ChatSemanticAnchor?,
@@ -674,8 +578,6 @@ extension ChatScrollCoordinator {
             completion(.discarded)
             return false
         }
-        // Explicit history intent supersedes semantic restoration. Catch-up and
-        // a visible opening reveal retain stronger ownership and are rejected above.
         cancelLayoutRestore()
         clearCommand()
         let admittedAnchor = anchor.flatMap(admittedPrependAnchor)
@@ -711,8 +613,6 @@ extension ChatScrollCoordinator {
             case .failed:
                 self.finishPrepend(result: .failure)
             case .installed(nil):
-                // Canonical data is already installed. With no admitted anchor
-                // there is no app-generated offset command to settle.
                 self.finishPrepend(result: .success)
             case .installed(let page?):
                 guard let admittedAnchor,
@@ -742,10 +642,6 @@ extension ChatScrollCoordinator {
         return anchor
     }
 
-    /// Applies exactly one currently-owned command. Its ScrollPosition target
-    /// remains installed until its catch-up or semantic transaction observes
-    /// settlement, then a token-owned release callback removes it before native
-    /// size-change anchoring resumes.
     @discardableResult
     func commandApplied(_ applied: ChatScrollCommand) -> Bool {
         guard command?.token == applied.token, applied.presentation == presentation else {
@@ -758,12 +654,6 @@ extension ChatScrollCoordinator {
         appliedTargetCommandToken = applied.token
         appliedTargetOrigin = applied.origin
         if applied.origin == .oldestHistory || applied.origin == .annotationReveal {
-            // Neither the status-bar jump to the oldest edge nor a detached
-            // annotation reveal waits for marker proof: the edge is legal as soon
-            // as the command lands, and a reveal is reader intent that native
-            // anchoring keeps from the next frame. Release through the bounded
-            // lease so the load-earlier page request is admitted again, instead
-            // of holding a target across the jump.
             requestTargetRelease(applied.token)
         }
         if catchUpCommandToken == applied.token {
@@ -789,9 +679,6 @@ extension ChatScrollCoordinator {
                 }
             } else if catchUpPhase == .final {
                 catchUpPhase = .settling
-                // Native geometry can reach the tail before SwiftUI reports
-                // command application. Re-evaluate that already-admitted fact
-                // so catch-up cannot remain stuck and revoke draft actions.
                 if !isUserInteracting, geometry.isAtCatchUpBoundary {
                     finishCatchUpPinned()
                 }
@@ -1015,9 +902,6 @@ extension ChatScrollCoordinator {
     private func reduceViewport(_ intent: ChatViewportIntent) {
         let previous = viewportMode
         viewportMode.reduce(intent)
-        // Direct native phase callbacks can repeat without changing ownership.
-        // Preserve meaningful lifecycle intents while suppressing duplicate
-        // reader/tail transitions from the diagnostic hot path.
         if previous == viewportMode,
            intent == .userTookOver || intent == .userReturnedToTail {
             return
@@ -1181,9 +1065,6 @@ extension ChatScrollCoordinator {
 
     private func refreshPhysicalTailEvidence(marker: SemanticFrameSample) {
         let previousEvidence = physicalTailEvidence
-        // Native underflow alignment retains a content-local edge. The marker
-        // and this edge share scroll-view coordinates; subtracting the composer
-        // inset again would misclassify correctly visible short content.
         let visibleHeight = min(geometry.contentHeight, geometry.containerHeight)
         let visibleBounds = visibleHeight > 0 && visibleHeight.isFinite
             ? CGRect(x: 0, y: 0, width: 1, height: visibleHeight)
@@ -1197,10 +1078,6 @@ extension ChatScrollCoordinator {
         )
         let previousOffsetY = physicalTailEvidenceOffsetY
         let previousContentHeight = physicalTailEvidenceContentHeight
-        // Keep the latest SwiftUI viewport sample even when the marker's
-        // classification and frame are unchanged. A later classification edge
-        // must describe the immediately preceding geometry, not an older
-        // marker callback.
         if evidence == physicalTailEvidence {
             physicalTailEvidenceOffsetY = geometry.isValid ? geometry.offsetY : nil
             physicalTailEvidenceContentHeight = geometry.isValid ? geometry.contentHeight : nil

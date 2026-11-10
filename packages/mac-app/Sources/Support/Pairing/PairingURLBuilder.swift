@@ -1,14 +1,9 @@
 import Foundation
 
-/// Builds `tron://pair?host=...&port=...&code=...&label=...` URLs for
-/// the iOS `PairingInvitationParser` to consume.
 enum PairingURLBuilder {
     private static let scheme = "tron"
     private static let host = "pair"
 
-    /// Builds a `tron://pair?host=…&port=…&code=…[&label=…]` URL.
-    /// The optional `label` value is the iOS server name.
-    /// Returns nil if any required field is empty or malformed after trimming.
     static func makeURL(_ payload: PairingPayload) -> URL? {
         guard let canonicalHost = PairingHostValidator.canonicalHost(payload.host),
               (1...65_535).contains(payload.port) else {
@@ -35,8 +30,6 @@ enum PairingURLBuilder {
     }
 }
 
-/// Mirrors the iOS host contract: a pairing host is a bare DNS hostname, IPv4
-/// address, or unbracketed IPv6 address, never a full URL/path/query/userinfo.
 private enum PairingHostValidator {
     static func canonicalHost(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -51,8 +44,6 @@ private enum PairingHostValidator {
         }
 
         if trimmed.contains(":") {
-            // Preserve the old host grammar: inet_pton also accepts embedded
-            // IPv4 and scoped addresses, though the pairing contract did not.
             guard !trimmed.contains("."), !trimmed.contains("%"), TailscaleProbe.isIPv6(trimmed) else { return nil }
             return trimmed.lowercased()
         }

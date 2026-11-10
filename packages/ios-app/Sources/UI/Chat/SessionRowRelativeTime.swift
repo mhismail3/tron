@@ -1,11 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// A session row's trailing relative-time (or waiting) label. It reserves the
-/// widest label `GatewayTimestamp.relativeDescription` realistically produces,
-/// measured in the shared code font at the current Dynamic Type size, so a
-/// ticking label never changes the width left for the row's title
-/// and the title keeps one truncation point.
 struct SessionRowRelativeTime: View {
     let text: String
     let isWaiting: Bool

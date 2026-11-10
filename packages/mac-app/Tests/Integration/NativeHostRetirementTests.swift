@@ -4,19 +4,12 @@ import Security
 import Testing
 @testable import TronMac
 
-/// The wrapper pins the native helper's code signature on its XPC connection, so
-/// libxpc validates every reply against the live sender. These tests drive the
-/// production retirement owner in a separate process that a disposable launchd
-/// job demand-launches through a real Mach service, exactly as the wrapper's
-/// Quit, Disable, Restart Helper and Uninstall paths reach the helper.
 @Suite("Native helper retirement over a real Mach service", .serialized)
 struct NativeHostRetirementTests {
     @Test("a signature-pinning wrapper receives the confirmation, then the helper exits")
     func confirmationReachesPinnedWrapper() async throws {
         let job = try RetirementJob()
         defer { job.cleanup() }
-        // Each round demand-launches a fresh helper process; one lucky delivery
-        // cannot pass the check.
         for round in 1...3 {
             let connection = try job.connect()
             let confirmed = await job.retire(through: connection)
@@ -57,7 +50,7 @@ private final class RetirementJob: @unchecked Sendable {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         let plist: [String: Any] = [
             "Label": label, "ProgramArguments": [probe, label], "MachServices": [label: true],
-            "ThrottleInterval": 1, // demand relaunch between rounds, without launchd's 10 s default
+            "ThrottleInterval": 1,
         ]
         let plistURL = root.appendingPathComponent("job.plist")
         try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: plistURL)
@@ -65,8 +58,6 @@ private final class RetirementJob: @unchecked Sendable {
         bootstrapped = true
     }
 
-    /// Same shape as the wrapper's connection: a Mach-service client that pins
-    /// the helper's signature, so replies from a dead sender are refused.
     func connect() throws -> NSXPCConnection {
         let connection = NSXPCConnection(machServiceName: label)
         connection.setCodeSigningRequirement(requirement)

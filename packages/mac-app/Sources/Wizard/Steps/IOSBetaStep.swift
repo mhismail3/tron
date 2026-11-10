@@ -1,10 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// iOS beta handoff step. The shell owns Back / Continue; this view
-/// presents the public TestFlight invite as a QR code so the user can
-/// install the latest available Tron iOS beta on the phone before
-/// moving to pairing.
 struct IOSBetaStep: View {
     @State private var copiedLink = false
 

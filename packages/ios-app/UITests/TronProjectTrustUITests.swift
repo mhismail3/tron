@@ -1,7 +1,5 @@
 import XCTest
 
-/// Real Project Trust controls against synthetic authority only. The fake
-/// Gateway commits and broadcasts before withholding a typed command reply.
 final class TronProjectTrustUITests: XCTestCase {
     @MainActor
     func testEarlierTrustReceiptCannotReplaceLaterCanonicalBlock() {
@@ -44,8 +42,6 @@ final class TronProjectTrustUITests: XCTestCase {
     @MainActor
     private func holdOlderInspectThenBlock(_ app: XCUIApplication) {
         app.buttons["Trust Project"].tap()
-        // Both the change-event read and accepted command's reconciliation
-        // read must be held; no inferred mock callback is being exercised.
         XCTAssertTrue(counts(app, contain: "heldReads:2"), app.debugDescription)
         app.buttons["Do Not Load Project Resources"].tap()
         XCTAssertTrue(positiveCount(app, field: "readsFalse"), app.debugDescription)
@@ -56,7 +52,6 @@ final class TronProjectTrustUITests: XCTestCase {
     func testMatchingSingleBlockSettlesWithoutAnotherCommand() {
         let app = launch(scenario: "ordered")
         defer { app.terminate() }
-        // The decision names the Project root it is recorded for, not only the chat's folder.
         XCTAssertTrue(app.staticTexts["Applies to project root"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["/fixture"].exists, app.debugDescription)
         app.buttons["Do Not Load Project Resources"].tap()
@@ -114,8 +109,6 @@ final class TronProjectTrustUITests: XCTestCase {
     private func acceptTrustThenBlock(_ app: XCUIApplication) {
         app.buttons["Trust Project"].tap()
         XCTAssertTrue(counts(app, contain: "held:1"), app.debugDescription)
-        // The real change event/read may already show Trusted; Block remains
-        // available. Holding the reply does not hold canonical application.
         XCTAssertTrue(app.buttons["Do Not Load Project Resources"].waitForExistence(timeout: 10))
         app.buttons["Do Not Load Project Resources"].tap()
         XCTAssertTrue(counts(app, contain: "sets:2 commands:2 repeats:0"), app.debugDescription)

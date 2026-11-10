@@ -1,12 +1,6 @@
 import XCTest
 
-/// Manage Session, its folded Project section and the Resources sheet (#1655),
-/// through the hosted Manage Session fixture with reported usage, a Git
-/// workspace and resources of every kind and source.
 final class TronManageSessionReviewUITests: XCTestCase {
-    /// Manage Session: the usage line sits under the headline with Compact Now
-    /// trailing and centered on both; no separate Compact row; the renamed rows;
-    /// no Project Settings row.
     @MainActor func testManageSessionLayout() {
         let app = launch(dark: false); defer { app.terminate() }
         let card = element(app, "session-usage-summary")
@@ -34,8 +28,6 @@ final class TronManageSessionReviewUITests: XCTestCase {
         XCTAssertTrue(html.isHittable, app.debugDescription)
     }
 
-    /// Session Settings ends with the project's section: trust, the ignored
-    /// field listed once, a No repository overrides row, and no Workspace row.
     @MainActor func testSessionSettingsShowsProjectSection() {
         let app = launch(dark: false); defer { app.terminate() }
         let link = app.buttons["chat-settings-link"]
@@ -48,15 +40,12 @@ final class TronManageSessionReviewUITests: XCTestCase {
         XCTAssertTrue(none.waitForExistence(timeout: 8), app.debugDescription)
         for _ in 0..<6 where !none.isHittable { app.swipeUp() }
         XCTAssertFalse(labels(none, containing: "No repository overrides").isEmpty, none.debugDescription)
-        // A row in the shared card, not the large centered placeholder.
         XCTAssertLessThan(none.frame.height, 140, "No repository overrides is a row: \(none.frame)")
         XCTAssertTrue(section.buttons["project-settings-trust"].exists, section.debugDescription)
         XCTAssertTrue(labels(section, containing: "Workspace").isEmpty, "Manage Session's Workspace row already names the branch")
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings-ignored-defaultTools").count, 1)
     }
 
-    /// Resources: Global, Project and External tags; a command's and a subagent's
-    /// body preview in a glass card, and View All reads the whole of it.
     @MainActor func testResourceTagsAndBodies() {
         for (kind, title, end) in [("commands", "Review", "END OF REVIEW COMMAND"), ("subagents", "Scout", "END OF SCOUT DEFINITION")] {
             let app = launch(dark: false)
@@ -90,8 +79,6 @@ final class TronManageSessionReviewUITests: XCTestCase {
         }
     }
 
-    // MARK: Journeys
-
     @MainActor private func launch(dark: Bool) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -114,14 +101,10 @@ final class TronManageSessionReviewUITests: XCTestCase {
         expandSheet(app, title: row.label)
     }
 
-    // MARK: Helpers
-
-    /// The distribution and scope tags painted on a Resources row.
     @MainActor private func tags(_ app: XCUIApplication, _ row: String) -> [String] {
         let button = app.buttons["project-resource-\(row)"]
         XCTAssertTrue(button.waitForExistence(timeout: 5), app.debugDescription)
         let words: Set<String> = ["Global", "Project", "External", "Local", "Module", "User"]
-        // The row combines its texts into one label; tags are its trailing words.
         return button.label.components(separatedBy: ", ").filter(words.contains)
     }
 
@@ -129,7 +112,6 @@ final class TronManageSessionReviewUITests: XCTestCase {
         root.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).allElementsBoundByIndex
     }
 
-    /// Brings a sheet to its large detent once it stops presenting.
     @MainActor private func expandSheet(_ app: XCUIApplication, title text: String) {
         let title = app.staticTexts.matching(NSPredicate(format: "label == %@", text)).firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 8), app.debugDescription)

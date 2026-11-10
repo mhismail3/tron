@@ -132,8 +132,6 @@ final class SessionProcessHistoryStore {
         status = .idle
     }
 
-    /// Cancels disposable list/detail requests while preserving the last
-    /// complete projection for a covered surface.
     func suspendPendingWork() {
         pageGeneration &+= 1
         pageTask?.cancel()
@@ -146,8 +144,6 @@ final class SessionProcessHistoryStore {
         }
     }
 
-    /// Revealing a covered sheet resumes an unfinished initial read; it never
-    /// advances pagination or replays a completed page. Load More owns paging.
     func loadInitialPageIfNeeded(sessionID: String, presentationGeneration: Int) {
         guard historyRevision == nil else { return }
         loadNext(sessionID: sessionID, presentationGeneration: presentationGeneration)
@@ -171,9 +167,6 @@ final class SessionProcessHistoryStore {
                 }
             }
             do {
-                // One canonical list request is faster and more reliable than
-                // waiting for a separate capability projection first. Older
-                // Gateways return a bounded unsupported response directly.
                 struct Params: Encodable {
                     let sessionId: String
                     let cursor: String?
@@ -311,7 +304,7 @@ final class SessionProcessHistoryStore {
                     self.detailGeneration = generation
                     self.detailRouteID = routeID
                 }
-            } catch { /* A disappearing canonical route remains unavailable. */ }
+            } catch { }
         }
     }
 

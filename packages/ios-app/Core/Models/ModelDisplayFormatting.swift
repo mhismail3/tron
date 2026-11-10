@@ -22,7 +22,6 @@ package enum ModelDisplayFormatting {
         "xai": "xAI"
     ]
 
-    // Anthropic's moving aliases; their dated siblings pin a release.
     private static let latestAliases: Set<String> = ["claude-haiku-4-5", "claude-opus-4-5", "claude-sonnet-4-5"]
 
     private static let wordAliases: [String: String] = [
@@ -45,10 +44,6 @@ package enum ModelDisplayFormatting {
         return words(in: clean).map(formatWord).joined(separator: " ")
     }
 
-    /// A bare ModelRef ID named as the catalog names it, so no model needs its own row:
-    /// one- or two-digit tokens join into a version (`5-2` is 5.2) unless zero-padded
-    /// or after a number, which marks a date (`02-23`, `2024-05-13`). Like the catalog,
-    /// the name omits a `-YYYYMMDD` pin, which `pickerIdentity` shows.
     package static func model(_ value: String) -> String {
         let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return "Unknown model" }
@@ -106,23 +101,17 @@ package enum ModelDisplayFormatting {
     }
 }
 
-/// The one spelling of model release-date syntax. Gateway payloads, the
-/// "Pinned release" identity line, and the Latest rail all read it here so the
-/// wire format cannot drift between them.
 package enum ModelReleaseDate {
     static func admits(_ value: String) -> Bool {
         value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil
     }
 
-    /// The date pinned by a date-suffixed model ID, e.g.
-    /// `claude-opus-4-5-20251101` becomes `2025-11-01`. Nil without a suffix.
     package static func pinnedReleaseDate(inID id: String) -> String? {
         guard let match = id.range(of: #"-(\d{8})$"#, options: .regularExpression) else { return nil }
         let digits = id[match].dropFirst()
         return "\(digits.prefix(4))-\(digits.dropFirst(4).prefix(2))-\(digits.suffix(2))"
     }
 
-    /// `2025-11-01` to `20251101`, the ID suffix that pins that release.
     static func compact(_ value: String) -> String {
         value.replacingOccurrences(of: "-", with: "")
     }
@@ -144,9 +133,6 @@ extension ProviderSummary {
 
 extension ModelSummary {
     package var pickerIdentity: String { ModelDisplayFormatting.pickerIdentity(for: self) }
-    /// The release date the picker may order by. A malformed or absent Gateway
-    /// value keeps the model out of the Latest rail instead of failing the
-    /// catalog read; the raw value stays canonical.
     package var admittedReleaseDate: String? {
         releaseDate.flatMap { ModelReleaseDate.admits($0) ? $0 : nil }
     }
@@ -159,17 +145,12 @@ extension ModelSummary {
     }
 }
 
-/// Compact facts for the model picker's rail cards.
 package enum ModelCardFacts {
-    /// `$input / $output` per million tokens. Whole dollars drop decimals;
-    /// fractional prices keep cents so sub-dollar rates stay distinguishable.
     package static func priceLabel(_ price: ModelTokenPrice?) -> String? {
         guard let price else { return nil }
         return "\(dollars(price.input)) / \(dollars(price.output))"
     }
 
-    /// Compact window size. Rounds down so a label never claims more context
-    /// than the model accepts (1,048,576 is "1M", not "1.1M").
     package static func contextLabel(_ tokens: Int) -> String? {
         guard tokens > 0 else { return nil }
         if tokens >= 1_000_000 {
@@ -180,16 +161,12 @@ package enum ModelCardFacts {
         return "\(tokens)"
     }
 
-    /// `YYYY-MM-DD` as "Sep 2026". Fixed English month names keep the label
-    /// identical to the Gateway's wire date on every device locale.
     package static func releaseLabel(_ date: String?) -> String? {
         guard let date, ModelReleaseDate.admits(date),
               let month = Int(date.dropFirst(5).prefix(2)), (1...12).contains(month) else { return nil }
         return "\(monthNames[month - 1]) \(date.prefix(4))"
     }
 
-    /// The provider-row facts line: context, price, release, omitting any
-    /// the Gateway did not supply.
     package static func rowSummary(_ model: ModelSummary) -> String? {
         let parts = [
             contextLabel(model.contextWindow).map { "\($0) context" },

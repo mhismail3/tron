@@ -6,7 +6,6 @@ import Testing
 @MainActor
 struct WizardProgressFilesystemTests {
     private func records() async throws -> [TronLog.Record] {
-        // The scheme isolates the production singleton before the host starts.
         try #require(TronPaths.tronHome.path.contains("TronMacIntegrationTests-home"))
         await TronLog.shared.flush()
         let path = TronPaths.tronHome.appendingPathComponent("logs/mac.jsonl")
@@ -26,8 +25,6 @@ struct WizardProgressFilesystemTests {
         let state = WizardState(stateURL: path, initialStep: .tailscale)
         let prior = try Data(contentsOf: path)
 
-        // Move the original private tree intact, then make its publication
-        // parent a file. AtomicFileWriter cannot chmod this obstruction away.
         try FileManager.default.moveItem(at: parent, to: saved)
         try Data("obstruction".utf8).write(to: parent)
         state.advance()
@@ -45,7 +42,6 @@ struct WizardProgressFilesystemTests {
         #expect(state.step == .permissions)
         let published = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any]
         #expect(published?["step"] as? String == "permissions")
-        // Unsafe cold-start steps still clamp and publish Welcome, not Done.
         #expect(WizardState(stateURL: path).step == .welcome)
         let recovered = try await records().dropFirst(offset)
         #expect(recovered.contains { $0.event == "wizard.progress-write" && $0.new == "permissions" && $0.outcome == "success" })
@@ -74,7 +70,6 @@ struct WizardProgressFilesystemTests {
         #expect(WizardState(stateURL: path).step == .welcome)
         #expect(try Data(contentsOf: path) == future)
         #expect(try await records().count == beforeUnknown)
-        // Only an explicit override may replace an unknown owner's record.
         #expect(WizardState(stateURL: path, initialStep: .iosBeta).step == .iosBeta)
         #expect(try Data(contentsOf: path) != future)
         #expect(WizardState(stateURL: path).step == .iosBeta)

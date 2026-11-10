@@ -3,8 +3,6 @@ import Foundation
 import TronMobileCore
 
 extension HostedSubagentParityFixture {
-    /// Real transcript DTOs, deliberately not result-arrival or array ordered.
-    /// All declarations share a timestamp; finalized groupIndex is authoritative.
     static func toolSummaryTintTranscript(_ scenario: String) -> [TranscriptItem] {
         let active = scenario.hasPrefix("active-")
         let failedIndex: Int? = scenario == "latest-failed" ? 2
@@ -21,8 +19,6 @@ extension HostedSubagentParityFixture {
              "kind": "message", "role": "assistant", "content": content]
         }
         let firstCount = scenario == "cross-group" ? 2 : 3
-        // Last array member is NOT the latest invocation. Cross-group also
-        // proves that a new group's index 0 follows the prior group's index 1.
         let indices = firstCount == 3 ? [2, 0, 1] : [1, 0]
         var entries = [message(prefix, content: indices.map {
             call($0, group: prefix, groupIndex: $0, count: firstCount)
@@ -32,8 +28,6 @@ extension HostedSubagentParityFixture {
                 call(2, group: prefix + "-follow", groupIndex: 0, count: 1)
             ]))
         }
-        // Latest call completes first. Earlier failure arrives last, with a
-        // later startedAt as well: neither mutable timestamp may choose tint.
         for index in [2, 1, 0] where !active || index != 2 {
             let id = "\(prefix)-result-\(index)"
             entries.append(["id": id, "presentationId": id,

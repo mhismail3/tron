@@ -2,8 +2,6 @@ import AppKit
 import Foundation
 import UserNotifications
 
-/// Typed commands emitted by the pure menu builder and executed by the
-/// controller-owned action handler.
 enum MenuBarAction: Equatable, Sendable {
     case showPairingInfo
     case showPermissions
@@ -15,15 +13,10 @@ enum MenuBarAction: Equatable, Sendable {
     case uninstall
 }
 
-/// Owns the side effects behind typed menu-bar actions (launchctl,
-/// NSWorkspace, dialogs, notifications, and feedback issue links).
-/// `MenuBarController` owns one handler for exactly its own lifecycle.
 @MainActor
 final class MenuBarActionHandler {
     private let setup: EnvironmentSetup
 
-    /// Handle on the menu-bar controller so re-pairing can request a
-    /// status refresh and pause/resume can re-render the menu.
     weak var menuBarController: MenuBarController?
 
     init(setup: EnvironmentSetup) {
@@ -51,11 +44,6 @@ final class MenuBarActionHandler {
         }
     }
 
-    // MARK: - Actions
-
-    /// Requests a drain-aware Gateway restart. Launchd owns the process and is
-    /// only asked to register an unloaded service; an already-loaded service
-    /// is never force-kickstarted by this user-facing action.
     private func restartServer() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Restart blocked") else { return }
         applyBusy(.restarting)
@@ -87,9 +75,6 @@ final class MenuBarActionHandler {
                 return
             }
 
-            // A repaired registration may need a moment to launch before it
-            // can receive the authenticated restart request. Do not kick it;
-            // wait for the launchd-owned health endpoint instead.
             let health = await ServerHealthAwaiter.waitForHealthy(setup: setup)
             guard case .success = health else {
                 await finishRestartFailure(title: "Restart failed", message: unhealthyStartMessage(result: health))
@@ -246,8 +231,6 @@ final class MenuBarActionHandler {
                         + result.remainingPaths.map(\.path).joined(separator: "\n")
                 )
             }
-            // Uninstall is reached through the async action handler just like
-            // Quit; defer termination until its AppKit event has returned.
             ApplicationTermination.request()
         case .requiresApproval(let message), .launchdRefused(let message), .unknown(let message):
             if case .requiresApproval = outcome {
@@ -265,14 +248,7 @@ final class MenuBarActionHandler {
         }
     }
 
-    // MARK: - Helpers
-
     private func refreshStatus() async {
-        // Triggers an immediate snapshot via the poller so the menu
-        // re-renders within ~100ms instead of waiting for the next 30s tick.
-        // The probe is explicit: it always runs and records its outcome in the
-        // poller's cache, so a failure it finds is not overwritten by a cached
-        // admission on the next cycle.
         guard let controller = menuBarController else { return }
         let snapshot = await controller.explicitStatusSnapshot()
         controller.applySnapshot(snapshot)
@@ -324,9 +300,6 @@ final class MenuBarActionHandler {
         alert.informativeText = message
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
-        // runModal blocks the main thread but we're already on MainActor
-        // and the user explicitly invoked this action, so a brief modal is
-        // expected UX (mirrors System Settings deep-link confirms).
         _ = alert.runModal()
     }
 

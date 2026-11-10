@@ -36,16 +36,12 @@ enum SettingsTarget: Hashable, Sendable {
 }
 
 extension SettingsTarget {
-    /// The layer a write to this target lands in: Global for global, Project for a project.
     var writeLayer: String { scope == .global ? "global" : "project" }
 
-    /// One chat's `settings.resolve`/`settings.change` target. Every surface names a
-    /// target the same way, so they share one snapshot.
     static func sessionGatewayTarget(_ sessionID: String) -> JSONValue {
         .object(["kind": .string("session"), "sessionId": .string(sessionID)])
     }
 
-    /// The `target` of `settings.resolve` and `settings.change` (docs/settings-model.md 3.1).
     var gatewayTarget: JSONValue {
         switch self {
         case .global: .object(["kind": .string("global")])
@@ -53,8 +49,6 @@ extension SettingsTarget {
         }
     }
 
-    /// One `settings.change` entry that sets, or with nil unsets, a schema key at
-    /// this target's own layer: Global for global, Project for a project.
     func keyChange(_ key: String, value: JSONValue?) -> JSONValue {
         var change: [String: JSONValue] = ["key": .string(key), "layer": .string(writeLayer)]
         if let value {
@@ -92,9 +86,6 @@ struct ScopedSettingsDraftStore<Draft: Equatable> {
         entries[target]?.isDirty == true
     }
 
-    /// Compares the value currently presented by the sheet directly with the
-    /// installed baseline. This deliberately does not depend on a later
-    /// SwiftUI `onChange` callback having copied the value into the store.
     func hasChanges(_ presented: Draft, for target: SettingsTarget) -> Bool {
         guard let entry = entries[target] else { return false }
         return !entry.hasBaseline || presented != entry.baseline
@@ -128,9 +119,6 @@ struct ScopedSettingsDraftStore<Draft: Equatable> {
         return true
     }
 
-    /// Seeds the disabled initial state exactly once. A later refresh must not
-    /// redefine a currently presented edit as the baseline merely because its
-    /// `onChange` callback has not run yet.
     @discardableResult
     mutating func seedBaselineIfMissing(_ draft: Draft, for target: SettingsTarget) -> Bool {
         guard entries[target] == nil else { return false }
@@ -138,9 +126,6 @@ struct ScopedSettingsDraftStore<Draft: Equatable> {
         return true
     }
 
-    /// Installs an asynchronous projection only when the value still visible
-    /// in the sheet matches its baseline. This closes the render/onChange gap
-    /// without allowing a late response to erase an edit.
     @discardableResult
     mutating func install(
         _ draft: Draft,

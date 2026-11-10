@@ -6,7 +6,6 @@ import Foundation
 import os
 import ScreenCaptureKit
 
-/// Kernel launch identity, not an exec incarnation, code identity, or input grant.
 internal struct WindowCaptureProcessIdentity: Equatable, Sendable {
     let pid: Int32
     let seconds: UInt64
@@ -26,8 +25,6 @@ internal struct WindowCaptureProcessIdentity: Equatable, Sendable {
     }
 }
 
-/// Capture-only selection, never an input target. The exact SDK filter remains
-/// private and is never updated, rediscovered, or widened after selection.
 package final class NativeWindowCaptureSelection: @unchecked Sendable {
     private enum Content {
         case window(NSRunningApplication, Date, WindowCaptureProcessIdentity, SCWindow)
@@ -59,8 +56,6 @@ package final class NativeWindowCaptureSelection: @unchecked Sendable {
         return try Self(display: display, identity: identity, region: region)
     }
 
-    /// One initial lookup only, guarded on both sides of the SDK await. No titles,
-    /// inventory, or pixels are logged/retained beyond this exact selection.
     package static func select(windowID: CGWindowID, application: NSRunningApplication) async throws -> NativeWindowCaptureSelection {
         guard #available(macOS 15.2, *) else { throw NativeWindowCaptureError.unsupportedSystem }
         try Task.checkCancellation()
@@ -99,8 +94,6 @@ package final class NativeWindowCaptureSelection: @unchecked Sendable {
             }
         case let .display(display, identity):
             let current = try NativeCaptureDisplayIdentity.read(display.displayID)
-            // Whole-display streams can follow resolution changes. A selected
-            // area cannot silently change coordinate spaces or expand its crop.
             guard filter.style == .display, identity.admits(current, cropped: sourceRect != nil) else {
                 throw NativeWindowCaptureError.sourceUnavailable
             }
@@ -118,7 +111,6 @@ internal struct ScreenCaptureKitPlatform: NativeWindowCapturePlatform {
         return try ScreenCaptureKitWindowStream(selection: selection, limits: limits, output: output)
     }
 
-    // Inert configuration construction is covered offline; no native start here.
     static func configuration(_ limits: NativeWindowCaptureLimits, sourceRect: CGRect? = nil) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
         if let sourceRect { config.sourceRect = sourceRect }
@@ -138,9 +130,6 @@ internal struct ScreenCaptureKitPlatform: NativeWindowCapturePlatform {
     }
 }
 
-/// The owner serializes start -> stop. Sample work stays synchronous on one SCK
-/// queue, with bounded encoding and no per-frame dispatch/tasks. The callback
-/// gate also joins delegate callbacks (SCK does not give them a caller queue).
 @available(macOS 15.2, *)
 private final class ScreenCaptureKitWindowStream: NSObject, NativeWindowCaptureStream, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private static let logger = Logger(subsystem: "com.tron.native-capture", category: "frame-validation")
@@ -209,10 +198,10 @@ private final class ScreenCaptureKitWindowStream: NSObject, NativeWindowCaptureS
     }
     func streamDidBecomeInactive(_ stream: SCStream) {
         guard stream === native else { return }
-        lifetime.withCallback { _ in fail(.sourceUnavailable) } // Never resume/rebind.
+        lifetime.withCallback { _ in fail(.sourceUnavailable) }
     }
     func outputVideoEffectDidStart(for stream: SCStream) {
         guard stream === native else { return }
-        lifetime.withCallback { _ in fail(.sourceUnavailable) } // No overlay pixels.
+        lifetime.withCallback { _ in fail(.sourceUnavailable) }
     }
 }

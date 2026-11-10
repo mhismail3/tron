@@ -4,8 +4,6 @@ import TronMobileCore
 enum HomeTaskLifecycle: String, Decodable, Sendable { case pending, active, terminal }
 enum HomeTaskOutcome: String, Decodable, Sendable { case progress, needsInput = "needs-input", final, limited, interrupted, unknown }
 
-/// `inputTokens` is fresh input; cache read/write arrive as a pair (#1250). A record
-/// published before that has neither, and its `inputTokens` includes cache.
 struct HomeTaskSpendDTO: Decodable, Equatable, Sendable {
     let sourceDigest: String
     let inputTokens: Int
@@ -19,7 +17,6 @@ struct HomeTaskSpendDTO: Decodable, Equatable, Sendable {
     }
 }
 
-/// Last-known progress, with the original operation retained across an in-place resume.
 struct HomeTaskCheckinDTO: Decodable, Equatable, Sendable {
     let id: String
     let taskId: String
@@ -53,9 +50,7 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
         let taskId: String
         let createdAt: Int
         let updatedAt: Int
-        /// The worker's name, else the brief's first line; absent on an older Gateway.
         let title: String?
-        /// The target directory's last path component.
         let project: String?
         let workerSessionId: String?
         let target: String
@@ -66,7 +61,6 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
         let pendingGrant: Bool
         let checkins: [HomeTaskCheckinDTO]?
         var id: String { taskId }
-        /// The Gateway names the dispatched worker `sessionId` (HomeTaskSummary).
         private enum CodingKeys: String, CodingKey {
             case taskId, createdAt, updatedAt, title, project, target, lifecycle, outcome, spend, attention, pendingGrant, checkins
             case workerSessionId = "sessionId"
@@ -92,8 +86,6 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
     }
 }
 
-/// Exact execution/route authority from home.taskStatus, never inferred from a
-/// list row. Immutable report bodies remain with the canonical Gateway owner.
 struct HomeTaskDTO: Decodable, Equatable, Sendable {
     struct Intent: Decodable, Equatable, Sendable { let text: String }
     struct Terminal: Decodable, Equatable, Sendable {
@@ -107,7 +99,6 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
         let state: State
         let routeGeneration: Int
         let delivery: JSONValue?
-        /// An outcome-unknown wake always carries its delivery, so only an unadmitted wake can be redelivered.
         var canRedeliver: Bool {
             delivery == nil && [.pending, .blocked].contains(state)
         }
@@ -117,43 +108,34 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
     let createdAt: Int
     let updatedAt: Int
     let intent: Intent
-    /// The worker's name, else the brief's first line; absent on an older Gateway.
     let title: String?
     let project: String?
-    /// The worker chat Home delegated this task to; opened read-only from the task.
     let workerSessionId: String?
     let target: String
     let lifecycle: HomeTaskLifecycle
-    /// Stop and steer are fenced by this operation ID alone.
     let operationId: String?
     let spend: HomeTaskSpendDTO?
     let terminalEvidence: Terminal?
     let wake: Wake?
-    /// The worker's current model, read by the Gateway; absent on an older Gateway.
     let workerModel: ModelRef?
     let subagents: Subagents?
     let subagentRuns: SubagentRuns?
-    /// Historical canonical tool results may predate progress; absence means none was recorded.
     let checkins: [HomeTaskCheckinDTO]?
 
-    /// The Gateway's task record names the dispatched worker `sessionId`.
     private enum CodingKeys: String, CodingKey {
         case taskId, homeId, createdAt, updatedAt, intent, title, project, target, lifecycle, operationId, spend
         case terminalEvidence, wake, workerModel, subagents, subagentRuns, checkins
         case workerSessionId = "sessionId"
     }
 
-    /// Subagent launches the task admitted; `stoppedAtEnd` is nil when the Gateway cannot prove it.
     struct Subagents: Decodable, Equatable, Sendable {
         let started: Int
         let stoppedAtEnd: Int?
     }
-    /// The worker's live runs, newest first, at most 20 of `total`. Empty once the task settles.
     struct SubagentRuns: Decodable, Equatable, Sendable {
         struct Run: Decodable, Equatable, Sendable, Identifiable {
             let runId: String
             let agent: String
-            /// The run's own lifecycle state, shown as the pill's label.
             let state: String
             let startedAt: String
             let lastActivityAt: String?
@@ -227,7 +209,6 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
                   restoreEpoch: restoreEpoch)
         }
     }
-    /// Older Gateways omit this read-only projection.
     let needsReconfirmation: Bool
     let scopes: [Scope]
     let decisions: [Decision]
@@ -245,8 +226,6 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
     static func decode(_ value: JSONValue) throws -> Self {
         let wire = try value.decode(Wire.self)
         let allIDs = [wire.scopes.map(\.id), wire.requests.map(\.id), wire.decisions.map(\.id), wire.grants.map(\.id)]
-        // Identifiers are unique before any index is built, so the lookups below
-        // cannot trap or pick an ambiguous record.
         guard wire.revision > 0, allIDs.allSatisfy({ $0.count <= 10000 && Set($0).count == $0.count && $0.allSatisfy(homeID) }) else {
             throw invalidHomeTask()
         }
@@ -284,11 +263,7 @@ private func invalidHomeTask() -> GatewayFailure {
     GatewayFailure(code: "invalid_response", message: "Home returned invalid task or permission metadata. Reload from the Gateway.", retryable: false, details: nil)
 }
 
-/// The task rows' and detail's derived text: one title rule and one state pill,
-/// so the list and the detail name a task the same way.
 enum HomeTaskPresentation {
-    /// The Tokens row: fresh input, cache reads (and writes, when any) and output, so cache
-    /// health reads at a glance. A pre-split record shows its combined total as such.
     static func spendText(_ spend: HomeTaskSpendDTO) -> String {
         func count(_ value: Int) -> String { value.formatted(.number.notation(.compactName)) }
         guard let read = spend.cacheReadTokens, let write = spend.cacheWriteTokens else {
@@ -298,13 +273,11 @@ enum HomeTaskPresentation {
             + ["\(count(spend.outputTokens)) out"]).joined(separator: " · ")
     }
 
-    /// The tool transcript keeps its compact check-in preview; task sheets use structured rows.
     static func checkinText(_ checkin: HomeTaskCheckinDTO) -> String {
         [HomeSheetTime.relative(checkin.at), checkin.step, "Done: \(checkin.done)", "Next: \(checkin.next)",
          checkin.blocker.map { "Blocker: \($0)" }].compactMap { $0 }.joined(separator: "\n")
     }
 
-    /// The worker's name, else the brief's first non-empty line, else the project.
     static func title(title: String?, briefText: String?, project: String?) -> String {
         if let title, !title.isEmpty { return title }
         if let line = briefText?.split(whereSeparator: \.isNewline).map({ $0.trimmingCharacters(in: .whitespaces) }).first(where: { !$0.isEmpty }) {
@@ -313,7 +286,6 @@ enum HomeTaskPresentation {
         return project ?? "Untitled task"
     }
 
-    /// Active, Pending, Stopped (interrupted), or Finished with the outcome named.
     static func stateLabel(lifecycle: HomeTaskLifecycle, outcome: HomeTaskOutcome?) -> String {
         switch lifecycle {
         case .pending: return "Pending"

@@ -1,6 +1,5 @@
 import Foundation
 
-/// Canonical Tron-home, gateway-state, and bundle paths owned by the wrapper.
 enum TronPaths {
     private enum HomeComponent {
         static let internalDir = "internal"
@@ -13,7 +12,6 @@ enum TronPaths {
     static let piCodingAgentDirEnv = "PI_CODING_AGENT_DIR"
     static let gatewaySupervisionEnv = "TRON_GATEWAY_SUPERVISED"
     static let gatewaySupervisionValue = "1"
-    /// Selects the externally staged payload namespace under the selected Tron home.
     static let gatewayChannelEnv = "TRON_GATEWAY_CHANNEL"
 
     static let homeDirectory: URL = {
@@ -34,9 +32,6 @@ enum TronPaths {
     }()
 
     static func tronHome(profile: TronGatewayProfile) -> URL {
-        // Stable is the wrapper-owned profile and follows the same explicit
-        // whole-home overrides as Gateway config. Debug remains an isolated
-        // profile and is never redirected by Stable's environment.
         if profile == .stable { return tronHome }
         return homeDirectory.appendingPathComponent(profile.homeName, isDirectory: true)
     }
@@ -87,8 +82,6 @@ enum TronPaths {
     static var serverHelperBundle: URL { serverHelperBundle(profile: activeProfile) }
     static var serverHelperBinary: URL { serverHelperBinary(profile: activeProfile) }
 
-    /// Dedicated Aqua host for TCC queries and explicit permission requests.
-    /// Explicit setup registers its bundled agent; launchd then owns activation.
     static var nativeHostBundle: URL {
         applicationBundle.appendingPathComponent(NativeHostTrust.relativeBundlePath, isDirectory: true)
     }
@@ -164,8 +157,6 @@ enum TronPaths {
 
     static var agentBundleName: String { activeProfile.agentBundleName }
 
-    /// Stable has exactly one wrapper parent. Debug lifecycle is CLI-owned and
-    /// has no SMAppService parent.
     static var associatedWrapperBundleIDs: [String] {
         associatedWrapperBundleIDs(profile: activeProfile)
     }
@@ -174,7 +165,6 @@ enum TronPaths {
         profile == .stable ? [MacRuntimeVariant.releaseBundleIdentifier] : []
     }
 
-    /// The wrapper owns exactly one profile; Debug lifecycle is CLI-owned.
     static let activeProfile: TronGatewayProfile = .stable
 
     static func macWrapperLockFileName(bundleIdentifier: String?) -> String {

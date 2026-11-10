@@ -1,8 +1,6 @@
 #if HOSTED_TEST
 import Foundation
 
-/// Synthetic content using home-owner.taskControl / controlCatalog wire shapes.
-/// Catalog rows have no worker model; reports and receipts have no task title.
 enum HostedTaskToolSheetFixture {
     static func result(_ scenario: String) -> (request: [String: Any], details: [String: Any]) {
         let id = "photo-readiness"

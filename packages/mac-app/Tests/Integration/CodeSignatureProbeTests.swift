@@ -79,8 +79,6 @@ struct CodeSignatureProbeTests {
                 : ["-dv", "--verbose=4", fixture.root.path]
             #expect(arguments == expected)
             await calls.record(arguments)
-            // Exercise the real observation owner with the production-selected
-            // policy, substituting only the owned executable/fixture argument.
             return await Subprocess.run(executable: fixture.shell, arguments: fixture.arguments + arguments, policy: policy)
         }
     }
@@ -91,7 +89,6 @@ struct CodeSignatureProbeTests {
     }
 
     private func noise(bytes: Int) -> String {
-        // exec preserves the exact owned helper PID; there is no child tree.
         "exec /usr/bin/awk 'BEGIN { for (i=0; i<\(bytes); i++) printf \"x\"; print \"\" }'"
     }
 

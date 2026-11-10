@@ -5,11 +5,7 @@ import TronMobileCore
 @MainActor
 @Observable
 final class SessionPresentationStore {
-    // Renew at most one-third of the Gateway's 45-second presentation lease
-    // after the previous renewal, on the socket ping grid (see
-    // `presentationLeaseRenewalDelay`).
     private static let presentationLeaseRenewalInterval: Duration = .seconds(15)
-    // A busy open may clear quickly; keep its bounded retry local to this presentation owner.
     private static let busyOpenRetryBaseDelay: Duration = .milliseconds(250)
 
     private let client: GatewayClient
@@ -21,9 +17,6 @@ final class SessionPresentationStore {
         target.map { .session(id: $0.sessionID, generation: $0.generation) }
     }
 
-    // During an opening transition, notices belong to the pending presentation
-    // rather than the still-mounted target. This prevents new errors from
-    // being retired by a stale close of the previous presentation.
     private var noticeScope: InAppNoticeScope? {
         noticeScope(for: pendingTarget ?? target)
     }
@@ -53,8 +46,6 @@ final class SessionPresentationStore {
     private(set) var snapshot: SessionSnapshot? {
         didSet {
             let next = snapshot.map(SessionContextPresentation.init)
-            // Presentation equality excludes the transport cursor. Mutation
-            // admission reads the current authoritative snapshot at the action.
             if sessionContextPresentation != next { sessionContextPresentation = next }
             let history = snapshot.map(SessionHistoryPresentation.init)
             if historyPresentation != history { historyPresentation = history }
@@ -90,16 +81,9 @@ final class SessionPresentationStore {
     private(set) var loadingEarlierTranscript = false
     private(set) var transcriptLoadState: SessionTranscriptLoadState = .idle
     @ObservationIgnored private var transcriptLoadTarget: SessionPresentationIdentity?
-    // At most one target can be mounted or in replacement intake. Keeping the
-    // revoked marker exact avoids retaining every historical presentation.
     private var revokedTarget: SessionPresentationIdentity?
-    /// Exact source presentation fenced while a fork mutation is in flight.
-    /// Composer ownership remains valid until canonical success, but secondary
-    /// runtime reads stop before Pi can rekey the underlying session.
     private var forkTransitionTarget: SessionPresentationIdentity?
     private var nextPresentationGeneration = 0
-    // Every Gateway connection owns a distinct token namespace. Responses and
-    // close completions from an older connection must not mutate new ownership.
     private var connectionGeneration = 0
     private struct SubscriptionCloseLease: Hashable {
         let sessionID: String
@@ -138,11 +122,6 @@ final class SessionPresentationStore {
     private let synchronization = SessionSynchronizationCoordinator()
     private var deferredEffectsByTarget: [SessionPresentationIdentity: [ReducerEffect]] = [:]
     private var terminalSynchronizationFailures: [SessionPresentationIdentity: GatewayFailure] = [:]
-    /// The Gateway's own code for the failure that ended the last opening
-    /// synchronization of a session. `open` rewords that failure as
-    /// `sync_failed`, so `session.open.failure` reads this to report what the
-    /// Gateway actually answered (O-4 Do 7). Recording only: the thrown failure
-    /// keeps the presentation owner's wording.
     private var openingFailureGatewayCodes: [String: String] = [:]
     private struct AutomaticSynchronization {
         let lease: SessionSynchronizationCoordinator.Lease
@@ -151,26 +130,14 @@ final class SessionPresentationStore {
         var failed = false
     }
     private var automaticSynchronization: AutomaticSynchronization?
-    // Intake is synchronous at the event-consumer boundary. The coordinator
-    // owns the bounded quarantined suffix; only network recovery is drained by
-    // this one owner task.
     private var pendingSynchronizationSessionIDs = Set<String>()
     private var pendingSynchronizationLeases: [String: SessionSynchronizationCoordinator.Lease] = [:]
     @ObservationIgnored private var eventProcessingTask: Task<Void, Never>?
     private var eventProcessingGeneration = 0
-    // Replacement and foreground restoration of the mounted chat (C-2) owns the
-    // treatment that chat shows, never the connection label: the socket that
-    // admitted it is live, so the retained transcript reconciles behind a
-    // Connected badge and the chat itself reports the wait.
     @ObservationIgnored private var mountedRestorationTreatmentTask: Task<Void, Never>?
     private var mountedRestorationOwner = 0
-    // The mounted chat a restoration belongs to. Its treatment is scoped to
-    // that chat and retired against it, so a restoration the user has left or
-    // replaced can never post onto whatever screen is current.
     private var mountedRestorationTarget: SessionPresentationIdentity?
     private var mountedRestorationShowsCatchUpTreatment = false
-    // A restoration that finishes inside the grace shows no treatment at all: a
-    // prompt reconnect must not flash a catch-up notice over the chat.
     private static let mountedRestorationTreatmentGrace: Duration = .seconds(2)
 
     private(set) var context: JSONValue?
@@ -199,7 +166,6 @@ final class SessionPresentationStore {
     }
 }
 
-// Behavior stays out of the @Observable class body; see AppModel (#1066).
 extension SessionPresentationStore {
     var mountedTarget: SessionPresentationIdentity? {
         guard let target, owns(target) else { return nil }
@@ -217,8 +183,6 @@ extension SessionPresentationStore {
         guard isAuthoritative,
               let presentation = sessionContextPresentation,
               presentation.sessionID == sessionID else { return nil }
-        // Keep this accessor semantic: progress-only authoritative revisions
-        // must not invalidate Manage Session visuals or observation tracking.
         return presentation
     }
 
@@ -277,9 +241,6 @@ extension SessionPresentationStore {
         return target?.generation
     }
 
-    /// The Gateway's own code for the failure that ended this session's last
-    /// opening synchronization, or nil when the phone never reached the Gateway
-    /// or the failure did not come from an opening synchronization.
     func openingFailureGatewayCode(sessionID: String) -> String? {
         openingFailureGatewayCodes[sessionID]
     }
@@ -383,15 +344,9 @@ extension SessionPresentationStore {
         guard target == requested else { return }
         if forkTransitionTarget == requested { forkTransitionTarget = nil }
         revokedTarget = requested
-        // Route replacement retires every secondary read with the same exact
-        // authority. A fork rekeys the Gateway runtime before the old sheets
-        // finish dismissing; their late tree/context failures are obsolete and
-        // must not surface through the replacement route.
         clearSecondaryProjection()
     }
 
-    /// Project the synchronization owner's finite failure latch; the view must
-    /// not infer failure from an absent subscription or a transient notice.
     func hasFailedSynchronization(for sessionID: String) -> Bool {
         guard let target = mountedTarget,
               target.sessionID == sessionID,
@@ -463,14 +418,10 @@ extension SessionPresentationStore {
         )
         pendingTarget = requested
         terminalSynchronizationFailures[requested] = nil
-        // A new opening owns the answer: an earlier opening's Gateway code must
-        // not be read as this one's.
         openingFailureGatewayCodes[sessionID] = nil
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
-        // A same-session mounted snapshot remains truthful while a replacement
-        // owner reconnects. New sessions have no retained chat to preserve.
         let retainsMountedChat = isAuthoritative
             && target?.sessionID == sessionID
             && snapshot?.sessionId == sessionID
@@ -479,13 +430,7 @@ extension SessionPresentationStore {
         defer {
             if !didOpen {
                 deferredEffectsByTarget[requested] = nil
-                // Failed intake owns no presentation UI. Retire its exact
-                // notice scope before dropping the pending target so a
-                // catch-up/error capsule cannot leak into a later route.
                 retireNoticeScopes([requested])
-                // A failed fresh open must not leave the dashboard believing
-                // this exact route is still selected. The live subscription
-                // owner is closed by the synchronization failure path.
                 if pendingTarget == requested { pendingTarget = nil }
             }
         }
@@ -512,10 +457,6 @@ extension SessionPresentationStore {
               subscriptionTarget == requested else {
             throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
         }
-        // Optional recent-tail hydration is part of the opaque opening
-        // transaction. It either installs its exact bounded page now or times
-        // out silently; it can never race a second physical spine into view
-        // immediately after the first ready frame.
         await backfillRecentTailForOpening(ifNeededFor: requested)
         guard !Task.isCancelled, owns(requested), isAuthoritative else {
             throw CancellationError()
@@ -526,14 +467,8 @@ extension SessionPresentationStore {
     }
 
     func close(_ requested: SessionPresentationIdentity) async {
-        // A newer open owns the transition while the previously mounted target
-        // remains visible. Its eventual close callback must not clear the new
-        // owner's revocation, notice, or subscription.
         guard target == requested,
               pendingTarget == nil || pendingTarget == requested else { return }
-        // Only the exact mounted/pending owner may release its revocation. A
-        // stale close during replacement must leave the newer pending scope
-        // untouched.
         let oldTarget = target
         let oldPendingTarget = pendingTarget
         setPresentationVisible(requested, visible: false)
@@ -629,10 +564,6 @@ extension SessionPresentationStore {
         )
     }
 
-    /// A replacement tail may legitimately cover the entire mounted window,
-    /// in which case `reconcilePrefix` returns nil because no prefix remains.
-    /// Event admission still needs to distinguish that safe replacement from a
-    /// gap or identity conflict, which must retain the prior visible commit.
     private func replacementCoversMountedWindow(
         _ window: MountedTranscriptWindow?,
         from oldAuthority: SessionSnapshot?,
@@ -702,19 +633,12 @@ extension SessionPresentationStore {
               newTotal >= oldTotal,
               newTotal >= newTailEnd else { return nil }
 
-        // Validate the old mounted window before consulting the replacement.
-        // The prefix and authority tail are one exact visible sequence at
-        // their canonical ordinals; never infer continuity from a leaf alone.
         let oldVisible = window.prefixItems + oldAuthority.transcript
         let oldVisibleStart = window.coverage.start
         let oldVisibleEnd = window.coverage.end
         guard oldVisible.count == oldVisibleEnd - oldVisibleStart,
               Set(oldVisible.map(\.id)).count == oldVisible.count else { return nil }
 
-        // A replacement tail must share at least one canonical ordinal with
-        // the old visible sequence, or begin exactly at its end. The latter
-        // is an adjacent append: there is no overlap to validate, but also no
-        // unfillable gap. The only other exception is two empty windows.
         let bothEmpty = oldVisible.isEmpty && authority.transcript.isEmpty
         let adjacentAppend = newTailStart == oldVisibleEnd
         guard bothEmpty || adjacentAppend || (
@@ -734,9 +658,6 @@ extension SessionPresentationStore {
             }
         }
 
-        // Retain exactly the old visible rows before the replacement tail.
-        // When the replacement reaches or precedes the visible start there is
-        // no mounted prefix to retain; the authority tail remains canonical.
         let prefixCount = max(0, newTailStart - oldVisibleStart)
         guard prefixCount <= oldVisible.count else { return nil }
         guard prefixCount > 0 else { return nil }
@@ -821,11 +742,6 @@ extension SessionPresentationStore {
                 leafEntryIdPresent = values.contains(.leafEntryId)
             }
         }
-        // A cursor can become stale while the Gateway request is suspended.
-        // Explicit reader intent retries twice; optional recent-tail hydration
-        // makes one attempt and never delays or wedges the usable mount: its
-        // bound stays well inside the opening's outer deadline, so an
-        // unanswered page falls back to the usable tail instead of failing it.
         let maximumAttempt = optional ? 0 : 2
         for attempt in 0...maximumAttempt {
             guard let target,
@@ -848,10 +764,6 @@ extension SessionPresentationStore {
                 updateTranscriptLoadState(.failed("History bounds are invalid."), for: loadTarget)
                 return .failed
             }
-            // This lease intentionally excludes eventSequence: ordinary
-            // streaming events may advance that cursor while this request is
-            // suspended. Structure, runtime, branch, and mounted coverage are
-            // exact identities and must not change underneath the page.
             let leasedTarget = target
             let leasedStructureRevision = structureRevision
             let leasedRuntimeGeneration = current.runtimeGeneration
@@ -886,10 +798,6 @@ extension SessionPresentationStore {
                     updateTranscriptLoadState(.idle, for: loadTarget)
                     return .unavailable
                 }
-                // A branch/structure change invalidates the cursor at once;
-                // never retry a page against a changed canonical spine. The
-                // same exact lease also prevents a replacement runtime, leaf,
-                // target, or mounted coverage from accepting stale rows.
                 guard self.structureRevision == leasedStructureRevision,
                       installed.runtimeGeneration == leasedRuntimeGeneration,
                       installed.leafEntryId == leasedLeafEntryID,
@@ -932,8 +840,6 @@ extension SessionPresentationStore {
                     itemCount: response.items.count,
                     visibleItemCount: self.visibleTranscript.count
                 ), SessionSnapshotTranscriptAdmissionPolicy.admitsPage(response.items) else {
-                    // Repeating the same malformed/stale page cannot converge.
-                    // Retry only when the mounted canonical cursor itself moved.
                     updateTranscriptLoadState(
                         .failed("The history page did not match this conversation. Tap to retry."),
                         for: loadTarget
@@ -1031,9 +937,6 @@ extension SessionPresentationStore {
         expectedNextEntryID: String?,
         echoedNextEntryID: String?
     ) -> Bool {
-        // Mounted paging requires a present, exact canonical boundary echo.
-        // A nil expected anchor is retained only for the empty start=0/no-page
-        // compatibility path.
         guard let expectedNextEntryID else { return true }
         guard let echoedNextEntryID else { return false }
         return echoedNextEntryID == expectedNextEntryID
@@ -1067,9 +970,6 @@ extension SessionPresentationStore {
         commandLoadGeneration &+= 1
         commandCatalogTarget = nil
         synchronization.reset()
-        // Keep the last-good snapshot authoritative for the mounted chat, but
-        // advance its presentation generation so the retained projection is
-        // immediately observable and can accept the next reconnect owner.
         if mountedTarget != nil, snapshot != nil {
             advanceChatProjection(canonical: false)
         }
@@ -1121,9 +1021,6 @@ extension SessionPresentationStore {
         clearSecondaryProjection()
     }
 
-    /// Admits and reduces the event synchronously. If it invalidates the
-    /// mounted projection, `scheduleResynchronization` claims the existing
-    /// bounded coordinator quarantine before this method returns.
     func admitSynchronously(_ event: GatewayEvent) {
         if event.topic == "session.rebaseline" {
             processAdmittedEvent(event)
@@ -1140,9 +1037,6 @@ extension SessionPresentationStore {
     }
 
     func admit(_ event: GatewayEvent) async {
-        // Reduction and quarantine admission are synchronous. The recovery
-        // task intentionally remains independent so an unusable network read
-        // cannot stall the event caller or unrelated session intake.
         admitSynchronously(event)
         await Task.yield()
     }
@@ -1234,20 +1128,13 @@ extension SessionPresentationStore {
               target.sessionID == sessionID else { return }
         if let recovery = automaticSynchronization, recovery.failed,
            recovery.target == target, recovery.connectionGeneration == connectionGeneration { return }
-        // Claim the coordinator synchronously. The network task may begin
-        // later, but subsequent events are already bounded in its suffix.
         let lease = synchronization.acquire(
             sessionID: sessionID,
             intent: .reconnect(presentationGeneration: target.generation)
         )
         if lease.role == .leader {
-            // Keep the last canonical snapshot for display; its old token is
-            // not current command authority while a replacement is in flight.
             automaticSynchronization = AutomaticSynchronization(lease: lease, target: target, connectionGeneration: connectionGeneration)
         }
-        // A queued join must retain its existing outcome, not acquire a fresh
-        // transaction after that owner fails. Never overwrite an unstarted
-        // leader with a join to itself.
         if pendingSynchronizationLeases[sessionID] == nil, lease.role != .leader {
             _ = synchronization.markRetryRequired(sessionID: sessionID)
         }
@@ -1276,16 +1163,10 @@ extension SessionPresentationStore {
             target.sessionID,
             presentationGeneration: target.generation
         )
-        // Success and failure let the synchronization owner publish its own
-        // outcome in the restoration's own scope; only a restoration that
-        // ended without one leaves the treatment for this owner to retire.
         finishMountedRestoration(owner: owner, restored: restored)
         return restored
     }
 
-    /// One mounted restoration owns the treatment it publishes; a newer
-    /// restoration supersedes an older one's cleanup instead of clearing the
-    /// treatment the chat is showing.
     private func beginMountedRestoration(target: SessionPresentationIdentity) -> Int {
         mountedRestorationOwner &+= 1
         let owner = mountedRestorationOwner
@@ -1294,9 +1175,6 @@ extension SessionPresentationStore {
         let clock = self.clock
         mountedRestorationTreatmentTask = Task { @MainActor [weak self] in
             do { try await clock.sleep(Self.mountedRestorationTreatmentGrace) } catch { return }
-            // The chat this restoration belongs to must still be the mounted
-            // one: a restoration the user left, or replaced with a pending
-            // open, reports nothing onto the screen that took over.
             guard let self, self.mountedRestorationOwner == owner,
                   self.mountedTarget == target, self.pendingTarget == nil else { return }
             self.mountedRestorationShowsCatchUpTreatment = true
@@ -1319,9 +1197,6 @@ extension SessionPresentationStore {
         guard mountedRestorationShowsCatchUpTreatment else { return }
         mountedRestorationShowsCatchUpTreatment = false
         guard !restored else { return }
-        // A latched failure for this same chat has already replaced the
-        // treatment with its own warning; only a restoration that ended
-        // without one is this treatment's to retire.
         if let recovery = automaticSynchronization, recovery.failed, recovery.target == target { return }
         delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope(for: target))
     }
@@ -1553,9 +1428,6 @@ extension SessionPresentationStore {
               subscribedSessionID == lease.sessionID,
               subscriptionToken == lease.subscriptionToken,
               subscriptionTarget == expectedSubscriptionTarget else { return false }
-        // A decoded `closed:false` is authoritative evidence that this exact
-        // token is already retired. Only an interrupted request retains local
-        // ownership for retry; a newer token is never overwritten.
         guard response != nil else { return false }
         subscriptionToken = nil
         subscribedSessionID = nil
@@ -1568,8 +1440,6 @@ extension SessionPresentationStore {
         token: String,
         expectedConnectionGeneration: Int
     ) async {
-        // A retired connection's Gateway subscription is revoked with its
-        // socket. Never send that stale token through a newer connection.
         guard connectionGeneration == expectedConnectionGeneration else { return }
         if pendingSubscriptionTokens[sessionID] == token { pendingSubscriptionTokens[sessionID] = nil }
         struct Params: Codable { let sessionId, subscriptionToken: String }
@@ -1630,18 +1500,11 @@ extension SessionPresentationStore {
             case .join:
                 return await lease.sharedValue()
             case .retryAfterCurrent:
-                // A fresh presentation cannot accept a predecessor reconnect
-                // result: it needs its own bounded tail and target. Wait for
-                // that exact owner to drain, then reacquire under the still
-                // current pending target.
                 let shared = await lease.sharedValue()
                 guard !Task.isCancelled else { return false }
                 if replacingVisibleTranscript {
                     guard let presentationGeneration,
                           pendingTarget == SessionPresentationIdentity(sessionID: sessionID, generation: presentationGeneration) else { return false }
-                    // The predecessor's outcome belongs to its reconnect/fresh
-                    // target, never to this exact pending generation. Reacquire
-                    // once it has settled, including after a same-epoch failure.
                     continue
                 }
                 if shared || connectionGeneration == initialConnectionGeneration { return shared }
@@ -1649,8 +1512,6 @@ extension SessionPresentationStore {
                 synchronization.prepareLeaderAttempt(lease)
                 pendingRebaselines[sessionID] = nil
                 if case .reconnect = intent, let target = mountedTarget {
-                    // Foreground and transport reconnect use the same authority
-                    // fence and finite failure latch as event-driven recovery.
                     automaticSynchronization = AutomaticSynchronization(lease: lease, target: target, connectionGeneration: connectionGeneration)
                 }
                 return await performSynchronization(sessionID: sessionID, lease: lease, operation: operation)
@@ -1705,9 +1566,6 @@ extension SessionPresentationStore {
                     do { try await clock.sleep(delay * (attempt + 1)) }
                     catch { synchronization.complete(lease, outcome: false); return false }
                 }
-                // The attempt may already have installed a subscription before
-                // discovering a contiguous-replay race. Retire that exact
-                // owner before opening the replacement attempt.
                 if subscriptionToken != nil,
                    !(await closeSubscription(sessionID, expectedTarget: nil)) {
                     let ownsNotice = ownsSynchronizationAttempt(
@@ -1793,10 +1651,6 @@ extension SessionPresentationStore {
         var result = PerformanceResult.failure
         var metrics = PerformanceMetrics.none
         defer { performanceSignposts.end(interval, result: result, metrics: metrics) }
-        // This presentation attempt owns the answer: a code kept from the
-        // attempt that asked for a retry must not be read as the one that ended
-        // the open. A reconnect attempt is not an opening and never reports a
-        // `gatewayCode`, so it neither stores nor clears one.
         if case .presentation = lease.intent {
             openingFailureGatewayCodes[sessionID] = nil
         }
@@ -1809,9 +1663,6 @@ extension SessionPresentationStore {
                 "session.open",
                 Params(sessionId: sessionID)
             )
-            // session.open creates synchronization ownership before iOS decodes
-            // the snapshot. Preserve the independently bounded close token so
-            // a malformed snapshot can release that ownership before retrying.
             if let token = responseValue.objectValue?["subscriptionToken"]?.stringValue,
                GatewayTokenAdmissionPolicy.admit(token) {
                 provisionalToken = token
@@ -1888,11 +1739,6 @@ extension SessionPresentationStore {
                     details: nil
                 )
             }
-            // Resume from the bounded authoritative tail before any optional
-            // history work. Paging inside this barrier extends the replay race
-            // for active sessions and can turn a usable baseline into repeated
-            // open/sync/page/close failures. Older pages remain available after
-            // the presentation mounts and never gate conversation availability.
             let mode: SessionSnapshotInstallationMode
             switch lease.intent {
             case .presentation:
@@ -1929,9 +1775,6 @@ extension SessionPresentationStore {
                 return .retry(nil)
             }
 
-            // Reduce the complete quarantined suffix locally. Snapshot, token,
-            // and route-keyed effects become observable only after acknowledgement
-            // and contiguity establish the exact installed target.
             var replayChangedChatTimeline = false
             var replayChangedCanonicalChat = false
             var replayRequiresResynchronization = false
@@ -2012,9 +1855,6 @@ extension SessionPresentationStore {
                 Task { [weak self] in await self?.loadCommands(sessionID: sessionID) }
             }
             advanceChatProjection(canonical: true)
-            // Acknowledge only the completion revision carried by the exact
-            // snapshot that was admitted above. Retry retains that absolute cut;
-            // it can never clear a completion that raced after session.open.
             pendingAttentionRead = PendingAttentionRead(
                 sessionID: sessionID,
                 throughCompletionRevision: response.completionRevision,
@@ -2024,31 +1864,16 @@ extension SessionPresentationStore {
             )
             switch lease.intent {
             case .presentation:
-                // Final admission, authority installation, fresh mount, and
-                // lease release are one MainActor turn. No event can escape the
-                // quarantine between these ownership transitions.
                 mount(installedTarget)
                 isAuthoritative = true
-                // Initiate the cross-client attention acknowledgement before any
-                // open-time delegate work. The delegate immediately starts
-                // provider/model catalog discovery, which can block on an
-                // interactive provider-auth prompt, and the acknowledgement must
-                // never be starved behind it. Both remain concurrent requests;
-                // only their initiation order is fixed.
                 schedulePendingAttentionRead(targetOverride: installedTarget)
                 delegate?.sessionPresentationStoreDidOpen(installedTarget)
                 delegate?.sessionPresentationStoreDidPublishSnapshot(installed, target: installedTarget)
                 publish(replayEffects, target: installedTarget)
             case .reconnect:
                 if handoffTarget != nil {
-                    // A visible open joined this reconnect while its quarantine
-                    // was active. Transfer the admitted cut before releasing the
-                    // shared lease so no replay effect can escape under the old
-                    // presentation owner.
                     mount(installedTarget)
                     isAuthoritative = true
-                    // Same ordering rule as the presentation open: acknowledgement
-                    // first, then the delegate work that starts catalog discovery.
                     schedulePendingAttentionRead(targetOverride: installedTarget)
                     delegate?.sessionPresentationStoreDidOpen(installedTarget)
                     delegate?.sessionPresentationStoreDidPublishSnapshot(installed, target: installedTarget)
@@ -2082,11 +1907,6 @@ extension SessionPresentationStore {
             ) else {
                 return .failed(showCatchUpNotice: false)
             }
-            // `open` rewords this failure, so keep the code the Gateway itself
-            // answered for the opening synchronization's own record. A locally
-            // minted failure (`disconnected`, `timeout`, `closed`, …) has no
-            // Gateway answer to report, so it is not stored and the record
-            // reads `gatewayCode=none`.
             if case .presentation = lease.intent,
                let failure = error as? GatewayFailure,
                failure.answeredByGateway == true {
@@ -2106,10 +1926,6 @@ extension SessionPresentationStore {
             if let failure = error as? GatewayFailure,
                failure.code == "invalid_response",
                retriesInvalidResponse {
-                // A runtime snapshot can change while bounded extension
-                // activity settles. Retry a malformed projection twice from a
-                // fresh session.open; the final failure remains actionable and
-                // enters the iOS Logs ring.
                 return .retry(nil)
             }
             if let failure = error as? GatewayFailure,
@@ -2206,9 +2022,6 @@ extension SessionPresentationStore {
         }
     }
 
-    /// The wait until the latest ping-grid tick no later than one renewal
-    /// interval from now, so the renewal RPC rides a liveness-ping wakeup
-    /// while never renewing later than the fixed interval would.
     private static func presentationLeaseRenewalDelay(clock: MonotonicClock) -> Duration {
         let now = clock.now()
         let grid = GatewayConnectionPolicy.clientPingInterval
@@ -2305,8 +2118,6 @@ extension SessionPresentationStore {
                         throughCompletionRevision
                     )
                 } else if self.attentionReadHighWaterRevision == throughCompletionRevision {
-                    // Admission failed, so this revision is not a high-water
-                    // fact. A later visibility renewal or summary may retry it.
                     self.attentionReadHighWaterRevision = self.attentionReadAcknowledgedRevision
                     self.attentionReadRequiresVisibility = false
                 }
@@ -2357,8 +2168,6 @@ extension SessionPresentationStore {
                 throw CancellationError()
             } catch let failure as GatewayFailure {
                 if failure.retryable && attempt < 2 { continue }
-                // Attention convergence is non-blocking for chat. A later
-                // reconnect/open retries the same canonical operation.
                 return false
             } catch {
                 if attempt < 2 { continue }
@@ -2391,10 +2200,6 @@ extension SessionPresentationStore {
         let staleLiveProjection = previousLiveRevision.map { previous in
             snapshot.liveActivityRevision.map { $0 < previous } ?? true
         } ?? false
-        // Preserve all rows across a stale full frame. This closes the compact
-        // delta/full-snapshot race without letting an equal/newer authoritative
-        // frame retain expired membership. Terminal truth remains latched even
-        // when the full frame itself is current.
         for prior in previous {
             guard let index = admitted.firstIndex(where: { $0.stableID == prior.stableID }) else {
                 if staleLiveProjection { admitted.append(prior) }
@@ -2493,8 +2298,6 @@ extension SessionPresentationStore {
         let previousLifecycle = previous.lifecycle
         let nextLifecycle = activity.lifecycle
         if let previousLifecycle, previousLifecycle.isTerminal {
-            // Terminal truth is latched. Equal/older advisory updates and any
-            // attempt to return to a current state are ignored.
             if nextLifecycle?.isTerminal != true || nextLifecycle?.state != previousLifecycle.state { return (activities, false) }
         }
         if let old = previousLifecycle?.sequence, let next = nextLifecycle?.sequence, next <= old { return (activities, false) }
@@ -2771,8 +2574,6 @@ extension SessionPresentationStore {
                 into: snapshot.extensionActivities ?? []
             )
             if changed { snapshot.extensionActivities = next }
-            // This delta changes only the mounted extension hub. Deliberately
-            // do not advance transcript projection or scrolling.
             advance(&snapshot, envelope)
         case "session.processActivity":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
@@ -2790,9 +2591,6 @@ extension SessionPresentationStore {
             var next = (snapshot.processActivities ?? []).filter { !removals.contains($0.processId) }
             if let activity = delta.activity {
                 let result = Self.upsertingProcessActivity(activity, into: next)
-                // A newly authoritative aggregate cannot be installed around a
-                // stale/rejected row. Resynchronize rather than allowing the
-                // composer overview and mounted rows to split authority.
                 guard result.1 else { return snapshot.sessionId }
                 next = result.0
             }
@@ -2802,8 +2600,6 @@ extension SessionPresentationStore {
             ) else { return snapshot.sessionId }
             snapshot.processOverview = delta.overview
             snapshot.processActivities = next
-            // Process output and lifecycle never mutate transcript projection
-            // or issue a scroll command.
             advance(&snapshot, envelope)
         case "session.extensionPresentation":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
@@ -2843,20 +2639,12 @@ extension SessionPresentationStore {
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
             if updatesSecondaryRevisions {
                 let branchChanged = envelope.data.objectValue?["branchChanged"]?.boolValue == true
-                // A structure notification is not itself a replacement of the
-                // mounted canonical window. Custom entries and other ordinary
-                // append-only changes must preserve explicitly loaded earlier
-                // rows until the next authoritative snapshot proves overlap.
-                // Only a real branch replacement invalidates that prefix.
                 structureRevision &+= 1
                 contextRevision &+= 1
                 if branchChanged {
                     mountedTranscriptWindow = nil
                     synchronization.requireFreshInstall(sessionID: snapshot.sessionId)
                 } else if let window = mountedTranscriptWindow {
-                    // Re-key the retained coverage to the new structure lease.
-                    // This preserves the exact loaded prefix while ensuring an
-                    // in-flight page captured before the event cannot install.
                     let old = window.coverage
                     mountedTranscriptWindow = MountedTranscriptWindow(
                         coverage: MountedTranscriptCoverage(
@@ -2967,9 +2755,6 @@ extension SessionPresentationStore {
                     from: snapshot,
                     into: admitted
                 ) else {
-                // Exact-next sequencing is not sufficient to prove that a
-                // retained loaded prefix still joins this tail. Preserve the
-                // visible commit and request the authoritative resync path.
                 return event.sessionId
             }
             mountedTranscriptWindow = reconciledPrefix
@@ -3003,8 +2788,6 @@ extension SessionPresentationStore {
     private func resyncIfNeeded(_ event: GatewayEvent, snapshot: SessionSnapshot) -> String? {
         guard event.sessionId == snapshot.sessionId else { return nil }
         guard let envelope = event.preparedSessionEvent?.envelope else {
-            // A recognized owned session topic that could not produce an
-            // envelope is not safely ignorable: fail closed to authority.
             return hasInstalledSubscription(for: snapshot.sessionId) ? snapshot.sessionId : nil
         }
         if envelope.runtimeGeneration != snapshot.runtimeGeneration

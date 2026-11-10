@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Metadata is a secondary disclosure of the already loaded resource, never a
-/// second fetch or another owner of the selected invocation.
 struct ComposerResourceInfoSheet: View {
     let items: [TronTechnicalMetadataItem]
     let accent: Color

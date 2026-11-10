@@ -2,9 +2,6 @@ import Foundation
 import Observation
 import TronMobileCore
 
-/// Transcript-coupled session facts frozen with the exact installed commit.
-/// Drafts, command admission, and the independent process projection retain
-/// their existing owners.
 struct ChatVisibleSessionFacts: Hashable, Sendable {
     let sessionID: String
     let phase: SessionPhase
@@ -18,14 +15,9 @@ struct ChatVisibleSessionFacts: Hashable, Sendable {
 }
 
 struct ChatTranscriptProjectionTag: Hashable, Sendable {
-    /// Bounded layout facts only. Authority sequence/revision may advance for
-    /// model, context, or other metadata without requiring transcript work or
-    /// arming viewport settlement.
     struct LayoutIdentity: Hashable, Sendable {
         let transcriptStart: Int?
         let transcriptTotal: Int?
-        // Put sparse/high-frequency facts before the bounded canonical array so
-        // synthesized equality rejects streaming/tool/queue churn in O(1).
         let streaming: TranscriptItem?
         let phase: SessionPhase
         let activeToolSegmentId: String?
@@ -59,9 +51,6 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         }
     }
 
-    /// Value semantics over one immutable `LayoutIdentity`: equality and
-    /// hashing are exactly the wrapped value's, so the tag's synthesized
-    /// conformances are unchanged.
     private final class LayoutIdentityStorage: Hashable, Sendable {
         let value: LayoutIdentity
 
@@ -93,8 +82,6 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
                 name = attachment.name
                 mimeType = attachment.mimeType
                 size = attachment.size
-                // The digest is cached when the attachment is admitted. Never
-                // inspect either fullPreviewData or preview bytes here.
                 previewIdentity = attachment.previewIdentity
             }
         }
@@ -180,20 +167,11 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     let transcriptCount: Int
     let firstTranscriptID: String?
     let lastTranscriptID: String?
-    /// The exact Gateway capability fact captured by this immutable source.
-    /// A missing Gateway defaults to false for callers and tests.
     let queueManagementCapability: Bool
-    /// Every transcript row carries its installation tag into several view
-    /// values, and SwiftUI copies those values repeatedly per body update. The
-    /// inline layout facts (including a whole streaming item) would make each
-    /// copy about a kilobyte, so they live in one immutable shared box.
     private let layoutIdentityStorage: LayoutIdentityStorage
     var layoutIdentity: LayoutIdentity { layoutIdentityStorage.value }
     var handoffIdentity: HandoffIdentity
     let hiddenThinkingLabel: String?
-    /// Foreground reconciliation installs the authoritative aggregate without
-    /// replaying every row that arrived while the app was suspended. The
-    /// generation is consumed by the presentation store exactly once.
     let entranceSuppressionGeneration: Int?
 
     init(
@@ -275,9 +253,6 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
 }
 
 enum ChatProjectionTransactionAdmissionPolicy {
-    /// Opening may reveal one complete commit while same-runtime streaming or
-    /// canonical append facts advance. Session, mounted presentation, and
-    /// runtime replacement remain hard boundaries.
     static func admitsOpening(
         installed: ChatTranscriptProjectionTag,
         desired: ChatTranscriptProjectionTag?
@@ -286,9 +261,6 @@ enum ChatProjectionTransactionAdmissionPolicy {
         return desired.matchesIdentity(of: installed)
     }
 
-    /// An exact history page may finish while live facts or a canonical suffix
-    /// advance. Its first/last IDs must still bound an unchanged prefix at the
-    /// same ordinals; branch replacement and window movement fail closed.
     static func admitsTranscriptWindow(
         installed: ChatTranscriptProjectionTag,
         desired: ChatTranscriptProjectionTag?,
@@ -405,8 +377,6 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let runtimeItems: [ChatTranscriptRenderItem]
     let committedLedger: ChatCommittedLedger
     let liveRegion: ChatLiveRegion
-    /// Bounded display-only composition at the one canonical/live boundary.
-    /// Source ownership remains unchanged in the two ledgers above.
     let toolBoundaryFusion: ChatPhysicalToolRunFusion?
     let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
     let queuedMessages: [SessionSnapshot.QueuedMessage]
@@ -648,9 +618,6 @@ struct InstalledChatTranscript: Hashable, Sendable {
               Set(toolPhysicalIDByRenderedID.values).count
                   == toolPhysicalIDByRenderedID.count else { return false }
 
-        // Validate the namespace SwiftUI actually receives, not just the
-        // canonical timeline. Presentation-only lifecycle, queue, paging, and
-        // tail-marker IDs must never collide with canonical/runtime IDs.
         var physicalIDs = Set<String>()
         func admit(_ id: String) -> Bool {
             guard !id.isEmpty else { return false }
@@ -680,9 +647,6 @@ struct InstalledChatTranscript: Hashable, Sendable {
         timeline.containsID(id) || runtimeIDSet.contains(id)
     }
 
-    /// Returns the stable physical host for a source row when display-only
-    /// boundary composition is active. This never changes canonical/live
-    /// ownership or semantic call identity.
     func physicalHostID(forDisplayedID id: String) -> String {
         guard let fusion = toolBoundaryFusion,
               id == fusion.canonicalRenderedID || id == fusion.liveRenderedID else {
@@ -695,9 +659,6 @@ struct InstalledChatTranscript: Hashable, Sendable {
         displayedItemByID?[id]
     }
 
-    /// Entrance animation is meaningful only for a row that still owns running
-    /// execution. Terminal tool rows can arrive as a fresh bounded snapshot,
-    /// but must never acquire or retain a pending visual entrance.
     func toolRunIsRunning(forDisplayedID id: String) -> Bool? {
         if let fusion = toolBoundaryFusion,
            id == fusion.canonicalRenderedID || id == fusion.liveRenderedID {
@@ -725,9 +686,6 @@ struct InstalledChatTranscript: Hashable, Sendable {
         return resolveToolDetails(callIDs: callIDs)
     }
 
-    /// The trace an open thinking detail follows, resolved by the identity its
-    /// row presented: the row's own install answers, so the sheet keeps growing
-    /// with the trace after the row that opened it is gone.
     func resolveThinkingTrace(_ identity: String) -> ChatThinkingTraceContent? {
         guard let resolved = ChatTranscriptDetailResolution.thinkingTrace(
             in: timeline.items,
@@ -740,8 +698,6 @@ struct InstalledChatTranscript: Hashable, Sendable {
         )
     }
 
-    /// The transcript event an open detail follows, resolved by the identity its
-    /// pill presented so a body that is still arriving keeps filling the sheet.
     func resolveNotificationDetail(_ eventID: String) -> ChatNotificationPresentation? {
         ChatTranscriptDetailResolution.notificationDetail(in: timeline.items, eventID: eventID)
     }
@@ -861,11 +817,6 @@ enum ChatTranscriptTransitionPolicy {
 
         var inserted: [String] = []
         var insertedSet = Set<String>()
-        // Built at most once per install, and only when a candidate passes the
-        // cheaper ID checks, so the pass stays linear in the displayed rows.
-        // A row outside the semantic index has a nil semantic ID; a nil next
-        // semantic ID matches any such previous row, exactly as an optional
-        // equality against every previous row would.
         var previousSemantics: (indexed: Set<String>, includesUnindexed: Bool)?
         func previouslyDisplayedSemantic(_ semanticID: String?) -> Bool {
             let semantics = previousSemantics ?? {
@@ -887,10 +838,6 @@ enum ChatTranscriptTransitionPolicy {
             for id in candidates {
                 guard inserted.count < ChatTranscriptPageRequest.maximumItemCount else { return }
                 guard insertedSet.insert(id).inserted else { continue }
-                // A status-only update or canonical takeover can change the
-                // rendered row ID while retaining the exact semantic call or
-                // group. It is an update to an existing physical owner, not a
-                // new entrance entitlement.
                 let entranceID = id == next.toolBoundaryFusion?.liveRenderedID
                     ? (next.toolBoundaryFusion?.canonicalRenderedID ?? id)
                     : id
@@ -915,9 +862,6 @@ enum ChatTranscriptTransitionPolicy {
         return inserted
     }
 
-    /// Source ordinals, rather than rendered grouping, distinguish a forward
-    /// bounded-tail rollover from prepend or replacement. Both windows are
-    /// capped at the Gateway page bound before reaching MainActor publication.
     private static func isExactForwardEvolution(
         from previous: InstalledChatTranscript.SourceWindow,
         to next: InstalledChatTranscript.SourceWindow
@@ -972,11 +916,8 @@ enum ChatTranscriptPresentationStoreError: Error, Equatable, Sendable, Localized
 }
 
 #if HOSTED_TEST
-/// Deterministic `HOSTED_TEST`-only preparation invocation seam.
 typealias ChatTextPreparationWorkRecorder = @Sendable () -> Void
 
-/// Deterministic `HOSTED_TEST`-only scheduling seam. It may delay the real
-/// production kernel but cannot replace or manufacture projection output.
 typealias ChatTranscriptProjectionWorkGate = @Sendable (ChatTranscriptProjectionTag) -> Void
 #endif
 
@@ -1044,8 +985,6 @@ private actor ChatTranscriptProjectionWorker {
             isCachedProjection = snapshot.isCachedProjection == true
         }
 
-        /// Tool payload patches change `toolExecutions`, but not text inputs.
-        /// Keep every other preparation dependency explicit.
         var textPreparationKey: TextPreparationKey {
             TextPreparationKey(
                 canonical: canonical, phase: phase,
@@ -1076,9 +1015,6 @@ private actor ChatTranscriptProjectionWorker {
         let candidate: ChatTranscriptProjectionCandidate
         let preparedText: ChatTextPreparationSnapshot
         let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
-        /// Memory pressure intentionally invalidates preparation without
-        /// invalidating the projection basis. A later build must take the
-        /// bounded cold-preparation path rather than reuse empty slices.
         let preparedTextAvailable: Bool
     }
 
@@ -1119,8 +1055,6 @@ private actor ChatTranscriptProjectionWorker {
     }
     #endif
 
-    /// Monotonic retirement cannot erase a basis installed for a newer reset
-    /// epoch, even when an older retirement message was delayed behind work.
     func retire(before cacheEpoch: Int) async {
         retiredBeforeEpoch = max(retiredBeforeEpoch, cacheEpoch)
         newestCacheEpoch = max(newestCacheEpoch, cacheEpoch)
@@ -1131,9 +1065,6 @@ private actor ChatTranscriptProjectionWorker {
            textPreparationScope.cacheEpoch < retiredBeforeEpoch {
             self.textPreparationScope = nil
         }
-        // The cache owns the same monotonic epoch fence. Retirement can be
-        // delivered after a successor build has begun, so it removes only
-        // entries at or below the retired epoch and preserves newer work.
         await textPreparationCache.retire(before: cacheEpoch)
     }
 
@@ -1172,8 +1103,6 @@ private actor ChatTranscriptProjectionWorker {
         newestCacheEpoch = max(newestCacheEpoch, cacheEpoch)
         let scope = Scope(tag: tag, cacheEpoch: cacheEpoch)
         if let basis, basis.scope.cacheEpoch < cacheEpoch {
-            // A newer epoch must dispose the old complete history before any
-            // eligibility check, not after an incremental build succeeds.
             self.basis = nil
         }
 
@@ -1224,10 +1153,6 @@ private actor ChatTranscriptProjectionWorker {
         }
 
         guard !Task.isCancelled else { return nil }
-        // Malformed authoritative identities are intentionally retained by the
-        // kernel so installation can fail closed. Do not feed those duplicate
-        // rendered IDs into Dictionary(uniqueKeysWithValues:), which traps
-        // before the owner can reject the projection safely.
         guard candidate.isValid else {
             return BuiltChatTranscript(
                 installed: installedTranscript(
@@ -1251,9 +1176,6 @@ private actor ChatTranscriptProjectionWorker {
         let preparedText: ChatTextPreparationSnapshot
         let slices: [String: ChatTextPreparationSnapshot]
         if canReusePreparedText, let basis {
-            // A tool payload patch changes descriptors only. Exact scope and
-            // preparation inputs prove that the existing bounded text slices
-            // remain valid; tool payloads are installed separately.
             preparedText = basis.preparedText
             slices = basis.preparedTextByRenderedID
         } else {
@@ -1271,8 +1193,6 @@ private actor ChatTranscriptProjectionWorker {
                 preparedText = .empty
                 await textPreparationCache.removeAll()
             }
-            // Preparation itself is bounded to the canonical render-critical
-            // tail; explicitly paged older rows use the exact cold parser.
             slices = Dictionary(uniqueKeysWithValues: candidate.timeline.items
                 .suffix(ChatTranscriptPageRequest.maximumItemCount)
                 .map { item in (item.id, preparedText.slice(for: item)) })
@@ -1331,9 +1251,6 @@ private actor ChatTranscriptProjectionWorker {
     }
 }
 
-/// Disposable exact-tagged transcript projection. Canonical session truth stays
-/// in `SessionPresentationStore`; this owner serializes expensive formatting off
-/// MainActor and atomically installs only the newest complete timeline.
 @MainActor
 @Observable
 final class ChatTranscriptPresentationStore {
@@ -1356,10 +1273,6 @@ final class ChatTranscriptPresentationStore {
     private(set) var admittedEntranceIDs: Set<String> = []
     private(set) var displayedSemanticIDCount: Int = 0
 
-    /// The sheet a row asked to present. It lives here with the other row-owned
-    /// presentation state because a lazy window change discards the row: a
-    /// row-owned sheet is dismissed with the row that presented it, and a tool
-    /// detail can be three viewports away from the row that opened it.
     let sheetRoutes = ChatTranscriptSheetRouteOwner()
 
     @ObservationIgnored private var pendingEntranceOrder: [String] = []
@@ -1418,15 +1331,11 @@ final class ChatTranscriptPresentationStore {
     }
     #endif
 
-    /// Returns true only when this exact source introduced new projection work.
     @discardableResult
     func submit(snapshot: SessionSnapshot, tag: ChatTranscriptProjectionTag) -> Bool {
         submit(snapshot: snapshot, handoff: .none, tag: tag)
     }
 
-    /// Snapshot and handoff are one admission unit. A caller that captured a
-    /// different commit must coalesce and recapture rather than install a tag
-    /// whose row facts came from another moment.
     @discardableResult
     func submit(
         snapshot: SessionSnapshot,
@@ -1435,9 +1344,6 @@ final class ChatTranscriptPresentationStore {
         tag: ChatTranscriptProjectionTag
     ) -> Bool {
         precondition(tag.sessionID == snapshot.sessionId)
-        // Commit only the row-sized frozen attachment projection. This also
-        // protects callers that constructed a handoff directly rather than via
-        // ChatView's source capture.
         let frozenHandoff = handoff.frozenForHandoff()
         guard tag.handoffIdentity == ChatTranscriptProjectionTag.HandoffIdentity(
             commit: frozenHandoff,
@@ -1475,9 +1381,6 @@ final class ChatTranscriptPresentationStore {
             return false
         }
 
-        // Keep the last complete commit visible while this source is prepared.
-        // The replacement is admitted as one frame-gated install below; clearing
-        // here would expose a blank interval and let controls race ahead of rows.
         desiredTag = tag
         pending = PendingProjection(
             snapshot: snapshot,
@@ -1491,10 +1394,6 @@ final class ChatTranscriptPresentationStore {
         return true
     }
 
-    /// Installs the local outgoing lifecycle in the current complete projection
-    /// synchronously. Canonical payload facts and their tag fields are retained;
-    /// the newest authoritative capture is still submitted immediately after
-    /// this graft and remains the only path that advances canonical truth.
     @discardableResult
     func graftLocalLifecycle(
         handoff: ChatTranscriptHandoffCommit,
@@ -1519,9 +1418,6 @@ final class ChatTranscriptPresentationStore {
         return true
     }
 
-    /// Whether this tag can still satisfy an installation waiter. A rejected
-    /// submission must not be mistaken for pending work by the presentation
-    /// loop, otherwise it can retry synchronously forever.
     func hasInstallWork(for tag: ChatTranscriptProjectionTag) -> Bool {
         installed?.tag == tag
             || desiredTag == tag
@@ -1581,14 +1477,10 @@ final class ChatTranscriptPresentationStore {
         return installed.resolveToolDetails(callIDs: callIDs, installationTag: installationTag)
     }
 
-    /// The content an open thinking detail follows, resolved from the installed
-    /// projection the rows themselves render from. The sheet reads this while it
-    /// is presented, so an install that grows the trace re-renders it.
     func resolveThinkingTrace(_ identity: String) -> ChatThinkingTraceContent? {
         installed?.resolveThinkingTrace(identity)
     }
 
-    /// The presentation an open event detail follows, from the same install.
     func resolveNotificationDetail(_ eventID: String) -> ChatNotificationPresentation? {
         installed?.resolveNotificationDetail(eventID)
     }
@@ -1603,9 +1495,6 @@ final class ChatTranscriptPresentationStore {
         entranceSuppressedInstallationTag == tag
     }
 
-    /// Row geometry is the admission evidence. The exact displayed installation
-    /// captured by that row must still own both its identity and pending state;
-    /// a newer desired source is deliberately not part of this decision.
     @discardableResult
     func resolveEntrance(
         id: String,
@@ -1621,17 +1510,11 @@ final class ChatTranscriptPresentationStore {
         return isVisible
     }
 
-    /// Retires one admitted transcript entrance only after its local animation
-    /// completes. The displayed-semantic ledger prevents a lazy remount or a
-    /// later projection from replaying it.
     func consumeTranscriptEntrance(id: String) {
         guard admittedEntranceIDs.remove(id) != nil else { return }
         admittedEntranceOrder.removeAll { $0 == id }
     }
 
-    /// Lifecycle rows are lazily mounted, so their one-shot entrance ownership
-    /// lives outside row-local `@State`. Recording a mounted row does not publish
-    /// observation changes and therefore cannot truncate its active animation.
     func lifecycleEntranceIsConsumed(id: String) -> Bool {
         consumedLifecycleEntranceIDs.contains(id)
     }
@@ -1640,8 +1523,6 @@ final class ChatTranscriptPresentationStore {
         consumedLifecycleEntranceIDs.insert(id)
     }
 
-    /// Direct/native interaction is stronger than a pending visual entrance.
-    /// Clearing here prevents lazily realized offscreen rows from replaying later.
     func discardPendingEntrances() {
         pendingEntranceIDs.removeAll(keepingCapacity: true)
         pendingEntranceOrder.removeAll(keepingCapacity: true)
@@ -1657,9 +1538,6 @@ final class ChatTranscriptPresentationStore {
         Task { await projectionWorker.removePreparedText() }
     }
 
-    /// Retires disposable derivation while preserving the last complete frame.
-    /// Authority continues in SessionPresentationStore; the caller submits one
-    /// newest immutable cut when its surface becomes active again.
     func suspendPendingWork() {
         generation &+= 1
         let retiredEpoch = generation
@@ -1814,10 +1692,6 @@ final class ChatTranscriptPresentationStore {
         admittedEntranceIDs = Set(admittedEntranceOrder)
     }
 
-    /// Finalized grouping or canonical fusion can replace a tool run's semantic
-    /// ID while preserving its physical host. Transfer only an already-admitted
-    /// entrance to that current semantic owner so rapid tool completion cannot
-    /// truncate the local animation or create a second entrance.
     private func transferAdmittedToolEntrancesToCurrentSemanticOwner(
         in output: InstalledChatTranscript
     ) {
@@ -1860,9 +1734,6 @@ final class ChatTranscriptPresentationStore {
             0,
             pendingEntranceOrder.count + novel.count - ChatTranscriptPageRequest.maximumItemCount
         )
-        // Observation can synchronously reevaluate the lazy-tail hint from a
-        // property mutation. Build both ledgers off-owner so that callback can
-        // never overlap an inout access to either observed collection.
         var updatedOrder = pendingEntranceOrder
         var updatedIDs = pendingEntranceIDs
         Self.retireOldestEntrances(
@@ -1919,9 +1790,6 @@ final class ChatTranscriptPresentationStore {
                 return true
             }
         }
-        // Current rendered rows are never evicted from the resilience ledger,
-        // even if bounded runtime notifications temporarily lift the visible
-        // count above the canonical page size.
         displayedSemanticIDCount = displayedSemanticIDs.count
     }
 

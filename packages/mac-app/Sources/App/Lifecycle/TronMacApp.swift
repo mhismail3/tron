@@ -20,30 +20,7 @@ struct TronMacApp: App {
                 }
             }
                 .environment(\.environmentSetup, EnvironmentSetup.live)
-                // App-wide tint — every system control (focus rings,
-                // default buttons, toggles) inherits emerald instead
-                // of system blue. Custom controls in
-                // `WizardButtonStyle.swift` reach for `.tronEmerald`
-                // directly so they stay emerald even if a sub-view
-                // overrides the tint locally.
                 .tint(Color.tronEmerald)
-                // The wizard canvas is pinned at 480×440. `RootView`
-                // propagates the chosen size per mode
-                // (loading/wizard/menu-bar-only); `.contentSize`
-                // below tells SwiftUI to size the window to whatever
-                // that content reports. `WindowConfigurator` still
-                // strips `.resizable` from the style mask so the user
-                // can't drag-resize.
-                // `.containerBackground(_:for: .window)` paints the
-                // material at the WINDOW level — under the entire
-                // SwiftUI content view, on top of nothing. On macOS 26
-                // (Tahoe) `.regularMaterial` automatically picks up the
-                // Liquid Glass treatment with the live wallpaper bleed-
-                // through; on older macOS it falls back to vibrancy.
-                // Combined with the early-running `WindowConfigurator`
-                // that flips `isOpaque = false`, this gives the
-                // single-canvas glass look without a separate titlebar
-                // region.
                 .containerBackground(.regularMaterial, for: .window)
                 .configureHostingWindow { window in
                     if EnvironmentSetup.live.resolvedStartupMode() == .testHost {
@@ -55,15 +32,7 @@ struct TronMacApp: App {
                     window.titlebarAppearsTransparent = true
                     window.titleVisibility = .hidden
                     window.styleMask.insert(.fullSizeContentView)
-                    // Strip the resize affordance entirely — paired with
-                    // the fixed `.frame(...)` and `.contentSize`
-                    // resizability above, the user has no way to drag
-                    // the window larger.
                     window.styleMask.remove(.resizable)
-                    // Anti-aliased rounded corners on the content view's
-                    // layer so the glass clips cleanly against the
-                    // wallpaper instead of showing a hard rectangular
-                    // edge against the material.
                     window.contentView?.wantsLayer = true
                     window.contentView?.layer?.cornerRadius = 16
                     window.contentView?.layer?.masksToBounds = true
@@ -76,10 +45,6 @@ struct TronMacApp: App {
 }
 
 enum TronMacRuntime {
-    /// Xcode has exposed different test-host markers across XCTest,
-    /// Swift Testing, and runner generations. Treat any known marker as
-    /// a test host so CI never boots wizard/menu side effects just to run
-    /// logic tests.
     static func isRunningUnderTests(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
@@ -97,17 +62,6 @@ struct TestHostView: View {
     }
 }
 
-/// Top-level switcher between Wizard and Menu Bar modes.
-///
-/// Decision rule: presence of the `~/.tron/internal/run/.onboarded` sentinel.
-/// - Missing → wizard window.
-/// - Present → window dismisses; AppDelegate transforms the process to
-///   `.accessory` and installs the menu bar item.
-///
-/// The activation policy follows mode: `.regular` for the wizard
-/// window, `.accessory` for menu-bar-only. Post-onboarding pairing
-/// info is handled by a dedicated menu-bar window controller rather
-/// than remounting the wizard.
 struct RootView: View {
     @Environment(\.environmentSetup) private var setup
     @State private var mode: AppMode = .loading
@@ -118,16 +72,10 @@ struct RootView: View {
         Group {
             switch mode {
             case .loading:
-                // Pin the loading canvas to the final wizard size so
-                // the window does not resize between loading and the
-                // first step.
                 ProgressView("Loading…")
                     .controlSize(.large)
                     .frame(width: WizardLayout.width, height: WizardLayout.height)
             case .wizard:
-                // `WizardView` → `WizardShell` applies one fixed
-                // `.frame(width: WizardLayout.width, height: WizardLayout.height)`
-                // so step transitions do not fight window resizing.
                 WizardView()
             case .menuBarOnly:
                 MenuBarHostView()
@@ -149,7 +97,6 @@ struct RootView: View {
             case .wizard:
                 NSApp.setActivationPolicy(.regular)
                 NSApp.activate(ignoringOtherApps: true)
-                // WindowConfigurator applies window chrome before display.
                 NSApp.windows.first?.makeKeyAndOrderFront(nil)
             case .menuBarOnly:
                 NSApp.setActivationPolicy(.accessory)
@@ -169,9 +116,6 @@ enum AppMode: Equatable {
     case companion
 }
 
-/// Visible only in menu-bar mode. Renders a 1×1 hidden placeholder so
-/// SwiftUI's WindowGroup has something to draw before the window is
-/// orderOut'd.
 struct MenuBarHostView: View {
     var body: some View {
         Color.clear
@@ -247,16 +191,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             break
         }
 
-        // The test host app launches inside `xcodebuild test`; skip
-        // wrapper locks, menu-bar setup, launchd checks, and wizard
-        // observers so logic tests do not manage a real server.
         if startupMode == .testHost {
             return
         }
 
-        // Install the per-wrapper lock first. The installed release and
-        // an Xcode Debug companion intentionally use different lock
-        // files so wrapper UI work can happen while production runs.
         let lock = SingleInstanceLock(lockFileURL: setup.wrapperLockPath)
         guard lock.acquire() else {
             TronLog.shared.record(.warning, event: "app.instance-already-running", source: "lifecycle", message: "Another wrapper instance is already running")
@@ -284,17 +222,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if case .onboarded = startupMode {
             installMenuBar(setup: setup, context: .existingOnboardedLaunch)
         }
-        // Otherwise the WindowGroup shows WizardView; menu bar is installed
-        // when the wizard completes via NotificationCenter event.
 
         wizardCompletionObserver = NotificationCenter.default.addObserver(
             forName: .tronWizardDidComplete,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            // The `.main` queue guarantees MainActor execution, but the
-            // closure type is nominally `@Sendable`. Hop into a MainActor
-            // task so we can touch `self` + AppKit APIs safely.
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let setup = EnvironmentSetup.live
@@ -344,7 +277,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         Task { @MainActor in
             defer { ApplicationTermination.request() }
-            // Cleanup failures are logged by TronUninstaller; command mode has no alert surface.
             let outcome = await TronUninstaller.unregisterAndClean(setup: EnvironmentSetup.live).outcome
             switch outcome {
             case .ok, .alreadyLoaded:
@@ -395,8 +327,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let wizardCompletionObserver {
             NotificationCenter.default.removeObserver(wizardCompletionObserver)
         }
-        // Tear down the menu bar before releasing the single-instance
-        // lock so a second wrapper cannot observe a half-disposed item.
         menuBarController?.dispose()
         menuBarController = nil
         instanceLock?.release()

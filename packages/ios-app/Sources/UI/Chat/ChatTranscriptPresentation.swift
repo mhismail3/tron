@@ -2,8 +2,6 @@ import Foundation
 import SwiftUI
 import TronMobileCore
 
-/// Owns the one locally admitted earlier-page transaction. Model and scroll
-/// reducers may corroborate loading, but neither can retire this token.
 struct ChatEarlierMessagesOperationOwner: Equatable, Sendable {
     typealias Token = UInt64
 
@@ -20,8 +18,6 @@ struct ChatEarlierMessagesOperationOwner: Equatable, Sendable {
         return nextToken
     }
 
-    /// Only the currently admitted request may settle the operation. A late
-    /// completion from an older request cannot clear a newer page load.
     mutating func settle(_ token: Token) {
         guard activeToken == token else { return }
         activeToken = nil
@@ -67,9 +63,6 @@ struct ExtensionInteractionScope: Equatable, Hashable, Sendable {
     }
 }
 
-/// Identity used by the managed sheet lease. Every field that owns a pending
-/// interaction response participates so a same-ID host successor gets a fresh
-/// presentation token instead of sharing the old sheet's lifecycle.
 enum ExtensionInteractionPresentationIdentity {
     static func value(sessionID: String, interaction: ExtensionInteraction) -> String {
         let scope = ExtensionInteractionScope(interaction)
@@ -84,9 +77,6 @@ enum ChatExtensionForegroundPresentation: Equatable {
 }
 
 enum ChatExtensionPresentationArbiter {
-    /// Semantic questions have deterministic priority over draft replacement
-    /// confirmation. The lower-priority request remains in the authoritative
-    /// store and is presented after the interaction settles.
     static func presentation(
         modelSettled: Bool,
         presentationReady: Bool,
@@ -126,12 +116,7 @@ enum ChatExtensionInteractionPolicy {
     }
 }
 
-/// Normalized behavior for every prompt lifecycle shell. Unknown wire values
-/// are deliberately neutral rather than silently becoming steering.
 enum ChatAttachmentEnvelopePolicy {
-    /// Pi may retain a bounded attachment-context text part in canonical JSONL
-    /// for an attachment-only prompt. It is not user-entered text and must be
-    /// admitted only with exact typed attachment evidence.
     static func isBounded(_ text: String) -> Bool {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.utf8.count <= 4_096,
@@ -143,10 +128,6 @@ enum ChatAttachmentEnvelopePolicy {
 }
 
 enum ChatPromptLifecycleReplacementPolicy {
-    /// Finds one unambiguous queue-to-canonical replacement from two
-    /// authoritative projection boundaries. Multiple removals or candidates
-    /// deliberately fail closed so a repeated prompt can never borrow the
-    /// wrong queue card's visual identity.
     static func canonicalHandoffID(
         previousQueue: [SessionSnapshot.QueuedMessage],
         incomingQueue: [SessionSnapshot.QueuedMessage],
@@ -185,8 +166,6 @@ enum ChatPromptLifecycleReplacementPolicy {
         incomingSourceWindow: InstalledChatTranscript.SourceWindow?
     ) -> Bool {
         guard let previousSourceWindow, let incomingSourceWindow else {
-            // Keep the pure policy usable by legacy fixtures; mounted ChatView
-            // always supplies both authoritative source windows.
             return true
         }
         guard isExactForwardEvolution(
@@ -271,8 +250,6 @@ enum ChatPromptLifecycleReplacementPolicy {
         guard attachments.count == queue.attachmentCount else { return false }
         if let expected = queue.photoCount, expected != photos { return false }
         if let expected = queue.fileAttachmentCount, expected != files { return false }
-        // A rich queue with attachments but no typed facts is not exact enough
-        // to animate as a card replacement. Empty prompts remain exact.
         if queue.attachmentCount > 0,
            queue.photoCount == nil, queue.fileAttachmentCount == nil {
             return false
@@ -319,9 +296,6 @@ enum ChatPromptBehavior: Hashable, Sendable {
 
 }
 
-/// Exact-target presentation-only outgoing state. This is never inserted into
-/// the canonical transcript or JSONL; it disappears only after canonical user
-/// message reconciliation (or a definitive rejection).
 struct ChatOutgoingSubmissionPresentation: Equatable, Hashable, Identifiable, Sendable {
     let id: String
     let text: String
@@ -360,9 +334,6 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Hashable, Identifiable, Se
     }
 }
 
-/// Authoritative prompt admission that has not reached canonical JSONL yet.
-/// Unlike the composer-owned outgoing row, this survives chat re-navigation
-/// because it is reconstructed from the Gateway session snapshot.
 struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendable {
     let id: String
     let createdAt: String?
@@ -413,10 +384,6 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
     }
 }
 
-/// Suppresses a pending runtime row only when canonical evidence identifies the
-/// same prompt. Legacy pending rows without a valid timestamp use one bounded
-/// candidate (the newest canonical user message), never an arbitrary history
-/// match for repeated text.
 struct ChatCanonicalSubmissionAlias: Equatable, Sendable {
     let canonicalID: String
     let presentationID: String
@@ -443,9 +410,6 @@ enum ChatCanonicalSubmissionAliasPolicy {
 }
 
 enum ChatPendingCanonicalSuppressionPolicy {
-    /// Returns canonical IDs that replace this exact pending prompt. The IDs
-    /// remain canonical; callers use them only in the existing entrance
-    /// suppression ledger so the replacement does not replay an insertion.
     static func canonicalIDs(
         for pending: SessionSnapshot.PendingPrompt,
         in transcript: [TranscriptItem]
@@ -470,8 +434,6 @@ enum ChatPendingCanonicalSuppressionPolicy {
             return candidates.count == 1 ? Set(candidates) : []
         }
 
-        // Canonical transcript projections are page-bounded. Restrict the
-        // compatibility fallback to that bounded tail and exactly one user row.
         guard let latest = transcript
             .suffix(ChatTranscriptPageRequest.maximumItemCount)
             .reversed()
@@ -502,9 +464,6 @@ enum ChatPendingCanonicalSuppressionPolicy {
         )
     }
 
-    /// Physical identity continuity is stricter than compatibility suppression:
-    /// only one canonical user row carrying the exact Gateway operation ID may
-    /// inherit the pending row's SwiftUI identity.
     static func exactCanonicalID(
         for pending: ChatPendingPromptPresentation,
         in transcript: [TranscriptItem]
@@ -550,17 +509,12 @@ enum ChatPendingCanonicalSuppressionPolicy {
     }
 }
 
-/// One exact, already-decoded local thumbnail admitted for a canonical media blob.
 struct ChatCanonicalMediaPreviewSeed: Equatable, Sendable {
     let blobID: String
     let attachment: PendingAttachment
 }
 
 enum ChatCanonicalMediaPreviewPolicy {
-    /// Maps only exact local/canonical attachment facts. File blobs preserve the
-    /// upload identity on the wire. Images receive content-addressed blob IDs,
-    /// so their bounded previews may transfer by order only when the complete
-    /// image count and MIME sequence agree.
     static func seeds(
         attachments: [PendingAttachment],
         canonicalItem: TranscriptItem
@@ -597,9 +551,6 @@ enum ChatCanonicalMediaPreviewPolicy {
     }
 }
 
-/// One immutable presentation commit for the interval before a submitted
-/// prompt is represented by canonical JSONL. The outgoing attachment DTOs are
-/// copied into this commit so a composer mutation cannot alter an installed row.
 enum ChatTranscriptHandoffCommit: Hashable, Sendable {
     case none
     case pending(ChatPendingPromptPresentation)
@@ -608,8 +559,6 @@ enum ChatTranscriptHandoffCommit: Hashable, Sendable {
         attachments: [PendingAttachment]
     )
 
-    /// Apply the canonical hidden-input rule before creating a user-position
-    /// handoff. Renderers only receive admitted pending presentations.
     static func pending(in snapshot: SessionSnapshot) -> Self {
         guard let pending = snapshot.pendingPrompt,
               pending.semantic?.direction != .hiddenInternal,
@@ -638,9 +587,6 @@ enum ChatTranscriptHandoffCommit: Hashable, Sendable {
         }
     }
 
-    /// Strips upload-only bytes before this value crosses into transcript
-    /// presentation. Installed projections retain only row metadata and the
-    /// bounded thumbnail preview.
     func frozenForHandoff() -> Self {
         guard case .outgoing(let presentation, let attachments) = self else { return self }
         return .outgoing(
@@ -650,8 +596,6 @@ enum ChatTranscriptHandoffCommit: Hashable, Sendable {
     }
 }
 
-/// The single ephemeral runtime row shown after the canonical transcript while
-/// an active session reports visible working state.
 struct ChatRuntimeWorkingPresentation: Equatable {
     let message: String
     let phase: SessionPhase
@@ -661,8 +605,6 @@ struct ChatRuntimeWorkingPresentation: Equatable {
         guard phase.isActive else { return nil }
         self.phase = phase
         message = Self.defaultMessage(for: phase)
-        // Retry metadata describes the attempt through auto_retry_end. Only
-        // phase owns visible waiting; agent_start resumes ordinary activity.
         usesAmbientBottomIndicator = phase == .running
     }
 
@@ -676,9 +618,6 @@ struct ChatRuntimeWorkingPresentation: Equatable {
     }
 }
 
-/// Presentation-only physical proof for the mounted tail marker. It is never
-/// a second scroll position: the native scroll anchor remains the routine
-/// owner; this evidence distinguishes physical marker alignment from geometry estimates.
 struct ChatPhysicalTailEvidence: Equatable, Sendable {
     let presentationEpoch: Int
     let layoutEpoch: Int
@@ -732,15 +671,8 @@ enum ChatOpenPresentationPhase: Equatable {
     case waitingForConnection
     case opening
     case positioning
-    /// The physical positioning lift is resolving behind the opaque opening
-    /// surface. It is not the user-visible transcript entrance.
     case revealing
-    /// Physical settlement is complete. One covered frame installs the visible
-    /// entrance's initial opacity/offset without exposing intermediate layout.
     case presenting
-    /// The settled transcript is in its cosmetic fade/rise transaction. The
-    /// authoritative ready phase is admitted independently of animation
-    /// completion so a missing callback cannot strand the surface.
     case presented
     case ready
     case failed(String)
@@ -759,9 +691,6 @@ struct ChatOpenPresentationState: Equatable {
 
     mutating func installAuthoritativeBaseline(sessionID: String, epoch: Int) -> Bool {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .opening else { return false }
-        // Keep the opaque opening surface mounted while the exact physical tail
-        // is positioned. Authoritative installation alone is not proof that a
-        // lazy transcript has a valid visible viewport.
         phase = .positioning
         return true
     }
@@ -804,8 +733,6 @@ struct ChatOpenPresentationState: Equatable {
 
 struct ChatTranscriptPageRequest: Equatable {
     static let maximumItemCount = 512
-    /// Bounds the optional recent-tail page inside the opaque opening, well
-    /// under `ChatOpeningAttemptPolicy.deadline`.
     static let optionalOpeningPageDeadline: Duration = .seconds(5)
 
     let sessionID: String
@@ -896,8 +823,6 @@ struct ChatResponseState: Equatable {
     }
 }
 
-/// Heavy protocol values are owned separately from the timeline descriptor
-/// spine and are combined only when an installed transcript resolves a detail.
 struct ChatToolPayload: Hashable, Sendable {
     let request: JSONValue?
     let response: JSONValue?
@@ -911,7 +836,6 @@ struct ChatToolPayload: Hashable, Sendable {
 struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let id: String
     let isDisplayTool: Bool
-    /// Raw protocol tool name. `title` may be an extension-authored display label.
     let toolName: String?
     let title: String
     let subtitle: String
@@ -925,8 +849,6 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let outputTruncated: Bool
     let nestedCallCount: Int
     let nestedFailureCount: Int
-    /// A nested `ask_user` call (for example from codemode) is still running inside this
-    /// call, so its pending question opens from this row (#929).
     let hostsRunningNestedAskUser: Bool
     let display: DisplayProjection?
     let requestedDisplaySurface: DisplaySurface?
@@ -952,7 +874,6 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         progressSequence = tool.progressSequence
         outputTruncated = tool.outputTruncated
         let nested = tool.nestedCalls?.objectValue?["calls"]?.arrayValue ?? []
-        // The Gateway bounds the list; the chip counts the calls the sheet lists.
         nestedCallCount = nested.count
         nestedFailureCount = nested.filter { $0.objectValue?["status"]?.stringValue == "failed" }.count
         hostsRunningNestedAskUser = nested.contains {
@@ -970,8 +891,6 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     }
 
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
-    /// A declared invocation is pending execution. It may keep the run live,
-    /// but must not accrue execution time before the Gateway starts the call.
     var isActivelyExecuting: Bool { subtitle == "Running" }
 
     func elapsedMilliseconds(
@@ -1021,14 +940,11 @@ struct ChatToolPayloadIndex: Hashable, Sendable {
 }
 
 struct ChatToolPresentation: Hashable, Identifiable, Sendable {
-    /// The display owner admits completed source offers; the invocation's
-    /// explicit action reserves the same row before its artifact is available.
     var isDisplayTool: Bool {
         toolName == "display" || (toolName == "swift_app" && (display != nil
             || DisplayPresentationPolicy.invocationSurface(toolName: toolName, request: request) != nil))
     }
     let id: String
-    /// Raw protocol tool name. The title remains the user-facing label.
     let toolName: String?
     let title: String
     let subtitle: String
@@ -1187,9 +1103,6 @@ private extension JSONValue {
     }
 }
 
-/// Runtime timestamps are authoritative for live/current-Gateway calls. Pi JSONL
-/// does not yet persist execution timing, so older canonical calls use their call
-/// and result entry timestamps as a conservative observed interval.
 enum ToolTiming {
     static func date(_ value: String?) -> Date? {
         value.flatMap(GatewayTimestamp.parse)
@@ -1211,9 +1124,6 @@ enum ToolTiming {
         return max(0, Int(rounded))
     }
 
-    /// Running Gateway durations are monotonic samples. Pure presentation
-    /// callers preserve the sample exactly; mounted views advance it from the
-    /// local receive-time uptime anchor without comparing device/Gateway clocks.
     static func runningDuration(
         sampledDuration: Int?,
         sampleAnchor: ToolDurationSampleAnchor?,
@@ -1238,10 +1148,6 @@ enum ToolTiming {
         }
     }
 
-    /// Runtime duration is authoritative when supplied by the Gateway because
-    /// it is measured from the tool callback with a monotonic clock. Timestamp
-    /// subtraction is only the compatibility fallback for older canonical
-    /// history that has no retained execution metadata.
     static func resolvedDuration(
         startedAt: String?,
         completedAt: String?,
@@ -1306,12 +1212,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
     let body: String?
     let tone: ChatNotificationTone
     let material: ChatNotificationMaterial
-    /// Error footers can remain flat until native layout confirms their title
-    /// is clipped. Only then does the owning view promote them to a detail
-    /// action; ordinary status notifications never become interactive.
     let expandsOnTruncation: Bool
-    /// Compaction summaries remain interactive, but their long-form sheet
-    /// content keeps the rounded container with flat rather than glass styling.
     let detailUsesGlassSurface: Bool
     let errorRun: ChatProviderErrorRun?
 
@@ -1472,10 +1373,6 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                 material: .flat
             ))
         }
-        // The Gateway can publish the canonical compaction entry one commit
-        // before phase and queued metadata settle. Exact tail ordinals prove
-        // the current entry even when bounded configuration metadata follows
-        // it; inexact windows deliberately retain runtime chrome.
         if let working = ChatRuntimeWorkingPresentation(
             phase: snapshot.phase
         ), !working.usesAmbientBottomIndicator,
@@ -1508,8 +1405,6 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                 material: .flat
             ))
         }
-        // Ambient extension status/widget/service chrome is intentionally
-        // retired. Canonical runtime phase remains the only ephemeral row owner.
         return values
     }
 
@@ -1539,9 +1434,6 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
 }
 
 enum ChatToolInvocationOrdering {
-    /// Detail surfaces order by the producer's invocation boundary only. The
-    /// original index is an intentional tie-breaker so equal or absent times
-    /// never make rows jump as progress/result frames arrive.
     static func reverseChronological(_ tools: [ChatToolDescriptor]) -> [ChatToolDescriptor] {
         ordered(tools, startedAt: \.startedAt)
     }
@@ -1565,9 +1457,6 @@ enum ChatToolInvocationOrdering {
             case (nil, _?):
                 return false
             default:
-                // Calls in one message commonly share a timestamp. Their
-                // canonical/group invocation order is the remaining evidence,
-                // so later source calls come first, never completion order.
                 return left.offset > right.offset
             }
         }.map(\.element)
@@ -1577,16 +1466,11 @@ enum ChatToolInvocationOrdering {
 struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     let tools: [ChatToolDescriptor]
     let anchorID: String
-    /// Set for a stretch split out of a row (`ToolRunSegment`): it presents
-    /// exactly its own calls, not the finalized group's declared cardinality.
     let visibleCallsOnly: Bool
 
     init(tools: [ChatToolDescriptor], anchorID: String? = nil, visibleCallsOnly: Bool = false) {
         self.tools = tools
         self.visibleCallsOnly = visibleCallsOnly
-        // Finalized Gateway group identity is stable before execution starts
-        // and survives live-to-canonical settlement. Legacy rows retain their
-        // first call only when no finalized group metadata exists.
         self.anchorID = anchorID ?? tools.first(where: { $0.groupFinalized == true })?.groupId
             ?? tools.first?.id ?? "empty"
     }
@@ -1614,13 +1498,7 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
         }
         return max(tools.count, ungrouped + countByGroup.values.reduce(0, +))
     }
-    /// Group cardinality describes declaration completeness, not execution
-    /// liveness. A paged or temporarily partial finalized group is still
-    /// historical evidence when every visible descriptor is terminal.
     var isRunning: Bool { tools.contains(where: \.isRunning) }
-    /// The projector assembles runs in canonical transcript/group order, not
-    /// result-arrival order. Within the final group, its declared invocation
-    /// index wins even when descriptors or mutable timing metadata disagree.
     var latestInvocation: ChatToolDescriptor? {
         guard let last = tools.last else { return nil }
         guard last.groupFinalized == true, let groupID = last.groupId else { return last }
@@ -1649,9 +1527,6 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
         if failureCount > 0 { return "\(failureCount) failed" }
         return isRunning ? "In progress" : "Completed"
     }
-    /// Accumulated tool time is the sum of each invocation, rather than the
-    /// wall-clock span of the run. This remains correct when tools overlap and
-    /// keeps the Used tools detail surface consistent with its individual rows.
     func elapsedMilliseconds(at date: Date = .now) -> Int? {
         let values = tools.compactMap { $0.elapsedMilliseconds(at: date) }
         guard !values.isEmpty else { return nil }
@@ -1667,19 +1542,12 @@ struct ChatThinkingSegment: Hashable, Identifiable, Sendable {
 }
 
 struct ChatThinkingRun: Hashable, Identifiable, Sendable {
-    /// The contiguous-run ordinal is stable when bounded live frames drop
-    /// leading thinking parts. Word-level reveal remains row-local state.
     let id: String
     let segments: [ChatThinkingSegment]
 }
 
-/// The compact thinking trace's own content, resolved by identity from the
-/// install that renders it. One value serves the row that shows the trace and
-/// the detail sheet that outlives it, so both follow the same source.
 struct ChatThinkingTraceContent: Hashable, Sendable {
     let inline: MarkdownPresentation.Inline
-    /// Whether the trace is still arriving. A sheet opened on a streaming trace
-    /// follows its tail; a completed trace rests at its beginning.
     let streaming: Bool
 
     init(segments: [ChatThinkingSegment], preparedText: ChatTextPreparationSnapshot, streaming: Bool) {
@@ -1687,20 +1555,10 @@ struct ChatThinkingTraceContent: Hashable, Sendable {
         self.streaming = streaming
     }
 
-    /// The identity a row presents and a sheet resolves, unique across the
-    /// transcript. Segment and run ids are only unique within one message (most
-    /// replies open with thinking at ordinal 0), so the owning message's
-    /// presentation id scopes them. The run id, not its first line, is the
-    /// suffix: a bounded live frame may drop leading thinking parts, and the
-    /// open sheet must keep following the same trace.
     static func identity(owner: TranscriptItem, run: ChatThinkingRun) -> String {
         "thinking-run:\(owner.presentationId):\(run.id)"
     }
 
-    /// The trace's rendered content, assembled from the prepared segments the row
-    /// itself renders from. Explicitly paged history can exceed the
-    /// asynchronously warmed tail, so lazily realized older thinking keeps the
-    /// same exact Markdown semantics through the bounded cold-parser fallback.
     static func inline(
         of segments: [ChatThinkingSegment],
         preparedText: ChatTextPreparationSnapshot
@@ -1726,14 +1584,7 @@ struct ChatThinkingTraceContent: Hashable, Sendable {
     }
 }
 
-/// Resolves the detail content a transcript install publishes for the identity a
-/// row presented. The main transcript and a read-only child transcript resolve
-/// their open details the same way, each from the projection that owns it.
 enum ChatTranscriptDetailResolution {
-    /// The thinking run an open trace detail follows, with the item that renders
-    /// it (the item owns the prepared text the trace is assembled from) and
-    /// whether that row is still streaming. A canonical transcript row renders
-    /// settled content; only a live message presentation streams.
     static func thinkingTrace(
         in items: ChatTranscriptItems,
         identity: String
@@ -1763,7 +1614,6 @@ enum ChatTranscriptDetailResolution {
         return nil
     }
 
-    /// The presentation an open event detail follows.
     static func notificationDetail(
         in items: ChatTranscriptItems,
         eventID: String
@@ -1837,9 +1687,6 @@ enum ChatTranscriptRenderItem: Hashable, Identifiable, Sendable {
     }
 }
 
-/// A flat immutable row spine. Sparse tool updates share the assembly-produced
-/// base and replace only affected indexes; an assembly always starts a fresh
-/// base, so overlays never form a chain.
 struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
     typealias Index = Int
 
@@ -1867,9 +1714,6 @@ struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
         self.liveOverrides = liveOverrides
     }
 
-    /// Materializes the canonical spine with sparse replacements for hashing,
-    /// projection comparison, and the bounded ledger; render paths use the
-    /// collection directly.
     var canonical: [ChatTranscriptRenderItem] {
         guard !canonicalOverrides.isEmpty else { return canonicalBase }
         var result = canonicalBase
@@ -1949,10 +1793,6 @@ struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        // SwiftUI compares a view's inputs on every update, and an unchanged
-        // row compares one installed commit with itself. Arrays sharing one
-        // buffer are equal in O(1); only a different representation needs the
-        // element walk.
         if sharesStorage(lhs.canonicalBase, rhs.canonicalBase),
            sharesStorage(lhs.liveBase, rhs.liveBase),
            lhs.canonicalOverrides == rhs.canonicalOverrides,
@@ -2157,9 +1997,6 @@ struct ChatTranscriptTimeline: Hashable, Sendable {
         canonicalRenderedIDSet.contains(id) || liveRenderedIDSet.contains(id)
     }
 
-    /// Sparse replacements are permitted only after the kernel proves every row
-    /// identity unchanged, so the cached identity spine and semantic maps remain
-    /// the exact canonical values rather than being rebuilt or guessed.
     func replacingCanonicalRows(
         _ replacements: [Int: ChatTranscriptRenderItem]
     ) -> ChatTranscriptTimeline {
@@ -2191,8 +2028,6 @@ struct ChatTranscriptTimeline: Hashable, Sendable {
     func appendingLive(_ live: ChatTranscriptTimeline) -> ChatTranscriptTimeline {
         precondition(live.items.canonicalCount == 0)
         let canonicalIDSet = canonicalRenderedIDSet
-        // Canonical rows win collisions individually. A single reconnect
-        // collision must not discard unrelated live activity rows.
         let admittedLiveItems = live.items.live.filter { !canonicalIDSet.contains($0.id) }
         let admittedLiveIDs = live.renderedIDs.live.filter { !canonicalIDSet.contains($0) }
         let liveIDSet = Set(admittedLiveItems.map(\.id))
@@ -2227,9 +2062,6 @@ struct ChatTranscriptTimeline: Hashable, Sendable {
     }
 
     func hash(into hasher: inout Hasher) {
-        // Equality implies identical rendered identities. Hashing the cached
-        // split spine keeps sparse/live publications shallow; content and maps
-        // may legally collide and are still compared exactly by `==`.
         hasher.combine(renderedIDs)
     }
 }
@@ -2239,8 +2071,6 @@ enum ChatToolbarTitleLayout {
     static let horizontalControlReservation: CGFloat = 152
     static let minimumWidth: CGFloat = 80
     static let maximumWidth: CGFloat = 360
-    /// One title-view height for the title and the recovery capsule that
-    /// replaces it, so swapping them never relays out the bar (#878).
     static let height: CGFloat = 32
 
     static func width(containerWidth: CGFloat) -> CGFloat {
@@ -2276,10 +2106,6 @@ enum ChatAttachmentAvailabilityPolicy {
         hasMountedAuthority: Bool
     ) -> Bool {
         guard hasMountedAuthority, phase != nil else { return false }
-        // Uploads stage independently of prompt transport and viewport
-        // settlement. Keep the attachment menu enabled while a send is being
-        // acknowledged and throughout active steering; the upload owner still
-        // rechecks exact authority before each mutation.
         return true
     }
 }
@@ -2297,17 +2123,11 @@ enum ChatUnreadResponsePolicy {
     }
 }
 
-/// Presentation-only filtering for Pi's canonical transcript. Configuration
-/// entries before the first conversational entry describe session bootstrap
-/// state and belong in Manage Session, not in the chat transcript. Later
-/// configuration entries remain visible as compact change notifications.
 enum ChatTranscriptPresentation {
     static func items(in snapshot: SessionSnapshot) -> [TranscriptItem] {
         ChatTranscriptProjectionKernel.visibleItems(in: snapshot)
     }
 
-    /// The public cold oracle delegates to the one raw-fragment/global-assembler
-    /// kernel. No view constructs or repairs a timeline independently.
     static func timeline(
         in snapshot: SessionSnapshot,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
@@ -2320,15 +2140,9 @@ enum ChatTranscriptPresentation {
         ).timeline
     }
 
-    /// Projects original prompt arguments and coalesces adjacent thinking parts for
-    /// display. Canonical content stays authoritative and stable part identities
-    /// remain attached to the same visible content across rederivation.
     static func messageParts(in item: TranscriptItem) -> [ChatMessagePart] {
         if item.role == .user,
            let text = item.semantic?.submittedText {
-            // Keep canonical bytes and attachment identities untouched. One
-            // display part replaces all expanded template text, including
-            // prompts whose expansion contains multiple text blocks.
             let originalText = item.content?.first { $0.type == .text && $0.attachment == nil }
             let input = ContentPart(
                 id: originalText?.id ?? "\(item.id):prompt-input",

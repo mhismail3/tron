@@ -264,7 +264,8 @@ separate:
   The sheet receives its presenter's environment except interaction enablement: a presented
   sheet is enabled on its own, whatever disabled state its presenter had (#2207).
 - Managed sources publish render-input preferences without adding a background view or AX node
-  to a control. `TronNativeSheetCanvas`, mounted at each scene/surface root, contains scope-owned
+  to a control. A source's identity is its own UUID, never an object address: a freed host's address
+  can be reused within one canvas update and would inherit the old sheet node's state. `TronNativeSheetCanvas`, mounted at each scene/surface root, contains scope-owned
   `RetainedNativeSheetHost` nodes in one retained SwiftUI hosting controller per surface. Native
   sheet nodes mount while their presenters are idle, before the first binding request; the first
   tap changes an existing node rather than installing an already-presenting graph. Home destinations

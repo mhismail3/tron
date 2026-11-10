@@ -1,8 +1,6 @@
 import AppKit
 import Darwin
 
-// Standalone application only: no Tron startup, service registration, Gateway,
-// credentials, or helper. A background watchdog bounds a blocked AppKit loop.
 @main
 struct AppKitTerminationProbe {
     static func log(_ value: String) {

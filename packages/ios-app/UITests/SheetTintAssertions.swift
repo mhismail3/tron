@@ -1,21 +1,12 @@
 import XCTest
 
-/// A sheet's toolbar icons are drawn in its title's tint (#963): `TronSheetTitle`
-/// and `tronToolbarAction` resolve through one rule, `TronSheetTint`. This reads
-/// the rendered pixels, so any sheet that paints its own toolbar colour fails.
 extension XCTestCase {
-    /// Every enabled, hittable button in the navigation bar that shows `title`
-    /// must be inked within tolerance of the title. Disabled actions are grey by
-    /// design; `excluding` names destructive actions, which stay red.
     @MainActor
     func assertToolbarTint(_ app: XCUIApplication, title: String, excluding: Set<String> = [],
                            file: StaticString = #filePath, line: UInt = #line) {
         let titles = app.navigationBars.staticTexts.matching(identifier: title)
         XCTAssertTrue(titles.firstMatch.waitForExistence(timeout: 5), "No sheet titled \(title): \(app.debugDescription)", file: file, line: line)
-        // A covered sheet of the same title (Profile under its item) stays in the tree
-        // with no activation point; the frontmost sheet's title is the last.
         let titleText = titles.allElementsBoundByIndex.last ?? titles.firstMatch
-        // Let the presentation settle so the screenshot shows final colours.
         _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: titleText)], timeout: 3)
         let bar = app.navigationBars.containing(.staticText, identifier: title).allElementsBoundByIndex
             .last { $0.frame.contains(CGPoint(x: titleText.frame.midX, y: titleText.frame.midY)) }
@@ -42,8 +33,6 @@ extension XCTestCase {
         add(attachment)
     }
 
-    /// The average colour of the saturated (inked) pixels in `area`: glyphs, never
-    /// the neutral glass or sheet material behind them.
     func sheetInk(_ image: UIImage, _ area: CGRect, window: CGFloat) -> [Double]? {
         guard let source = image.cgImage else { return nil }
         let scale = CGFloat(source.width) / window
@@ -64,9 +53,6 @@ extension XCTestCase {
         return count > 10 ? sum.map { $0 / count } : nil
     }
 
-    /// The ink of text in `area`: the mean of the pixels furthest from the area's
-    /// background (its most common colour), as 0...255 channels. Unlike `sheetInk` it
-    /// also reads neutral ink, so a test can tell grey/black text from tinted text.
     func textInk(_ image: UIImage, _ area: CGRect, window: CGFloat) -> [Double]? {
         guard let source = image.cgImage else { return nil }
         let scale = CGFloat(source.width) / window

@@ -1,8 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Standard detail sections within the same sheet shell as tool descendants.
-/// Counts and identity remain owned by the shared transcript projection.
 struct ChatProviderErrorDetails: View {
     let run: ChatProviderErrorRun
     @State private var expanded: Set<String>

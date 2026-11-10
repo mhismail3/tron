@@ -3,9 +3,6 @@ import Observation
 import SwiftUI
 @preconcurrency import UserNotifications
 
-/// Native Notification Center is real; only delivery is local rather than APNs.
-/// Provisional permission belongs to the disposable simulator test host and
-/// presents no OS permission dialog. Exact fixture request IDs own cleanup.
 @MainActor @Observable
 final class HostedDeliveredNotificationFixture: NSObject, UNUserNotificationCenterDelegate {
     var summary = "starting"
@@ -91,8 +88,6 @@ struct HostedDeliveredNotificationControls: View {
             }
         }.font(.caption2).padding(4).background(.background)
         .task {
-            // Native removal is asynchronous and has no completion callback.
-            // Observe the real center for the lifetime of the hosted probe.
             while !Task.isCancelled {
                 await fixture.inspect()
                 do { try await Task.sleep(for: .milliseconds(100)) }

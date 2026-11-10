@@ -1,31 +1,19 @@
 import Foundation
 import TronMobileCore
 
-/// Copy is a bounded diagnostic projection, never a transcript or credential
-/// export. Profile labels are user-entered text, so use per-copy opaque aliases.
 enum GatewayLogExport {
-    /// One export carries at most this many JSON lines, the identifying header
-    /// included.
     static let maximumExportLines = 1_000
     static let maximumUploadBytes = 512 * 1024
 
-    /// The Logs rows projected from `AppLog`. The export carries `AppLog`
-    /// records directly, so it skips these rows instead of writing them twice.
     static let appLogProfileID = "ios-client"
 
     static func jsonLines(
         records: [GatewayProfileLogRecord], metadata: GatewayLogCaptureMetadata,
         appRecords: [AppLogRecord], captureKind: String? = nil
     ) -> String {
-        // The Logs surface hands `records` newest-first. Re-derive that order so
-        // every bound below keeps the newest evidence whatever order a caller
-        // supplies.
         let newestFirst = records.sorted { gatewayLogRecordIsNewer($0, than: $1) }
         let loadedComposition = Array(newestFirst.prefix(maximumExportLines))
         let truncatedInputRecords = max(0, newestFirst.count - loadedComposition.count)
-        // Retained phone diagnostics are keyed `<profile>:ios-client`; the chat
-        // interaction trace is keyed `ios-client:chat-trace`. Both are phone
-        // records.
         func process(for profileID: String) -> String {
             profileID == ChatInteractionTrace.diagnosticProfileID || profileID.hasSuffix(":\(appLogProfileID)")
                 ? "ios" : "gateway"
@@ -82,41 +70,23 @@ enum GatewayLogExport {
             process: "ios", requestID: nil, durationMs: nil, outcome: nil, code: nil,
             profileID: nil, connectionID: nil, lifecycleGeneration: nil
         )
-        // The chat interaction trace is the incident evidence for chat
-        // scroll/geometry bugs. Its producer bounds it to
-        // `ChatInteractionTrace.maximumRecords`, and the export spends its byte
-        // and line budgets on the identifying header plus every retained trace
-        // row before any other record can claim space. Trace rows are usually
-        // older than the newest phone rows, so a payload selected by line count
-        // alone could still lose the trace to the byte envelope that
-        // `uploadText` applies; the trace's 256-record bound keeps this
-        // reservation far inside `maximumUploadBytes`.
         let chatTrace = newestFirst.filter { $0.profileID == ChatInteractionTrace.diagnosticProfileID }
             .prefix(ChatInteractionTrace.maximumRecords)
         let encoder = JSONEncoder()
-        // `bytes` counts the line's newline, so summing a selection bounds the
-        // emitted payload exactly.
         func encoded(_ record: AppLogRecord) -> (record: AppLogRecord, text: String, bytes: Int)? {
             guard let data = try? encoder.encode(record) else { return nil }
             return (record, String(decoding: data, as: UTF8.self), data.count + 1)
         }
         var header = encoded(appStarted)
         let trace = chatTrace.map(gatewayRecord).compactMap(encoded)
-        // Local-capture window/count fields are added after selecting rows; reserve
-        // their bounded header space now so they cannot evict rows unexpectedly.
         let captureSummaryReserve = captureKind == nil ? 0 : 256
         var byteBudget = maximumUploadBytes - (header?.bytes ?? 0) - captureSummaryReserve - trace.reduce(0) { $0 + $1.bytes }
         var lineBudget = maximumExportLines - (header == nil ? 0 : 1) - trace.count
-        // The newest remaining records win the leftover budget. `AppLog` is
-        // oldest-first, so it reverses into a newest-first candidate list; the
-        // rows already projected from it are skipped instead of written twice.
         var candidates = appRecords.reversed().map(localRecord)
         candidates.append(contentsOf: newestFirst
             .filter { $0.profileID != appLogProfileID && $0.profileID != ChatInteractionTrace.diagnosticProfileID }
             .map(gatewayRecord))
         let newest = candidates.sorted { GatewayTimestamp.isNewer($0.timestamp, than: $1.timestamp) }
-        // Taking the newest prefix is what drops the oldest non-trace records,
-        // so the retained window stays contiguous and the byte bound holds.
         var retained: [(record: AppLogRecord, text: String, bytes: Int)] = []
         for record in newest {
             guard lineBudget > 0, let value = encoded(record), value.bytes <= byteBudget else { break }
@@ -143,8 +113,6 @@ enum GatewayLogExport {
             )
             header = encoded(summary)
         }
-        // `isNewer` is a total order, so its inverse lists the retained evidence
-        // oldest to newest behind the header.
         var lines: [String] = []
         if let header { lines.append(header.text) }
         lines.append(contentsOf: selectedRows.map(\.text))
@@ -188,8 +156,6 @@ enum GatewayLogExport {
         return lines.joined(separator: "\n")
     }
 
-    // Only opaque protocol identifiers cross this diagnostic projection. Never
-    // serialize arbitrary request parameters or error details into exports.
     private static func safeToken(_ value: String?) -> String? {
         guard let value, !value.isEmpty, value.utf8.count <= 160,
               value.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0)
@@ -197,9 +163,6 @@ enum GatewayLogExport {
         return IOSClientDiagnosticBuffer.redactedMessage(value)
     }
 
-    /// Keeps the export contract byte-bounded without splitting UTF-8 or
-    /// removing its identifying header. The newest lines are kept: the oldest
-    /// overflow is dropped ahead of the truncation marker.
     static func uploadText(_ text: String) -> String {
         guard text.utf8.count > maximumUploadBytes else { return text }
         let marker = AppLogRecord(

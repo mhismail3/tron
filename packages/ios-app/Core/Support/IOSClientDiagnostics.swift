@@ -1,10 +1,5 @@
 import Foundation
 
-// The iOS client's diagnostic log records and their bounded retention: the
-// buffer the client fills, the incident store it drains into, and the duration
-// conversion they report. The Gateway-side facts they describe are declared in
-// Gateway/GatewayClientDiagnostics.swift.
-
 package struct GatewayLogRecord: Identifiable, Hashable, Codable, Sendable {
     package let timestamp: String
     package let level: String
@@ -36,7 +31,6 @@ package struct GatewayProfileLogRecord: Hashable, Identifiable, Codable, Sendabl
     package let profileID: String
     package let profileLabel: String
     package let record: GatewayLogRecord
-    // Local, validated correlation only; remote Gateway log records have none.
     let incidentID: String?
 
     package init(profileID: String, profileLabel: String, record: GatewayLogRecord, incidentID: String? = nil) {
@@ -299,15 +293,6 @@ package struct IOSClientDiagnosticBuffer: Sendable {
         )
     }
 
-    /// A URL is `scheme://body`, and only the scheme scan needs hand-driving:
-    /// the engine retries `[A-Za-z][A-Za-z0-9+.-]*` from every start position,
-    /// so one long unbroken run of scheme characters costs super-quadratic time
-    /// before it can fail on a missing `://` (measured 3 ms for 512 characters,
-    /// 650 ms for 4,096). Diagnostics carry such runs — a base64 token, a hash,
-    /// a parameter value — and the export redacts four fields of every row, so
-    /// the engine's own cost can hang the export. `redactURLs` offers it only
-    /// the windows a match can start in; the pattern stays the authority on the
-    /// match itself.
     private static let urlPatternSource = #"[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>]+"#
     private static let urlPattern = try? NSRegularExpression(pattern: urlPatternSource)
 
@@ -324,13 +309,6 @@ package struct IOSClientDiagnosticBuffer: Sendable {
         return boundedUTF8(result, maximumBytes: 2_000)
     }
 
-    /// Redacts every URL the `urlPatternSource` pattern would match, without
-    /// letting it retry a scheme run from every start position. The pattern's
-    /// greedy scheme is the maximal run of scheme characters, and the engine
-    /// only reaches `://` at the end of such a run, so a match starts at the
-    /// first letter of a run that is directly followed by `://` and a non-empty
-    /// body. Each such window is handed to the pattern, which decides the match
-    /// it always did (its own whitespace and delimiter classes included).
     private static func redactURLs(_ value: String) -> String {
         guard value.contains("://") else { return value }
         guard let pattern = urlPattern else {
@@ -348,8 +326,6 @@ package struct IOSClientDiagnosticBuffer: Sendable {
             }
             var runEnd = index
             while runEnd < units.count, isSchemeUnit(units[runEnd]) { runEnd += 1 }
-            // No `://` after the run, or no body after it: no start position
-            // inside the run can match, so the whole run is skipped at once.
             guard runEnd + 3 < units.count,
                   units[runEnd] == 0x3A, units[runEnd + 1] == 0x2F, units[runEnd + 2] == 0x2F,
                   !isURLDelimiterUnit(units[runEnd + 3]),
@@ -374,7 +350,6 @@ package struct IOSClientDiagnosticBuffer: Sendable {
         return pieces.isEmpty ? value : pieces.joined()
     }
 
-    /// The scheme class of `urlPatternSource`, ASCII for ASCII.
     private static func isSchemeUnit(_ unit: UInt16) -> Bool {
         isSchemeLetterUnit(unit) || (0x30...0x39).contains(unit) || unit == 0x2B || unit == 0x2D || unit == 0x2E
     }
@@ -383,10 +358,6 @@ package struct IOSClientDiagnosticBuffer: Sendable {
         (0x41...0x5A).contains(unit) || (0x61...0x7A).contains(unit)
     }
 
-    /// The `\s`, `"`, `'`, `<` and `>` of the pattern's body class. A scalar
-    /// this treats as body that the pattern calls whitespace (a non-ASCII space)
-    /// can widen the window, so the match is anchored at the run's start and the
-    /// pattern still decides it without an unanchored rescan.
     private static func isURLDelimiterUnit(_ unit: UInt16) -> Bool {
         switch unit {
         case 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0x22, 0x27, 0x3C, 0x3E: true
@@ -442,8 +413,6 @@ package actor IOSClientDiagnosticStore {
     }
 
     func save(_ values: [GatewayProfileLogRecord], now: Date = .now) {
-        // One store serializes both direct transport incidents and UI context.
-        // A late UI snapshot cannot erase a newer handshake/pressure incident.
         var seen = Set<String>()
         var retained = Self.retainFirstIncidentAndLatest((values + load(now: now)).compactMap { Self.sanitize($0, now: now) }
             .sorted { gatewayLogRecordIsNewer($0, than: $1) }
@@ -471,8 +440,6 @@ package actor IOSClientDiagnosticStore {
             if latest[key] == nil { latest[key] = value }
             if ["warning", "error"].contains(value.record.level) { first[key] = value }
         }
-        // Reserve oldest causes for the eight most recently observed incidents,
-        // not one ancient warning per profile/event for the entire seven days.
         let keys = latest.keys.sorted { gatewayLogRecordIsNewer(latest[$0]!, than: latest[$1]!) }.prefix(8)
         return Set(keys.compactMap { first[$0]?.id })
     }
@@ -497,8 +464,6 @@ package actor IOSClientDiagnosticStore {
               let date = GatewayTimestamp.parse(value.record.timestamp) else { return nil }
         let age = now.timeIntervalSince(date)
         guard age >= 0 && age <= maximumAge else { return nil }
-        // Only the typed event code crosses this boundary. Character/path
-        // sanitization cannot establish that arbitrary response text is private.
         let safeLabel = "iOS client"
         let safeMessage = value.record.event == "gateway.response.invalid"
             ? "code=invalid_response"

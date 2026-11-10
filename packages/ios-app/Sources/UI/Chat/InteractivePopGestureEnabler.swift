@@ -1,8 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// Restores the native left-edge back gesture when ChatView hides the system
-/// back button in favor of Tron's emerald toolbar control.
 struct InteractivePopGestureEnabler: UIViewRepresentable {
     func makeUIView(context: Context) -> PopGestureView {
         PopGestureView()

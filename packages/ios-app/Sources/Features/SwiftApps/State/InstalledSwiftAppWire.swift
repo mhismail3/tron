@@ -29,8 +29,6 @@ struct InstalledSwiftAppSnapshot: Codable, Sendable {
     let app: InstalledSwiftAppManifest
     let source: String
     let state: State
-    // Transport data stays below the interpreter; the runner decodes and admits
-    // its declared feed before publishing an executable session.
     let feeds: [String: JSONValue]?
 
     func admitted(appID: String) throws -> Self {

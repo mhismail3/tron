@@ -1,9 +1,5 @@
 import SwiftUI
 
-/// Minimal activity animation inspired by Jakub Antalik's
-/// MIT-licensed thinking-orbs project. Working uses a sparse twisting sphere;
-/// resting uses a small set of continuous curved strands.
-/// Geometry stays renderer-independent for deterministic focused tests.
 enum ProcessActivityOrbMode: Hashable, Sendable {
     case solving
     case thinking
@@ -70,8 +66,6 @@ enum ProcessActivityOrbEngine {
         case .thinking: thinkingFrame(time: time)
         }
     }
-
-    // MARK: Solving / Rubik
 
     private static func solvingFrame(time: Double) -> ProcessActivityOrbFrame {
         let center = size / 2
@@ -197,11 +191,6 @@ enum ProcessActivityOrbEngine {
         return (x, y, z, inActive)
     }
 
-    // MARK: Thinking / composing ribbon
-
-    /// Preserve the original ribbon projection and its two traveling waves,
-    /// but join mirrored longitude samples into eleven continuous strands
-    /// instead of drawing 208 independent circles.
     private static func thinkingFrame(time: Double) -> ProcessActivityOrbFrame {
         let center = size / 2
         let sphereRadius = (size / 2) * 0.78
@@ -298,8 +287,6 @@ enum ProcessActivityOrbEngine {
         )
     }
 
-    // MARK: Shared math
-
     private typealias Projector = (Double, Double, Double) -> (x: Double, y: Double, z: Double)
 
     private static func projector(
@@ -394,10 +381,6 @@ private struct ProcessActivityOrbCanvas: View, @preconcurrency Animatable {
     }
 
     var body: some View {
-        // This frame is intentionally tiny and bounded. Synchronous drawing
-        // keeps its pixels in the same presentation transaction as the
-        // composer's matched-geometry glass transition instead of queueing a
-        // stale asynchronous frame while transcript updates are arriving.
         Canvas(rendersAsynchronously: false) { context, canvasSize in
             let weights = ProcessActivityOrbModeTransitionPolicy.weights(
                 thinkingBlend: thinkingBlend

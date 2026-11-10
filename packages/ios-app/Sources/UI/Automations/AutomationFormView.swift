@@ -3,8 +3,6 @@ import TronMobileCore
 
 enum AutomationWorkspacePathPolicy {
     static func initialPath(selectedPath: String) -> String? {
-        // Omit an unset path so filesystem.list resolves the Gateway's own
-        // default; an empty string is an invalid explicit path.
         selectedPath.isEmpty ? nil : selectedPath
     }
 }
@@ -30,7 +28,6 @@ enum AutomationDateField: String, Identifiable {
     }
 }
 
-/// The tapped component, not just the backing field, owns picker presentation.
 struct AutomationDateSelection: Identifiable {
     let field: AutomationDateField
     let component: TronDateComponent
@@ -141,14 +138,8 @@ struct AutomationFormView: View {
     @PresentationState private var targetSessionID = ""
     @PresentationState private var homeTargetStatus: HomeStatusDTO?
     @PresentationState private var savedHomeTarget: GatewayAutomationTarget?
-    /// The name of a target the dashboard projection cannot hold. An archived
-    /// session is excluded from that projection by contract, so the owning
-    /// Gateway's archived projection supplies its name instead of showing an
-    /// empty or invalid target.
     @PresentationState private var archivedTargetTitle: String?
     @PresentationState private var editingDateField: AutomationDateSelection?
-    // Workspace paths are transient form state only. They are sent to the
-    // owning Gateway and are never written to iOS preferences or caches.
     @PresentationState private var workspacePath = ""
     @PresentationState private var workspaceTrustInspection: JSONValue?
     @PresentationState private var showingWorkspaceBrowser = false
@@ -497,9 +488,6 @@ struct AutomationFormView: View {
                         TronInlineActionLabel(selectedSessionTitle)
                     }
                     .buttonStyle(.plain)
-                    // An archived-only Gateway has nothing to pick, so the
-                    // saved target stays named and read-only instead of opening
-                    // an empty picker.
                     .disabled(sessions.isEmpty)
                     .accessibilityLabel("Choose session")
                     .accessibilityValue(selectedSessionTitle)
@@ -703,11 +691,6 @@ struct AutomationFormView: View {
         AutomationWorkspacePathPolicy.initialPath(selectedPath: workspacePath)
     }
 
-    /// Names a saved target the dashboard projection cannot: an archived row is
-    /// excluded from it by contract, so the owning Gateway's archived projection
-    /// is the only authority for its name. The lookup keeps the existing
-    /// fallback when the session is not archived inside the bounded page walk,
-    /// and a superseded or retired read publishes nothing.
     private func resolveArchivedTargetTitle() async {
         guard targetMode == .existingSession || actionKind == .notification,
               !targetSessionID.isEmpty,
@@ -742,9 +725,6 @@ struct AutomationFormView: View {
             ?? "Choose a session"
     }
 
-    /// Explains why a saved target is not in the picker. The automation keeps
-    /// the target, and every run unarchives it. The hint disappears as soon as
-    /// the dashboard lists the target again, without another page walk.
     private var archivedTargetHint: String? {
         guard archivedTargetTitle != nil,
               sessions.first(where: { $0.id == targetSessionID }) == nil else { return nil }
@@ -960,7 +940,6 @@ struct AutomationFormView: View {
         )
     }
 
-    /// A text entry under its standard row title, with its byte budget trailing.
     private func fieldRow<Field: View>(
         title: String, icon: String, count: Int, limit: Int, @ViewBuilder field: () -> Field
     ) -> some View {
@@ -1160,8 +1139,6 @@ struct AutomationFormView: View {
             if let anchor = record.trigger.anchorAt, let date = GatewayTimestamp.parse(anchor) { intervalAnchor = date }
             setInterval(record.trigger.everySeconds ?? 3_600)
             if let storedTime = record.trigger.localTime { setLocalTime(storedTime) }
-            // Install the complete draft without a suspension point. Separate
-            // activity-keyed preview/trust reads cannot partially initialize it.
             initialized = true
         } catch is CancellationError {
             return
@@ -1217,8 +1194,6 @@ struct AutomationFormView: View {
                   requestedPresentationGeneration == presentationReadGeneration,
                   presentationActivity.allowsPresentationPublication,
                   scenePhase == .active else { return }
-            // A previous trigger's dates must not masquerade as this trigger's
-            // preview. The initialized editing draft itself remains untouched.
             preview = []
             errorMessage = (error as? GatewayFailure)?.message ?? "Schedule preview is unavailable."
         }

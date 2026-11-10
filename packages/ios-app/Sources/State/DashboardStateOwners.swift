@@ -2,7 +2,6 @@ import Foundation
 import SwiftUI
 import TronMobileCore
 
-/// Requires the mounted chat generation to retire before a different route mounts.
 struct SessionRouteReplacementOwner: Equatable {
     private struct Pending: Equatable {
         let retiringRouteID: String
@@ -62,7 +61,6 @@ struct SessionRouteReplacementOwner: Equatable {
     }
 }
 
-/// Admits only the latest asynchronous dashboard navigation intent.
 struct DashboardNavigationOwner: Equatable {
     private var generation = 0
 
@@ -106,26 +104,15 @@ struct DashboardPresentationSnapshot: Equatable {
     }
 }
 
-/// A dashboard row's relative-activity label and the `TimelineView` schedule
-/// that re-renders the row exactly when that label can change: every second
-/// while it shows seconds, then once a minute, an hour, a day and so on. The
-/// change instants come from the shared formatter itself, never from assumed
-/// unit boundaries. This visible-surface clock never changes catalog timestamps
-/// or ordering.
 struct DashboardActivityClock: TimelineSchedule {
-    /// Longer than the formatter's slowest unit (a leap year plus a DST hour),
-    /// so a search always reaches the next change; an unchanged horizon entry
-    /// only re-renders the same text.
     static let changeSearchHorizon: TimeInterval = 400 * 86_400
 
-    /// Parsed once per row value rather than on every render.
     let updatedAt: Date?
 
     init(updatedAt: String) {
         self.updatedAt = GatewayTimestamp.parse(updatedAt)
     }
 
-    /// Malformed timestamps keep today's empty label and never schedule a tick.
     func label(relativeTo reference: Date) -> String {
         updatedAt.map { GatewayTimestamp.relativeDescription($0, relativeTo: reference) } ?? ""
     }
@@ -134,9 +121,6 @@ struct DashboardActivityClock: TimelineSchedule {
         Entries(clock: self, start: startDate)
     }
 
-    /// Yields the start, then each later instant at which the label changes.
-    /// SwiftUI pulls one entry ahead, so each search runs as the previous
-    /// change renders.
     struct Entries: Sequence, IteratorProtocol {
         let clock: DashboardActivityClock
         let start: Date
@@ -166,9 +150,6 @@ struct DashboardActivityClock: TimelineSchedule {
 }
 
 enum DashboardProjectionRetentionPolicy {
-    /// Background connection retirement is not deletion. Keep an existing
-    /// bounded dashboard bucket while a profile is reconnecting, blocked, or
-    /// otherwise temporarily unavailable.
     static func retainsExistingBucket(
         profileExists: Bool,
         existingSessionCount: Int,
@@ -200,7 +181,6 @@ struct DashboardServerSource: Identifiable, Equatable, Sendable {
 }
 
 enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
-    // Declaration order is the filter sheet's order; Home is first and the default.
     case home = "Home"
     case projectServer = "By Project / Server"
     case recent = "Recent Activity"
@@ -396,9 +376,6 @@ struct DashboardServerFilterState: Equatable, Sendable {
     mutating func reconcile(profileIDs: [String]) {
         let admitted = Set(profileIDs)
         availableProfileIDs = admitted
-        // An empty source list is a transient startup/offline projection. Keep
-        // the persisted choice until an authoritative non-empty set can
-        // reconcile removed or re-paired profiles.
         guard !admitted.isEmpty else { return }
         selectedProfileIDs = selectedProfileIDs.intersection(admitted)
         if selectedProfileIDs.count == admitted.count { selectedProfileIDs.removeAll() }
@@ -447,10 +424,7 @@ struct SessionCatalogLoadKey: Equatable, Sendable {
     let connectionID: Int
 }
 
-/// Owns the bounded dashboard projection, revisioned global row overlays, and
-/// exact admission for one catalog materialization. Gateway remains canonical.
 enum SessionCatalogLoadBounds {
-    // Limits cap one user-list traversal while allowing the current 25,000-row catalog.
     static let pageSize = 500
     static let maximumPages = 50
     static let maximumRows = 25_000
@@ -458,9 +432,6 @@ enum SessionCatalogLoadBounds {
 
 enum SessionCatalogLoadResult: Sendable {
     case loaded(rows: [SessionSummary], pageCount: Int, revision: Int, projectionToken: String, archivedCount: Int?)
-    /// The Gateway confirmed the caller's retained projection token, so the
-    /// held rows are still exactly its projection. No rows crossed the wire
-    /// (G-7).
     case unchanged(revision: Int)
     case revisionMoved(pageCount: Int, revision: Int?)
     case retired
@@ -472,27 +443,14 @@ enum SessionCatalogLoader {
         let cursor: String?
         let limit: Int
         let scope: String
-        /// Only the first page of a traversal may name the caller's retained
-        /// projection token; a cursored page is already bound to the projection
-        /// its lease admitted.
         let projectionToken: String?
     }
     private struct Response: Decodable {
         let sessions: [SessionSummary]
         let nextCursor: String?
-        /// Structural catalog revision of this page's traversal. Diagnostic:
-        /// the projection token below is what identifies the whole projection.
         let listRevision: Int
-        /// The projection every row of this page belongs to. The Gateway owns
-        /// it, so a client that holds an equal token holds this exact projection
-        /// including every mutable row overlay (G-7).
         let projectionToken: String
-        /// Present only when the Gateway answered a conditional first page
-        /// without rows.
         let notModified: Bool?
-        /// Present on the first `exclude` page and nowhere else. Archived rows
-        /// are not part of this projection, so the count is the only way the
-        /// dashboard learns how many sessions are hidden.
         let archivedCount: Int?
     }
 
@@ -537,8 +495,6 @@ enum SessionCatalogLoader {
                 }
                 guard await admitsPublication() else { return .retired }
                 if response.notModified == true {
-                    // Only a first page that named a retained token can be
-                    // unchanged, and such a client already holds every row.
                     guard cursor == nil, pageCount == 0, let sinceToken,
                           response.projectionToken == sinceToken,
                           response.sessions.isEmpty, response.nextCursor == nil, response.archivedCount == nil else {
@@ -559,9 +515,6 @@ enum SessionCatalogLoader {
                 guard response.sessions.count <= SessionCatalogLoadBounds.pageSize,
                       all.count <= SessionCatalogLoadBounds.maximumRows - response.sessions.count,
                       response.archivedCount.map({ $0 >= 0 && $0 <= SessionCatalogLoadBounds.maximumRows }) ?? true,
-                      // `exclude` hides archived sessions. A row that still
-                      // carries archive state would leak a hidden session onto
-                      // the dashboard, so the projection is rejected instead.
                       response.sessions.allSatisfy({ $0.archivedAt == nil }),
                       response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
                     return .invalid(code: "invalid_response", reason: "session-list-page", pageCount: pageCount, revision: latestRevision)
@@ -587,16 +540,12 @@ enum SessionCatalogLoader {
     }
 }
 
-/// Bounds the archived-page walk that names a session the dashboard projection
-/// cannot hold. A profile whose archived count exceeds this bound keeps the
-/// existing fallback label instead of an unbounded read.
 enum SessionArchiveTargetLookup {
     static let maximumPages = 5
 }
 
 enum ArchivedSessionsLoadResult: Sendable {
     case loaded(page: ArchivedSessionsPage)
-    /// The read was superseded by a newer request or its surface retired it.
     case retired
     case invalid(code: String, reason: String)
 }
@@ -606,13 +555,6 @@ struct ArchivedSessionsPage: Equatable, Sendable {
     let nextCursor: String?
 }
 
-/// Reads the Gateway's `archived: "only"` projection for the dashboard's
-/// archived container. The dashboard bucket never supplies these rows: it
-/// excludes archived sessions by contract, so a page read is the only
-/// authority for them. One call reads exactly one page; the container owns
-/// expansion and the cursor. The caller's managed activity and its exact
-/// latest-request fence are rechecked after every await, so a page that a newer
-/// archive toggle already invalidated can never reach the surface.
 enum ArchivedSessionsLoader {
     struct PageRequest: Encodable {
         let cursor: String?
@@ -628,9 +570,6 @@ enum ArchivedSessionsLoader {
 
     static let pageSize = 200
 
-    /// Admits one response. Pure apart from the caller's publication fence, so
-    /// the bounds, the archived-rows contract, and cursor progress are testable
-    /// without a transport.
     static func admit(
         _ response: PageResponse,
         requestedCursor: String?,
@@ -650,10 +589,6 @@ enum ArchivedSessionsLoader {
     }
 }
 
-/// Sums the Gateway-owned archived-session count across profiles. Only a
-/// profile that advertises `session-archive.v1` and has a known count
-/// contributes; `nil` therefore means "no archive projection yet", which the
-/// dashboard must never present as a fabricated zero.
 enum SessionArchiveCountProjection {
     static func total(countsByProfile: [String: Int], capableProfileIDs: Set<String>) -> Int? {
         var total = 0
@@ -667,9 +602,6 @@ enum SessionArchiveCountProjection {
     }
 }
 
-/// One archive-capable server the dashboard container can read. Only a live
-/// connection may be read; a capable but unreachable Gateway is named as a note
-/// instead of listing rows that may be stale.
 struct ArchivedSessionsProfileSource: Equatable, Identifiable, Sendable {
     let profileID: String
     let label: String
@@ -678,45 +610,28 @@ struct ArchivedSessionsProfileSource: Equatable, Identifiable, Sendable {
     var id: String { profileID }
 }
 
-/// The surface that owns one archived-projection read. Each purpose keeps its
-/// own latest-request fence, so a container pass and the automation form's
-/// bounded target lookup can never retire each other's read.
 enum SessionArchiveReadPurpose: String, CaseIterable, Hashable, Sendable {
     case container
     case targetLookup
 }
 
-/// One profile's read fence for one archived-projection purpose.
 struct SessionArchiveReadKey: Hashable, Sendable {
     let profileID: String
     let purpose: SessionArchiveReadPurpose
 }
 
-/// A correlation label for one `session.list` caller. The client keeps the
-/// newest request identity per label, so a dashboard catalog failure diagnostic
-/// names the catalog's own request instead of whatever read ran last.
 enum SessionListCorrelation {
     static let dashboardCatalog = "dashboard-catalog"
 }
 
-/// Owns the dashboard's archived container: one collapsed disclosure plus the
-/// per-profile pages it reads when expanded. Archive membership stays
-/// Gateway-owned, so this owner holds only the current page projection and
-/// every publish is checked against the expansion generation: a page that a
-/// collapse or a newer pass already superseded can never reach the surface.
 struct ArchivedSessionsContainerState: Equatable {
     private(set) var isExpanded = false
     private(set) var isLoading = false
     private(set) var rowsByProfile: [String: [SessionSummary]] = [:]
     private(set) var nextCursorByProfile: [String: String] = [:]
-    /// Servers whose pages cannot be shown: a capable Gateway that is not
-    /// connected, or one whose page read failed. The container names them
-    /// inline rather than presenting stale rows.
     private(set) var unavailableProfileIDs: Set<String> = []
     private var generation = 0
 
-    /// Rows in Gateway archive order (newest archived first). Ordering is
-    /// identity-qualified because two servers can own equal session IDs.
     var rows: [SessionSummary] {
         rowsByProfile.values.flatMap { $0 }.sorted { left, right in
             let leftInstant = left.archivedAt.flatMap(GatewayTimestamp.parse)
@@ -731,7 +646,6 @@ struct ArchivedSessionsContainerState: Equatable {
         }
     }
 
-    /// True while a server still has an unpublished page.
     var hasMore: Bool { !nextCursorByProfile.isEmpty }
 
     var currentGeneration: Int { generation }
@@ -742,9 +656,6 @@ struct ArchivedSessionsContainerState: Equatable {
         isExpanded = true
     }
 
-    /// Collapsing retires every in-flight page: the generation moves so a late
-    /// publish is dropped, and the next expansion starts from fresh first
-    /// pages.
     @discardableResult
     mutating func collapse() -> Int {
         let generation = retirePages()
@@ -755,12 +666,6 @@ struct ArchivedSessionsContainerState: Equatable {
         return generation
     }
 
-    /// Retires the pages in flight without clearing what is already published.
-    /// A newer archive authority must replace a pass that is still reading: the
-    /// pass's task is cancelled as a best effort, and its page was read before
-    /// that authority landed, so the generation moves here and the late page is
-    /// refused. Published rows stay because the fresh pass's first page is the
-    /// whole authority for its server and replaces them.
     @discardableResult
     mutating func retirePages() -> Int {
         generation &+= 1
@@ -768,9 +673,6 @@ struct ArchivedSessionsContainerState: Equatable {
         return generation
     }
 
-    /// Reconciles with the current capable-server snapshot. Rows and cursors of
-    /// a server that is no longer capable or connected are dropped, because a
-    /// page read is their only authority.
     mutating func reconcile(_ sources: [ArchivedSessionsProfileSource]) {
         let readable = Set(sources.filter(\.isConnected).map(\.profileID))
         rowsByProfile = rowsByProfile.filter { readable.contains($0.key) }
@@ -781,8 +683,6 @@ struct ArchivedSessionsContainerState: Equatable {
         }
     }
 
-    /// The reads for one pass: first pages for connected servers, or the
-    /// unpublished next pages when the user asked for more.
     func pageRequests(
         for sources: [ArchivedSessionsProfileSource],
         more: Bool
@@ -798,11 +698,6 @@ struct ArchivedSessionsContainerState: Equatable {
 
     mutating func finishLoading() { isLoading = false }
 
-    /// Publishes one admitted page. Returns false when the pass was retired or
-    /// the read did not produce a page, so the caller stops paging.
-    /// `requestedCursor` is the page the caller asked for: a first page (nil)
-    /// replaces the server's rows, while a continuation page extends them, so
-    /// "Show more" cannot discard the pages the user already saw.
     @discardableResult
     mutating func apply(
         _ result: ArchivedSessionsLoadResult,
@@ -827,25 +722,15 @@ struct ArchivedSessionsContainerState: Equatable {
         }
     }
 
-    /// Records that a server's page could not be read.
     mutating func markUnavailable(_ profileID: String) {
         unavailableProfileIDs.insert(profileID)
     }
 
-    /// Drops a server's continuation cursor after the Gateway refused it as
-    /// unknown (expired or evicted). The same cursor can never succeed, so the
-    /// caller re-reads that server's first page and paging starts over instead
-    /// of leaving a control that repeats the refusal. Reports whether a cursor
-    /// was actually dropped.
     @discardableResult
     mutating func discardCursor(_ profileID: String) -> Bool {
         nextCursorByProfile.removeValue(forKey: profileID) != nil
     }
 
-    /// Applies the dashboard's summed archive count. Zero means no archived
-    /// session exists on any capable server, so the container closes and every
-    /// in-flight page retires. The caller owns cancelling its own pass; this
-    /// reports whether the container closed.
     @discardableResult
     mutating func reconcileCount(_ count: Int?) -> Bool {
         guard count == 0 else { return false }
@@ -853,8 +738,6 @@ struct ArchivedSessionsContainerState: Equatable {
         return true
     }
 
-    /// Appends a continuation page in Gateway order, dropping an ID the
-    /// container already holds so a repeated row cannot appear twice.
     private static func extending(
         _ rows: [SessionSummary],
         with page: [SessionSummary]
@@ -872,27 +755,17 @@ struct SessionCatalogCoordinator: Equatable {
 
     enum SummaryUpdateAdmission: Equatable, Sendable {
         case stale
-        /// No row exists for the ID. A summary never materializes one, so the
-        /// caller must ask for an authoritative list read instead.
         case unknownSession
         case updated
     }
 
     private(set) var sessions: [SessionSummary] = []
     private(set) var freshness: SessionCatalogFreshness = .stale
-    /// Gateway-owned archived-session count for this profile's dashboard
-    /// projection. Retained while a list is unavailable; `nil` means the count
-    /// has never been observed for this exact catalog.
     private(set) var archivedCount: Int?
     private var indicesByID: [String: Int] = [:]
     private var liveUpdates: [String: SessionSummaryUpdate] = [:]
     private var liveSessionIDs: Set<String> = []
     private var loadGeneration = 0
-    /// The projection token this projection was published from. A conditional
-    /// list read may claim it on any connection: it carries the Gateway runtime
-    /// epoch, so a restarted Gateway whose revisions begin again at zero can
-    /// never match one, and every mutable row overlay (a live summary, a cold
-    /// row's attention projection, archive state) moves it too (G-7).
     private(set) var projectionToken: String?
 
     mutating func beginLoad(key: SessionCatalogLoadKey? = nil) -> LoadAdmission {
@@ -911,7 +784,6 @@ struct SessionCatalogCoordinator: Equatable {
 
     mutating func markLoadUnavailable() {
         freshness = .stale
-        // A failed complete list cannot erase individually observed summaries.
         liveSessionIDs = Set(liveUpdates.keys)
     }
 
@@ -957,10 +829,6 @@ struct SessionCatalogCoordinator: Equatable {
         return true
     }
 
-    /// Confirms a retained projection as still current for the token a
-    /// conditional read named. Nothing is republished by contract: the rows,
-    /// the visible archived count and the local overlays are unchanged, so chat
-    /// identity, scroll and selection stay exactly as they are.
     mutating func confirmUnchanged(admission: LoadAdmission) -> Bool {
         guard admits(admission, key: admission.key), projectionToken != nil else { return false }
         freshness = .live
@@ -987,9 +855,6 @@ struct SessionCatalogCoordinator: Equatable {
         return .updated
     }
 
-    /// Applies the authoritative attention mutation response without inventing
-    /// a row for an unknown session. Attention revisions are independent of
-    /// summary revisions, so a late response cannot overwrite newer state.
     @discardableResult
     mutating func applyAttention(
         sessionID: String,
@@ -1074,10 +939,6 @@ struct SessionCatalogCoordinator: Equatable {
         rebuildIndex()
     }
 
-    /// Applies the authoritative archive response: the row leaves the dashboard
-    /// projection immediately. Membership stays Gateway-owned, so nothing here
-    /// remembers the ID — an archived row is absent from the `exclude`
-    /// projection, and a summary update can never materialize a row on its own.
     mutating func markArchived(sessionID: String) {
         invalidateLoads()
         liveUpdates.removeValue(forKey: sessionID)

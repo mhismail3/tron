@@ -61,7 +61,6 @@ struct SwiftAppInstallCommand: Encodable, Sendable {
         try values.encode(review.reference.sessionId, forKey: .sessionId)
         try values.encode(review.reference.artifactId, forKey: .artifactId)
         try values.encode(review.offer.id, forKey: .offerId)
-        // Absence is an explicit reviewed precondition, not an omitted wildcard.
         try values.encode(review.installed?.revision, forKey: .expectedRevision)
         try values.encode(review.installed?.sourceSha256, forKey: .expectedSourceSha256)
         try values.encode(review.installed?.instanceId, forKey: .expectedInstanceId)

@@ -1,7 +1,5 @@
 import XCTest
 
-/// Production SwiftUI over synthetic tool invocation/result boundaries.
-/// No source assertions or golden snapshots; old renderers fail on visible behavior.
 @MainActor final class TronWorkerToolRegressionTests: XCTestCase {
     func testReportShowsMarkdownSummaryEvidenceAndReadableOutcome() {
         continueAfterFailure = false
@@ -64,7 +62,6 @@ import XCTest
             XCTAssertTrue(row.exists, app.debugDescription)
             XCTAssertTrue(row.label.hasPrefix(friendly + ","), "Expected \(friendly), got \(row.label)")
         }
-        // Open the actual aggregate row: friendly identity must survive navigation.
         app.descendants(matching: .any)["tool-run-summary-worker-review-report"].firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-tool-text-evidence"].firstMatch.waitForExistence(timeout: 8), app.debugDescription)
         attach(app, "aggregate-report-navigation")

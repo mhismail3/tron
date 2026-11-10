@@ -1,8 +1,5 @@
 import XCTest
 
-/// #1925: reading-family changes must not change Home's numeric stats font.
-/// Measures the actual production card against shared code typography, not a
-/// reported font name; proportional glyphs and line metrics must both match.
 @MainActor final class TronHomeSummaryTypographyUITests: XCTestCase {
     func testHomeStatsUseSharedCodeTypographyAndScaleWithDynamicType() {
         continueAfterFailure = true

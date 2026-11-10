@@ -1,7 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// A history row carries its canonical record; opening it admits no second read.
 struct HomeTaskCheckinSheet: View {
     let item: HomeTaskHistoryPageDTO.Item
     @Environment(\.dismiss) private var dismiss
@@ -28,8 +27,6 @@ struct HomeTaskCheckinSheet: View {
     }
 }
 
-/// Literal canonical text, never markdown or a whitespace-reconstructed sentence.
-/// The same rows render the latest snapshot and every paged history event.
 struct HomeTaskCheckinView: View {
     let checkin: HomeTaskCheckinDTO
     let identifier: String
@@ -40,8 +37,6 @@ struct HomeTaskCheckinView: View {
     private var accent: Color { theme?.accent ?? .tronPrimary }
 
     var body: some View {
-        // This is one record, not a stack of independently padded settings rows.
-        // Keep the shared list's outer insets and inter-block rhythm exactly once.
         VStack(alignment: .leading, spacing: TronListMetrics.headerGap) {
             HStack(alignment: .firstTextBaseline, spacing: TronListMetrics.slotGap) {
                 if let heading {

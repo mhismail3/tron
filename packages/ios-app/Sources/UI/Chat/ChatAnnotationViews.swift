@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Shared annotation presentation: one accent, icon and title rule for the
-/// staged composer chip, the sent-message chip and the detail sheet.
 enum ChatAnnotationPresentation {
     static let icon = "text.quote"
     static let tone: ChatNotificationTone = .warning
@@ -20,8 +18,6 @@ enum ChatAnnotationPresentation {
     }
 }
 
-/// A staged annotation above the composer input: the shared staged chip,
-/// opening the editable annotation sheet.
 struct ComposerAnnotationChip: View {
     let annotation: ChatAnnotation
     let onSave: (String) -> Void
@@ -45,7 +41,6 @@ struct ComposerAnnotationChip: View {
         .tronManagedSheet(
             isPresented: $showsDetail,
             identity: "composer.annotation.\(annotation.id)",
-            // Its quote reveals the source in the chat behind the sheet.
             keepsPresenterViewport: true
         ) {
             ChatAnnotationSheet(annotation: annotation, editing: .init(onSave: onSave, onDelete: onRemove))
@@ -53,8 +48,6 @@ struct ComposerAnnotationChip: View {
     }
 }
 
-/// A sent annotation in the user message, presented like the canonical
-/// resource chip and opening the same sheet read-only.
 struct ChatSentAnnotationChip: View, Equatable {
     let annotation: ChatAnnotation
     @State private var showsDetail = false
@@ -91,8 +84,6 @@ struct ChatSentAnnotationChip: View, Equatable {
     }
 }
 
-/// Typed prompt text with any sent annotations recovered from its envelope:
-/// annotation chips above the ordinary user bubble.
 struct ChatUserPromptContent: View {
     let text: String
 
@@ -119,8 +110,6 @@ struct ChatSentAnnotationChips: View {
     let annotations: [ChatAnnotation]
 
     var body: some View {
-        // Trailing-aligned like the canonical resource chip, one per line so
-        // every quote stays readable beside the message it belongs to.
         VStack(alignment: .trailing, spacing: 4) {
             ForEach(annotations) { ChatSentAnnotationChip(annotation: $0) }
         }
@@ -130,8 +119,6 @@ struct ChatSentAnnotationChips: View {
     }
 }
 
-/// Quote and comment for one annotation. Staged annotations are editable and
-/// deletable; sent ones are read-only.
 struct ChatAnnotationSheet: View {
     struct Editing {
         let onSave: (String) -> Void
@@ -174,8 +161,6 @@ struct ChatAnnotationSheet: View {
                     VStack(alignment: .leading, spacing: 8) {
                         sectionHeader("Comment")
                         if editing != nil {
-                            // Grows with the comment so the sheet, not an inner
-                            // box, scrolls a long one.
                             TextField("Add a comment", text: $comment, axis: .vertical)
                                 .font(TronTypography.body)
                                 .foregroundStyle(Color.tronTextPrimary)
@@ -226,7 +211,6 @@ struct ChatAnnotationSheet: View {
                 }
             }
         }
-        // The sheet's top bounds where a revealed source may land.
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { presenter?.sheetTop = $0 }
         .onDisappear { presenter?.sheetTop = nil }
         .tronTopBlur(.sheet)
@@ -244,8 +228,6 @@ struct ChatAnnotationSheet: View {
     }
 }
 
-/// A staged annotation's quote is a button that shows its source in the
-/// transcript. A quote without a source anchor (a sent annotation) stays text.
 private struct ChatAnnotationQuoteReveal: ViewModifier {
     let enabled: Bool
     let action: () -> Void
@@ -264,26 +246,15 @@ private struct ChatAnnotationQuoteReveal: ViewModifier {
     }
 }
 
-/// The floating comment bubble, anchored above the selection that is being
-/// annotated and kept above the keyboard. It uses the composer input's glass
-/// and controls so it reads as a small composer for one quote.
 struct ChatAnnotationBubbleHost: View {
     let presenter: ChatAnnotationPresenter
-    /// Saving continues in the composer: it takes the keyboard from the
-    /// comment field before the bubble is removed, so it never drops.
     let composer: ChatComposerResponder
     @State private var comment = ""
     @State private var bubbleHeight: CGFloat = 0
     @State private var region: CGRect = .zero
-    /// The region's bottom when Annotate was chosen. The transcript follows
-    /// its bottom edge as the keyboard rises, so the selection moves by the
-    /// same amount and the bubble follows it.
     @State private var capturedRegionMaxY: CGFloat?
     @State private var selection: TextSelection?
-    /// The comment Shift+Return produced; its newline is an edit, not a save.
     @State private var lineBreakComment: String?
-    /// A hardware Return also ends the vertical field's editing; after
-    /// Shift+Return's line break the comment takes focus back once.
     @State private var refocusAfterLineBreak = false
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -291,7 +262,6 @@ struct ChatAnnotationBubbleHost: View {
     static let margin: CGFloat = 12
     private static var returnSaves: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 
-    /// `new` is `old` with exactly one newline typed into it.
     private static func isTypedNewline(from old: String, to new: String) -> Bool {
         guard new.count == old.count + 1 else { return false }
         let old = Array(old), new = Array(new)
@@ -328,8 +298,6 @@ struct ChatAnnotationBubbleHost: View {
             selection = nil
             refocusAfterLineBreak = false
             capturedRegionMaxY = id == nil ? nil : region.maxY
-            // Only claim focus. Clearing it on close would resign whichever
-            // responder holds the keyboard by then, i.e. the composer after Save.
             if id != nil { focused = true }
         }
     }
@@ -353,12 +321,8 @@ struct ChatAnnotationBubbleHost: View {
                     .lineLimit(1...4)
                     .focused($focused)
                     .submitLabel(.done)
-                    // iPad: Return saves like the check. A hardware Return would
-                    // otherwise end editing, so Shift+Return inserts the multi-line
-                    // comment's newline here. iPhone Return stays a newline.
                     .onKeyPress(.return, phases: .all) { press in
                         guard Self.returnSaves else { return .ignored }
-                        // Consume the whole press; the field acts on more than key-down.
                         guard press.phase == .down else { return .handled }
                         if press.modifiers.contains(.shift) {
                             insertLineBreak()
@@ -372,8 +336,6 @@ struct ChatAnnotationBubbleHost: View {
                         refocusAfterLineBreak = false
                         if !isFocused { focused = true }
                     }
-                    // The on-screen Return key arrives as one typed newline;
-                    // dictation's "new line" stays text.
                     .onChange(of: comment) { old, new in
                         guard Self.returnSaves else { return }
                         defer { lineBreakComment = nil }
@@ -416,8 +378,6 @@ struct ChatAnnotationBubbleHost: View {
         .accessibilityIdentifier("chat.annotation.bubble")
     }
 
-    /// Only iPad edits at the selection (Shift+Return); iPhone keeps the
-    /// field without a selection binding.
     @ViewBuilder private var commentField: some View {
         if Self.returnSaves {
             TextField("Add a comment", text: $comment, selection: $selection, axis: .vertical)
@@ -439,15 +399,11 @@ struct ChatAnnotationBubbleHost: View {
     }
 
     private func save(_ comment: String) {
-        // UIKit moves the keyboard's input target directly from the
-        // still-installed comment field, so it is never dismissed.
         _ = composer.becomeFirstResponder()
         presenter.save(comment: comment)
     }
 }
 
-/// The focused text input, read from the first responder that `sendAction`
-/// reaches.
 @MainActor
 enum ChatTextInputFocus {
     fileprivate static weak var reported: UIResponder?
@@ -463,8 +419,6 @@ enum ChatTextInputFocus {
         firstResponder?.textInputMode?.primaryLanguage == "dictation"
     }
 
-    /// Whether a text input other than `view` holds the keyboard (the composer
-    /// or a comment field).
     static func keyboardIsOwned(byAnotherThan view: UIView) -> Bool {
         guard let responder = firstResponder, responder !== view else { return false }
         if let textView = responder as? UITextView { return textView.isEditable }
@@ -478,8 +432,6 @@ private extension UIResponder {
 }
 
 enum ChatAnnotationBubbleLayout {
-    /// Above the selection when it fits; otherwise pinned inside the visible
-    /// region (which already excludes the keyboard and composer).
     static func top(anchorTop: CGFloat, bubbleHeight: CGFloat, containerHeight: CGFloat, margin: CGFloat) -> CGFloat {
         let preferred = anchorTop - bubbleHeight - margin
         let maximum = max(margin, containerHeight - bubbleHeight - margin)

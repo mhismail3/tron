@@ -1,8 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// Commits durable onboarding before emitting the process-local mode switch;
-/// throwing prevents AppDelegate from entering a mode that cannot survive relaunch.
 @MainActor
 func commitWizardCompletion(
     touchSentinel: @Sendable () throws -> Void,
@@ -12,14 +10,6 @@ func commitWizardCompletion(
     notificationCenter.post(name: .tronWizardDidComplete, object: nil)
 }
 
-/// Top-level wizard. Reads the current `WizardStep` from `WizardState`
-/// and dispatches to a per-step view. The shell (top-bar with progress,
-/// fixed action bar, glass canvas, animated step transitions) is shared
-/// by `WizardShell`.
-///
-/// Pass `initialStep` to override the persisted last-visited step for
-/// wizard-owned recovery paths. The menu-bar pairing action uses its
-/// dedicated pairing-only window instead of remounting this wizard.
 struct WizardView: View {
     @Environment(\.environmentSetup) private var setup
     @State private var state: WizardState
@@ -109,62 +99,13 @@ private struct WizardProgressTrack: View, @MainActor Animatable {
     }
 }
 
-/// Shared chrome — single liquid-glass canvas with the system traffic
-/// lights floating in the top-left, a pinned header row (step icon +
-/// title + progress), a transitioning body, and a pinned
-/// secondary/primary action bar.
-///
-/// Layout invariants:
-/// ```
-/// ┌────────────────────────────────────────┐
-/// │ ●●●                                    │
-/// │ [icon] Title                    [pill] │
-/// │                                        │
-/// │   [step body fills here]               │
-/// │                                        │
-/// │ [secondary]            [primary CTA]   │
-/// └────────────────────────────────────────┘
-/// ```
-///
-/// - The header row is pinned, so the icon, title, and progress pill
-///   share one vertical center on every step. The title/icon group
-///   transitions inside that row; the progress fill animates inside
-///   one stable Canvas-backed track.
-/// - Body content owns a single `.id(displayStep)` so it re-mounts and
-///   slides as one cohesive unit. The shell keeps one fixed-height
-///   viewport, so every page slides across the same clipping geometry.
-/// - The bottom action bar is an overlay pinned to
-///   `WizardLayout.bottomPadding` + `WizardLayout.horizontalPadding`.
-///   Step bodies cannot push it around during measurement.
-/// - Slide direction is read from `displayDirection`, a local `@State`
-///   mirror of `WizardState.slideDirection`. `WizardState`'s navigation
-///   methods set the new direction BEFORE mutating `step`; this view
-///   then performs a two-phase update (see `onChange` below) so the
-///   outgoing chrome is re-rendered with the fresh direction attached
-///   to its `.transition(...)` modifier BEFORE its identity changes
-///   and SwiftUI unmounts it. Without that deferral, SwiftUI reuses
-///   whatever direction was baked into the outgoing view's transition
-///   during the PREVIOUS body eval (i.e. the prior navigation's
-///   direction), producing reversed animations on every nav after the
-///   first.
-/// - The shell owns the secondary + primary CTAs for every step. Step
-///   bodies provide ONLY their description / body content; tertiary
-///   actions (Refresh, Re-check) live inline within the body
-///   so they slide with it.
 struct WizardShell<Content: View>: View {
     @Environment(\.environmentSetup) private var setup
     @Bindable var state: WizardState
     @ViewBuilder var content: (WizardStep) -> Content
 
-    /// The step actually rendered in the chrome. Lags `state.step` by
-    /// exactly one runloop tick after a navigation. See the struct-
-    /// level doc + the `.onChange` handler in `body` for the rationale.
     @State private var displayStep: WizardStep
 
-    /// Direction consumed by `slideTransition`. Updated SYNCHRONOUSLY
-    /// inside `.onChange(of: state.step)` (Phase 1) so the outgoing
-    /// chrome re-renders with the fresh direction attached before
-    /// `displayStep` changes identity (Phase 2).
     @State private var displayDirection: WizardSlideDirection
 
     init(state: WizardState, @ViewBuilder content: @escaping (WizardStep) -> Content) {
@@ -176,13 +117,6 @@ struct WizardShell<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            // Layer 1 (content plane): body content re-mounts on every
-            // `displayStep` change and slides as one cohesive group.
-            // The top inset reserves permanent space for Layer 3's
-            // pinned header row, and the bottom inset reserves Layer
-            // 2's pinned action bar. Dynamic body measurement cannot
-            // move the Back/Continue buttons or the progress pill even
-            // for a single frame.
             content(displayStep)
                 .padding(.top, WizardLayout.topPadding + WizardLayout.headerHeight + WizardLayout.headerBodySpacing)
                 .padding(.horizontal, WizardLayout.horizontalPadding)
@@ -192,45 +126,21 @@ struct WizardShell<Content: View>: View {
                 .transition(slideTransition)
                 .animation(WizardLayout.transitionAnimation, value: displayStep)
 
-            // Layer 2 (pinned): bottom bar has an explicit height and
-            // absolute bottom alignment inside the 480×440 canvas. Only
-            // its labels/styles switch with `displayStep`; the bar's
-            // frame never gets remeasured by the sliding content.
             bottomBar
                 .frame(height: WizardLayout.bottomBarHeight, alignment: .center)
                 .padding(.horizontal, WizardLayout.horizontalPadding)
                 .padding(.bottom, WizardLayout.bottomPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
 
-            // Layer 3 (pinned): one real header row owns icon, title,
-            // and progress. Keeping the pill in this row prevents the
-            // progress track from drifting away from the title chrome
-            // during page transitions.
             headerBar
                 .padding(.top, WizardLayout.topPadding)
                 .padding(.horizontal, WizardLayout.horizontalPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        // Fixed wizard canvas: every page gets the same 480×440 viewport,
-        // so horizontal transitions cannot resize the window or change
-        // their clipping geometry.
         .frame(width: WizardLayout.width, height: WizardLayout.height)
         .configureHostingWindow { window in
             window.isMovableByWindowBackground = true
         }
-        // Two-phase direction+step update (see struct doc). Phase 1
-        // runs synchronously: write the new direction, which re-renders
-        // the CURRENTLY-mounted chrome so its `.transition(slideTransition)`
-        // modifier now holds the fresh direction. Phase 2 runs one
-        // runloop tick later via `DispatchQueue.main.async`: flip
-        // `displayStep`, which changes the chrome's `.id(...)` and
-        // triggers SwiftUI to unmount the outgoing view (using the
-        // direction Phase 1 just baked in) and mount the incoming
-        // view. If we set both synchronously, both sides of the
-        // transition use the direction from the PREVIOUS navigation
-        // (because that's what was baked into the outgoing view's
-        // transition during the prior body eval), and the animation
-        // reverses on every step after the first.
         .onChange(of: state.step) { _, newStep in
             displayDirection = state.slideDirection
             DispatchQueue.main.async {
@@ -238,8 +148,6 @@ struct WizardShell<Content: View>: View {
             }
         }
     }
-
-    // MARK: - Header (icon + title + progress)
 
     @ViewBuilder
     private var headerBar: some View {
@@ -288,8 +196,6 @@ struct WizardShell<Content: View>: View {
         }
     }
 
-    // MARK: - Bottom action bar
-
     @ViewBuilder
     private var bottomBar: some View {
         HStack(spacing: 12) {
@@ -303,9 +209,6 @@ struct WizardShell<Content: View>: View {
     private var secondaryButton: some View {
         switch displayStep {
         case .welcome:
-            // Power-user shortcut — not a back button. The Welcome
-            // step is the entry point so there's nothing to go back
-            // to anyway.
             Button {
                 state.skipToPairing()
             } label: {
@@ -313,7 +216,6 @@ struct WizardShell<Content: View>: View {
             }
             .buttonStyle(.wizardLink)
         case .done:
-            // Done is terminal; no secondary action.
             EmptyView()
         default:
             Button {
@@ -412,8 +314,6 @@ struct WizardShell<Content: View>: View {
         }
     }
 
-    /// A failed durable commit leaves Done visible for retry instead of
-    /// asking AppDelegate to enter menu-bar mode.
     private func completeOnboarding() {
         do {
             try commitWizardCompletion(touchSentinel: setup.touchOnboardedSentinel)
@@ -422,15 +322,10 @@ struct WizardShell<Content: View>: View {
         }
     }
 
-    /// Preserve core setup without requiring consent for an unavailable or
-    /// unused native capability. Computer control has its own execution gate.
     private var permissionsCanContinue: Bool {
         Permission.coreSetupSatisfied(by: state.permissionStatuses)
     }
 
-    /// The primary CTA advances only after the wizard-owned pipeline
-    /// has started the helper and `system::ping` has answered.
-    /// Before then, the same CTA admits the wizard-owned install task.
     private var installCanContinue: Bool {
         guard let outcome = state.installOutcome else { return false }
         return outcome == .success
@@ -447,8 +342,6 @@ struct WizardShell<Content: View>: View {
         }
         return "Install"
     }
-
-    // MARK: - Pinned progress pill
 
     @ViewBuilder
     private var progressPill: some View {
@@ -494,14 +387,6 @@ struct WizardShell<Content: View>: View {
             .animation(WizardLayout.progressAnimation, value: fraction)
     }
 
-    // MARK: - Direction-aware slide transition
-
-    /// Reads `displayDirection` (a local mirror of `state.slideDirection`
-    /// updated in Phase 1 of the two-phase `onChange` handler above).
-    /// Forward navigations slide the outgoing view off-left and the
-    /// incoming view in from the right; back navigations reverse both
-    /// edges. The whole shell mimics a horizontal pager: forward =
-    /// swipe left, back = swipe right.
     private var slideTransition: AnyTransition {
         switch displayDirection {
         case .forward:

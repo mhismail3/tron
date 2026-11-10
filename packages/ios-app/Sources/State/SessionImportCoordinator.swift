@@ -48,8 +48,6 @@ typealias SessionImportUpload = @MainActor (
     _ byteCount: Int
 ) async throws -> String
 
-/// Owns the local-file-to-upload import pipeline while the Gateway remains the
-/// sole owner of the resulting canonical session.
 @MainActor
 final class SessionImportCoordinator {
     struct ImportedSession {

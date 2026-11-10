@@ -2,22 +2,13 @@ import Observation
 import SwiftUI
 import UIKit
 
-/// Semantic intent, not a generator choice at each call site. Selection ticks
-/// mark deliberate value changes; notifications mark accepted outcomes.
 enum TronHaptic: String, CaseIterable, Sendable {
-    /// The Home button's hold opened the dashboard menu (#1480).
     case menuOpened
-    /// The Gateway accepted a sent prompt.
     case promptSent
-    /// One tick of a newly attached photo or file sliding into the composer.
     case attachmentAdded
-    /// The agent's run settled normally.
     case runFinished
-    /// A worker or subagent delivered a message into the chat.
     case workerMessage
-    /// A question sheet (`ask_user`) presented.
     case questionPresented
-    /// Any other sheet or system picker presented through the shared presenter.
     case sheetPresented
     case toggleChanged
     case selectionChanged
@@ -27,17 +18,10 @@ enum TronHaptic: String, CaseIterable, Sendable {
     case terminalBell
 }
 
-/// The one haptic seam. UIKit's view-bound feedback generators honor the
-/// system's System Haptics setting; a generator plays only while its view (by
-/// default the foreground-active scene's key window) is on screen, so nothing
-/// plays from the background. Hosted UI journeys read `TronHapticsProbe`,
-/// because XCUITest cannot feel the Taptic Engine.
 @MainActor
 final class TronHaptics {
     static let shared = TronHaptics()
 
-    /// A batch of attachments ticks at most this many times, this far apart, so
-    /// a large selection reads as a short cascade, never a continuous buzz.
     static let cascadeLimit = 6
     static let cascadeInterval: Duration = .milliseconds(70)
 
@@ -51,8 +35,6 @@ final class TronHaptics {
 
     private init() {}
 
-    /// Warms the Taptic Engine shortly before a haptic that a touch or an
-    /// in-flight request makes likely, so it lands without latency.
     func prepare(_ haptic: TronHaptic, in view: UIView? = nil) {
         generator(for: haptic, in: view)?.prepare()
     }
@@ -74,8 +56,6 @@ final class TronHaptics {
         }
     }
 
-    /// A switch's user-intent seam, shared by touch and accessibility actions.
-    /// Server updates never enter it. A refused/redundant setter stays silent.
     func changeToggle(from current: Bool, to value: Bool? = nil, apply: (Bool) -> Void) {
         let next = value ?? !current
         guard next != current else { return }
@@ -90,9 +70,6 @@ final class TronHaptics {
         })
     }
 
-    /// One tick per item up to `cascadeLimit`, `cascadeInterval` apart,
-    /// starting now with the first item's insertion. A newer cascade replaces
-    /// the remainder of an older one.
     func playCascade(_ haptic: TronHaptic, count: Int) {
         cascade?.cancel()
         cascade = nil
@@ -138,15 +115,12 @@ final class TronHaptics {
 }
 
 #if HOSTED_TEST
-/// Every haptic played, in order, so UI journeys prove which event played which
-/// pattern and that replayed, aborted or background events play none.
 @MainActor @Observable
 final class TronHapticsProbe {
     static let shared = TronHapticsProbe()
     var played: [TronHaptic] = []
 
     func count(_ haptic: TronHaptic) -> Int { played.filter { $0 == haptic }.count }
-    /// `promptSent,attachmentAdded,...` in play order, or `none`.
     var summary: String { played.isEmpty ? "none" : played.map(\.rawValue).joined(separator: ",") }
 }
 #endif

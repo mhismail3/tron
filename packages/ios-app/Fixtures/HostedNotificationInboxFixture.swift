@@ -2,18 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// The real Settings sheet, bell, inbox coordinator, `GatewayClient` and event
-/// intake; only the selected Gateway is scripted. Its inbox mirrors the
-/// Gateway contract (`notification.inbox.list/read/readAll` and a coalesced
-/// `notification.inbox.changed` after every commit). A second paired Mac is
-/// unreachable, so its dashboard connection stays offline (#938).
-///
-/// The UI test changes the Gateway's inbox while the sheet is open by posting
-/// Darwin notifications: `deliver` admits a new unread alert and `read-newest`
-/// marks the newest unread row read, as another device would.
-/// Scenario `empty` starts with no notifications. `-notification-inbox-list-latency`
-/// gives every list read a real Gateway round trip's delay, so a refresh is
-/// observable on screen.
 struct HostedNotificationInboxFixture: View {
     static let deliverNotification = "com.tron.hosted.notification-inbox.deliver"
     static let readNewestNotification = "com.tron.hosted.notification-inbox.read-newest"
@@ -32,7 +20,6 @@ struct HostedNotificationInboxFixture: View {
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(profile, token: "fixture-only-token")
-        // `.invalid` never resolves, so this Mac's dashboard connection is offline.
         try! profiles.save(
             GatewayProfile(id: "inbox-laptop", label: "MacBook", host: "macbook.invalid", port: 9847, machineId: "inbox-laptop-machine"),
             token: "fixture-only-token",
@@ -62,8 +49,6 @@ struct HostedNotificationInboxFixture: View {
             DarwinTrigger.observe(Self.readNewestNotification) { Task { await gateway.readNewestUnread() } }
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-only-token")
-                // The hosted connect skips the connected callback's catalog read;
-                // rows are titled from this catalog.
                 _ = await model.refreshSessions()
                 ready = true
             } catch { status = "fixture-error:\(error.localizedDescription)" }
@@ -71,9 +56,6 @@ struct HostedNotificationInboxFixture: View {
     }
 }
 
-/// A process-wide Darwin notification is the only channel the UI test runner
-/// shares with the app; each observer lives for the fixture process. Shared by
-/// the hosted fixtures whose controls a presented sheet would cover.
 enum DarwinTrigger {
     private final class Box { let action: () -> Void; init(_ action: @escaping () -> Void) { self.action = action } }
 
@@ -175,8 +157,6 @@ private actor NotificationInboxGateway {
         ])
     }
 
-    /// The position the app derives from the wired millisecond timestamp, so a
-    /// `readAll` cut taken from a shown row always covers that row.
     private func position(_ row: Row) -> NotificationInboxPosition {
         let wired = GatewayTimestamp.parse(GatewayTimestamp.string(from: row.createdAt)) ?? row.createdAt
         return NotificationInboxPosition(milliseconds: Int((wired.timeIntervalSince1970 * 1_000).rounded()), id: row.id)

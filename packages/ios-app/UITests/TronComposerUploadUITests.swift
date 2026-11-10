@@ -1,13 +1,6 @@
 import XCTest
 
-/// Composer photo staging across a background reconnect (#916). The fixture
-/// scripts only the Gateway: four photos are pasted through the composer's own
-/// edit menu, the third transfer is in flight when the app backgrounds, and the
-/// fixture counts every staging attempt the Gateway receives.
 final class TronComposerUploadUITests: XCTestCase {
-    /// Already-staged photos survive the reconnect to the same Mac and a
-    /// reopened chat: only the interrupted and unstarted photos are uploaded
-    /// again, and the message sends with all four attachments.
     @MainActor func testBackgroundMidUploadReusesStagedPhotosAfterReconnect() {
         continueAfterFailure = false
         let app = launch("reconnect"); defer { app.terminate() }
@@ -18,7 +11,6 @@ final class TronComposerUploadUITests: XCTestCase {
         waitConnected(app)
 
         XCTAssertTrue(waitCounts(app, "staged:1,1,1,1"), "every photo is staged exactly once after the reconnect: \(counts(app))")
-        // Leaving and reopening the chat keeps the staged photos too.
         app.buttons["fixture.reopen-chat"].tap()
         XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 20), app.debugDescription)
         send(app)
@@ -29,9 +21,6 @@ final class TronComposerUploadUITests: XCTestCase {
         keepEvidence(app, "916-reused-staged-photos")
     }
 
-    /// When the Mac no longer holds the staged photos (expired or reset staging),
-    /// the rejected send restores the draft, every photo uploads again, and the
-    /// next send carries all four.
     @MainActor func testLostStagingReuploadsEveryPhotoAndSends() {
         continueAfterFailure = false
         let app = launch("lost-staging"); defer { app.terminate() }
@@ -50,8 +39,6 @@ final class TronComposerUploadUITests: XCTestCase {
         keepEvidence(app, "916-lost-staging-reupload")
     }
 
-    /// On iPad, Return sends a photos-only message like Send, and like Send it
-    /// does nothing while an upload is still in flight.
     @MainActor func testPadReturnSendsPhotosOnlyOnceUploadsSettle() throws {
         try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, "iPad keyboard behavior")
         continueAfterFailure = false
@@ -76,8 +63,6 @@ final class TronComposerUploadUITests: XCTestCase {
         XCTAssertTrue(waitCounts(app, "prompts:4 "), "Return sends the message with all four photos: \(counts(app))")
     }
 
-    /// A new app process must restore actual user input from the real draft store,
-    /// not a remounted view or a fixture seed. The UUID root belongs to this test.
     @MainActor func testDraftTextSurvivesColdProcessRelaunch() {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-composer-upload-fixture", "-composer-durable-token", UUID().uuidString,

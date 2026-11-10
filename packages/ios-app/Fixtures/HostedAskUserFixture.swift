@@ -4,9 +4,6 @@ import PhotosUI
 import SwiftUI
 import TronMobileCore
 
-/// A deterministic, test-only host for the rendered Ask User route. It keeps
-/// the real managed sheet and AppModel mutation owner in the loop while the
-/// socket supplies only a bounded synthetic transport response.
 @MainActor
 struct HostedAskUserFixtureView: View {
     private let sessionID = "hosted-ask-user-session"
@@ -171,9 +168,6 @@ private struct HostedAskUserFixture {
     let receipt: HostedAskUserFixtureReceipt
     let model: AppModel
 
-    /// Stores this question's draft (Staging chosen) and around it one
-    /// unreadable record, an older duplicate of its scope with nothing chosen,
-    /// and 32 older drafts for other sessions, one more than the store keeps.
     @MainActor
     private static func storeDraftsBesideBadRecords(
         form: ExtensionFormDescriptor, interaction: ExtensionInteraction, in defaults: UserDefaults
@@ -220,9 +214,7 @@ private struct HostedAskUserFixture {
         self.receipt = receipt
         let allowCancel = !ProcessInfo.processInfo.arguments.contains("-tron-ask-user-no-cancel")
         let styled = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-styled")
-        // Agent-authored URL, inline code and a fenced command (#941).
         let copyable = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-copyable")
-        // Context taller than the sheet, so the page must scroll (#1123).
         let long = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-long")
         let optionA = ExtensionFormOption(id: "environment-a", label: "Staging", description: styled ? "A pre-release environment for validation." : nil)
         let optionB = ExtensionFormOption(id: "environment-b", label: "Production", description: styled ? "The live environment used by customers." : nil)

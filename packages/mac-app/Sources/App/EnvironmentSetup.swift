@@ -1,11 +1,6 @@
 import Foundation
 import SwiftUI
 
-/// Dependency injection point for the Mac wrapper.
-///
-/// This is the composition seam for wizard/menu dependencies that need host
-/// substitution. Leaf services retain their own bounded filesystem, process,
-/// and timing behavior.
 struct EnvironmentSetup: Sendable {
     var profile: TronGatewayProfile = .stable
     var runtimeVariant: MacRuntimeVariant = .installedRelease
@@ -25,87 +20,44 @@ struct EnvironmentSetup: Sendable {
     var canManageLaunchAgent: Bool
     var wrapperLockPath: URL
 
-    /// Returns true if the on-disk first-run sentinel exists.
     var onboardedSentinelExists: @Sendable () -> Bool
 
-    /// Reads the gateway-local health token from `gateway/local-auth.json`.
-    /// It is used only by this signed wrapper and never shown to users.
     var readBearerToken: @Sendable () -> String?
 
-    /// Projects authoritative LaunchAgent ownership for Stable lifecycle actions.
-    /// Read-only Debug observation deliberately leaves this false.
     var runtimeOwnershipHealthy: @Sendable () async -> Bool = { false }
 
-    /// Coherent Stable admission correlating launchd, listener, payload,
-    /// process command, and authenticated identity, or the check that refused.
     var admitStableRuntime: @Sendable (ServerPingInfo) async -> Result<StableGatewayObserver.Admission, StableGatewayObserver.Refusal> = { _ in .failure(.noRuntime) }
 
-    /// One-shot read-only Debug observation. It owns transport resolution and
-    /// returns one immutable admission rather than exposing split projections.
     var observeDebugGateway: @Sendable (String?) async -> DebugGatewayObserver.Observation = { _ in .unavailable }
 
-    /// Reads the short-lived one-time code emitted for mobile enrollment.
     var readEnrollmentCode: @Sendable () -> String? = { nil }
 
-    /// Reads the disposable Tailscale presentation cache. Pairing resolves
-    /// Tailscale live first.
     var readTailscaleIPFromSettings: @Sendable () -> String?
 
-    /// Updates the disposable Tailscale presentation cache. Pairing must not
-    /// depend on this write succeeding.
     var cacheTailscaleIP: @Sendable (String) -> Void
 
-    /// Probes Tailscale on the host - app installed AND `tailscale ip -4`
-    /// returns at least one address.
     var probeTailscale: @Sendable () async -> TailscaleStatus
 
-    /// Probes FDA from the wrapper and GUI permissions from the signed Aqua
-    /// host. No probe requests TCC or registers a service.
     var probePermissions: @Sendable () async -> [Permission: PermissionStatus]
 
-    /// Explicit user-only GUI permission request. The request is never made
-    /// by polling, setup readiness, or a view appearance.
     var nativeHostServiceState: @Sendable () async -> NativeHostServiceState = { .unavailable }
     var enableNativeHost: @Sendable () async throws -> NativeHostServiceState = { .unavailable }
     var refreshNativeHost: @Sendable () async throws -> NativeHostServiceState = { .unavailable }
     var requestPermission: @Sendable (Permission) async -> PermissionStatus = { _ in .probeUnavailable }
     var unregisterNativeHost: @Sendable () async throws -> Void = {}
 
-    /// Detects whether the bundled Login Item is registered and usable.
     var detectExistingInstall: @Sendable () async -> ExistingInstallStatus
 
-    /// Returns a user-facing problem when the release app is not running
-    /// from `/Applications/Tron.app`.
     var validateApplicationLocation: @Sendable () -> String?
 
-    /// Returns a user-facing problem when the embedded helper, LaunchAgent
-    /// plist, or helper signature is missing/corrupt.
     var validateBundledHelper: @Sendable () async -> String?
 
-    /// Returns a user-facing problem when the embedded Gateway entrypoint,
-    /// production dependencies, or architecture-specific Node runtime is
-    /// missing. The shipped app must not depend on a global Pi or Node install.
     var validateGatewayPayload: @Sendable () -> String? = { nil }
 
-    /// Performs a single `system::ping` against the running server.
-    /// Returns a classified `ServerPingResult` so the caller can
-    /// distinguish "server is down" from "token rejected" — the menu
-    /// bar tone + wizard recovery copy depend on this distinction.
-    /// Honors the supplied bearer token. `nil` means the token could not be
-    /// read locally; authenticated servers should classify that as
-    /// `.unauthorized`. Every explicit user action (pairing, restart, health
-    /// wait, menu presentation) pings through this and so resolves Tailscale
-    /// live.
     var pingServer: @Sendable (String?) async -> ServerPingResult
 
-    /// The status poll's per-cycle ping. It differs from `pingServer` only in
-    /// transport resolution: it reuses one live Tailscale resolution for a
-    /// bounded window, so the 30 s poll does not make Tailscale reload its
-    /// network extension. `nil` falls back to `pingServer`.
     var statusPollPingServer: (@Sendable (String?) async -> ServerPingResult)?
 
-    /// Requests the Gateway-owned drain restart. This is deliberately separate
-    /// from LaunchAgent registration: launchd remains the process supervisor.
     var restartGateway: @Sendable () async throws -> GatewayRestartClient.Response = {
         throw GatewayRestartClient.Failure.transport
     }
@@ -132,19 +84,13 @@ struct EnvironmentSetup: Sendable {
     }
     var restoreApprovedNativeHost: @Sendable () async -> Void = {}
 
-    /// Health wait policy after menu-bar start/restart/resume actions.
-    /// Tests can lower these to keep stale-helper paths deterministic.
     var serverStartHealthCheckAttempts: Int = 60
     var serverStartHealthCheckDelayNanoseconds: UInt64 = 1_000_000_000
 
-    /// LaunchAgent control surface - load/unload/restart/check.
     var launchAgentManager: LaunchAgentManaging
 
-    /// Touches the `~/.tron/internal/run/.onboarded` sentinel atomically.
     var touchOnboardedSentinel: @Sendable () throws -> Void
 
-    /// Current app version identity and the last version whose menu-bar
-    /// startup finalized the bundled server.
     var currentAppVersion: @Sendable () -> MacAppVersionIdentity = {
         MacAppVersionIdentity.current()
     }
@@ -155,8 +101,6 @@ struct EnvironmentSetup: Sendable {
         try MacAppVersionMarkerStore.write(version, at: TronPaths.macAppVersionMarkerPath)
     }
 
-    /// Resolves startup once from the bundle variant, command line, test host,
-    /// and authoritative onboarding sentinel.
     func resolvedStartupMode(
         command: MacCommandLineMode = .current,
         underTests: Bool = TronMacRuntime.isRunningUnderTests(),
@@ -170,21 +114,15 @@ struct EnvironmentSetup: Sendable {
         )
     }
 
-    /// Resolves the Gateway's presentation and transport host from live
-    /// Tailscale state, falling back only to the bounded disposable cache.
-    /// There is deliberately no loopback fallback for Stable.
     func resolvedTailscaleHost() async -> String? {
         await TailscaleHostResolution.resolveLive(probe: probeTailscale, cache: readTailscaleIPFromSettings)
     }
 
     static let live = makeLive(profile: .stable)
-    /// Read-only authenticated observation of the scripts/tron-dev runtime.
     static let debug = makeDebugObserver()
 
     private static func makeLive(profile: TronGatewayProfile) -> EnvironmentSetup {
         let home = TronPaths.tronHome(profile: profile)
-        // Composition still refuses a relative explicit SDK home; storing its
-        // otherwise unread URL is not what enforces that admission rule.
         _ = TronPaths.agentHome(profile: profile)
         let bearer = TronPaths.bearerTokenPath(profile: profile)
         let enrollment = TronPaths.enrollmentCodePath(profile: profile)
@@ -197,9 +135,6 @@ struct EnvironmentSetup: Sendable {
                 cache: { GatewayNetworkCacheReader.tailscaleIP(at: cache) }
             )
         }
-        // Only the status poll reuses one Tailscale resolution for a bounded
-        // window; every explicit lifecycle action resolves live through
-        // `resolveHost`.
         let tailscaleHost = TailscaleHostResolution(
             probe: { await TailscaleProbe.probe() },
             readCached: { GatewayNetworkCacheReader.tailscaleIP(at: cache) },
@@ -298,10 +233,6 @@ struct EnvironmentSetup: Sendable {
                 guard let host = await tailscaleHost.host() else { return .unreachable }
                 let result = await Self.ping(host: host, port: profile.port, token: token)
                 guard Self.failedAddressLookup(result) else { return result }
-                // A reused address can be stale. Re-resolve once before reporting
-                // the Gateway down, and re-ping only when the address changed, so
-                // a Gateway that is genuinely down does not reload the CLI every
-                // cycle.
                 guard let retried = await tailscaleHost.host(previousPingFailed: true), retried != host else {
                     return result
                 }
@@ -378,8 +309,6 @@ struct EnvironmentSetup: Sendable {
         }
     }
 
-    /// True when the ping never reached a Gateway at the address it used, which
-    /// is the only case a stale resolved address can explain.
     private static func failedAddressLookup(_ result: ServerPingResult) -> Bool {
         switch result {
         case .unreachable, .timeout: return true
@@ -434,9 +363,6 @@ struct EnvironmentSetup: Sendable {
         )
     }
 
-    /// Pins a freshly admitted Debug observation into a pairing presentation.
-    /// The sheet cannot race a later lifecycle/host transition or reconstruct
-    /// identity from independent reads.
     func pinnedDebug(admission: DebugGatewayObserver.Admission) -> EnvironmentSetup {
         precondition(profile == .debug)
         var copy = self
@@ -476,8 +402,6 @@ private struct ReadOnlyDebugLaunchAgentManager: LaunchAgentManaging {
     func isLoaded(label: String) async -> Bool? { false }
     func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo? { nil }
 }
-
-// MARK: - SwiftUI Environment plumbing
 
 private struct EnvironmentSetupKey: EnvironmentKey {
     static let defaultValue: EnvironmentSetup = .live

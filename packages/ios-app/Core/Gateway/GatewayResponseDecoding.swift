@@ -49,9 +49,6 @@ package enum GatewayResponseDecoding {
     private static func admittedPath(_ codingPath: [CodingKey]) -> String {
         let components = codingPath.prefix(maximumPathComponents).map { key -> String in
             if let index = key.intValue { return "[\(index)]" }
-            // Synthesized model CodingKeys are source-owned schema names.
-            // Dictionary keys are response-owned data and may contain session
-            // IDs, provider values, or secrets, so never retain them in Logs.
             guard String(reflecting: type(of: key)).hasSuffix(".CodingKeys") else {
                 return "<redacted>"
             }

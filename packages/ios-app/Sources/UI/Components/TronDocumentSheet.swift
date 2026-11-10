@@ -1,20 +1,10 @@
 import SwiftUI
 
-/// File previews and assembled instructions share one large document surface.
-/// Scroll owners supply the soft-edge/top-blur treatment; this owns navigation
-/// chrome so native text readers cannot inherit an opaque toolbar or bottom bar.
 struct TronDocumentSheet<Content: View>: View {
     let title: String
-    /// File previews read at full height; nested instruction readers follow
-    /// their parent sheets and start at medium.
     var detents: Set<PresentationDetent>
     let initialDetent: PresentationDetent?
-    /// An optional leading toolbar action, such as running a displayed
-    /// `.swift` file (#889). Done stays the only trailing control.
     let leadingAction: TronDocumentSheetAction?
-    /// False when the content owns its navigation stacks (an interpreted
-    /// Swift app's tabs, #909); each stack root then applies
-    /// `tronDocumentSheetChrome` itself, so the chrome is never nested.
     let hostsNavigation: Bool
     @State private var selectedDetent: PresentationDetent // view-local: a rebuilt sheet starts at its initial detent
     @ViewBuilder let content: () -> Content
@@ -62,10 +52,6 @@ struct TronDocumentSheet<Content: View>: View {
     }
 }
 
-/// The document sheet's navigation chrome: the shared `TronSheetTitle`, an
-/// optional leading action and the trailing Done that closes the sheet. Apply
-/// it to the root view inside the sheet's NavigationStack; `TronDocumentSheet`
-/// does, and content that owns its stacks applies it at each stack root.
 private struct TronDocumentSheetChrome: ViewModifier {
     let title: String
     let leadingAction: TronDocumentSheetAction?
@@ -76,11 +62,7 @@ private struct TronDocumentSheetChrome: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            // UIKit text readers otherwise stop above the home-indicator
-            // safe area, leaving a hard empty strip unlike SwiftUI documents.
             .ignoresSafeArea(.container, edges: .bottom)
-            // Let the native sheet material show through, matching standard
-            // sheets in both appearances instead of painting an opaque page.
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)

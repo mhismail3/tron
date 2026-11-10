@@ -178,9 +178,6 @@ struct SessionContextSheet: View {
         guard let presentation else {
             return presentationActivity.allowsPresentationPublication ? presentationSource : nil
         }
-        // Keep the installed semantic frame and control identity stable while
-        // the authoritative revision advances for ordinary progress. Admission
-        // callers read the latest revision directly from AppModel.
         return presentation
     }
 
@@ -195,8 +192,6 @@ struct SessionContextSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                // Bounded cards own nested sheets. Keep their presenters mounted
-                // while a child covers this scrolled, medium-detent surface.
                 TronSettingsSections(alignment: .leading, spacing: 18) {
                     if let snapshot = displayedPresentation {
                         if model.connectionState == .connected,
@@ -211,8 +206,6 @@ struct SessionContextSheet: View {
                                 Task { _ = await model.retryConversationSynchronization(target: target) }
                             }
                         }
-                        // Manage Session is this chat's live state and its few direct
-                        // controls. Settings (the gear) owns every scope's settings.
                         Group {
                             SessionContextUsageCard(snapshot: snapshot, action: compactButton(snapshot))
                             ManageModelConfigurationCard(sessionID: sessionID)
@@ -220,7 +213,6 @@ struct SessionContextSheet: View {
                             settingsSection(snapshot)
                         }
                         .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
-                        // Terminal/export keep their own neutral slate treatment.
                         exportSection
                     } else {
                         TronSheetLoadingState(label: "Loading session…", accent: .tronPrimary)
@@ -315,10 +307,7 @@ struct SessionContextSheet: View {
                         WorkspaceInspectorSheet(sessionID: sessionID)
                     }
                 }
-                // Child sheets match Settings metadata sizing, not the compact
-                // Manage Session summary's local adjustment.
                 .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
-                // Every destination follows Manage Session's emerald sheet theme.
                 .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
             }
             .tronTextEntrySheet(
@@ -342,8 +331,6 @@ struct SessionContextSheet: View {
         .environment(\.configurationSliderSignposts, model.performanceSignposts)
         .onAppear {
             if initialHistoryEntryID != nil, destination == nil {
-                // Evidence routes enter the same managed history owner as a
-                // user-opened session; they never issue an ad-hoc history RPC.
                 destination = .history
             }
             if capturedNoticeScope == nil {
@@ -471,7 +458,6 @@ struct SessionContextSheet: View {
         }
     }
 
-    /// This chat's settings and, below them, its project's, in Settings' own accent.
     private func settingsSection(_ snapshot: SessionContextPresentation) -> some View {
         TronGlassCard(accent: .tronPrimary) {
             VStack(spacing: 0) {
@@ -512,11 +498,6 @@ struct SessionContextSheet: View {
         }
     }
 
-    /// Archive state is Gateway-owned and an archived row is absent from the
-    /// dashboard, so this surface is where the user restores it. The presented
-    /// snapshot is its only reader: the Gateway republishes it when the archive
-    /// changes, including when a run clears the record. Sending a message needs
-    /// no confirmation for the same reason.
     private var archiveRow: some View {
         Button {
             guard !unarchiving else { return }
@@ -624,11 +605,6 @@ struct SessionContextSheet: View {
         workspaceLoadGeneration &+= 1
         let generation = workspaceLoadGeneration
         guard workspaceRefreshIdentity == identity, !Task.isCancelled else { return }
-        // Covering this sheet cancels its read, not its published workspace.
-        // Keep that value while the resumed read is in flight.
-        // Scene activation can precede transport/subscription reconciliation.
-        // The task keys off admitted authority, so readiness restarts this read
-        // immediately instead of leaving a transient error until another wake.
         while !Task.isCancelled, workspaceRefreshIdentity == identity {
             do {
                 let inspection = try await model.workspaceInspection.inspect(sessionID: sessionID)

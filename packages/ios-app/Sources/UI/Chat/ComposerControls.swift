@@ -25,9 +25,6 @@ final class ChatComposerResponder {
     func becomeFirstResponder() -> Bool { textView?.becomeFirstResponder() ?? false }
 }
 
-/// UIKit owns selection and the capped editor's internal scroll position. A
-/// vertical SwiftUI TextField can repeatedly relayout at its line cap and lose
-/// the insertion point while typing; this control keeps one stable scroll owner.
 struct ComposerTextAuthority: Equatable, Sendable {
     let scope: ComposerDraftScope?
     let revision: Int
@@ -36,9 +33,6 @@ struct ComposerTextAuthority: Equatable, Sendable {
 struct MultilineComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
-    /// Live draft-owner identity and revision. UIKit delegate callbacks can arrive
-    /// while SwiftUI has not yet installed a route change or synchronous clear.
-    /// This token fences stale edits from repopulating a superseded draft.
     var authoritativeTextRevision: Binding<ComposerTextAuthority>? = nil
     var selection: Binding<NSRange>? = nil
     var responder: ChatComposerResponder? = nil
@@ -46,17 +40,11 @@ struct MultilineComposerTextView: UIViewRepresentable {
     let keyboardAppearance: UIKeyboardAppearance
     var maximumLines = 8
     var onPasteImages: (@MainActor ([NSItemProvider]) -> Void)? = nil
-    /// When set, a typed Return calls this instead of inserting a newline;
-    /// hardware Shift+Return, Return that commits IME marked text, paste and
-    /// dictation still edit.
     var onReturn: (@MainActor () -> Void)? = nil
 
     final class LayoutAwareTextView: UITextView {
         var didLayout: ((LayoutAwareTextView) -> Void)?
         var onPasteImages: (([NSItemProvider]) -> Void)?
-        /// Called instead of inserting a typed Return's newline. Both keyboards
-        /// type Return through `insertText`, which paste does not use;
-        /// Shift+Return's line break passes through it as text.
         var onReturn: (() -> Void)?
         private var isInsertingLineBreak = false
         private var isReportingLayout = false
@@ -78,8 +66,6 @@ struct MultilineComposerTextView: UIViewRepresentable {
         }
 
         override func insertText(_ text: String) {
-            // Return that commits IME marked text, and dictation's "new line",
-            // stay text.
             if text == "\n", let onReturn, !isInsertingLineBreak, markedTextRange == nil,
                textInputMode?.primaryLanguage != "dictation" {
                 onReturn()
@@ -89,10 +75,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         }
 
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-            // Shift+Return that commits IME marked text stays the system's.
             if action == #selector(insertLineBreak) { return isEditable && markedTextRange == nil }
-            // Query only type availability while displaying editing controls;
-            // clipboard contents are read solely in the user's Paste action.
             if action == #selector(paste(_:)), isEditable, onPasteImages != nil,
                UIPasteboard.general.hasImages { return true }
             return super.canPerformAction(action, withSender: sender)
@@ -116,10 +99,6 @@ struct MultilineComposerTextView: UIViewRepresentable {
                 super.paste(itemProviders: itemProviders)
                 return
             }
-            // Each provider is one clipboard item, not one image representation.
-            // Prefer images over alternate URL/text flavors from Copy Image.
-            // Retain one overflow item so the owner can reject, not silently
-            // drop part of a clipboard selection larger than the attachment cap.
             onPasteImages(Array(itemProviders.lazy.filter {
                 ComposerPastedImages.containsImages([$0])
             }.prefix(ChatAttachmentImportPolicy.maximumPhotoSelection + 1)))
@@ -205,9 +184,6 @@ struct MultilineComposerTextView: UIViewRepresentable {
         view.delegate = nil
     }
 
-    /// SwiftUI may call representable measurement speculatively. Keep this
-    /// callback pure: live scroll mode and caret ownership reconcile only after
-    /// UIKit has installed the returned bounds and completed TextKit layout.
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView: LayoutAwareTextView,
@@ -245,10 +221,6 @@ struct MultilineComposerTextView: UIViewRepresentable {
         }
 
         func reconcileFocus(on view: UITextView) {
-            // A direct tap makes UITextView first responder before SwiftUI mirrors
-            // the delegate callback. Never resign from that one stale render.
-            // Programmatic dismissal is explicit only after UIKit has reported
-            // focus for this responder lifetime.
             if parent.isFocused, !view.isFirstResponder, parent.isEditable {
                 guard !focusReconciliationScheduled else { return }
                 focusReconciliationScheduled = true
@@ -294,10 +266,6 @@ struct MultilineComposerTextView: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             guard !isInstallingAuthoritativeText else { return }
             if hasSupersedingAuthoritativeTextRevision {
-                // Resigning first responder can commit autocorrection/marked text
-                // synchronously after submission admission cleared the owner but
-                // before updateUIView runs. Reinstall the newer owner instead of
-                // treating the stale UIKit value as a fresh draft edit.
                 _ = reconcileAuthoritativeText(on: textView)
                 return
             }
@@ -386,9 +354,6 @@ struct MultilineComposerTextView: UIViewRepresentable {
             view.setNeedsLayout()
         }
 
-        /// Runs only from `layoutSubviews`, after SwiftUI has installed the
-        /// representable's capped frame. Scroll ownership and caret visibility
-        /// are therefore reduced from one final bounds/content geometry pair.
         func textViewDidLayout(_ view: UITextView) {
             guard !isReconcilingLayout,
                   view.bounds.width > 0,
@@ -514,7 +479,6 @@ enum SessionContextProgressPolicy {
     }
 }
 
-/// The shared determinate context ring; its caller supplies size and semantic tint.
 struct SessionContextProgressRing: View {
     let fraction: Double
     let accent: Color
@@ -534,10 +498,6 @@ struct SessionContextProgressRing: View {
     }
 }
 
-/// Historical session-owned context indicator. It remains mounted at zero
-/// while the authoritative chat opens, then animates to the canonical value.
-/// Tapping it opens the chat's management sheet (Manage Session, or Manage Home
-/// in a chat that claims the Home status); it owns no runtime state or mutation path.
 struct SessionContextProgressButton: View {
     let presentation: SessionContextProgressPresentation
     let opensManageHome: Bool
@@ -611,8 +571,6 @@ enum ChatComposerPolicy {
     }
 
     static func isTextEditable(isTranscriptReady: Bool) -> Bool {
-        // Drafting is local and remains available while authoritative opening
-        // finishes; send and attachment mutations retain their own readiness gates.
         true
     }
 
@@ -627,8 +585,6 @@ enum ChatComposerPolicy {
     }
 
     static func submissionBehavior(acceptsQueuedPrompts: Bool) -> String? {
-        // Queue delivery follows the Gateway's exact Pi streaming capability,
-        // not broad presentation phases such as compaction or retry.
         acceptsQueuedPrompts ? "steer" : nil
     }
 
@@ -748,9 +704,6 @@ struct ComposerTrailingButton: View {
             return "Sends steering after the current turn. Touch and hold to choose follow-up delivery."
         }
         if mode == .stopAgent {
-            // Stop is scoped to the current run. It deliberately does not claim
-            // to disable an extension workflow that may start another run, so
-            // the control never overpromises what it halts.
             return "Stops the current run. A workflow that continues on its own can still start another."
         }
         return ""

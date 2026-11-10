@@ -1,14 +1,6 @@
 import Foundation
 import TronMobileCore
 
-/// The purpose-built detail of one Home tool call (`delegate`, `task`, `settings`,
-/// `profile`, `zoom`, `date`, `memory_search`, `checkin`, `report`): what was asked, what happened and
-/// the content it carried, as header, rows, Markdown texts and line lists that
-/// `HomeToolDetailSections` renders with the shared settings components.
-///
-/// The builders read the call's arguments and its typed result details. A shape
-/// they do not recognize returns nil, so the call keeps the generic tool detail,
-/// and Technical details always keeps the raw request and result.
 struct HomeToolDetailPresentation: Hashable, Sendable {
     enum Tone: Hashable, Sendable { case success, pending, failure, neutral }
 
@@ -27,7 +19,6 @@ struct HomeToolDetailPresentation: Hashable, Sendable {
         var id: String { "\(title):\(value)" }
     }
 
-    /// A line of memory or a search hit: a short preview that opens whole.
     struct Line: Hashable, Sendable, Identifiable {
         let id: String
         let icon: String
@@ -46,10 +37,8 @@ struct HomeToolDetailPresentation: Hashable, Sendable {
 
     enum Section: Hashable, Sendable {
         case tasks(summary: String, footer: String?, rows: [TaskRow])
-        /// An error or refusal, shown first in the error tint.
         case failure(title: String, message: String, issues: [String])
         case rows(title: String?, detail: String?, rows: [Row])
-        /// Markdown text, previewed and opened whole from View All when long.
         case text(id: String, title: String, text: String, detail: String? = nil)
         case prompt(id: String, title: String, text: String, detail: String? = nil)
         case lines(id: String, title: String, detail: String?, lines: [Line])
@@ -62,11 +51,8 @@ struct HomeToolDetailPresentation: Hashable, Sendable {
 
     static func make(tool: ChatToolPresentation) -> HomeToolDetailPresentation? {
         let name = tool.toolName ?? tool.title
-        // Tron's own modules are inline extensions; a package or project tool of the
-        // same name keeps the generic detail.
         guard toolNames.contains(name), tool.extensionOrigin.map({ $0.owner?.source == "inline" }) ?? true else { return nil }
         let call = Call(tool: tool)
-        // A bounded preview of the arguments is not the request; keep the raw view.
         if call.arguments["truncated"]?.boolValue == true { return nil }
         return switch name {
         case "delegate": delegate(call)
@@ -83,10 +69,7 @@ struct HomeToolDetailPresentation: Hashable, Sendable {
     }
 }
 
-// MARK: - Call inputs
-
 extension HomeToolDetailPresentation {
-    /// One call's inputs, read once: arguments, typed details and the result text.
     struct Call {
         let arguments: [String: JSONValue]
         let details: [String: JSONValue]?
@@ -111,8 +94,6 @@ extension HomeToolDetailPresentation {
             details?[key]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
         }
 
-        /// A failed call's failure section: a schema rejection lists its issues, any
-        /// other error states the tool's own message.
         var failure: Section? {
             guard error else { return nil }
             return HomeToolDetailPresentation.failure(text)
@@ -160,11 +141,7 @@ extension HomeToolDetailPresentation {
     }
 }
 
-// MARK: - settings
-
 extension HomeToolDetailPresentation {
-    /// A setting value as the Settings rows read it: unset, a model reference, a
-    /// boolean, or the value's compact text.
     static func settingValue(_ value: JSONValue?) -> String {
         guard let value, value != .null else { return "Not set" }
         if let text = value.stringValue { return text.isEmpty ? "Empty" : text }
@@ -288,8 +265,6 @@ extension HomeToolDetailPresentation {
     }
 }
 
-// MARK: - profile
-
 extension HomeToolDetailPresentation {
     private static func profile(_ call: Call) -> HomeToolDetailPresentation? {
         guard let action = call.string("action") else { return nil }
@@ -338,23 +313,17 @@ extension HomeToolDetailPresentation {
     }
 }
 
-// MARK: - memory tools
-
 extension HomeToolDetailPresentation {
-    /// One view line `id+n|text`, its kind prefix read for a message line.
     struct MemoryLine {
         let start: Int
         let span: Int
         let text: String
 
-        /// `user`, `talk`, `echo` or `event` for a message line.
         var kind: HomeMemoryItemDTO.Kind? {
             guard span <= 1 else { return nil }
             return ["user", "talk", "echo", "event"].first { text.hasPrefix("\($0): ") }.flatMap(HomeMemoryItemDTO.Kind.init)
         }
 
-        /// The line's text without its view tag: `user:`/`talk:`/`echo:`/`event:` for a
-        /// message, `summary:` for a merged range.
         var body: String {
             if let kind { return String(text.dropFirst(kind.rawValue.count + 2)) }
             return text.hasPrefix("summary: ") ? String(text.dropFirst("summary: ".count)) : text
@@ -392,7 +361,6 @@ extension HomeToolDetailPresentation {
         guard case .number(let idValue)? = call.arguments["id"], case .number(let nValue)? = call.arguments["n"] else { return nil }
         let id = Int(idValue), n = Int(nValue)
         let title = "Line \(id)+\(n)"
-        // Only an address the view can hold (n a power of two) names what it opens into.
         let valid = n >= 1 && n & (n - 1) == 0
         let subtitle: String? = !valid ? nil : n == 1 ? "The message whole" : "Opened into two lines of \(n / 2)"
         if call.running { return HomeToolDetailPresentation(header: runningHeader(icon: "plus.magnifyingglass", title: title, subtitle: subtitle), sections: []) }
@@ -406,7 +374,6 @@ extension HomeToolDetailPresentation {
             guard let line = MemoryLine.parse(call.text) else { return nil }
             lines = [line]
         } else {
-            // The second line starts at a known address; summary text may hold newlines.
             let half = n / 2
             let parts = call.text.components(separatedBy: "\n\(id + half)+\(half)|")
             guard parts.count == 2, let first = MemoryLine.parse(parts[0]) else { return nil }
@@ -427,7 +394,6 @@ extension HomeToolDetailPresentation {
                                               sections: [failed.section])
         }
         guard call.detail("status") == "ok" else { return nil }
-        // The typed instant when the Gateway sends it; the recorded local text otherwise.
         let instant = call.details?["date"]?.objectValue?["at"]?.stringValue.flatMap(GatewayTimestamp.parse)
             ?? MemoryLine.parse(call.text).flatMap { Self.localTimestamp($0.text) }
         guard let instant else { return nil }
@@ -441,7 +407,6 @@ extension HomeToolDetailPresentation {
             sections: [.rows(title: nil, detail: nil, rows: rows)])
     }
 
-    /// `2026-10-13 22:30:58 +02:00`, the memory's recorded local text.
     static func localTimestamp(_ text: String) -> Date? {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

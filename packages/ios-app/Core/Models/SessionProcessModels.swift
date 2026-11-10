@@ -66,20 +66,13 @@ package struct SessionProcessLifecycle: Codable, Hashable, Sendable {
         self.recentUntil = recentUntil
     }
 
-    /// Gateway-authored settlement. A paused run carries the instant the
-    /// Gateway observed its exact process exit as `terminalAt`, which makes it
-    /// resumable history that ages out like finished work instead of live work.
     package var isSettled: Bool {
         state.isTerminal || (state == .paused && terminalAt != nil)
     }
 
-    /// Work the Gateway still observes: queued/running, or a paused run whose
-    /// process exit it has not proven yet.
     package var isActiveWork: Bool { !isSettled && state.isActive }
 }
 
-/// Exact additive Gateway DTO. Optional fields remain optional so old history
-/// and rows from different existing producers decode without fabrication.
 package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
     let version: Int
     package let processId: String
@@ -99,8 +92,6 @@ package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable
     package let outputTail: String?
     package let outputTruncated: Bool
     package let durationMs: Int?
-    // Receipt-local presentation time, never encoded or part of value identity.
-    // Keeping it with the sample prevents sheet/row remounts restarting the clock.
     package private(set) var durationSampleAnchor = ToolDurationSampleAnchor(uptime: ProcessInfo.processInfo.systemUptime)
     package let toolCount: Int?
     package let turnCount: Int?
@@ -165,8 +156,6 @@ package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable
         self.childSessionRef = childSessionRef
     }
 
-    /// Progress/output changes may repeat the same duration sample. Such frames
-    /// must not move its receipt anchor forward and make the counter restart.
     func retainingDurationSample(from previous: Self?) -> Self {
         guard let previous,
               processId == previous.processId, runId == previous.runId, startedAt == previous.startedAt,
@@ -236,8 +225,6 @@ package struct SessionProcessDelta: Codable, Hashable, Sendable {
     package let overview: SessionProcessOverview
 }
 
-/// Lease invalidations are deliberately outside the mounted parent session
-/// sequence. A close notification has no revision and is still admitted.
 package struct ProcessTranscriptChanged: Codable, Hashable, Sendable {
     package let leaseId: String
     let processId: String?
@@ -295,8 +282,6 @@ package enum SessionProcessAdmissionPolicy {
             guard process.executionMode == .synchronous || process.executionMode == .asynchronous,
                   process.command == nil else { return false }
         case .command:
-            // Decode and validate legacy Gateway rows so an older authoritative
-            // snapshot can still open, but never admit them to presentation.
             guard process.executionMode == .foreground,
                   process.source == .mainAssistant,
                   process.command != nil else { return false }
@@ -384,7 +369,7 @@ package enum SessionProcessAdmissionPolicy {
 
     package static func admitsSnapshotFacts(_ snapshot: SessionSnapshot) -> Bool {
         guard let overview = snapshot.processOverview else {
-            return snapshot.processActivities == nil // Legacy Gateway omits the projection entirely.
+            return snapshot.processActivities == nil
         }
         let activities = snapshot.processActivities ?? []
         guard admits(overview), activities.count <= maximumActivities,
@@ -427,8 +412,6 @@ package enum SessionProcessAdmissionPolicy {
         case .active:
             return lifecycle.isActiveWork && lifecycle.terminalAt == nil && lifecycle.recentUntil == nil
         case .recent, .historical:
-            // Recent/historical presentation is settled work: a terminal row, or
-            // a paused row whose exact process exit the Gateway observed.
             guard lifecycle.isSettled,
                   let terminal = lifecycle.terminalAt.flatMap(GatewayTimestamp.parse),
                   let expiry = lifecycle.recentUntil.flatMap(GatewayTimestamp.parse) else { return false }
@@ -485,9 +468,6 @@ package enum SessionProcessProjection {
         )
     }
 
-    /// Keep an already-presented single-run sheet attached when Gateway replaces
-    /// a temporary aggregate with its exact child row. Multiple matching
-    /// children are intentionally ambiguous and fail closed.
     package static func mountedActivity(
         selected: SessionProcessActivity,
         activities: [SessionProcessActivity]
@@ -513,9 +493,6 @@ package enum SessionProcessProjection {
         let lhsProblem = lhs.lifecycle.attention == .needsAttention || lhs.lifecycle.state.isProblem
         let rhsProblem = rhs.lifecycle.attention == .needsAttention || rhs.lifecycle.state.isProblem
         if lhsProblem != rhsProblem { return lhsProblem }
-        // Active observation timestamps advance with progress heartbeats and
-        // are not ordering authority. Hold rows at their run-start boundary;
-        // terminal history may continue using its fixed completion boundary.
         let lhsTime = lhs.visibility == .active
             ? (lhs.startedAt ?? "")
             : (lhs.lifecycle.terminalAt ?? lhs.lifecycle.observedAt)

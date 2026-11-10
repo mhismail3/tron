@@ -2,11 +2,6 @@ import Foundation
 import CryptoKit
 import Darwin
 
-/// The on-disk contract for externally selected Gateway payloads.
-///
-/// Updates publish a complete `versions/<version>` directory and atomically
-/// replace `current.json`. The wrapper only reads this projection; it never
-/// writes sessions, credentials, or any other canonical Gateway state.
 struct GatewayPayloadStore {
     static let schema = 1
     static let maxManifestBytes = 64 * 1024
@@ -17,8 +12,6 @@ struct GatewayPayloadStore {
     static let versionComponentLimit = 128
     static let gatewayVersionComponentLimit = 127
     static let nodeVersionComponentLimit = 127
-    /// The launcher's `json_manifest_exact` requires this exact flat key set,
-    /// each key once, and the selection pointer's five keys the same way.
     static let manifestKeys = [
         "schema", "kind", "gatewayVersion", "protocolVersion", "minProtocolVersion", "nodeVersion",
         "sourceRevision", "runtimeEpoch", "channel", "version", "payloadFingerprint", "dependencyTreeCoverage",
@@ -48,8 +41,6 @@ struct GatewayPayloadStore {
         channelRoot.appendingPathComponent("versions", isDirectory: true)
     }
 
-    /// This file is the sole mutable selection pointer. Deployment replaces it
-    /// atomically while retaining the prior selection for rollback.
     var currentManifestURL: URL {
         channelRoot.appendingPathComponent("current.json", isDirectory: false)
     }
@@ -69,15 +60,12 @@ struct GatewayPayloadStore {
         }
     }
 
-    /// The launcher's `valid_revision`: exactly 40 lowercase hex characters.
     static func validSourceRevision(_ value: String) -> Bool {
         value.utf8.count == 40 && value.utf8.allSatisfy {
             ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x61 && $0 <= 0x66)
         }
     }
 
-    /// The launcher's `valid_uuid`: exactly 36 lowercase hex characters with
-    /// dashes at the four canonical positions.
     static func validRuntimeEpoch(_ value: String) -> Bool {
         let bytes = Array(value.utf8)
         guard bytes.count == 36 else { return false }
@@ -91,11 +79,6 @@ struct GatewayPayloadStore {
         return true
     }
 
-    /// The launcher parses these documents with a bounded flat parser and
-    /// admits no escapes, so a key set is exact and every value is either the
-    /// schema digit or an unescaped string. `Codable` would ignore an unknown
-    /// key and keep the last of a repeated one, which is exactly the tampering
-    /// signal this rejects.
     static func keysAreExact(_ data: Data, keys: [String]) -> Bool {
         let bytes = Array(data)
         var index = 0
@@ -201,9 +184,6 @@ struct GatewayPayloadSelection: Codable, Equatable, Sendable {
 }
 
 enum GatewayPayloadValidationError: Equatable, Error, Sendable {
-    /// The path exists but cannot be trusted as part of the payload store.
-    /// Unsafe external paths must not be replaced by the bundled fallback: the
-    /// launcher fails closed for the same condition.
     case unsafePath(String)
     case missing(String)
     case tooLarge(String)
@@ -217,11 +197,6 @@ struct GatewayPayloadValidationResult: Equatable, Sendable {
     let manifest: GatewayPayloadManifest
 }
 
-/// File identity of one payload input: device, inode, mtime and bytes. It is a
-/// change fence for two owners, not a payload cache and not a second selection
-/// store: the native capture peer proves its connection still runs the exact
-/// selected payload, and the Stable status poll re-proves the selection before
-/// it may reuse an admission.
 struct PayloadSelectionStamp: Equatable, Sendable {
     let exists: Bool
     let device: Int32
@@ -230,9 +205,6 @@ struct PayloadSelectionStamp: Equatable, Sendable {
     let nanos: Int64
     let bytes: Data
 
-    /// Returns `nil` when the file exists but cannot be stamped safely (not a
-    /// regular file, empty, oversized, a symlink, or replaced while read). An
-    /// absent file is `exists == false`, which is a stable value of its own.
     static func read(_ url: URL) -> Self? {
         let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         if fd < 0, errno == ENOENT {
@@ -256,19 +228,12 @@ struct PayloadSelectionStamp: Equatable, Sendable {
     }
 }
 
-/// The launcher and the app share this fail-closed policy: an external
-/// selection wins only after bounded prevalidation; otherwise the bundled
-/// payload is the safe fallback. Deployment performs complete fingerprint
-/// verification before publishing a selection.
 enum GatewayPayloadResolver {
     static func resolve(
         external: Result<GatewayPayloadValidationResult, GatewayPayloadValidationError>,
         bundled: Result<GatewayPayloadValidationResult, GatewayPayloadValidationError>
     ) -> GatewayPayloadValidationResult? {
         if case let .success(payload) = external { return payload }
-        // Keep the fallback for ordinary absent, malformed, or tampered
-        // selections. Existing unsafe roots are a launcher fail-closed signal,
-        // not a reason for health to claim the bundled payload is active.
         if case .failure(.unsafePath) = external { return nil }
         if case let .success(payload) = bundled { return payload }
         return nil
@@ -685,9 +650,6 @@ enum GatewayPayloadValidator {
         return try? Data(contentsOf: url, options: [.mappedIfSafe])
     }
 
-    /// Matches hash-gateway-payload.sh: sorted UTF-8 relative paths, each
-    /// regular-file `sha256  path\\n` or symlink `symlink:sha256(target + LF)  path\\n` line,
-    /// then SHA-256 of the complete line stream.
     private static func payloadFingerprint(_ root: URL, fileManager: FileManager) -> String? {
         var files: [FingerprintFile] = []
         for prefix in ["app", "runtime"] {
@@ -699,9 +661,6 @@ enum GatewayPayloadValidator {
                 files: &files
             ) else { return nil }
         }
-        // `sort` in hash-gateway-payload.sh is byte ordered under LC_ALL=C.
-        // Keep each UTF-8 key from the traversal instead of rebuilding it for
-        // every comparison.
         files.sort { $0.sortKey.lexicographicallyPrecedes($1.sortKey) }
         var lineHasher = SHA256()
         for file in files {

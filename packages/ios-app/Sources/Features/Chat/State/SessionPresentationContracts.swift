@@ -32,8 +32,6 @@ struct MountedTranscriptCoverage: Equatable, Sendable {
     let structureRevision: Int
 }
 
-/// The mounted transcript owns only the retained prefix. The Gateway tail
-/// remains in SessionSnapshot and is never copied into this window.
 struct MountedTranscriptWindow: Equatable, Sendable {
     let coverage: MountedTranscriptCoverage
     let prefixItems: [TranscriptItem]

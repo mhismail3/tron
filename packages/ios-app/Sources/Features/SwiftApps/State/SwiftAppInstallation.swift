@@ -1,9 +1,6 @@
 import Foundation
 import Observation
 
-/// A single accepted installation, held by the Apps owner through dismissal,
-/// disconnect and receipt reconciliation. A failed command is never replaced
-/// or replayed by presenting the review again.
 @MainActor @Observable
 final class SwiftAppInstallation {
     let review: SwiftAppInstallReview

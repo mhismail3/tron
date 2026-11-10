@@ -51,9 +51,6 @@ enum InboundProducerPresentationPolicy {
     }
 }
 
-/// A canonical model prompt admitted by a Gateway-owned Automation. It remains
-/// a visible chat turn, but its receipt-backed producer is distinct from the
-/// person using the session.
 struct AutomationPromptMessageView: View {
     let item: TranscriptItem
 
@@ -180,8 +177,6 @@ enum InboundContextCompactPresentationPolicy {
     }
 }
 
-/// Message category is not producer attribution. Exact subagent message types
-/// can have useful labels even when their canonical origin remains unknown.
 struct InboundContextMessagePresentation: Equatable {
     let title: String
     let status: String
@@ -246,14 +241,10 @@ struct InboundContextMessagePresentation: Equatable {
             default: return "Update"
             }
         case "subagent-wait-subscription":
-            // A wake subscription is a category of subagent message, not proof
-            // that the referenced execution completed successfully.
             return "Wait Update"
         case "subagent-incremental-child-notify":
             return "Child Update"
         case "subagent-notify":
-            // This emitter omits structured status and can report successful,
-            // failed, paused, or grouped results. Never infer success from prose.
             return "Result Received"
         default:
             return nil
@@ -261,9 +252,6 @@ struct InboundContextMessagePresentation: Equatable {
     }
 }
 
-/// A producer-authored message delivered into the mounted session's agent
-/// context. Inbound context is always trailing; provenance and message category
-/// change its tone and label but never change direction.
 struct InboundProducerMessageView: View {
     let item: TranscriptItem
     @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
@@ -317,8 +305,6 @@ struct InboundProducerMessageView: View {
     }
 }
 
-/// A read-only view of the known report envelope, never a rewrite of canonical
-/// context. Unknown versions/shapes and prose remain verbatim and inspectable.
 private struct InboundHomeReport {
     private struct Report: Decodable {
         let version: Int
@@ -340,8 +326,6 @@ private struct InboundHomeReport {
             payload = report
         } else {
             let source = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            // The released delivery format has one header followed by one complete
-            // JSON report. Never search arbitrary prose for a convenient JSON fragment.
             let json: String
             if source.hasPrefix("Home task "), let newline = source.firstIndex(of: "\n") {
                 json = String(source[source.index(after: newline)...])
@@ -354,7 +338,6 @@ private struct InboundHomeReport {
               !report.resultId.isEmpty, !report.text.isEmpty,
               ["progress", "needs-input", "final"].contains(report.outcome) else { return nil }
         text = report.text
-        // A final report is not a claim that the task succeeded.
         outcome = report.outcome == "final" ? "Final report" : report.outcome == "needs-input" ? "Needs input" : "Progress"
         envelope = payload
     }

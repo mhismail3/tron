@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Automations follow the user's primary theme; only attention and failure
-/// read in the error colour, a success in the success colour, and an idle
-/// lifecycle in slate.
 enum AutomationStatusPresentation {
     @MainActor static func color(_ activation: AutomationActivation, run: AutomationRunState? = nil) -> Color {
         if run == .outcomeUnknown || run == .failed || activation == .blocked { return .tronError }
@@ -31,8 +28,6 @@ enum AutomationStatusPresentation {
 }
 
 enum AutomationDateFormatting {
-    /// Format styles are values, so every row reuses one instead of building a
-    /// formatter per call.
     private static let style = Date.FormatStyle(date: .abbreviated, time: .shortened)
 
     static func date(_ value: String?) -> String {

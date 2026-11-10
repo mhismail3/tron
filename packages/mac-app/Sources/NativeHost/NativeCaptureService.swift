@@ -1,8 +1,5 @@
 import Foundation
 
-/// Bounded authenticated transports are distinct from the ONE native stream.
-/// A catalogue/idle connection owns no stream capacity. Only actual joined
-/// retirement releases a reservation; diagnostics remain visible separately.
 public final class NativeCaptureSlot: @unchecked Sendable {
     public init() {}
     let bootID = UUID()
@@ -47,8 +44,6 @@ public final class NativeCaptureSlot: @unchecked Sendable {
         let (current, pending) = lock.withLock { closed = true; return (Array(sessions.values), Array(handshakes.values)) }
         for session in current { session.fence.close() }
         for handshake in pending { handshake.retire() }
-        // Closing admission is not completion of already-running OS validation.
-        // Join both validation and its structured deadline before unregistering.
         for handshake in pending { await handshake.join() }
         var joined = true
         for session in current { if !(await session.drain().joined) { joined = false } }
@@ -77,16 +72,12 @@ final class NativeCaptureService: NSObject, TronNativeCaptureService, @unchecked
             let value = await session.execute(request)
             let deliver = stop || session.fence.admits()
                 || (value.failure != nil && value.jpeg == nil && session.fence.admitsFailureReply())
-            // No async hop after this exact delivery fence. The client must also
-            // fence decode/render; a value handed to XPC cannot be revoked.
             reply(deliver ? value.control : NativeCaptureResponse.error(.stale).control, deliver ? value.jpeg : nil)
             lock.withLock { if stop { stopReplies -= 1 } else { replies -= 1 } }
         }
     }
 }
 
-/// Deadline closes activation admission but retains the real validation task
-/// until it returns. In particular, timed-out launchctl work cannot install late.
 final class NativeCaptureHandshake: @unchecked Sendable {
     private enum State { case validating, active, retired }
     private let lock = NSLock()
@@ -129,8 +120,6 @@ final class NativeCaptureHandshake: @unchecked Sendable {
     func activate(_ action: () -> Void) -> Bool {
         lock.withLock {
             guard state == .validating else { return false }
-            // Linearize readiness before cancelling the timer. An already-woken
-            // deadline must not invalidate a successfully admitted connection.
             state = .active
             action()
             return true
@@ -138,8 +127,6 @@ final class NativeCaptureHandshake: @unchecked Sendable {
     }
 }
 
-// NSXPC serializes message/handler delivery. This immutable reference only
-// configures before activation or invalidates; handshake locking fences the two.
 private final class NativeCaptureTransport: @unchecked Sendable {
     let connection: NSXPCConnection
     init(_ connection: NSXPCConnection) { self.connection = connection }
@@ -186,6 +173,6 @@ public final class NativeCaptureListener: NSObject, NSXPCListenerDelegate {
             slot.abandonHandshake(id)
         }
         handshake.install(task)
-        return true // Remains inactive until authenticated Stable admission.
+        return true
     }
 }

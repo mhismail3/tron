@@ -1,10 +1,5 @@
 import SwiftUI
 
-/// The one dashboard list row: a status icon column, a title with an optional
-/// line of context, and a trailing status or timestamp, in the dashboard's
-/// glass row container. Every session row draws through it, so session rows
-/// keep one size, rhythm and surface. Callers own the row's meaning and its
-/// accessibility label.
 struct DashboardListRow<Leading: View, Trailing: View>: View {
     let title: String
     let subtitle: String?

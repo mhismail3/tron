@@ -2,8 +2,6 @@ import Foundation
 import MetricKit
 import TronMobileCore
 
-/// The local MetricKit adapter retains only bounded, typed summaries. Raw
-/// payloads, symbols, paths, and call-stack text never enter the mailbox.
 final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unchecked Sendable {
     protocol Manager: AnyObject {
         func add(_ subscriber: MXMetricManagerSubscriber)
@@ -40,9 +38,6 @@ final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unche
         start()
     }
 
-    /// State is admitted before callbacks are accepted, while manager calls are
-    /// made outside the lock. This handles synchronous test-manager callbacks,
-    /// concurrent stop, and callbacks racing with remove without deadlocking.
     func start() {
         lock.lock()
         guard registrationState == .stopped else {
@@ -73,7 +68,6 @@ final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unche
             lock.unlock()
             return
         case .starting:
-            // start() owns the in-flight add and will pair it with remove.
             registrationState = .stopping
             lock.unlock()
         case .registered:
@@ -212,7 +206,6 @@ final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unche
         )
     }
 
-    /// Testable conversion boundary used by the typed MetricKit extraction.
     static func formattedMeasurement<UnitType: Dimension>(
         _ measurement: Measurement<UnitType>,
         unit: UnitType
@@ -220,8 +213,6 @@ final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unche
         formattedNumber(measurement.converted(to: unit).value)
     }
 
-    /// Keeps only the first bounded buckets and preserves latency units/counts;
-    /// this is not a bucket count pretending to be a latency measurement.
     static func formattedHistogram(label: String, buckets: [HistogramBucketProjection], omitted: Bool = false) -> String {
         let bounded = Array(buckets.prefix(8)).filter {
             $0.lower.isFinite && $0.lower >= 0 && $0.upper.isFinite && $0.upper >= $0.lower && $0.count >= 0

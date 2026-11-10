@@ -1,9 +1,6 @@
 import Foundation
 import ServiceManagement
 
-/// Decides whether the bundled `SMAppService` agent is registered and
-/// the embedded helper is intact. Auth/settings/database files are user
-/// data and are deliberately ignored.
 enum ExistingInstallDetector {
     static func detect(
         helperBundle: URL = TronPaths.serverHelperBundle,
@@ -162,8 +159,6 @@ enum ExistingInstallDetector {
         )
     }
 
-    /// Reads `CFBundleShortVersionString` from `<Bundle>/Contents/Info.plist`.
-    /// Returns nil if the file doesn't exist or can't be parsed.
     static func readMarketingVersion(of bundle: URL) -> String? {
         let infoPlistURL = bundle.appendingPathComponent("Contents/Info.plist", isDirectory: false)
         guard let data = try? Data(contentsOf: infoPlistURL),
@@ -173,7 +168,6 @@ enum ExistingInstallDetector {
         return plist["CFBundleShortVersionString"] as? String
     }
 
-    /// Returns nil when the helper app's code signature is suitable for TCC.
     static func bundleSignatureProblem(
         of bundle: URL,
         expectedBundleIdentifier: String = TronPaths.launchAgentLabel,
@@ -181,8 +175,6 @@ enum ExistingInstallDetector {
     ) async -> String? {
         let helperName = bundle.lastPathComponent
         let executable = URL(fileURLWithPath: "/usr/bin/codesign")
-        // These are disposable observations, not signing or accepted service
-        // mutations. The shared owner drains, bounds and retires each client.
         let verification = await run(executable, ["--verify", "--deep", "--strict", "--verbose=2", bundle.path], .observation)
         guard verification.exitCode >= 0 else {
             return "\(helperName) is present but its code signature could not be checked"
@@ -210,8 +202,6 @@ enum ExistingInstallDetector {
         helperName: String = "\(TronPaths.agentBundleName).app"
     ) -> String? {
         let lines = identityText.split(whereSeparator: \.isNewline)
-        // A successful capture is not proof of complete identity metadata.
-        // Reject absent/duplicate fields rather than trusting a plausible prefix.
         func uniqueValue(_ key: String) -> String? {
             let prefix = key + "="
             let matches = lines.filter { $0.hasPrefix(prefix) }

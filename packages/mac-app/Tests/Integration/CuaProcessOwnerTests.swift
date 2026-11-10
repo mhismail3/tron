@@ -8,7 +8,7 @@ import Testing
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
         let executable = root.appendingPathComponent("driver")
-        let expected = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" // SHA256("hello")
+        let expected = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         try Data("hello".utf8).write(to: executable)
         #expect(CuaProcessOwner.matchesRelease(executable, sha256: expected))
         try Data("world".utf8).write(to: executable)
@@ -45,7 +45,7 @@ import Testing
             for _ in 0..<20 { await Task.yield() }
             #expect(!firstDone && !secondDone, "Neither caller may claim retirement while the admitted child is still blocked")
             #expect(owner.endpoint() == nil)
-            owner.start() // Startup is sealed while joining, not just afterward.
+            owner.start()
             try Data().write(to: root.appendingPathComponent("release"))
             await first.value; await second.value
             #expect(firstDone && secondDone)

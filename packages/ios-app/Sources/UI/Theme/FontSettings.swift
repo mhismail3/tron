@@ -6,7 +6,6 @@ enum FontCategory: String, CaseIterable, Sendable {
     var displayName: String { rawValue.capitalized }
 }
 
-/// The same font catalog and persisted keys used by the pre-gateway iOS app.
 enum FontFamily: String, CaseIterable, Identifiable, Sendable {
     case recursive, alanSans, comme
     case donegalOne, ibmPlexSerif, libreBaskerville, sourceSerif4, lora
@@ -170,8 +169,6 @@ final class AppearanceSettings {
     static let shared = AppearanceSettings()
     private(set) var isApplyingAppIcon = false
 
-    /// Only an explicit selection changes the system icon. Restores and color-mode
-    /// changes stay silent; iOS owns icon appearance variants and its change alert.
     func selectTheme(_ theme: ThemeColor) async throws {
         guard !isApplyingAppIcon else { return }
         themeColor = theme

@@ -7,25 +7,14 @@ struct ComposerDraftScope: Hashable, Sendable {
 }
 
 struct PendingAttachment: Identifiable, Hashable, Sendable {
-    /// Stable chip identity. Restored drafts use a local opaque value.
     let id: String
-    /// Staged Gateway upload identity. It belongs to the draft scope, whose
-    /// profile is one paired Mac, so it survives presentation revocation and
-    /// reconnects to that Mac (#916). It is never persisted; a Gateway that no
-    /// longer holds it (expired or reset staging) makes the chip upload again.
     let gatewayUploadID: String?
     let name: String
     let mimeType: String
     let size: Int
     let previewData: Data?
-    /// Exact bytes retained only by the live composer under its 25 MiB aggregate
-    /// attachment bound. Frozen queue/canonical handoffs always strip them.
     let fullPreviewData: Data?
-    /// The immutable decoded form of `previewData`, prepared off-main once.
-    /// Equality and hashing deliberately use `previewIdentity`, not object identity.
     let preparedThumbnail: ComposerPreparedAttachmentThumbnail?
-    /// Cached when the attachment is admitted. Handoff identity must not hash
-    /// the payload again while the view recomputes its projection tag.
     let previewIdentity: UInt64?
 
     init(
@@ -80,15 +69,10 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
         }
     }
 
-    /// Canonical upload blob identity. Local `id` remains the stable chip,
-    /// removal, and morph identity even when a restored attachment is re-uploaded.
     var transportBlobID: String? {
         gatewayUploadID.map { "upload:\($0)" }
     }
 
-    /// A frozen handoff owns only the bounded thumbnail used by the row. The
-    /// upload's full bytes remain available only to the live composer until
-    /// this source is admitted to transcript presentation.
     func frozenForHandoff() -> Self {
         Self(
             id: id,
@@ -137,8 +121,6 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
             && lhs.name == rhs.name
             && lhs.mimeType == rhs.mimeType
             && lhs.size == rhs.size
-            // The digest is computed once when preview bytes are admitted.
-            // Routine composer equality must never rescan image data.
             && lhs.previewIdentity == rhs.previewIdentity
     }
 
@@ -149,8 +131,6 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
         hasher.combine(mimeType)
         hasher.combine(size)
         hasher.combine(previewIdentity)
-        // `previewData` is bounded thumbnail data; fullPreviewData is
-        // deliberately excluded from value identity and hashing.
     }
 
     private static func identity(_ data: Data) -> UInt64 {
@@ -167,11 +147,7 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
 struct CanonicalSubmissionHandoffReceipt: Equatable, Sendable {
     let canonicalID: String
     let attachments: [PendingAttachment]
-    /// Exact Gateway operation identity when transport admission completed.
-    /// Physical row aliasing requires this causal value for every prompt kind.
     let operationID: String?
-    /// Presentation identity retained only until this one canonical replacement
-    /// is installed. It never substitutes for the canonical transcript ID.
     let submission: ComposerSubmissionSnapshot?
 
     init(
@@ -230,9 +206,6 @@ enum ComposerAttachmentPolicy {
     }
 }
 
-/// The logical route a submission is admitted for. A Home conversation keeps
-/// its physical chapter as presentation identity, but its prompts go through
-/// `home.prompt`, which resolves the current chapter when the prompt is sent.
 enum ComposerSubmissionRoute: Equatable, Sendable {
     case session
     case home
@@ -242,15 +215,9 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let target: SessionPresentationIdentity
     let textRevision: Int
     let localNonce: UInt64
-    /// User-visible text. Skill transport metadata is deliberately separate so
-    /// optimistic, queued, and canonical presentation never expose `/skill:`.
     let outgoingText: String
-    /// The typed message without staged annotations; a rejected submission
-    /// restores this and `annotations` separately, never the composed envelope.
     let draftText: String
     let annotations: [ChatAnnotation]
-    /// Ordered skills and prompts (no arguments), or one extension command
-    /// whose arguments are `outgoingText`. Empty for an ordinary message.
     let resourceInvocations: [ComposerResourceInvocation]
     let attachmentIDs: [String]
     let behavior: String?
@@ -285,8 +252,6 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
 
     var isExtensionCommand: Bool { resourceInvocations.first?.isExtensionCommand == true }
 
-    /// Stable only for the owning presentation and admitted submission. This
-    /// is a presentation identity, never a transcript/event ID.
     var presentationID: String {
         "outgoing-submission:\(target.sessionID):\(target.generation):\(localNonce)"
     }

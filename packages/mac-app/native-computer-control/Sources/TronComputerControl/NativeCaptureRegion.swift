@@ -1,8 +1,6 @@
 import CoreGraphics
 import Foundation
 
-/// Display-local points, never screenshot pixels or global desktop coordinates.
-/// A crop is immutable for a selected view and must not expand to fit a source.
 public struct NativeCaptureRegion: Codable, Equatable, Sendable {
     public let x: Double
     public let y: Double

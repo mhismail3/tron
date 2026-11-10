@@ -2,8 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Synthetic driver of the production-owned presentation. No lifecycle commands
-/// or decisions: only the real native owner may supply those effects.
 @MainActor
 struct HostedProjectLifecyclePreview: View {
     let surface: String
@@ -38,8 +36,6 @@ struct HostedProjectLifecyclePreview: View {
     }
 }
 
-/// Fixtures alone supply sample paths, draft values and simulated effects. Each
-/// presented page owns its own child sheets, including the canonical review.
 @MainActor
 private struct HostedProjectLifecycleContent: View {
     let surface: String
@@ -53,7 +49,6 @@ private struct HostedProjectLifecycleContent: View {
     var body: some View {
         content
             .tronManagedSheet(item: $approval, identity: { "preview.project-lifecycle.\($0.rawValue)" }) { action in
-                // Design preview: Approve sends nothing; only the real owner confirms.
                 ChangeReviewSheet(review: action.review, approve: {}, cancel: { approval = nil })
             }
             .tronManagedSheet(isPresented: $choosingFolder, identity: "preview.project-lifecycle.existing") {
@@ -88,8 +83,6 @@ private struct HostedProjectLifecycleContent: View {
     }
 }
 
-/// Synthetic exact reviews for the production review sheet. This gallery sends
-/// no command, so its Approve cannot apply anything.
 enum HostedProjectApprovalPreview: String, CaseIterable, Identifiable {
     case trust, untrust
     var id: String { "preview-project-\(rawValue)" }

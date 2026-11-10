@@ -1,7 +1,5 @@
 import XCTest
 
-/// Bounded UI-first review capture, not behavioral acceptance of replay or
-/// Gateway persistence. The follow-up real-Gateway journey owns that proof.
 final class TronToolSheetsPolishUITests: XCTestCase {
     @MainActor func testCaptureComposerPickerSubtextForReview() {
         continueAfterFailure = false
@@ -19,8 +17,6 @@ final class TronToolSheetsPolishUITests: XCTestCase {
         }
     }
 
-    /// Compare actual rendered text line boxes with Manage Home's production row.
-    /// This fails if any picker secondary site falls back to the old caption size.
     @MainActor func testComposerPickerSecondaryTextMatchesManageHomeRow() {
         continueAfterFailure = false
         for scenario in ["picker", "picker-alternate", "picker-query"] {
@@ -57,7 +53,6 @@ final class TronToolSheetsPolishUITests: XCTestCase {
                                        dark ? "-polish-dark" : "-polish-light", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
                 app.launch()
                 XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15))
-                // Wait for the actual sheet or rendered prompt before capturing.
                 if scenario == "prompt" || scenario == "short-prompt" {
                     XCTAssertTrue(app.staticTexts["Transcript presentation review"].waitForExistence(timeout: 10))
                 } else {
@@ -91,7 +86,6 @@ final class TronToolSheetsPolishUITests: XCTestCase {
         }
     }
 
-    /// Approval evidence only; interaction/receipt acceptance runs after review.
     @MainActor func testCaptureHomeSecondaryRowsForReview() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
@@ -117,7 +111,6 @@ final class TronToolSheetsPolishUITests: XCTestCase {
         }
     }
 
-    /// Preview plus a focused native-reader round trip; no live task is sent.
     @MainActor func testTaskMessageHeaderAndFullReaderForReview() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
@@ -261,7 +254,6 @@ final class TronToolSheetsPolishUITests: XCTestCase {
     }
 
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {
-        // Let the native sheet and media settle, independent of content reads.
         Thread.sleep(forTimeInterval: 0.7)
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name

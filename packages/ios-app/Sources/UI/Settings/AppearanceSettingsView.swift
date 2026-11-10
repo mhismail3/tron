@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// This iPhone's local preferences in one sheet: dashboard, subagent activity,
-/// color mode, theme and fonts. The dashboard's number field sits near the top
-/// so focusing it never needs keyboard avoidance under the floating Done.
 struct AppearanceSettingsView: View {
     @Environment(AppModel.self) private var model
     @PresentationState private var behavior = AppLocalBehaviorSettings.shared
@@ -220,10 +217,6 @@ struct AppearanceSettingsView: View {
     }
 }
 
-/// Theme choices as one horizontally scrolling row of Liquid Glass tiles, each
-/// a third of the row and tinted with the theme it names; more themes scroll.
-/// Accessibility sizes widen each tile to most of the row, peeking the next,
-/// so names wrap by word rather than by letter.
 private struct ThemeColorPicker: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let selection: ThemeColor
@@ -263,9 +256,6 @@ private struct ThemeColorPicker: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, minHeight: 76, maxHeight: .infinity, alignment: .topLeading)
-            // The selection ring is glass content, so it scales with the
-            // interactive press instead of staying inset under the grown glass.
-            // The glass draws its own rim; unselected tiles add no second one.
             .overlay { if isSelected { shape.strokeBorder(color.ink, lineWidth: 2) } }
             .tronGlassSurface(accent: color.surfaceTint, cornerRadius: 16,
                               tintOpacity: isSelected ? 0.34 : 0.18, interactive: true,

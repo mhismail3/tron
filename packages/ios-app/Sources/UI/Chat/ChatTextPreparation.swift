@@ -62,11 +62,7 @@ struct ChatTextPreparationSnapshot: Hashable, Sendable {
 
     let markdown: [String: MarkdownEntry]
     let thinking: [String: ThinkingEntry]
-    /// Present only on a row slice that actually renders thinking. Extension
-    /// label changes therefore cannot invalidate unrelated committed rows.
     let hiddenThinkingLabel: String?
-    /// Globally unique cache-entry revisions make this sorted membership token
-    /// exact while keeping render-row equality independent of prepared payloads.
     let revision: [UInt64]
 
     init(
@@ -220,9 +216,6 @@ enum ChatTextPreparationPolicy {
             }
         }
 
-        // Explicitly paged history may exceed one page. Only the render-critical
-        // bounded tail is warmed; older lazily realized rows retain the exact
-        // cold parser fallback and are never mirrored by this cache.
         for item in transcript { admit(item) }
         if let streaming,
            !transcript.contains(where: {
@@ -296,8 +289,6 @@ actor ChatTextPreparationCache {
             }
             if var entry = entries[source.identity], entry.source == source.source,
                entry.cacheEpoch == cacheEpoch {
-                // Requested sources are oldest-to-newest, so the tail receives
-                // the strongest deterministic recency without depending on task order.
                 accessOrdinal &+= 1
                 entry.accessOrdinal = accessOrdinal
                 entries[source.identity] = entry
@@ -345,10 +336,6 @@ actor ChatTextPreparationCache {
                 for await value in group { result.append(value) }
                 return result
             }
-            // Task completion order is intentionally irrelevant to LRU order.
-            // The selected batch is admitted oldest-to-newest. A retired
-            // projection may finish a non-cooperative parser, but it cannot
-            // admit that batch into this or a successor cache epoch.
             guard !Task.isCancelled, cacheEpoch >= retiredBeforeEpoch else {
                 return snapshot(for: newest)
             }
@@ -366,9 +353,6 @@ actor ChatTextPreparationCache {
         return snapshot(for: newest)
     }
 
-    /// Retires all entries and in-flight admissions before this projection
-    /// epoch. The boundary epoch remains valid for its successor even when
-    /// retirement is delivered after that work has started.
     func retire(before epoch: Int) {
         guard epoch > retiredBeforeEpoch else { return }
         retiredBeforeEpoch = epoch

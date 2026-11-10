@@ -2,7 +2,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Capture-only entry points into production views with synthetic boundary data.
 struct HostedSixSmallUIFixture: View {
     let surface: String
     @Environment(AppModel.self) private var model

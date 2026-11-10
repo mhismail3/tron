@@ -2,8 +2,6 @@ import CoreText
 import SwiftUI
 import UIKit
 
-/// Creates the bundled static and variable fonts without applying unsupported
-/// SwiftUI weight mutations to a named variable face.
 @MainActor
 enum TronFontLoader {
     enum Weight: CGFloat {
@@ -21,8 +19,6 @@ enum TronFontLoader {
         let key = cacheKey(size: size, weight: weight, mono: mono, casual: casual, family: family, settings: settings)
         if let cached = fontCache[key] { return cached }
         let base = uiFont(for: key)
-        // `relativeTo:` carries Dynamic Type metadata into SwiftUI's environment;
-        // wrapping a UIFont/CTFont alone renders the right pixels but audits as fixed.
         let font = Font.custom(base.fontName, size: size, relativeTo: textStyle(for: size))
         if fontCache.count >= cacheLimit { fontCache.removeAll(keepingCapacity: true) }
         fontCache[key] = font
@@ -40,23 +36,15 @@ enum TronFontLoader {
         uiFont(for: cacheKey(size: size, weight: weight, mono: mono, casual: casual, family: family, settings: settings))
     }
 
-    /// Every input that shapes the created font. Views call these loaders from
-    /// their bodies, so resolved fonts are reused by exact key; building the key
-    /// reads the same `FontSettings` properties as an uncached build, so font
-    /// setting changes still invalidate the calling views through observation.
-    /// Dynamic Type is not an input: SwiftUI (`relativeTo:`) and callers'
-    /// `UIFontMetrics` scale the unscaled base at render time.
     private struct CacheKey: Hashable {
         let family: FontFamily
         let size: CGFloat
         let weight: Weight
         let mono: Bool
         let preferredWeight: Double
-        /// Recursive's effective `CASL` value; nil for every other family.
         let casual: CGFloat?
     }
 
-    /// Bounds the caches when continuous axis sliders produce new keys.
     private static let cacheLimit = 256
     private static var uiFontCache: [CacheKey: UIFont] = [:]
     private static var fontCache: [CacheKey: Font] = [:]
@@ -102,10 +90,10 @@ enum TronFontLoader {
         if resolved.isVariable {
             var variations: [UInt32: CGFloat] = [FontAxis.weight.tag: clamped]
             if resolved == .recursive, let casual = key.casual {
-                variations[0x4D4F4E4F] = mono ? 1 : 0 // MONO
+                variations[0x4D4F4E4F] = mono ? 1 : 0
                 variations[FontAxis.casual.tag] = casual
-                variations[0x736C6E74] = 0 // slnt
-                variations[0x43525356] = 0 // CRSV
+                variations[0x736C6E74] = 0
+                variations[0x43525356] = 0
             }
             if resolved == .sourceSerif4 {
                 let range = FontAxis.opticalSize.range(for: resolved)
@@ -153,9 +141,6 @@ enum TronFontLoader {
         }
     }
 
-    /// The UIKit counterpart of the Dynamic Type style `createFont` scales
-    /// with, so UIKit text renders at the same size as the SwiftUI text it
-    /// replaces.
     static func uiTextStyle(for size: CGFloat) -> UIFont.TextStyle {
         switch textStyle(for: size) {
         case .caption2: .caption2

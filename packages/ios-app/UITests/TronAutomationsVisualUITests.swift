@@ -1,8 +1,5 @@
 import XCTest
 
-/// Review screenshots of the Automations list, detail, run detail and editor in
-/// light and dark, and the list and detail at XXXL text. A visual record for
-/// design review, not a validation gate; run it explicitly.
 final class TronAutomationsVisualUITests: XCTestCase {
     @MainActor func testAutomationsSheetsReviewScreenshots() {
         continueAfterFailure = false
@@ -42,7 +39,6 @@ final class TronAutomationsVisualUITests: XCTestCase {
             for _ in 0..<4 { app.swipeUp() }
             Thread.sleep(forTimeInterval: 0.5)
             keep(app, "automation-run-end-\(variant)")
-            // The topmost sheet's Done is the last one in the hierarchy.
             let done = app.buttons.matching(NSPredicate(format: "label == 'Done'"))
             done.element(boundBy: done.count - 1).tap()
             XCTAssertTrue(app.staticTexts["Run Details"].waitForNonExistence(timeout: 5))

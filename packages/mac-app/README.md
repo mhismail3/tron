@@ -33,7 +33,8 @@ preserve it and `gateway/workspace-state`
 
 `MacStartupMode.resolve` is the single startup authority: test host and CLI first, Xcode Debug
 → read-only observation, installed Release → wizard or onboarded lifecycle, misplaced Release →
-a visible error. Debug never creates a LaunchAgent.
+a visible error. Test-host detection accepts known XCTest and Swift Testing environment markers;
+Debug never creates a LaunchAgent.
 
 | Variant | Login Item | Label | Home | Port |
 |---|---|---|---|---|
@@ -63,7 +64,8 @@ sole 9848 listener, selected manifest, `system.info`) and may show its pairing, 
   sequentially, stopping at the first failure; failed capture or an unobserved PID refuses repair.
 - `ServerStatusPoller` pings every 30 s; full Stable admission reruns only when the runtime fence
   changes (launchd PID and start identity, selection and manifest stamps). Refusals are re-proved
-  every cycle; Tailscale resolution is reused about five minutes; explicit actions resolve live
+  every cycle; Tailscale resolution is reused about five minutes; a failed poll re-resolves once
+  and retries the ping only if the address changed. Explicit actions resolve live
   and run full admission. A refusal shows **Update required** with `why` in
   `observer.state-changed`. Runtime differing from the selection shows **Update incomplete** with
   **Rerun Gateway Update** (`gateway.update`, `mode: auto`, reconciled by `command.status`).
@@ -82,7 +84,9 @@ sole 9848 listener, selected manifest, `system.info`) and may show its pairing, 
 ## Quit
 
 `MacQuitCoordinator` reads the exact Stable PID, command and start identity, sends one
-receipt-backed `gateway.stop`, and waits for that process to go with no replacement; a reachable
+receipt-backed `gateway.stop`, and waits for that process to go with no replacement; launchd job
+absence or missing `ps` metadata does not prove the exact process is offline. Retries retain the
+original PID fence and never adopt a replacement. A reachable
 preparing or waiting drain is unbounded. Only the Gateway's `gateway/stop-completed.json` receipt
 starts the 5 s exit-stall grace; five seconds without it or a reachable drain is reported
 uncertainty and Quit fails, work untouched. A proven stall rechecks identity and boots out only

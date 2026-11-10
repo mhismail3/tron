@@ -2,8 +2,6 @@ import Network
 import SwiftUI
 import TronMobileCore
 
-/// The app's network path observer. `ProductionSceneOwner` creates it lazily, so
-/// a composition that never renders the production scene starts no path monitor.
 @MainActor
 final class GatewayPathDiagnosticsObserver {
     private let monitor = NWPathMonitor()
@@ -30,8 +28,6 @@ final class GatewayPathDiagnosticsObserver {
     func setSceneActive(_ active: Bool) {
         delivery.setActive(active)
         if active {
-            // The scene activation re-reads the same path: it forwards that
-            // reading's signature so it cannot pass as a route change (C-3).
             let path = monitor.currentPath
             lanPermission.update(systemDenied: Self.localNetworkDenied(path))
             pathHint(path.status == .satisfied, Self.routeSignature(path))
@@ -39,9 +35,6 @@ final class GatewayPathDiagnosticsObserver {
         }
     }
 
-    /// The system's own report that this install may not reach the local
-    /// network (E-3c). The LAN lane reads it; nothing else in the app treats a
-    /// denied permission as an outage.
     private nonisolated static func localNetworkDenied(_ path: NWPath) -> Bool {
         path.unsatisfiedReason == .localNetworkDenied
     }
@@ -76,10 +69,6 @@ final class GatewayPathDiagnosticsObserver {
         return used.isEmpty ? "unknown" : used
     }
 
-    /// What the lifecycle reads as a route's identity: the interfaces this path
-    /// uses. A status, flag or cost-only update — and a scene activation
-    /// re-reading the same path — keeps this the same, so it cannot read as a
-    /// path change and restart a grown backoff (C-3).
     private nonisolated static func routeSignature(_ path: NWPath) -> String {
         interfaces(path)
     }
@@ -90,21 +79,6 @@ final class GatewayPathDiagnosticsObserver {
     }
 }
 
-/// The one owner of the production scene's lifecycle composition.
-///
-/// The shipping app and the hosted test app's no-fixture arm both build this
-/// owner and render `ProductionSceneRoot`, so the scene a real-UI journey drives
-/// is the scene the user runs: scene-phase transitions, pairing invitations and
-/// shared links, path diagnostics, background checkpoints, connection-state
-/// logging and push reconciliation. The hosted fixture arms keep their own
-/// views and never build this owner.
-///
-/// The model is injected, so each arm keeps the construction its configuration
-/// owns: the shipping app composes incident retention (the persisted client
-/// diagnostic store and the notification inbox) and the hosted test app stays
-/// memory-only, as it is composed today.
-/// `ObservableObject` is what lets `@StateObject` create this owner exactly once
-/// for the hosted no-fixture arm; nothing here publishes a change.
 @MainActor
 final class ProductionSceneOwner: ObservableObject {
     let model: AppModel
@@ -112,9 +86,6 @@ final class ProductionSceneOwner: ObservableObject {
     let backgroundCheckpoints = AppBackgroundCheckpointCoordinator()
     let pushNotifications = PushNotificationCoordinator()
     let pendingShares = UserDefaultsPendingShareStore()
-    /// Created with the owner, before the scene's first `.task`, as the shipping
-    /// app created it in its own `init`: the monitor's first update lands before
-    /// `setSceneActive` reads the current path.
     let pathDiagnostics: GatewayPathDiagnosticsObserver
 
     init(model: AppModel) {
@@ -123,15 +94,6 @@ final class ProductionSceneOwner: ObservableObject {
     }
 }
 
-/// The production scene: the shipping app's window content and the lifecycle
-/// modifiers that drive it.
-///
-/// `pushDelegate` is the composition's one injected dependency: push
-/// registration is driven by the app's `UIApplicationDelegateAdaptor`
-/// (`AppDelegate`), and the shipping app passes its own. The adaptor is declared
-/// on the `App`, so installing it for the hosted app would install it for every
-/// hosted arm - the fixture arms included, which stay inert; they pass `nil` and
-/// still run every other production modifier.
 struct ProductionSceneRoot: View {
     let owner: ProductionSceneOwner
     let pushDelegate: AppDelegate?
@@ -175,8 +137,6 @@ struct ProductionSceneRoot: View {
             .onOpenURL { url in
                 if let invitation = PairingInvitationParser.parse(url) {
                     Task {
-                        // The receipt and a cancelled pairing are recorded: an
-                        // invitation that never pairs must say where it stopped.
                         await owner.model.appLog.recordCausal(name: "pairing.link", outcome: "received")
                         do { try await owner.model.pair(invitation) }
                         catch is CancellationError {
@@ -185,7 +145,6 @@ struct ProductionSceneRoot: View {
                         catch { owner.model.presentError(error) }
                     }
                 } else if url.scheme == "tron", url.host == "pair" {
-                    // Never the URL itself: it carries the one-use invitation.
                     Task { await owner.model.appLog.recordCausal(name: "pairing.link", outcome: "unparsed", level: "warning") }
                 } else if url.host == "share",
                           let shared = owner.pendingShares.load()?.buildSharePrompt(),

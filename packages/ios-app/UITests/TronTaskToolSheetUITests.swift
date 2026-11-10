@@ -69,8 +69,6 @@ final class TronTaskToolSheetUITests: XCTestCase {
         }
     }
 
-    /// A control message's body reads in the standard sheet text colour (neutral), not the
-    /// automation cyan its prompt tone once gave it.
     @MainActor func testMessageBodyUsesStandardTextInk() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {

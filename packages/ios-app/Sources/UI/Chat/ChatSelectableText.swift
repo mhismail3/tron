@@ -2,8 +2,6 @@ import Observation
 import SwiftUI
 import UIKit
 
-/// The assistant text part whose Markdown blocks may be quoted. Set by the
-/// transcript row only; every other Markdown surface keeps SwiftUI text.
 struct ChatAnnotationSource: Hashable {
     let itemID: String
     let partID: String
@@ -16,18 +14,13 @@ extension EnvironmentValues {
     @Entry var chatAnnotationPresenter: ChatAnnotationPresenter? = nil
 }
 
-/// A selection that is being annotated in the floating bubble.
 struct ChatAnnotationRequest: Identifiable, Equatable {
     let id = UUID()
     let quote: String
     let anchor: ChatAnnotationAnchor
-    /// The selection's bounds in window coordinates when Annotate was chosen.
     let selectionRect: CGRect
 }
 
-/// Chat-scoped presentation owner for annotating. Staged annotations stay in
-/// `ComposerDraftCoordinator` (the draft authority); this object only binds
-/// that authority to the mounted chat's scope and owns the open bubble.
 @MainActor
 @Observable
 final class ChatAnnotationPresenter {
@@ -46,8 +39,6 @@ final class ChatAnnotationPresenter {
         }
     }
 
-    /// Ranges to highlight in one rendered block: staged annotations and the
-    /// selection currently open in the bubble.
     func highlights(itemID: String, blockKey: String) -> [NSRange] {
         var anchors: [ChatAnnotationAnchor] = []
         if let scope, let drafts {
@@ -68,12 +59,8 @@ final class ChatAnnotationPresenter {
 
     func cancel() { pending = nil }
 
-    // MARK: Revealing a staged annotation's source
-
-    /// A scroll the transcript owes the open reveal.
     struct RevealScroll: Equatable {
         enum Target: Equatable {
-            /// The source row is not mounted: bring it into the viewport first.
             case row(itemID: String)
             case visualOffset(CGFloat)
         }
@@ -87,31 +74,22 @@ final class ChatAnnotationPresenter {
         var scrolls = 0
     }
 
-    /// The top of the band the source must lie in, as a fraction of the
-    /// window height: below the navigation bar.
     static let revealBandTop: CGFloat = 0.14
     private static let maximumRevealScrolls = 3
-    /// Frames a landed reveal scroll waits for its source to hold still.
     static let maximumSettleFrames = 30
 
     private(set) var revealScroll: RevealScroll?
 
-    /// The revealed source, for assistive technologies: the transcript row
-    /// exposes it as an element over the range while its highlight shows.
     struct RevealedSource: Equatable {
         let id = UUID()
         let itemID: String
         let blockKey: String
         let quote: String
-        /// The range's bounds in the source text view.
         let rect: CGRect
     }
     private(set) var revealed: RevealedSource?
 
     #if HOSTED_TEST
-    /// Hosted journeys read each revealed source ("shown" with its window
-    /// frame), its element mounting ("exposed") and its clearing ("cleared"):
-    /// all fall inside XCUITest's idle wait after the tap.
     static var hostedReveals: (@MainActor (_ event: String, _ quote: String, _ windowFrame: CGRect?) -> Void)?
     #endif
 
@@ -119,17 +97,10 @@ final class ChatAnnotationPresenter {
         guard let revealed, revealed.itemID == itemID, revealed.blockKey == blockKey else { return nil }
         return revealed
     }
-    /// The composer's top (with its staged chips) in window coordinates, the
-    /// band's bottom; ChatView keeps it current.
     @ObservationIgnored var revealBottom: CGFloat?
-    /// The open annotation sheet's top in window coordinates; the source
-    /// lands above it.
     @ObservationIgnored var sheetTop: CGFloat? {
         didSet { if revealSheetTop != nil { revealSheetTop = sheetTop } }
     }
-    /// The sheet's top once one of its quotes revealed: the transcript keeps
-    /// that much clearance so its content scrolls above the sheet, until the
-    /// sheet closes.
     private(set) var revealSheetTop: CGFloat?
     @ObservationIgnored var reduceMotion = false
     @ObservationIgnored private var reveal: Reveal?
@@ -138,15 +109,10 @@ final class ChatAnnotationPresenter {
     private struct SourceKey: Hashable { let itemID: String; let blockKey: String }
     private struct WeakSource { weak var view: ChatSelectableTextView? }
 
-    /// Scrolls the transcript to an annotation's selected range and flashes
-    /// it. An annotation without an anchor, or whose source row is gone, does
-    /// nothing.
     func reveal(_ annotation: ChatAnnotation) {
         guard let anchor = annotation.anchor else { return }
         revealed = nil
         reveal = Reveal(anchor: anchor, quote: annotation.quote)
-        // The transcript makes room above an open sheet; the measured
-        // scrolls below converge on the source as that layout lands.
         if let sheetTop { revealSheetTop = sheetTop }
         if !placeReveal() { request(.row(itemID: anchor.itemID)) }
     }
@@ -169,7 +135,6 @@ final class ChatAnnotationPresenter {
         sources = sources.filter { $0.value.view != nil && $0.value.view !== view }
     }
 
-    /// The pending reveal's source range in window coordinates, when mounted.
     var revealSourceFrame: CGRect? {
         guard let reveal,
               let view = sources[SourceKey(itemID: reveal.anchor.itemID, blockKey: reveal.anchor.blockKey)]?.view,
@@ -178,9 +143,6 @@ final class ChatAnnotationPresenter {
         return view.convert(view.bounds(of: reveal.anchor.range), to: window)
     }
 
-    /// Measures the mounted source: flashes it when it is in the band (or
-    /// after `maximumRevealScrolls` measured scrolls), otherwise asks for the
-    /// measured scroll. False when the source is not mounted.
     private func placeReveal() -> Bool {
         guard var reveal,
               let view = sources[SourceKey(itemID: reveal.anchor.itemID, blockKey: reveal.anchor.blockKey)]?.view,
@@ -190,7 +152,6 @@ final class ChatAnnotationPresenter {
         let top = window.bounds.height * Self.revealBandTop
         let obstruction = min(revealBottom ?? window.bounds.height * 0.5, sheetTop ?? .infinity)
         let bottom = max(top + 1, obstruction - 12)
-        // A source taller than the band starts at its top.
         let tall = rect.height > bottom - top
         let placed = tall ? abs(rect.minY - top) <= 1 : rect.minY >= top && rect.maxY <= bottom
         if placed || reveal.scrolls >= Self.maximumRevealScrolls {
@@ -204,7 +165,6 @@ final class ChatAnnotationPresenter {
             #if HOSTED_TEST
             Self.hostedReveals?("shown", source.quote, rect)
             #endif
-            // The element lives as long as the highlight it describes.
             view.flash(reveal.anchor.range, reduceMotion: reduceMotion) { [weak self] in
                 guard let self, self.revealed?.id == source.id else { return }
                 self.revealed = nil
@@ -241,8 +201,6 @@ final class ChatAnnotationPresenter {
 }
 
 extension View {
-    /// The revealed source's accessibility element, over its range in this
-    /// selectable text.
     func chatRevealedSource(_ presenter: ChatAnnotationPresenter, itemID: String, blockKey: String) -> some View {
         overlay(alignment: .topLeading) {
             if let revealed = presenter.revealed(itemID: itemID, blockKey: blockKey) {
@@ -262,28 +220,18 @@ extension View {
     }
 }
 
-/// Typography for one selectable block; mirrors the SwiftUI text it replaces.
 struct ChatSelectableTextStyle: Hashable {
     var size: CGFloat = 14
     var weight: TronFontLoader.Weight = .regular
     var color: Color = .tronTextPrimary
 }
 
-/// A completed assistant Markdown block rendered by a non-editable UITextView,
-/// which gives native range selection with drag handles (SwiftUI `Text` on
-/// iOS 26 only selects whole views). Links keep UIKit's default open action.
-/// The edit menu adds Annotate ahead of the system actions when the surface
-/// admits annotation; otherwise it keeps only the system actions (Copy).
-/// `detectsLinks` turns bare URLs into links for surfaces whose authored text
-/// is not Markdown-linked (Ask Question); the transcript keeps them literal.
 struct ChatSelectableInlineText: UIViewRepresentable {
     let inline: MarkdownPresentation.Inline
     let style: ChatSelectableTextStyle
     var messageBlocks: [MarkdownPresentation.Block]? = nil
     var highlights: [NSRange] = []
     var detectsLinks = false
-    /// The presenter and block this text quotes from, so a staged
-    /// annotation's quote can find and flash its source.
     var revealSource: (presenter: ChatAnnotationPresenter, itemID: String, blockKey: String)? = nil
     let onAnnotate: ((String, NSRange, CGRect) -> Void)?
 
@@ -311,7 +259,6 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         onAnnotate: ((String, NSRange, CGRect) -> Void)?
     ) {
         self.revealSource = revealSource
-        // The message run renders `messageBlocks`; its plain text needs no Markdown parse.
         self.inline = MarkdownPresentation.Inline(source: Self.plainText(messageBlocks), attributedString: nil)
         self.style = style
         self.messageBlocks = messageBlocks
@@ -335,8 +282,6 @@ struct ChatSelectableInlineText: UIViewRepresentable {
 
     static let accessibilityIdentifier = "chat.assistant.selectable-text"
 
-    /// Every input that changes rendered text. Selection survives any update
-    /// that leaves it equal.
     struct RenderKey: Equatable {
         let inline: MarkdownPresentation.Inline
         let style: ChatSelectableTextStyle
@@ -364,9 +309,6 @@ struct ChatSelectableInlineText: UIViewRepresentable {
             return UIMenu(children: [annotate] + suggestedActions)
         }
 
-        /// Annotate for `range`. The quote and its range are fixed when the
-        /// menu is built, so a later re-render or layout shift cannot change
-        /// what is quoted.
         func annotateAction(_ textView: ChatSelectableTextView, range: NSRange) -> UIAction? {
             let source = textView.attributedText.string as NSString
             guard onAnnotate != nil, range.length > 0, NSMaxRange(range) <= source.length else { return nil }
@@ -388,9 +330,6 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> ChatSelectableTextView {
-        // The subclasses use their designated initializer, which runs their
-        // stored property initializers; `init(usingTextLayoutManager:)` does
-        // not on iOS 27. A nil container selects TextKit 2.
         let view: ChatSelectableTextView = messageBlocks == nil
             ? ChatSelectableTextView(frame: .zero, textContainer: nil)
             : ChatSelectableMessageTextView(frame: .zero, textContainer: nil)
@@ -479,23 +418,12 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     }
 }
 
-/// Selectable chat text. UIKit's own range selection makes this view first
-/// responder, which takes the keyboard from the focused composer; the
-/// transcript then re-lays out under the finger and the drag extends onto
-/// other text. So while another text input owns the keyboard this view
-/// refuses first responder and selects with UIKit's public selection pieces
-/// instead: the same word-granular long-press drag, handles, loupe and menu,
-/// leaving the keyboard and the transcript where they are.
 @MainActor
 class ChatSelectableTextView: UITextView {
-    /// Annotate for a selected range; nil when the surface does not annotate.
     var annotateAction: ((NSRange) -> UIAction?)?
 
-    /// The one keyboard-up selection on screen.
     private static weak var activeKeyboardSelection: ChatSelectableTextView?
 
-    /// UIScrollView is its own gesture delegate; these recognizers and the
-    /// interactions use a separate one.
     private lazy var delegateProxy = KeyboardSelectionDelegate(owner: self)
     private lazy var selectionDisplay = UITextSelectionDisplayInteraction(textInput: self, delegate: delegateProxy)
     private lazy var editMenu = UIEditMenuInteraction(delegate: delegateProxy)
@@ -503,14 +431,9 @@ class ChatSelectableTextView: UITextView {
     private lazy var handleDrag = UIPanGestureRecognizer(target: self, action: #selector(dragHandle(_:)))
     private lazy var clearingTap = UITapGestureRecognizer(target: self, action: #selector(clearWithTap))
     private var loupe: UITextLoupeSession?
-    /// The long press's first word; the selection always contains it.
     private var pressAnchor: NSRange?
-    /// The selection end a handle drag keeps fixed.
     private var fixedHandleOffset: Int?
-    /// Set while the menu is replaced, so its dismissal keeps the selection.
     private var isAdjustingSelection = false
-    /// Advances with each new or adjusted selection; a dismissed menu ends
-    /// only the selection it was shown for.
     private var selectionGeneration = 0
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
@@ -531,7 +454,6 @@ class ChatSelectableTextView: UITextView {
     }
 
     override func becomeFirstResponder() -> Bool {
-        // UIKit's own selection press still asks while it is refused.
         guard super.becomeFirstResponder() else { return false }
         endKeyboardSelection()
         return true
@@ -539,7 +461,6 @@ class ChatSelectableTextView: UITextView {
 
     private var hasKeyboardSelection: Bool { Self.activeKeyboardSelection === self }
 
-    /// Ends this view's selection in either mode.
     func endChatSelection() {
         endKeyboardSelection()
         if isFirstResponder {
@@ -560,8 +481,6 @@ class ChatSelectableTextView: UITextView {
         editMenu.dismissMenu()
     }
 
-    // MARK: Reveal flash
-
     private var flashView: UIView?
 
     func clearRevealedSource() {
@@ -569,10 +488,6 @@ class ChatSelectableTextView: UITextView {
         flashView = nil
     }
 
-    /// A brief amber pulse over `range` that fades; with Reduce Motion only
-    /// the fade.
-    /// `faded` runs once the highlight is gone, also when a re-render
-    /// removes it early.
     func flash(_ range: NSRange, reduceMotion: Bool, faded: @escaping () -> Void) {
         clearRevealedSource()
         var rects: [CGRect] = []
@@ -617,14 +532,11 @@ class ChatSelectableTextView: UITextView {
         }
     }
 
-    // MARK: Gestures
-
     fileprivate func keyboardSelectionShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
         if recognizer === selectionPress {
             return ChatTextInputFocus.keyboardIsOwned(byAnotherThan: self)
         }
         if recognizer === handleDrag {
-            // The long press's own drag extends by words; a handle only moves after it.
             let pressing = [.began, .changed].contains(selectionPress.state)
             return !pressing && hasKeyboardSelection && handleEnd(near: recognizer.location(in: self)) != nil
         }
@@ -633,13 +545,11 @@ class ChatSelectableTextView: UITextView {
 
     fileprivate func keyboardSelection(_ recognizer: UIGestureRecognizer,
                                        recognizesSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-        // UIKit's own selection press fails quietly without first responder.
         recognizer === selectionPress && other.view === self
     }
 
     fileprivate func keyboardSelection(_ recognizer: UIGestureRecognizer,
                                        makesWait other: UIGestureRecognizer) -> Bool {
-        // A handle drag wins over the transcript's scroll: the scroll waits for it.
         recognizer === handleDrag && other.view is UIScrollView && other.view !== self
     }
 
@@ -713,8 +623,6 @@ class ChatSelectableTextView: UITextView {
         isAdjustingSelection = false
     }
 
-    // MARK: Geometry
-
     private func offset(at point: CGPoint) -> Int {
         guard let position = closestPosition(to: point) else { return 0 }
         return offset(from: beginningOfDocument, to: position)
@@ -725,7 +633,6 @@ class ChatSelectableTextView: UITextView {
         return caretRect(for: position)
     }
 
-    /// The word at `point`, or the character there when it is not in a word.
     private func wordRange(at point: CGPoint) -> NSRange? {
         guard let position = closestPosition(to: point) else { return nil }
         let word = tokenizer.rangeEnclosingPosition(position, with: .word, inDirection: .storage(.forward))
@@ -739,7 +646,6 @@ class ChatSelectableTextView: UITextView {
         return NSRange(location: min(offset(from: beginningOfDocument, to: position), length - 1), length: 1)
     }
 
-    /// The selection end whose handle is under `point`.
     private func handleEnd(near point: CGPoint) -> Int? {
         let range = selectedRange
         guard range.length > 0 else { return nil }
@@ -751,7 +657,6 @@ class ChatSelectableTextView: UITextView {
         return nil
     }
 
-    /// The union of the selection rects for `range`, in this view.
     func bounds(of range: NSRange) -> CGRect {
         var rect = CGRect.null
         if let start = position(from: beginningOfDocument, offset: range.location),
@@ -764,9 +669,6 @@ class ChatSelectableTextView: UITextView {
         return rect.isNull ? bounds : rect
     }
 
-    // MARK: Menu
-
-    /// Annotate ahead of the system actions, as the keyboard-down menu.
     fileprivate func keyboardSelectionMenu(suggestedActions: [UIMenuElement]) -> UIMenu? {
         let range = selectedRange
         guard hasKeyboardSelection, range.length > 0, NSMaxRange(range) <= attributedText.length else { return nil }
@@ -778,8 +680,6 @@ class ChatSelectableTextView: UITextView {
     }
 
     fileprivate func keyboardSelectionMenuWillDismiss(_ animator: any UIEditMenuInteractionAnimating) {
-        // A tap or scroll elsewhere dismisses the menu and ends the selection,
-        // as it would resign UIKit's own.
         guard !isAdjustingSelection else { return }
         let generation = selectionGeneration
         animator.addCompletion { [weak self] in
@@ -839,8 +739,6 @@ private final class ChatSelectableMessageTextView: ChatSelectableTextView {
     private var segmentElements: [UIAccessibilityElement] = []
 
     func installAccessibilitySegments(_ segments: [ChatSelectableAccessibilitySegment]) {
-        // Layout/highlight updates must not replace the VoiceOver element that
-        // owns focus. Only a different semantic source rebuilds these elements.
         if self.segments != segments {
             self.segments = segments
             segmentElements = segments.map { segment in
@@ -879,7 +777,6 @@ private final class ChatSelectableMessageTextView: ChatSelectableTextView {
 
 @MainActor
 enum ChatSelectableTextLayout {
-    /// Subtle highlighter for annotated ranges; amber is the annotation accent.
     static let highlightOpacity = 0.24
 
     static func scaledFont(
@@ -893,7 +790,6 @@ enum ChatSelectableTextLayout {
             .scaledFont(for: base, compatibleWith: traits)
     }
 
-    /// First-line baseline for aligning a SwiftUI list marker with the block.
     static func firstBaseline(style: ChatSelectableTextStyle, sizeCategory: ContentSizeCategory) -> CGFloat {
         scaledFont(
             size: style.size,
@@ -941,7 +837,6 @@ enum ChatSelectableTextLayout {
         traits: UITraitCollection
     ) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
-        // One separator between blocks, as `accessibilitySegments` counts them.
         for (index, block) in blocks.enumerated() {
             if index > 0 { result.append(NSAttributedString(string: "\n")) }
             let start = result.length
@@ -969,7 +864,6 @@ enum ChatSelectableTextLayout {
                     let paragraph = NSMutableParagraphStyle()
                     paragraph.lineBreakMode = .byWordWrapping
                     paragraph.firstLineHeadIndent = CGFloat(item.depth) * 14
-                    // Wrapped lines align with the item's text, after its marker.
                     paragraph.headIndent = CGFloat(item.depth) * 14 + ceil(marker.size().width)
                     paragraph.paragraphSpacing = 5
                     result.addAttribute(.paragraphStyle, value: paragraph, range: range)
@@ -1042,8 +936,6 @@ enum ChatSelectableTextLayout {
         return result
     }
 
-    /// Selections commonly include the trailing space or newline of a word;
-    /// the quote and its highlight are the visible words only.
     static func trimmedRange(_ range: NSRange, in source: NSString) -> NSRange {
         var lower = range.location
         var upper = NSMaxRange(range)

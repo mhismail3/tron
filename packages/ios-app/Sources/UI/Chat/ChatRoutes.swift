@@ -18,9 +18,6 @@ struct ChatForkNavigationOwner {
     mutating func cancel() { pendingRoute = nil }
 }
 
-/// Route-only presentation shell. All authority and task admission remain in
-/// ChatView/ChatSessionPresentation. The sole transient state below sequences a
-/// confirmed fork route after the complete outer context-sheet dismissal.
 struct ChatRoutes: ViewModifier {
     let sessionID: String
     let initialHistoryEntryID: String?
@@ -62,8 +59,6 @@ struct ChatRoutes: ViewModifier {
             .tronManagedSheet(item: $homeSheet, identity: { $0.id }, dependencies: { _ in [] }, onDismiss: completeStagedNavigationAfterDismissal) { route in
                 HomeSheet(destination: route.destination, profileID: route.profileID, sessionID: route.sessionID,
                           onOpenSession: { openedSessionID in
-                              // Read-only open of a chapter or worker chat: stage a profile-fenced
-                              // ordinary route, dismiss the sheet, navigate on its dismissal.
                               guard let staged = try? model.navigationRouteForHomeSession(
                                   profileID: route.profileID, sessionID: openedSessionID) else { return }
                               forkNavigation.stage(staged)
@@ -142,7 +137,6 @@ struct ChatRoutes: ViewModifier {
             .tronManagedSheet(
                 item: $interaction,
                 identity: { ExtensionInteractionPresentationIdentity.value(sessionID: sessionID, interaction: $0) },
-                // The chat's live haptics play this question's own attention haptic.
                 presentationHaptic: nil
             ) { value in
                 if value.method == .form {
@@ -180,7 +174,6 @@ struct ChatRoutes: ViewModifier {
             .tronManagedSheet(
                 item: $editorRequest,
                 identity: { "chat.\(sessionID).editor.\($0.id)" },
-                // A pending request re-presents once the reopened chat settles.
                 presentationHaptic: nil
             ) { request in
                 TronConfirmationSheet(
@@ -195,8 +188,6 @@ struct ChatRoutes: ViewModifier {
             }
     }
 
-    /// Completes a navigation a covering sheet staged (a fork from the context
-    /// sheet, or a read-only chapter open from Manage Home) once that sheet is gone.
     private func completeStagedNavigationAfterDismissal() {
         guard let route = forkNavigation.consume(),
               model.ownsNavigationRoute(route) else { return }

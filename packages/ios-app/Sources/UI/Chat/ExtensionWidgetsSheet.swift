@@ -1,13 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// General, read-only presentation surface for retained extension content.
-///
-/// Retained widgets are not transcript rows and not ambient composer chrome.
-/// A discrete extension event belongs in a notification pill; retained state is
-/// only visible when the user opens this sheet. The sheet owns no extension
-/// execution and starts no provider work: it renders the content it was given
-/// and disappears with the sheet.
 struct SessionActivitySheet: View {
     let sessionID: String
     let extensionContent: ExtensionRetainedContent
@@ -34,9 +27,6 @@ struct SessionActivitySheet: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         let sections = SessionProcessProjection.sections(processes)
-                        // One collection owns process identity across lifecycle sections.
-                        // Separate lazy ForEach groups can retain a departed live cell
-                        // when its exact process ID arrives in the completed group.
                         ForEach(rows(sections)) { row in
                             switch row {
                             case .heading(let title):
@@ -141,7 +131,6 @@ struct SessionActivitySheet: View {
     }
 }
 
-/// Shared sheet-header typography for both native processes and extensions.
 private struct ActivitySectionHeader: View {
     let title: String
 
@@ -154,8 +143,6 @@ private struct ActivitySectionHeader: View {
     }
 }
 
-/// One read-only retained entry. Card geometry and internal padding match the
-/// existing activity rows so the sheet reads as part of the same system.
 private struct ExtensionContentEntryCard: View {
     let entry: ExtensionRetainedContent.Entry
 
@@ -196,7 +183,6 @@ private struct ExtensionContentEntryCard: View {
     }
 }
 
-/// A partial projection is disclosed rather than presented as complete.
 private struct ExtensionContentNotice: View {
     let text: String
 

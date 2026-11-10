@@ -18,8 +18,6 @@ struct HomeMemoryEvidenceDTO: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-/// One catalog message as the memory browser shows it: its projection, its own
-/// summary when built, and the exact evidence behind it.
 struct HomeMemoryItemDTO: Decodable, Equatable, Hashable, Sendable, Identifiable {
     enum Kind: String, Decodable, Sendable { case user, talk, echo, event }
     enum Attribution: String, Decodable, Sendable { case user, assistant, tool, event }
@@ -59,15 +57,10 @@ struct HomeMemoryItemDTO: Decodable, Equatable, Hashable, Sendable, Identifiable
     }
 }
 
-/// Typed projection of `home.memory.view`: the lines Home's memory view holds,
-/// newest first. An older range is one summary line covering `span` messages; a
-/// recent message is its own line and carries its item. A `part` read answers the
-/// two lines one summary covers. Decode fails closed on protocol drift.
 struct HomeMemoryViewDTO: Decodable, Equatable, Sendable {
     struct Line: Decodable, Equatable, Hashable, Sendable, Identifiable {
         let start: Int
         let span: Int
-        /// Display text without kind prefixes; nil while the line is not summarized yet.
         let text: String?
         let truncated: Bool
         let inCurrentView: Bool
@@ -98,10 +91,7 @@ struct HomeMemoryViewDTO: Decodable, Equatable, Sendable {
         let homeId: String
     }
 
-    /// `part` names the summary whose two halves were read; `continuation` the page before.
     static func decode(_ value: JSONValue, continuation: Continuation?, part: Line? = nil) throws -> Self {
-        // Byte admission uses the wire encoder: Foundation's default escapes
-        // slashes and can reject a valid page that the Gateway kept below its cap.
         let data = try JSONEncoder.gateway.encode(value)
         let view = try JSONDecoder.gateway.decode(Self.self, from: data)
         guard data.count <= 128 * 1024, !view.homeId.isEmpty, view.homeId.utf8.count <= 200,
@@ -119,7 +109,6 @@ struct HomeMemoryViewDTO: Decodable, Equatable, Sendable {
             guard view.nextCursor == nil, view.lines.map(\.start) == [part.start, part.start + half],
                   view.lines.allSatisfy({ $0.span == half }) else { throw invalidHomeRead() }
         } else {
-            // Newest first: each line ends where the next one's range is still older.
             guard zip(view.lines, view.lines.dropFirst()).allSatisfy({ $0.start >= $1.start + $1.span }) else { throw invalidHomeRead() }
         }
         return view
@@ -148,9 +137,6 @@ struct HomeMemoryEvidencePageDTO: Decodable, Equatable, Sendable {
     }
 }
 
-/// Typed projection of `home.chapterList` (#740): the whole chapter ledger in
-/// ledger order with the Gateway's shared soft and hard rollover limits. Absent
-/// sizes mean unmeasured, never zero; decode fails closed on protocol drift.
 struct HomeChapterListDTO: Decodable, Equatable, Sendable {
     struct Chapter: Decodable, Equatable, Sendable, Identifiable {
         enum State: String, Decodable, Sendable { case active, sealed, reserved, materializing }
@@ -163,7 +149,6 @@ struct HomeChapterListDTO: Decodable, Equatable, Sendable {
         let sealedAt: String?
         let bytes: Int?
         let entries: Int?
-        /// What the chapter holds, from the Gateway's bounded ledger; absent on an older Gateway.
         let contents: Contents?
         var id: Int { ordinal }
         var valid: Bool {
@@ -179,8 +164,6 @@ struct HomeChapterListDTO: Decodable, Equatable, Sendable {
         let userMessages: Int?
         let homeReplies: Int?
         let tasksDelegated: Int?
-        /// At most eight of the chapter's newest memory summaries, each at most 1000
-        /// characters with its markdown lines kept; a row previews one, a sheet shows it whole.
         let topics: [String]?
         var valid: Bool {
             [userMessages, homeReplies, tasksDelegated].allSatisfy { ($0 ?? 0) >= 0 }
@@ -213,9 +196,6 @@ struct HomeChapterListDTO: Decodable, Equatable, Sendable {
     }
 }
 
-/// Typed projection of `home.context`: the activation's request sizes, plus the
-/// body-free breakdown of the context window when the Gateway reports one. An
-/// older Gateway omits `breakdown`, and the sheet keeps the plain fields.
 struct HomeContextDTO: Equatable, Sendable {
     struct Breakdown: Decodable, Equatable, Sendable {
         struct Activation: Decodable, Equatable, Sendable {
@@ -229,7 +209,6 @@ struct HomeContextDTO: Equatable, Sendable {
             enum ID: String, Decodable, Sendable { case instructions, profile, memory, chapter, results, input }
             let id: ID
             let tokens: Int
-            /// Notes, summary lines, entries or results, when the section has a count.
             let count: Int?
         }
         let activation: Activation
@@ -255,24 +234,15 @@ struct HomeContextDTO: Equatable, Sendable {
     }
 }
 
-/// The Manage Home main sheet's one owner load: every read it presents, admitted
-/// by the same status. Task and permission reads are absent while task recovery
-/// is closed, and chapters are absent on a Gateway without the chapter list.
 struct HomeManageDTO: Equatable, Sendable {
     let status: HomeStatusDTO
     let context: HomeContextDTO
     let chapters: HomeChapterListDTO?
     let tasks: HomeTaskPageDTO?
     let permissions: HomeTaskPermissionsDTO?
-    /// Absent on a Gateway without `home-profile-list.v1` or when its read was refused.
     var profile: HomeProfileListDTO? = nil
 }
 
-/// Typed projection of `home.profileList`: every learned-profile Knowledge note,
-/// classified by the Gateway the way Home's instructions apply them. Only an
-/// `active` item applies; decode fails closed on protocol drift.
-/// One maintainer change to a learned-profile item, as `home.profileChange` takes it.
-/// `expectedRevision` is the revision he read: a note Home changed since is refused.
 struct HomeProfileChange: Encodable, Equatable, Sendable {
     enum Action: String, Encodable, Sendable { case confirm, refine, supersede, retire }
     let action: Action
@@ -283,8 +253,6 @@ struct HomeProfileChange: Encodable, Equatable, Sendable {
     var reason: String? = nil
 }
 
-/// `home.profileChange`'s answer: the record entries it wrote (each undoable through
-/// `settings.undo`) and the changed items as `home.profileList` lists them now.
 struct HomeProfileChangeResultDTO: Decodable, Sendable {
     struct Change: Decodable, Sendable { let changeId: String }
     let changes: [Change]
@@ -324,11 +292,7 @@ struct HomeProfileListDTO: Decodable, Equatable, Sendable {
     }
 }
 
-/// One owner of the chapter rows' derived text, so the sheet and its tests
-/// describe the same ledger identically.
 enum HomeChapterPresentation {
-    /// A topic's row preview: one line of plain text (markdown marks dropped),
-    /// ended at a word boundary. Tapping the row opens the topic whole.
     static func topicPreview(_ topic: String, limit: Int = 140) -> String {
         let line = topic.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: #"^(?:[-*+]|\d+[.)]|#{1,6})\s+"#, with: "", options: .regularExpression) }
@@ -358,22 +322,17 @@ enum HomeChapterPresentation {
         }
     }
 
-    /// The soft-limit share of a chapter, the larger of its bytes and entries, so
-    /// the size bar and the row's subtitle read the same measurement.
     static func softPercent(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> Int? {
         guard let bytes = chapter.bytes, let entries = chapter.entries else { return nil }
         return max(ratio(bytes, limits.softBytes), ratio(entries, limits.softEntries))
     }
 
-    /// The share the size line names: of the soft limit until it is reached, then of the hard limit.
     static func limitPercent(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> Int? {
         guard let bytes = chapter.bytes, let entries = chapter.entries else { return nil }
         let soft = max(ratio(bytes, limits.softBytes), ratio(entries, limits.softEntries))
         return soft < 100 ? soft : max(ratio(bytes, limits.hardBytes), ratio(entries, limits.hardEntries))
     }
 
-    /// Contents as rows: counts the Gateway measured, and topics it named.
-    /// Each count with the icon of who produced it: you, Home, or its workers.
     static func contentsLines(_ contents: HomeChapterListDTO.Contents) -> [(icon: String, text: String)] {
         var lines: [(icon: String, text: String)] = []
         if let messages = contents.userMessages { lines.append(("person", "\(messages.formatted()) \(messages == 1 ? "user message" : "user messages")")) }
@@ -382,7 +341,6 @@ enum HomeChapterPresentation {
         return lines
     }
 
-    /// `createdAt` to `sealedAt`, or open-ended for the chapter still being written.
     static func dateRange(_ chapter: HomeChapterListDTO.Chapter) -> String {
         guard let start = GatewayTimestamp.parse(chapter.createdAt) else { return "Dates unavailable" }
         let style = Date.FormatStyle.dateTime.day().month(.abbreviated).year()
@@ -393,8 +351,6 @@ enum HomeChapterPresentation {
         return from == to ? from : "\(from) – \(to)"
     }
 
-    /// Measured size against the shared rollover limits; unmeasured is named,
-    /// never shown as zero.
     static func sizeLine(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> String {
         guard let bytes = chapter.bytes, let entries = chapter.entries else { return "Not measured" }
         let size = "\(entries.formatted()) entries · \(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary))"
@@ -425,15 +381,12 @@ struct HomeSheetReadIdentity: Hashable {
 
 enum HomeSheetReadQuery: Hashable, Sendable {
     case manage
-    /// Home Settings' pause and disable controls read only the status.
     case status
     case tasks(String?, filter: HomeTaskFilter = .open), task(String), permissions
     case taskHistory(String, cursor: String?)
     case chapters
     case profile
-    /// One chapter's memory when `sessionID` is set; otherwise the whole memory view.
     case memory(sessionID: String?, continuation: HomeMemoryViewDTO.Continuation?)
-    /// The two lines one summary line covers.
     case memoryPart(sessionID: String?, HomeMemoryViewDTO.Line)
     case evidence(HomeMemoryEvidenceDTO, offset: Int)
 }
@@ -449,12 +402,8 @@ enum HomeSheetContent {
     case evidence(HomeMemoryEvidencePageDTO)
 }
 
-/// One page, one request, one sheet lifetime. Keeping the request in the state
-/// makes replacement/retirement invalidate all outcomes, not just successes.
 @MainActor @Observable
 final class HomeSheetReadOwner {
-    /// `requestID` is the caller's request. `loadID` is this single `load` call,
-    /// so a rerun of the same request is never equal to the run it replaces.
     struct Read: Equatable {
         let requestID: UUID
         let loadID: UUID
@@ -464,14 +413,10 @@ final class HomeSheetReadOwner {
         case idle, loading(Read, HomeSheetContent?), loaded(Read, HomeSheetContent), failed(Read, String)
     }
     private(set) var state: State = .idle
-    /// The one load whose outcome may publish. Presentation state alone cannot
-    /// fence it: a re-read of a refused request keeps that refusal on screen.
     @ObservationIgnored private var inFlight: Read?
 
     func retire() { state = .idle; inFlight = nil }
 
-    /// Keep an installed frame while its picker/evidence child covers it; only
-    /// pending publication is disposable at that transition.
     func retireLoading() {
         inFlight = nil
         if case .loading(let read, let installed) = state {
@@ -479,8 +424,6 @@ final class HomeSheetReadOwner {
         }
     }
 
-    /// Whether this exact request is already installed for this identity. A sheet
-    /// that a child covered and uncovered keeps that frame instead of reading again.
     func holds(requestID: UUID, identity: HomeSheetReadIdentity) -> Bool {
         if case .loaded(let read, _) = state { return read.requestID == requestID && read.identity == identity }
         return false
@@ -497,8 +440,6 @@ final class HomeSheetReadOwner {
             installed = content
         } else { installed = nil }
         let read = Read(requestID: requestID, loadID: UUID(), identity: identity)
-        // A periodic re-read of a refused request keeps the refusal visible until
-        // its own outcome lands, instead of flashing the loading placeholder.
         if case .failed(let previous, _) = state, previous.requestID == requestID, identity.retainsContent(from: previous.identity) {
         } else { state = .loading(read, installed) }
         inFlight = read

@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Settings: this Mac's defaults, its accounts and resources, and this iPhone.
-/// A chat's own settings (and its project's) are in Manage Session, next to the
-/// chat they apply to. Every destination is one row; each group is one card.
 struct SettingsView: View {
     let onImported: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
@@ -69,10 +66,6 @@ struct SettingsView: View {
                                                  target: SettingsTarget.global.gatewayTarget, writeLayer: "global")
                         }
                     }
-                    // Utilities and diagnostics that span this iPhone and the
-                    // Mac: a shell on the Mac, prototypes, logs and setup. Each
-                    // row's summary names its own scope, so the group has no
-                    // caption (#1030).
                     SettingsGroupCard(.diagnostics) {
                         MacTerminalSettingsRow()
                         TronSettingsDivider()
@@ -134,9 +127,6 @@ struct SettingsView: View {
         .task(id: presentationActivity.allowsPresentationPublication) {
             guard presentationActivity.allowsPresentationPublication,
                   !hasRefreshedNotificationBadge else { return }
-            // Only the root-owned badge is refreshed here. Destination owners
-            // load their own data after the sheet transition, keeping unrelated
-            // network publications out of the presentation path.
             await model.refreshNotificationInbox()
             guard !Task.isCancelled else { return }
             hasRefreshedNotificationBadge = true
@@ -160,10 +150,6 @@ struct SettingsView: View {
     }
 }
 
-/// The settings palette: each group is one titled card with one accent, and every
-/// sheet a row opens keeps that accent. Groups follow what is being configured:
-/// the Macs and accounts Tron reaches, the agent's behaviour and what it can use,
-/// with this iPhone first and System last.
 enum SettingsGroupKind {
     case tools, accounts, more, iphone, diagnostics
 
@@ -184,8 +170,6 @@ enum SettingsGroupKind {
         }
     }
 
-    /// Schema sections Settings places itself; any other served section joins More.
-    /// Sources and setup are shown inside Extensions and Setup.
     static let placedSections: Set<String> = ["model", "workers", "context", "run", "trust", "connections", "tools", "sources", "setup"]
 
     static func icon(forSection id: String) -> String {
@@ -203,7 +187,6 @@ enum SettingsGroupKind {
     }
 }
 
-/// Global-only consolidation. Scoped Home and Session keep their own presentations.
 struct GlobalAgentBehaviorView: View {
     private let target = SettingsTarget.global.gatewayTarget
 
@@ -224,7 +207,6 @@ struct GlobalAgentBehaviorView: View {
     }
 }
 
-/// One group's titled card, its rows and every sheet they open in its accent.
 struct SettingsGroupCard<Content: View>: View {
     let kind: SettingsGroupKind
     @ViewBuilder let content: () -> Content
@@ -239,8 +221,6 @@ struct SettingsGroupCard<Content: View>: View {
     }
 }
 
-/// The rows for served schema sections, in the given order: each opens the
-/// section's sheet for one target. A section the target does not serve has no row.
 struct SettingsSectionLinks: View {
     let ids: [String]
     let sections: [SettingsRendererSection]
@@ -252,7 +232,6 @@ struct SettingsSectionLinks: View {
     var selection: SettingsKeySelection = .all
     @Environment(AppModel.self) private var model
 
-    // Presentation grouping only: schema keys, layers and mutation owners stay unchanged.
     private var chatScope: Bool { target.objectValue?["kind"]?.stringValue == "session" }
     private func root(_ id: String) -> String {
         if chatScope && ["model", "workers"].contains(id) { return "advanced" }
@@ -268,8 +247,6 @@ struct SettingsSectionLinks: View {
         id == "model" ? "Models" : id == "advanced" ? "More Settings" : (sections.first { $0.id == id }?.title ?? id)
     }
 
-    /// A grouped row (Models, More Settings) names its sections in one short
-    /// line; joining each section's served description would wrap.
     private func sectionDescription(_ id: String) -> String? {
         let members = members(id)
         if id == "advanced" { return chatScope ? "Workers and connection" : "Connection" }
@@ -303,9 +280,6 @@ struct SettingsSectionLinks: View {
         }
     }
 
-    /// A scope's drill-in row names what it currently uses: the root section's
-    /// essential values (Home's model and thinking), then any grouped section's title.
-    /// An unset optional value (a context window with no override) uses nothing.
     private func summary(_ id: String) -> String? {
         let sections = members(id)
         guard let first = sections.first, first.id == id else { return nil }
@@ -317,14 +291,10 @@ struct SettingsSectionLinks: View {
     }
 }
 
-/// Scope-owned editors and read-only effective configuration share the Gateway schema.
-/// Home edits its durable profile, never silently a current-chapter Session override.
 struct SessionSettingsView: View {
     let sessionID: String
-    /// The layers this chat writes, in order of preference.
     let ownedLayers: [String]
     var projectCWD: String?
-    /// Only Home owns delegation scopes; ordinary chats keep the same schema renderer.
     var homeProfileID: String? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -347,8 +317,6 @@ struct SessionSettingsView: View {
         let rows = (homeProfileID == nil ? ["context", "tools", "model", "workers", "run"] : ["workers", "tools", "run"])
             .filter(shown.contains)
         let moreRows = rows.filter { ["model", "workers", "run"].contains($0) }
-        // The chat's project, read-only, below its own choices; Manage Session's
-        // Workspace row already names the branch. Its notices are listed there once.
         let project = homeProfileID == nil ? projectCWD.flatMap { cwd in
             model.selectedGatewayProfileID().map { (cwd: cwd, profileID: $0) }
         }.flatMap { $0.cwd.isEmpty ? nil : $0 } : nil
@@ -366,7 +334,6 @@ struct SessionSettingsView: View {
                         TronSheetLoadingState(label: "Loading settings…")
                     } else if let homeProfileID {
                         homeSections(rows, sections, profileID: homeProfileID)
-                        // Pause and disable close Home Settings, below Connection.
                         HomeControlsSection(profileID: homeProfileID)
                     } else if project == nil {
                         TronSettingsGroup(nil, accent: .tronPrimary) { links(rows, sections) }
@@ -387,12 +354,6 @@ struct SessionSettingsView: View {
             }
             .padding(20)
         }
-        // The presented sheet animates this scroll view's top inset in; when the last step
-        // lands without an offset update the content rests a pixel or two below its top, and the
-        // medium sheet then scrolls on an upward drag instead of expanding. Until the user
-        // scrolls, content that is within a point of its top is put back at the top. Every
-        // inset/offset pair is observed: during the animation the drift is already present,
-        // so a drifted/not-drifted flag would not change at the final step.
         .scrollPosition($scrollPosition)
         .onScrollPhaseChange { _, phase in if phase == .interacting { userScrolled = true } }
         .onScrollGeometryChange(for: [CGFloat].self) { [$0.contentInsets.top, $0.contentOffset.y] } action: { _, value in
@@ -412,8 +373,6 @@ struct SessionSettingsView: View {
                              showsSummary: true, selection: selection)
     }
 
-    /// Move only the first-level sections here. Each shared row keeps its
-    /// existing editor, source inspection and Revert; delegation keeps its owner.
     private func homeSections(_ ids: [String], _ sections: [SettingsRendererSection], profileID: String) -> some View {
         ForEach(ids, id: \.self) { id in
             if id == "workers", let section = sections.first(where: { $0.id == id }),
@@ -432,7 +391,6 @@ struct SessionSettingsView: View {
     }
 }
 
-/// Why the Project layer is not applied (untrusted or unreadable), in Session and Project settings.
 struct SettingsProjectNoticeGroup: View {
     let notice: SettingsProjectNotice
 
@@ -441,8 +399,6 @@ struct SettingsProjectNoticeGroup: View {
     }
 }
 
-/// Project Settings' notice and the repository fields the Gateway ignores, named
-/// by the setting they try to change. Listed once here, not on every Session.
 struct SettingsProjectNotices: View {
     let resolution: SettingsResolution
 
@@ -470,7 +426,6 @@ struct SettingsProjectNotices: View {
     }
 }
 
-/// Only admitted, applied repository values; never a Global inspection clone.
 struct SettingsProjectGroups: View {
     let target: JSONValue
     var selection: SettingsKeySelection = .projectValues
@@ -488,7 +443,6 @@ struct SettingsProjectGroups: View {
     }
 }
 
-/// Setup: import, Mac storage/telemetry, and safeguarded local prototypes.
 struct SetupSettingsView: View {
     let onImported: (AppModel.SessionNavigationRoute) -> Void
 
@@ -528,22 +482,14 @@ private struct TronSheetDetentPolicyModifier: ViewModifier {
 struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let accessibilityLabel: String
     let identity: String
-    /// Keep destination construction inside the presented sheet so large
-    /// settings payloads are not built while the parent sheet is scrolling.
     let destination: () -> Destination
     let label: Label
     let accent: Color?
     let surfaceAccent: Color?
-    /// Settings destinations open at medium and expand to large; a destination
-    /// that publishes `TronSheetFitHeightKey` (the model picker) passes `.contentFit`.
     let detents: TronSheetDetentPolicy
-    /// Runs once the destination sheet has actually been dismissed.
     let onDismiss: (() -> Void)?
-    /// The link's call site, so two links sharing a label keep separate state.
     private let fileID: String
     private let line: Int
-    /// Kept in the enclosing presentation's scope by identity, so a link inside
-    /// a sheet whose content SwiftUI rebuilds keeps its sheet open (#1073).
     @PresentationState private var isPresented: Bool
     @Environment(\.tronSettingsVisualTheme) private var inheritedTheme
 
@@ -585,8 +531,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             ) {
                 NavigationStack {
                     themed(destination()
-                        // A field's source/reset projection belongs to that row,
-                        // never to rows in its separately owned destination.
                         .environment(\.tronSettingsRowAccessory, nil)
                         .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
@@ -607,8 +551,6 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             }
     }
 
-    /// A destination keeps its presenter's family accent unless the link names one.
-    /// The theme wraps the Done too, so it takes the same tint as the title (#963).
     @ViewBuilder
     private func themed(_ content: some View) -> some View {
         if let accent {

@@ -25,7 +25,6 @@ enum TerminalConnectionPhase: Equatable {
     }
 }
 
-/// Mac Terminal's title, connection phase, menu, Done and emulator surface.
 struct TerminalSheetChrome<Content: View, MenuContent: View>: View {
     let title: String
     let phase: TerminalConnectionPhase
@@ -40,8 +39,6 @@ struct TerminalSheetChrome<Content: View, MenuContent: View>: View {
     var body: some View {
         NavigationStack {
             Group { content(accent) }
-                // A loading state is a zero-size pulse request: fill the sheet so
-                // the top blur spans the surface, not a band at its middle.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .tronTopBlurSurface()
                 .navigationTitle("")
@@ -86,7 +83,6 @@ struct TerminalSheetChrome<Content: View, MenuContent: View>: View {
     }
 }
 
-/// The emulator with its padding and keyboard control bar.
 struct TerminalSurface: View {
     let chunks: [TerminalChunk]
     let isInteractive: Bool

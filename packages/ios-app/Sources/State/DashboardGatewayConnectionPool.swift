@@ -28,15 +28,7 @@ protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
     func dashboardPoolNotificationInboxChanged(profileID: String, change: NotificationInboxChanged?)
     func dashboardPoolAutomationChanged(profileID: String)
     func dashboardPoolDevicesChanged(profileID: String)
-    /// The Gateway-owned archived count for one background profile. `nil` means
-    /// that profile has not published a count yet.
     func dashboardPoolDidUpdateArchivedCount(profileID: String, count: Int?)
-    /// One background profile's catalog projection is authoritative again: it
-    /// published a complete `session.list` page, or its connection epoch
-    /// retired. The dashboard's archived container reads its rows from exactly
-    /// those pages, so it must re-read even when the archived count is
-    /// unchanged — a renamed archived session, or one archived while another is
-    /// unarchived, changes rows and not the count.
     func dashboardPoolDidPublishAuthoritativeCatalog(profileID: String)
 }
 
@@ -45,11 +37,6 @@ extension DashboardGatewayConnectionPoolDelegate {
     func dashboardPoolDevicesChanged(profileID: String) {}
 }
 
-/// Everything a background entry's connection, identity admission and catalog
-/// projection depend on. The LAN advertisement is deliberately excluded: E-3b
-/// replaces `lanEndpoints`/`lanPin` on every hello, and this pool dials the
-/// saved endpoint rather than the lane, so a refreshed advertisement must not
-/// stop and restart a working background connection.
 private struct DashboardPoolProfileIdentity: Equatable {
     let host: String
     let port: Int
@@ -70,19 +57,10 @@ private struct DashboardPoolProfileIdentity: Equatable {
     }
 }
 
-/// Maintains lightweight dashboard catalog connections for non-focused servers.
-/// The focused chat remains owned by GatewayLifecycleCoordinator; each other
-/// profile has an independent connection and failure boundary.
 @MainActor
 final class DashboardGatewayConnectionPool {
-    /// Consecutive failed attempts at one entry after which that profile is
-    /// treated as unreachable: its retries escalate to `POOL_MAX_RETRY`, so a
-    /// Mac that is not there costs a few attempts and then one every five
-    /// minutes. Three rules out a blip.
     static let POOL_UNREACHABLE_AFTER = 3
-    /// The longest wait between attempts for an unreachable background profile.
     static let POOL_MAX_RETRY: Duration = .seconds(300)
-    /// Profile-owned recovery survives retirement; entries borrow this exact state.
     private final class RecoveryState {
         let identity: DashboardPoolProfileIdentity
         let token: String
@@ -100,9 +78,6 @@ final class DashboardGatewayConnectionPool {
         let profile: GatewayProfile
         let token: String
         let client: GatewayClient
-        /// One connection recorder per entry: attempts and episodes are
-        /// attributable to the profile that made them, and two pool profiles
-        /// write to the one always-on log without mixing timelines.
         let recorder: GatewayConnectionEpisodeRecorder
         var connectionID: Int?
         var gatewayInfo: GatewayInfo?
@@ -111,10 +86,6 @@ final class DashboardGatewayConnectionPool {
         var task: Task<Void, Never>?
         var refreshTask: Task<Void, Never>?
         var reconnectTask: Task<Void, Never>?
-        /// The reader of this entry's live connection events. The client's event
-        /// stream is client-lifetime, so the reader is owned by the connection
-        /// epoch it serves and is retired with it; an entry whose attempts have
-        /// not connected yet has none.
         var eventTask: Task<Void, Never>?
         let reconnectSchedule: GatewayReconnectSchedule
         var reconnectWaiting: Bool
@@ -126,10 +97,6 @@ final class DashboardGatewayConnectionPool {
         var refreshRetryAttempt: Int
         var refreshFailedAttempts: Int
         let recovery: RecoveryState
-        /// The loop that owns `reconnectTask`, and the loop whose attempt is in
-        /// flight. They are identities, not flags: a retired loop must not
-        /// clear its successor's marker, and the stall watchdog reads them to
-        /// tell a running attempt from a parked loop.
         var reconnectLoopID: String?
         var attemptInFlightLoopID: String?
     }
@@ -142,8 +109,6 @@ final class DashboardGatewayConnectionPool {
     private var entries: [String: Entry] = [:]
     private var generation = 0
     private var retirementTasks: [String: (generation: Int, task: Task<Void, Never>)] = [:]
-    /// Profile-owned recovery survives background transport retirement. Identity
-    /// fences prevent a replaced/removed profile from inheriting its history.
     private var recoveryStates: [String: RecoveryState] = [:]
     private var nonRetryableProfiles = Set<String>()
 
@@ -209,14 +174,6 @@ final class DashboardGatewayConnectionPool {
         }
     }
 
-    /// Retires transport entries. Background suspension preserves profile-owned
-    /// recovery so foreground reconciliation resumes the same escalation rather
-    /// than giving an offline Mac another burst of immediate attempts.
-    ///
-    /// `endedBy` names who ended the open episodes. The scene suspension that
-    /// parks every pool entry is a `background` retirement; the projection
-    /// retirements of a profile switch, removal, pairing and teardown `stopped`
-    /// them, exactly as a `stop` for a removed profile does.
     func retire(endedBy: GatewayEpisodeEnd = .background) {
         generation &+= 1
         for profileID in Array(entries.keys) { stop(profileID: profileID, endedBy: endedBy) }
@@ -230,9 +187,6 @@ final class DashboardGatewayConnectionPool {
         entries[profileID]?.state
     }
 
-    /// The message of the failure that stopped this background profile, or nil
-    /// while it retries or is connected. It is the pool's own record of why
-    /// that profile's entry stopped, which `state` alone cannot carry (F-3).
     func stopReason(for profileID: String) -> String? {
         entries[profileID]?.recovery.stopReason
     }
@@ -250,15 +204,10 @@ final class DashboardGatewayConnectionPool {
         return await entry.client.activeConnectionID()
     }
 
-    /// MainActor projection used only for bounded presentation admission keys.
-    /// The pool's connection entry remains the authority; this is not a cache
-    /// of transport state and is refreshed whenever the pool publishes.
     func connectionIDSnapshot(for profileID: String) -> Int? {
         entries[profileID]?.connectionID
     }
 
-    /// Policy demand must distinguish replacement clients whose local epoch
-    /// counters can both start at one. No transport state is retained here.
     func requestIdentity(for profileID: String) -> String? {
         guard let entry = entries[profileID], let connectionID = entry.connectionID else { return nil }
         return "\(entry.client.diagnosticOwnerID):\(entry.generation):\(connectionID)"
@@ -367,9 +316,6 @@ final class DashboardGatewayConnectionPool {
         !selectedProfileIsProvisional
             && profile.id != selectedProfileID
             && profile.isEnabled
-            // Older stored profiles use machineId as a provisional group.
-            // Select once to handshake and persist the real physical group
-            // before allowing a secondary background connection.
             && profile.machineGroupID != profile.machineId
             && profile.machineGroupID != selectedMachineGroupID
     }
@@ -399,16 +345,9 @@ final class DashboardGatewayConnectionPool {
         guard let token else { return }
         let client = clientFactory()
         let retirementBarrier = retirementTasks[profile.id]?.task
-        // One recorder per entry, but only the selected profile's recorder
-        // pings the main actor: with one ping per open pool outage the same
-        // main-thread stall would be recorded once per profile. The entry keeps
-        // its own attempts, episodes and stall guard.
         let recorder = GatewayConnectionEpisodeRecorder(
             clock: clock, appLog: appLog, mainStallPing: {}
         )
-        // `self` is unwrapped before the guard is read: folding the lookup into
-        // one optional would turn "recovery is progressing" into `other` and
-        // report a stall whenever an episode is open.
         recorder.stallGuard = { [weak self] in
             guard let self else { return nil }
             return self.stallGuard(profileID: profile.id)
@@ -459,9 +398,6 @@ final class DashboardGatewayConnectionPool {
             guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
             let startedAt = self.clock.now()
             do {
-                // The identity carries the hello's Gateway connection id, so the
-                // first attempt of a pool profile is joinable to the Gateway's
-                // own records exactly like its reconnects are.
                 let identity = try await client.connectForLifecycle(profile: profile, token: token)
                 try await client.activateEvents(connectionID: identity.id)
                 guard Self.admitsIdentity(identity.info, for: profile) else {
@@ -476,11 +412,6 @@ final class DashboardGatewayConnectionPool {
                 guard !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 guard connectionID == identity.id else {
-                    // The hello's connection is already gone, or is no longer the
-                    // one this client would serve: fail the attempt like any
-                    // other, so the entry records it and keeps its reconnect
-                    // loop instead of parking `.connecting` with nothing
-                    // scheduled.
                     throw GatewayFailure(
                         code: "replaced",
                         message: "The connection ended before its handshake completed.",
@@ -514,9 +445,6 @@ final class DashboardGatewayConnectionPool {
                     generation: generation,
                     delay: .zero
                 )
-                // The connection is live: somebody has to read its events. The
-                // admitted connection is the identity the guard above pinned to
-                // the client's own active one.
                 self.startEventConsumption(
                     profileID: profile.id,
                     generation: generation,
@@ -591,9 +519,6 @@ final class DashboardGatewayConnectionPool {
         entry.reconnectTask?.cancel()
         entry.eventTask?.cancel()
         entry.reconnectSchedule.cancel()
-        // A retired entry ends the episode it was explaining: `stopped` for a
-        // profile switch, removal or explicit retry, `background` for the
-        // scene retirement that parks every pool entry.
         entry.recorder.endEpisode(
             endedBy, profileID: profileID, lifecycleGeneration: entry.generation
         )
@@ -609,17 +534,12 @@ final class DashboardGatewayConnectionPool {
                 await previous?.value
                 await entry.client.close()
                 guard let self else { return }
-                // A predecessor must not erase the successor that joined it.
-                // Replacement admission observes the tail of this exact chain.
                 if self.retirementTasks[profileID]?.generation == entry.generation {
                     self.retirementTasks[profileID] = nil
                 }
             }
             retirementTasks[profileID] = (entry.generation, task)
         }
-        // Retiring a background transport is not deletion of its bounded
-        // dashboard projection. The AppModel keeps the last-known bucket while
-        // this profile reconnects, is blocked, or is temporarily unadmitted.
     }
 
     private func isCurrent(profileID: String, client: GatewayClient, generation: Int) -> Bool {
@@ -627,13 +547,6 @@ final class DashboardGatewayConnectionPool {
         return entry.client === client && entry.generation == generation
     }
 
-    /// Starts this entry's reader for one live connection's events. The client's
-    /// event stream is client-lifetime, so the reader is owned by the connection
-    /// epoch it serves: `retireConnectionEpoch` cancels it with that epoch, and a
-    /// connection that connects starts its own. That is what makes every live
-    /// socket consumed exactly once — including a reconnect after an initial
-    /// connect that failed, whose `start` task ended in its failure branch and
-    /// therefore never reached the stream.
     private func startEventConsumption(
         profileID: String,
         generation: Int,
@@ -654,9 +567,6 @@ final class DashboardGatewayConnectionPool {
             }
             guard !Task.isCancelled,
                   self.isCurrent(profileID: profileID, client: client, generation: generation) else { return }
-            // The event stream ended without a disconnect event and is still a
-            // loss: the episode it opens keeps whatever the first failed attempt
-            // adds as its cause.
             self.entries[profileID]?.recorder.noteDisconnected(
                 profileID: profileID, lifecycleGeneration: generation, foreground: true
             )
@@ -682,9 +592,6 @@ final class DashboardGatewayConnectionPool {
         switch event.topic {
         case "session.summary":
             guard case .sessionSummary(let update) = event.preparation else {
-                // Do not leave a background dashboard row stale when a Gateway
-                // sends a summary shape this client cannot decode. Its bounded
-                // catalog read is the authoritative recovery path.
                 scheduleRefresh(profileID: profileID, generation: generation)
                 return
             }
@@ -732,14 +639,6 @@ final class DashboardGatewayConnectionPool {
         }
     }
 
-    /// Path hints are advisory per profile. A satisfied return hint can revive
-    /// a parked secondary entry even when its previous callback was missed.
-    ///
-    /// Only a real path change — unsatisfied to satisfied — ends a wait early.
-    /// `AppModel.lifecycleNotePathHint` forwards every monitor update while the
-    /// network is available and every scene activation, so reading any
-    /// satisfied notice as a change would cut a five-minute pool backoff short
-    /// on a scene resume and make the cap a lie.
     func notePathHint(profileID: String, satisfied: Bool) {
         guard var entry = entries[profileID] else { return }
         let pathChanged = entry.networkPathSatisfied != satisfied
@@ -760,14 +659,9 @@ final class DashboardGatewayConnectionPool {
             if pathChanged { entry.reconnectSchedule.accelerate() }
             return
         }
-        // No loop holds this entry: it was stopped or parked while the path was
-        // gone (or before it was ever up), so a satisfied hint restarts it at
-        // once rather than waiting for a wait that does not exist.
         scheduleReconnect(profileID: profileID, generation: entry.generation, immediate: true)
     }
 
-    /// Explicit user retry clears this profile's nonretryable stop; background
-    /// retirement and navigation never do so.
     func retry(profileID: String) {
         guard let entry = entries[profileID], entry.refreshTask == nil,
               (entry.reconnectTask == nil || entry.reconnectWaiting),
@@ -803,12 +697,6 @@ final class DashboardGatewayConnectionPool {
         let clock = self.clock
         entries[profileID]?.reconnectLoopID = loopID
         let task = Task { @MainActor [weak self, clock] in
-            // Whatever ends this loop — success, a state mismatch that returns
-            // early, a path park or cancellation — a later drop must not read a
-            // dead loop's marker as an attempt in flight, and `scheduleReconnect`
-            // must not read a dead loop as a pending task and refuse to start
-            // its successor. The identity check keeps a replaced loop from
-            // clearing or erasing what its successor owns.
             defer {
                 if let self, self.entries[profileID]?.reconnectLoopID == loopID {
                     self.entries[profileID]?.reconnectLoopID = nil
@@ -829,15 +717,8 @@ final class DashboardGatewayConnectionPool {
                         delay: Self.retryDelay(failedAttempts: waitingEntry.recovery.failedAttempts)
                     )
                     guard !Task.isCancelled else { return }
-                    // The wait ended while the path was gone: park the entry. Its
-                    // backoff is over, so a path return has to find no task here
-                    // and start the next attempt itself.
                     guard delayCompleted || self.entries[profileID]?.networkPathSatisfied == true else { return }
                 }
-                // A path that went away mid-wait parks the entry here instead of
-                // leaving `reconnectTask` behind: a wait that no longer exists
-                // cannot be woken by the return hint, and a task still in this
-                // slot is what stopped `scheduleReconnect` from starting one.
                 guard !Task.isCancelled, self.isCurrent(profileID: profileID, client: waitingEntry.client, generation: generation),
                       self.entries[profileID]?.networkPathSatisfied == true else { return }
                 self.entries[profileID]?.reconnectWaiting = false
@@ -846,9 +727,6 @@ final class DashboardGatewayConnectionPool {
                       entry.generation == generation else { return }
                 retry += 1
                 let startedAt = clock.now()
-                // The loop is inside one transport attempt until this attempt
-                // ends; the stall watchdog reads this identity to tell a running
-                // attempt from a parked loop.
                 self.entries[profileID]?.attemptInFlightLoopID = loopID
                 let diagnosticSequence = await entry.client.latestDiagnosticSequence()
                 guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
@@ -896,11 +774,6 @@ final class DashboardGatewayConnectionPool {
                     )
                     self.entries[profileID]?.reconnectTask = nil
                     self.scheduleRefresh(profileID: profileID, generation: generation, delay: .zero)
-                    // A reconnect that connected owes its live socket the same
-                    // event reader an initial connect gets. Without it the
-                    // socket delivers summaries and control events nobody
-                    // reads, which is how an entry whose first attempt failed
-                    // went silent until it was recreated.
                     self.startEventConsumption(
                         profileID: profileID,
                         generation: generation,
@@ -972,7 +845,6 @@ final class DashboardGatewayConnectionPool {
         return recovery.failedAttempts >= Self.POOL_UNREACHABLE_AFTER ? .offline : .reconnecting
     }
 
-    /// The same count controls label and delay, including after scene retirement.
     private static func retryDelay(failedAttempts: Int) -> Duration {
         let standardSteps = min(2, max(0, failedAttempts - 1))
         let escalatedSteps = min(3, max(0, failedAttempts - POOL_UNREACHABLE_AFTER))
@@ -982,14 +854,6 @@ final class DashboardGatewayConnectionPool {
         return .seconds(min(Double(POOL_MAX_RETRY.components.seconds), seconds))
     }
 
-    /// Why no attempt is in flight or scheduled, for the stall watchdog. `nil`
-    /// means recovery is progressing: an attempt is running or the loop is
-    /// waiting in its bounded backoff. Both are read through the loop's own
-    /// identity, because a task a returned loop left in the slot is not
-    /// progress: reading it as progress is how a parked entry went unnamed.
-    /// `reconnectTaskBusy` is the loop existing but neither attempting nor
-    /// waiting, which is where this pool could park recovery; C-1 owns what a
-    /// parked loop should do instead.
     private func stallGuard(profileID: String) -> GatewayReconnectStallGuard? {
         guard let entry = entries[profileID] else { return .other }
         if entry.reconnectLoopID != nil, entry.attemptInFlightLoopID == entry.reconnectLoopID { return nil }
@@ -1000,15 +864,6 @@ final class DashboardGatewayConnectionPool {
         return .other
     }
 
-    /// One `gateway.attempt` record for an attempt this entry made, plus the
-    /// episode bookkeeping the recorder derives from it. Pool entries exist
-    /// only between a foreground reconcile and the background retirement, so
-    /// every pool attempt is a foreground attempt. `stageReached` is the
-    /// client's own handshake stage when it recorded one; without one the
-    /// attempt never opened a transport, which is what a pool attempt is. The
-    /// record is owned by the pool: the profile ID alone cannot say whether an
-    /// attempt came from the selected profile's lifecycle or from a pool entry,
-    /// because a profile switch moves one profile between the two.
     private func recordAttempt(
         profileID: String,
         generation: Int,
@@ -1056,11 +911,8 @@ final class DashboardGatewayConnectionPool {
         let needsImmediateFollowUp: Bool
     }
 
-    // Coalesce bursts of structural events before opening one per-profile list traversal.
     private static let refreshCoalescingDelay: Duration = .milliseconds(250)
 
-    /// Structural events coalesce into one bounded per-profile lease. An
-    /// active traversal is never cancelled merely because a newer event arrives.
     private func scheduleRefresh(
         profileID: String,
         generation: Int,
@@ -1102,15 +954,6 @@ final class DashboardGatewayConnectionPool {
             self.entries[profileID] = current
             if result.needsImmediateFollowUp
                 && (result.outcome == .published || result.outcome == .retained) {
-                // A newer invalidation arrived while the final traversal was
-                // reading, so that traversal can have been retired by the very
-                // change it was meant to publish: its page cannot be this
-                // profile's catalog. `.retained` covers that retirement as well
-                // as a page this client rejected, and both need the catch-up
-                // this lease owed — the fresh lease owns the next attempt and
-                // its own failure budget. The flag requires a fresh invalidation
-                // each time, so this cannot spin. `.retryRead` and
-                // `.transportFailure` keep their own backoff instead.
                 self.startRefreshLease(profileID: profileID, generation: generation, delay: .zero)
             } else {
                 if result.outcome == .published {
@@ -1244,12 +1087,6 @@ final class DashboardGatewayConnectionPool {
                 publishAuthoritativeCatalog(profileID: profileID)
                 return .published
             case .unchanged:
-                // The rows are confirmed, not republished. A retired epoch had
-                // marked this catalog disconnected, and both the archived
-                // container and the profile's own state read from the signals
-                // a published catalog sends, so a confirmation that revives a
-                // retired projection republishes them — the rows it sends are
-                // the ones it already held.
                 let wasLive = admitted.catalog.freshness == .live
                 guard admitted.catalog.confirmUnchanged(admission: admission) else { return .retained }
                 admitted.state = .connected
@@ -1294,8 +1131,6 @@ final class DashboardGatewayConnectionPool {
             requestGeneration: requestGeneration
         ) else { return .retained }
         do {
-            // A schema/application error on a responsive socket retires only
-            // the read lease, not the transport or the last complete catalog.
             try await seed.client.ensureResponsive(maximumSilence: .zero)
             let activeConnectionID = await seed.client.activeConnectionID()
             guard admitsRefresh(
@@ -1307,8 +1142,6 @@ final class DashboardGatewayConnectionPool {
             if entries[profileID]?.catalog.freshness == .live {
                 entries[profileID]?.state = .connected
             } else {
-                // The socket is responsive, but no complete catalog for this
-                // epoch has published. Preserve any AppModel cache as stale.
                 entries[profileID]?.state = .stale
             }
             publish(profileID: profileID)
@@ -1318,8 +1151,6 @@ final class DashboardGatewayConnectionPool {
                 return .retained
             }
             await seed.client.closeIfCurrent(connectionID: connectionID)
-            // A catalog read that proves the socket dead is a loss like any
-            // other: it opens the episode the following attempts belong to.
             seed.recorder.noteDisconnected(
                 profileID: profileID, lifecycleGeneration: generation,
                 foreground: true, cause: GatewayDiagnosticFailure.code(error)
@@ -1353,9 +1184,6 @@ final class DashboardGatewayConnectionPool {
         entry.refreshRequestGeneration &+= 1
         entry.refreshRetryAttempt = 0
         entry.refreshFailedAttempts = 0
-        // The epoch's event reader ends with the epoch. A reader left waiting on
-        // the client's shared stream would keep its place in the hub's waiter
-        // queue and could take (and drop) a successor connection's deliveries.
         entry.eventTask?.cancel()
         entry.eventTask = nil
         entry.connectionID = nil
@@ -1363,8 +1191,6 @@ final class DashboardGatewayConnectionPool {
         entry.catalog.markDisconnected()
         entries[profileID] = entry
         publish(profileID: profileID)
-        // A server the container can no longer read loses its rows, so the
-        // archived projection changed with the epoch.
         publishAuthoritativeCatalog(profileID: profileID)
     }
 
@@ -1382,10 +1208,6 @@ final class DashboardGatewayConnectionPool {
         )
     }
 
-    /// Reports the one moment a background profile's catalog authority changes,
-    /// which is also the archived projection's own authority. `publish` alone
-    /// cannot carry this: it also runs for summary updates, where the archived
-    /// rows cannot change.
     private func publishAuthoritativeCatalog(profileID: String) {
         delegate?.dashboardPoolDidPublishAuthoritativeCatalog(profileID: profileID)
     }

@@ -33,7 +33,8 @@ its replacement. Application RPCs are definitely unsent until hello admission an
   with no fully delivered inbound frame since the ping retires the epoch. This keeps
   Tailscale/iOS idle paths alive; the Gateway pings only a client that has gone quiet.
 - **Admission.** Decoded frames above the Gateway's 1 MiB ceiling retire the epoch
-  (`frame_too_large`, after `permessage-deflate` inflation). Dynamic `JSONValue` is capped at depth
+  (`frame_too_large`, after `permessage-deflate` inflation: CFNetwork's `maximumMessageSize` bounds
+  only compressed bytes, and an uncompressed oversized receive fails in CFNetwork as a disconnect). Dynamic `JSONValue` is capped at depth
   64, 32,768 nodes, 8,192 members, 1 MiB per string and 4 MiB aggregate. The ordered event hub
   admits the Gateway's 1,024-event quarantine under a 2 MiB byte ceiling; overflow retires the epoch
   and rebaselines rather than dropping sequence.
@@ -53,7 +54,10 @@ state, reconnect, foreground reconciliation, serial retire/close transitions and
 - **Identity.** Pairing responses, hellos and `system.info` must assert a `stable` or `dev` channel
   matching the saved endpoint; mismatches fail closed. Hellos carry the private-LAN lanes
   (`lanEndpoints`) and certificate pin (`lanPin`), replaced on every hello and never read from an
-  unauthenticated route. An epoch the LAN lane carried routes that connection's authenticated HTTP
+  unauthenticated route. The LAN certificate is self-signed, so the pin is that lane's whole trust:
+  the leaf's public key must hash to `lanPin`, a mismatch cancels the challenge during TLS before
+  the bearer-carrying request is written, and a missing or malformed pin (not base64 of 32 bytes)
+  or an unexportable key leaves no trusted LAN lane. An epoch the LAN lane carried routes that connection's authenticated HTTP
   (live view, media, uploads) through the same pinned endpoint.
 - **Schedule.** Each executor owns one `GatewayReconnectSchedule`. The focused profile starts at
   2 s, grows ×1.7 to 15 s with independent 80–120% jitter. A pool entry follows the same curve
@@ -157,7 +161,9 @@ transcript paging and session-keyed context/tree/resources/commands.
   is never causal settlement. `session.operationFailed` restores only its exact admission.
   `compactionQueued` is Gateway-owned pending maintenance, never a fabricated entry.
 - **Stop.** Carries the authoritative operation ID as its fence; the Gateway rejects a stale tap
-  and acknowledges only after every foreground controller and owned bash process settles.
+  and acknowledges only after every foreground controller and owned bash process settles. It is the
+  one live command that bypasses the mounted-authority presentation gate; the Gateway fences its
+  route session and operation IDs instead.
 - **Resources.** Skills, prompt templates and extension commands travel as typed
   `resourceInvocations` (#311); arguments are the exact visible text (≤ 5,000 UTF-8 bytes) and are
   never rewritten. `session.resourcesChanged` revokes command-catalog readiness and reloads it.

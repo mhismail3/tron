@@ -192,7 +192,6 @@ private struct WorkspaceHistoryGraph: View {
 }
 
 struct WorkspaceInspectorSheet: View {
-    /// The one label of this sheet's title and the Manage Session row that opens it.
     static let title = "Workspace"
     let sessionID: String
     @Environment(AppModel.self) private var model
@@ -247,8 +246,6 @@ struct WorkspaceInspectorSheet: View {
             )) {
                 guard presentationActivity.allowsPresentationPublication,
                       scenePhase == .active else { return }
-                // Only the Files tab needs the directory; History and Changes
-                // resume from inspection alone.
                 await owner.loadInitial(
                     service: model.workspaceInspection,
                     sessionID: sessionID,
@@ -257,7 +254,6 @@ struct WorkspaceInspectorSheet: View {
                 guard !Task.isCancelled,
                       scenePhase == .active,
                       presentationActivity.allowsPresentationPublication else { return }
-                // Re-check the tab: it can change while inspection is in flight.
                 if selectedTab == .history,
                    !owner.hasLoadedHistory,
                    owner.inspection?.repository != nil {
@@ -310,8 +306,6 @@ struct WorkspaceInspectorSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // The path owns a full line. Status ink can never escape into it,
-            // even with a long detached commit or accessibility-sized text.
             HStack(spacing: 8) {
                 Image(systemName: "folder.fill")
                     .foregroundStyle(Color.tronPrimary)
@@ -407,8 +401,6 @@ struct WorkspaceInspectorSheet: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
-        // Only an admitted directory change animates rows, never loading,
-        // polling errors, or an obsolete navigation response.
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: owner.directory?.path)
     }
 

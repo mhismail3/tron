@@ -5,8 +5,6 @@ final class GatewayPingCompletion: @unchecked Sendable {
     private var continuation: CheckedContinuation<Void, Error>?
     private var terminalResult: Result<Void, Error>?
 
-    /// Cancellation can precede continuation installation. Remember the winner
-    /// and do not enqueue a ping when cancellation already owns completion.
     func install(_ continuation: CheckedContinuation<Void, Error>) -> Bool {
         lock.lock()
         let terminal = terminalResult
@@ -41,21 +39,9 @@ package struct GatewaySocketMetadata: Sendable, Equatable {
         self.certificatePinRejected = certificatePinRejected
         self.closeReason = closeReason
     }
-    /// Milliseconds from task start until the WebSocket opened; nil when it
-    /// never opened. Distinguishes a path that never reached the Mac from a
-    /// Mac that accepted the socket but did not answer.
     var transportOpenMilliseconds: Int? = nil
-    /// URLSession reported waiting for connectivity during this task.
     var waitedForConnectivity = false
-    /// The pinned lane refused the served certificate, so this socket never
-    /// carried the bearer credential (E-3c). A stale pin and a substituted
-    /// certificate are the same fact to the phone: do not use this lane for
-    /// this attempt.
     var certificatePinRejected = false
-    /// The peer's own close reason, when URLSession exposed the close frame.
-    /// The Gateway uses it to carry the machine-readable cause and the protocol
-    /// range a version mismatch needs (F-3); URLSession may report 1005/1006
-    /// instead, so its absence stays explicit.
     var closeReason: String? = nil
 }
 
@@ -73,16 +59,12 @@ extension GatewaySocketConnection {
 
 
 package struct GatewaySocketFactory: Sendable {
-    /// `pin` is the public key a pinned TLS lane's certificate must hash to
-    /// (E-3c). It is nil for the saved endpoint, which keeps whatever trust the
-    /// path already has.
     let makeConnection: @Sendable (URLRequest, String?) -> any GatewaySocketConnection
 
     package init(makeConnection: @escaping @Sendable (URLRequest, String?) -> any GatewaySocketConnection) {
         self.makeConnection = makeConnection
     }
 
-    /// The single-endpoint form: a fixture or an unpinned dial.
     package init(makeConnection: @escaping @Sendable (URLRequest) -> any GatewaySocketConnection) {
         self.init { request, _ in makeConnection(request) }
     }
@@ -92,8 +74,6 @@ package struct GatewaySocketFactory: Sendable {
     }
 }
 
-/// A byte-only transport owner. Actor isolation confines the non-value
-/// URLSession and WebSocket task to one Sendable owner under Swift 6.
 private final class GatewayWebSocketDelegate: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var closeCode: Int?
@@ -103,20 +83,12 @@ private final class GatewayWebSocketDelegate: NSObject, URLSessionWebSocketDeleg
     private var openedAt: ContinuousClock.Instant?
     private var waitedForConnectivity = false
     private var certificatePinRejected = false
-    /// The pinned lane's certificate key, or nil when this connection keeps the
-    /// platform's own TLS evaluation.
     private let pinnedPublicKey: String?
 
     init(pinnedPublicKey: String?) {
         self.pinnedPublicKey = pinnedPublicKey
     }
 
-    /// Server-trust evaluation for a pinned lane (E-3c). The socket is the
-    /// credential's carrier, so the pin decides the handshake: the advertised
-    /// certificate is the only one this lane accepts, and a mismatch cancels the
-    /// challenge — which URLSession resolves during TLS, before the request that
-    /// carries the bearer token is written. Anything unpinned is left to the
-    /// platform.
     func urlSession(
         _ session: URLSession,
         didReceive challenge: URLAuthenticationChallenge,
@@ -187,11 +159,6 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
 
     init(request: URLRequest, pinnedPublicKey: String? = nil) {
         let configuration = URLSessionConfiguration.ephemeral
-        // A pinned lane is the local one: iOS blocks a connection to it when
-        // the install's Local Network permission is denied, and a session that
-        // waits for connectivity hides that inside the connect budget instead
-        // of naming it (E-3c). The saved endpoint keeps waiting, because the
-        // path it needs is the one a phone that just lost Wi-Fi is waiting for.
         configuration.waitsForConnectivity = pinnedPublicKey == nil
         configuration.timeoutIntervalForRequest = GatewayConnectionPolicy.requestInactivityTimeout
         let delegate = GatewayWebSocketDelegate(pinnedPublicKey: pinnedPublicKey)
@@ -208,10 +175,6 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
 
     func ping() async throws {
         guard !closed else { throw URLError(.cancelled) }
-        // The caller owns a bounded timeout around this callback. Observing the
-        // completion is important: enqueueing a ping is not proof that the
-        // peer or path is alive. The completion owner also settles cancellation
-        // and close, so a late/missing CFNetwork callback cannot retain a task.
         let completion = GatewayPingCompletion()
         activePing = completion
         defer { if activePing === completion { activePing = nil } }
@@ -226,17 +189,12 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
                 }
             }
         } onCancel: {
-            // The epoch owner decides transport retirement. Canceling a
-            // completed/obsolete probe must not close a healthy socket later.
             completion.cancel()
         }
     }
 
     func metadata() -> GatewaySocketMetadata {
         let observed = delegate.metadata()
-        // Async send/receive failure can resume before the delegate queue runs.
-        // The exact URLSession task's immutable response/close facts are the
-        // same authority, not a delay or a guess from localized error prose.
         return GatewaySocketMetadata(
             closeCode: observed.closeCode ?? (task.closeCode == .invalid ? nil : task.closeCode.rawValue),
             httpStatusCode: observed.httpStatusCode ?? (task.response as? HTTPURLResponse)?.statusCode,
@@ -264,9 +222,6 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
         guard !closed else { return }
         closed = true
         task.cancel(with: .goingAway, reason: nil)
-        // Allow a close frame a short opportunity to leave, then force release
-        // of the one-task session. This preserves graceful teardown on healthy
-        // paths without retaining dead CFNetwork epochs during reconnect loops.
         session.finishTasksAndInvalidate()
         let retiringSession = session
         Task.detached {

@@ -89,8 +89,6 @@ enum PendingPhotoRemoveLayoutPolicy {
     static let visibleDiameter: CGFloat = 22
     static let touchTarget: CGFloat = 30
 
-    /// A top-trailing overlay aligns by its frame edge. Moving it by half its
-    /// target size places the control's center exactly on the preview corner.
     static var centerOnTopTrailingCornerOffset: CGSize {
         CGSize(width: touchTarget / 2, height: -touchTarget / 2)
     }

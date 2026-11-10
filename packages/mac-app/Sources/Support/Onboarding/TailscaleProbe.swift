@@ -1,44 +1,7 @@
 import Darwin
 import Foundation
 
-/// Probes Tailscale availability + signed-in-and-connected state on the
-/// host.
-///
-/// Detection rule:
-/// 1. `/Applications/Tailscale.app` exists OR a CLI binary lives at one
-///    of the known Homebrew paths (gives us something to invoke).
-/// 2. `tailscale status --peers=false --json` exits 0 AND the parsed
-///    `BackendState` is `"Running"` AND `TailscaleIPs` contains an eligible
-///    Tailscale IPv4 (100.64.0.0/10) or IPv6 (fd7a:115c:a1e0::/48) address.
-///    Selection mirrors the Gateway: IPv4 before IPv6, then deterministic
-///    numeric/lexical address order.
-///
-/// Why not `tailscale ip -4`: the CLI returns the Mac's assigned IP even
-/// when the user has hit **Disconnect** in the menu bar (`BackendState`
-/// becomes `"Stopped"`) or has quit Tailscale.app while the launchd
-/// daemon keeps running. Using `ip -4` caused the wizard to briefly
-/// flash `.installedNotSignedIn` (during the subprocess's transient
-/// unavailability window right after the user disconnected) and then
-/// flip back to `.signedIn` on the next poll because the cached IP
-/// reappeared. Parsing `BackendState` out of the JSON status gives us
-/// an authoritative "currently participating in the tailnet" signal
-/// that can't be fooled by the cached IP.
-///
-/// `BackendState` values we treat as NOT-ready (i.e.
-/// `.installedNotSignedIn`):
-///   - `"Stopped"` — user hit Disconnect.
-///   - `"NeedsLogin"` — not signed in.
-///   - `"NeedsMachineAuth"` — pending admin approval.
-///   - `"NoState"` — daemon just started, not yet configured.
-///   - `"Starting"` — daemon is coming up; the next poll will settle.
-///   - `"InUseOtherUser"` — another macOS user has the daemon bound.
-///
-/// Each CLI observation runs off the caller's actor with a bounded capture
-/// lifetime. Cancellation stops candidate selection; ordinary not-ready results
-/// still allow another executable to prove current connectivity.
 enum TailscaleProbe {
-    /// Default probe used by `EnvironmentSetup.live`. Tests inject a
-    /// fake instead of mocking Process directly.
     static func probe() async -> TailscaleStatus {
         await probe(
             tailscaleAppExists: { FileManager.default.fileExists(atPath: $0.path) },
@@ -53,7 +16,6 @@ enum TailscaleProbe {
         )
     }
 
-    /// Test-injection variant. All side-effects flow through the closures.
     static func probe(
         tailscaleAppExists: (URL) -> Bool,
         cliPaths: [URL],
@@ -62,10 +24,6 @@ enum TailscaleProbe {
         let appURL = URL(fileURLWithPath: "/Applications/Tailscale.app")
         let appPresent = tailscaleAppExists(appURL)
 
-        // The CLI may be present even without the .app (Homebrew install).
-        // Try every executable candidate and accept the first one that
-        // proves the Mac is actively connected. This avoids a stale or
-        // GUI-flavoured binary masking a healthy Homebrew CLI.
         var sawExecutableCLI = false
         for candidate in cliPaths where FileManager.default.isExecutableFile(atPath: candidate.path) {
             sawExecutableCLI = true
@@ -73,16 +31,10 @@ enum TailscaleProbe {
             let result = await runProcess(candidate)
             guard !Task.isCancelled else { break }
 
-            // Non-zero exit covers: daemon not running, transient
-            // startup errors, permission errors. All of these are
-            // "not ready from this executable right now" — try any
-            // other known CLI before reporting not-ready.
             guard result.exitCode == 0 else { continue }
 
             guard let data = result.stdout.data(using: .utf8),
                   let status = try? JSONDecoder().decode(TailscaleStatusJSON.self, from: data) else {
-                // Malformed / unparseable JSON — do not trust this
-                // executable, but keep looking for a healthier CLI.
                 continue
             }
 
@@ -90,17 +42,10 @@ enum TailscaleProbe {
                 continue
             }
 
-            // Prefer `Self.TailscaleIPs` (the node's own IP) over the
-            // top-level list which on some Tailscale versions includes
-            // only the aggregate tailnet IPs. Fall back to top-level
-            // if `Self` is absent.
             let candidateIPs = status.`Self`?.TailscaleIPs ?? status.TailscaleIPs ?? []
             if let address = selectedAddress(candidateIPs) {
                 return .signedIn(address: address)
             }
-
-            // BackendState==Running but no eligible Tailscale address in the
-            // response — try another CLI before giving up.
         }
 
         return appPresent || sawExecutableCLI ? .installedNotSignedIn : .notInstalled
@@ -157,12 +102,6 @@ enum TailscaleProbe {
     }
 }
 
-/// Subset of `tailscale status --peers=false --json` we need. Field
-/// names mirror the Go source's PascalCase keys verbatim so the default
-/// `JSONDecoder` picks them up without a custom key strategy. Everything
-/// is optional so a future Tailscale version that drops or renames a
-/// field degrades gracefully to `.installedNotSignedIn` instead of
-/// throwing a decoding error that strands the wizard.
 private struct TailscaleStatusJSON: Decodable {
     let BackendState: String?
     let TailscaleIPs: [String]?

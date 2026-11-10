@@ -1,7 +1,6 @@
 import Foundation
 import TronMobileCore
 
-/// Disposable projections of projects.lifecycle.v1, never a project/trust store.
 struct ProjectLifecycleEligibility: Decodable, Sendable {
     let allowed: Bool
     let code: String?
@@ -41,15 +40,12 @@ enum ProjectLifecycleOperation: String, Sendable {
     case create, trust, untrust
 }
 
-/// `projects.change` without a confirmation: the exact review and the typed
-/// intent the confirmation must return unchanged.
 struct ProjectLifecycleReviewResult: Decodable {
     let status: String
     let review: ChangeReview
     let intent: JSONValue
 }
 
-/// One reviewed project action, ready for the maintainer's tap on its card.
 struct ProjectLifecycleReview: Identifiable {
     let params: [String: JSONValue]
     let review: ChangeReview

@@ -1,7 +1,6 @@
 import XCTest
 
 final class TronNewSessionUITests: XCTestCase {
-    /// Repository inspection before creation cannot manufacture a Session override.
     @MainActor func testRepositoryOverridesAreReadOnlyBeforeFirstSession() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
@@ -33,9 +32,6 @@ final class TronNewSessionUITests: XCTestCase {
         }
     }
 
-    /// Shared sheet loading (#1333): a slow first read shows only the surface's
-    /// pulse under usable chrome, then the content fades and rises in. Frames are
-    /// kept as a timed sequence; the result bundle also records the screen.
     @MainActor func testSlowProjectSettingsShowsPulseThenRevealsContent() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {

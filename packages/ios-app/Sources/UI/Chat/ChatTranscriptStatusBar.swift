@@ -2,8 +2,6 @@ import OSLog
 import SwiftUI
 import UIKit
 
-/// Origin-only status-bar routing. The probe is content-owned so ancestry finds
-/// exactly this transcript; the window proxy never replaces SwiftUI's delegate.
 struct ChatTranscriptStatusBar: UIViewRepresentable {
     let active: Bool
     let scrollToOldest: () -> Void
@@ -69,7 +67,6 @@ struct ChatTranscriptStatusBar: UIViewRepresentable {
         func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
             guard active, scrollView === proxy, window != nil, transcript?.window === window else { return false }
             scrollToOldest?()
-            // Keep the proxy off its origin so the next system tap is delivered.
             return false
         }
 

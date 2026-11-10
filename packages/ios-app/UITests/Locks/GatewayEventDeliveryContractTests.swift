@@ -2,9 +2,6 @@ import Foundation
 @testable import TronMobileCore
 import XCTest
 
-/// Kernel contract at GatewaySocketConnection: real handshake/decoder, receive
-/// loop, event admission, epoch retirement and AsyncSequence; only the byte peer
-/// is synthetic. No GatewayEventHub instance or private queue fields are read.
 @MainActor
 final class GatewayEventDeliveryContractTests: XCTestCase {
     private func profile(port: Int = 9847) -> GatewayProfile {
@@ -53,8 +50,6 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
 
     private func fence(_ client: GatewayClient, peer: EventLockPeer, frames: [Data]) async throws {
         await peer.enqueue(frames)
-        // This response follows the frames on the same receive port. Its
-        // completion proves admission ran, without sleeps or private counters.
         _ = try await client.requestValue("fixture.fence", EmptyParams())
     }
 
@@ -127,8 +122,6 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
     func testCoalescedReplacementPreflightsTotalBytes() async throws {
         let first = try frame("session.listChanged", value: "first")
         let other = try frame("lock.other", value: "other")
-        // Its own frame fits the ceiling; replacing the first while retaining
-        // the other frame crosses it. Size the input from actual encoded bytes.
         let replacement = try frame("session.listChanged", value: String(repeating: "x", count: other.count))
         let ceiling = first.count + other.count + 10
         try await withClient(policy: .init(maximumEvents: 8, maximumBytes: ceiling)) { client, peer in
@@ -153,8 +146,6 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             let first = await self.next(client.events)
             XCTAssertEqual(first?.event.topic, "session.listChanged")
             XCTAssertEqual(first?.event.payload.objectValue?["value"]?.stringValue, "latest")
-            // Shrinking the replacement and dequeuing it must release its
-            // actual bytes, not leave the replaced frame charged to the queue.
             try await self.fence(client, peer: peer, frames: [try self.frame("lock.after-replacement")])
             let second = await self.next(client.events)
             let third = await self.next(client.events)
@@ -191,8 +182,6 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             try await fence(client, peer: successor, frames: [try frame("lock.successor")])
             await gate.release()
             await fulfillment(of: [admitted], timeout: 3)
-            // Observe before releasing close: admission, not old reset, must
-            // already have removed the predecessor's queued delivery.
             let delivery = await next(client.events)
             XCTAssertEqual(delivery?.connectionID, newID)
             XCTAssertEqual(delivery?.event.topic, "lock.successor")
@@ -233,8 +222,6 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             await client.closeIfCurrent(connectionID: oldID)
             await gate.release()
             await fulfillment(of: [admitted], timeout: 3)
-            // No successor evidence exists yet: the retirement high-water mark
-            // alone must fence already-decoded predecessor work.
             await expectNoDelivery(client.events)
             let newID = try await connect(client, port: 9846)
             try await fence(client, peer: successor, frames: [try frame("lock.new-first"), try frame("lock.new-second")])
@@ -267,8 +254,6 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
         var following: Task<GatewayEventDelivery?, Never>?
         do {
             await fulfillment(of: [entered], timeout: 3)
-            // A real RPC round trip gives the consumer's queued next() operation a
-            // causal receive-loop boundary before cancellation, not an arbitrary delay.
             try await fence(client!, peer: peer, frames: [])
             consumer.cancel()
             await fulfillment(of: [ended], timeout: 3)
@@ -281,8 +266,6 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
                 return value
             }
             await fulfillment(of: [delivered], timeout: 3)
-            // Finish before joining: even a broken cancellation control must
-            // leave neither this case's waiter nor its follow-up consumer alive.
             await client!.close()
             client = nil
             let cancelled = await consumer.value
@@ -320,7 +303,7 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
             await client!.close()
             client = nil
             await fulfillment(of: [ended], timeout: 3)
-            consumer.cancel() // also settles a known-bad missing-finish control
+            consumer.cancel()
             let terminal = await consumer.value
             XCTAssertNil(terminal)
         } catch {
@@ -333,8 +316,6 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
     }
 }
 
-/// Controlled byte peer, using the production socket port and serialized wire
-/// envelopes. It knows no event-buffer policy and makes no admission decision.
 private actor EventLockPeer: GatewaySocketConnection {
     private var hello = false
     private var frames: [Data] = []
@@ -404,8 +385,6 @@ private actor EventLockPeer: GatewaySocketConnection {
     }
 }
 
-/// Cancellation deliberately does not release this run-local admission gate:
-/// it represents already-decoded predecessor work suspended at the actor hop.
 private actor EventLockGate {
     private let onWait: @Sendable () -> Void
     private var released = false

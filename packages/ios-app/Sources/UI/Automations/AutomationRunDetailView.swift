@@ -84,8 +84,6 @@ struct AutomationRunDetailView: View {
         ])
     }
 
-    /// The execution session opens from its row once it exists; until then the
-    /// row says why it cannot.
     @ViewBuilder private var openSession: some View {
         TronSettingsDivider()
         if let sessionID = run.executionSessionId, !run.targetSnapshot.isWorkspace || run.startedAt != nil {
@@ -154,7 +152,6 @@ struct AutomationRunDetailView: View {
         return sections
     }
 
-    /// An uncertain run is resolved once, on the owning Gateway.
     private var resolution: some View {
         TronSettingsGroup(
             "Needs Attention",

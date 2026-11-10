@@ -5,11 +5,6 @@ import SwiftUI
 import XCTest
 @testable import TronMobile
 
-/// Chat scenarios for `scripts/tron-profile ios`: the production `ChatView`
-/// opened through `AppModel`'s real `session.open`/`session.sync` path over the
-/// scripted Gateway, then driven by pre-encoded Gateway frames at the
-/// Gateway's cadence. Frames are encoded before the measured window so the
-/// window contains only what the app does with them.
 @MainActor
 final class ProfileChatScenarioTests: XCTestCase {
     func testIdleChat() throws {
@@ -42,19 +37,15 @@ final class ProfileChatScenarioTests: XCTestCase {
     }
 }
 
-/// One scripted Gateway frame at its offset from the window start.
 struct ProfileScriptedFrame {
     let offset: Duration
     let topic: String
     let data: Data
-    /// The session event sequence this frame installs, when it is sequenced.
     let eventSequence: Int?
 }
 
 @MainActor
 final class ProfileChatRun: ProfileScenarioRun {
-    /// No frame is sent in the window's last second, so the window contains
-    /// the processing of every frame it delivered.
     static let drainTail = Duration.seconds(1)
 
     let fixture: ProfileGatewayFixture
@@ -73,10 +64,6 @@ final class ProfileChatRun: ProfileScenarioRun {
         self.frames = frames
     }
 
-    /// Connects, publishes a catalog containing the session, answers the chat
-    /// opening RPCs with `snapshot`, and mounts the production chat.
-    /// `history` is the whole canonical session when `snapshot` holds only
-    /// its newest page; older pages are served from it like the Gateway does.
     static func make(
         snapshot: SessionSnapshot,
         history: [TranscriptItem]? = nil,
@@ -127,8 +114,6 @@ final class ProfileChatRun: ProfileScenarioRun {
             return try self.olderPage(params)
         }
         fixture.handle("session.close") { _ in .object(["closed": .bool(true)]) }
-        // An empty catalog: the composer's model picker loads it on open, and an
-        // unanswered read would put an error notice on screen during the window.
         fixture.handle("provider.list") { _ in .object(["providers": .array([])]) }
         fixture.handle("model.list") { _ in .object(["models": .array([]), "nextCursor": .null]) }
         fixture.handle("session.presentation.set") { params in
@@ -143,8 +128,6 @@ final class ProfileChatRun: ProfileScenarioRun {
         }
     }
 
-    /// The Gateway's `projectTranscriptPage`: newest-first up to 512 items and
-    /// 600 KB before `before`, against the current authoritative branch.
     private func olderPage(_ params: JSONValue?) throws -> JSONValue {
         guard let before = params?.objectValue?["before"]?.intValue else {
             throw ProfileScenarioError.workloadDiverged("unscripted forward transcript page")
@@ -188,9 +171,6 @@ final class ProfileChatRun: ProfileScenarioRun {
         try await profileWaitUntil("transcript rows rendered in the native scroll view") {
             profileViews(UIScrollView.self, in: view).contains { $0.contentSize.height > $0.bounds.height * 2 }
         }
-        // The production opening ends its first-ready-frame interval once the
-        // transcript is positioned at the tail, or fails it when the layout did
-        // not settle within ChatView's own bound.
         let signposts = signposts
         try await profileWaitUntil("chat opening finished its first ready frame", timeout: .seconds(60)) {
             signposts.firstReadyFrameResult != nil
@@ -198,8 +178,6 @@ final class ProfileChatRun: ProfileScenarioRun {
         guard signposts.firstReadyFrameResult == .success else {
             throw ProfileScenarioError.notReady("chat opening did not settle (first ready frame \(signposts.firstReadyFrameResult.map { "\($0)" } ?? "missing"))")
         }
-        // Scroll settlement, text preparation and media finish over the next
-        // frames; the window measures steady state after them.
         try await Task.sleep(for: .seconds(2))
         guard let target = model.mountedPresentationTarget, target.sessionID == sessionID,
               model.hasMountedSessionAuthority(target) else {
@@ -231,14 +209,6 @@ final class ProfileChatRun: ProfileScenarioRun {
         expectedSequence = frames.last(where: { $0.offset < window - Self.drainTail && $0.eventSequence != nil })?.eventSequence
     }
 
-    /// A pinned chat follows its tail. The newest row must sit at the visual
-    /// bottom when the window ends; otherwise newly appended rows fall below
-    /// the viewport and the window measures a fraction of the workload.
-    ///
-    /// The check is in window coordinates, through the same
-    /// `TranscriptWindowOracle` the hosted journeys use: a scroll-space offset
-    /// against the estimated content size points at the oldest history in the
-    /// origin-anchored transcript and could read a blank chat as followed.
     static let pinnedTailTolerance = TranscriptWindowOracle.profilingTolerance
 
     func renderCheck() -> ProfileRenderCheck {
@@ -270,8 +240,6 @@ final class ProfileChatRun: ProfileScenarioRun {
         if let expected = expectedSequence {
             let model = fixture.model
             let sessionID = snapshot.sessionId
-            // The drain tail normally covers the last frame's processing; a
-            // loaded host gets a bounded grace period outside the window.
             try? await profileWaitUntil("last scripted event installed", timeout: .seconds(10)) {
                 (model.authoritativeSnapshot(for: sessionID)?.eventSequence ?? 0) >= expected
             }
@@ -298,9 +266,6 @@ final class ProfileChatRun: ProfileScenarioRun {
     }
 }
 
-/// Deterministic transcripts with realistic prose, Markdown, tool calls and
-/// tool results (the shared scenario builder's rows are single repeated
-/// characters, which lay out unlike real text).
 enum ProfileTranscript {
     static let timestamp = "2026-09-01T10:00:00.000Z"
 
@@ -331,8 +296,6 @@ enum ProfileTranscript {
             (0..<sentences).map { _ in sentence(8 + next(10)) }.joined(separator: " ")
         }
 
-        /// A Markdown reply: paragraphs, a list, inline code and sometimes a
-        /// fenced block, the shapes the chat's text preparation handles.
         mutating func markdown(paragraphs: Int) -> String {
             var blocks: [String] = []
             for index in 0..<paragraphs {
@@ -387,7 +350,6 @@ enum ProfileTranscript {
         ))
     }
 
-    /// Four-item turns: prompt, tool call, tool result, Markdown answer.
     static func item(seed: Int, index: Int, words: inout Words, toolOutputBytes: Int) -> TranscriptItem {
         let id = id(seed, index)
         let parent = index == 0 ? nil : Self.id(seed, index - 1)
@@ -415,8 +377,6 @@ enum ProfileTranscript {
         return (0..<items).map { item(seed: seed, index: $0, words: &words, toolOutputBytes: toolOutputBytes) }
     }
 
-    /// An authoritative snapshot whose page is `items`, the newest tail of a
-    /// longer canonical session.
     static func snapshot(seed: Int, items: [TranscriptItem], priorItems: Int = 0) throws -> SessionSnapshot {
         var snapshot = try SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: 4_096)
         snapshot.name = "Profile fixture"
@@ -427,12 +387,9 @@ enum ProfileTranscript {
         return snapshot
     }
 
-    /// The Gateway's authoritative page bound: at most 512 items and 600 KB of
-    /// encoded transcript.
     static let pageItemBound = SessionSnapshot.maximumTranscriptItems
     static let pageByteBound = 600_000
 
-    /// A 1,200-entry canonical session and its newest page at the bounds.
     static func pageBoundSession(seed: Int) throws -> (history: [TranscriptItem], snapshot: SessionSnapshot) {
         let items = history(seed: seed, items: 1_200, toolOutputBytes: 2_400)
         var page = Array(items.suffix(pageItemBound))
@@ -481,7 +438,6 @@ enum ProfileTranscript {
                                     eventSequence: nil)
     }
 
-    /// Appends `item` as a canonical entry and slides the page to the bounds.
     static func appending(_ item: TranscriptItem, to snapshot: SessionSnapshot) throws -> SessionSnapshot {
         var next = snapshot
         next.transcript.append(item)
@@ -500,12 +456,6 @@ enum ProfileTranscript {
     }
 }
 
-/// `session.progress` at the Gateway's cadence: the SDK reports a token every
-/// 12.5 ms; `RuntimeSlot.emitProgress` sends the first update after a quiet
-/// window at once, then at most one frame per 150 ms window (a window that
-/// sent re-arms the timer; only an empty window ends the throttle). Every frame
-/// carries the cumulative reply: a thinking segment for the first 3 s, then
-/// Markdown text.
 enum ProfileStreamingScript {
     static let tokenInterval = Duration.microseconds(12_500)
     static let flushWindow = Duration.milliseconds(150)
@@ -544,8 +494,6 @@ enum ProfileStreamingScript {
                 id: "streaming", parent: promptID, role: .assistant, content: content, presentationID: "stream:profile"
             ))
         }
-        // Replay RuntimeSlot's throttle: an immediate first frame, then one
-        // frame per window while updates keep arriving.
         var timerFires: Duration?
         var pending: Int?
         func emit(_ tokens: Int, at offset: Duration) throws {
@@ -580,10 +528,6 @@ enum ProfileStreamingScript {
     }
 }
 
-/// A tool-calling loop on a page-bound transcript. Every 1.5 s the agent
-/// appends a tool call (snapshot + summary), the tool reports progress at
-/// 5/s for 1.2 s, and its result is appended (snapshot + summary): the
-/// Gateway republishes the full page on every canonical append.
 enum ProfileToolLoopScript {
     static let cycle = Duration.milliseconds(1_500)
     static let progressInterval = Duration.milliseconds(200)
@@ -665,8 +609,6 @@ extension Duration {
     }
 }
 
-/// Forwards every chat signpost to the production signposter and records the
-/// outcome of the opening's first ready frame, the app's own readiness signal.
 final class ProfileOpeningSignposts: PerformanceSignposting {
     private let result = Mutex<PerformanceResult?>(nil)
 

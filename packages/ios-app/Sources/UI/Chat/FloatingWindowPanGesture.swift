@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// One native pan lifecycle: cancellation and release never reset a value that
-/// contributes to the rendered position. Coordinates come from the same native
-/// proposal that fits the window, not a keyboard offset or a cached frame.
 struct FloatingWindowPanGesture: UIGestureRecognizerRepresentable {
     enum Space: Hashable { case bounds, window }
 

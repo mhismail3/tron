@@ -1,6 +1,5 @@
 import XCTest
 
-/// Sheet behavior through the production views and hosted Gateway socket.
 @MainActor final class TronSheetLayoutUITests: XCTestCase {
     func testHomeSettingsAreOnMainSheet() {
         let app = home()
@@ -13,7 +12,6 @@ import XCTest
             XCTAssertTrue(row.exists, "Inline setting \(prefix)\n\(app.debugDescription)")
         }
         XCTAssertTrue(app.staticTexts["Home's overrides of Global settings. Worker launch choices apply to new workers."].exists)
-        // Revert and list editing retain their independent shared controls.
         let worker = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-row-model.queue_role_worker_' AND NOT identifier ENDSWITH '-reset'")).firstMatch
         XCTAssertTrue(worker.staticTexts["Overridden"].exists)
         XCTAssertTrue(worker.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch.exists)
@@ -55,8 +53,6 @@ import XCTest
         XCTAssertTrue(actions.exists, "Actions remain in the sheet")
     }
 
-    /// At XXXL a shared row's title keeps the full text width and its Overridden
-    /// pill moves below it, instead of the title shrinking to a fragment.
     func testSharedRowTitleKeepsFullWidthAtXXXL() {
         let app = home(xxxl: true)
         defer { app.terminate() }
@@ -65,7 +61,6 @@ import XCTest
         let title = row.staticTexts["Worker models"].firstMatch
         let pill = row.staticTexts["Overridden"].firstMatch
         XCTAssertTrue(title.exists && pill.exists, row.debugDescription)
-        // One title line is about a pill tall; a title squeezed into fragments wraps to several.
         XCTAssertLessThan(title.frame.height, pill.frame.height * 1.6, "The title is not broken into fragments: \(title.frame) vs \(pill.frame)")
         XCTAssertGreaterThanOrEqual(pill.frame.minY, title.frame.maxY - 1, "The pill stacks below the title: \(pill.frame) vs \(title.frame)")
     }
@@ -107,7 +102,6 @@ import XCTest
         expand(app, title: "Session History")
         app.buttons["history-row-h-6731"].tap()
         XCTAssertTrue(app.navigationBars.staticTexts["History Entry"].waitForExistence(timeout: 8), app.debugDescription)
-        // Wait for the actual content load before sampling the medium-detent layout.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH ' characters'")).firstMatch.waitForExistence(timeout: 8), app.debugDescription)
         return app
     }

@@ -4,8 +4,6 @@ import Foundation
 import SwiftUI
 import TronMobileCore
 
-/// Hosted-process/filesystem contract driver. Reports read actual files and
-/// public model/catalog values, never SnapshotCache's private generations.
 struct HostedSnapshotCacheFixture: View {
     @State private var driver = SnapshotCacheFixtureDriver()
     var body: some View {
@@ -185,8 +183,6 @@ private final class SnapshotCacheFixtureDriver {
         lifecycleJob = Task { @MainActor [self] in
             do {
                 try model.profiles.save(second, token: "fixture-only-token", selecting: false)
-                // The profile store correctly refuses disabling the selected
-                // profile; switch through the lifecycle owner before disabling it.
                 await model.switchGateway(second)
                 model.setGatewayEnabled(false, profile: first)
                 completion = "done"
@@ -210,11 +206,7 @@ private final class SnapshotCacheFixtureDriver {
         lifecycleJob = nil
         await model.enteredBackground().value
         await client.close()
-        // Independently fence real I/O even when the exercised background-join
-        // control is deliberately broken; cleanup must not race its last write.
         _ = await cache.load(profileID: first.id)
-        // A relaunch deliberately retains the UUID root; this explicit final
-        // action owns only that fixture root, never ordinary application data.
         try? FileManager.default.removeItem(at: root)
         phase = "cleaned"
     }

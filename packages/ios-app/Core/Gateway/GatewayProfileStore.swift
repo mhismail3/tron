@@ -43,8 +43,6 @@ package final class GatewayProfileStore {
         do {
             loaded = try metadata.load()
         } catch {
-            // Keep the cache bounded for callers that can render before recovery,
-            // but retain the actual failure and never overwrite durable state.
             self.cachedDocument = Self.emptyDocument
             self.loadError = error
             return
@@ -52,8 +50,6 @@ package final class GatewayProfileStore {
         let sanitized = Self.sanitize(loaded ?? Self.emptyDocument)
         self.cachedDocument = sanitized
         self.loadError = nil
-        // Missing metadata is a valid first launch and is not materialized.
-        // Repairs/migrations are persisted only for successfully admitted data.
         if let loaded, loaded != sanitized {
             do { try metadata.save(sanitized) }
             catch { self.loadError = error }
@@ -66,8 +62,6 @@ package final class GatewayProfileStore {
         cachedDocument.profiles.first { $0.id == cachedDocument.selectedProfileID } ?? cachedDocument.profiles.first
     }
 
-    /// Re-read and admit the durable document after a load failure. The error
-    /// remains unresolved until both loading and any required repair succeed.
     func reload() throws {
         do {
             let loaded = try metadata.load()
@@ -93,9 +87,6 @@ package final class GatewayProfileStore {
             selectedProfileID: selecting ? profile.id : (previousDocument.selectedProfileID ?? values.first?.id)
         ))
 
-        // Keychain upsert is atomic for an existing item. Metadata is committed
-        // only after it succeeds; a metadata failure restores the exact prior
-        // credential (or removes a newly-created credential).
         try tokens.save(token, profileID: profile.id)
         do {
             try metadata.save(replacement)
@@ -141,12 +132,6 @@ package final class GatewayProfileStore {
         cachedDocument = replacement
     }
 
-    /// Replace the LAN endpoints and pin a stored profile holds with what the
-    /// last pairing response or hello advertised (E-3b). The hello path calls
-    /// this on every connection: the Mac answers with the lane it serves now,
-    /// so an address that moved and a lane that was switched off both correct
-    /// the profile before the next attempt, and an unchanged answer writes
-    /// nothing.
     package func adoptLanAdvertising(
         endpoints: [GatewayLanEndpoint],
         pin: String?,
@@ -204,7 +189,6 @@ package final class GatewayProfileStore {
         cachedDocument = replacement
     }
 
-    /// Nil when no token is stored; throws when the Keychain cannot be read.
     package func token(for profile: GatewayProfile) throws -> String? {
         try tokens.read(profileID: profile.id)
     }

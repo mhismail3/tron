@@ -26,8 +26,6 @@ struct ChatLayoutClock: Equatable, Sendable {
             )
         }
         if joined.contains(.submission) {
-            // Submission geometry must be monotonic. A spring can overshoot the
-            // composer inset and produce a visible down/up correction.
             return Self(
                 duration: ChatMotion.transcriptRevealDuration,
                 curve: .smooth
@@ -57,8 +55,6 @@ final class ChatLayoutTransaction {
     enum TerminalEvent: Equatable, Sendable {
         case settled(Int)
         case abandoned(Int)
-        /// Observation stopped consuming exact outcomes. The viewport owner
-        /// must cancel transient leases rather than guess which event survived.
         case overflow
     }
 
@@ -77,9 +73,6 @@ final class ChatLayoutTransaction {
     }
 
     private(set) var generation: Generation?
-    /// Only a completed generation may authorize scroll-lease settlement.
-    /// Abandonment is intentionally observable as a different terminal fact so
-    /// interrupted background/layout work cannot masquerade as success.
     private(set) var settledGenerationID: Int?
     private(set) var abandonedGenerationID: Int?
     private(set) var terminalEventRevision = 0
@@ -111,9 +104,6 @@ final class ChatLayoutTransaction {
         joinParticipant(mutation).generationID
     }
 
-    /// Returns an exact participant ticket for sources that can repeat within
-    /// one generation (notably keyboard transitions). An older animation
-    /// completion cannot settle a newer revision of the same participant.
     @discardableResult
     func joinParticipant(_ mutation: ChatLayoutMutation) -> ParticipantTicket {
         if var current = generation {
@@ -185,9 +175,6 @@ final class ChatLayoutTransaction {
         settle(ticket.generationID, source: ticket.mutation)
     }
 
-    /// Settles a participant from the one frozen structural clock. This does
-    /// not animate content; it merely prevents an empty SwiftUI animation from
-    /// being mistaken for UIKit keyboard completion.
     func settleAfterResolvedClock(_ ticket: ParticipantTicket) {
         guard generation?.id == ticket.generationID,
               generation?.participantRevisions[ticket.mutation] == ticket.revision else { return }
@@ -233,10 +220,6 @@ final class ChatLayoutTransaction {
         publishTerminal(.abandoned(id))
     }
 
-    /// Records exact terminal outcomes until the bounded queue overflows, then
-    /// emits one fail-closed recovery event. SwiftUI may coalesce observable
-    /// mutations; abandonment must still reach the viewport owner so a command
-    /// lease cannot remain installed after its layout participant dies.
     func consumeTerminalEvents() -> [TerminalEvent] {
         let events = pendingTerminalEvents
         pendingTerminalEvents.removeAll(keepingCapacity: true)

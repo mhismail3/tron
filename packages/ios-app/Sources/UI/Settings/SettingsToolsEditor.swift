@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Edits a tool selection (a `catalog.tools` setting) with the same groups, rows
-/// and detail sheet as Manage Session → Available Tools. Like every checklist
-/// it edits a draft committed with Save; the order chosen is kept.
 struct SettingsToolsEditor: View {
     let title: String
     let options: [SettingsOption]
@@ -24,8 +21,6 @@ struct SettingsToolsEditor: View {
     private var groups: [AvailableToolGroup] {
         let tools = options.compactMap { option -> JSONValue? in
             guard let name = option.value.stringValue, onSave != nil || chosen.contains(name) else { return nil }
-            // The option owns identity. Home's curated catalog deliberately has
-            // resource: {}; resource is optional detail, not a second catalog.
             var resource = option.resource?.objectValue ?? [:]
             resource["name"] = .string(name)
             if resource["label"] == nil { resource["label"] = .string(option.label) }

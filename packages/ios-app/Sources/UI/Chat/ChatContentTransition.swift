@@ -1,9 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// The composer is one permanently mounted inset owner. Editor-only height
-/// changes remain atomic for UIKit caret ownership. Accessory insertion and
-/// removal receives one value-scoped smooth transition through that same owner.
 @MainActor
 final class ChatComposerHeightLedger {
     private(set) var current: CGFloat = 0
@@ -124,8 +121,6 @@ struct ChatComposerStructuralHost<Content: View>: View {
             if submissionActive { onHeightSettled?(measurement.height) }
             return
         }
-        // The identity belongs to the last installed height, not to a geometry
-        // read that can arrive before SwiftUI reports the new natural size.
         installedAccessoryIdentity = measurement.accessoryIdentity
         if animates {
             let animation = submissionAnimation
@@ -295,8 +290,6 @@ extension ChatContentEntranceTransform.Anchor {
     }
 }
 
-/// Complete transcript snapshots install atomically while explicitly tagged row,
-/// prompt, tool-chip, and continuous native-control animations pass through.
 private enum ChatToolChipAnimationTransactionKey: TransactionKey {
     static let defaultValue = false
 }
@@ -331,10 +324,6 @@ private struct ChatStableTranscriptUpdateModifier<ProjectionIdentity: Equatable>
 
     func body(content: Content) -> some View {
         content.transaction(value: projectionIdentity) { transaction in
-            // Suppress inherited animation only when the installed projection
-            // changes. Native Liquid Glass begins with a discrete touch-down
-            // transaction before its continuous drag updates; an unconditional
-            // transaction transform was erasing that first animation.
             if !transaction.admitsChatToolChipAnimation,
                !transaction.admitsChatEntranceAnimation,
                !transaction.admitsChatIncrementalGrowthAnimation {

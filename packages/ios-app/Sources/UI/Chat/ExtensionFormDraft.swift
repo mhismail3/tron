@@ -6,8 +6,6 @@ struct ExtensionFormQuestionDraft: Codable, Equatable, Sendable {
     var other = ""
 }
 
-/// Ephemeral, ID-keyed form state. The Gateway descriptor remains authoritative;
-/// this draft never enters session cache or canonical state.
 struct ExtensionFormDraft: Codable, Equatable, Sendable {
     private(set) var values: [String: ExtensionFormQuestionDraft] = [:]
 

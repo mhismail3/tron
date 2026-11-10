@@ -1,8 +1,6 @@
 import SwiftUI
 import UIKit
 
-/// Bound only the visible viewport. The original prompt stays available to
-/// copy/annotation menus and the shared Markdown reader.
 struct PromptTextPreview: View {
     let text: String
     var tone: UserPromptTextTone = .user
@@ -26,8 +24,6 @@ struct PromptTextPreview: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
             .frame(maxHeight: maximumHeight, alignment: .top)
             .clipped()
-            // Fade only the prompt's ink. A backdrop blur samples the glass
-            // behind it and creates a second, inset rectangular surface.
             .mask {
                 VStack(spacing: 0) {
                     Color.black

@@ -18,7 +18,6 @@ final class ChatPerformanceBaselineTests: XCTestCase {
                 + "maxFPS=\(Self.maximumFramesPerSecond)"
         )
         let options = XCTMeasureOptions()
-        // XCTest adds one discarded warm-up invocation to this measured count.
         options.iterationCount = 5
         options.invocationOptions = [.manuallyStop]
         let metrics: [any XCTMetric] = [

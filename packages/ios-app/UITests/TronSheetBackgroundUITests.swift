@@ -1,10 +1,6 @@
 import XCTest
 
-/// Samples the real rendered sheet surface, not a SwiftUI modifier or a replica.
-/// The outer gutter excludes cards, title ink and glass buttons, exposing a
-/// separate toolbar backdrop even when that backdrop hides from accessibility.
 final class TronSheetBackgroundUITests: XCTestCase {
-    /// Navigation-only visual checkpoint. Pixel assertions are in the regression journeys.
     @MainActor func testTopBlurVisualCheckpoint() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
@@ -44,7 +40,6 @@ final class TronSheetBackgroundUITests: XCTestCase {
         }
     }
 
-    /// Releases the fixture's next held `home.taskList` read (Manage Home's or the Tasks sheet's).
     private func releaseHeldTaskList() {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
             CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-task-list" as CFString), nil, nil, true)
@@ -89,8 +84,6 @@ final class TronSheetBackgroundUITests: XCTestCase {
                       "The delayed real sheet read must exercise the loading reveal")
         let window = app.windows.firstMatch.frame
         let toolbarY = done.frame.midY
-        // The gutter is inside the medium sheet but outside cards/buttons. Sample
-        // the whole fade, not title ink or the pulse. The held read keeps the pulse up for this 13 s sample.
         let offsets: [CGFloat] = [-8, 12, 32, 52, 72]
         func profile(_ screenshot: XCUIScreenshot) -> [[Double]] {
             guard let source = screenshot.image.cgImage else { XCTFail("No screenshot pixels"); return [] }

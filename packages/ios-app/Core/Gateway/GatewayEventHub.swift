@@ -23,8 +23,6 @@ package struct GatewayEventBufferPolicy: Sendable {
     let maximumEvents: Int
     let maximumBytes: Int
 
-    // Matches the Gateway synchronization quarantine count while the byte cap
-    // remains the stricter cross-session memory bound.
     static let `default` = Self(maximumEvents: 1_024, maximumBytes: 2 * 1_024 * 1_024)
 }
 
@@ -82,9 +80,6 @@ actor GatewayEventHub {
     private var admittedCount = 0
     private var dequeuedCount = 0
     private var pressureLevels: Set<Int> = []
-    // Evidence follows the newest admitted epoch. During a suspended close,
-    // successor admission can overlap removal of the predecessor's buffer;
-    // stale deliveries must not reset successor counters or threshold state.
     private var evidenceConnectionID: Int?
     private var retiredThrough = Int.min
     private var dequeuedAt: ContinuousClock.Instant?
@@ -125,9 +120,6 @@ actor GatewayEventHub {
         }
     }
 
-    /// Admission and its evidence are one actor operation. In particular, a
-    /// coalesced replacement is preflighted before changing byte accounting, so
-    /// a rejected replacement cannot leave the hub over its configured bound.
     func admit(_ delivery: GatewayEventDelivery, bytes: Int) -> GatewayEventAdmission {
         guard !finished, delivery.connectionID > retiredThrough,
               evidenceConnectionID.map({ delivery.connectionID >= $0 }) ?? true else {
@@ -271,8 +263,6 @@ actor GatewayEventHub {
 
     private func beginEvidence(for connectionID: Int) {
         guard evidenceConnectionID != connectionID else { return }
-        // A replacement epoch supersedes queued predecessor projections. This
-        // runs before capacity checks; stale backlog cannot retire its successor.
         buffered.removeAll { $0.delivery.connectionID < connectionID }
         bufferedBytes = buffered.reduce(0) { $0 + $1.bytes }
         evidenceConnectionID = connectionID
@@ -314,8 +304,6 @@ actor GatewayEventHub {
             lastDequeuedAt = nil
         }
         if let owner = dequeuedConnectionID, owner <= retiredThrough { clearDequeued() }
-        // Only the retirement owner may enqueue its final control notification.
-        // Ordinary frames remain fenced, including after the buffer is empty.
         if mayNotify, let notification {
             _ = enqueue(GatewayEventDelivery(connectionID: connectionID, event: notification), bytes: notification.admittedBytes)
         }

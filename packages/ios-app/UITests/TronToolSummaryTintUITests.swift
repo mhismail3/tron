@@ -1,8 +1,6 @@
 import XCTest
 import UIKit
 
-/// Gateway transcript DTOs pass through the real mounted ChatView/projector and
-/// native chip. Color is observed from rendered title ink, not a policy probe.
 @MainActor final class TronToolSummaryTintUITests: XCTestCase {
 
     func testRestingTintFollowsCanonicalLatestInvocation() {
@@ -13,8 +11,6 @@ import UIKit
                 XCTAssertEqual(chip.label, scenario == "clean" ? "3 tools, Completed, 7.5s" : "3 tools, 1 failed, 7.5s")
                 verifyInk(app, chip: chip, expected: scenario == "latest-failed" ? .error : .tool,
                           name: "\(scenario)-\(mode)")
-                // The actual chip still opens its aggregate sheet; counts and
-                // individual failed/successful tool results remain reachable.
                 chip.tap()
                 XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
                 let latest = app.descendants(matching: .any)["tool-run-summary-tint-\(scenario)-2"].firstMatch
@@ -47,7 +43,6 @@ import UIKit
         app.launchArguments = ["-tron-subagent-parity-fixture", "-tool-summary-tint", scenario,
                                "-\(mode)", "-themeColor", "emerald", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        // The fixture's assistant line renders as selectable text (#1112), not a static label.
         let header = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Tool summary review · \(scenario)")).firstMatch
         XCTAssertTrue(header.waitForExistence(timeout: 12), app.debugDescription)
         let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '3 tools,'")).firstMatch
@@ -61,8 +56,6 @@ import UIKit
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
         guard let image = screenshot.image.cgImage else { XCTFail("No native screenshot"); return }
         let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
-        // Sample the '3 tools' foreground only, excluding the deliberately
-        // unchanged aggregate-error icon and the duration/detail labels.
         let title = CGRect(x: chip.frame.minX + 28, y: chip.frame.midY - 9, width: 54, height: 18)
         guard let crop = image.cropping(to: title.applying(CGAffineTransform(scaleX: scale, y: scale))) else {
             XCTFail("No title crop"); return

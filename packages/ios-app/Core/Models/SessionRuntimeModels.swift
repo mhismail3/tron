@@ -59,8 +59,6 @@ package struct ExtensionRunChild: Codable, Hashable, Identifiable, Sendable {
 package struct ExtensionRunActivity: Codable, Hashable, Identifiable, Sendable {
     package enum Status: String, Codable, Sendable { case running, completed, failed }
     package let id: String
-    /// Gateway-owned deterministic presentation identity. `id` remains for
-    /// rolling compatibility with older snapshots.
     let activityId: String?
     let runId: String?
     let toolCallId: String
@@ -166,9 +164,6 @@ package struct ExtensionActivityDelta: Codable, Hashable, Sendable {
     package let extensionActivityAsOf: String
 }
 
-/// Device-local receipt time for a Gateway duration sample. It deliberately has
-/// no value identity and is excluded from Codable so authoritative snapshots,
-/// caches, and protocol round trips remain unchanged.
 package struct ToolDurationSampleAnchor: Hashable, Sendable {
     package let uptime: TimeInterval
 
@@ -521,11 +516,8 @@ package struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendabl
 
     package var isExtensionCommand: Bool { source == .extension }
 
-    /// One message may combine at most this many skills and prompts (Gateway contract, #311).
     package static let maximumMessageResources = 16
 
-    /// A message's skills and prompts: each at most once, none with arguments
-    /// (the message text follows every expansion once), never an extension command.
     package static func admitsMessageResources(_ resources: [ComposerResourceInvocation]) -> Bool {
         !resources.isEmpty && resources.count <= maximumMessageResources
             && resources.allSatisfy { $0.source != .extension && $0.arguments.isEmpty && $0.isTransportValid }
@@ -549,8 +541,6 @@ package struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendabl
     }
 }
 
-/// Gateway-owned admission category. Null on the wire means ready; the key is
-/// required in protocol 7, so missing readiness cannot silently enable controls.
 package enum SessionConfigurationBlocker: String, Codable, Hashable, Sendable {
     case ready, running, queued, settling, mutation, interaction, unavailable
 
@@ -584,10 +574,7 @@ package enum SessionConfigurationBlocker: String, Codable, Hashable, Sendable {
 }
 
 package struct SessionSnapshot: Codable, Hashable, Sendable {
-    /// Gateway's bounded authoritative queue capacity. Rich queue projections
-    /// exceeding this limit are invalid and must not reach row rendering.
     package static let maximumQueuedMessages = 32
-    /// Gateway's canonical count bound for one authoritative transcript tail.
     package static let maximumTranscriptItems = 512
     package var sessionId: String
     package var runtimeGeneration: String
@@ -595,10 +582,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
     package var eventSequence: Int
     package var phase: SessionPhase
     package var configurationBlocker: SessionConfigurationBlocker
-    /// Exact Gateway/Pi admission capability. Older compatible snapshots omit
-    /// it and use the conservative running-phase fallback at presentation.
     package var acceptsQueuedPrompts: Bool? = nil
-    /// Disposable Gateway annotation for the inherited-to-child transition.
     package var forkBoundary: TranscriptForkBoundary? = nil
     package var name: String?
     package var cwd: String
@@ -620,30 +604,19 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
     package var leafEntryId: String?
     package var operation: SessionOperationState?
     var retry: RetryState?
-    /// Exact Gateway-owned segment authority for the running streaming agent;
-    /// a barrier generation may match no declaration yet. Older compatible
-    /// Gateways omit it and retain phase-based presentation.
     package var activeToolSegmentId: String? = nil
     package var toolExecutions: [ToolExecutionState]
     package var extensionActivities: [ExtensionRunActivity]? = nil
     var extensionActivityOmissions: ExtensionActivityOmissions? = nil
-    /// Monotonic Gateway facts for the disposable current/recent projection.
     package var liveActivityRevision: Int? = nil
     package var extensionActivityAsOf: String? = nil
-    /// Atomic, disposable process projection.
     package var processOverview: SessionProcessOverview? = nil
     package var processActivities: [SessionProcessActivity]? = nil
     package var extensionPresentation: ExtensionPresentationState
     var diagnostics: [RuntimeDiagnostic]
-    /// Set only on the disposable offline cache projection. Gateway snapshots
-    /// leave this absent so canonical runtime state remains authoritative.
     package var isCachedProjection: Bool? = nil
-    /// Optional on rolling gateways that do not advertise context-window.v1.
     package var contextWindowPolicy: ContextWindowPolicy? = nil
     package var compactionPolicy: CompactionPolicyProjection? = nil
-    /// Gateway archive projection for this exact session: present while it is
-    /// archived, absent while it is visible. The Gateway republishes the
-    /// snapshot on an archive change, so an open chat never infers it.
     var archivedAt: String? = nil
 
     package init(
@@ -729,11 +702,9 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         package let id: String
         package var behavior: Behavior
         package var text: String
-        /// Total uploaded items represented by this queued prompt.
         package let attachmentCount: Int
         package var photoCount: Int? = nil
         package var fileAttachmentCount: Int? = nil
-        /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
         package var attachments: [PromptAttachment]? = nil
         package var resourceInvocations: [ComposerResourceInvocation]? = nil
         package var semantic: ChatSemanticMetadata? = nil
@@ -763,7 +734,6 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         package let attachmentCount: Int
         package var photoCount: Int? = nil
         package var fileAttachmentCount: Int? = nil
-        /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
         package var attachments: [PromptAttachment]? = nil
         package var resourceInvocations: [ComposerResourceInvocation]? = nil
         package var semantic: ChatSemanticMetadata? = nil
@@ -787,8 +757,6 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         }
     }
 
-    /// Presentation is disposable; hidden inputs still belong to the authoritative
-    /// queue and count for admission/ordering just like any other queued input.
     package var displayedQueuedMessages: [QueuedMessage] {
         queuedItems.filter { $0.semantic?.direction != .hiddenInternal }
     }
@@ -809,8 +777,6 @@ package enum SessionSnapshotTranscriptAdmissionPolicy {
               }) ?? true else { return false }
         switch (snapshot.transcriptStart, snapshot.transcriptTotal) {
         case (nil, nil):
-            // Legacy/test projections without paging metadata remain valid. A
-            // partial pair cannot establish a canonical range.
             return true
         case let (start?, total?):
             guard start >= 0, total >= start else { return false }
@@ -836,19 +802,12 @@ package enum SessionSnapshotTranscriptAdmissionPolicy {
               (0...1_000_000).contains(policy.currentBudgets.keepRecentTokens),
               policy.warning.map({ $0.utf8.count <= 4_096 }) ?? true else { return false }
         guard let active = policy.active else { return true }
-        // The SDK can admit the successor Agent turn before compaction_end;
-        // active is still authoritative during that running handoff. It must
-        // not survive into an idle/settled frame.
         return active.isValid && ["manual", "threshold", "overflow"].contains(active.reason ?? "")
             && (snapshot.phase == .compacting || snapshot.phase == .retrying || snapshot.phase == .running)
     }
 
     private static func admitsContextWindowPolicy(_ snapshot: SessionSnapshot) -> Bool {
         guard let policy = snapshot.contextWindowPolicy else { return true }
-        // Saved overrides may be outside today's capacity after a catalog change.
-        // They are displayed with the server's adjustment warning, not discarded
-        // along with the authoritative transcript. Effective is the actual live
-        // budget, which can briefly precede application of refreshed metadata.
         guard policy.model == snapshot.model,
               !policy.model.provider.isEmpty, policy.model.provider.utf8.count <= 480,
               !policy.model.id.isEmpty, policy.model.id.utf8.count <= 1_200,
@@ -898,14 +857,10 @@ package enum SessionSnapshotQueueAdmissionPolicy {
     ) -> Bool {
         guard attachmentCount >= 0 else { return false }
         guard let resources else { return true }
-        // Extension commands execute immediately and never belong to prompt
-        // queue state; queued skills and prompts carry no arguments of their own.
         return ComposerResourceInvocation.admitsMessageResources(resources)
     }
 }
 
-/// Narrow, immutable facts used by Manage Session. Streaming transcript content
-/// is deliberately absent so its publication cannot invalidate that surface.
 package struct SessionContextPresentation: Hashable, Sendable {
     package let runtimeGeneration: String
     package let sessionID: String
@@ -926,7 +881,6 @@ package struct SessionContextPresentation: Hashable, Sendable {
     package let cwd: String
     package let diagnostics: [RuntimeDiagnostic]
     package let contextWindowPolicy: ContextWindowPolicy?
-    /// Gateway-owned archive state, so Manage Session needs no second read.
     package let archivedAt: String?
 
     package init(_ snapshot: SessionSnapshot) {

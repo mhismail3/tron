@@ -1,11 +1,6 @@
 import Vision
 import XCTest
 
-/// Overridden rows in Home, Session and Project settings at their reported
-/// lengths (#1651), through the hosted Home and Manage Session fixtures: values
-/// paint in full beside a title-line Overridden pill and a separate Revert,
-/// Session and Home use Global's group cards, ignored repository fields are
-/// listed once (the Project section) in plain language, and summaries skip unset values.
 final class TronSettingsScopeRowsUITests: XCTestCase {
     @MainActor func testHomeModelsLight() { homeModels(dark: false) }
     @MainActor func testHomeModelsDark() { homeModels(dark: true) }
@@ -31,12 +26,9 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Home's first-level Models route is removed")
         XCTAssertTrue(element(app, "settings-row-model.queue_role_worker_").waitForExistence(timeout: 8), app.debugDescription)
         shot("1651-home-settings-\(dark ? "dark" : "light")")
-        // The direct model/thinking card belongs to Manage Home, not its delegation sheet.
-        // Direct selection/receipts remain covered by the model and shared-thinking UI journeys.
         shot("1651-home-models-\(dark ? "dark" : "light")")
         assertOverriddenRow(app, "settings-row-model.queue_role_worker_", title: "Worker models", value: "^2 models$")
         assertOverriddenRow(app, "settings-row-model.queue_role_subagent_", title: "Subagent models", value: "^3 models$")
-        // The retired profile editors are gone: all three queues now fit without a drag.
         assertOverriddenRow(app, "settings-row-model.queue_role_background_", title: "Background models", value: "^3 models$")
     }
 
@@ -57,14 +49,11 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         shot("1651-session-settings-\(dark ? "dark" : "light")")
         let content = element(app, "session-settings-content")
         let sections = element(app, "session-project-settings")
-        // The caption stays separate from repository/settings groups of drill-in rows.
         XCTAssertFalse(sections.staticTexts["Settings"].exists, "The session card is untitled")
         XCTAssertTrue(sections.buttons["settings-section-tools-open"].exists, sections.debugDescription)
         XCTAssertFalse(element(app, "settings-row-tools.active").exists, "Tools opens from its row")
-        // The ignored repository field is the Project section's to list, once.
         XCTAssertEqual(labels(content, containing: "Ignored").count, 0, content.debugDescription)
         XCTAssertEqual(labels(content, containing: "tools.active").count, 0, content.debugDescription)
-        // The unset context window is not part of what the chat uses.
         XCTAssertEqual(labels(content, containing: "Not set").count, 0, content.debugDescription)
         toolsLink.tap()
         expandSheet(app, title: "Tools")
@@ -74,7 +63,6 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         app.navigationBars.containing(.staticText, identifier: "Tools").buttons["Done"].firstMatch.tap()
         XCTAssertFalse(app.buttons["settings-section-model-open"].exists,
                        "The direct model/thinking card belongs to Manage Session; this fixture has no delegation overrides")
-        // The project's read-only section ends Session Settings (#1655).
         let projectSection = element(app, "session-project-settings")
         XCTAssertTrue(projectSection.waitForExistence(timeout: 8), app.debugDescription)
         for _ in 0..<6 where !app.staticTexts["No repository overrides"].isHittable { app.swipeUp() }
@@ -85,8 +73,6 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         XCTAssertFalse(ignored.label.contains("tools.active"), ignored.label)
     }
 
-    /// An overridden row: the value paints whole, the Overridden pill sits centered
-    /// on the title's line before the value, and Revert stays its own 44-point target.
     @MainActor private func assertOverriddenRow(_ app: XCUIApplication, _ prefix: String, title: String, value pattern: String,
                                                 file: StaticString = #filePath, line: UInt = #line) {
         let row = app.descendants(matching: .any).matching(NSPredicate(
@@ -100,8 +86,6 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         let revert = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset'")).firstMatch
         XCTAssertTrue(editor.exists && pill.exists && heading.exists && revert.exists, row.debugDescription, file: file, line: line)
         XCTAssertLessThanOrEqual(pill.frame.maxX, editor.frame.minX, "\(title): Overridden precedes the value", file: file, line: line)
-        // Beside the title, centered on its first line when a long title wraps (#1655).
-        // At the default size one title line is about the pill's height.
         XCTAssertGreaterThan(pill.frame.minX, heading.frame.minX, "\(title): Overridden follows the title", file: file, line: line)
         let lines = max(1, (heading.frame.height / pill.frame.height).rounded())
         XCTAssertEqual(pill.frame.midY, heading.frame.minY + heading.frame.height / lines / 2, accuracy: 0.75,
@@ -112,8 +96,6 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         assertRendersWhole(editor, matching: pattern, named: "1651-\(prefix)-value", file: file, line: line)
     }
 
-    /// The element's painted text, recognized from pixels: a truncated pill keeps
-    /// its full accessibility label, so only the glyphs show an ellipsis.
     @MainActor private func assertRendersWhole(_ element: XCUIElement, matching pattern: String, named name: String,
                                                file: StaticString, line: UInt) {
         let screenshot = element.screenshot()
@@ -136,7 +118,6 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         root.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).allElementsBoundByIndex
     }
 
-    /// Brings a settings sheet to its large detent once it stops presenting.
     @MainActor private func expandSheet(_ app: XCUIApplication, title text: String) {
         let title = app.navigationBars.staticTexts[text].firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 8), app.debugDescription)

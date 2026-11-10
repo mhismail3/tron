@@ -1,12 +1,6 @@
 import CoreGraphics
 import SwiftUI
 
-/// Pure layout constants for the onboarding wizard shell.
-///
-/// Keeping these values out of `WizardView` gives tests a stable
-/// surface for the invariants users can feel immediately: the wizard
-/// canvas uses one fixed size, and the bottom action bar is pinned to
-/// the same insets regardless of which step body is sliding.
 enum WizardLayout {
     static let width: CGFloat = 480
     static let height: CGFloat = 440
@@ -25,12 +19,6 @@ enum WizardLayout {
     static let progressAnimation = transitionAnimation
 }
 
-/// Shared geometry for icon-led cards inside wizard pages.
-///
-/// The important invariant is optical balance: the space from the card's
-/// left edge to the icon column equals the space from that icon column
-/// to the text. Without a fixed icon column, wide SF Symbols make the
-/// icon look shoved left while the text floats too far away.
 enum WizardCardLayout {
     static let cornerRadius: CGFloat = 10
     static let horizontalInset: CGFloat = 18

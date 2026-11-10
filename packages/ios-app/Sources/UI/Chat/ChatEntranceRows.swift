@@ -20,23 +20,10 @@ struct ChatSemanticFrameObservation: Equatable {
 }
 
 enum ChatEntranceGrowthPolicy {
-    /// Liquid Glass paints shadows and interactive press expansion beyond a
-    /// row's layout bounds. The entrance reveal owns only vertical admission;
-    /// this transparent gutter keeps those effects out of its clip boundary.
     static let effectOverflow: CGFloat = 24
-    /// A settled row's clip covers this far past its own bounds in every
-    /// direction. The clip node is present at every progress — removing it at
-    /// admission switched the row's view structure — so at progress 1 it must not
-    /// trim any surface a row draws past its animated frame. Keep the bounded
-    /// display viewport and header inside the admitted reveal, with room for
-    /// Liquid Glass press expansion, shadows and prompt selection chrome.
     static let settledOverflow: CGFloat = DisplayInlineLayoutPolicy.maximumViewportHeight
         + DisplayInlineLayoutPolicy.controlTouchTarget
         + effectOverflow
-    /// Height interpolation is a layout optimization for compact arrivals, not
-    /// a transcript admission requirement. Keeping very tall rows at their
-    /// natural height prevents a single large prompt or Markdown response from
-    /// moving the lazy stack by tens of thousands of points per animation.
     static let maximumAnimatedHeight: CGFloat = 8_000
 
     static func normalizedProgress(_ progress: CGFloat) -> CGFloat {
@@ -47,33 +34,19 @@ enum ChatEntranceGrowthPolicy {
     static func height(natural: CGFloat, progress: CGFloat) -> CGFloat {
         guard natural.isFinite, natural > 0 else { return 0 }
         guard natural <= maximumAnimatedHeight else { return natural }
-        // A zero-height run of pending compact pills can be culled by the
-        // lazy stack before placement, preventing the geometry that admits
-        // their entrance. Keep an invisible layout footprint, not a new view
-        // identity or retry; opacity still hides the pending content.
         return min(natural, max(1, natural * normalizedProgress(progress)))
     }
 
-    /// The admission clip: vertically inset while the row is still being
-    /// admitted, and past every edge of the row at progress 1. The clip is
-    /// applied at every progress, because removing the node at admission is what
-    /// switched the row's view structure and discarded the state below it; at
-    /// progress 1 it constrains neither the row's shadows nor its press region.
     static func clipRect(in bounds: CGRect, progress: CGFloat) -> CGRect {
         let normalized = normalizedProgress(progress)
         guard normalized < 1 else {
             return bounds.insetBy(dx: -settledOverflow, dy: -settledOverflow)
         }
-        // Horizontal overflow stays available to native text and glass effects
-        // throughout incremental growth; only the vertical admission is clipped.
         return bounds.insetBy(dx: -effectOverflow, dy: effectOverflow * (1 - normalized))
     }
 }
 
 enum ChatIncrementalContentGrowthPolicy {
-    /// A large accumulated network backlog installs atomically instead of
-    /// interpolating an unbounded row. Ordinary line and chip growth remains
-    /// well below this limit.
     static let maximumAnimatedGrowth: CGFloat = 2_000
 
     static func shouldAnimate(
@@ -102,15 +75,6 @@ private struct ChatIncrementalContentMeasurement<Identity: Equatable & Sendable>
     let height: CGFloat
 }
 
-/// Owns only the presentation height of an already-mounted streaming message.
-/// Canonical text and controls are installed immediately at natural size, then
-/// clipped by one local height while ordinary additions expand. Width changes,
-/// replacement/shrink, covered surfaces, and large backlogs install atomically.
-///
-/// A settled row owns no height here at all: pinning one would lay the row out at
-/// a stale height whenever its width, Dynamic Type or document changed, and would
-/// write state on every mount for nothing. The pinned height is released when a
-/// stream ends, after any growth animation still in flight completes.
 struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content: View>: View {
     let identity: Identity
     let streaming: Bool
@@ -181,9 +145,6 @@ struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content:
             let animation = ChatMotion.streamingResize
             isAnimatingGrowth = true
             withAnimation(animation, completionCriteria: .logicallyComplete) {
-                // The growth marker travels with the height write itself:
-                // `chatStableTranscriptUpdates` reads it to keep a projection
-                // change in the same update from erasing this animation.
                 var transaction = Transaction(animation: animation)
                 transaction.admitsChatIncrementalGrowthAnimation = true
                 withTransaction(transaction) { presentedHeight = measurement.height }
@@ -197,9 +158,6 @@ struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content:
         }
     }
 
-    /// A settled row keeps no pinned height. `onChange` re-enters through a fresh
-    /// body, so this reads the current `streaming` and animation state rather
-    /// than the values captured when an animation started.
     @MainActor
     private func releaseSettledHeight() {
         guard !streaming, !isAnimatingGrowth, presentedHeight != nil else { return }
@@ -230,9 +188,6 @@ private struct ChatEntranceGrowthLayout: Layout, Animatable {
     func makeCache(subviews: Subviews) -> Cache { Cache() }
 
     func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        // Payload and Dynamic Type changes invalidate the intrinsic measurement.
-        // Animating `progress` alone does not, so the lazy row can reuse one
-        // exact measurement for every frame of its short height reveal.
         cache = Cache()
     }
 
@@ -296,18 +251,12 @@ private struct ChatEntranceGrowthClipShape: Shape {
 }
 
 private extension View {
-    /// Clips only the animated vertical admission. Horizontal overflow remains
-    /// available to native text and glass effects throughout incremental growth.
     func chatIncrementalVerticalClip() -> some View {
         padding(.horizontal, ChatEntranceGrowthPolicy.effectOverflow)
             .clipShape(Rectangle())
             .padding(.horizontal, -ChatEntranceGrowthPolicy.effectOverflow)
     }
 
-    /// Clips only the animated vertical admission. The clip node is present at
-    /// every progress — a settled row's clip covers everything it can draw — so
-    /// admission never switches the row's view structure and the transcript chip
-    /// keeps its unconstrained Liquid Glass press-and-drag region.
     func chatEntranceGrowthClip(progress: CGFloat) -> some View {
         clipShape(ChatEntranceGrowthClipShape(progress: progress))
     }
@@ -400,9 +349,6 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
     }
 }
 
-/// The ephemeral submission occupies its complete final layout immediately.
-/// Only the already-sized row fades and translates straight up; later canonical
-/// replacements reuse the same physical host without replaying the entrance.
 struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
     static var hiddenOffset: CGFloat { 20 }
 

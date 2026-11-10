@@ -3,12 +3,6 @@ import SwiftUI
 import TronMobileCore
 import UniformTypeIdentifiers
 
-/// The real chat route, composer and attachment strip over a scripted Gateway,
-/// so journeys read which haptic each live event played (`TronHapticsProbe`).
-/// Prompts script the run: `fail` is rejected, one containing `slow` runs until
-/// Stop, `away` settles three seconds later, anything else replies at once. Fixture buttons
-/// deliver a worker result or an `ask_user` question as live snapshots;
-/// `-chat-haptics-history` opens a chat whose history already holds each event.
 struct HostedChatHapticsFixture: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: AppModel
@@ -120,7 +114,6 @@ private actor ChatHapticsGateway {
             return
         }
         guard history else { return }
-        // Each event already happened before this chat opened.
         transcript = [Self.message("history-1", "user", "Earlier prompt"),
                       Self.message("history-2", "assistant", "Earlier reply", stopReason: "stop"),
                       Self.workerResult("history-3"), Self.message("history-4", "user", "Later prompt")]
@@ -152,7 +145,6 @@ private actor ChatHapticsGateway {
         case "session.attention.read": return .success(.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]))
         case "session.list": return .success(.object(["sessions": .array([])]))
         case "session.prompt":
-            // The keyboard may capitalize the scripted word.
             let text = params["text"]?.stringValue?.lowercased() ?? ""
             lastPrompt = text
             guard text != "fail" else {
@@ -215,8 +207,6 @@ private actor ChatHapticsGateway {
         await deliver()
     }
 
-    /// The canonical prompt carries its operation as its presentation ID, the
-    /// receipt the composer resolves its outgoing row by.
     private func run(_ text: String, operationID: String) async {
         try? await Task.sleep(for: .milliseconds(150))
         transcript.append(Self.message(nextID("user"), "user", text, presentationID: operationID))
@@ -234,8 +224,6 @@ private actor ChatHapticsGateway {
         await deliver()
     }
 
-    /// A live `session.snapshot`, as the Gateway sends the open session; a
-    /// closed (backgrounded) connection loses it like a suspended app would.
     private func deliver() async {
         sequence += 1
         publish()
@@ -287,7 +275,6 @@ private actor ChatHapticsGateway {
                 "origin": .object(["kind": .string("extension"), "title": .string("Home task"), "confidence": .string("receipt")])])])
     }
 
-    /// A settled `ask_user` call and its canonical result: the read-only row.
     private static func answeredQuestion(_ id: String) -> [JSONValue] {
         let origin: JSONValue = .object(["source": .string(AskUserToolPresentation.tronSource), "owner": .object([
             "id": .string("tron-ask-user"), "title": .string("Ask User"), "source": .string(AskUserToolPresentation.tronSource)])])

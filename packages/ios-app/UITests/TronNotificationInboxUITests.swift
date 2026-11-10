@@ -1,19 +1,10 @@
 import UIKit
 import XCTest
 
-/// The Notifications sheet opened from the Settings bell (#938). The fixture
-/// scripts only the selected Gateway's inbox; a second paired Mac is offline.
-/// The test changes the Gateway's inbox while the sheet is open through Darwin
-/// notifications the fixture observes, so every change reaches the app as the
-/// Gateway's own `notification.inbox.changed` event.
 final class TronNotificationInboxUITests: XCTestCase {
     private let deliver = "com.tron.hosted.notification-inbox.deliver"
     private let readNewest = "com.tron.hosted.notification-inbox.read-newest"
 
-    /// With a paired Mac offline the sheet has no connection row of its own;
-    /// a pull neither refreshes nor shows a spinner; a new alert and a read on
-    /// another device change the open sheet live; every row sits on the shared
-    /// Liquid Glass row surface, clear when read and accent-tinted when unread.
     @MainActor func testSheetFollowsGatewayLiveWithoutOfflineRowOrPullToRefresh() throws {
         continueAfterFailure = false
         let app = launch("mixed"); defer { app.terminate() }
@@ -24,15 +15,11 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertTrue(ask.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertEqual(ask.value as? String, "Unread")
         XCTAssertTrue(finished.exists)
-        // Titled by its chat from the catalog; the kind is the icon, said once.
         XCTAssertTrue(waitFor(ask, label: "Release checklist, Input needed, "), ask.label)
-        // Two Macs are paired, so each row names its Gateway once.
         XCTAssertTrue(ask.label.hasSuffix(", Studio Mac"), ask.label)
         assertNoConnectionRow(app)
         try capture(app, "unread")
 
-        // All mixes read and unread rows: each is its own glass row (#956),
-        // clear when read and tinted when unread.
         selectFilter(app, "All")
         let home = row(app, "inbox-row-home")
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
@@ -44,14 +31,12 @@ final class TronNotificationInboxUITests: XCTestCase {
         assertNoConnectionRow(app)
         try capture(app, "all")
 
-        // A pull is not a refresh: no spinner, no list read, the sheet stays.
         let filter = app.buttons["Unread"]
         let start = home.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 120)))
         XCTAssertEqual(app.activityIndicators.count, 0, "a pull starts no refresh spinner: \(app.debugDescription)")
         XCTAssertTrue(filter.waitForExistence(timeout: 5), "the sheet stays open after the pull")
 
-        // A new alert appears while the sheet is open, unread and tinted.
         post(deliver)
         let live = row(app, "inbox-row-live-1")
         XCTAssertTrue(live.waitForExistence(timeout: 20), "the new notification never appeared: \(app.debugDescription)")
@@ -61,13 +46,11 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertTrue(isTinted(app, live, comparedWith: home))
         try capture(app, "all-live-delivered")
 
-        // Read on another device: the same row turns read and clear in place.
         post(readNewest)
         XCTAssertTrue(waitFor(live, value: "Read"), "the read never reached the open sheet: \(live.debugDescription)")
         XCTAssertTrue(hasSurface(app, live), "the read row keeps its glass surface")
         XCTAssertFalse(isTinted(app, live, comparedWith: home), "the read row lost its tint")
 
-        // Mark Read clears every remaining unread row in place.
         let markRead = app.buttons["Mark all notifications read"]
         XCTAssertTrue(markRead.isEnabled)
         markRead.tap()
@@ -78,8 +61,6 @@ final class TronNotificationInboxUITests: XCTestCase {
         assertNoConnectionRow(app)
     }
 
-    /// The empty Unread and All states with a paired Mac offline: the shared
-    /// empty state, no connection row, and a live first alert.
     @MainActor func testEmptyInboxShowsEmptyStateAndReceivesFirstAlertLive() throws {
         continueAfterFailure = false
         let app = launch("empty"); defer { app.terminate() }
@@ -97,9 +78,6 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["No notifications yet"].exists)
     }
 
-    /// Mark Read on Unread removes the rows once: the empty state replaces them
-    /// and stays while the reconciling refreshes (real round trips) run. A
-    /// refresh never hides the sheet's content under the loading pulse.
     @MainActor func testMarkReadOnUnreadSettlesOnceWhileTheRefreshRuns() throws {
         continueAfterFailure = false
         let app = launch("mixed", arguments: ["-notification-inbox-list-latency"]); defer { app.terminate() }
@@ -113,9 +91,6 @@ final class TronNotificationInboxUITests: XCTestCase {
         let filter = app.buttons["Unread"]
         let empty = app.staticTexts["No unread notifications"]
         app.buttons["Mark all notifications read"].tap()
-        // From the tap through the mark-all reconciliation and the Gateway's
-        // change event (two list round trips at the fixture's latency): the
-        // sheet keeps its content and goes from rows to the empty state once.
         let observeUntil = Date().addingTimeInterval(5)
         var transitions: [String] = []
         while Date() < observeUntil {
@@ -130,8 +105,6 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertFalse(ask.exists)
         try capture(app, "unread-after-mark-read-settled")
     }
-
-    // MARK: - Helpers
 
     @MainActor private func waitFor(_ condition: @escaping () -> Bool, timeout: TimeInterval = 20) -> Bool {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)],
@@ -151,7 +124,6 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertTrue(bell.waitForExistence(timeout: 30), "the Settings bell never appeared: \(app.debugDescription)")
         bell.tap()
         XCTAssertTrue(app.buttons["Unread"].waitForExistence(timeout: 10), app.debugDescription)
-        // Expand to the large detent so every seeded row is on screen.
         let title = app.staticTexts["Notifications"]
         let start = title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)))
@@ -181,16 +153,11 @@ final class TronNotificationInboxUITests: XCTestCase {
         ) == .completed
     }
 
-    /// The sheet never renders its own connection treatment, however long the
-    /// offline Mac's inbox read has been failing.
     @MainActor private func assertNoConnectionRow(_ app: XCUIApplication) {
         let offline = NSPredicate(format: "label CONTAINS[c] 'offline' OR label CONTAINS[c] 'could not load' OR label == 'Retry'")
         XCTAssertEqual(app.descendants(matching: .any).matching(offline).count, 0, app.debugDescription)
     }
 
-    /// Whether a row has its own surface: one pixel inside the row's trailing
-    /// padding against one just outside it, close enough that the blurred
-    /// sheet behind both is the same. A bare row on the sheet matches.
     @MainActor private func hasSurface(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
         guard let image = XCUIScreen.main.screenshot().image.cgImage else { return false }
         let scale = CGFloat(image.width) / app.frame.width
@@ -200,8 +167,6 @@ final class TronNotificationInboxUITests: XCTestCase {
         return distance(inside, outside) > 6
     }
 
-    /// Whether a row's surface carries the accent tint: the same point in its
-    /// trailing padding against a read (clear glass) row's.
     @MainActor private func isTinted(_ app: XCUIApplication, _ element: XCUIElement, comparedWith clear: XCUIElement) -> Bool {
         guard let image = XCUIScreen.main.screenshot().image.cgImage else { return false }
         let scale = CGFloat(image.width) / app.frame.width

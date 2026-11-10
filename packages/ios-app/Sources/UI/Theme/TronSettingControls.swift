@@ -1,12 +1,7 @@
 import SwiftUI
 
-/// Passive explanations sit on the sheet, never in a surface that looks tappable:
-/// sheet intros, help and captions, in the settings row subtitle's size and colour
-/// on every sheet (#900), so explanatory copy never reads smaller than its rows.
 struct TronSettingsCaption: View {
     let text: String
-    /// Captions sit 4 points inside the sheet's content edge; a group's detail
-    /// aligns with its header instead.
     var inset: CGFloat = 4
     init(_ text: String, inset: CGFloat = 4) { self.text = text; self.inset = inset }
     var body: some View {
@@ -20,7 +15,6 @@ struct TronSettingsCaption: View {
 }
 
 extension View {
-    /// Keep the explanation attached to its owner rather than a distant page footer.
     func tronSettingsCaption(_ text: String?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             self
@@ -29,8 +23,6 @@ extension View {
     }
 }
 
-/// Actionable failures share row geometry and a trailing retry target. They are
-/// deliberately distinct from passive, surface-free settings captions.
 struct TronSettingsNotice: View {
     let message: String
     var title: String? = nil
@@ -51,7 +43,6 @@ struct TronSettingsNotice: View {
     }
 }
 
-/// A chosen value belongs in its action capsule, not repeated as a subtitle.
 struct TronSelectionRow<Choices: View>: View {
     let icon: String
     let title: String
@@ -69,7 +60,6 @@ struct TronSelectionRow<Choices: View>: View {
     }
 }
 
-/// One option of a `TronChoiceRow`/`TronChoicePicker`.
 struct TronChoice<ID: Hashable>: Identifiable {
     let id: ID
     let label: String
@@ -77,9 +67,6 @@ struct TronChoice<ID: Hashable>: Identifiable {
     var disabledReason: String? = nil
 }
 
-/// The standard single-choice row: the chosen value in a right-aligned capsule
-/// that opens a picker sheet of option rows. Keep schema choices on this shared
-/// surface; nested native-menu behavior is covered by TronSheetTintUITests (#877).
 struct TronChoiceRow<ID: Hashable>: View {
     let icon: String
     let title: String
@@ -97,7 +84,6 @@ struct TronChoiceRow<ID: Hashable>: View {
     }
 }
 
-/// A picker sheet of standard option rows; long lists get the floating search.
 struct TronChoicePicker<ID: Hashable>: View {
     let title: String
     let choices: [TronChoice<ID>]
@@ -128,8 +114,6 @@ struct TronChoicePicker<ID: Hashable>: View {
     }
 }
 
-/// Several choices from one list, committed with Save. The order chosen is kept;
-/// a newly chosen item joins the end.
 struct TronChecklistPicker<ID: Hashable>: View {
     let title: String
     var help: String? = nil
@@ -178,7 +162,6 @@ struct TronChecklistPicker<ID: Hashable>: View {
     }
 }
 
-/// The same selected-value row can open a richer picker instead of a menu.
 struct TronSelectionSheetRow<Destination: View>: View {
     let icon: String
     let title: String
@@ -186,7 +169,6 @@ struct TronSelectionSheetRow<Destination: View>: View {
     let value: String
     var accessibilityLabel: String? = nil
     var accent: Color = .tronPrimary
-    /// A short count or state is shown whole; the row layout makes room.
     var valueFixed = false
     @ViewBuilder let destination: () -> Destination
     @Environment(\.tronSettingsVisualTheme) private var theme
@@ -202,8 +184,6 @@ struct TronSelectionSheetRow<Destination: View>: View {
     }
 }
 
-/// Catalog choices share the established model-picker row. Catalog owners
-/// supply facts and selection authority; this primitive owns only presentation.
 struct TronCatalogOptionRow: View {
     let title: String
     var summary: String? = nil
@@ -253,8 +233,6 @@ extension EnvironmentValues {
     }
 }
 
-/// Stage numeric text until editing ends. Form owners may instead keep the
-/// pending text externally until their explicit action captures a policy.
 struct TronNumberSettingRow: View {
     let icon: String
     let title: String
@@ -358,8 +336,6 @@ struct TronTextSettingRow: View {
 }
 
 extension Binding {
-    /// Route compound user actions through the same binding admission as a
-    /// field, without teaching individual sheets a second save path.
     func update(_ change: (inout Value) -> Void) {
         var next = wrappedValue
         change(&next)

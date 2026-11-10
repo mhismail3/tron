@@ -1,8 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// Core onboarding still requires FDA only. The same permission surface is also
-/// reachable after onboarding without changing the wizard's persisted position.
 struct PermissionsStep: View {
     @Bindable var state: WizardState
     var body: some View { PermissionSetupView(statuses: $state.permissionStatuses) }
@@ -207,7 +205,6 @@ struct PermissionSetupView: View {
         settingsWatch?.cancel(); settingsWatch = nil
         if let observer = activationObserver { NotificationCenter.default.removeObserver(observer) }
         activationObserver = nil
-        // The coordinator, not this view, still owns any accepted consent work.
     }
 }
 

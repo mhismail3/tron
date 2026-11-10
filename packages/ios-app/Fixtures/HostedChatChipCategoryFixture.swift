@@ -3,8 +3,6 @@ import Foundation
 import TronMobileCore
 
 extension HostedSubagentParityFixture {
-    /// One running transcript holding every compact chat chip category, as real
-    /// Gateway transcript DTOs through the mounted ChatView projector.
     static var chipCategoryTranscript: [TranscriptItem] {
         func semantic(_ kind: String, origin: String, title: String?, direction: String = "inboundContext",
                       sequence: Int, extra: [String: Any] = [:]) -> [String: Any] {

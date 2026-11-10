@@ -17,8 +17,6 @@ extension EnvironmentValues {
     }
 }
 
-/// The document never resolves a path or starts a remote URL fetch. Only its
-/// admitted immutable image artifacts may use the shared bounded media loader.
 struct MarkdownResourceImage: View {
     let alt: String
     let destination: String
@@ -70,7 +68,6 @@ struct MarkdownResourceImage: View {
             image = preview.image
             loadedIdentity = identity
         } catch is CancellationError {
-            // The covered/retired surface publishes nothing; reactivation retries.
         } catch {
             guard !Task.isCancelled, activity.allowsPresentationPublication, self.identity == identity else { return }
             image = nil

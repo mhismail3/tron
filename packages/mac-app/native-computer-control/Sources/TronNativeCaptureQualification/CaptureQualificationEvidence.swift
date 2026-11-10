@@ -3,7 +3,6 @@ import Foundation
 import ImageIO
 import TronComputerControl
 
-/// Closed invocation: no target, input, duration, or arbitrary filesystem selector.
 enum CaptureQualificationInvocation: Equatable {
     case help, preflight, capture(writeImages: Bool), invalid
 
@@ -18,8 +17,6 @@ enum CaptureQualificationInvocation: Equatable {
     }
 }
 
-/// The same entry boundary is exercised offline with native closures that must
-/// remain uncalled for help/invalid input. Parsing precedes even NSApplication.
 @MainActor
 enum CaptureQualificationEntry {
     static func run(arguments: [String], emit: (String) -> Void,
@@ -66,7 +63,6 @@ struct CaptureQualificationFrameEvidence: Codable {
     let width: Int
     let height: Int
     let encodedBytes: Int
-    /// Measured 5x5 patch means in top-left, top-right, bottom-left, bottom-right order.
     let samples: [CaptureQualificationRGB]
 
     var matches: Bool {
@@ -78,8 +74,6 @@ struct CaptureQualificationFrameEvidence: Codable {
     }
 }
 
-/// No fixture drawing helpers are used by this oracle. Expected RGB values and
-/// patch locations are specified independently of AppKit's drawing implementation.
 enum CaptureQualificationJPEG {
     static func markersMatch(_ samples: [CaptureQualificationRGB], stage: CaptureQualificationStage) -> Bool {
         let expected: [[Int]]
@@ -102,8 +96,6 @@ enum CaptureQualificationJPEG {
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int,
               width == frame.width, height == frame.height else { throw CaptureQualificationFailure.invalidJPEG }
-        // Validate encoded dimensions BEFORE full decode: metadata cannot authorize
-        // an unbounded ImageIO allocation or merely relabel a square native canvas.
         guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil), image.width == width, image.height == height,
               let space = CGColorSpace(name: CGColorSpace.sRGB) else { throw CaptureQualificationFailure.invalidJPEG }
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
@@ -129,8 +121,6 @@ enum CaptureQualificationJPEG {
     }
 }
 
-/// Observe the actual producer after its join. Joining and a healthy native
-/// retirement are distinct facts; expected source-close errors are phase-local.
 struct CaptureQualificationStopInspection {
     let joined: Bool
     let retirementFailure: NativeWindowCaptureError?

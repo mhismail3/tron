@@ -6,7 +6,6 @@ struct ProviderSetupRow: View {
     let provider: ProviderSummary
     var sessionID: String? = nil
     var usageSnapshot: ProviderUsageSnapshot? = nil
-    /// True while the bounded usage read is still pending for a supported row.
     var isUsageLoading: Bool = false
     @PresentationState private var showsConfiguration: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
@@ -26,8 +25,6 @@ struct ProviderSetupRow: View {
         self.sessionID = sessionID
         self.usageSnapshot = usageSnapshot
         self.isUsageLoading = isUsageLoading
-        // Every provider row shares this declaration site inside one sheet.
-        // Its nested presentation must survive content rebuilds independently.
         _showsConfiguration = PresentationState(wrappedValue: false, key: "\(sessionID ?? "global"):\(provider.id)")
     }
 
@@ -98,8 +95,6 @@ struct ProviderSetupRow: View {
     private func rowContents<Trailing: View>(@ViewBuilder trailing: () -> Trailing) -> some View {
         let rowAccent = settingsTheme?.accent
             ?? (provider.configured ? Color.tronEmerald : Color.tronTextSecondary)
-        // Usage always wraps in the flexible text column. Measuring intrinsic
-        // label width here used to move Details below multi-window summaries.
         HStack(alignment: .center, spacing: TronSpacing.xl) {
             providerIcon(rowAccent)
             providerLabels.frame(maxWidth: .infinity, alignment: .leading)
@@ -127,8 +122,6 @@ struct ProviderSetupRow: View {
                 .fixedSize(horizontal: false, vertical: true)
             usageLine
         }
-        // The loading placeholder and the resolved usage line share one slot, so
-        // only their opacity changes: the row never animates a height jump.
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: usageLineIdentity)
     }
 
@@ -142,8 +135,6 @@ struct ProviderSetupRow: View {
                 .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(usageSnapshot))")
                 .transition(.opacity)
         } else if showsLocalUnlimitedIndicator {
-            // Local models have no account to report usage for, so the slot
-            // states that instead of staying empty.
             Image(systemName: "infinity")
                 .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald)

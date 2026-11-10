@@ -2,7 +2,6 @@
 import Foundation
 import TronMobileCore
 
-/// Synthetic socket evidence for lineage/history UI journeys; never live user data.
 enum HostedHomeTaskHistoryFixture {
     private static let now = Date().timeIntervalSince1970
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-home-task-history-review") }

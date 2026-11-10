@@ -1,8 +1,6 @@
 import Foundation
 import TronMobileCore
 
-/// A dashboard workspace section with the sessions already ordered for display.
-/// The gateway catalog remains canonical; this is only a lightweight UI grouping.
 struct SessionListWorkspaceGroup: Identifiable, Equatable {
     let path: String
     let name: String
@@ -74,13 +72,6 @@ struct SessionListPaginationTransition: Equatable {
     }
 }
 
-/// Per-workspace pagination state for the dashboard.
-///
-/// The state changes the rendered count before the animation starts so SwiftUI
-/// can lay out new rows, then reveals them in a staged pass. Hiding rows follows
-/// the opposite order and only commits the smaller count after the fade. A
-/// generation on every transition rejects delayed completions from an older
-/// refresh or animation.
 struct SessionListSessionExpansion: Equatable {
     private(set) var pageSize: Int
 
@@ -98,8 +89,6 @@ struct SessionListSessionExpansion: Equatable {
         pageSize = next
         visibleCountsByGroupID.removeAll()
         transitionByGroupID.removeAll()
-        // Keep generations: delayed completions must not match the first
-        // transition started after a settings change for the same project.
     }
 
     func visibleCount(for groupID: String, totalCount: Int) -> Int {
@@ -205,9 +194,6 @@ struct SessionListSessionExpansion: Equatable {
 
     mutating func reconcile(groupCounts: [String: Int]) {
         let validGroupIDs = Set(groupCounts.keys)
-        // A catalog replacement may retain the same counts while replacing row
-        // identities. Finish no in-flight animation against that new snapshot;
-        // the visible count is retained and the next user action starts clean.
         transitionByGroupID.removeAll()
         visibleCountsByGroupID = visibleCountsByGroupID.reduce(into: [:]) { result, entry in
             guard let totalCount = groupCounts[entry.key], totalCount > pageSize else { return }

@@ -2,15 +2,8 @@ import Foundation
 import Observation
 import SwiftUI
 
-/// Rendering activity is intentionally independent from Gateway/session
-/// authority. The topmost surface owns animation and viewport work; its
-/// mounted ancestors continue publishing the bounded state consumed by that
-/// visible descendant. Unrelated covered branches suppress presentation work.
 struct PresentationSurfaceActivity: Equatable, Sendable {
-    /// Bounded parent data needed by the visible surface, such as the exact
-    /// tool payload selected by a descendant detail sheet.
     let allowsDataPublication: Bool
-    /// Surface-owned loads, polls, and automatic presentation effects.
     let allowsPresentationPublication: Bool
     let allowsContinuousAnimation: Bool
     let allowsViewportObservation: Bool
@@ -21,8 +14,6 @@ struct PresentationSurfaceActivity: Equatable, Sendable {
     static let presentingDescendant = Self(allowsDataPublication: true, allowsPresentationPublication: false,
                                            allowsContinuousAnimation: false, allowsViewportObservation: false)
 
-    /// A parent whose topmost child is a partial sheet that shows it (an
-    /// annotation's sheet revealing its source) keeps its viewport live.
     static let presentingViewportDescendant = Self(allowsDataPublication: true, allowsPresentationPublication: false,
                                                    allowsContinuousAnimation: false, allowsViewportObservation: true)
 
@@ -35,8 +26,6 @@ struct PresentationSurfaceToken: Hashable, Sendable {
     let generation: UUID
 }
 
-/// Restarts one disposable view task when its surface changes activity without
-/// coupling the task's domain-specific source identity to presentation state.
 struct PresentationActivityTaskID<Source: Hashable>: Hashable {
     let source: Source
     let presentationActive: Bool
@@ -44,8 +33,6 @@ struct PresentationActivityTaskID<Source: Hashable>: Hashable {
 
 @MainActor
 enum PresentationPublicationPolicy {
-    /// A coordinator is authoritative whenever present. A missing token is
-    /// therefore fail-closed; ambient activity is only a standalone fallback.
     static func allows(
         ambient: PresentationSurfaceActivity,
         coordinator: PresentationActivityCoordinator?,
@@ -67,29 +54,21 @@ enum PresentationClockPolicy {
     }
 }
 
-/// Owns mounted topology and disposable read demand. Transport, accepted
-/// mutations and canonical session authority remain with their existing owners.
 @MainActor
 @Observable
 final class PresentationActivityCoordinator {
     private struct Surface {
         let parent: PresentationSurfaceToken?
         let dependencies: Set<PresentationRefreshDependency>
-        /// Its direct parent keeps viewport work while this is topmost.
         let keepsParentViewport: Bool
     }
 
     private static let retiredTokenLimit = 512
     private var surfaces: [PresentationSurfaceToken: Surface] = [:]
     private var order: [PresentationSurfaceToken] = []
-    /// A dismissal can retire binding intent before delayed SwiftUI content
-    /// appears. Keep an exact, bounded tombstone ledger so that late content—or
-    /// a late child of that content—cannot escape as a new independent branch.
     private var retiredTokens: Set<PresentationSurfaceToken> = []
     private var retiredTokenOrder: [PresentationSurfaceToken] = []
 
-    /// Registration is idempotent so binding intent and mounted content can
-    /// both establish the same generation without creating duplicate leases.
     func register(_ token: PresentationSurfaceToken, parent: PresentationSurfaceToken?,
                   dependencies: Set<PresentationRefreshDependency>? = nil, keepsParentViewport: Bool = false) {
         guard surfaces[token] == nil,
@@ -98,16 +77,12 @@ final class PresentationActivityCoordinator {
         #if HOSTED_TEST
         HostedPresentationProbe.record?("register", "\(token.id)#\(token.generation) parent=\(parent?.id ?? "root")")
         #endif
-        // Session authority is shared down its lineage; catalog demand belongs
-        // only to the surface declaring that it actually consumes the roster.
         surfaces[token] = Surface(parent: parent, dependencies: dependencies
             ?? refreshDependencies(for: parent).filter { $0 != .sessionCatalog },
             keepsParentViewport: keepsParentViewport)
         order.append(token)
     }
 
-    /// Retires one exact generation and every mounted descendant. A delayed
-    /// callback from an earlier route cannot affect its replacement.
     func retire(_ token: PresentationSurfaceToken) {
         #if HOSTED_TEST
         HostedPresentationProbe.record?("retire", "\(token.id)#\(token.generation)")
@@ -134,8 +109,6 @@ final class PresentationActivityCoordinator {
         return .covered
     }
 
-    /// Binding intent may already be nil during native dismissal. Visual
-    /// handoffs follow this owner's retained topology until dismissal completes.
     func hasMountedDescendant(id: String, of parent: PresentationSurfaceToken?) -> Bool {
         guard let parent, surfaces[parent] != nil else { return false }
         return order.contains { $0.id == id && isDescendant($0, of: parent) }
@@ -145,8 +118,6 @@ final class PresentationActivityCoordinator {
         token.flatMap { surfaces[$0]?.dependencies } ?? []
     }
 
-    /// Transport recovery always proceeds. Only the foremost presentation's
-    /// declared read dependencies request mounted-session synchronization.
     func requiresSessionRefresh(_ sessionID: String) -> Bool {
         guard let topmostToken else { return true }
         return refreshDependencies(for: topmostToken).contains { $0.requiresSession(sessionID) }
@@ -222,8 +193,6 @@ struct TronPresentationActivityReader<Content: View>: View {
     var body: some View { content(activity) }
 }
 
-/// Registers a navigation/root surface for exactly the lifetime of its mounted
-/// content and resolves activity for all descendants.
 struct TronPresentationSurface<Content: View>: View {
     private let id: String
     private let suppliedToken: PresentationSurfaceToken?
@@ -281,9 +250,6 @@ struct TronPresentationSurface<Content: View>: View {
         suppliedToken ?? PresentationSurfaceToken(id: id, generation: generation)
     }
 
-    /// A route surface (dashboard, chat route) is the parent of the sheets its
-    /// content presents, so their presentation state ends with the route even
-    /// when a presenter is torn down without its sheet reporting a dismissal.
     private var statePath: String {
         PresentationStateStore.path(parent: inheritedStateScope, identity: "surface:\(id)#\(generation)")
     }
@@ -303,8 +269,6 @@ struct TronPresentationSurface<Content: View>: View {
             .modifier(TronNativeSheetCanvas(role: registersLifecycle ? .route : .sheet))
             #if HOSTED_TEST
             .background { HostedPresentationProbe.nativeView?(token.id) }
-            // Native sheets host this content in a new transaction root. The
-            // presenter's canvas transaction does not fence its layout updates.
             .transaction { transaction in
                 if ProcessInfo.processInfo.environment["TRON_UI_LOCK_RENDERING"] == "1" {
                     transaction.disablesAnimations = true

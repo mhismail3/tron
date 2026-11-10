@@ -9,8 +9,6 @@ struct ChatMediaIdentity: Hashable, Sendable {
     let profileID: String
     let lifecycleGeneration: Int
     let blobID: String
-    /// Required only for session-authorized durable display artifacts. Existing
-    /// transient blobs and prompt attachments retain their original route.
     let sessionID: String?
 
     init(
@@ -44,14 +42,7 @@ enum ChatMediaLoadError: Error, Equatable, Sendable {
     case staleIdentity
 }
 
-/// The prepared form of one inline display artifact. `ChatMediaLoader` retains
-/// it for the exact artifact identity, because an inline card is mounted by the
-/// transcript's lazy window rather than by a user gesture: a sibling card's
-/// automatic load must not cancel its request, and a card that leaves and
-/// re-enters the window must render what its identity already prepared instead
-/// of a placeholder that resizes the row under the reader.
 protocol ChatInlineArtifact: Sendable {
-    /// The bytes this value accounts for in the store's bound.
     var accountedBytes: Int { get }
 }
 
@@ -64,23 +55,9 @@ enum ChatMediaPolicy {
     static let maximumEncodedBytes = 25 * 1_024 * 1_024
     static let maximumConcurrentPreparations = 1
     static let maximumThumbnailFlights = 32
-    /// Prepared inline display artifacts the loader retains per exact identity.
-    /// Inline cards load automatically as they enter the lazy window, so they
-    /// are not a replacement flight: the bound is how many prepared documents a
-    /// card that mounts again may resolve without re-fetching, not how much work
-    /// runs at once.
     static let maximumRetainedInlineArtifacts = 8
     static let maximumRetainedInlineArtifactBytes = 4 * 1_024 * 1_024
-    /// A prepared artifact above this ceiling is handed to its caller and not
-    /// retained: one large decoded document must not occupy the store. The card
-    /// that loaded it holds the value itself, so a value this size renders for as
-    /// long as its own card is mounted.
     static let maximumRetainedInlineArtifactValueBytes = 1 * 1_024 * 1_024
-    /// Inline artifact requests are independent per identity, so one card's
-    /// automatic load cannot cancel another's. The shared preparation slot still
-    /// admits one fetch/decode working set at a time; this ceiling bounds how
-    /// many identities prepare at once. A card that arrives when every slot is
-    /// busy waits for one in arrival order rather than failing.
     static let maximumInlineArtifactFlights = 4
 
     static func admitsEncodedByteCount(_ count: Int) -> Bool {
@@ -95,9 +72,6 @@ enum ChatMediaPolicy {
     }
 }
 
-/// One app-wide ImageIO slot, including retired view generations. Cancellation
-/// cannot interrupt native decoding already in progress; replacements drop the
-/// candidate (and poll the latest frame later) rather than queue or overlap it.
 actor LiveImagePreparation {
     static let shared = LiveImagePreparation()
     private var preparing = false
@@ -123,8 +97,6 @@ actor LiveImagePreparation {
     }
 }
 
-// The transport and bytes stay in Gateway; the bounded ImageIO decode
-// belongs with the chat media policy that bounds it.
 extension GatewayClient.LiveFrame {
     func decode() async throws -> UIImage? {
         try await LiveImagePreparation.shared.prepare { try self.decodeImage() }
@@ -248,10 +220,6 @@ final class ChatMediaLoader {
         var accessOrdinal: UInt64
     }
 
-    /// One inline artifact request per exact identity. Unlike the full-preview
-    /// flight this is not a replacement slot: a sibling card's automatic load
-    /// must not cancel this one, and every waiter on the identity observes the
-    /// same work.
     private struct InlineArtifactFlight {
         let token: UInt64
         let task: Task<any ChatInlineArtifact, Error>
@@ -274,8 +242,6 @@ final class ChatMediaLoader {
         case file(ChatMediaPayload)
     }
 
-    /// Cancellation is observed synchronously before its MainActor cleanup hop.
-    /// A replacement read must not join a retired waiter while that hop queues.
     private final class PreviewRequestCancellation: @unchecked Sendable {
         private let lock = NSLock()
         private var cancelled = false
@@ -311,12 +277,7 @@ final class ChatMediaLoader {
     private var previewFlight: PreviewFlight?
     private var inlineArtifacts: [ChatMediaIdentity: RetainedInlineArtifact] = [:]
     private var inlineArtifactFlights: [ChatMediaIdentity: InlineArtifactFlight] = [:]
-    /// Slots held by the flights above, one per flight. A waiter is handed its
-    /// slot when it resumes, so a card that arrives in that moment cannot take
-    /// the same slot and push the flights past the ceiling.
     private var inlineArtifactSlotsInUse = 0
-    /// Inline artifact requests that cannot start yet, oldest first. A card
-    /// waits in this queue instead of failing its load.
     private var inlineArtifactSlotWaiters: [UInt64: CheckedContinuation<Void, Never>] = [:]
     private var inlineArtifactSlotWaiterOrder: [UInt64] = []
     private var retainedInlineArtifactBytes = 0
@@ -359,9 +320,6 @@ final class ChatMediaLoader {
         try await thumbnail(for: identity, decode: thumbnailDecode)
     }
 
-    /// Aliases a composer thumbnail that was already decoded and bounded
-    /// off-main under the exact canonical blob identity. Settlement performs no
-    /// ImageIO work and can therefore install the canonical row immediately.
     func seedPreparedThumbnail(
         _ prepared: ComposerPreparedAttachmentThumbnail,
         for identity: ChatMediaIdentity
@@ -386,17 +344,11 @@ final class ChatMediaLoader {
         )
     }
 
-    /// Read-only synchronous lookup used by a newly mounted canonical chip so
-    /// it never paints a loading placeholder over the thumbnail just displayed.
     func cachedThumbnail(for identity: ChatMediaIdentity) -> UIImage? {
         guard admits(identity) else { return nil }
         return thumbnails[identity]?.image
     }
 
-    /// The prepared inline artifact this exact identity already retains, for a
-    /// card that mounted again. A synchronous read with no side effect: a view
-    /// body reads it so its first frame is the prepared document instead of a
-    /// placeholder that changes the row's height once the payload arrives.
     func retainedInlineArtifact<A: ChatInlineArtifact>(
         for identity: ChatMediaIdentity,
         as type: A.Type
@@ -405,11 +357,6 @@ final class ChatMediaLoader {
         return inlineArtifacts[identity]?.value as? A
     }
 
-    /// One inline display artifact: the payload is fetched once per identity and
-    /// the prepared value is retained for the next mount. Requests for different
-    /// identities do not cancel each other (the shared preparation slot still
-    /// serializes the fetch/decode work), so two adjacent cards cannot starve
-    /// each other out of the lazy window's own mounting order.
     func inlineArtifact<A: ChatInlineArtifact>(
         for identity: ChatMediaIdentity,
         prepare: @escaping @Sendable (ChatMediaPayload) async throws -> A
@@ -422,9 +369,6 @@ final class ChatMediaLoader {
         }
 
         await acquireInlineArtifactSlot()
-        // Acquiring a slot suspends, so this identity's work may have started or
-        // finished while this request waited: the retained value or the flight
-        // that exists now is the one answer for it.
         do {
             try Task.checkCancellation()
             guard admits(identity) else { throw ChatMediaLoadError.staleIdentity }
@@ -437,7 +381,6 @@ final class ChatMediaLoader {
                 return try await inlineArtifact(joining: existing, identity: identity)
             }
         } catch {
-            // The handed slot goes to the next waiter instead of leaking.
             releaseInlineArtifactSlot()
             throw error
         }
@@ -469,10 +412,6 @@ final class ChatMediaLoader {
         return try await inlineArtifact(joining: flight, identity: identity)
     }
 
-    /// One waiter's view of one flight. Every waiter observes the same work, and
-    /// the token-guarded retire releases the flight and its slot exactly once —
-    /// including when the waiter that retires it was cancelled, so a flight that
-    /// already ended cannot keep holding a slot.
     private func inlineArtifact<A: ChatInlineArtifact>(
         joining flight: InlineArtifactFlight,
         identity: ChatMediaIdentity
@@ -480,8 +419,6 @@ final class ChatMediaLoader {
         do {
             let artifact = try await flight.task.value
             retireInlineArtifactFlight(identity: identity, token: flight.token)
-            // Every waiter asked for the same identity's own artifact type; a
-            // mismatch means this request found a superseded value.
             guard let typed = artifact as? A else { throw ChatMediaLoadError.staleIdentity }
             return typed
         } catch {
@@ -490,9 +427,6 @@ final class ChatMediaLoader {
         }
     }
 
-    /// Takes one of the bounded inline artifact slots, or waits for one. The wait
-    /// is a queue, not a retry: the caller resumes once, in arrival order, when a
-    /// slot is handed to it.
     private func acquireInlineArtifactSlot() async {
         guard inlineArtifactSlotsInUse >= ChatMediaPolicy.maximumInlineArtifactFlights else {
             inlineArtifactSlotsInUse += 1
@@ -506,8 +440,6 @@ final class ChatMediaLoader {
         }
     }
 
-    /// Hands this caller's slot to the oldest waiter, or frees it when nobody is
-    /// waiting. A waiting card starts its own flight in the order it mounted.
     private func releaseInlineArtifactSlot() {
         while let token = inlineArtifactSlotWaiterOrder.first {
             inlineArtifactSlotWaiterOrder.removeFirst()
@@ -637,8 +569,6 @@ final class ChatMediaLoader {
                 taskCompleted = true
                 throw error
             }
-            // A cancelled consumer must not publish or evict the shared flight;
-            // another owner may still be waiting on the same identity.
             try Task.checkCancellation()
             guard flight.invalidationGeneration == invalidationGeneration,
                   admits(identity) else { throw ChatMediaLoadError.staleIdentity }
@@ -684,8 +614,6 @@ final class ChatMediaLoader {
         hostedNotifyMediaCounts()
     }
 
-    /// Locally staged composer images share the same single preparation slot as
-    /// transcript media without entering the transcript cache or flight state.
     func prepareLocalFullPreview(_ data: Data) async throws -> UIImage {
         guard ChatMediaPolicy.admitsEncodedByteCount(data.count) else {
             throw ChatMediaLoadError.encodedPayloadTooLarge
@@ -696,9 +624,6 @@ final class ChatMediaLoader {
         }
     }
 
-    /// Preview payloads are never inserted into the thumbnail LRU. Images and
-    /// files share one exact profile/lifecycle/blob flight and one priority work
-    /// slot, so opening a document cannot create a parallel full-payload cache.
     func fullPreview(
         for identity: ChatMediaIdentity,
         leaseID: UUID
@@ -785,8 +710,6 @@ final class ChatMediaLoader {
             ready.forEach { $0.1.resume() }
             #endif
             defer { releasePreviewRequest(flightToken: flight.token, requestToken: requestToken) }
-            // Cancellation can race registration on another executor. Its flag
-            // fences admission immediately; the queued cleanup remains exact.
             guard !cancellation.isCancelled else { throw CancellationError() }
             let value = try await flight.task.value
             try Task.checkCancellation()
@@ -804,8 +727,6 @@ final class ChatMediaLoader {
                 #if HOSTED_TEST
                 await self.hostedBeforePreviewCancellationCleanup?()
                 #endif
-                // Tokens belong to this loader's existing monotonic ordinal;
-                // a late hop cannot name a successor attempt, even on one sheet.
                 if let flight = self.previewFlight, flight.requests[requestToken] != nil {
                     self.releasePreviewRequest(flightToken: flight.token, requestToken: requestToken)
                 }
@@ -849,9 +770,6 @@ final class ChatMediaLoader {
         inlineArtifactFlights.values.forEach { $0.task.cancel() }
         thumbnailFlights.removeAll(keepingCapacity: false)
         previewFlight = nil
-        // Cancelling a flight completes every waiter on it, and each of those
-        // hands its slot to the next queued card, so the queue drains and no
-        // waiting card is left holding a slot the loader no longer owns.
         inlineArtifactFlights.removeAll(keepingCapacity: false)
         thumbnails.removeAll(keepingCapacity: false)
         inlineArtifacts.removeAll(keepingCapacity: false)
@@ -888,9 +806,6 @@ final class ChatMediaLoader {
         }
         let depth = (properties[kCGImagePropertyDepth] as? NSNumber)?.doubleValue ?? 16
         guard depth.isFinite, depth > 0, depth <= 32 else { throw ChatMediaLoadError.invalidImage }
-        // ImageIO preserves 16-bit PNG components: an edge cap alone can admit
-        // twice the decoded budget. Reserve RGBA bytes and row alignment before
-        // decoding, then retain the actual decoded-byte check below.
         let edge = min(Double(maximumDimension), max(width, height))
         let scale = edge / max(width, height)
         let pixelBytes = ceil(width * scale) * ceil(height * scale) * 4 * ceil(depth / 8)

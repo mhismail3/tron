@@ -1,9 +1,6 @@
 @testable import TronMobileCore
 import XCTest
 
-/// Chips, Home worker rows and tool details name a model from its bare
-/// `ModelRef` ID. Real catalog IDs must read as their catalog names, with a
-/// version's dot, without a per-model table.
 final class ModelDisplayNameTests: XCTestCase {
     func testModelIDsReadAsVersionedNames() {
         let names = [

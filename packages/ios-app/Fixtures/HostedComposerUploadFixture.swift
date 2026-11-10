@@ -3,15 +3,6 @@ import SwiftUI
 import TronMobileCore
 import UniformTypeIdentifiers
 
-/// The real chat, composer, paste path, draft coordinator and scene lifecycle;
-/// only the Gateway is scripted. Upload staging mirrors the Gateway contract:
-/// an unclaimed staged upload survives a reconnect to the same Mac, a prompt
-/// claims staged IDs, and an unknown ID is `not_found` (#916).
-///
-/// The third upload attempt is held until the app backgrounds, then fails like
-/// a transfer the suspended app lost. Uploads attempted while backgrounded fail
-/// the same way. Scenario `lost-staging` also forgets every staged upload while
-/// the app is away, as an expired or reset staging area would.
 struct HostedComposerUploadFixture: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: AppModel
@@ -31,7 +22,6 @@ struct HostedComposerUploadFixture: View {
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(profile, token: "fixture-only-token")
-        // Only the relaunch journey opts into a stable, UUID-scoped root.
         let token = args.drop(while: { $0 != "-composer-durable-token" }).dropFirst().first.flatMap(UUID.init(uuidString:))
         let root = FileManager.default.temporaryDirectory.appending(path: "composer-upload-fixture-\((token ?? UUID()).uuidString)")
         durableRoot = token == nil ? nil : root
@@ -71,8 +61,6 @@ struct HostedComposerUploadFixture: View {
                     }
                 }
                 if ready { ChatView(sessionID: "upload-session").id(chatOpening) }
-                // Leaving and reopening the chat revokes and remounts its
-                // presentation, the retry the old upload error asked for.
                 Button("Reopen chat") { chatOpening += 1 }
                     .font(.caption2).accessibilityIdentifier("fixture.reopen-chat")
                 Text(counters).font(.caption2).accessibilityIdentifier("fixture.upload-counts")
@@ -97,8 +85,6 @@ struct HostedComposerUploadFixture: View {
         }
         .task { for await value in gateway.updates() { counters = value } }
         .task {
-            // Four distinct photos on the system pasteboard; the journey pastes
-            // them through the composer's own edit-menu Paste action.
             UIPasteboard.general.setItems(ComposerUploadGateway.photos.map { [UTType.png.identifier: $0] })
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-only-token")
@@ -120,8 +106,6 @@ private actor ComposerUploadGateway {
     private var backgrounded = false
     private var backgroundTransitions = 0
     private var attempts = 0
-    /// Successful staging per photo index, and staging that happened after the
-    /// photo was already staged once (the #916 regression).
     private var stagedCount: [Int: Int] = [:]
     private var restaged = 0
     private var staged: [String: Int] = [:]
@@ -158,7 +142,6 @@ private actor ComposerUploadGateway {
 
     func upload(_ data: Data) async throws -> String {
         let photos = await MainActor.run { Self.photos }
-        // A camera capture (JPEG) from the hosted camera journey (#937).
         if data.starts(with: [0xFF, 0xD8]) {
             cameraUploads += 1
             publish()
@@ -195,7 +178,6 @@ private actor ComposerUploadGateway {
         case "session.list": return .success(.object(["sessions": .array([])]))
         case "session.prompt":
             let ids = params["uploadIds"]?.arrayValue?.compactMap(\.stringValue) ?? []
-            // Gateway materialization: every ID must name an unclaimed staged upload.
             guard ids.allSatisfy({ staged[$0] != nil }) else {
                 rejectedPrompts += 1
                 publish()

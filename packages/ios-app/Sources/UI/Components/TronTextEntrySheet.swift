@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Shared rename/bookmark entry retains native autofocus and scrolling inside
-/// a bounded column; clearing never scrolls away or displaces the field.
 struct TronConfirmationTextField: View {
     let placeholder: String
     @Binding var text: String

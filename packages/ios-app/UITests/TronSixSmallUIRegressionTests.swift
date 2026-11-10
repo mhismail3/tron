@@ -1,7 +1,6 @@
 import XCTest
 import UIKit
 
-/// Production SwiftUI over the hosted Gateway socket. No golden/source assertions.
 @MainActor final class TronSixSmallUIRegressionTests: XCTestCase {
     private let root = "/Users/fixture/Workspace/tron-worktrees/six-small-ui-fixes"
 
@@ -32,14 +31,12 @@ import UIKit
             let app = launch("toast", mode: mode)
             let card = app.staticTexts["in-app-notice-card"].firstMatch
             XCTAssertTrue(card.waitForExistence(timeout: 8))
-            // A notice correctly covers the navigation title; use visible primary ink below it.
             let title = app.staticTexts["six-ui-primary-reference"].firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 8))
             Thread.sleep(forTimeInterval: 0.7)
             let screenshot = app.screenshot()
             guard let image = screenshot.image.cgImage else { XCTFail("Missing rendered screenshot"); return }
             let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
-            // Sample only the icon slot, not the glass tint or neutral message.
             let slot = CGRect(x: card.frame.minX + 14, y: card.frame.minY + 8, width: 26, height: card.frame.height - 16)
             guard let actual = ink(image, slot, scale), let primary = ink(image, title.frame, scale) else {
                 XCTFail("Missing visible toast glyph or primary title ink"); return

@@ -7,15 +7,10 @@ package struct BoundedHTTPDataTransport: Sendable {
         self.dataForRequest = dataForRequest
     }
 
-    /// A transport that never pins: the saved endpoint keeps the platform's own
-    /// trust, and a fixture standing in for it needs none (E-3c).
     package init(dataForRequest: @escaping @Sendable (URLRequest, Int) async throws -> (Data, HTTPURLResponse)) {
         self.init { request, maximumBytes, _ in try await dataForRequest(request, maximumBytes) }
     }
 
-    /// `pin` is the public key the served certificate must hash to while this
-    /// route runs over a pinned LAN lane (E-3c); nil keeps the platform's own
-    /// TLS evaluation, which is what the saved endpoint gets.
     package func data(
         for request: URLRequest,
         maximumBytes: Int,
@@ -29,7 +24,6 @@ package struct BoundedHTTPDataTransport: Sendable {
         try await BoundedURLSessionDataLoader.load(request, maximumBytes: maximumBytes, pinnedPublicKey: pin)
     }
 
-    /// Credential-bearing capability requests never follow redirects.
     package static let noRedirects = BoundedHTTPDataTransport { request, maximumBytes, pin in
         try await BoundedURLSessionDataLoader.load(
             request,
@@ -49,7 +43,6 @@ package struct BoundedHTTPUploadTransport: Sendable {
         self.dataForFileRequest = dataForFileRequest
     }
 
-    /// A transport that never pins (see `BoundedHTTPDataTransport`).
     package init(
         dataForFileRequest: @escaping @Sendable (URLRequest, URL, Int) async throws -> (Data, HTTPURLResponse)
     ) {
@@ -105,24 +98,12 @@ package struct BoundedHTTPBodyAccumulator {
     }
 }
 
-/// Routes bounded requests between one long-lived shared session and a fresh
-/// session per request. Idempotent bodiless reads share a session so their
-/// keep-alive connections are reused (live-view frame polling would otherwise
-/// open a TCP connection per frame); per-task delegates keep each request's
-/// bounds, redirect policy and cancellation. Every other request keeps a fresh
-/// session per request: a request that is unsafe to replay must not depend on
-/// how CFNetwork recovers a reused connection the server already closed, which
-/// can surface as `networkConnectionLost`.
 enum BoundedHTTPReadSession {
     package static func admits(_ request: URLRequest, uploadFileURL: URL? = nil) -> Bool {
         guard uploadFileURL == nil, request.httpBody == nil, request.httpBodyStream == nil else { return false }
         return request.httpMethod == "GET" || request.httpMethod == "HEAD"
     }
 
-    /// A shared session with the request queueing behavior of a fresh session
-    /// per request. CFNetwork otherwise queues requests beyond a small
-    /// per-host connection count; this is its widest working value (larger
-    /// values stop requests from starting).
     package static func configured(_ configuration: URLSessionConfiguration) -> URLSessionConfiguration {
         let shared = configuration.copy() as! URLSessionConfiguration
         shared.httpMaximumConnectionsPerHost = Int(Int32.max)
@@ -130,18 +111,13 @@ enum BoundedHTTPReadSession {
     }
 }
 
-/// The sessions one bounded data transport configuration runs on.
 package struct BoundedHTTPDataSessions: Sendable {
     let freshConfiguration: @Sendable () -> URLSessionConfiguration
     let readSession: URLSession
 
-    /// `configuration` returns a new configuration per call, so each fresh
-    /// session has private cache, cookie and credential storage.
     package init(configuration: @escaping @Sendable () -> URLSessionConfiguration) {
         freshConfiguration = configuration
         let read = BoundedHTTPReadSession.configured(configuration())
-        // A fresh session per request never carried a cached response, cookie
-        // or credential into a later request; the shared session keeps none.
         read.urlCache = nil
         read.httpCookieStorage = nil
         read.urlCredentialStorage = nil
@@ -156,15 +132,12 @@ package final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegat
     private var accumulator: BoundedHTTPBodyAccumulator
     private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
     private var response: HTTPURLResponse?
-    /// The fresh session a non-read request owns; nil on the shared read session.
     private var ownedSession: URLSession?
     private var task: URLSessionDataTask?
     private var cancellationRequested = false
     private var terminalResult: Result<(Data, HTTPURLResponse), Error>?
     private let sessions: BoundedHTTPDataSessions
     private let allowsRedirects: Bool
-    /// The public key this request's certificate must hash to, or nil to keep
-    /// the platform's own trust evaluation (E-3c).
     private let pinnedPublicKey: String?
 
     private init(
@@ -218,9 +191,6 @@ package final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegat
 
         let task: URLSessionDataTask
         let ownedSession: URLSession?
-        // A pinned request owns a fresh session: the shared read session has no
-        // delegate, and the lane's own certificate must be evaluated against the
-        // pin before URLSession writes the credential-bearing request (E-3c).
         if pinnedPublicKey == nil, BoundedHTTPReadSession.admits(request, uploadFileURL: uploadFileURL) {
             task = sessions.readSession.dataTask(with: request)
             task.delegate = self
@@ -369,8 +339,6 @@ package final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegat
         if let ownedSession {
             ownedSession.invalidateAndCancel()
         } else if case .failure = result {
-            // Retire only this request; the shared session and its other
-            // requests continue.
             task?.cancel()
         }
         continuation?.resume(with: result)

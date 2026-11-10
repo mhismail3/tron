@@ -1,7 +1,5 @@
 import Foundation
 
-/// Reads the gateway's short-lived, one-time enrollment code. The permanent
-/// local health token never enters a QR code or presentation state.
 enum EnrollmentCodeReader {
     private static let maximumBytes = 64 * 1024
     private struct Document: Decodable {

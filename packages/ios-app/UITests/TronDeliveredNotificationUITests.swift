@@ -1,7 +1,5 @@
 import XCTest
 
-/// Real native delivered notifications; the hosted app mounts production chat
-/// synchronization/visibility over the existing synthetic Gateway transport.
 final class TronDeliveredNotificationUITests: XCTestCase {
     @MainActor func testReadingOrdinaryChatRemovesOnlyItsDeliveredPushes() {
         verify(home: false)

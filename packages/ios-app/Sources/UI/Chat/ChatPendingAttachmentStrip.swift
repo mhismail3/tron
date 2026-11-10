@@ -9,8 +9,6 @@ struct ChatPendingAttachmentStrip: View {
 
     @State private var presentedAttachments: [PendingAttachment]
     @State private var reconciliationTask: Task<Void, Never>?
-    /// Every chip this strip has shown: a rejected send's restored chips slide
-    /// back in without ticking, as do drafts restored on open.
     @State private var shownAttachmentIDs: Set<String>
 
     init(
@@ -28,9 +26,6 @@ struct ChatPendingAttachmentStrip: View {
     }
 
     var body: some View {
-        // Keep the collection mounted across zero ↔ one. Scaling a newly
-        // inserted full-width scroll view pulls its leading chip toward the
-        // screen center; only each chip's own center may own that transform.
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(presentedAttachments) { attachment in
@@ -62,8 +57,6 @@ struct ChatPendingAttachmentStrip: View {
         reconciliationTask?.cancel()
         reconciliationTask = nil
 
-        // `ComposerDraftCoordinator` mints `local:` IDs for this device's own
-        // picks, pastes, captures and files, `restored-` IDs for saved drafts.
         let newlyImported = target.filter { $0.id.hasPrefix("local:") && !shownAttachmentIDs.contains($0.id) }.count
         shownAttachmentIDs.formUnion(target.map(\.id))
 
@@ -75,7 +68,6 @@ struct ChatPendingAttachmentStrip: View {
         }
 
         if reduceMotion {
-            // Without the cascade every chip fades in at once: one tick.
             if newlyImported > 0 { TronHaptics.shared.play(.attachmentAdded) }
             withAnimation(ChatMotion.attachmentArrive(reduceMotion: true)) {
                 presentedAttachments = target
@@ -104,7 +96,6 @@ struct ChatPendingAttachmentStrip: View {
         }
 
         guard !insertionIDs.isEmpty else { return }
-        // One tick per new chip as the cascade begins, capped and spaced.
         if newlyImported > 0 { TronHaptics.shared.playCascade(.attachmentAdded, count: newlyImported) }
         reconciliationTask = Task { @MainActor in
             for (rank, id) in insertionIDs.enumerated() {

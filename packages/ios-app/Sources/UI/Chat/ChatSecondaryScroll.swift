@@ -13,9 +13,6 @@ extension EnvironmentValues {
     }
 }
 
-/// The transcript's horizontally scrolling chip row: prompt photo/file chips and
-/// a grouped run's display chips share one layout, spacing and scroll policy.
-/// Chips scroll past the row's margins rather than clipping at them.
 struct ChatChipStrip<Content: View>: View {
     var alignment: HorizontalAlignment = .leading
     @ViewBuilder var content: Content
@@ -34,8 +31,6 @@ struct ChatChipStrip<Content: View>: View {
 }
 
 extension View {
-    /// Apply to CONTENT inside a secondary scroll, never the scroll's background
-    /// outside its native hierarchy. Other screens keep their existing policy.
     func chatSecondaryScrollContent() -> some View {
         modifier(ChatSecondaryScrollModifier())
     }
@@ -50,8 +45,6 @@ private struct ChatSecondaryScrollModifier: ViewModifier {
     }
 }
 
-/// Public ancestry only. One helper is shared by accessories, catalogs and row
-/// renderers; it never substitutes a scroll delegate or changes scroll geometry.
 private struct ChatSecondaryScrollProbe: UIViewRepresentable {
     func makeUIView(context: Context) -> Probe { Probe() }
     func updateUIView(_ view: Probe, context: Context) { view.reconcile() }

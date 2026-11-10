@@ -28,9 +28,6 @@ enum PendingExtensionInteractionToolPresentation {
         )
     }
 
-    /// Matches the pending interaction to the tool's operation/extension owner,
-    /// not to the tool-call ID. Pi's semantic interaction carries the enclosing
-    /// prompt invocation ID, which is deliberately distinct from its tool-call ID.
     static func interaction(
         tools: [ChatToolDescriptor],
         pendingInteractions: [ExtensionInteraction]
@@ -49,9 +46,6 @@ enum PendingExtensionInteractionToolPresentation {
         if operationMatches.count == 1 { return operationMatches[0] }
         guard operationMatches.isEmpty else { return nil }
 
-        // A running ask_user blocks its serialized session lane, so one exact
-        // admitted owner and one pending form are an unambiguous fallback when a
-        // cold canonical tool segment no longer exposes the live operation ID.
         let askUserTools = tools.filter { tool in
             tool.isRunning && (isAskUser(tool) || tool.hostsRunningNestedAskUser)
         }
@@ -68,9 +62,6 @@ enum PendingExtensionInteractionToolPresentation {
             && AskUserToolPresentation.isAskUserSource(tool.extensionOrigin?.owner?.source)
     }
 
-    /// A question asked by `ask_user` from inside another call (codemode) is owned by the
-    /// Ask User capability, not by the enclosing call, so it matches the enclosing row
-    /// while that row reports the nested `ask_user` call still running (#929).
     private static func hostsNestedAskUserForm(_ interaction: ExtensionInteraction, _ tool: ChatToolDescriptor) -> Bool {
         interaction.method == .form
             && tool.hostsRunningNestedAskUser
@@ -95,7 +86,6 @@ enum PendingExtensionInteractionToolPresentation {
 }
 
 struct AskUserToolPresentation: Equatable, Sendable {
-    /// Release-owned origin; the audited package remains a readable historical origin.
     static let tronSource = "tron:ask-user.v1"
     static let auditedSource = "npm:@zhushanwen/pi-ask-user@7.0.15"
 
@@ -108,9 +98,6 @@ struct AskUserToolPresentation: Equatable, Sendable {
     let cancelled: Bool
 
     static func completed(tool: ChatToolPresentation) -> AskUserToolPresentation? {
-        // ask_user is a reserved Gateway capability. Execution-origin metadata
-        // is live-only, not persisted in Pi JSONL; the canonical result's strict
-        // form schema below is the durable read-only presentation contract.
         guard tool.toolName == "ask_user",
               !tool.isRunning,
               !tool.error,

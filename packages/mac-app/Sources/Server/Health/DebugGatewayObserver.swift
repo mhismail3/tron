@@ -1,12 +1,6 @@
 import Darwin
 import Foundation
 
-/// Read-only admission for the developer-owned Gateway on port 9848.
-///
-/// The installed wrapper never manages this process. One immutable observation
-/// reads one bounded lifecycle record, resolves that record's exact transport,
-/// authenticates it, and correlates the live supervisor, child, listener,
-/// selected immutable payload, process command, and runtime identity.
 enum DebugGatewayObserver {
     static let maximumLifecycleBytes: Int64 = 64 * 1024
 
@@ -27,9 +21,6 @@ enum DebugGatewayObserver {
     struct Admission: Equatable, Sendable {
         let lifecycle: Lifecycle
         let processID: Int
-        /// Display-only diagnostic. It deliberately does not participate in
-        /// admission equality because elapsed time changes between otherwise
-        /// identical observations.
         let uptime: String?
         let transportHost: String
         let pairingTransportAvailable: Bool

@@ -1,7 +1,5 @@
 import Foundation
 
-/// Steps in the first-run wizard. `allCases` is the canonical flow used by
-/// the wizard state machine and progress presentation.
 enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     case welcome
     case tailscale
@@ -13,8 +11,6 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var id: String { rawValue }
 
-    /// Title rendered in the wizard's shared header row (`WizardShell`),
-    /// so the icon, title, and progress pill share one baseline.
     var displayTitle: String {
         switch self {
         case .welcome: return "Tron Installer"
@@ -27,10 +23,6 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         }
     }
 
-    /// Glyph rendered to the left of `displayTitle` in the shell's
-    /// header row. The Welcome step uses the brand asset; every other
-    /// step uses an SF Symbol so a single rendering path styles them
-    /// uniformly with `Color.tronEmerald`.
     var headerIcon: HeaderIcon {
         switch self {
         case .welcome: return .asset("TronLogo")
@@ -45,17 +37,11 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
 
 }
 
-/// Discriminated source for the icon rendered in `WizardShell`'s
-/// header row. Asset cases are rendered as `Image(_:)` with the
-/// template rendering mode (so `foregroundStyle` tints them); symbol
-/// cases use `Image(systemName:)` directly.
 enum HeaderIcon: Equatable, Sendable {
     case asset(String)
     case symbol(String)
 }
 
-/// Permission categories surfaced by first-time setup. FDA remains owned by
-/// the wrapper; GUI permissions are queried by the signed Aqua host process.
 enum Permission: String, CaseIterable, Sendable {
     case fullDiskAccess
     case accessibility
@@ -77,7 +63,6 @@ enum Permission: String, CaseIterable, Sendable {
     }
 }
 
-/// Per-permission grant state. Mirrors TCC categories.
 enum PermissionStatus: String, Equatable, Sendable {
     case granted
     case denied
@@ -85,7 +70,6 @@ enum PermissionStatus: String, Equatable, Sendable {
     case probeUnavailable
 }
 
-/// Tailscale state on the host. Used by the Tailscale prerequisite step.
 enum TailscaleStatus: Equatable, Sendable {
     case notInstalled
     case installedNotSignedIn
@@ -102,10 +86,6 @@ enum TailscaleStatus: Equatable, Sendable {
     }
 }
 
-/// Existing server registration detection result. This deliberately
-/// models the Login Item registration, not whether the server is
-/// currently reachable. The Install step must still start/kickstart
-/// and ping the helper before it can advance.
 enum ExistingInstallStatus: Equatable, Sendable {
     case none
     case requiresApproval
@@ -113,8 +93,6 @@ enum ExistingInstallStatus: Equatable, Sendable {
     case registered(version: String?)
 }
 
-/// Canonical `system::ping` projection needed by the wrapper after the decoder
-/// validates the complete required response shape.
 struct ServerPingInfo: Equatable, Sendable {
     var version: String
     var gatewayChannel: String
@@ -137,9 +115,6 @@ struct ServerPingInfo: Equatable, Sendable {
     }
 }
 
-/// Pairing payload shared with the iOS app via the
-/// `tron://pair?host=...&port=...&code=...&label=...` URL.
-/// The `label` query item is the user-facing server name on iOS.
 struct PairingPayload: Equatable, Sendable, Hashable {
     var host: String
     var port: Int
@@ -147,14 +122,9 @@ struct PairingPayload: Equatable, Sendable, Hashable {
     var label: String?
 }
 
-/// Discrete steps in the install pipeline. Ordering is consumed by the
-/// installation state machine and progress presentation.
 enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
-    /// Confirms this is the release app in `/Applications`.
     case validateApplication
-    /// Confirms the embedded helper app, plist, and signature are intact.
     case validateHelper
-    /// Registers the bundled LaunchAgent through `SMAppService`.
     case registerAgent
     case awaitPing
 }
