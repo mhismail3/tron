@@ -163,13 +163,18 @@ def nested_files() -> tuple[set, set]:
     return tuple({f"{GATEWAY}/{entry}" for entry in listed[config]} for config in vitest_configs.LISTS)
 
 
+# Python tests that read this Mac's own state run here, never on the mini: test-core.py verifies each block's review
+# row against the reviewer's transcript in this Mac's Pi session store (tools/proof/README.md).
+PYTHON_HERE = {"tools/proof/tests/test-core.py"}
+
+
 def runner_of(path: str, nested: set, mac_terminal: set) -> str:
     if path.startswith(f"{GATEWAY}/src/"):
         return "mac-terminal" if path in mac_terminal else ("gateway-nested" if path in nested else "gateway")
     if path.endswith(".test.mjs"):
         return "node-gateway" if path.startswith(f"{GATEWAY}/") else "node"
     if path.endswith(".py"):
-        return "python"
+        return "python-here" if path in PYTHON_HERE else "python"
     if path.endswith(".sh"):
         return "shell"
     if path.startswith(f"{IOS}/"):
@@ -1052,6 +1057,8 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         return (node + ["node", "--test", "--test-concurrency=1", *[p[len(GATEWAY) + 1:] for p in files]], ROOT / GATEWAY, tap_count)
     if group == "node":
         return (node + ["node", "--test", "--test-concurrency=1", *files], ROOT, tap_count)
+    if group == "python-here":
+        return (per_file("python3", files), ROOT, python_count)
     if group == "python":
         command = per_file("python3", files)
         return (["python3", str(ROOT / "tools/verify/mini.py"), "python", command] if gateway_host == "mini" else command, ROOT, python_count)
@@ -1229,6 +1236,8 @@ def main(argv: list[str]) -> int:
         print(f"  gateway and python lanes: {'on the Mac mini' if gateway_host == 'mini' else 'on this Mac'} ({gateway_reason})", flush=True)
     else:
         gateway_host, gateway_reason = "local", "no Gateway or Python lane selected"
+    if "python-here" in groups and not skipped_group("python-here"):
+        print("  python-here lane: on this Mac (its tests read this Mac's Pi session store)", flush=True)
     if "mac-terminal" in groups and not skipped_group("mac-terminal"):
         print("  mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", flush=True)
     plan_steps = ["ownership", "worktree residue", "budgets", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
