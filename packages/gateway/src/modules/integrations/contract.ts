@@ -1,33 +1,11 @@
 import type { JsonValue } from "../../protocol/types.js";
 
 export const CONNECTION_STATE_SCHEMA_VERSION = 1 as const;
-export const CONNECTION_DEFINITION_SCHEMA_VERSION = 1 as const;
-
 export type ConnectionSetupMethod = "oauth" | "token" | "browser";
 export type ConnectionImplementationKind = "knowledge-connector";
 export type ConnectionHealth = "unconfigured" | "setup-required" | "ready" | "disabled" | "auth-error" | "error" | "disconnected";
-export type ConnectionCapabilityAvailability = "available" | "unavailable" | "requires-setup" | "disabled" | "unsupported";
 export type CredentialAvailability = "available" | "unavailable" | "unknown";
 export type ProviderIdentityAdmission = "admitted" | "mismatch" | "unknown";
-export type ConnectionEffect = "read" | "write" | "paid" | "disclosure";
-
-/** A supplier-level identity. Definitions are composed from built-in/package
- * discovery and are never a second package manifest or credential authority. */
-export interface IntegrationDefinition {
-  schemaVersion: typeof CONNECTION_DEFINITION_SCHEMA_VERSION;
-  id: string;
-  implementation: ConnectionImplementationKind;
-  displayName: string;
-  setupMethods: ConnectionSetupMethod[];
-  capabilities: IntegrationCapabilityDefinition[];
-}
-
-export interface IntegrationCapabilityDefinition {
-  id: string;
-  displayName: string;
-  effects: ConnectionEffect[];
-  supported: boolean;
-}
 
 export interface ConnectionPolicy {
   enabled: boolean;
@@ -67,16 +45,6 @@ export interface ConnectionInstance {
 
 export type ConnectionInstanceProjection = Omit<ConnectionInstance, "credentialRef"> & { credentialConfigured: boolean };
 
-export interface ConnectionCapabilityStatus {
-  id: string;
-  availability: ConnectionCapabilityAvailability;
-  effects: ConnectionEffect[];
-  definitionId: string;
-  connectionId?: string;
-  provenance: { owner: "connection"; definitionId: string; connectionId?: string };
-  detail?: string;
-}
-
 export interface ConnectionSetupOperation {
   operationId: string;
   instanceId: string;
@@ -87,12 +55,14 @@ export interface ConnectionSetupOperation {
   updatedAt: string;
 }
 
+/** Production has no connection definitions or adapters, so `definitions` and
+ * `capabilities` are always empty; the tool output keeps both keys. */
 export interface ConnectionOwnerSnapshot {
-  definitions: IntegrationDefinition[];
+  definitions: [];
   /** Presentation projection: credential refs never leave the owner. */
   instances: ConnectionInstanceProjection[];
   setupOperations: ConnectionSetupOperation[];
-  capabilities: ConnectionCapabilityStatus[];
+  capabilities: [];
   stateRevision: number;
 }
 
@@ -110,9 +80,6 @@ export interface ConnectionOwnerState {
   setupOperations: Record<string, ConnectionSetupOperation>;
   receipts: Record<string, ConnectionOwnerReceipt>;
 }
-
-/** Shared identifier only; credential bytes remain with the Mac adapter. */
-export const CONNECTOR_CREDENTIAL_SERVICE = "Tron Connector Credentials";
 
 /** The read-only projection consumed by the agent `connections` tool. */
 export interface ConnectionAccess {
