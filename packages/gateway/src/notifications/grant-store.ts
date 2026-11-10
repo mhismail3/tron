@@ -220,14 +220,7 @@ const empty = (): NotificationDocument => ({
 export class NotificationGrantStore {
   private readonly path: string;
   private readonly mutex = new AsyncMutex();
-  private migratedLegacyKinds: NotificationKind[] = [];
   constructor(tronHome: string, path = tronHomePath(tronHome, "gateway/notifications.json")) { this.path = path; }
-
-  takeMigratedLegacyKinds(): NotificationKind[] {
-    const kinds = this.migratedLegacyKinds;
-    this.migratedLegacyKinds = [];
-    return kinds;
-  }
 
   async initialize(): Promise<void> {
     await this.mutex.run(async () => {
@@ -238,13 +231,7 @@ export class NotificationGrantStore {
         await this.ensureSecureParent();
         return;
       }
-      try {
-        const migrated = validate(current.value);
-        if (current.migrated) {
-          await durableAtomicWriteJson(this.path, migrated);
-          await this.ensureSecureParent();
-        }
-      } catch { throw new GatewayError("conflict", "Notification state is malformed or oversized"); }
+      try { validate(current.value); } catch { throw new GatewayError("conflict", "Notification state is malformed or oversized"); }
     });
   }
 
@@ -289,36 +276,8 @@ export class NotificationGrantStore {
     }
   }
 
-  private async read(): Promise<{ present: false } | { present: true; value: unknown; migrated?: boolean }> {
-    try {
-      const result = await readSecureJson<unknown>(this.path, MAXIMUM_DOCUMENT_BYTES);
-      if (!result.present || !result.value || typeof result.value !== "object" || Array.isArray(result.value)) return result;
-      const value = result.value as Record<string, unknown>;
-      // notifications.json is explicitly versioned. Migrate the previous
-      // policy on read, preserving its ask choice and enabling new kinds.
-      if (value.version === 1 && value.policy && typeof value.policy === "object" && !Array.isArray(value.policy)) {
-        const policy = value.policy as Record<string, unknown>;
-        if (Object.keys(policy).length === 1 && typeof policy.notifyWhenAskPresented === "boolean"
-          && Array.isArray(value.pending) && Array.isArray(value.receipts) && Array.isArray(value.inbox)) {
-          const legacyPending = value.pending.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry)));
-          this.migratedLegacyKinds = legacyPending.flatMap((entry) =>
-            entry.kind === "ask" || entry.kind === "agent_finished" || entry.kind === "explicit" ? [entry.kind] : []);
-          const retiredDedupeKeys = new Set(legacyPending.map((entry) => entry.dedupeKey).filter((key): key is string => typeof key === "string"));
-          const now = new Date().toISOString();
-          return { present: true, migrated: true, value: {
-            ...value,
-            version: 2,
-            policy: { notifyWhenAskPresented: policy.notifyWhenAskPresented, notifyWhenFinished: true, notifyWhenWaiting: true },
-            pending: [],
-            receipts: value.receipts.map((entry) => entry && typeof entry === "object" && retiredDedupeKeys.has((entry as Record<string, unknown>).dedupeKey as string)
-              ? { ...(entry as Record<string, unknown>), result: "failed" } : entry),
-            inbox: value.inbox.map((entry) => entry && typeof entry === "object" && retiredDedupeKeys.has((entry as Record<string, unknown>).dedupeKey as string)
-              ? { ...(entry as Record<string, unknown>), outcome: "failed", updatedAt: now } : entry),
-          } };
-        }
-      }
-      return result;
-    }
+  private async read(): Promise<{ present: false } | { present: true; value: unknown }> {
+    try { return await readSecureJson<unknown>(this.path, MAXIMUM_DOCUMENT_BYTES); }
     catch (error) {
       if (error instanceof SecureJsonFileError || error instanceof RangeError || error instanceof SyntaxError) {
         throw new GatewayError("conflict", "Notification state is unsafe, malformed, or oversized");
