@@ -68,11 +68,11 @@ this host's native binary from the registry's `agent-browser@<version>` package 
 the fork pin is the only engine update. An ambiguous pin or declaration, or failed provisioning,
 fails the run. It first waits
 its turn for the host's `/tmp/tron-full-gateway.lock` (printing the holder and earlier waiters) and
-records itself there, so Gateway runs never overlap each other or a `verify --batch` Gateway lane,
-which holds it only while that lane runs ([batch](batch.md)). Waiters, batch included, take the lock first-come first-served: each holds the
+records itself there, so local Gateway runs never overlap each other or a `mutate` sampling, which holds it
+throughout. Waiters take the lock first-come first-served: each holds the
 flock of a numbered ticket in `/tmp/tron-full-gateway.lock.queue/` while it waits, so a dead
 waiter's ticket is pruned, and only the earliest live ticket tries the lock. `host_lock.py` is
-the lock's one owner; the runner and the batch import it.
+the lock's one owner; the runner and `mutate` import it.
 Migration fixtures seed explicit historical JSON; they never copy the invoking
 user's settings or profile. Test input and output must not depend on live stores.
 
@@ -89,10 +89,10 @@ Gateway `node_modules`, refuses a Node binary or npm off the commit's `config/ci
 only when `package.json`, `package-lock.json`, `third_party/` or the Node binary changed, and runs that commit's
 `gateway.py`, or the Python group's per-file command (stderr merged, the pinned Node first on PATH), each in its own process group killed before the lock is released, with a minimal PATH and only the mini user's HOME, USER, LOGNAME, SHELL and LANG. Output streams
 live; the Vitest output files come back with paths rewritten to this checkout, and the lane's exit code is the step's. With `--mini`, an unconfigured or
-unreachable mini exits 2; once a lane is on the mini, a failed push, an off-pin toolchain or a session without a result exits 2, never falling back here. Stopping verify, or killing
+unreachable mini, a failed push, an off-pin toolchain, a job lock still held when the caller's `TRON_MINI_JOB_WAIT_SECONDS` runs out, or a session without a result exits 75 with a last `mini: no result: <reason>` line, never falling back here (a lane that itself exits 75 stays a lane result); verify records that step as `no result` with its reason and the run as `incomplete`, not failed. Stopping verify, or killing
 its whole process group, ends the session and SIGTERMs the mini job's child. Setup: `git config tron.verify.mini <user@host>` and
 `tron.verify.miniIdentity <key file>`, and a bare `~/tron-ci/tron.git` on the mini; until the pinned Node and Dafny are
-installed there, a job refuses with the `scripts/tron-node install` or (Python lanes) `scripts/tron proof bootstrap` command for its checkout. `verify --batch` runs its Gateway default/nested lanes and their case probes on the pool too, and records each lane's host (`gatewayHost`); `mutate` runs its lanes here.
+installed there, a job refuses with the `scripts/tron-node install` or (Python lanes) `scripts/tron proof bootstrap` command for its checkout. `verify --batch` runs every Gateway and Python run it starts on the mini, except the `mac-terminal` and `python-here` groups, which need this host ([batch](batch.md)); `mutate` runs its lanes here.
 
 ## Run output
 

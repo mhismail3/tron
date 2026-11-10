@@ -17,24 +17,24 @@ import tempfile
 import threading
 import time
 
-from host_lock import FULL_GATEWAY_LOCK, HELD_BY_CALLER, wait_for_full_gateway_lock
+from host_lock import HELD_BY_CALLER
+import mini
 import timing
 import verify
 
 ROOT = verify.ROOT
-# The host's one full-Gateway run at a time. A batch takes it only around each lane or probe
-# marked `gatewayLock` (a full Gateway Vitest run, which the test-host pool may place on the mini
-# or here; the lock covers the run here), in arrival order with every other Gateway
-# Vitest run (tools/verify/host_lock.py owns the lock), and marks that subprocess
-# HELD_BY_CALLER so its runner does not wait on the batch. Every other subprocess runs
-# unmarked: Gateway runs inside it (the verifier's Gateway groups) queue for the lock themselves.
-# A Gateway lane waits its turn this long, then is uncovered naming the holder; never skipped.
-FULL_GATEWAY_LOCK_WAIT_SECONDS = 45 * 60
+# Every Gateway Vitest and Python run the batch starts (its Gateway lanes, `verify --all`'s groups,
+# their probes and the candidate's affected checks) runs on the Mac mini (tools/verify/mini.py), never
+# beside the Apple chain on this Mac; only the groups that need this host (mac-terminal, python-here)
+# run here. Each waits its turn for the mini's job lock this long. A run the mini gives no result for
+# is uncovered naming why, never red; during attribution or repair it raises MiniNoResult, so nothing
+# is concluded and the investigation resumes on the next batch.
+MINI_JOB_WAIT_SECONDS = 45 * 60
 REVERT_REMOTE_KEY = 'tron.verify.revertRemote'
 # Inverse deltas touching these owners can change persisted data or authority.
 IRREVERSIBLE_RISK = {'persistence', 'security', 'mac-installer'}
 # The lanes run as two concurrent chains under their existing owners, each in plan order:
-# Node (verifier, Gateway Vitest under the full-Gateway lock, Mac, relay) and Apple (the
+# Node (verifier, Gateway Vitest on the mini, Mac, relay) and Apple (the
 # iOS lanes under host slots). Both join before freeze, attribution and verdict.
 CHAINS = ('node', 'apple')
 # The real-UI journey lane runs its journeys on this many owned simulator lanes at once, one
@@ -70,11 +70,10 @@ def lanes(root: Path, base: str) -> list[dict]:
     apple = apple_lane(root)
     lane_only = {key: apple[key] for key in ('TRON_IOS_TEST_LANE', 'TRON_IOS_TEST_LANE_REPOSITORY')}
     # Required lanes never disappear when a checkout/tool is missing.
-    result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base]}]
-    # Gateway Vitest lanes and their case probes run on the test-host pool (mini.py), like every Gateway lane.
+    result = [{'name': 'full verify', 'chain': 'node', 'command': ['scripts/tron', 'verify', '--all', '--base', base, '--gateway-host', 'mini']}]
     for name, config in [('Gateway default', []), ('Gateway nested', ['--config', 'vitest.nested.config.ts'])]:
-        result.append({'name': name, 'chain': 'node', 'command': ['python3', 'tools/verify/mini.py', 'pool', *config],
-                       'vitest': True, 'gatewayLock': True, 'requires': 'packages/gateway/package-lock.json'})
+        result.append({'name': name, 'chain': 'node', 'command': ['python3', 'tools/verify/mini.py', *config],
+                       'vitest': True, 'requires': 'packages/gateway/package-lock.json'})
     result.extend([
         {'name': 'Mac integration', 'chain': 'node', 'command': ['python3', 'tools/verify/mac.py'], 'requires': 'packages/mac-app/project.yml'},
         {'name': 'relay', 'chain': 'node', 'command': ['scripts/tron-node', 'exec', 'npm', '--prefix', 'packages/push-relay', 'test', '--'],
@@ -151,7 +150,7 @@ def previous_journey_seconds(state: Path, current: Path) -> dict[str, int]:
 
 
 # Lane process groups running now, so an interrupted or failed chain set can stop both chains,
-# and the cancellation a lane still waiting for the full-Gateway lock observes.
+# and the cancellation a lane not yet started observes.
 RUNNING: set[int] = set()
 RUNNING_LOCK = threading.Lock()
 CANCELLED = threading.Event()
@@ -253,55 +252,40 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
     if lane['name'] == 'full verify':
         sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
         (root / 'test-results/verify' / f'{sha}.json').unlink(missing_ok=True)
+    # A caller's held full-Gateway lock marker never reaches a lane: a local Gateway run inside one takes the lock itself.
     env = {key: value for key, value in os.environ.items() if key != HELD_BY_CALLER}
     env['TRON_IOS_E2E_NO_INSTALL'] = '1'
+    env['TRON_MINI_JOB_WAIT_SECONDS'] = str(MINI_JOB_WAIT_SECONDS)
     env.update(lane.get('env', {}))
-    held, window = None, None
-    if lane.get('gatewayLock'):
-        record = {'pid': os.getpid(), 'worktree': str(root), 'purpose': f"verify --batch: {lane['name']}"}
+    if CANCELLED.is_set():
+        # Stopped while it set up: a lane that has not started never starts.
+        return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
+                'reason': 'batch stopped before this lane started; not run'}
+    with log.open('w') as output:
+        process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
+                                   stdout=output, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+        with RUNNING_LOCK:
+            RUNNING.add(process.pid)
         try:
-            held = wait_for_full_gateway_lock(record, FULL_GATEWAY_LOCK_WAIT_SECONDS,
-                                              lambda line: print(f"batch: {lane['name']} {line}", flush=True), CANCELLED.is_set)
-        except InterruptedError as error:
-            return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
-                    'reason': f'batch stopped while this lane waited for {FULL_GATEWAY_LOCK} ({error}); not run'}
-        except TimeoutError as error:
-            return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
-                    'reason': f'a full-Gateway run held or preceded this lane at {FULL_GATEWAY_LOCK} past the '
-                              f'{FULL_GATEWAY_LOCK_WAIT_SECONDS}s wait cap ({error}); not run'}
-        env[HELD_BY_CALLER] = '1'
-        window = {'waitSeconds': round(time.monotonic() - start, 3), 'acquiredAt': time.time()}
-    try:
-        if CANCELLED.is_set():
-            # Stopped while it waited or set up: a lane that has not started never starts.
-            return {**lane, 'exit': None, 'status': 'uncovered', 'seconds': round(time.monotonic() - start, 3),
-                    'reason': 'batch stopped before this lane started; not run'}
-        with log.open('w') as output:
-            process = subprocess.Popen(command, cwd=root / lane.get('cwd', '.'), shell=isinstance(command, str),
-                                       stdout=output, stderr=subprocess.STDOUT, env=env, start_new_session=True)
-            with RUNNING_LOCK:
-                RUNNING.add(process.pid)
+            code = process.wait()
+        except BaseException:
+            verify.signal_group(process.pid, signal.SIGTERM)
             try:
-                code = process.wait()
-            except BaseException:
-                verify.signal_group(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    verify.signal_group(process.pid, signal.SIGKILL)
-                    process.wait()
-                raise
-            finally:
-                with RUNNING_LOCK:
-                    RUNNING.discard(process.pid)
-    finally:
-        if held:
-            held.close()
-            window['releasedAt'] = time.time()
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                verify.signal_group(process.pid, signal.SIGKILL)
+                process.wait()
+            raise
+        finally:
+            with RUNNING_LOCK:
+                RUNNING.discard(process.pid)
     result = {**lane, 'exit': code, 'seconds': round(time.monotonic() - start, 3), 'startedAt': started_at, 'endedAt': time.time(),
               'log': str(log), 'executedCommand': command}
-    if window:
-        result['fullGatewayLock'] = window
+    if (isinstance(command, list) and any(word.endswith('tools/verify/mini.py') for word in command)
+            and (reason := mini.no_result_reason(code, log.read_text(errors='replace')))):
+        result.update(exit=None, status='uncovered', noResult=True, reason=f'the mini gave no result: {reason}')
+        print(f"batch: {lane['name']} UNCOVERED in {result['seconds']}s ({result['reason']})", flush=True)
+        return result
     if deferred_ios:
         result.update(status='uncovered', reason='deferred: verifier iOS consumers; all host slots held')
     # Preserve the owning verifier's exact selection, failed tests and partial step logs.
@@ -321,6 +305,9 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             if (verdict == 'deferred' or report.get('skipped') or report.get('selection', {}).get('deferredTests')
                     or any(step.get('status') == 'deferred' for step in report.get('steps', []))):
                 result.update(status='uncovered', reason='verifier deferred/skipped required work')
+            if missing := [step for step in report.get('steps', []) if step.get('status') == 'no result']:
+                result.update(exit=None, status='uncovered', noResult=True,
+                              reason='the mini gave no result: ' + '; '.join(f"{step['name']}: {step.get('reason')}" for step in missing))
             save(directory / 'verify.json', report)
             logs = root / 'test-results/verify' / sha
             if logs.is_dir():
@@ -333,8 +320,6 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
             result['signature'] = signature(report['message'], failures, detail, root)
     elif lane.get('vitest'):
         output = log.read_text(errors='replace')
-        if host := re.search(r'^gateway lane: (.+)$', output, re.M):
-            result['gatewayHost'] = host.group(1)
         # The owning parser normalizes only the repo prefix and rejects suite errors.
         previous = verify.ROOT
         verify.ROOT = root
@@ -429,6 +414,10 @@ def prepare(root: Path, directory: Path) -> bool:
 
 
 
+class MiniNoResult(Exception):
+    """A probe or the candidate's affected checks got no result from the mini: no outcome, so nothing may be concluded."""
+
+
 class ProbeSelectionError(verify.VerifyError):
     """An exact-case recipe ran zero tests where the case is known to exist: a tooling error, never 'unresolved'."""
 
@@ -477,6 +466,10 @@ class Prober:
             outcome = execute(self.root, {**self.failed['probe'], 'probe': True}, attempt)
         finally:
             stop_fixture(self.root, attempt / 'stop')
+        if outcome.get('noResult'):
+            self.record['probes'].append({'commit': sha, 'outcome': 'no-result', 'fresh': True, **outcome})
+            save(self.directory / 'progress.json', self.record)
+            raise MiniNoResult(outcome['reason'].removeprefix('the mini gave no result: '))
         if selection_required and outcome.get('selectedTests') == 0:
             # The case failed at this commit, so a recipe selecting nothing is a broken selector, not a non-reproduction.
             self.record['probes'].append({'commit': sha, 'outcome': 'selector-error', 'fresh': True, **outcome})
@@ -621,7 +614,19 @@ def case_identity(failed: dict) -> str:
 
 
 def build(journal: dict, prober: Prober, state: Path) -> dict:
-    """Reproduce on the current tip, invert only the culprit landing, prove, and bind for review."""
+    """Reproduce on the current tip, invert only the culprit landing, prove, and bind for review. A mini
+    that gives no result leaves the repair pending, never refused: it resumes on the next batch."""
+    try:
+        return build_repair(journal, prober, state)
+    except MiniNoResult as error:
+        reason = f'the mini gave no result: {error}; resumes on the next batch'
+        journal.update(state='pending', reason=reason)
+        journal['history'].append({'state': 'pending', 'reason': reason, 'tip': journal.get('tip'), 'at': time.time()})
+        save(repair_path(state, journal['culprit']), journal)
+        return journal
+
+
+def build_repair(journal: dict, prober: Prober, state: Path) -> dict:
     path = repair_path(state, journal['culprit'])
     culprit, parent = journal['culprit'], journal['parent']
 
@@ -663,11 +668,14 @@ def build(journal: dict, prober: Prober, state: Path) -> dict:
     if not prober.controls(candidate, 'good'):
         return settle('refused', 'the inverse did not remove the failure in two fresh executions')
     prober.git('checkout', '--detach', candidate)
-    affected = execute(prober.root, {'name': 'affected verify', 'command': ['scripts/tron', 'verify', '--changed', '--base', tip]},
+    affected = execute(prober.root, {'name': 'affected verify', 'command': ['scripts/tron', 'verify', '--changed', '--base', tip, '--gateway-host', 'mini']},
                        Path(prober.directory) / f'affected-{candidate[:12]}')
     report = prober.root / 'test-results/verify' / f'{candidate}.json'
-    verdict = json.loads(report.read_text()).get('verdict') if report.exists() else None
+    checked = json.loads(report.read_text()) if report.exists() else {}
+    verdict = checked.get('verdict')
     journal['affected'] = {'exit': affected['exit'], 'verdict': verdict, 'log': affected.get('log')}
+    if missing := [f"{step['name']}: {step.get('reason')}" for step in checked.get('steps', []) if step.get('status') == 'no result']:
+        raise MiniNoResult('; '.join(missing))
     if affected['exit'] != 0 or verdict != 'passed':
         return settle('refused', 'affected checks on the candidate did not pass')
     if not verify.git('for-each-ref', f'refs/heads/revert/{culprit}').strip():
@@ -714,7 +722,12 @@ def investigate(base: str, head: str, failed: dict, directory: Path, state: Path
     journal = None
     try:
         if not attribution:
-            attribution = attribute(base, head, failed, prober)
+            try:
+                attribution = attribute(base, head, failed, prober)
+            except MiniNoResult as error:
+                # No outcome is no evidence: unresolved for this batch only, never memoized.
+                attribution = {**prober.record, 'status': 'unresolved', 'noResult': True,
+                               'reason': f'the mini gave no result: {error}; attribution resumes on the next batch'}
         if attribution.get('status') == 'proven':
             path = repair_path(state, attribution['commit'])
             if path.exists():
@@ -730,7 +743,7 @@ def investigate(base: str, head: str, failed: dict, directory: Path, state: Path
                 journal = build(journal, prober, state)
     finally:
         prober.close()
-        if attribution and not attribution.get('reused'):
+        if attribution and not attribution.get('reused') and not attribution.get('noResult'):
             attribution['hostSeconds'] = round(time.monotonic() - start, 3)
             memo.parent.mkdir(parents=True, exist_ok=True)
             save(memo, attribution)
@@ -786,7 +799,9 @@ def failure_key(failed: dict) -> str:
     return hashlib.sha256(json.dumps([failed['name'], failed.get('signature')], sort_keys=True).encode()).hexdigest()
 
 
-def repair_summary(journal: dict | None) -> str:
+def repair_summary(journal: dict | None, attribution: dict) -> str:
+    if not journal and attribution.get('noResult'):
+        return 'No source revert yet: the mini gave no attribution result; the next batch attributes this red again.\n'
     if not journal:
         return 'No source revert: attribution is unresolved; diagnose the root cause.\n'
     text = f"Repair of `{journal['culprit']}`: **{journal['state']}**" + (f" — {journal['reason']}" if journal.get('reason') else '') + '.\n'
@@ -810,7 +825,7 @@ def file_issue(report: dict, directory: Path, state: Path) -> dict:
                # Attribution narrows nothing short of a causal landing, so the candidates are the whole range:
                # named by count, which keeps a long range within the 64 KiB issue bound.
                f"Candidates: all {len(report['commits'])} covered commits of the range.\n")
-            + repair_summary(journal)
+            + repair_summary(journal, attribution)
             + ('\nFiles: ' + ', '.join(f'`{p}`' for p in attribution['files']) if 'files' in attribution else
                f"\nFiles: {len(report['files'])} changed in the range (`report.json` `files`).")
             + '\n\nThe first failure, exact commands, counts and logs are frozen in the repository-local '
@@ -831,7 +846,7 @@ def failure_cases(outcome: dict) -> list[dict]:
                 continue
             command = outcome['command']
             cases.append({**outcome, 'signature': {'failures': {identity: digest}},
-                          'probe': {'name': outcome['name'], 'vitest': True, 'gatewayLock': bool(outcome.get('gatewayLock')),
+                          'probe': {'name': outcome['name'], 'vitest': True,
                                     'command': [*command, file.removeprefix(outcome.get('testRoot', 'packages/gateway') + '/'), '-t', '^' + re.escape(' > '.join(names)) + '$']}})
     # Other owners may only be probed if the recorded invocation is already a case filter.
     elif outcome.get('xctestCases') and outcome.get('signature'):
@@ -881,7 +896,7 @@ def next_action(journal: dict) -> dict:
 
 
 class Locks:
-    """The nonwaiting repository batch lock. The host's full-Gateway lock is per Gateway lane (`execute`)."""
+    """The nonwaiting repository batch lock."""
 
     def __init__(self, state: Path):
         state.mkdir(exist_ok=True)

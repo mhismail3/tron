@@ -10,18 +10,20 @@ line with head, report path and each repair's state and next step; the caller de
 **Coverage.** First use needs `--base <main-anchor>`, not a claim of green.
 `<git-common-dir>/verify/green.json` names the last raw-green head and is the next base;
 `--base` cannot override it. Every run takes the nonwaiting repository `batch.lock` (held refuses,
-exit 2). The host's `/tmp/tron-full-gateway.lock` is held only while a full Gateway Vitest run
-executes: each Gateway default/nested lane and each Gateway attribution probe waits its turn in the
-same first-come queue as every other Gateway Vitest run ([runner](README.md)) and marks only that
-subprocess `TRON_FULL_GATEWAY_LOCK_HELD=1`; `verify --all` and the affected-check candidate run
-unmarked, so their Gateway groups queue for themselves. Gateway runs never overlap, and a
-pre-land run waits only for the batch's own Gateway runs, never its iOS lanes. Holders are never interrupted; a lane still
-waiting after 45 minutes is uncovered naming the holder, earlier waiters and its wait, never skipped.
-Unmarked runs (the verifier's Gateway groups, verifier-step probes, the candidate's affected
-checks) wait in the same queue without a cap, like any pre-land run; no holder waits on the batch.
+exit 2). Every Gateway Vitest and Python run the batch starts runs on the Mac mini, never beside
+its Apple chain here: the Gateway default/nested lanes and their case probes through `mini.py`, and
+`verify --all` and the affected-check candidate with `--gateway-host mini` ([runner](README.md)); only
+the groups that need this host, `mac-terminal` and `python-here`, run here. Each waits its turn for
+the mini's job lock up to 45 minutes (`TRON_MINI_JOB_WAIT_SECONDS`), never interrupting the holder.
+A lane the mini gives no result for (unreachable, off-pin, or still waiting at the cap) is uncovered
+naming the mini's reason, never red or run here. During attribution or repair a no-result concludes
+nothing: the attribution is unresolved for that batch only (not memoized) and a repair stays
+`pending`, so both resume on the next batch. A
+caller's `TRON_FULL_GATEWAY_LOCK_HELD` never reaches a lane, so a local Gateway run inside one
+(the Mac Terminal group) queues for this host's lock itself.
 Same green HEAD does nothing once its turn comes; `--repeat` reruns all nine lanes there. `--plan` is read-only. After pinned Gateway/relay dependency preparation every
 required lane runs, even after failures: locks and every declaration (`verify --all`), full
-default and nested Gateway Vitest (on the test-host pool, [README](README.md); each lane's `gatewayHost` names where it ran), signed Mac integration, relay Workers Vitest, unsigned
+default and nested Gateway Vitest (on the mini), signed Mac integration, relay Workers Vitest, unsigned
 shipping iOS compile, UI smoke `checkpoint`, real-Gateway boundary and real-UI journeys
 (installation disabled; Mac uses scratch HOME/TMPDIR). The lanes run as two concurrent chains, each
 in plan order: **Node** (`verify --all`, Gateway default, nested, Mac integration, relay) and
@@ -33,8 +35,8 @@ worktree's own DerivedData), so they never contend with the verifier's iOS steps
 lane lease. The repository owns that lane and its UI journey lanes (`TRON_IOS_TEST_LANE_REPOSITORY`),
 so any worktree a batch runs in reuses the same warm simulators; they are reaped only with the
 repository or after the idle TTL, never with a batch worktree. A chain that errors (for
-example changed source) or an interrupt stops the other chain's running lane and cancels a lane
-waiting for the full-Gateway lock (uncovered, never started); both join before fixture cleanup,
+example changed source) or an interrupt stops the other chain's running lane (a mini job waiting for
+its lock or running ends with its session); both join before fixture cleanup,
 freeze, attribution and verdict. iOS lanes release host slots between lanes; all slots held by other
 work at admission is deferred, while a slot this batch's own worktree holds frees when its
 lane ends, so the lane is admitted and waits for it. The UI journey lane runs its journeys on
@@ -45,7 +47,7 @@ Missing owners/reports, empty/skipped/deferred evidence, a non-`passed` verifier
 failed setup/cleanup or changed source is **uncovered**; any executed failure is **red**.
 Neither advances `green.json`. Immutable `verify/batches/<range>/` keeps commands, logs,
 counts and wall times. Each lane's `timing` in `report.json` is read-only observation
-([`timing.py`](timing.py)), never a verdict input: start/end and full-Gateway lock wait/hold,
+([`timing.py`](timing.py)), never a verdict input: start/end,
 verifier step seconds, per-file Vitest wall seconds, `-showBuildTimingSummary` buckets, per-journey
 wall seconds, and per-case and top-level activity seconds (idle waits counted) from each result
 bundle the log names (`xcresulttool get test-results tests|activities`); an unreadable source is
@@ -104,12 +106,12 @@ then green; disabled publication, then enabled; innocent concurrent landing with
 rebind; uncertain push, crash after remote acceptance and an owner killed mid-repair (one
 revert each); stale red; unreadable remote; migration and `security` owner boundaries; BLOCK;
 conflict; an inverse that leaves the failure; failing affected checks; mutated frozen evidence;
-mixed controls, suite-level errors, skipped/missing coverage and octopus history; held locks
-(per-lane arrival order, capped waits, a pre-land run passing a running UI lane), a stand-in
+mixed controls, suite-level errors, skipped/missing coverage and octopus history; Gateway lanes,
+verifier and candidate runs only on a stand-in mini carrying the wait cap, and a mini without a
+result leaving them uncovered; a stand-in
 Vitest that matches `-t` like Vitest 5, a head probe selecting nothing (error, exit 2),
 chains that each wait on the other's lane (only concurrent chains finish), the Apple chain's
-own simulator lane beside the verifier's iOS steps, an interrupt cancelling a lane waiting for
-the Gateway lock, a red Node lane
+own simulator lane beside the verifier's iOS steps, a red Node lane
 beside a full Apple chain, UI journey lanes with the previous batch's seconds, a slot held by
-this batch's own worktree, and interrupted cleanup preservation. The fixture points the host lock at its own temporary
-file; the production path is not exercised by tests.
+this batch's own worktree, and interrupted cleanup preservation. The fixture runs the real `mini.py` with its job handed to a
+stand-in mini host in the fixture checkout; the ssh hop and mini side are `test-mini.py`'s.
