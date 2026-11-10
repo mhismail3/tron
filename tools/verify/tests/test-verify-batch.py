@@ -125,7 +125,7 @@ class BatchTests(unittest.TestCase):
                 assert "\nif __name__ == '__main__':\n" in text, 'mini.py moved its entry point; point this fixture at it'
                 text = text.replace("\nif __name__ == '__main__':\n", "\n" + MINI_HOST + "\nif __name__ == '__main__':\n")
             self.write('tools/verify/' + file, text)
-        for directory in ('ownership', 'budgets', 'metrics', 'layers'):
+        for directory in ('ownership', 'metrics', 'layers'):
             for source in (ROOT / 'tools' / directory).glob('*.py'):
                 self.write(str(source.relative_to(ROOT)), source.read_text())
         self.write('.gitignore', 'test-results/\n__pycache__/\n')

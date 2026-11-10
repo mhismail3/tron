@@ -37,6 +37,9 @@ IRREVERSIBLE_RISK = {'persistence', 'security', 'mac-installer'}
 # Node (verifier, Gateway Vitest on the mini, Mac, relay) and Apple (the
 # iOS lanes under host slots). Both join before freeze, attribution and verdict.
 CHAINS = ('node', 'apple')
+# The packages whose pinned dependencies a batch (and each probe worktree) installs first: the
+# Gateway's (most tests import it), the relay's lane, and the core runtime the proof gate runs.
+PACKAGES = ('gateway', 'push-relay', 'core')
 # The real-UI journey lane runs its journeys on this many owned simulator lanes at once, one
 # host slot each, longest first by the previous batch's per-journey seconds.
 UI_JOURNEY_LANES = 3
@@ -405,13 +408,13 @@ def stop_fixture(root: Path, directory: Path) -> dict | None:
 
 
 def prepare(root: Path, directory: Path) -> bool:
-    if not (root / 'packages/gateway/package-lock.json').is_file():
-        return True
-    result = execute(root, {'name': 'probe dependencies', 'command': [
-        'scripts/tron-node', 'exec', 'npm', '--prefix', 'packages/gateway', 'ci', '--include=dev']}, directory)
-    return result['exit'] == 0
-
-
+    for package in PACKAGES:
+        if (root / f'packages/{package}/package-lock.json').is_file():
+            result = execute(root, {'name': f'probe {package} dependencies', 'command': [
+                'scripts/tron-node', 'exec', 'npm', '--prefix', f'packages/{package}', 'ci', '--include=dev']}, directory / package)
+            if result['exit'] != 0:
+                return False
+    return True
 
 
 class MiniNoResult(Exception):
@@ -452,10 +455,10 @@ class Prober:
             return observed['outcome']
         self.git('checkout', '--detach', sha)
         attempt = self.directory / f'probe-{len(self.record["probes"]):02d}-{sha[:12]}'
-        lock = self.root / 'packages/gateway/package-lock.json'
-        dependencies = hashlib.sha256(lock.read_bytes()).hexdigest() if lock.exists() else ''
+        locks = [self.root / f'packages/{package}/package-lock.json' for package in PACKAGES]
+        dependencies = hashlib.sha256(b''.join(lock.read_bytes() for lock in locks if lock.exists())).hexdigest()
         pure_static = self.failed.get('probe', {}).get('name') in {
-            'ownership', 'budgets', 'documentation policy', 'agent policy', 'privacy guard',
+            'ownership', 'documentation policy', 'agent policy', 'privacy guard',
             'git diff --check'}
         if not pure_static and dependencies != self.dependency_key:
             if not prepare(self.root, attempt / 'dependencies'):
@@ -1064,7 +1067,7 @@ def main(argv: list[str]) -> int:
                 def source_unchanged():
                     if verify.git('rev-parse', 'HEAD').strip() != head or verify.git('status', '--porcelain', '--untracked-files=normal').strip():
                         raise verify.VerifyError('source changed during batch; no green coverage recorded')
-                for package in ('gateway', 'push-relay'):
+                for package in PACKAGES:
                     if (ROOT / f'packages/{package}/package-lock.json').is_file():
                         try:
                             setup = execute(ROOT, {'name': f'{package} dependencies', 'command': [
