@@ -18,12 +18,10 @@ final class TronRecoveryNoticeUITests: XCTestCase {
         XCTAssertTrue(status.waitForExistence(timeout: 10), "the route never showed its recovery status: \(app.debugDescription)")
         // The second never-opened failure reclassifies the episode as Mac unreachable and
         // updates the notice in place; that is the text a later same-class failure repeats.
-        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Mac unreachable"),
-                                                                        object: card)], timeout: 20) == .completed,
+        XCTAssertTrue(waitUntil(card, NSPredicate(format: "label CONTAINS %@", "Mac unreachable"), timeout: 20),
                       "the notice never read Mac unreachable before it expired: \(card.label)")
         // The notice expires on its own lifetime; the title keeps the lasting reason.
-        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: card)],
-                                       timeout: 20) == .completed, "the recovery notice never expired")
+        XCTAssertTrue(waitUntil(card, NSPredicate(format: "exists == false"), timeout: 20), "the recovery notice never expired")
         XCTAssertTrue(waitForHittable(status, timeout: 10), "Retry is not reachable after the notice expired: \(app.debugDescription)")
         keep(app.screenshot(), "2273-after-expiry")
 
@@ -49,8 +47,7 @@ final class TronRecoveryNoticeUITests: XCTestCase {
         let state = app.staticTexts["keychain-locked-state"]
         let unreadable = "offline: This iPhone's Keychain cannot be read yet. Unlock it to reconnect."
         XCTAssertTrue(state.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label == %@", unreadable), object: state)], timeout: 15) == .completed,
+        XCTAssertTrue(waitUntil(state, NSPredicate(format: "label == %@", unreadable), timeout: 15),
                       "an unreadable Keychain did not leave the paired Mac offline: \(state.label)")
         XCTAssertFalse(app.staticTexts["Welcome to Tron"].waitForExistence(timeout: 5),
                        "an unreadable Keychain presented setup for a paired Mac: \(app.debugDescription)")
@@ -61,9 +58,7 @@ final class TronRecoveryNoticeUITests: XCTestCase {
         app.activate()
         // The fixture Mac never resolves, so a read token starts a reconnect
         // that fails for a network reason, never the Keychain one.
-        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label != %@ AND label != %@", unreadable, "unpaired"), object: state)],
-                                       timeout: 20) == .completed,
+        XCTAssertTrue(waitUntil(state, NSPredicate(format: "label != %@ AND label != %@", unreadable, "unpaired"), timeout: 20),
                       "the foreground did not read the token and reconnect: \(state.label)")
         XCTAssertFalse(app.staticTexts["Welcome to Tron"].exists, app.debugDescription)
         keep(app.screenshot(), "2296-keychain-readable-after-foreground")

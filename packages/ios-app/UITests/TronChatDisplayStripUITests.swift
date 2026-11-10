@@ -204,8 +204,7 @@ final class TronChatDisplayStripUITests: XCTestCase {
     }
 
     @MainActor private func waitHittable(_ element: XCUIElement) -> Bool {
-        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: element)
-        return XCTWaiter.wait(for: [expectation], timeout: 10) == .completed
+        return waitUntil(element, NSPredicate(format: "isHittable == true"), timeout: 10)
     }
 
     @MainActor private func keepScreenshot(_ app: XCUIApplication, _ name: String) {

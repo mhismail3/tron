@@ -258,8 +258,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
                 guard let button = element as? XCUIElement else { return false }
                 return button.frame.minY < mediumTop - 100
             }
-            expectation(for: expanded, evaluatedWith: done)
-            waitForExpectations(timeout: 8)
+            XCTAssertTrue(waitUntil(done, expanded, timeout: 8), "\(done)")
             XCTAssertTrue(sheetPlayer.exists && sheetPlayer.isHittable, "\(scenario): player survives the large detent")
             XCTAssertGreaterThan(sheetPlayer.frame.height, mediumPlayerFrame.height + 100, "\(scenario): the player re-lays out with the expanded detent")
             let largePlayPause = app.buttons["Play/Pause"]
@@ -387,7 +386,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
     }
     @MainActor private func wait(_ element: XCUIElement, predicate: String, value: String? = nil) -> Bool {
         let condition = value.map { NSPredicate(format: predicate, $0) } ?? NSPredicate(format: predicate)
-        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: condition, object: element)], timeout: 10) == .completed
+        return waitUntil(element, condition, timeout: 10)
     }
     @MainActor private func assertGeneratedVideoEdge(
         in app: XCUIApplication,

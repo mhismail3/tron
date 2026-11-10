@@ -31,7 +31,7 @@ import Vision
             XCTAssertLessThanOrEqual(done.frame.maxY, keyboard.frame.minY + 1)
             XCTAssertGreaterThanOrEqual(done.frame.minY, keyboard.frame.minY - 60)
             done.tap()
-            XCTAssertTrue(wait(keyboard, "exists == false"), "Done dismisses the number pad")
+            XCTAssertTrue(waitUntil(keyboard, "exists == false", timeout: 8), "Done dismisses the number pad")
         }
     }
 
@@ -150,7 +150,7 @@ import Vision
         let app = launch(mode, fixture: "-tron-home-dashboard-fixture", extra: ["-home-shell-ready"] + extra)
         tap(app, "home-pinned-row")
         let context = app.buttons["session-context-button"]
-        XCTAssertTrue(wait(context, "enabled == true"))
+        XCTAssertTrue(waitUntil(context, "enabled == true", timeout: 8))
         context.tap()
         XCTAssertTrue(e(app, "home-manage-state").waitForExistence(timeout: 8), app.debugDescription)
         expand(app, done: "home-sheet-done-manage")
@@ -173,7 +173,7 @@ import Vision
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         origin.withOffset(CGVector(dx: 60, dy: done.frame.midY)).press(forDuration: 0.1,
             thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        _ = wait(done, "frame.minY < 120")
+        _ = waitUntil(done, "frame.minY < 120", timeout: 8)
     }
     private func expandTitle(_ app: XCUIApplication, title: String) {
         let bar = app.navigationBars.staticTexts[title].firstMatch
@@ -182,10 +182,7 @@ import Vision
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         origin.withOffset(CGVector(dx: 60, dy: bar.frame.midY)).press(forDuration: 0.1,
             thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        _ = wait(bar, "frame.minY < 120")
-    }
-    private func wait(_ element: XCUIElement, _ predicate: String) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: predicate), object: element)], timeout: 8) == .completed
+        _ = waitUntil(bar, "frame.minY < 120", timeout: 8)
     }
     private func shot(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

@@ -26,8 +26,8 @@ final class TronNewSessionUITests: XCTestCase {
             app.buttons["Done"].firstMatch.tap()
             XCTAssertTrue(app.buttons["Create"].isEnabled)
             app.buttons["Create"].tap()
-            XCTAssertTrue(wait(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'"))
-            XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:1 typed:0 projectWrites:0 inherited:true'"),
+            XCTAssertTrue(waitUntil(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'", timeout: 12))
+            XCTAssertTrue(waitUntil(app.staticTexts["fixture.create-counts"], "label CONTAINS 'creates:1 typed:0 projectWrites:0 inherited:true'", timeout: 12),
                           "Creating from a repository default must not copy it to a Session override")
             app.terminate()
         }
@@ -70,7 +70,7 @@ final class TronNewSessionUITests: XCTestCase {
         let app = launch("draft"); defer { app.terminate() }
         chooseBranch(app)
         app.buttons["Done"].tap()
-        XCTAssertTrue(wait(app.buttons["new-session-card.Source Control"], "label CONTAINS 'fixture-new-branch'"), "Parent reactivation must retain the chosen source-control intent")
+        XCTAssertTrue(waitUntil(app.buttons["new-session-card.Source Control"], "label CONTAINS 'fixture-new-branch'", timeout: 12), "Parent reactivation must retain the chosen source-control intent")
         XCUIDevice.shared.press(.home); app.activate(); waitConnected(app)
         app.buttons["new-session-card.Source Control"].tap()
         XCTAssertTrue(app.textFields["feature/my-work"].waitForExistence(timeout: 10))
@@ -82,9 +82,9 @@ final class TronNewSessionUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("accepted-background"); defer { app.terminate() }
         XCTAssertTrue(app.buttons["Create"].waitForExistence(timeout: 15)); app.buttons["Create"].tap()
-        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'typed:1'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.create-counts"], "label CONTAINS 'typed:1'", timeout: 12))
         XCUIDevice.shared.press(.home); app.activate(); waitConnected(app)
-        XCTAssertTrue(wait(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'"), "Accepted typed create result must rejoin original navigation admission")
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'", timeout: 12), "Accepted typed create result must rejoin original navigation admission")
         XCTAssertEqual(app.staticTexts["fixture.create-counts"].label, "creates:1 typed:1")
         XCTAssertFalse(app.buttons["new-session-card.Source Control"].exists)
         evidence(app, "348-new-session-create-background")
@@ -93,7 +93,7 @@ final class TronNewSessionUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("accepted-replace-profile"); defer { app.terminate() }
         XCTAssertTrue(app.buttons["Create"].waitForExistence(timeout: 15)); app.buttons["Create"].tap()
-        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'typed:1'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.create-counts"], "label CONTAINS 'typed:1'", timeout: 12))
         XCUIDevice.shared.press(.home); app.activate(); waitConnected(app)
         XCTAssertEqual(app.staticTexts["fixture.create-result"].label, "callbacks:0 owned:false")
         XCTAssertEqual(app.staticTexts["fixture.create-counts"].label, "creates:1 typed:1")
@@ -114,11 +114,11 @@ final class TronNewSessionUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("accepted-newer-workspace"); defer { app.terminate() }
         XCTAssertTrue(app.buttons["Create"].waitForExistence(timeout: 15)); app.buttons["Create"].tap()
-        XCTAssertTrue(wait(app.staticTexts["fixture.create-counts"], "label CONTAINS 'typed:1'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.create-counts"], "label CONTAINS 'typed:1'", timeout: 12))
         changeWorkspace(app)
         XCUIDevice.shared.press(.home); app.activate(); waitConnected(app)
         XCTAssertTrue(app.staticTexts["new-session-created-elsewhere"].waitForExistence(timeout: 10))
-        XCTAssertTrue(wait(app.buttons["new-session-card.Workspace"], "label CONTAINS '/fixture/replacement'"))
+        XCTAssertTrue(waitUntil(app.buttons["new-session-card.Workspace"], "label CONTAINS '/fixture/replacement'", timeout: 12))
         XCTAssertEqual(app.staticTexts["fixture.create-result"].label, "callbacks:0 owned:false")
         XCTAssertEqual(app.staticTexts["fixture.create-counts"].label, "creates:1 typed:1")
         evidence(app, "348-new-session-newer-draft")
@@ -128,7 +128,7 @@ final class TronNewSessionUITests: XCTestCase {
         let app = launch("draft-replace-profile"); defer { app.terminate() }
         chooseBranch(app); app.buttons["Done"].tap()
         XCUIDevice.shared.press(.home); app.activate(); waitConnected(app)
-        XCTAssertTrue(wait(app.buttons["new-session-card.Source Control"], "NOT label CONTAINS 'fixture-new-branch'"), "A replaced namespace must revoke the original source-control intent")
+        XCTAssertTrue(waitUntil(app.buttons["new-session-card.Source Control"], "NOT label CONTAINS 'fixture-new-branch'", timeout: 12), "A replaced namespace must revoke the original source-control intent")
         XCTAssertTrue(app.buttons["Preparing"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Preparing"].isEnabled)
         evidence(app, "348-new-session-profile-draft-replaced")
@@ -139,7 +139,7 @@ final class TronNewSessionUITests: XCTestCase {
         XCTAssertTrue(app.buttons["new-session-card.Workspace"].waitForExistence(timeout: 15))
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.10))
             .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
-        XCTAssertTrue(wait(app.buttons["new-session-card.Workspace"], "exists == false"))
+        XCTAssertTrue(waitUntil(app.buttons["new-session-card.Workspace"], "exists == false", timeout: 12))
         XCUIDevice.shared.press(.home); app.activate(); waitConnected(app)
         XCTAssertFalse(app.buttons["new-session-card.Workspace"].exists)
         XCTAssertEqual(app.staticTexts["fixture.create-counts"].label, "creates:0 typed:0")
@@ -150,13 +150,13 @@ final class TronNewSessionUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("trust-before-profile"); defer { app.terminate() }
         XCTAssertTrue(app.buttons["Create"].waitForExistence(timeout: 15)); app.buttons["Create"].tap()
-        XCTAssertTrue(wait(app.staticTexts["fixture.trust-counts"], "label CONTAINS 'held:1'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.trust-counts"], "label CONTAINS 'held:1'", timeout: 12))
         app.buttons["new-session-card.Server"].tap()
         let server = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Replacement fixture'")).firstMatch
         XCTAssertTrue(server.waitForExistence(timeout: 10)); server.tap()
-        XCTAssertTrue(wait(app.staticTexts["fixture.create-connection"], "label BEGINSWITH 'connected' AND label CONTAINS 'profile:new-session-replacement'"))
-        XCTAssertTrue(wait(app.staticTexts["fixture.trust-counts"], "label CONTAINS 'released:1'"))
-        XCTAssertTrue(wait(app.buttons["Create"], "exists == true AND enabled == false"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.create-connection"], "label BEGINSWITH 'connected' AND label CONTAINS 'profile:new-session-replacement'", timeout: 12))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.trust-counts"], "label CONTAINS 'released:1'", timeout: 12))
+        XCTAssertTrue(waitUntil(app.buttons["Create"], "exists == true AND enabled == false", timeout: 12))
         XCTAssertTrue(app.staticTexts["fixture.trust-counts"].label.hasPrefix("trusts:0 successor:0"), "Original cwd/trust fallback must never dispatch to a replacement Mac")
         XCTAssertEqual(app.staticTexts["fixture.create-counts"].label, "creates:0 typed:0")
         XCTAssertEqual(app.staticTexts["fixture.create-result"].label, "callbacks:0 owned:false")
@@ -166,9 +166,9 @@ final class TronNewSessionUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("trust-before-background"); defer { app.terminate() }
         XCTAssertTrue(app.buttons["Create"].waitForExistence(timeout: 15)); app.buttons["Create"].tap()
-        XCTAssertTrue(wait(app.staticTexts["fixture.trust-counts"], "label CONTAINS 'held:1'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.trust-counts"], "label CONTAINS 'held:1'", timeout: 12))
         XCUIDevice.shared.press(.home); app.activate(); waitConnected(app)
-        XCTAssertTrue(wait(app.staticTexts["fixture.trust-counts"], "label CONTAINS 'released:1'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.trust-counts"], "label CONTAINS 'released:1'", timeout: 12))
         XCTAssertTrue(app.staticTexts["fixture.trust-counts"].label.hasPrefix("trusts:0 successor:0"))
         XCTAssertEqual(app.staticTexts["fixture.create-counts"].label, "creates:0 typed:0")
         XCTAssertEqual(app.staticTexts["fixture.create-result"].label, "callbacks:0 owned:false")
@@ -178,7 +178,7 @@ final class TronNewSessionUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("trust-original"); defer { app.terminate() }
         XCTAssertTrue(app.buttons["Create"].waitForExistence(timeout: 15)); app.buttons["Create"].tap()
-        XCTAssertTrue(wait(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'", timeout: 12))
         XCTAssertTrue(app.staticTexts["fixture.trust-counts"].label.hasPrefix("trusts:1 successor:0 fallback:true"))
         XCTAssertEqual(app.staticTexts["fixture.create-counts"].label, "creates:1 typed:0")
         evidence(app, "348-new-session-original-trust")
@@ -187,14 +187,14 @@ final class TronNewSessionUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("trust-accepted-background"); defer { app.terminate() }
         XCTAssertTrue(app.buttons["Create"].waitForExistence(timeout: 15)); app.buttons["Create"].tap()
-        XCTAssertTrue(wait(app.staticTexts["fixture.trust-counts"], "label CONTAINS 'acceptedHeld:1'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.trust-counts"], "label CONTAINS 'acceptedHeld:1'", timeout: 12))
         XCUIDevice.shared.press(.home); app.activate(); waitConnected(app)
-        XCTAssertTrue(wait(app.buttons["Create"], "exists == true AND enabled == true"))
+        XCTAssertTrue(waitUntil(app.buttons["Create"], "exists == true AND enabled == true", timeout: 12))
         XCTAssertFalse(app.buttons["new-session-card.Project Trust"].exists, "Canonical accepted trust must reconcile without replay")
         XCTAssertEqual(app.staticTexts["fixture.create-counts"].label, "creates:0 typed:0")
         XCTAssertEqual(app.staticTexts["fixture.create-result"].label, "callbacks:0 owned:false")
         app.buttons["Create"].tap()
-        XCTAssertTrue(wait(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.create-result"], "label == 'callbacks:1 owned:true'", timeout: 12))
         XCTAssertTrue(app.staticTexts["fixture.trust-counts"].label.hasPrefix("trusts:1 successor:0 fallback:true"))
         XCTAssertEqual(app.staticTexts["fixture.create-counts"].label, "creates:1 typed:0")
         evidence(app, "348-new-session-accepted-trust")
@@ -202,7 +202,7 @@ final class TronNewSessionUITests: XCTestCase {
     @MainActor private func changeWorkspace(_ app: XCUIApplication) {
         app.buttons["new-session-card.Workspace"].tap()
         XCTAssertTrue(app.buttons["replacement"].waitForExistence(timeout: 10)); app.buttons["replacement"].tap()
-        XCTAssertTrue(wait(app.navigationBars.staticTexts.matching(NSPredicate(format: "label CONTAINS '/fixture/replacement'")).firstMatch, "exists == true"))
+        XCTAssertTrue(waitUntil(app.navigationBars.staticTexts.matching(NSPredicate(format: "label CONTAINS '/fixture/replacement'")).firstMatch, "exists == true", timeout: 12))
         app.buttons["Use current folder"].tap()
     }
     @MainActor private func chooseBranch(_ app: XCUIApplication) {
@@ -213,7 +213,7 @@ final class TronNewSessionUITests: XCTestCase {
         let branch = app.textFields["feature/my-work"]
         XCTAssertTrue(branch.waitForExistence(timeout: 10)); branch.tap(); branch.typeText("fixture-new-branch")
         app.buttons["Done"].tap()
-        XCTAssertTrue(wait(source, "label CONTAINS 'fixture-new-branch'"), "Closing the child must retain the branch before reopening its base picker")
+        XCTAssertTrue(waitUntil(source, "label CONTAINS 'fixture-new-branch'", timeout: 12), "Closing the child must retain the branch before reopening its base picker")
         source.tap()
         app.buttons.matching(identifier: "Start From").element(boundBy: 1).tap()
         XCTAssertTrue(app.buttons["fixture-base"].waitForExistence(timeout: 10)); app.buttons["fixture-base"].tap()
@@ -221,11 +221,8 @@ final class TronNewSessionUITests: XCTestCase {
     @MainActor private func launch(_ scenario: String) -> XCUIApplication {
         let app = XCUIApplication(); app.launchArguments = ["-tron-new-session-fixture", "-new-session-scenario", scenario]; app.launch(); return app
     }
-    @MainActor private func wait(_ e: XCUIElement, _ predicate: String) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: predicate), object: e)], timeout: 12) == .completed
-    }
     @MainActor private func waitConnected(_ app: XCUIApplication) {
-        XCTAssertTrue(wait(app.staticTexts["fixture.create-connection"], "label BEGINSWITH 'connected' AND NOT label CONTAINS 'socket:1'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.create-connection"], "label BEGINSWITH 'connected' AND NOT label CONTAINS 'socket:1'", timeout: 12))
     }
     @MainActor private func evidence(_ app: XCUIApplication, _ name: String) {
         let a = XCTAttachment(screenshot: app.screenshot()); a.name = name; a.lifetime = .keepAlways; add(a)

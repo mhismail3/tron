@@ -869,7 +869,7 @@ final class TronSwiftAppUITests: XCTestCase {
     }
     @MainActor private func wait(_ element: XCUIElement, predicate: String, value: String? = nil) -> Bool {
         let condition = value.map { NSPredicate(format: predicate, $0) } ?? NSPredicate(format: predicate)
-        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: condition, object: element)], timeout: 10) == .completed
+        return waitUntil(element, condition, timeout: 10)
     }
     @MainActor private func keepScreenshot(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)

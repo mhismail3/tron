@@ -129,7 +129,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(wait(for: bubble, exists: false))
 
         let chips = app.otherElements.matching(identifier: "composer.staged-chip")
-        XCTAssertTrue(wait { chips.count == 2 }, "Annotations use the shared composer staged chip: \(app.debugDescription)")
+        XCTAssertTrue(waitUntil(timeout: 8) { chips.count == 2 }, "Annotations use the shared composer staged chip: \(app.debugDescription)")
         let first = chips.element(boundBy: 0)
         XCTAssertTrue(first.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.exists)
         XCTAssertTrue(first.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Remove annotation'")).firstMatch.exists)
@@ -156,15 +156,15 @@ final class TronChatAnnotationUITests: XCTestCase {
         app.typeText("Please revise the retry section.")
         app.buttons["Send message"].firstMatch.tap()
         let prompt = app.staticTexts["fixture.last-prompt"]
-        XCTAssertTrue(wait { prompt.label.hasPrefix("<annotation>\n> ") }, prompt.label)
+        XCTAssertTrue(waitUntil(timeout: 8) { prompt.label.hasPrefix("<annotation>\n> ") }, prompt.label)
         XCTAssertTrue(prompt.label.contains("Make the cap configurable up to a minute\n</annotation>"), prompt.label)
         XCTAssertTrue(prompt.label.contains("Also on Wi-Fi changes\n</annotation>"), prompt.label)
         XCTAssertTrue(prompt.label.hasSuffix("</annotation>\n\nPlease revise the retry section."), prompt.label)
-        XCTAssertTrue(wait { chips.count == 0 }, "Sending clears staged annotations")
+        XCTAssertTrue(waitUntil(timeout: 8) { chips.count == 0 }, "Sending clears staged annotations")
 
         // The sent message shows the annotations with the canonical chip and sheet.
         let sent = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'"))
-        XCTAssertTrue(wait { sent.count == 2 }, app.debugDescription)
+        XCTAssertTrue(waitUntil(timeout: 8) { sent.count == 2 }, app.debugDescription)
         keepScreenshot(app, "899-5-sent")
         sent.firstMatch.tap()
         XCTAssertTrue(app.staticTexts["chat.annotation.comment"].waitForExistence(timeout: 5))
@@ -297,7 +297,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(keyboard.exists, "Selecting message text keeps the keyboard up")
         XCTAssertEqual(paragraph.frame, restingFrame, "The transcript does not move under the selection")
         annotate("keyboard up")
-        XCTAssertTrue(wait { chips.count == 2 }, app.debugDescription)
+        XCTAssertTrue(waitUntil(timeout: 8) { chips.count == 2 }, app.debugDescription)
 
         func stagedQuote(_ index: Int) -> String {
             chips.element(boundBy: index).buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
@@ -326,7 +326,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         let paste = menuAction(app, "Paste")
         XCTAssertTrue(paste.waitForExistence(timeout: 5), app.debugDescription)
         paste.tap()
-        XCTAssertTrue(wait { (composer.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == control },
+        XCTAssertTrue(waitUntil(timeout: 8) { (composer.value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) == control },
                       String(describing: composer.value))
     }
 
@@ -370,7 +370,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         if catchUp.waitForExistence(timeout: 2) { catchUp.tap() }
         // The fixture fits the screen at the default size; at XXXL the source is off screen.
         if name.hasPrefix("xxxl") {
-            XCTAssertTrue(wait { heading.frame.maxY < navigationBottom }, "The source scrolled away: \(heading.frame)")
+            XCTAssertTrue(waitUntil(timeout: 8) { heading.frame.maxY < navigationBottom }, "The source scrolled away: \(heading.frame)")
         }
 
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
@@ -387,7 +387,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         // idle wait after the tap, so the fixture records each reveal's window
         // frame and its clearing.
         let reveals = app.staticTexts["fixture.reveals"]
-        XCTAssertTrue(wait { reveals.label.contains("cleared|") },
+        XCTAssertTrue(waitUntil(timeout: 8) { reveals.label.contains("cleared|") },
                       "The quote reveals its source and clears it with the highlight: \(reveals.label)")
         keepScreenshot(app, "quote-reveal-sheet-open-source-\(name)")
         let shown = reveals.label.components(separatedBy: ";").first { $0.hasPrefix("shown|") }?
@@ -453,12 +453,12 @@ final class TronChatAnnotationUITests: XCTestCase {
         let paste = menuAction(app, "Paste")
         XCTAssertTrue(paste.waitForExistence(timeout: 5), app.debugDescription)
         paste.tap()
-        XCTAssertTrue(wait { (composer.value as? String)?.lowercased() == "a\nb\n" }, "Pasting a newline inserts it: \(String(describing: composer.value))")
+        XCTAssertTrue(waitUntil(timeout: 8) { (composer.value as? String)?.lowercased() == "a\nb\n" }, "Pasting a newline inserts it: \(String(describing: composer.value))")
         XCTAssertEqual(prompt.label, "none", "Pasting a newline does not send")
         composer.typeKey("c", modifierFlags: [])
         composer.typeKey("\n", modifierFlags: [])
-        XCTAssertTrue(wait { prompt.label.lowercased() == "a\nb\nc" }, prompt.label)
-        XCTAssertTrue(wait { (composer.value as? String ?? "").isEmpty }, String(describing: composer.value))
+        XCTAssertTrue(waitUntil(timeout: 8) { prompt.label.lowercased() == "a\nb\nc" }, prompt.label)
+        XCTAssertTrue(waitUntil(timeout: 8) { (composer.value as? String ?? "").isEmpty }, String(describing: composer.value))
     }
 
     /// On iPhone, Return keeps inserting a newline in the composer and in the
@@ -494,7 +494,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         app.typeText("Make the cap configurable")
         app.typeText("\n")
         XCTAssertTrue(wait(for: bubble, exists: false), "Return saves the annotation")
-        XCTAssertTrue(wait { chips.count == 1 }, app.debugDescription)
+        XCTAssertTrue(waitUntil(timeout: 8) { chips.count == 1 }, app.debugDescription)
         assertStagedComment(app, chips.firstMatch, "make the cap configurable", "Return is not part of the comment")
     }
 
@@ -517,7 +517,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertEqual((commentField(in: bubble).value as? String)?.lowercased(), "u\nxp", "Shift+Return inserts a newline at the caret")
         app.typeKey("\n", modifierFlags: [])
         XCTAssertTrue(wait(for: bubble, exists: false), "Hardware Return saves the annotation")
-        XCTAssertTrue(wait { chips.count == 1 }, app.debugDescription)
+        XCTAssertTrue(waitUntil(timeout: 8) { chips.count == 1 }, app.debugDescription)
         assertStagedComment(app, chips.firstMatch, "u\nxp", "Shift+Return keeps its newline")
     }
 
@@ -580,17 +580,8 @@ final class TronChatAnnotationUITests: XCTestCase {
         if tip.waitForExistence(timeout: 1) { tip.tap() }
     }
 
-    private func wait(timeout: TimeInterval = 8, _ condition: () -> Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if condition() { return true }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        }
-        return condition()
-    }
-
-    private func wait(for element: XCUIElement, exists: Bool) -> Bool {
-        wait { element.exists == exists }
+    @MainActor private func wait(for element: XCUIElement, exists: Bool) -> Bool {
+        waitUntil(timeout: 8) { element.exists == exists }
     }
 
     @MainActor private func keepScreenshot(_ app: XCUIApplication, _ name: String) {

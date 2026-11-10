@@ -127,7 +127,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         XCTAssertTrue(element(app, "home-manage-state").waitForExistence(timeout: 10), app.debugDescription)
         expandSheet(app, title: "Manage Home")
@@ -249,7 +249,7 @@ final class TronListStandardUITests: XCTestCase {
             XCTAssertTrue(app.buttons[action].waitForExistence(timeout: 5), "Long-press offers \(action)\n\(app.debugDescription)")
         }
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
-        _ = waitFor(app.buttons["Copy Text"], "exists == false", timeout: 5)
+        _ = waitUntil(app.buttons["Copy Text"], "exists == false", timeout: 5)
         bookmarked.tap()
         XCTAssertTrue(element(app, "history-entry-actions").waitForExistence(timeout: 8), app.debugDescription)
         for (id, title) in zip(["navigate", "fork", "bookmark", "copy"], menuActions) {
@@ -275,7 +275,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(chip.label.contains("of 6,733"), "The chip counts the whole feed: \(chip.label)")
         XCTAssertFalse(app.buttons["history-row-h-6732"].isHittable)
         chip.tap()
-        XCTAssertTrue(waitFor(app.buttons["history-row-h-6732"], "hittable == true", timeout: 5), "The chip jumps to the newest entry")
+        XCTAssertTrue(waitUntil(app.buttons["history-row-h-6732"], "hittable == true", timeout: 5), "The chip jumps to the newest entry")
     }
 
     /// Grouped lists: a status row's pill is top-right, ordinal rows centre their
@@ -297,7 +297,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         let chapters = element(app, "home-manage-chapters")
         XCTAssertTrue(chapters.waitForExistence(timeout: 10), app.debugDescription)
@@ -326,7 +326,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         let profile = element(app, "home-manage-profile")
         XCTAssertTrue(profile.waitForExistence(timeout: 10), app.debugDescription)
@@ -412,7 +412,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         XCTAssertTrue(element(app, "home-manage-state").waitForExistence(timeout: 10), app.debugDescription)
         expandSheet(app, title: "Manage Home")
@@ -505,7 +505,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         let tasks = element(app, "home-manage-tasks")
         XCTAssertTrue(tasks.waitForExistence(timeout: 10), app.debugDescription)
@@ -534,7 +534,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         let memory = element(app, "home-manage-memory-browser")
         XCTAssertTrue(memory.waitForExistence(timeout: 10), app.debugDescription)
@@ -567,7 +567,7 @@ final class TronListStandardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         let memory = element(app, "home-manage-memory-browser")
         XCTAssertTrue(memory.waitForExistence(timeout: 10), app.debugDescription)
@@ -613,7 +613,7 @@ final class TronListStandardUITests: XCTestCase {
         // So is a tap at its corner: it jumps to the newest entry and opens nothing.
         _ = rowUnderChip()
         chip.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.94)).tap()
-        XCTAssertTrue(waitFor(newest, "hittable == true", timeout: 5), "A tap anywhere on the chip jumps to the newest entry")
+        XCTAssertTrue(waitUntil(newest, "hittable == true", timeout: 5), "A tap anywhere on the chip jumps to the newest entry")
         XCTAssertEqual(detail.count, 0, "A tap on the chip never reaches the row beneath\n\(app.debugDescription)")
 
         // Beside the chip, the same row still takes taps.
@@ -622,7 +622,7 @@ final class TronListStandardUITests: XCTestCase {
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: beside.frame.minX + 16, dy: chip.frame.midY)).tap()
         XCTAssertTrue(detail.firstMatch.waitForExistence(timeout: 8), "A row beside the chip opens its detail\n\(app.debugDescription)")
         detail.firstMatch.tap()
-        XCTAssertTrue(waitFor(detail.firstMatch, "exists == false", timeout: 8))
+        XCTAssertTrue(waitUntil(detail.firstMatch, "exists == false", timeout: 8))
 
         // The end of the feed scrolls fully clear of the chip, and its last row opens.
         let retry = app.buttons["feed-retry"]
@@ -671,8 +671,7 @@ final class TronListStandardUITests: XCTestCase {
     /// yet is scrolled toward, as before.
     @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication, swipes: Int) {
         for _ in 0..<swipes {
-            let laidOut = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !element.exists || !element.frame.isEmpty }, object: nil)
-            XCTAssertEqual(XCTWaiter.wait(for: [laidOut], timeout: 10), .completed, app.debugDescription)
+            XCTAssertTrue(waitUntil(timeout: 10) { !element.exists || !element.frame.isEmpty }, app.debugDescription)
             if element.isHittable { return }
             app.swipeUp()
         }
@@ -680,10 +679,6 @@ final class TronListStandardUITests: XCTestCase {
 
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any)[id].firstMatch
-    }
-
-    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
     /// Brings a sheet to its large detent by dragging its title toward the top.

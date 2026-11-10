@@ -349,8 +349,9 @@ targets:
         excludes:
           - "**/*.module.json"
           - "**/README.md"
-      # The shared sheet-tint assertion every UI test target uses.
+      # The shared sheet-tint assertion and wait every UI test target uses.
       - path: UITests/SheetTintAssertions.swift
+      - path: UITests/WaitUntil.swift
       # Canonical mini-app source the journeys run byte for byte (#1339). A
       # folder reference: Xcode will not copy a loose .swift file as a resource.
       - path: ../../tools/web/apps/builds-preview

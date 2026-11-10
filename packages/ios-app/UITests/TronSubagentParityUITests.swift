@@ -26,8 +26,7 @@ final class TronSubagentParityUITests: XCTestCase {
             try capture("1306-history-mixed-\(scheme)")
             app.buttons["Finish worker"].tap()
             let settled = NSPredicate(format: "value CONTAINS %@", "Completed")
-            expectation(for: settled, evaluatedWith: worker)
-            waitForExpectations(timeout: 5)
+            XCTAssertTrue(waitUntil(worker, settled, timeout: 5), "\(worker)")
             XCTAssertEqual(app.buttons.matching(identifier: "subagent-row-worker").count, 1)
             XCTAssertFalse((worker.value as? String)?.contains("LIVE OUTPUT") == true)
             try capture("1306-history-finished-\(scheme)")
@@ -72,8 +71,7 @@ final class TronSubagentParityUITests: XCTestCase {
                                   file: StaticString = #filePath, line: UInt = #line) {
         let row = app.buttons["subagent-row-\(id)"]
         // Match the lifecycle prefix, not a word in the title/output metadata.
-        expectation(for: NSPredicate(format: "value BEGINSWITH %@", "\(status),"), evaluatedWith: row)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitUntil(row, NSPredicate(format: "value BEGINSWITH %@", "\(status),"), timeout: 5), "\(row)")
         XCTAssertEqual(app.buttons.matching(identifier: "subagent-row-\(id)").count, 1, file: file, line: line)
         if !active {
             XCTAssertFalse((row.value as? String)?.contains("LIVE OUTPUT") == true, file: file, line: line)

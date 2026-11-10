@@ -107,7 +107,7 @@ final class TronNotificationInboxUITests: XCTestCase {
         let ask = row(app, "inbox-row-ask")
         XCTAssertTrue(ask.waitForExistence(timeout: 20), app.debugDescription)
         let pulse = app.descendants(matching: .any)["sheet-loading"]
-        XCTAssertTrue(waitFor { !pulse.exists }, "the first load never settled: \(app.debugDescription)")
+        XCTAssertTrue(waitUntil(timeout: 20) { !pulse.exists }, "the first load never settled: \(app.debugDescription)")
         try capture(app, "unread-before-mark-read")
 
         let filter = app.buttons["Unread"]
@@ -132,11 +132,6 @@ final class TronNotificationInboxUITests: XCTestCase {
     }
 
     // MARK: - Helpers
-
-    @MainActor private func waitFor(_ condition: @escaping () -> Bool, timeout: TimeInterval = 20) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)],
-                       timeout: timeout) == .completed
-    }
 
     @MainActor private func launch(_ scenario: String, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
@@ -168,17 +163,11 @@ final class TronNotificationInboxUITests: XCTestCase {
     }
 
     @MainActor private func waitFor(_ element: XCUIElement, value: String) -> Bool {
-        XCTWaiter.wait(
-            for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: element)],
-            timeout: 20
-        ) == .completed
+        waitUntil(element, NSPredicate(format: "value == %@", value), timeout: 20)
     }
 
     @MainActor private func waitFor(_ element: XCUIElement, label prefix: String) -> Bool {
-        XCTWaiter.wait(
-            for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", prefix), object: element)],
-            timeout: 20
-        ) == .completed
+        waitUntil(element, NSPredicate(format: "label BEGINSWITH %@", prefix), timeout: 20)
     }
 
     /// The sheet never renders its own connection treatment, however long the

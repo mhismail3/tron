@@ -86,8 +86,7 @@ final class TronInstallReviewUITests: XCTestCase {
         card.tap()
         let install = app.buttons["apps.install.confirm"]
         XCTAssertTrue(install.waitForExistence(timeout: 15), app.debugDescription)
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: install)
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed, app.debugDescription)
+        XCTAssertTrue(waitUntil(install, NSPredicate(format: "enabled == true"), timeout: 15), app.debugDescription)
     }
 
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {

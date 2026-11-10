@@ -32,11 +32,9 @@ final class TronProjectTrustUITests: XCTestCase {
         holdOlderInspectThenBlock(app)
         app.buttons["fixture.release-trust-reads"].tap()
         XCTAssertTrue(counts(app, contain: "releasedReads:2"), app.debugDescription)
-        let staleError = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Earlier trust read failure"),
-                                                   object: app.staticTexts["fixture.trust-notices"])
-        let observed = XCTWaiter.wait(for: [staleError], timeout: 2)
+        let observed = waitUntil(app.staticTexts["fixture.trust-notices"], NSPredicate(format: "label CONTAINS %@", "Earlier trust read failure"), timeout: 2)
         keepScreenshot(app, name: "358-trust-earlier-inspect-error-retired")
-        XCTAssertEqual(observed, .timedOut, "An earlier trust read cannot publish an error into the newer inspection")
+        XCTAssertFalse(observed, "An earlier trust read cannot publish an error into the newer inspection")
         XCTAssertTrue(app.staticTexts["Resources blocked"].exists)
         assertOriginalCommands(app, count: 2)
     }
@@ -125,10 +123,9 @@ final class TronProjectTrustUITests: XCTestCase {
 
     @MainActor
     private func assertBlockedWithoutLateTrust(_ app: XCUIApplication, screenshot: String) {
-        let stale = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: app.staticTexts["Trusted"])
-        let observed = XCTWaiter.wait(for: [stale], timeout: 2)
+        let observed = waitUntil(app.staticTexts["Trusted"], NSPredicate(format: "exists == true"), timeout: 2)
         keepScreenshot(app, name: screenshot)
-        XCTAssertEqual(observed, .timedOut, "An earlier accepted trust receipt must not replace the latest canonical inspection")
+        XCTAssertFalse(observed, "An earlier accepted trust receipt must not replace the latest canonical inspection")
         XCTAssertTrue(app.staticTexts["Resources blocked"].exists, app.debugDescription)
     }
 
@@ -140,15 +137,12 @@ final class TronProjectTrustUITests: XCTestCase {
 
     @MainActor
     private func positiveCount(_ app: XCUIApplication, field: String, id: String = "fixture.trust-original") -> Bool {
-        let condition = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label MATCHES %@", ".*\\b\(field):[1-9][0-9]*\\b.*"),
-                                                  object: app.staticTexts[id])
-        return XCTWaiter.wait(for: [condition], timeout: 15) == .completed
+        return waitUntil(app.staticTexts[id], NSPredicate(format: "label MATCHES %@", ".*\\b\(field):[1-9][0-9]*\\b.*"), timeout: 15)
     }
 
     @MainActor
     private func counts(_ app: XCUIApplication, id: String = "fixture.trust-original", contain expected: String) -> Bool {
-        let condition = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", expected), object: app.staticTexts[id])
-        return XCTWaiter.wait(for: [condition], timeout: 15) == .completed
+        return waitUntil(app.staticTexts[id], NSPredicate(format: "label CONTAINS %@", expected), timeout: 15)
     }
 
     @MainActor

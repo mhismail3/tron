@@ -176,8 +176,7 @@ final class TronSheetTintUITests: XCTestCase {
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(ring.waitForExistence(timeout: 10))
-        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: ring)],
-                                     timeout: 10) == .completed)
+        XCTAssertTrue(waitUntil(ring, NSPredicate(format: "enabled == true"), timeout: 10))
         ring.tap()
         XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 10), app.debugDescription)
         assertToolbarTint(app, title: "Manage Home")

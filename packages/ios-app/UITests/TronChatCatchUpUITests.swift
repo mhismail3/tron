@@ -73,9 +73,9 @@ final class TronChatCatchUpUITests: XCTestCase {
         }
     }
 
-    private func wait(_ element: XCUIElement, _ fragment: String, predicate: Bool = false, timeout: TimeInterval = 20) -> Bool {
+    @MainActor private func wait(_ element: XCUIElement, _ fragment: String, predicate: Bool = false, timeout: TimeInterval = 20) -> Bool {
         let condition = predicate ? NSPredicate(format: fragment) : NSPredicate(format: "label CONTAINS %@", fragment)
-        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: condition, object: element)], timeout: timeout) == .completed
+        return waitUntil(element, condition, timeout: timeout)
     }
 
     @MainActor private func keepScreenshot(_ app: XCUIApplication, _ name: String) {

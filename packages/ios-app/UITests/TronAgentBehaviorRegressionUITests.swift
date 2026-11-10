@@ -18,7 +18,7 @@ final class TronAgentBehaviorRegressionUITests: XCTestCase {
                     app.buttons["home-pinned-row"].tap()
                     let ring = app.buttons["session-context-button"]
                     XCTAssertTrue(ring.waitForExistence(timeout: 15))
-                    XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: ring)], timeout: 10), .completed)
+                    XCTAssertTrue(waitUntil(ring, NSPredicate(format: "enabled == true"), timeout: 10))
                     ring.tap()
                     expand(app, "Manage Home")
                     tap(app, "home-manage-settings")

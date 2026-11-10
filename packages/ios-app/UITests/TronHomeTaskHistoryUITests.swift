@@ -63,7 +63,7 @@ final class TronHomeTaskHistoryUITests: XCTestCase {
         app.buttons["home-pinned-row"].tap()
         let context = app.buttons["session-context-button"]
         XCTAssertTrue(context.waitForExistence(timeout: 10))
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: context)], timeout: 10), .completed)
+        XCTAssertTrue(waitUntil(context, NSPredicate(format: "enabled == true"), timeout: 10))
         context.tap()
         XCTAssertTrue(element(app, "home-manage-state").waitForExistence(timeout: 10))
         expand(app, done: "home-sheet-done-manage")
@@ -102,7 +102,7 @@ final class TronHomeTaskHistoryUITests: XCTestCase {
         XCTAssertTrue(element(app, "home-task-checkin-absolute-time").waitForExistence(timeout: 5))
         shot("2073-after-time-\(name)")
         app.navigationBars.staticTexts["Tasks"].firstMatch.tap()
-        _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element(app, "home-task-checkin-absolute-time"))], timeout: 3)
+        _ = waitUntil(element(app, "home-task-checkin-absolute-time"), NSPredicate(format: "exists == false"), timeout: 3)
         app.swipeUp(velocity: .slow)
         shot("2073-after-detail-\(name)")
         for _ in 0..<4 where !element(app, "home-task-view-checkins").isHittable { app.swipeUp() }
@@ -139,7 +139,7 @@ final class TronHomeTaskHistoryUITests: XCTestCase {
         guard done.frame.minY > 120 else { return }
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         origin.withOffset(CGVector(dx: 60, dy: done.frame.midY)).press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: done)], timeout: 3)
+        _ = waitUntil(done, NSPredicate(format: "frame.minY < 120"), timeout: 3)
     }
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
     @MainActor private func shot(_ name: String) {

@@ -79,7 +79,7 @@ import XCTest
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(ring.waitForExistence(timeout: 15))
-        XCTAssertTrue(wait(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         let row = app.descendants(matching: .any)["home-manage-settings"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
@@ -134,12 +134,8 @@ import XCTest
         for _ in 0..<3 where title.frame.minY > 120 {
             origin.withOffset(CGVector(dx: 60, dy: title.frame.midY))
                 .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-            _ = wait(title, "frame.minY < 120", timeout: 2)
+            _ = waitUntil(title, "frame.minY < 120", timeout: 2)
         }
-    }
-
-    private func wait(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
 }

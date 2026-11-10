@@ -125,4 +125,15 @@ core_ui_imports "$core_probe" >/dev/null || { rm -rf "$core_probe"; fail "Core U
 rm -rf "$core_probe"
 ! core_ui_imports "$ROOT/Core" || fail "TronMobileCore imports a UI framework"
 
-echo "iOS source policy passed (orientation/resources, managed presentation, shared sheet loading and Foundation-only Core)"
+# UI tests wait through the one immediate-read waitUntil (UITests/WaitUntil.swift): a predicate
+# expectation first reads after about 1 s and times out held conditions under load (#2410).
+predicate_waits() {
+  grep -rnE 'XCTNSPredicateExpectation|expectation\(for:' "$@" --include='*.swift'
+}
+wait_probe="$(mktemp -d)"
+printf 'let e = expectation(for: p, evaluatedWith: x)\n' > "$wait_probe/Probe.swift"
+predicate_waits "$wait_probe" >/dev/null || { rm -rf "$wait_probe"; fail "UI-test wait check no longer detects a predicate expectation"; }
+rm -rf "$wait_probe"
+! predicate_waits "$ROOT/UITests" "$ROOT/SwiftAppUITests" || fail "UI tests wait through waitUntil, not a predicate expectation"
+
+echo "iOS source policy passed (orientation/resources, managed presentation, shared sheet loading, Foundation-only Core and UI-test waits)"

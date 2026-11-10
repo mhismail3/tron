@@ -64,7 +64,7 @@ final class TronHomeControlsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         open(app, ring, ready: "home-manage-state", name: "manage")
         let settings = element(app, "home-manage-settings")
         for _ in 0..<8 where settings.exists && (!settings.isHittable || settings.frame.maxY > app.frame.maxY - 50) { app.swipeUp() }
@@ -116,10 +116,6 @@ final class TronHomeControlsUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5), "\(name)\n\(app.debugDescription)")
         row.tap()
         XCTAssertTrue(element(app, ready).waitForExistence(timeout: 8), "\(ready)\n\(app.debugDescription)")
-    }
-
-    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
     /// The average color of an element's saturated (inked) pixels: a title's

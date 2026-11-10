@@ -258,8 +258,7 @@ final class TronChatHapticsUITests: XCTestCase {
         composer.tap()
         composer.typeText(text)
         let send = app.buttons["Send message"]
-        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: send)
-        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 20), .completed, app.debugDescription)
+        XCTAssertTrue(waitUntil(send, NSPredicate(format: "isEnabled == true"), timeout: 20), app.debugDescription)
         send.tap()
     }
 
@@ -280,8 +279,8 @@ final class TronChatHapticsUITests: XCTestCase {
         XCTAssertEqual(haptics(app), "haptics:\(played)", message)
     }
 
-    private func wait(_ element: XCUIElement, _ predicate: NSPredicate, timeout: TimeInterval = 20) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
+    @MainActor private func wait(_ element: XCUIElement, _ predicate: NSPredicate, timeout: TimeInterval = 20) -> Bool {
+        waitUntil(element, predicate, timeout: timeout)
     }
 
     @MainActor private func keep(_ app: XCUIApplication, _ name: String) {

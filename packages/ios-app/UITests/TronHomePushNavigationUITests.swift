@@ -51,9 +51,9 @@ final class TronHomePushNavigationUITests: XCTestCase {
         let app = launchThenTapPushOnForeground(presenting: .home, ["-home-push-ordinary"])
         defer { app.terminate() }
         assertSettledWithoutOpenFailure(app)
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label == 'opened-session:ordinary-session'"),
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.home-opened-session"], "label == 'opened-session:ordinary-session'"),
                       app.debugDescription)
-        XCTAssertTrue(waitFor(app.buttons["session-context-button"], "label CONTAINS 'Manage Session'"), app.debugDescription)
+        XCTAssertTrue(waitUntil(app.buttons["session-context-button"], "label CONTAINS 'Manage Session'"), app.debugDescription)
         XCTAssertFalse(app.staticTexts["Conversation unavailable"].waitForExistence(timeout: 3), app.debugDescription)
         keep("1684-home-push-tap-opened-other-chat")
     }
@@ -66,18 +66,18 @@ final class TronHomePushNavigationUITests: XCTestCase {
         app.launch()
         let homeButton = app.buttons["dashboard.menu"]
         XCTAssertTrue(homeButton.waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(waitFor(homeButton, "value == 'Ready'"), app.debugDescription)
+        XCTAssertTrue(waitUntil(homeButton, "value == 'Ready'"), app.debugDescription)
         switch presented {
         case .home:
             homeButton.tap()
             XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 15), app.debugDescription)
-            XCTAssertTrue(waitFor(app.buttons["session-context-button"], "label CONTAINS 'Manage Home'"), app.debugDescription)
+            XCTAssertTrue(waitUntil(app.buttons["session-context-button"], "label CONTAINS 'Manage Home'"), app.debugDescription)
         case .ordinaryChat:
             let ordinary = app.buttons["session-row-home-shell-fixture:ordinary-session"]
             XCTAssertTrue(ordinary.waitForExistence(timeout: 10), app.debugDescription)
             ordinary.tap()
             XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 15), app.debugDescription)
-            XCTAssertTrue(waitFor(app.buttons["session-context-button"], "label CONTAINS 'Manage Session'"), app.debugDescription)
+            XCTAssertTrue(waitUntil(app.buttons["session-context-button"], "label CONTAINS 'Manage Session'"), app.debugDescription)
         case .dashboard:
             XCTAssertFalse(app.textViews["Message input"].exists, app.debugDescription)
         }
@@ -93,7 +93,7 @@ final class TronHomePushNavigationUITests: XCTestCase {
     @MainActor
     private func assertSettledWithoutOpenFailure(_ app: XCUIApplication) {
         let push = app.staticTexts["fixture.home-push"]
-        XCTAssertTrue(waitFor(push, "label BEGINSWITH 'push:consumed'", timeout: 15),
+        XCTAssertTrue(waitUntil(push, "label BEGINSWITH 'push:consumed'", timeout: 15),
                       "The push was never consumed after foreground restore: \(push.label)")
         XCTAssertFalse(app.staticTexts["Conversation unavailable"].waitForExistence(timeout: 8),
                        "Push open failed: \(app.debugDescription)")
@@ -103,20 +103,15 @@ final class TronHomePushNavigationUITests: XCTestCase {
     /// The presented chat is Home: it manages Home and sends through `home.prompt`.
     @MainActor
     private func assertHomeSendsThroughHomePrompt(_ app: XCUIApplication) {
-        XCTAssertTrue(waitFor(app.buttons["session-context-button"], "label CONTAINS 'Manage Home'"),
+        XCTAssertTrue(waitUntil(app.buttons["session-context-button"], "label CONTAINS 'Manage Home'"),
                       "The push did not open Home: \(app.buttons["session-context-button"].label)")
         let composer = app.textViews["Message input"]
         composer.tap(); composer.typeText("After the push")
         let send = app.buttons["Send message"]
-        XCTAssertTrue(waitFor(send, "enabled == true"), app.debugDescription)
+        XCTAssertTrue(waitUntil(send, "enabled == true"), app.debugDescription)
         send.tap()
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-prompt-route"], "label == 'prompt-route:home.prompt'"),
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.home-prompt-route"], "label == 'prompt-route:home.prompt'"),
                       "The push opened Home's chapter as an ordinary chat: \(app.staticTexts["fixture.home-prompt-route"].label)")
-    }
-
-    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)],
-                       timeout: timeout) == .completed
     }
 
     @MainActor private func keep(_ name: String) {

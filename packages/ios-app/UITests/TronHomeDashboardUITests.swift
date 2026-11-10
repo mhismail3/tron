@@ -32,10 +32,10 @@ final class TronHomeDashboardUITests: XCTestCase {
         let card = element(app, "home-usage-card")
         let reveals = app.staticTexts["fixture.dashboard-reveals"]
         XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(waitFor(card, "label == 'Loading account usage'"), card.label)
+        XCTAssertTrue(waitUntil(card, "label == 'Loading account usage'"), card.label)
         // The card (order 0), In Progress (1) and Recently Completed (2) reveal
         // while the card still shows its pulse.
-        XCTAssertTrue(waitFor(reveals, "label BEGINSWITH 'orders:0,1,2'"), reveals.label)
+        XCTAssertTrue(waitUntil(reveals, "label BEGINSWITH 'orders:0,1,2'"), reveals.label)
         XCTAssertEqual(card.label, "Loading account usage", "The usage read is still in flight")
         let inProgress = app.staticTexts["In Progress"], completed = app.staticTexts["Recently Completed"]
         XCTAssertTrue(inProgress.exists && completed.exists, app.debugDescription)
@@ -45,7 +45,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("05-usage-loading")
 
         // Loader to content at the same height.
-        XCTAssertTrue(waitFor(card, "label BEGINSWITH 'Anthropic, 42%'"), card.label)
+        XCTAssertTrue(waitUntil(card, "label BEGINSWITH 'Anthropic, 42%'"), card.label)
         XCTAssertEqual(card.frame.height, loadingHeight, accuracy: 1, "The card keeps its height when usage arrives")
         let settled = reveals.label
         keep("06-usage-content")
@@ -71,7 +71,7 @@ final class TronHomeDashboardUITests: XCTestCase {
 
         let card = element(app, "home-usage-card")
         XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(waitFor(card, "label CONTAINS 'Anthropic, ' AND label CONTAINS 'OpenAI Codex, '"), card.label)
+        XCTAssertTrue(waitUntil(card, "label CONTAINS 'Anthropic, ' AND label CONTAINS 'OpenAI Codex, '"), card.label)
         card.tap()
         let anthropic = app.buttons["home-usage-provider-anthropic"], codex = app.buttons["home-usage-provider-openai-codex"]
         XCTAssertTrue(anthropic.waitForExistence(timeout: 5), app.debugDescription)
@@ -82,21 +82,21 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("07-usage-providers-sheet")
 
         anthropic.tap()
-        XCTAssertTrue(waitFor(anthropic, "value == 'Not selected'"), app.debugDescription)
-        XCTAssertTrue(waitFor(card, "NOT (label CONTAINS 'Anthropic') AND label CONTAINS 'OpenAI Codex, '"), card.label)
+        XCTAssertTrue(waitUntil(anthropic, "value == 'Not selected'"), app.debugDescription)
+        XCTAssertTrue(waitUntil(card, "NOT (label CONTAINS 'Anthropic') AND label CONTAINS 'OpenAI Codex, '"), card.label)
         codex.tap()
-        XCTAssertTrue(waitFor(card, "label == 'Usage, no providers shown'"), card.label)
+        XCTAssertTrue(waitUntil(card, "label == 'Usage, no providers shown'"), card.label)
         app.buttons["Done"].tap()
-        XCTAssertTrue(waitFor(anthropic, "exists == false"), app.debugDescription)
+        XCTAssertTrue(waitUntil(anthropic, "exists == false"), app.debugDescription)
         keep("08-usage-card-all-hidden")
 
         // The compact row reopens the sheet; showing a provider restores it.
         card.tap()
         XCTAssertTrue(anthropic.waitForExistence(timeout: 5), app.debugDescription)
         anthropic.tap()
-        XCTAssertTrue(waitFor(card, "label BEGINSWITH 'Anthropic, ' AND NOT (label CONTAINS 'OpenAI Codex')"), card.label)
+        XCTAssertTrue(waitUntil(card, "label BEGINSWITH 'Anthropic, ' AND NOT (label CONTAINS 'OpenAI Codex')"), card.label)
         codex.tap()
-        XCTAssertTrue(waitFor(card, "label CONTAINS 'Anthropic, ' AND label CONTAINS 'OpenAI Codex, '"), card.label)
+        XCTAssertTrue(waitUntil(card, "label CONTAINS 'Anthropic, ' AND label CONTAINS 'OpenAI Codex, '"), card.label)
     }
 
     /// Full AppModel/catalog socket path: View All must include continuation
@@ -126,9 +126,9 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("1310-all-pages-search")
         oldest.tap()
         XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label == 'opened-session:chat-unread'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.home-opened-session"], "label == 'opened-session:chat-unread'"))
         XCTAssertTrue(app.staticTexts["fixture.home-diagnostics"].label.contains("selected-profile=Optional(\"home-shell-fixture\")"))
-        XCTAssertTrue(waitFor(reads, "label CONTAINS 'reads:chat-unread:1'"), reads.label)
+        XCTAssertTrue(waitUntil(reads, "label CONTAINS 'reads:chat-unread:1'"), reads.label)
         app.buttons["Back"].tap()
         openOtherSessions(app)
         app.buttons["home-other-sessions-sheet-search"].tap()
@@ -152,16 +152,16 @@ final class TronHomeDashboardUITests: XCTestCase {
             XCTAssertTrue(row.waitForExistence(timeout: 5))
             XCTAssertTrue(row.label.hasPrefix("Home,"), row.label)
             if empty {
-                XCTAssertTrue(waitFor(row, "exists == false", timeout: 25), app.debugDescription)
+                XCTAssertTrue(waitUntil(row, "exists == false", timeout: 25), app.debugDescription)
                 XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'No sessions'")).firstMatch.waitForExistence(timeout: 5),
                               "An emptied sheet must explain the empty projection")
             } else {
-                XCTAssertTrue(waitFor(row, "label BEGINSWITH 'Renamed ordinary chat,'", timeout: 25), app.debugDescription)
+                XCTAssertTrue(waitUntil(row, "label BEGINSWITH 'Renamed ordinary chat,'", timeout: 25), app.debugDescription)
             }
             keep("1310-live-\(empty ? "empty" : "rename")")
             app.buttons["Done"].tap()
             if empty {
-                XCTAssertTrue(waitFor(app.staticTexts["Other Sessions"], "exists == false"))
+                XCTAssertTrue(waitUntil(app.staticTexts["Other Sessions"], "exists == false"))
                 XCTAssertFalse(element(app, "home-other-sessions-view-all").exists)
             }
             app.terminate()
@@ -177,7 +177,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Other Sessions"].exists)
         XCTAssertFalse(element(app, "home-other-sessions-view-all").exists)
         toggleVisibleServer(app, "Home fixture")
-        XCTAssertTrue(waitFor(app.buttons["session-row-home-shell-fixture:worker-running"], "exists == false"))
+        XCTAssertTrue(waitUntil(app.buttons["session-row-home-shell-fixture:worker-running"], "exists == false"))
         XCTAssertFalse(app.staticTexts["Other Sessions"].exists)
         keep("1310-empty-server-selection")
     }
@@ -198,9 +198,9 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(row.label.contains("unread"))
         row.tap()
         XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-diagnostics"], "label CONTAINS 'selected-profile=Optional(\"competing-profile\")'"))
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label == 'opened-session:chat-recent-unread'"))
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.dashboard-catalog-reads"], "label CONTAINS 'chat-recent-unread:1'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.home-diagnostics"], "label CONTAINS 'selected-profile=Optional(\"competing-profile\")'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.home-opened-session"], "label == 'opened-session:chat-recent-unread'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.dashboard-catalog-reads"], "label CONTAINS 'chat-recent-unread:1'"))
         keep("1310-profile-qualified-preview-open")
     }
 
@@ -290,10 +290,10 @@ final class TronHomeDashboardUITests: XCTestCase {
 
         let card = element(app, "home-usage-card")
         XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(waitFor(card, "label CONTAINS 'Cloudflare AI Gateway, 48% used (Weekly)'"), card.label)
+        XCTAssertTrue(waitUntil(card, "label CONTAINS 'Cloudflare AI Gateway, 48% used (Weekly)'"), card.label)
         XCTAssertTrue(card.label.hasPrefix("Anthropic, 42% used (5h) · 18% used (Weekly)"), card.label)
         let probe = app.staticTexts["fixture.home-usage-layout"]
-        XCTAssertTrue(waitFor(probe, "label CONTAINS 'cloudflare-ai-gateway.column0.bar='"), probe.label)
+        XCTAssertTrue(waitUntil(probe, "label CONTAINS 'cloudflare-ai-gateway.column0.bar='"), probe.label)
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         var frames: [String: CGRect] = [:]
         for entry in probe.label.split(separator: ";") {
@@ -360,10 +360,10 @@ final class TronHomeDashboardUITests: XCTestCase {
         let card = element(app, "home-usage-card")
         XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
         let line = "0% used (5h) · 72% used (Weekly) · 100% used (Monthly)"
-        XCTAssertTrue(waitFor(card, "label CONTAINS 'Opencode Go, \(line)'"), card.label)
+        XCTAssertTrue(waitUntil(card, "label CONTAINS 'Opencode Go, \(line)'"), card.label)
         XCTAssertTrue(card.label.hasPrefix("Anthropic, 42% used (5h) · 18% used (Weekly)"), "two-window rows are unchanged: \(card.label)")
         let probe = app.staticTexts["fixture.home-usage-layout"]
-        XCTAssertTrue(waitFor(probe, "label CONTAINS 'opencode-go.column2.exhausted='"), probe.label)
+        XCTAssertTrue(waitUntil(probe, "label CONTAINS 'opencode-go.column2.exhausted='"), probe.label)
         RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         var frames: [String: CGRect] = [:]
         for entry in probe.label.split(separator: ";") {
@@ -419,11 +419,11 @@ final class TronHomeDashboardUITests: XCTestCase {
 
         let card = element(app, "home-usage-card")
         XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(waitFor(card, "label CONTAINS 'Opencode Go, 0% used (5h) · 72% used (Weekly) · 100% used (Monthly)'"), card.label)
+        XCTAssertTrue(waitUntil(card, "label CONTAINS 'Opencode Go, 0% used (5h) · 72% used (Weekly) · 100% used (Monthly)'"), card.label)
         XCTAssertTrue(card.label.contains("Cloudflare AI Gateway, 48% used (Weekly); "), card.label)
         XCTAssertFalse(card.label.contains("61% used"), "the repeated weekly cadence stays off the card: \(card.label)")
         let probe = app.staticTexts["fixture.home-usage-layout"]
-        XCTAssertTrue(waitFor(probe, "label CONTAINS 'opencode-go.column2.bar='"), probe.label)
+        XCTAssertTrue(waitUntil(probe, "label CONTAINS 'opencode-go.column2.bar='"), probe.label)
         XCTAssertTrue(probe.label.contains("cloudflare-ai-gateway.column0="), probe.label)
         XCTAssertFalse(probe.label.contains("cloudflare-ai-gateway.column1"), "one Weekly column: \(probe.label)")
         keep("15-usage-card-one-column-per-cadence")
@@ -479,14 +479,14 @@ final class TronHomeDashboardUITests: XCTestCase {
         // Abbreviation across words: "simlan" finds "Simulator lane cleanup".
         field.typeText("simlan")
         XCTAssertTrue(row("worker-done-7").waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertTrue(waitFor(row("worker-done-1"), "exists == false"), app.debugDescription)
+        XCTAssertTrue(waitUntil(row("worker-done-1"), "exists == false"), app.debugDescription)
         XCTAssertFalse(row("worker-done-2").exists)
         keep("13-recently-completed-search-filtered")
 
         // Diacritics and case fold; every word must match.
         replace(field, with: "GÀRDEN email", app: app)
         XCTAssertTrue(row("worker-done-2").waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertTrue(waitFor(row("worker-done-7"), "exists == false"), app.debugDescription)
+        XCTAssertTrue(waitUntil(row("worker-done-7"), "exists == false"), app.debugDescription)
         replace(field, with: "garden budget", app: app)
         XCTAssertTrue(noMatches(app).waitForExistence(timeout: 3), app.debugDescription)
 
@@ -511,7 +511,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         let home = app.buttons["dashboard.menu"]
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(waitFor(home, "value == 'Waiting for you'"), app.debugDescription)
+        XCTAssertTrue(waitUntil(home, "value == 'Waiting for you'"), app.debugDescription)
         keep("03-home-button-waiting")
     }
 
@@ -523,7 +523,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         let home = app.buttons["dashboard.menu"]
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(waitFor(home, "value == 'Working'"), app.debugDescription)
+        XCTAssertTrue(waitUntil(home, "value == 'Working'"), app.debugDescription)
         keep("04-home-button-working")
     }
 
@@ -551,10 +551,6 @@ final class TronHomeDashboardUITests: XCTestCase {
 
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any)[id].firstMatch
-    }
-
-    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
     @MainActor private func keep(_ name: String) {

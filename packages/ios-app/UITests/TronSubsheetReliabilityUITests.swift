@@ -14,14 +14,14 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         let app = launchFixture(); defer { app.terminate() }
         let title = app.staticTexts["fixture.child-title"]
         app.buttons["fixture.row-a"].tap()
-        XCTAssertTrue(waitFor(title, "label == 'Item a'"))
+        XCTAssertTrue(waitUntil(title, "label == 'Item a'"))
         assertSheetHaptics(app, 2, "parent and item")
         app.buttons["fixture.request-sibling"].tap()
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.child-state"], "label == 'item:a flag:true'"))
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.child-state"], "label == 'item:a flag:true'"))
         assertSheetHaptics(app, 2, "a request UIKit has not presented plays nothing")
         XCTAssertEqual(title.label, "Item a")
         app.buttons["fixture.child-close"].tap()
-        XCTAssertTrue(waitFor(title, "label == 'Flag'"), app.debugDescription)
+        XCTAssertTrue(waitUntil(title, "label == 'Flag'"), app.debugDescription)
         assertSheetHaptics(app, 3, "the deferred sheet plays once it appears")
     }
 
@@ -32,18 +32,18 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         let app = launchFixture(); defer { app.terminate() }
         let title = app.staticTexts["fixture.child-title"]
         app.buttons["fixture.row-a"].tap()
-        XCTAssertTrue(waitFor(title, "label == 'Item a'"))
+        XCTAssertTrue(waitUntil(title, "label == 'Item a'"))
         assertSheetHaptics(app, 2, "parent and item")
         app.buttons["fixture.request-sibling-close-parent"].tap()
         XCTAssertTrue(app.buttons["fixture.open-parent"].waitForExistence(timeout: 10))
         XCTAssertTrue(title.waitForNonExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.never-appeared"], "label == 'never-appeared:1'"),
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.never-appeared"], "label == 'never-appeared:1'"),
                       app.staticTexts["fixture.never-appeared"].label)
         assertSheetHaptics(app, 2, "a request that never appeared plays nothing", probe: "fixture.root-sheet-haptics")
         // The presenters are not left holding the stale request.
         app.buttons["fixture.open-parent"].tap()
         app.buttons["fixture.flag-row"].tap()
-        XCTAssertTrue(waitFor(title, "label == 'Flag'"), app.debugDescription)
+        XCTAssertTrue(waitUntil(title, "label == 'Flag'"), app.debugDescription)
         assertSheetHaptics(app, 4, "parent and flag")
     }
 
@@ -61,7 +61,7 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
                 played += 1
                 assertSheetHaptics(app, played, "\(row) opened")
                 app.buttons["fixture.rerequest-\(delay)"].tap()
-                XCTAssertTrue(waitFor(title, "label == '\(reopened)'"), "\(row) re-requested after \(delay) ms: \(app.debugDescription)")
+                XCTAssertTrue(waitUntil(title, "label == '\(reopened)'"), "\(row) re-requested after \(delay) ms: \(app.debugDescription)")
                 played += 1
                 assertSheetHaptics(app, played, "\(row) re-requested after \(delay) ms")
                 app.buttons["fixture.child-close"].tap()
@@ -81,7 +81,7 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         let profileRow = element(app, "home-manage-profile")
         XCTAssertTrue(profileRow.waitForExistence(timeout: 8), app.debugDescription)
@@ -92,14 +92,14 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         XCTAssertEqual(ids.count, 2)
         let feedback = app.staticTexts["fixture.sheet-feedback"]
         var played = 2 // Manage Home and Profile
-        XCTAssertTrue(waitFor(feedback, "label == 'sheet-feedback:\(played)'"), feedback.label)
+        XCTAssertTrue(waitUntil(feedback, "label == 'sheet-feedback:\(played)'"), feedback.label)
         let detail = element(app, "home-profile-item-detail")
         let window = app.windows.firstMatch
         for (index, dismissal) in ["done", "swipe", "background", "done", "swipe", "background"].enumerated() {
             element(app, ids[index % 2]).tap()
             XCTAssertTrue(detail.waitForExistence(timeout: 8), "\(index) after \(dismissal): \(app.debugDescription)")
             played += 1
-            XCTAssertTrue(waitFor(feedback, "label == 'sheet-feedback:\(played)'"), "\(index): \(feedback.label)")
+            XCTAssertTrue(waitUntil(feedback, "label == 'sheet-feedback:\(played)'"), "\(index): \(feedback.label)")
             switch dismissal {
             case "swipe":
                 window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62))
@@ -168,8 +168,7 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
                              "Canonical transcript opens at the shared medium detent, not large")
         title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in title.frame.minY < height * 0.2 }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 10), .completed, "Canonical transcript expands to large")
+        XCTAssertTrue(waitUntil(timeout: 10) { title.frame.minY < height * 0.2 }, "Canonical transcript expands to large")
         XCUIDevice.shared.press(.home)
         XCTAssertTrue(app.wait(for: .runningBackground, timeout: 15))
         app.activate()
@@ -193,7 +192,7 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         XCTAssertTrue(element(app, "home-manage-profile").waitForExistence(timeout: 8))
         return app
@@ -216,7 +215,7 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
     @MainActor private func assertSheetHaptics(_ app: XCUIApplication, _ count: Int, _ message: String,
                                                probe id: String = "fixture.sheet-haptics") {
         let probe = app.staticTexts[id]
-        XCTAssertTrue(waitFor(probe, "label == 'haptics:\(count)'", timeout: 5), "\(message): \(probe.label)")
+        XCTAssertTrue(waitUntil(probe, "label == 'haptics:\(count)'", timeout: 5), "\(message): \(probe.label)")
         Thread.sleep(forTimeInterval: 1)
         XCTAssertEqual(probe.label, "haptics:\(count)", "\(message): no late or duplicate impact")
     }
@@ -231,7 +230,4 @@ final class TronSubsheetReliabilityUITests: XCTestCase {
         done?.tap()
     }
 
-    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
-    }
 }

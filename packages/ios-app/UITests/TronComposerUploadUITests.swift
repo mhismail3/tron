@@ -69,8 +69,7 @@ final class TronComposerUploadUITests: XCTestCase {
         waitConnected(app)
         XCTAssertTrue(waitCounts(app, "staged:1,1,1,1"), counts(app))
         let send = app.buttons["Send message"]
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "isEnabled == true"), object: send)], timeout: 20), .completed, counts(app))
+        XCTAssertTrue(waitUntil(send, NSPredicate(format: "isEnabled == true"), timeout: 20), counts(app))
         composer.tap()
         app.typeText("\n")
         XCTAssertTrue(waitCounts(app, "prompts:4 "), "Return sends the message with all four photos: \(counts(app))")
@@ -86,9 +85,7 @@ final class TronComposerUploadUITests: XCTestCase {
         defer {
             if app.state != .notRunning {
                 app.buttons["fixture.draft-cleanup"].tap()
-                let cleaned = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'cleaned'"),
-                    object: app.staticTexts["fixture.draft-phase"])
-                XCTAssertEqual(XCTWaiter.wait(for: [cleaned], timeout: 20), .completed)
+                XCTAssertTrue(waitUntil(app.staticTexts["fixture.draft-phase"], NSPredicate(format: "label == 'cleaned'"), timeout: 20))
             }
             app.terminate()
         }
@@ -99,16 +96,13 @@ final class TronComposerUploadUITests: XCTestCase {
         let text = "Unsent relaunch draft \(UUID().uuidString)"
         composer.tap(); composer.typeText(text)
         app.buttons["fixture.draft-checkpoint"].tap()
-        let checkpointed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'checkpointed'"),
-            object: app.staticTexts["fixture.draft-phase"])
-        XCTAssertEqual(XCTWaiter.wait(for: [checkpointed], timeout: 20), .completed)
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.draft-phase"], NSPredicate(format: "label == 'checkpointed'"), timeout: 20))
         keepEvidence(app, "1792-before-process-relaunch")
         app.terminate(); app.launch()
         waitConnected(app)
         XCTAssertTrue(composer.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertNotEqual(app.staticTexts["fixture.draft-pid"].label, originalPID, "must be a different process")
-        let restored = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", text), object: composer)
-        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 20), .completed,
+        XCTAssertTrue(waitUntil(composer, NSPredicate(format: "value == %@", text), timeout: 20),
                        "Cold process lost unsent draft; actual: \(String(describing: composer.value))")
         keepEvidence(app, "1792-after-process-relaunch")
     }
@@ -137,8 +131,7 @@ final class TronComposerUploadUITests: XCTestCase {
     @MainActor private func send(_ app: XCUIApplication) {
         let send = app.buttons["Send message"]
         XCTAssertTrue(send.waitForExistence(timeout: 20), app.debugDescription)
-        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: send)
-        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 20), .completed, "send stays disabled: \(counts(app))")
+        XCTAssertTrue(waitUntil(send, NSPredicate(format: "isEnabled == true"), timeout: 20), "send stays disabled: \(counts(app))")
         send.tap()
     }
 
@@ -148,18 +141,12 @@ final class TronComposerUploadUITests: XCTestCase {
 
     @MainActor private func waitCounts(_ app: XCUIApplication, _ fragment: String) -> Bool {
         let condition = NSPredicate(format: "label CONTAINS %@", fragment)
-        return XCTWaiter.wait(
-            for: [XCTNSPredicateExpectation(predicate: condition, object: app.staticTexts["fixture.upload-counts"])],
-            timeout: 20
-        ) == .completed
+        return waitUntil(app.staticTexts["fixture.upload-counts"], condition, timeout: 20)
     }
 
     @MainActor private func waitConnected(_ app: XCUIApplication) {
         let condition = NSPredicate(format: "label BEGINSWITH 'connected'")
-        XCTAssertEqual(XCTWaiter.wait(
-            for: [XCTNSPredicateExpectation(predicate: condition, object: app.staticTexts["fixture.upload-connection"])],
-            timeout: 30
-        ), .completed, "the fixture never connected: \(app.staticTexts["fixture.upload-connection"].label)")
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.upload-connection"], condition, timeout: 30), "the fixture never connected: \(app.staticTexts["fixture.upload-connection"].label)")
     }
 
     @MainActor private func keepEvidence(_ app: XCUIApplication, _ name: String) {

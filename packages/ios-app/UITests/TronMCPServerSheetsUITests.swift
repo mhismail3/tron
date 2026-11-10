@@ -35,8 +35,7 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         XCTAssertTrue(counters(app, owner: "original", contain: "add:1"))
         replace(app.textFields["For example, calendar"], with: "unsent-old-mac-draft")
         XCUIDevice.shared.press(.home); app.activate()
-        let replacement = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'replacement-integration-fixture'"), object: app.staticTexts["fixture.destination"])
-        XCTAssertEqual(XCTWaiter.wait(for: [replacement], timeout: 15), .completed)
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.destination"], NSPredicate(format: "label CONTAINS 'replacement-integration-fixture'"), timeout: 15))
         let oldForm = app.textFields["For example, calendar"]
         XCTAssertFalse(oldForm.waitForExistence(timeout: 2), "A real authority change closes the credential form instead of retargeting it")
         XCTAssertTrue(counters(app, owner: "original", contain: "released:1"))
@@ -146,8 +145,7 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         openAuth(app)
         let code = app.textFields["Fixture code"]; code.tap(); code.typeText("fixture-only-code")
         XCUIDevice.shared.press(.home); app.activate()
-        let replacement = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'replacement-integration-fixture'"), object: app.staticTexts["fixture.destination"])
-        XCTAssertEqual(XCTWaiter.wait(for: [replacement], timeout: 15), .completed)
+        XCTAssertTrue(waitUntil(app.staticTexts["fixture.destination"], NSPredicate(format: "label CONTAINS 'replacement-integration-fixture'"), timeout: 15))
         assertAuthDismissed(app)
         XCTAssertFalse(code.exists)
         XCTAssertTrue(counters(app, owner: "original", contain: "answers:0"))
@@ -155,8 +153,7 @@ final class TronMCPServerSheetsUITests: XCTestCase {
     }
 
     @MainActor private func assertAuthDismissed(_ app: XCUIApplication) {
-        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["Cancel"])
-        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 10), .completed)
+        XCTAssertTrue(waitUntil(app.buttons["Cancel"], NSPredicate(format: "exists == false"), timeout: 10))
         XCTAssertTrue(app.buttons["Add Server"].waitForExistence(timeout: 10))
     }
 
@@ -189,8 +186,7 @@ final class TronMCPServerSheetsUITests: XCTestCase {
         field.typeText(text)
     }
     @MainActor private func counters(_ app: XCUIApplication, owner: String, contain value: String) -> Bool {
-        let expected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", value), object: app.staticTexts["fixture.mcp-\(owner)"])
-        return XCTWaiter.wait(for: [expected], timeout: 10) == .completed
+        return waitUntil(app.staticTexts["fixture.mcp-\(owner)"], NSPredicate(format: "label CONTAINS %@", value), timeout: 10)
     }
     @MainActor private func keepScreenshot(_ app: XCUIApplication, name: String) {
         let capture = XCTAttachment(screenshot: app.screenshot()); capture.name = name; capture.lifetime = .keepAlways; add(capture)

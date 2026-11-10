@@ -90,10 +90,8 @@ final class TronCameraCaptureUITests: XCTestCase {
     }
 
     @MainActor private func waitFor(_ element: XCUIElement, _ predicate: String, _ message: String) {
-        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: predicate), object: element)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [expectation], timeout: 20),
-            .completed,
+        XCTAssertTrue(
+            waitUntil(element, NSPredicate(format: predicate), timeout: 20),
             "\(message): \(element.exists ? element.label : "missing")"
         )
     }

@@ -65,13 +65,11 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         let card = app.buttons["home-usage-card"]
         XCTAssertTrue(card.waitForExistence(timeout: 5))
         let probe = app.staticTexts["fixture.home-usage-layout"]
-        expectation(for: NSPredicate(format: "label CONTAINS 'openai-codex.name='"), evaluatedWith: probe)
-        waitForExpectations(timeout: 3)
+        XCTAssertTrue(waitUntil(probe, NSPredicate(format: "label CONTAINS 'openai-codex.name='"), timeout: 3), "\(probe)")
         XCTAssertEqual(card.label, "Loading account usage", "Names must already be drawn before usage resolves")
         let frames = usageFrames(probe.label)
         keep("provider-values-loading")
-        expectation(for: NSPredicate(format: "label CONTAINS %@", "%"), evaluatedWith: card)
-        waitForExpectations(timeout: 10)
+        XCTAssertTrue(waitUntil(card, NSPredicate(format: "label CONTAINS %@", "%"), timeout: 10), "\(card)")
         let resolved = usageFrames(probe.label)
         for id in ["anthropic.name", "openai-codex.name"] {
             XCTAssertNotNil(frames[id]); XCTAssertNotNil(resolved[id])
@@ -87,8 +85,7 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         let app = session(["-manage-session-review", "-workspace-capture-delay"]); defer { app.terminate() }
         let workspace = app.buttons["Workspace"]
         reveal(app, workspace)
-        expectation(for: NSPredicate { _, _ in self.paintedText(workspace).contains("Working tree clean") }, evaluatedWith: workspace)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitUntil(workspace, NSPredicate { _, _ in self.paintedText(workspace).contains("Working tree clean") }, timeout: 5), "\(workspace)")
         let published = paintedText(workspace)
         tap(app, "manage-session-rename"); tap(app, "Cancel")
         // Native AX queries sample the delayed socket response interval; the old
@@ -123,8 +120,7 @@ final class TronConsolidatedUIRegressionTests: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 5))
         XCTAssertTrue(card.staticTexts["Effort"].exists && card.staticTexts["Context Window"].exists)
         tap(app, "settings-row-model.thinking_role_chat_-reset")
-        let revertedEffort = expectation(for: NSPredicate(format: "value == %@", "High"), evaluatedWith: card.buttons["Effort"])
-        wait(for: [revertedEffort], timeout: 5)
+        XCTAssertTrue(waitUntil(card.buttons["Effort"], NSPredicate(format: "value == %@", "High"), timeout: 5), "\(card.buttons["Effort"])")
         tap(app, "manage-model-switch")
         let alternative = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Alternative Model'")).firstMatch
         XCTAssertTrue(alternative.waitForExistence(timeout: 5)); alternative.tap()

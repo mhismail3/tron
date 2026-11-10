@@ -26,11 +26,6 @@ final class TronForegroundCaptureUITests: XCTestCase {
         return try JSONDecoder().decode(Observation.self, from: Data(value.utf8))
     }
 
-    @MainActor private func waitFor(_ condition: @escaping () -> Bool, timeout: TimeInterval = 15) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)],
-                      timeout: timeout) == .completed
-    }
-
     @MainActor private func launch(_ dark: Bool, arguments: [String] = []) throws -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-foreground-sheet-probe"]
@@ -152,7 +147,7 @@ final class TronForegroundCaptureUITests: XCTestCase {
         let composer = app.textViews["Message input"]
         XCTAssertTrue(composer.waitForExistence(timeout: 20)); composer.tap()
         composer.typeText("Reveal authority 1607")
-        XCTAssertTrue(waitFor { app.buttons["Send message"].isEnabled }, "A revealed chat must re-subscribe and regain command admission")
+        XCTAssertTrue(waitUntil(timeout: 15) { app.buttons["Send message"].isEnabled }, "A revealed chat must re-subscribe and regain command admission")
         let revealed = try observation(app)
         XCTAssertEqual(revealed.rpc["session.open", default: 0] - initial.rpc["session.open", default: 0], 2,
                        "Initial chat open and exactly one deferred reveal restoration")
@@ -169,7 +164,7 @@ final class TronForegroundCaptureUITests: XCTestCase {
         app.buttons["home-pinned-row"].tap()
         let lifecycle = app.descendants(matching: .any)["chat.hosted.presentation-lifecycle"].firstMatch
         XCTAssertTrue(lifecycle.waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertTrue(waitFor { (lifecycle.value as? String)?.hasSuffix("ready-exits=0") == true
+        XCTAssertTrue(waitUntil(timeout: 15) { (lifecycle.value as? String)?.hasSuffix("ready-exits=0") == true
             && app.textViews["Message input"].exists }, "The chat never became ready: \(app.debugDescription)")
         Thread.sleep(forTimeInterval: 1)
         let opened = try XCTUnwrap(lifecycle.value as? String)
@@ -208,7 +203,7 @@ final class TronForegroundCaptureUITests: XCTestCase {
         defer { app.terminate() }
         let card = app.descendants(matching: .any)["home-usage-card"].firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 30))
-        XCTAssertTrue(waitFor { card.label.contains("Anthropic, 42%") }, card.label)
+        XCTAssertTrue(waitUntil(timeout: 15) { card.label.contains("Anthropic, 42%") }, card.label)
         try capture(app, name: "dashboard-usage", reads: ["provider.list": 1, "model.list": 1],
                     forbidden: ["session.open", "session.sync"])
         XCTAssertTrue(card.label.contains("Anthropic Refreshed, 42%"), "Usage cannot keep a pre-disconnect provider catalog")
@@ -243,10 +238,10 @@ final class TronForegroundCaptureUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         print("FOREGROUND_CAPTURE activate \(name) \(Date().timeIntervalSince1970)")
         app.activate()
-        XCTAssertTrue(waitFor { ((try? self.observation(app).foreground) ?? before.foreground) > before.foreground },
+        XCTAssertTrue(waitUntil(timeout: 15) { ((try? self.observation(app).foreground) ?? before.foreground) > before.foreground },
                       "Foreground reconciliation must finish")
         let restored = try observation(app)
-        XCTAssertTrue(waitFor { ((try? self.observation(app).frames) ?? 0) >= restored.frames + 120 },
+        XCTAssertTrue(waitUntil(timeout: 15) { ((try? self.observation(app).frames) ?? 0) >= restored.frames + 120 },
                       "Observe 120 active display cycles, including late native replay")
         let after = try observation(app)
         let expectedStack = retiringTop ? Array(before.stack.dropLast()) : before.stack
@@ -264,7 +259,7 @@ final class TronForegroundCaptureUITests: XCTestCase {
     }
 
     @MainActor private func finish(_ app: XCUIApplication, initial: Observation, name: String) throws {
-        XCTAssertTrue(waitFor { (try? self.observation(app).liveAnchors) == initial.liveAnchors },
+        XCTAssertTrue(waitUntil(timeout: 15) { (try? self.observation(app).liveAnchors) == initial.liveAnchors },
                       "Closed native anchors must deinitialize, not retain their environment graphs")
         evidence(app, name: name)
     }

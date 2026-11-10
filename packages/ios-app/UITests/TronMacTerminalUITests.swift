@@ -166,24 +166,24 @@ final class TronMacTerminalUITests: XCTestCase {
         app.buttons["Remove Mac Terminal"].tap()
         app.buttons["Remove"].tap()
         let pending = files.appending(path: "removal-pending.txt")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        XCTAssertTrue(waitUntil(timeout: 15) {
             FileManager.default.fileExists(atPath: pending.path)
-        }, object: nil)], timeout: 15), .completed)
+        })
         app.navigationBars.buttons["Done"].firstMatch.tap()
         postMacTerminalNotification("select-b")
         let selected = files.appending(path: "selected-machine.txt")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        XCTAssertTrue(waitUntil(timeout: 15) {
             (try? String(contentsOf: selected, encoding: .utf8)) == "mac-terminal-machine-b"
-        }, object: nil)], timeout: 15), .completed)
+        })
         openMacTerminal(app)
         postMacTerminalNotification("fail-removal")
         XCTAssertTrue(app.staticTexts["Open a shell on your Mac"].waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertEqual(try Data(contentsOf: authorizedKeys), originalAuthorization, "failed revocation changed the old Mac’s authorization")
         app.navigationBars.buttons["Done"].firstMatch.tap()
         postMacTerminalNotification("select-a")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        XCTAssertTrue(waitUntil(timeout: 15) {
             (try? String(contentsOf: selected, encoding: .utf8)) == "mac-terminal-machine"
-        }, object: nil)], timeout: 15), .completed)
+        })
         openMacTerminal(app)
         waitForPhase(app, "Connected")
         focusTerminal(app)
@@ -261,7 +261,7 @@ final class TronMacTerminalUITests: XCTestCase {
             CFNotificationName(rawValue: "com.tron.mobile.fixture.mac-terminal.migration-\(name)" as CFString), nil, nil, true)
         let path = files.appending(path: "migration-key-\(name).txt")
         let ready = NSPredicate { _, _ in FileManager.default.fileExists(atPath: path.path) }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 10), .completed)
+        XCTAssertTrue(waitUntil(nil, ready, timeout: 10))
     }
 
     @MainActor
@@ -304,8 +304,7 @@ final class TronMacTerminalUITests: XCTestCase {
     @MainActor
     private func waitForPhase(_ app: XCUIApplication, _ phase: String) {
         let title = app.descendants(matching: .any)["terminal-sheet-title"].firstMatch
-        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", phase), object: title)
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 30), .completed, app.debugDescription)
+        XCTAssertTrue(waitUntil(title, NSPredicate(format: "value == %@", phase), timeout: 30), app.debugDescription)
     }
 
     @MainActor

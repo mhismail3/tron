@@ -21,7 +21,7 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(ring.waitForExistence(timeout: 15))
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         let row = element(app, "home-manage-settings")
         XCTAssertTrue(row.waitForExistence(timeout: 8), app.debugDescription)
@@ -150,16 +150,12 @@ final class TronSettingsScopeRowsUITests: XCTestCase {
         for _ in 0..<3 where title.frame.minY > 120 {
             origin.withOffset(CGVector(dx: 60, dy: title.frame.midY))
                 .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: title)], timeout: 2)
+            _ = waitUntil(title, NSPredicate(format: "frame.minY < 120"), timeout: 2)
         }
     }
 
     @MainActor private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any)[id].firstMatch
-    }
-
-    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
     @MainActor private func shot(_ name: String) {

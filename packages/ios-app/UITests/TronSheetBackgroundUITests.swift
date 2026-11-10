@@ -15,8 +15,7 @@ final class TronSheetBackgroundUITests: XCTestCase {
             XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
             app.buttons["home-pinned-row"].tap()
             let ring = app.buttons["session-context-button"]
-            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-                predicate: NSPredicate(format: "exists == true AND enabled == true"), object: ring)], timeout: 15), .completed)
+            XCTAssertTrue(waitUntil(ring, NSPredicate(format: "exists == true AND enabled == true"), timeout: 15))
             ring.tap()
             XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 15))
             releaseHeldTaskList()
@@ -68,8 +67,7 @@ final class TronSheetBackgroundUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == true AND enabled == true"), object: ring)], timeout: 15), .completed)
+        XCTAssertTrue(waitUntil(ring, NSPredicate(format: "exists == true AND enabled == true"), timeout: 15))
         ring.tap()
         let manageDone = app.buttons["home-sheet-done-manage"]
         XCTAssertTrue(manageDone.waitForExistence(timeout: 5))

@@ -314,16 +314,14 @@ final class TronAccessibilityUITests: XCTestCase {
     }
 
     private func waitForFrame(_ element: XCUIElement, y: CGFloat, height: CGFloat) {
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        XCTAssertTrue(waitUntil(timeout: 3) {
             MainActor.assumeIsolated {
                 abs(element.frame.minY - y) <= 1 && abs(element.frame.height - height) <= 1
             }
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 3), .completed, XCUIApplication().debugDescription)
+        }, XCUIApplication().debugDescription)
     }
 
     private func waitForValue(_ text: String, in element: XCUIElement) {
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", text), object: element)
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 3), .completed, element.debugDescription)
+        XCTAssertTrue(waitUntil(element, NSPredicate(format: "value CONTAINS %@", text), timeout: 3), element.debugDescription)
     }
 }

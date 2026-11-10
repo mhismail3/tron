@@ -62,8 +62,7 @@ final class TronInteractionHapticsUITests: XCTestCase {
 
     @MainActor private func assertHaptics(_ app: XCUIApplication, _ expected: String) {
         let probe = app.staticTexts["fixture.haptics"]
-        let match = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "haptics:\(expected)"), object: probe)
-        XCTAssertEqual(XCTWaiter.wait(for: [match], timeout: 5), .completed, probe.label)
+        XCTAssertTrue(waitUntil(probe, NSPredicate(format: "label == %@", "haptics:\(expected)"), timeout: 5), probe.label)
         sleep(1)
         XCTAssertEqual(probe.label, "haptics:\(expected)", "No late/duplicate feedback")
     }

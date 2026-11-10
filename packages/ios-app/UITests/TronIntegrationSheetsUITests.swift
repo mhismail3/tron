@@ -54,8 +54,7 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         let app = launch(scenario: "connection-opened-failure")
         defer { app.terminate() }
         let count = app.staticTexts["failed-socket-count"]
-        let twoAttempts = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "failed sockets 2"), object: count)
-        XCTAssertEqual(XCTWaiter.wait(for: [twoAttempts], timeout: 10), .completed)
+        XCTAssertTrue(waitUntil(count, NSPredicate(format: "label == %@", "failed sockets 2"), timeout: 10))
         let reconnecting = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Connection status: Reconnecting")).firstMatch
         XCTAssertTrue(reconnecting.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Mac unreachable")).firstMatch.exists)
@@ -70,9 +69,9 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         let app = launch(scenario: "connection-secondary")
         defer { app.terminate() }
         let state = app.staticTexts["secondary-state"]
-        func waitLabel(_ element: XCUIElement, _ value: String, timeout: TimeInterval = 10) {
+        @MainActor func waitLabel(_ element: XCUIElement, _ value: String, timeout: TimeInterval = 10) {
             let predicate = NSPredicate(format: "label == %@", value)
-            XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed, app.debugDescription)
+            XCTAssertTrue(waitUntil(element, predicate, timeout: timeout), app.debugDescription)
         }
         waitLabel(state, "connected")
         let primary = app.staticTexts["primary-state"].label
@@ -86,9 +85,9 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         app.activate()
         waitLabel(state, "offline")
         let waits = app.staticTexts["secondary-waits"]
-        func waitFirstDelay(_ value: String) {
+        @MainActor func waitFirstDelay(_ value: String) {
             let predicate = NSPredicate(format: "label BEGINSWITH %@", value)
-            XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: waits)], timeout: 5) == .completed, app.debugDescription)
+            XCTAssertTrue(waitUntil(waits, predicate, timeout: 5), app.debugDescription)
         }
         waitFirstDelay("300.0,")
         XCTAssertEqual(app.staticTexts["secondary-last-connected"].label, lastConnected)

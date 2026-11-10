@@ -21,7 +21,7 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             let button = app.buttons["dashboard.menu"]
             XCTAssertTrue(button.waitForExistence(timeout: 15), app.debugDescription)
             XCTAssertEqual(button.label, "Home")
-            XCTAssertTrue(waitFor(button, "value == 'Ready'"), app.debugDescription)
+            XCTAssertTrue(waitUntil(button, "value == 'Ready'"), app.debugDescription)
             XCTAssertFalse(app.buttons["home-floating-button"].exists, "One button, not a separate Home button")
             keep("1461-home-button-\(appearance)-resting")
             let feedback = app.staticTexts["fixture.menu-feedback"]
@@ -34,7 +34,7 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             XCTAssertTrue(app.buttons["New Session"].exists, app.debugDescription)
             keep("1461-home-button-\(appearance)-held-menu")
             XCTAssertFalse(app.textViews["Message input"].exists, "Releasing a hold does not open Home")
-            XCTAssertTrue(waitFor(feedback, "label == 'menu-feedback:1'"), "The menu opening plays one haptic")
+            XCTAssertTrue(waitUntil(feedback, "label == 'menu-feedback:1'"), "The menu opening plays one haptic")
 
             // Dismiss by tapping outside: the menu closes and Home still does not open.
             let outside = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2))
@@ -47,7 +47,7 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             // menu through the 0.2 s hold and its haptic (#1480).
             button.press(forDuration: 1.2)
             XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertTrue(waitFor(feedback, "label == 'menu-feedback:2'"), "A long hold plays the haptic: \(feedback.label)")
+            XCTAssertTrue(waitUntil(feedback, "label == 'menu-feedback:2'"), "A long hold plays the haptic: \(feedback.label)")
             outside.tap()
             XCTAssertTrue(settings.waitForNonExistence(timeout: 5), app.debugDescription)
 
@@ -98,10 +98,6 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             }
             XCTAssertEqual(button.label, "Home")
         }
-    }
-
-    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
     @MainActor private func keep(_ name: String) {

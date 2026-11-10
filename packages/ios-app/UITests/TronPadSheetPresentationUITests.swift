@@ -155,8 +155,7 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         let gearClosed = gear.frame
 
         let ring = app.buttons["session-context-button"]
-        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true AND label CONTAINS 'Manage Home'"), object: ring)
-        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, app.debugDescription)
+        XCTAssertTrue(waitUntil(ring, NSPredicate(format: "enabled == true AND label CONTAINS 'Manage Home'"), timeout: 10), app.debugDescription)
         ring.tap()
         var samples: [(gear: CGRect, panel: CGRect)] = []
         for index in 0..<6 {
@@ -254,8 +253,7 @@ final class TronPadSheetPresentationUITests: XCTestCase {
     private func openManageHome(_ app: XCUIApplication) {
         let ring = app.buttons["session-context-button"]
         XCTAssertTrue(ring.waitForExistence(timeout: 10), app.debugDescription)
-        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true AND label CONTAINS 'Manage Home'"), object: ring)
-        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed, app.debugDescription)
+        XCTAssertTrue(waitUntil(ring, NSPredicate(format: "enabled == true AND label CONTAINS 'Manage Home'"), timeout: 10), app.debugDescription)
         ring.tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-manage-state"].waitForExistence(timeout: 5), app.debugDescription)
         Thread.sleep(forTimeInterval: 1) // let the presentation transition settle before reading frames
@@ -292,8 +290,7 @@ final class TronPadSheetPresentationUITests: XCTestCase {
         XCTAssertLessThanOrEqual(composer.frame.maxX, sheet.minX, "The chat lays out beside the sheet, not under it", file: file, line: line)
         composer.tap()
         composer.typeText(text)
-        let typed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", text), object: composer)
-        XCTAssertEqual(XCTWaiter.wait(for: [typed], timeout: 5), .completed, "The chat composer takes text beside the sheet", file: file, line: line)
+        XCTAssertTrue(waitUntil(composer, NSPredicate(format: "value CONTAINS %@", text), timeout: 5), "The chat composer takes text beside the sheet", file: file, line: line)
     }
 
     @MainActor

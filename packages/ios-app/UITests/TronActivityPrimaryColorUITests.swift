@@ -13,9 +13,7 @@ import UIKit
                     "-themeColor", theme] + (mode == "dark" ? ["-home-dark"] : [])
                 dashboard.launch()
                 let home = dashboard.buttons["dashboard.menu"]
-                let working = XCTNSPredicateExpectation(predicate:
-                    NSPredicate(format: "exists == true AND value == 'Working'"), object: home)
-                XCTAssertEqual(XCTWaiter.wait(for: [working], timeout: 15), .completed)
+                XCTAssertTrue(waitUntil(home, NSPredicate(format: "exists == true AND value == 'Working'"), timeout: 15))
                 let title = dashboard.staticTexts["Tron"].firstMatch
                 XCTAssertTrue(title.exists)
                 compareInk(dashboard, icon: centered(home.frame, size: 28),

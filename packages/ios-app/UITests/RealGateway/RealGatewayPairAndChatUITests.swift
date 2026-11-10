@@ -65,7 +65,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let home = app.buttons["home-pinned-row"]
         XCTAssertTrue(home.waitForExistence(timeout: 60), app.debugDescription)
         let published = NSPredicate(format: "label CONTAINS '0 workers running'")
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: published, object: home)], timeout: 30), .completed)
+        XCTAssertTrue(waitUntil(home, published, timeout: 30))
         XCTAssertTrue(["normal", "elevated", "critical"].contains { home.label.contains("Host \($0)") }, home.label)
         XCTAssertFalse(home.label.lowercased().contains("queued"), home.label)
         keepScreenshot(app, name: "931-real-gateway-home-host-status")
@@ -154,9 +154,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                       "transport retirement must not dismiss the active composer keyboard")
         keepScreenshot(app, name: "393-simulator-same-route-transport-retired")
         let transientNotice = app.descendants(matching: .any).matching(identifier: "in-app-notice-card").firstMatch
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: transientNotice
-        )], timeout: 20), .completed)
+        XCTAssertTrue(waitUntil(transientNotice, NSPredicate(format: "exists == false"), timeout: 20))
         keepScreenshot(app, name: "393-simulator-retained-after-transient-notice")
         let waitingStatus = recoveryStatus(app, "Waiting for connection")
         XCTAssertTrue(waitingStatus.isHittable,
@@ -252,9 +250,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "878-simulator-delayed-foreground-status")
         // The app-scoped recovery card arrives with the same grace and briefly
         // covers the bar; the persistent status must remain after it retires.
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: transientNotice
-        )], timeout: 20), .completed)
+        XCTAssertTrue(waitUntil(transientNotice, NSPredicate(format: "exists == false"), timeout: 20))
         keepScreenshot(app, name: "878-simulator-delayed-foreground-status-persistent")
         assertRecoveryInChrome(app, status: waitingStatus)
         XCTAssertTrue(sameRouteReply.isHittable, "delayed-connection status covered the retained reply")
@@ -264,9 +260,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         try setProxyMode(fixture, mode: "pass")
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "the delayed reconnect did not finish without Retry")
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: waitingStatus
-        )], timeout: 30), .completed, "a finished reconnect left its recovery status behind")
+        XCTAssertTrue(waitUntil(waitingStatus, NSPredicate(format: "exists == false"), timeout: 30), "a finished reconnect left its recovery status behind")
         XCTAssertEqual(composer.value as? String, unsentDraft)
 
         // A definitive answer from the real Gateway is not transport loss. The
@@ -277,9 +271,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let unavailableStatus = recoveryStatus(app, "Conversation unavailable")
         XCTAssertTrue(unavailableStatus.waitForExistence(timeout: 30),
                       "a Gateway rejection must leave a persistent failure beside retained rows")
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: transientNotice
-        )], timeout: 30), .completed,
+        XCTAssertTrue(waitUntil(transientNotice, NSPredicate(format: "exists == false"), timeout: 30),
                        "the transient catch-up notice must retire before qualifying persistent failure")
         keepScreenshot(app, name: "393-simulator-persistent-gateway-failure")
         XCTAssertTrue(unavailableStatus.isHittable)
@@ -292,9 +284,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForHittable(unavailableStatus, timeout: 10))
         unavailableStatus.tap()
         XCTAssertTrue(waitForEnabled(send, timeout: 60), "explicit retry did not restore command authority")
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: unavailableStatus
-        )], timeout: 30), .completed, "a successful Retry left its failure status behind")
+        XCTAssertTrue(waitUntil(unavailableStatus, NSPredicate(format: "exists == false"), timeout: 30), "a successful Retry left its failure status behind")
 
         // A real reader detaches from the tail; this is not a short transcript
         // that happens to fit in the viewport. Scrolling intentionally dismisses
@@ -321,9 +311,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let rowsBeforeLoss = transcriptRows(app)
         try setProxyMode(fixture, mode: "blackhole")
         XCTAssertTrue(waitingStatus.waitForExistence(timeout: 60))
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: transientNotice
-        )], timeout: 20), .completed)
+        XCTAssertTrue(waitUntil(transientNotice, NSPredicate(format: "exists == false"), timeout: 20))
         keepScreenshot(app, name: "878-simulator-anchored-reader-persistent-recovery")
         let movedRows = changedPixelFraction(rowsBeforeLoss, transcriptRows(app))
         XCTAssertLessThan(movedRows, 0.01,
@@ -447,17 +435,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(largeStatus.waitForExistence(timeout: 90),
                       "transport loss at accessibility text size showed no recovery: \(largeText.debugDescription)")
         let largeNotice = largeText.descendants(matching: .any).matching(identifier: "in-app-notice-card").firstMatch
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: largeNotice
-        )], timeout: 20), .completed)
+        XCTAssertTrue(waitUntil(largeNotice, NSPredicate(format: "exists == false"), timeout: 20))
         keepScreenshot(largeText, name: "878-simulator-accessibility-xxxl-recovery")
         assertRecoveryInChrome(largeText, status: largeStatus)
         XCTAssertEqual(largeStatus.value as? String, "This conversation will resume when the Mac reconnects.",
                        "VoiceOver must receive the full recovery explanation")
         try setProxyMode(fixture, mode: "pass")
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: largeStatus
-        )], timeout: 90), .completed, "the large-text route did not reconnect on its own")
+        XCTAssertTrue(waitUntil(largeStatus, NSPredicate(format: "exists == false"), timeout: 90), "the large-text route did not reconnect on its own")
     }
 
     /// #935: reopening a running session whose agent waits on `ask_user`
@@ -630,8 +614,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
             origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
                 .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
-            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)
-            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed)
+            XCTAssertTrue(waitUntil(timeout: 5) { done.frame.minY < 120 })
             if index == 0 {
                 info.tap()
                 let request = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Inspect Request JSON,'")).firstMatch
@@ -2005,16 +1988,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         waitUntil(timeout: timeout) { !element.exists }
     }
 
-    @MainActor
-    func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if condition() { return true }
-            Thread.sleep(forTimeInterval: 0.25)
-        } while Date() < deadline
-        return condition()
-    }
-
     private func attachSettingsCoverage(_ coverage: [String: SurfaceCoverage], schema: SettingsSchemaInventory) {
         let attachment = XCTAttachment(string: coverageReport(coverage, schema: schema))
         attachment.name = "settings-surface-coverage.json"
@@ -2132,11 +2105,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let card = app.buttons["new-session-card.Workspace"]
         XCTAssertTrue(card.waitForExistence(timeout: 60), app.debugDescription)
         let expected = workspace.split(separator: "/").suffix(2).joined(separator: "/")
-        let showsWorkspace = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label CONTAINS %@", expected), object: card
-        )
-        XCTAssertEqual(
-            XCTWaiter().wait(for: [showsWorkspace], timeout: 90), .completed,
+        XCTAssertTrue(
+            waitUntil(card, NSPredicate(format: "label CONTAINS %@", expected), timeout: 90),
             "the new session must start in the workspace setup chose (\(workspace)): \(card.label)"
         )
         let create = app.buttons["Create"]
@@ -2167,29 +2137,20 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// would starve the session that reports it.
     @MainActor
     private func waitForBackground(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
-        let background = XCTNSPredicateExpectation(
-            predicate: NSPredicate(
+        return waitUntil(app, NSPredicate(
                 format: "state == %d OR state == %d",
                 XCUIApplication.State.runningBackground.rawValue,
                 XCUIApplication.State.runningBackgroundSuspended.rawValue
-            ),
-            object: app
-        )
-        return XCTWaiter().wait(for: [background], timeout: timeout) == .completed
+            ), timeout: timeout)
     }
 
     @MainActor
     private func waitForForeground(_ app: XCUIApplication, timeout: TimeInterval) -> Bool {
-        let foreground = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "state == %d", XCUIApplication.State.runningForeground.rawValue),
-            object: app
-        )
-        return XCTWaiter().wait(for: [foreground], timeout: timeout) == .completed
+        return waitUntil(app, NSPredicate(format: "state == %d", XCUIApplication.State.runningForeground.rawValue), timeout: timeout)
     }
 
-    private func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
-        let absent = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: element)
-        return XCTWaiter().wait(for: [absent], timeout: timeout) == .completed
+    @MainActor private func waitForAbsence(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        return waitUntil(element, NSPredicate(format: "exists == false"), timeout: timeout)
     }
 
     /// A completed assistant reply: its paragraph inside the message's one
@@ -2200,9 +2161,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             .descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
-    func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
-        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: element)
-        return XCTWaiter().wait(for: [enabled], timeout: timeout) == .completed
+    @MainActor func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        return waitUntil(element, NSPredicate(format: "enabled == true"), timeout: timeout)
     }
 
     /// Waits for an element the user can actually touch. A dashboard control is
@@ -2210,8 +2170,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// scene from a sheet that is still asking to pair.
     @MainActor
     func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
-        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
-        return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
+        return waitUntil(element, NSPredicate(format: "hittable == true"), timeout: timeout)
     }
 
     @MainActor

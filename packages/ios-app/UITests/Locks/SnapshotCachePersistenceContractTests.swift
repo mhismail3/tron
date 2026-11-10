@@ -20,10 +20,9 @@ final class SnapshotCachePersistenceContractTests: XCTestCase {
     @MainActor
     private func require(_ app: XCUIApplication, _ id: String, label: String) throws -> XCUIElement {
         let element = app.staticTexts[id]
-        let expected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", label), object: element)
-        let result = XCTWaiter.wait(for: [expected], timeout: 10)
-        XCTAssertEqual(result, .completed, "Expected \(id)=\(label); actual \(element.exists ? element.label : "<missing>")")
-        guard result == .completed else { throw Failure.missing(id) }
+        let result = waitUntil(element, NSPredicate(format: "label == %@", label), timeout: 10)
+        XCTAssertTrue(result, "Expected \(id)=\(label); actual \(element.exists ? element.label : "<missing>")")
+        guard result else { throw Failure.missing(id) }
         return element
     }
 

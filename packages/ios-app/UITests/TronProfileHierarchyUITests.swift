@@ -35,7 +35,7 @@ final class TronProfileHierarchyUITests: XCTestCase {
         XCTAssertTrue(home.waitForExistence(timeout: 10))
         home.tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(wait(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true", timeout: 8))
         ring.tap()
         XCTAssertTrue(element(app, "home-manage-state").waitForExistence(timeout: 8))
         let profile = element(app, "home-manage-profile")
@@ -94,15 +94,9 @@ final class TronProfileHierarchyUITests: XCTestCase {
             .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.frame.midX, dy: 20)),
                    withVelocity: .fast, thenHoldForDuration: 0)
         // CGRect's minY is a Swift computation, not a KVC property for a string predicate.
-        let expanded = XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)], timeout: 8) == .completed
+        let expanded = waitUntil(timeout: 8) { done.frame.minY < 120 }
         if !expanded { keep("failed-expand-\(id)") }
         XCTAssertTrue(expanded, "\(id): \(done.frame)")
-    }
-
-    private func wait(_ element: XCUIElement, _ predicate: String) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: predicate), object: element)],
-                      timeout: 8) == .completed
     }
 
     @MainActor private func keep(_ name: String) {

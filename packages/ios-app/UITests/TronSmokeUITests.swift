@@ -793,9 +793,7 @@ final class TronSmokeUITests: XCTestCase {
             // display's pixel grid rather than raw floating-point differences.
             let scale = CGFloat(XCUIScreen.main.screenshot().image.cgImage?.width ?? 0) / app.windows.firstMatch.frame.width
             func points(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
-            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-                predicate: NSPredicate { _, _ in target.isHittable && points(target.frame.height) >= 44 && points(target.frame.width) >= 44 },
-                object: target)], timeout: 5), .completed, "\(target.label): \(target.frame)")
+            XCTAssertTrue(waitUntil(target, NSPredicate { _, _ in target.isHittable && points(target.frame.height) >= 44 && points(target.frame.width) >= 44 }, timeout: 5), "\(target.label): \(target.frame)")
         }
         XCTAssertFalse(editor.frame.intersects(reset.frame), "Editing and Revert must not share targets")
         editor.tap()
@@ -1703,7 +1701,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 10))
         composer.tap(); composer.typeText("After rollover")
         let send = app.buttons["Send message"]
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: send)], timeout: 5), .completed)
+        XCTAssertTrue(waitUntil(send, NSPredicate(format: "enabled == true"), timeout: 5))
         send.tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-prompt-route"], containing: "prompt-route:home.prompt", timeout: 10))
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-opened-session"], containing: "opened-session:home-successor", timeout: 20))
@@ -1843,9 +1841,9 @@ final class TronSmokeUITests: XCTestCase {
         app.terminate()
     }
 
-    private func waitForLabel(_ element: XCUIElement, containing text: String, timeout: TimeInterval) -> Bool {
+    @MainActor private func waitForLabel(_ element: XCUIElement, containing text: String, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "label CONTAINS %@", text)
-        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
+        return waitUntil(element, predicate, timeout: timeout)
     }
 
     /// Opens Manage Home from the composer's context ring (#748, #799). The ring
@@ -1991,10 +1989,9 @@ final class TronSmokeUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 5.5)
         XCTAssertEqual(statusCount(), coveredBaseline, "Home status reads continued while Manage Home covered the chat")
         app.buttons["home-sheet-done-manage"].tap()
-        let increased = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        XCTAssertTrue(waitUntil(timeout: 7) {
             statusCount() > coveredBaseline
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [increased], timeout: 7), .completed)
+        })
         app.terminate()
     }
 
@@ -2094,9 +2091,9 @@ final class TronSmokeUITests: XCTestCase {
         expandSettingsSheet(app, title: "Home Settings")
     }
 
-    private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+    @MainActor private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "isEnabled == true")
-        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout) == .completed
+        return waitUntil(element, predicate, timeout: timeout)
     }
 
     // Home is never an ordinary session row: while it is Working, its pinned row
@@ -2209,11 +2206,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Superseded receipt delivered"].exists,
                        "A locked Effort selection must not reach the Gateway mutation socket")
         app.buttons["Release terminal settlement"].tap()
-        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        XCTAssertTrue(waitUntil(thinking, NSPredicate(format: "enabled == true"), timeout: 5), "\(thinking)")
         thinking.tap()
         XCTAssertTrue(high.waitForExistence(timeout: 3), app.debugDescription)
         high.tap()
-        wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
+        XCTAssertTrue(waitUntil(thinking, NSPredicate(format: "enabled == false"), timeout: 5), "\(thinking)")
         let modelReset = app.buttons["settings-row-model.ref_role_chat_-reset"]
         XCTAssertTrue(modelReset.exists)
         XCTAssertFalse(modelReset.isEnabled, "Pending configuration must disable independent model Revert")
@@ -2252,7 +2249,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(app.descendants(matching: .any)["fixture.session-settings-decisions"].label, "decisions:none")
         app.buttons["Complete superseded thinking"].tap()
         XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
-        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        XCTAssertTrue(waitUntil(thinking, NSPredicate(format: "enabled == true"), timeout: 5), "\(thinking)")
         XCTAssertEqual(thinking.value as? String, "Off")
         XCTAssertFalse(app.buttons["Why configuration is unavailable"].exists)
     }
@@ -2278,7 +2275,7 @@ final class TronSmokeUITests: XCTestCase {
             alternative.tap()
             let switchModel = app.buttons["manage-model-switch"]
             let picker = app.staticTexts["Models"]
-            wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
+            XCTAssertTrue(waitUntil(picker, NSPredicate(format: "exists == false"), timeout: 5), "\(picker)")
             XCTAssertEqual(switchModel.value as? String, "Applying configuration")
             // Browsing stays available while the receipt is pending; choices do not.
             switchModel.tap()
@@ -2288,11 +2285,11 @@ final class TronSmokeUITests: XCTestCase {
             keepScreenshot(named: "model-\(order)-pending-open")
             app.buttons["Deliver model receipt"].tap()
             let confirmed = order == "superseded" ? original : alternative
-            wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: confirmed)], timeout: 10)
+            XCTAssertTrue(waitUntil(confirmed, NSPredicate(format: "value == %@ AND enabled == true", "Selected"), timeout: 10), "\(confirmed)")
             XCTAssertTrue(picker.exists, "Acknowledgement must not dismiss the picker")
             keepScreenshot(named: "model-\(order)-confirmed-open")
             confirmed.tap() // Reselect is a no-op, not another mutation; the pick closes the picker.
-            wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
+            XCTAssertTrue(waitUntil(picker, NSPredicate(format: "exists == false"), timeout: 5), "\(picker)")
             let requests = app.staticTexts.matching(identifier: "fixture.model-requests").firstMatch
             XCTAssertTrue(app.staticTexts["Model requests: 1"].waitForExistence(timeout: 3),
                           "\(requests.label); switch: \(switchModel.value ?? "nil")\n\(app.debugDescription)")
@@ -2301,12 +2298,12 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertEqual(confirmed.value as? String, "Selected", "Reopening derives the acknowledged authoritative model")
             if order != "superseded" {
                 original.tap()
-                wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
+                XCTAssertTrue(waitUntil(picker, NSPredicate(format: "exists == false"), timeout: 5), "\(picker)")
                 XCTAssertEqual(switchModel.value as? String, "Applying configuration")
                 app.buttons["Deliver model receipt"].tap()
-                wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 10)
+                XCTAssertTrue(waitUntil(switchModel, NSPredicate(format: "value == %@", ""), timeout: 10), "\(switchModel)")
                 switchModel.tap()
-                wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: original)], timeout: 10)
+                XCTAssertTrue(waitUntil(original, NSPredicate(format: "value == %@ AND enabled == true", "Selected"), timeout: 10), "\(original)")
                 XCTAssertTrue(picker.exists, "A second distinct choice is acknowledged and remains browsable")
             }
             app.buttons["Done"].tap()
@@ -2334,7 +2331,7 @@ final class TronSmokeUITests: XCTestCase {
         alternative.tap()
         let switchModel = app.buttons["manage-model-switch"]
         let picker = app.staticTexts["Models"]
-        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
+        XCTAssertTrue(waitUntil(picker, NSPredicate(format: "exists == false"), timeout: 5), "\(picker)")
         XCTAssertEqual(switchModel.value as? String, "Applying configuration")
         app.buttons["Deliver model receipt"].tap()
         // The refusal is reported on the model row the picker closed back to.
@@ -2343,18 +2340,18 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(failure.label.contains("Model choice refused; try again."))
         XCTAssertTrue(failure.isHittable)
         keepScreenshot(named: "model-failure-visible-on-row")
-        wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 5)
+        XCTAssertTrue(waitUntil(switchModel, NSPredicate(format: "value == %@", ""), timeout: 5), "\(switchModel)")
         switchModel.tap()
         XCTAssertTrue(alternative.waitForExistence(timeout: 5))
         XCTAssertEqual(original.value as? String, "Selected")
         XCTAssertTrue(alternative.isEnabled)
         alternative.tap()
-        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: picker)], timeout: 5)
+        XCTAssertTrue(waitUntil(picker, NSPredicate(format: "exists == false"), timeout: 5), "\(picker)")
         XCTAssertEqual(switchModel.value as? String, "Applying configuration") // Accepted mutation survives picker dismissal.
         app.buttons["Deliver model receipt"].tap()
-        wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 10)
+        XCTAssertTrue(waitUntil(switchModel, NSPredicate(format: "value == %@", ""), timeout: 10), "\(switchModel)")
         switchModel.tap()
-        wait(for: [expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "Selected"), evaluatedWith: alternative)], timeout: 10)
+        XCTAssertTrue(waitUntil(alternative, NSPredicate(format: "value == %@ AND enabled == true", "Selected"), timeout: 10), "\(alternative)")
         keepScreenshot(named: "model-retry-confirmed-after-reopen")
         app.buttons["Done"].tap()
         XCTAssertTrue(app.staticTexts["Model requests: 2"].waitForExistence(timeout: 3))
@@ -2372,15 +2369,15 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["Release terminal settlement"].tap()
         // Thinking is the shared renderer's Effort row and its choice sheet.
         let thinking = app.buttons["Effort"]
-        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        XCTAssertTrue(waitUntil(thinking, NSPredicate(format: "enabled == true"), timeout: 5), "\(thinking)")
         thinking.tap()
         let high = app.buttons["settings-option-High"]
         XCTAssertTrue(high.waitForExistence(timeout: 3), app.debugDescription)
         high.tap()
-        wait(for: [expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: thinking)], timeout: 5)
+        XCTAssertTrue(waitUntil(thinking, NSPredicate(format: "enabled == false"), timeout: 5), "\(thinking)")
         app.buttons["Complete superseded thinking"].tap()
         XCTAssertTrue(app.staticTexts["Superseded receipt delivered"].waitForExistence(timeout: 5))
-        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: thinking)], timeout: 5)
+        XCTAssertTrue(waitUntil(thinking, NSPredicate(format: "enabled == true"), timeout: 5), "\(thinking)")
         XCTAssertTrue(thinking.value as? String == "Off")
         thinking.tap()
         XCTAssertTrue(high.waitForExistence(timeout: 3), "Another edit must work without reopening Manage Session")
@@ -2416,7 +2413,7 @@ final class TronSmokeUITests: XCTestCase {
         let switchModel = app.buttons["manage-model-switch"]
         XCTAssertEqual(switchModel.value as? String, "Finishing the session. Configuration will be available shortly.")
         app.buttons["Release terminal settlement"].tap()
-        wait(for: [expectation(for: NSPredicate(format: "value == %@", ""), evaluatedWith: switchModel)], timeout: 5)
+        XCTAssertTrue(waitUntil(switchModel, NSPredicate(format: "value == %@", ""), timeout: 5), "\(switchModel)")
         XCTAssertTrue(thinking.isEnabled)
         thinking.tap()
         XCTAssertTrue(app.buttons["settings-option-High"].waitForExistence(timeout: 3), app.debugDescription)
@@ -3161,13 +3158,13 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars.staticTexts["Extensions"].waitForExistence(timeout: 10), app.debugDescription)
         let codemode = app.switches["Codemode"]
         XCTAssertTrue(codemode.waitForExistence(timeout: 10), app.debugDescription)
-        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: codemode)], timeout: 5)
+        XCTAssertTrue(waitUntil(codemode, NSPredicate(format: "enabled == true"), timeout: 5), "\(codemode)")
         XCTAssertFalse(app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Always include codemode")).firstMatch.exists)
         closeTopSheet(app)
         tapScrolling(app.buttons["settings-section-tools-open"], in: app)
         let toggle = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Always include codemode")).firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 5), app.debugDescription)
-        wait(for: [expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: toggle)], timeout: 5)
+        XCTAssertTrue(waitUntil(toggle, NSPredicate(format: "isEnabled == true"), timeout: 5), "\(toggle)")
         tapScrolling(toggle, in: app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.tools-write"], containing: "global@global=read,retired,+codemode", timeout: 5),
                       "The relocated control writes only its Global layer and preserves unknown selectors")
@@ -3190,7 +3187,7 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(app.buttons["settings-section-tools-open"], in: app)
         let codeMode = app.buttons["Other tools with codemode"]
         XCTAssertTrue(codeMode.waitForExistence(timeout: 10), app.debugDescription)
-        wait(for: [expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: codeMode)], timeout: 10)
+        XCTAssertTrue(waitUntil(codeMode, NSPredicate(format: "isEnabled == true"), timeout: 10), "\(codeMode)")
         tapScrolling(codeMode, in: app)
         let only = app.buttons["settings-option-Codemode only"]
         XCTAssertTrue(only.waitForExistence(timeout: 5), app.debugDescription)
@@ -3460,8 +3457,7 @@ final class TronSmokeUITests: XCTestCase {
         // The fixture performs thirty controlled parent updates. Wait for its
         // completion while the actual tapped menu remains presented.
         let finished = NSPredicate(format: "label == %@", "Revision 30")
-        let updates = expectation(for: finished, evaluatedWith: app.staticTexts["menu-fixture-revision"])
-        wait(for: [updates], timeout: 10)
+        XCTAssertTrue(waitUntil(app.staticTexts["menu-fixture-revision"], finished, timeout: 10), "\(app.staticTexts["menu-fixture-revision"])")
         XCTAssertTrue(automations.isHittable, "Parent updates must not dismiss the native menu")
         XCTAssertTrue(app.buttons["Apps"].exists && app.buttons["New Session 0"].exists, app.debugDescription)
         XCTAssertFalse(app.buttons["Knowledge"].exists, "Retired Knowledge has no dashboard entry")
@@ -3577,8 +3573,7 @@ final class TronSmokeUITests: XCTestCase {
             guard let element = element as? XCUIElement else { return false }
             return element.frame.minY < initialY - 80
         }
-        expectation(for: expanded, evaluatedWith: title)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitUntil(title, expanded, timeout: 5), "\(title)")
     }
 
     @MainActor
@@ -3700,12 +3695,10 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     /// Done on the frontmost sheet; the covered overview's Done stays in the tree.
-    private func dismissTopSheet(_ app: XCUIApplication, revealing element: XCUIElement) {
+    @MainActor private func dismissTopSheet(_ app: XCUIApplication, revealing element: XCUIElement) {
         let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done"))
         done.element(boundBy: done.count - 1).tap()
-        let closed = expectation(for: NSPredicate(format: "exists == false"),
-                                 evaluatedWith: app.descendants(matching: .any)["agent-instructions-purpose"])
-        wait(for: [closed], timeout: 3)
+        XCTAssertTrue(waitUntil(app.descendants(matching: .any)["agent-instructions-purpose"], NSPredicate(format: "exists == false"), timeout: 3), "\(app.descendants(matching: .any)["agent-instructions-purpose"])")
         XCTAssertTrue(element.exists, app.debugDescription)
     }
 
@@ -4041,8 +4034,7 @@ final class TronSmokeUITests: XCTestCase {
             guard let element = element as? XCUIElement else { return false }
             return element.isHittable
         }
-        expectation(for: rowIsVisible, evaluatedWith: firstRow)
-        waitForExpectations(timeout: 10)
+        XCTAssertTrue(waitUntil(firstRow, rowIsVisible, timeout: 10), "\(firstRow)")
 
         // The list moved up to make room: the revealed rows are in view, the
         // header is still visible and above its pre-expansion position, and the
@@ -4118,8 +4110,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "Tapping Other must focus its editor: \(app.debugDescription)")
-        expectation(for: NSPredicate { _, _ in send.frame.minY < mediumY - 100 }, evaluatedWith: send)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitUntil(send, NSPredicate { _, _ in send.frame.minY < mediumY - 100 }, timeout: 5), "\(send)")
         assertAskUserEditorAboveKeyboard(editor, keyboard: keyboard)
         keepScreenshot(named: "ask-user-other-focused-above-keyboard")
         editor.typeText((1...8).map { "Line \($0)" }.joined(separator: "\n"))
@@ -4462,8 +4453,7 @@ final class TronSmokeUITests: XCTestCase {
         let visible = NSPredicate { _, _ in
             editor.frame.minY >= 0 && editor.frame.maxY + 16 <= keyboard.frame.minY
         }
-        expectation(for: visible, evaluatedWith: editor)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitUntil(editor, visible, timeout: 5), "\(editor)")
     }
 
     /// The question's selectable text view. iOS 27 also exposes its paragraph

@@ -38,7 +38,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
                 row.tap()
                 let title = navigationTitle(app, label)
                 XCTAssertTrue(title.waitForExistence(timeout: 8), "\(label) opens a sheet titled \(label)\n\(app.debugDescription)")
-                _ = waitFor(title, "hittable == true", timeout: 3)
+                _ = waitUntil(title, "hittable == true", timeout: 3)
                 assertInk(ink(app, title), theme, "\(label) sheet title (\(mode))")
                 closeTop(app)
             }
@@ -61,7 +61,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
             XCTAssertTrue(app.buttons[done].waitForExistence(timeout: 8), app.debugDescription)
             let title = navigationTitle(app, label)
             XCTAssertTrue(title.waitForExistence(timeout: 5), "\(id) opens a sheet titled \(label)\n\(app.debugDescription)")
-            _ = waitFor(title, "hittable == true", timeout: 3)
+            _ = waitUntil(title, "hittable == true", timeout: 3)
             assertInk(ink(app, title), theme, "\(label) sheet title")
             app.buttons[done].tap()
             Thread.sleep(forTimeInterval: 0.6)
@@ -126,7 +126,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
         app.buttons["home-pinned-row"].tap()
         let ring = app.buttons["session-context-button"]
-        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        XCTAssertTrue(waitUntil(ring, "enabled == true"))
         ring.tap()
         XCTAssertTrue(element(app, "home-manage-state").waitForExistence(timeout: 8), app.debugDescription)
         expand(app, done: "home-sheet-done-manage")
@@ -190,7 +190,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         for _ in 0..<3 where title.frame.minY > 120 {
             origin.withOffset(CGVector(dx: 60, dy: title.frame.midY))
                 .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: title)], timeout: 2)
+            _ = waitUntil(title, NSPredicate(format: "frame.minY < 120"), timeout: 2)
         }
     }
 
@@ -201,7 +201,7 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
             .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-        _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: done)], timeout: 3)
+        _ = waitUntil(done, NSPredicate(format: "frame.minY < 120"), timeout: 3)
     }
 
     @MainActor private func closeTop(_ app: XCUIApplication) {
@@ -209,10 +209,6 @@ final class TronManageSheetsThemeUITests: XCTestCase {
         XCTAssertNotNil(done, app.debugDescription)
         done?.tap()
         Thread.sleep(forTimeInterval: 0.8)
-    }
-
-    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
-        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
     }
 
     @MainActor private func shot(_ name: String) {

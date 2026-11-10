@@ -80,17 +80,15 @@ final class TronSettingsListRefreshUITests: XCTestCase {
         row.tap()
         XCTAssertFalse(app.buttons["Remove alpha"].exists, "Reopening must never seed the superseded value: \(app.debugDescription)")
         try Data().write(to: gate.appendingPathComponent("release"))
-        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: row)],
-                                     timeout: 15) == .completed, app.debugDescription)
+        XCTAssertTrue(waitUntil(row, NSPredicate(format: "enabled == true"), timeout: 15), app.debugDescription)
         row.tap()
         XCTAssertTrue(app.buttons["Remove saved-value"].waitForExistence(timeout: 15), "Reopening seeds the accepted value: \(app.debugDescription)")
         XCTAssertFalse(app.buttons["Remove alpha"].exists)
     }
 
-    private func waitForFile(_ url: URL) -> Bool {
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+    @MainActor private func waitForFile(_ url: URL) -> Bool {
+        return waitUntil(timeout: 15) {
             FileManager.default.fileExists(atPath: url.path)
-        }, object: nil)
-        return XCTWaiter.wait(for: [ready], timeout: 15) == .completed
+        }
     }
 }

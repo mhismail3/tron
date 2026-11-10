@@ -28,27 +28,23 @@ final class TronDeliveredNotificationUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["fixture.delivered-badge"].label, "badge:7")
         if home {
             let homeButton = app.buttons["dashboard.menu"]
-            let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'Ready'"), object: homeButton)
-            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+            XCTAssertTrue(waitUntil(homeButton, NSPredicate(format: "value == 'Ready'"), timeout: 15))
             homeButton.tap()
         } else {
             app.buttons["session-row-home-shell-fixture:ordinary-session"].tap()
         }
         let manage = app.buttons["session-context-button"]
         XCTAssertTrue(manage.waitForExistence(timeout: 20), app.debugDescription)
-        let routed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", home ? "Manage Home" : "Manage Session"), object: manage)
-        XCTAssertEqual(XCTWaiter.wait(for: [routed], timeout: 15), .completed, app.debugDescription)
+        XCTAssertTrue(waitUntil(manage, NSPredicate(format: "label CONTAINS %@", home ? "Manage Home" : "Manage Session"), timeout: 15), app.debugDescription)
         app.buttons["Inspect delivered"].tap()
         let remaining = home ? "ordinary,other-chat,other-machine,unrouted"
             : "home,other-chat,other-machine,sealed-home,unrouted"
-        let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", remaining), object: delivered)
-        XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 15), .completed)
+        XCTAssertTrue(waitUntil(delivered, NSPredicate(format: "label == %@", remaining), timeout: 15))
         XCTAssertEqual(app.staticTexts["fixture.delivered-badge"].label, "badge:0")
         app.buttons["Deliver later"].tap()
         let later = home ? "later,ordinary,other-chat,other-machine,unrouted"
             : "home,later,other-chat,other-machine,sealed-home,unrouted"
-        let retained = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", later), object: delivered)
-        XCTAssertEqual(XCTWaiter.wait(for: [retained], timeout: 15), .completed)
+        XCTAssertTrue(waitUntil(delivered, NSPredicate(format: "label == %@", later), timeout: 15))
         app.buttons["Inspect delivered"].tap()
         XCTAssertEqual(delivered.label, later)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
