@@ -432,7 +432,7 @@
                     "type": "number"
                   },
                   "glob": {
-                    "description": "Filter files by glob pattern, e.g. '*.ts' or '**/*.spec.ts'",
+                    "description": "Filter files by glob pattern, relative to path, e.g. '*.ts', 'src/**/*.ts' or '**/*.spec.ts'. A pattern without '/' matches file names at any depth",
                     "type": "string"
                   },
                   "ignoreCase": {
