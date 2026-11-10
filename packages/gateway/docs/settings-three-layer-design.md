@@ -136,7 +136,7 @@ Device-local settings (S=no, P=no, safety=no, immediate presentation effect; not
 
 | Key | Group | Current owner / storage |
 | --- | --- | --- |
-| `appearanceMode` (legacy `appearance.v1`) | This iPhone / Appearance | `AppearanceSettings`, UserDefaults |
+| `appearanceMode` | This iPhone / Appearance | `AppearanceSettings`, UserDefaults |
 | `fontFamily` | This iPhone / Appearance | `FontSettings`, UserDefaults |
 | `monoFontFamily` | This iPhone / Appearance | `FontSettings`, UserDefaults |
 | `fontAxisValues` | This iPhone / Appearance | `FontSettings`, UserDefaults |

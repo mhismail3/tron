@@ -41,11 +41,6 @@ neither Tron.app nor the Gateway owns its process or connection.
 - Keyboard, emulator and alerts are presentation-scoped. Within an attachment,
   a rebuilt sheet adopts the same emulator; a new attachment gets a fresh one.
   SwiftTerm reads the active screen, including tmux's alternate screen.
-- A one-time forward migration removes only the obsolete endpoint `hostCommand`
-  property from `macTerminal.enrollments.v1`. It copies every surviving byte,
-  completes and verifies an original-record backup before the rewrite, then marks
-  completion. A failed backup blocks reads/mutations without touching keys or
-  pins. Subsequent launches do not repeat the migration.
 - Removal revokes the authorized key on the Mac before deleting local enrollment.
   Already-running tmux shells are not terminated by key removal.
 - Security’s native service owns its private key/config/auth store and per-user

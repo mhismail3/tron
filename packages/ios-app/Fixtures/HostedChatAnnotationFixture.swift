@@ -31,8 +31,9 @@ struct HostedChatAnnotationFixture: View {
         probe.reducesMotion = ProcessInfo.processInfo.arguments.contains("-annotation-reduce-motion")
         profile = GatewayProfile(id: "annotation-fixture", label: "Fixture", host: "gateway.test", port: 9847,
             machineId: "fixture-machine", deviceId: "fixture-device")
-        defaults.set(try! JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
-        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        defaults.set(try! JSONEncoder.gateway.encode(
+            GatewayProfileDocument(profiles: [profile], selectedProfileID: profile.id)
+        ), forKey: "gatewayProfiles.v2")
         let socket = socket
         _model = State(initialValue: AppModel(
             client: GatewayClient(socketFactory: GatewaySocketFactory { _ in socket }),
