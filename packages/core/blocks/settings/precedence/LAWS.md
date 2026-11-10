@@ -6,7 +6,7 @@ Block hash: `911143e0ddecbcd7` (over `blocks/settings/precedence/Block.dfy`, `la
 | Gate | Status |
 |---|---|
 | Proof (pinned Dafny, --verify-included-files) | PASS: blocks/settings/precedence/Block.dfy: Dafny program verifier finished with 35 verified, 0 errors;  |
-| Independent review | NOT ACCEPTED: STALE (reviewed c9232182f7d5762a, current 911143e0ddecbcd7); reviewer transcript never mentions the current block hash (it did not review this version) |
+| Independent review | ACCEPT by law-reviewer (run 9ce92a8a, round 5dcad523) (anthropic/claude-haiku-5-5, transcript-verified); writer parent (anthropic/claude-fable-5-2); 2026-11-10 |
 | Mutation check | PASS: 103 valid mutants, 103 killed by laws, 0 law-gap, 0 survived, 0 accepted (blocks/settings/precedence/MUTATION.json) |
 | Cut over | the only implementation: `packages/gateway/src/core/settings/precedence` runs this block's compiled core (scripts/tron proof facade) |
 
@@ -23,7 +23,7 @@ lemma S1Admission(k: Key)
 
 **Mutation results.** kills 1 of 103 valid mutants; 1 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: The four equations exactly specify scopeAdmitted/Admitted; for example Key(false, true, false) admits Global, Home, and Session but not Project. Its one killed mutant directly guards admission.
+**Reviewer notes.** ACCEPT: English equals the four Admitted equations and matches scopeAdmitted in scope-resolution.ts (Global always; Home and Session on sessionOverridable; Project on projectSettable). Not vacuous: Key(false, true, false) admits Global, Home and Session but not Project. Its one killed mutant guards admission directly.
 
 ## R1 winner
 
@@ -56,7 +56,7 @@ lemma ShownOfSpec(k: Key, ls: Layers, l: Layer)
 
 **Mutation results.** kills 52 of 103 valid mutants; 48 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: The premise and conclusions match the winner semantics, including the qualification that the simple-value equality applies only to non-composing keys; e.g. a live Session entry with no live Project entry witnesses it. ShownAt prefers the qualified value within each layer, then the bottom-up fold makes scope outrank specificity; 46 kills (33 unique) are strong evidence.
+**Reviewer notes.** ACCEPT: Premise (l live, nothing live above l) is satisfiable, e.g. a Session entry alone with no Project entry. English 'highest applied layer that takes part' is Live (visible and applied); the non-composing value is the shown value, qualified first, as in ShownOf and the reference fold. The origin clause agrees with Steps. 48 kills alone.
 
 ## R2 default
 
@@ -70,7 +70,7 @@ lemma R2Default(k: Key, ls: Layers)
 
 **Mutation results.** kills 0 of 103 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: This exactly states the empty-live-set result; a Key(false,false,false) with all four entries out of target is a concrete satisfying input. It kills no mutants, but preserves an explicit default/origin result contract complementary to winner and compose laws.
+**Reviewer notes.** ACCEPT: Matches the empty-live case: Over returns the below value unchanged. Satisfiable by a key whose four entries are all out of target. It kills no mutant alone, but it is the only law that pins default value and origin for ordinary keys with no applied layer (R1 and R5 need a live layer), and the shell reports that origin, so it stays.
 
 ## R3 compose
 
@@ -84,7 +84,7 @@ lemma R3Compose(k: Key, ls: Layers)
 
 **Mutation results.** kills 0 of 103 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: This matches the composing fold over live shown tokens in ascending rank; a composing key with all entries out of target satisfies the premise and yields Default. It kills no mutants, but records the composition contract; A1 correctly delegates actual composition to the setting type.
+**Reviewer notes.** ACCEPT: English 'default composed, lowest first, with every applied layer that takes part (each layer's shown value)' equals Folded(Default, LiveTokens), with TokenOf the shown token. Satisfiable by a composing key with all entries out of target (value Default). Zero kills alone because composing-value mutants are attributed to R1 through its helper ResolveSteps; R3 is the only explicit statement of the composing contract, so keep it.
 
 ## R4 untrusted-inert
 
@@ -100,7 +100,7 @@ lemma R4UntrustedInert(k: Key, ls: Layers, ls2: Layers, l: Layer)
 
 **Mutation results.** kills 0 of 103 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: The equality premise preserves target, binding, and applied status while permitting only value-field changes, exactly what the conclusion requires; e.g. an out-of-target Project entry with applied=false and changed tokens is a witness. This captures inert untrusted-project values; zero unique kills is acceptable as a relational invariant also guarded by other resolution laws.
+**Reviewer notes.** ACCEPT: The revised English now says only what the Dafny proves: value and the layer it comes from are unchanged by an unapplied layer; shown and the not-applied report are excluded and left to R6 and R7. Premise is satisfiable (an out-of-target Project entry with applied=false and changed values). Zero kills alone: it is implied by R1 applied to both targets, but it states the untrusted-inert rule explicitly, so keep it.
 
 ## R5 higher-scope-wins
 
@@ -115,7 +115,7 @@ lemma R5HigherScopeWins(k: Key, ls: Layers, ls2: Layers, l: Layer)
 
 **Mutation results.** kills 0 of 103 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: For a non-composing key, keeping layer l and every higher-ranked entry fixed while changing lower entries cannot affect the winner; a live Project entry with all other entries absent is a witness. It correctly includes per-model values below l as irrelevant, matching scope-over-specificity; no unique kills, but it states that product invariant explicitly.
+**Reviewer notes.** ACCEPT: For an ordinary key with l live, the premise fixes every layer at rank >= l, so the highest live layer, and therefore the value and layer, is the same in both targets; lower changes, including per-model values, cannot matter. Satisfiable: a live Project entry with all others absent. Zero kills alone: implied by R1 on both targets, but it states 'scope outranks specificity' explicitly, so keep it.
 
 ## R6 shown
 
@@ -130,7 +130,7 @@ lemma R6Shown(k: Key, ls: Layers, l: Layer)
 
 **Mutation results.** kills 0 of 103 valid mutants; 0 killed by this law alone. Kills nothing here: implied by other laws or by the world model; the reviewer must say which.
 
-**Reviewer notes.** ACCEPT: The Dafny clauses exactly characterize Resolve.shown as sorted visible layers with each chosen Token, qualified marker, and applied flag; an empty Layers value is a concrete witness. ShownAt's qualified-first behavior matches the TS shown list; zero kills is understandable because other laws constrain shared implementation paths, but this law directly specifies reporting.
+**Reviewer notes.** ACCEPT: Covers what the old R6 covered: shown exactly for the layers that take part, with the per-model-or-plain token, the per-model flag and the applied flag. The old 'lowest first' order is implicit in the one-field-per-layer Shows record, so nothing is lost. Dafny clauses equal the English; satisfiable by the empty Layers value. Zero kills alone because the shell reads shown directly and Shows mutants are killed by R1; keep it as the contract the shell's layer values and badges read.
 
 ## R7 not-applied
 
@@ -146,7 +146,7 @@ lemma R7NotApplied(k: Key, ls: Layers, l: Layer)
 
 **Mutation results.** kills 18 of 103 valid mutants; 16 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: The biconditional and lower-origin consequence match the TS highest shown entry behavior; a visible, unapplied Project value with every higher-ranked layer absent witnesses it. It properly allows lower applied layers or default beneath the untrusted value; 12 kills (4 unique) provide direct evidence.
+**Reviewer notes.** ACCEPT: Top decides by the highest Shown layer, which the Dafny expresses as Visible(l), not applied, and no visible layer above l. English 'highest layer that takes part and it is not applied' matches. Satisfiable: a visible unapplied Project entry with all higher layers absent. The origin clause ('comes from below it') matches the Dafny's Rank check. Kills 18 mutants (16 alone).
 
 ## R8 below
 
@@ -168,7 +168,7 @@ lemma FoldedPlain(k: Key, ls: Layers, m: Layer, l: Layer, v: Value)
 
 **Mutation results.** kills 32 of 103 valid mutants; 31 killed by this law alone.
 
-**Reviewer notes.** ACCEPT: The statement matches composedBelow's strict-below, applied, admitted plain-value fold; a composing key with layer l=Project and no lower entries satisfies it with Default. The implementation explicitly uses unqualified values only, unlike the qualified-first resolution fold; 33 kills (25 unique) are strong evidence.
+**Reviewer notes.** ACCEPT: The revised English now covers both cases and equals the Dafny. Folded over Default with Step: a composing setting gives the composition over the default; an ordinary setting gives Tok of the last (highest) applied plain value below l, or the default when none exists. Satisfiable by a composing key with l=Project and no lower entries (Default). The plain-only reading matches the reference composedBelow (unqualified reads only, strictly below, applied, admitted, bound, in target). The branch is live: settings-change.ts calls composedBelow for every key with encode. 31 kills alone.
 
 ## Proof helpers (statements only; not laws, but part of what is proven)
 
@@ -397,4 +397,4 @@ ghost predicate PlainLive(k: Key, ls: Layers, m: Layer, l: Layer) {
 
 ## Reviewer: general notes
 
-High-stakes is correct because settings precedence includes model/tools and trust-gated project values. A1 now matches precedenceFacts: the default is tokenized first (token 0), and values are keyed by JSON.stringify output (with undefined represented as the empty string), so objects with equal mappings but different property order may receive distinct tokens; the block receives only tokens and never compares values, so this distinction does not change which entries participate or their order. A1 also correctly assigns Compose evaluation to the setting type. A2 matches the intended store facts but its 'applied=false only for untrusted Project' invariant must be checked at the seam. The laws cover admission, exact resolution, reporting, inert untrusted values, winner stability, and composedBelow; progress/recovery/stale-input/uncertain-outcome laws are inapplicable to this pure per-call resolver, while diagnostics, clamping, and formatting remain outside scope. Mutation reports 92/92 valid killed, 0 accepted, and 61 stillborn; shadow is generated lab traffic only (22,710 comparisons), not the required seven-day real-traffic evidence. The law model relies on the shell to select the target/model-qualified value and default correctly; replay/real traffic must test this seam.
+Tier: high-stakes confirmed. Settings precedence decides authority-relevant values (trust-gated project values, model and tools), and LAW-WRITING says to choose high-stakes when unsure. No accepted mutants. MUTATION.json at 911143e0ddecbcd7: 103 of 103 valid mutants killed, 0 law-gap, 0 survived, 0 accepted, inputsHash matches. The .dfy files contain no assume, {:axiom}, {:verify false} or {:extern}. 'scripts/tron proof check settings/precedence' now runs fresh and passes (35 verified, 0 errors). Assumptions: A1 (each read value gets its own token; default token 0; the block never compares tokens) matches the shell's precedenceFacts, which assigns each stored layer's qualified and plain reads distinct tokens and keeps values per token. It is realistic, and can be tested at the shell seam. A2 (applied is false only for an untrusted project's Project layer; the qualified/plain split) matches layerApplied and the qualified and plain reads, and can be tested at the same seam. Real-traffic replay is still required for the high-stakes window; this review does not rely on any lab comparison. Missing kinds: progress, recovery, stale-inputs and uncertain-outcomes are correctly n/a for a pure per-call resolver; no missing law kind lets a concrete bug through. Old R6 vs new R6 checked against git show 8bd83895a: nothing is lost. The Below layer mapping (Global, Home, Session, with Project the top layer lying below none) matches composedBelow for all four layers. Mutation attribution note: several laws (R2 to R6) kill nothing alone, because the same behaviour is pinned through R1, ResolveSteps or the shell's direct reads; the kept laws are the explicit product contracts, so no law is recommended for removal. Verdict: every law ACCEPT on this hash; the packet can proceed to the writer's gates.
