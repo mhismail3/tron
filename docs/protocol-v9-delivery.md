@@ -62,8 +62,8 @@ canonical value as TypeScript.
    Debug note: the installed Mac launcher accepts only a payload whose protocol equals its own,
    so a v9 Debug Gateway (9848) cannot start under the v8 Mac app. Validate v9 on the mini or a
    fixture launcher; on this Mac, v9 Debug works only after step 1 below.
-6. Park every worker and announce the window: from the merge until step 3 finishes, the v8
-   iPhone cannot connect, and no agent can restart Debug from main until step 1 finishes.
+6. Park every worker and announce the window: from the merge until delivery step 3 finishes, the v8
+   iPhone cannot connect, and no agent can restart Debug from main until delivery step 1 finishes.
 
 ## Delivery (Mohsin, in this order)
 
