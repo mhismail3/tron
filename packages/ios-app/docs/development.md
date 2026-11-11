@@ -130,7 +130,9 @@ Hosted foreground captures retain cumulative RPC counts and the latest 64 indexe
 method/parameter records in the native probe. Parameter JSON over 1,024 bytes is explicitly omitted; the probe reports
 how many earlier records were dropped. Captures print the ordered before/after interval before any
 fail-fast assertion and attach it with the native state, distinguishing Manage task reads (`limit: 20`)
-from filtered Tasks reads without changing the exact read-count assertions.
+from filtered Tasks reads without changing the exact read-count assertions. After dismissing Memory,
+the Manage journey joins its original native stack and exact reveal-owned read batch before taking
+the foreground baseline, so reveal work is not counted as a second foreground refresh.
 
 ### Simulator lifecycle
 

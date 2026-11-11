@@ -58,7 +58,9 @@ final class TronForegroundCaptureUITests: XCTestCase {
         app.buttons["session-context-button"].tap()
         XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 20))
         let memory = app.descendants(matching: .any)["home-manage-memory-browser"].firstMatch
-        reveal(memory, in: app); memory.tap()
+        reveal(memory, in: app)
+        let manage = try observation(app)
+        memory.tap()
         XCTAssertTrue(app.buttons["home-sheet-done-memory"].waitForExistence(timeout: 20))
         let olderPage = app.descendants(matching: .any)["home-memory-summary-0-16"].firstMatch
         reveal(olderPage, in: app)
@@ -76,10 +78,17 @@ final class TronForegroundCaptureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-sheet-done-memory-item"].waitForExistence(timeout: 20))
         try capture(app, name: "memory-item-\(dark ? "dark" : "light")", forbidden:
                         ["session.open", "session.sync", "session.list", "provider.list", "settings.resolve", "home.status", "home.taskList", "home.memory.view"])
+        let covered = try observation(app)
+        let manageReads = ["home.status": 1, "home.context": 1, "home.chapterList": 1, "home.profileList": 1,
+                           "home.taskList": 1, "settings.resolve": 1]
         app.buttons["home-sheet-done-memory-item"].tap(); app.buttons["home-sheet-done-memory"].tap()
-        try capture(app, name: "manage-revealed-\(dark ? "dark" : "light")",
-                    reads: ["home.status": 1, "home.context": 1, "home.chapterList": 1, "home.profileList": 1, "home.taskList": 1,
-                            "settings.resolve": 1],
+        XCTAssertTrue(waitFor {
+            guard let revealed = try? self.observation(app) else { return false }
+            return revealed.stack == manage.stack && manageReads.allSatisfy { method, expected in
+                revealed.rpc[method, default: 0] - covered.rpc[method, default: 0] == expected
+            }
+        }, "Manage must finish its native reveal and bounded reveal reads before foreground capture: \(app.debugDescription)")
+        try capture(app, name: "manage-revealed-\(dark ? "dark" : "light")", reads: manageReads,
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "home.memory.view"])
         app.buttons["home-sheet-done-manage"].tap(); app.buttons["Back"].tap()
         try finish(app, initial: initial, name: "memory-stack-retired")
