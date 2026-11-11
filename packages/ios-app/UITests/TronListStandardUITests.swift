@@ -406,7 +406,7 @@ final class TronListStandardUITests: XCTestCase {
         let placeholder = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label BEGINSWITH %@", text)).firstMatch
         XCTAssertTrue(placeholder.waitForExistence(timeout: 8), app.debugDescription)
-        let feed = element(app, viewport)
+        let feed = app.scrollViews.matching(identifier: viewport).element
         let caption = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", captionText)).firstMatch
         for detent in ["medium", "large"] {
             if detent == "large" { expandSheet(app, title: title) }
