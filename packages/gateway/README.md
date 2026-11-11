@@ -168,6 +168,7 @@ has a README; every other Gateway module's rows are in its own README
 | Signal | Level | Meaning |
 |---|---|---|
 | `probe process join failed; staging preserved` / `Refusing fixture removal after process join failure` | updater or probe stderr; `TRON_TEST_PROCESS_OWNER_FAILURE` record | A fixture process could not be joined after TERM/KILL; staging stays owned and publications are restored. Settle those exact PIDs before retiring staging; never retry the removal |
+| `ENOTEMPTY` removing a fixture's `home/.npm/_logs` | fixture teardown | Run `scripts/tron test gateway --mini src/e2e/transport/gateway-process-prompt.e2e.test.ts`: its held global npm lookup must have exited before Gateway restart continues. The provider's advertisement owner cancels and joins lookup processes on shutdown; never retry fixture removal |
 | `pi-subagents update failed` | `npm run update:pi-subagents` stderr | Dependency preparation failed, not activation; the suffix names dirty inputs, source, release, packaging or check failure. Candidates are rolled back |
 | `pi-subagents update failed: … execution gate failed` / `… rollback probe failed` | updater stderr, before publication | The unpublished candidate cannot execute, or the return leg cannot discover, execute or resume; the original pin stays |
 | `pi-subagents pin check failed` during payload staging/verification | bundler or checker stderr | Selected pin metadata, archive, lock or closure is missing or invalid; reject the payload before startup |
