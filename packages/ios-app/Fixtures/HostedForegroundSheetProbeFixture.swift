@@ -1,6 +1,7 @@
 #if HOSTED_TEST
 import Foundation
 import SwiftUI
+import TronMobileCore
 import UIKit
 
 @MainActor enum ForegroundSheetProbe {
@@ -10,24 +11,35 @@ import UIKit
     private static var frames = 0
     private static var liveAnchors = Set<String>()
     private static var rpcCounts: [String: Int] = [:]
+    private static var rpcTrace: [[String: Any]] = []
     static let enabled = ProcessInfo.processInfo.arguments.contains("-foreground-sheet-probe")
     private static let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("foreground-sheet-probe.jsonl")
 
     static func install() {
         guard enabled else { return }
-        HostedPresentationProbe.record = record
+        HostedPresentationProbe.record = { record($0, $1) }
         HostedPresentationProbe.nativeView = { AnyView(ForegroundSheetNativeProbe(identity: $0)) }
     }
 
-    static func record(_ event: String, _ identity: String) {
+    static func record(_ event: String, _ identity: String, params: [String: JSONValue]? = nil) {
         guard enabled, count < 20_000 else { return }
         count += 1
-        if event == "rpc" { rpcCounts[identity, default: 0] += 1 }
         if event == "anchor-create" { liveAnchors.insert(identity) }
         if event == "anchor-deinit" { liveAnchors.remove(identity) }
-        let value: [String: Any] = ["at": Date().timeIntervalSince1970, "pid": ProcessInfo.processInfo.processIdentifier,
-                                    "event": event, "identity": identity]
+        let at = Date().timeIntervalSince1970
+        var value: [String: Any] = ["at": at, "pid": ProcessInfo.processInfo.processIdentifier,
+                                  "index": count, "event": event, "identity": identity]
+        if event == "rpc" {
+            rpcCounts[identity, default: 0] += 1
+            let data = params.flatMap { try? JSONEncoder().encode($0) }
+            let parameters = data.map { $0.count <= 1_024 ? String(decoding: $0, as: UTF8.self) : "<omitted: \($0.count) bytes>" }
+                ?? "<unavailable>"
+            let request: [String: Any] = ["index": count, "at": at, "method": identity, "params": parameters]
+            rpcTrace.append(request)
+            if rpcTrace.count > 64 { rpcTrace.removeFirst() }
+            value["request"] = request
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return }
         if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
         guard let file = try? FileHandle(forWritingTo: url) else { return }
@@ -39,7 +51,9 @@ import UIKit
     static func nativeSummary(foreground: Int) -> String {
         let data = try! JSONSerialization.data(withJSONObject: [
             "stack": stack, "changes": stackChanges, "liveAnchors": liveAnchors.count,
-            "rpc": rpcCounts, "frames": frames, "foreground": foreground,
+            "rpc": rpcCounts, "rpcTrace": rpcTrace,
+            "rpcTraceOmitted": rpcCounts.values.reduce(0, +) - rpcTrace.count,
+            "frames": frames, "foreground": foreground,
         ], options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
     }

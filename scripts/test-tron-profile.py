@@ -208,6 +208,195 @@ class InputAdmission(ReportFixture):
         self.assertIn(f"-> {foreign.resolve()}\n", there.stdout)
 
 
+class FunctionalReceipts(unittest.TestCase):
+    TEST = "TronMobileProfiling/ProfileDashboardScenarioTests/testIdleDashboard"
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        self.results = self.root / "results/ios"
+        self.git("init", "-q", "-b", "main")
+        (self.repo / "scenario.txt").write_text("one\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "one")
+        self.revision = self.git("rev-parse", "HEAD")
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def git(self, *args: str) -> str:
+        identity = {"GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+                    "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
+        return subprocess.run(["git", *args], cwd=self.repo, env={**os.environ, **identity}, capture_output=True,
+                              text=True, check=True).stdout.strip()
+
+    def measure(self, run_id: str, scenario: str = "idle-dashboard", test: str = TEST, iterations: int = 1,
+                metrics: dict | None = None) -> Path:
+        run = self.results / run_id
+        run.mkdir(parents=True)
+        xcresult = run / "TestResults.xcresult"
+        xcresult.mkdir()
+        (run / "xctest-summary.json").write_text(json.dumps(
+            {"passedTests": 1, "failedTests": 0, "skippedTests": 0, "totalTestCount": 1}))
+        document = metrics or samples({
+            "time.wall": ("ns", "lower", [1.0] * iterations),
+            "cpu.time": ("ns", "lower", [2.0] * iterations),
+            "scenario.transport.frames": ("count", "lower", [8.0] * iterations),
+            "scenario.render.rows": ("count", "lower", [3.0] * iterations),
+        })
+        document["context"] = {"test": test, "iterations": iterations}
+        source = run / "samples.json"
+        source.write_text(json.dumps(document))
+        result = subprocess.run(
+            [sys.executable, str(REPORT), "write", "--tool", "ios", "--scenario", scenario, "--samples", str(source),
+             "--run-dir", str(run), "--worktree", str(self.repo), "--artifact", f"xcresult={xcresult}",
+             "--artifact", f"samples={source}"],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return run
+
+    def receipt(self, scenario: str = "idle-dashboard", test: str = TEST, iterations: int = 1,
+                revision: str | None = None, render: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(REPORT), "receipt", "--results-root", str(self.results), "--scenario", scenario,
+             "--test", test, "--iterations", str(iterations), "--worktree", str(self.repo),
+             "--revision", revision or self.revision, *(["--render"] if render else [])],
+            capture_output=True, text=True, timeout=60)
+
+    def test_a_receipt_of_this_revision_passes_and_names_its_run(self) -> None:
+        run = self.measure("20260101T000000Z-idle-dashboard-a")
+        result = self.receipt()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(run.name, result.stdout)
+
+    def test_a_missing_receipt_fails(self) -> None:
+        self.assertEqual(self.receipt().returncode, 2, "no results root")
+        (self.results / "unfinished-run").mkdir(parents=True)
+        self.assertEqual(self.receipt().returncode, 2, "a run directory without a report")
+        self.assertIn("no receipt", self.receipt().stderr)
+
+    def test_a_receipt_measured_on_another_revision_is_stale(self) -> None:
+        self.measure("20260101T000000Z-idle-dashboard-a")
+        (self.repo / "scenario.txt").write_text("two\n")
+        self.git("commit", "-q", "-am", "two")
+        result = self.receipt(revision=self.git("rev-parse", "HEAD"))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("measured revision", result.stderr)
+
+    def test_a_measurement_of_uncommitted_changes_is_not_a_receipt(self) -> None:
+        (self.repo / "scenario.txt").write_text("dirty\n")
+        self.measure("20260101T000000Z-idle-dashboard-a")
+        result = self.receipt()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("uncommitted", result.stderr)
+
+    def test_a_receipt_for_another_scenario_is_not_this_scenarios_receipt(self) -> None:
+        self.measure("20260101T000000Z-summary-storm-a", scenario="summary-storm")
+        result = self.receipt(scenario="idle-dashboard")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("no receipt", result.stderr)
+
+    def test_a_receipt_from_another_test_method_is_refused(self) -> None:
+        self.measure("20260101T000000Z-idle-dashboard-a",
+                     test="TronMobileProfiling/ProfileControlScenarioTests/testControl")
+        result = self.receipt()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("measured test", result.stderr)
+
+    def test_two_receipts_for_one_scenario_are_ambiguous(self) -> None:
+        self.measure("20260101T000000Z-idle-dashboard-a")
+        self.measure("20260101T000001Z-idle-dashboard-b")
+        result = self.receipt()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("2 receipts", result.stderr)
+
+    def test_a_receipt_with_another_iteration_count_is_refused(self) -> None:
+        self.measure("20260101T000000Z-idle-dashboard-a", iterations=2)
+        result = self.receipt(iterations=1)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("iterations", result.stderr)
+
+    def test_a_scenario_whose_test_did_not_pass_is_not_functional_evidence(self) -> None:
+        for outcome, summary in (
+            ("failed", {"passedTests": 0, "failedTests": 1, "skippedTests": 0, "totalTestCount": 1}),
+            ("skipped", {"passedTests": 0, "failedTests": 0, "skippedTests": 1, "totalTestCount": 1}),
+        ):
+            with self.subTest(outcome=outcome):
+                shutil.rmtree(self.results, ignore_errors=True)
+                run = self.measure(f"20260101T000000Z-idle-dashboard-{outcome}")
+                (run / "xctest-summary.json").write_text(json.dumps(summary))
+                result = self.receipt()
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("did not pass", result.stderr)
+
+    def test_a_receipt_without_its_xctest_summary_or_xcresult_is_refused(self) -> None:
+        run = self.measure("20260101T000000Z-idle-dashboard-a")
+        (run / "xctest-summary.json").unlink()
+        self.assertIn("did not pass", self.receipt().stderr)
+        (run / "xctest-summary.json").write_text(json.dumps({"passedTests": 1, "failedTests": 0, "skippedTests": 0, "totalTestCount": 1}))
+        shutil.rmtree(run / "TestResults.xcresult")
+        result = self.receipt()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("xcresult", result.stderr)
+
+    def test_a_scenario_that_left_no_workload_or_render_evidence_is_refused(self) -> None:
+        self.measure("20260101T000000Z-idle-dashboard-a", metrics=samples({
+            "time.wall": ("ns", "lower", [1.0]), "cpu.time": ("ns", "lower", [2.0])}))
+        result = self.receipt()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("no workload measurement", result.stderr)
+
+    def test_a_product_scenario_without_render_counters_is_refused(self) -> None:
+        self.measure("20260101T000000Z-idle-dashboard-a", metrics=samples({
+            "time.wall": ("ns", "lower", [1.0]), "cpu.time": ("ns", "lower", [2.0]),
+            "scenario.transport.frames": ("count", "lower", [8.0]),
+        }))
+        result = self.receipt()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("no render measurement", result.stderr)
+
+    def test_render_counters_alone_are_not_workload_evidence(self) -> None:
+        self.measure("20260101T000000Z-idle-dashboard-a", metrics=samples({
+            "time.wall": ("ns", "lower", [1.0]), "cpu.time": ("ns", "lower", [2.0]),
+            "scenario.render.rows": ("count", "lower", [3.0]),
+        }))
+        result = self.receipt()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("no workload measurement", result.stderr)
+
+    def test_a_control_scenario_has_workload_but_no_render_check(self) -> None:
+        self.measure("20260101T000000Z-control-a", scenario="control",
+                     test="TronMobileProfiling/ProfileControlScenarioTests/testControl", metrics=samples({
+                         "time.wall": ("ns", "lower", [1.0]), "cpu.time": ("ns", "lower", [2.0]),
+                         "scenario.control.ticks": ("count", "lower", [20.0]),
+                     }))
+        result = self.receipt(scenario="control", test="TronMobileProfiling/ProfileControlScenarioTests/testControl",
+                              render=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_measured_values_never_decide_the_receipt(self) -> None:
+        self.measure("20260101T000000Z-idle-dashboard-a", metrics=samples({
+            "time.wall": ("ns", "lower", [9e18]),
+            "cpu.time": ("ns", "lower", [1e-3]),
+            "scenario.transport.frames": ("count", "lower", [0.0]),
+            "scenario.render.rows": ("count", "lower", [0.0]),
+        }))
+        result = self.receipt()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class ScenarioProfilerArguments(unittest.TestCase):
+    def test_a_host_slot_wait_must_be_a_finite_nonnegative_number(self) -> None:
+        for value in ("-1", "nan", "inf", "soon"):
+            with self.subTest(value=value):
+                result = subprocess.run(
+                    [str(ROOT / "scripts/tron-profile-ios"), "--scenario", "idle-dashboard", "--host-slot-wait-seconds", value],
+                    capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 2, result.stderr)
+
+
 class DeviceCapture(unittest.TestCase):
     def test_the_device_capture_refuses_without_an_explicit_attached_device(self) -> None:
         result = subprocess.run([str(FRONT_DOOR), "device"], capture_output=True, text=True, timeout=60)

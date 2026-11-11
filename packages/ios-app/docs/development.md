@@ -86,6 +86,11 @@ It shares the test runner's lane and lease, builds `DevicePerformance`, and refu
 whose workload or render check diverged. Scenarios: `ProfilingTests/`
 ([performance baseline](performance-baseline.md)).
 
+Verify runs the scenarios of each `ProfilingTests` class that `scripts/profile.module.json` declares in
+`iosScenarios` once (`--iterations 1`) on each change, and passes them only on their functional receipts
+([verify](../../../tools/verify/README.md#owner-declared-profiling-scenarios)). Measured numbers stay diagnostic:
+`--self-test` and `compare` are never validation gates.
+
 #### Attribution: finding the owner
 
 `scripts/tron-profile ios --self-test --trace time-profiler` proves attribution;
@@ -125,6 +130,14 @@ already-settled state fails on load, not behaviour (#2410). Settings Editor/Reve
 its hittability and unchanged 44-point bounds immediately, polling only while false. Each evaluation
 must complete within the same monotonic five-second deadline; late success is rejected. A fixture that holds a reply to expose a loading state holds it until the
 test releases it, never for a fixed time.
+
+Hosted foreground captures retain cumulative RPC counts and the latest 64 indexed, timestamped
+method/parameter records in the native probe. Parameter JSON over 1,024 bytes is explicitly omitted; the probe reports
+how many earlier records were dropped. Captures print the ordered before/after interval before any
+fail-fast assertion and attach it with the native state, distinguishing Manage task reads (`limit: 20`)
+from filtered Tasks reads without changing the exact read-count assertions. After dismissing Memory,
+the Manage journey joins its original native stack and exact reveal-owned read batch before taking
+the foreground baseline, so reveal work is not counted as a second foreground refresh.
 
 ### Simulator lifecycle
 

@@ -83,7 +83,11 @@ config read and let that continuation start storage work after readiness. Each c
 still loads current config and retains its own provider selection/error; this is not
 a general downstream credential/model-store drain API. The `pi` bin and `./rpc-entry`
 bundle their dependencies, so only a release or a rebuild moves a dependency there, never a
-Gateway `overrides` entry.
+Gateway `overrides` entry. Both child entries are rebuilt with undici 8.12.4;
+`check-pi-sdk.integration.test.mjs` starts each real bundled entry on an isolated home and
+requires its installed fetch to reject a loopback body that mismatches tab-prefixed SRI metadata.
+This is independent of the Gateway's external dependency override and the separately pinned
+managed-provider closure. The SDK cohort and conversation contracts remain unchanged.
 
 Pi activates newly registered declarable extension tools on a resumed branch, and the
 Gateway reapplies the transcript's explicit loadout over them. When that narrows the
