@@ -62,6 +62,7 @@ const HOME_EXTENSIONS = [
   "<inline:tron-ask-user> | tools ask_user",
   "<inline:tron-display> | tools display | on tool_result×1,agent_end×1,session_shutdown×1",
   "<inline:tron-notify> | tools notify",
+  "<inline:tron-computer> | tools computer | on session_shutdown×1,before_agent_start×1",
   "<inline:tron-home> | tools zoom,date,memory_search,profile,obligation,delegate,task | on tool_call×1,cache_warming_decision×1,before_provider_request×1",
   "<inline:tron-home-research> | tools session_search,session_read",
   "<inline:tron-web-research> | tools web_search | on session_start×1,session_shutdown×1",
@@ -434,7 +435,7 @@ describe("gateway/home scenario lock", () => {
     };
     const FIXED = { "context.images.autoResize": { value: true }, "model.contextWindow": { qualifiers: { model: MODEL }, value: 128000 } };
     const HOME_TOOLS = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile", "obligation", "web_search", "session_search",
-      "session_read", "settings", "projects", "read", "write", "edit", "bash", "grep", "find", "ls"];
+      "session_read", "settings", "projects", "read", "write", "edit", "bash", "grep", "find", "ls", "computer"];
     const WORKER_TOOLS = ["read", "bash", "edit", "write", "jev", "web_search", "settings", "projects", "ask_user", "display", "swift_app", "computer", "notify", "checkin", "report"];
     expect(values(homeSessionJsonl), "Home's resolved settings").toEqual({ requestPins: { "context.images.block": false }, fixed: { ...FIXED,
       "model.ref[role=chat]": { qualifiers: { role: "chat" }, value: MODEL_REF },

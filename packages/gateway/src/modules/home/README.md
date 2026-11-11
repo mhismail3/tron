@@ -102,12 +102,12 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
 - **Profile** (`home-session-profile.ts`) is fixed per runtime. An unrecorded new Home uses
   its creation recipe once; later runtimes read the record (enabled Home, otherwise ordinary).
   Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-projects`,
-  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-home`, `tron-home-research` and `tron-web-research` load.
+  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-computer`, `tron-home`, `tron-home-research` and `tron-web-research` load.
   [Projects](../projects/README.md) owns tap-gated lifecycle actions. Shared Pi file/search/shell tools allow direct
-  work; only canonical maintainer turns admit general writes, edits or shell execution.
+  work; only canonical maintainer turns admit general writes, edits, shell execution or `computer`.
   Home's current recipe owns model, thinking and tools on creation/reconstruction and every request; chapter choices are records, never overrides.
   Rollover carries only directional authorization ceilings (e.g. images blocked until approved) and the explicit chapter window.
-  Settings counts enabled tools; every producer-owned input is a wake and withholds `write`, `edit` and `bash`.
+  Settings counts enabled tools; every producer-owned input is a wake and withholds `write`, `edit`, `bash` and `computer`.
   Agent `SYSTEM.md`/`APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
   model on its Gateway-runtime view; the profile owns explicit model admission and physical
@@ -181,7 +181,7 @@ changes keep its store, cursors and spend.
 - **Shared tools:** Pi owns `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`,
   including paging, truncation and errors. Resource trust is not a file sandbox. Global
   skills are discoverable through the shared loader; project executable resources remain
-  excluded. Wake requests omit write/edit/bash declarations and reject forged calls at
+  excluded. Wake requests omit write/edit/bash/computer declarations and reject forged calls at
   execution against the canonical current activation. Existing task, Profile, settings and
   automation authority is unchanged; fetched text never promotes a wake to a user turn.
 - **Settings tool:** Home changes settings through the one change path as `home`,
@@ -269,7 +269,7 @@ and the [built-in improvement-loop design](improvement-loop.md).
 | `home.task.store-refused`; `home.task.authorization`; `home.task.transition`; `home.task.checkin`; `home.task.spend`; `home.task.dispatch-stage`; `home.task.producer-refused`; `home.task.report-reminder` | info; refusals and slow, timed-out, cancelled or abandoned-cleanup-failed dispatch stages warn | Keyed by `taskHash`/`operationHash`, never intent, report or path ([tasks.md](tasks.md)): task-store refusal `reason` (fenced until the next start, in `home.status.taskRecovery`); scope, grant and decision transitions; durable `pending`/`active`/`terminal` transitions with `reason`, `failureCause`, `errorCode`; check-in `attention`; deduplicated token spend; a `delegate` admission `stage` slow (≥ 5 s), timed out (60 s), cancelled or `abandon-failed` (the late resource cleanup rejected); a refused detached-capable producer (`reason: unverified-provider` diagnoses a reviewed-version/pin mismatch before launch); the single report-only continuation |
 | `home.task.control`; `home.task.runaway-stop`; `home.task.detached-work`; `home.task.subagents`; `home.taskStatus.subagentRuns`; `home.taskStatus.ownerSettlement` | info; runaway stop and detached work warn; `home.taskStatus.*` are read-only status fields | Steer, interrupt and Stop `disposition` (`accepted`, `persisted`, `refused` with a finite `reason`; interrupt `calls`); the deadline cancel-and-join outcome; detached work outliving settlement (outcome unknown); subagent `started`, `stoppedAtEnd`, `noticesUndelivered`; the exact live runs that report and Stop select; the owner-settlement proof (`null` is unproven) |
 | `home.task.inbox`; `home.wake`; `home.inbox.admission-slow`; `home-inbox-settlement-failed` code on `session.diagnostic`; `home-worker-attention-failed` | info; refused wakes, slow admission (≥ 2 s) and failures warn | Wake-inbox transitions (`eventHash`, `state`, coded `reason`); each wake decision (`admitted`, `deferred`, `refused` with `reason`); result delivery into an activation (`delivery`, `durationMs`); a durable terminal whose inbox settlement rejected (session event); a failed acknowledgement of a new worker's earlier completion |
-| `session.context.activeTools` versus Home `settings.resolve` → `tools.active` | read-only RPC fields | Both describe the enabled recipe after runtime construction. A mismatch diagnoses stale selection; `home.context.breakdown.activation.kind` explains why wake requests omit `write`, `edit` and `bash` without changing that recipe |
+| `session.context.activeTools` versus Home `settings.resolve` → `tools.active` | read-only RPC fields | Both describe the enabled recipe after runtime construction. A mismatch diagnoses stale selection; `home.context.breakdown.activation.kind` explains why wake requests omit `write`, `edit`, `bash` and `computer` without changing that recipe |
 | `TRON_SETTINGS_OUTCOME_PROOF_DEFERRED` | warning | A settings delivery's canonical proof failed; its outbox remains retained for later proof, without exposing request IDs or paths |
 | `home.response-timing`; `home.task.history-summary` | info | Content-free accepted-input→visible/terminal scalar sample with queue/model/tool durations and completeness; authoritative admitted operation/resume counts with root hash and root-created time for page deduplication. A crash loses live timing correlation; a bounded log export is partial coverage |
 | `home.task.command-reap`; `home.task.command-scope-refused`; `host.load.non-task` | info at settle; sweep reaps, refused reaps, `bind-failed` and `host.load.non-task` warn | A settled task's commands reaped (`action` `settle` or `sweep`, `outcome`, `reason`, `counts.processes`/`survivors`); a scope bind that failed (`bind-failed`, commands run unscoped) or a scope the sweep leaves alone, once per scope (`unbound-scope`, `unknown-task`); busy CPU ≥ 90 % mostly outside task scopes, at most every 10 min (`counts` busy/task/non-task/`ppid=1` CPU, `stages` the top five as `name pid ppid cpu`) |

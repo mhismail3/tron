@@ -491,7 +491,7 @@ export function keyForHome(key: KeyDeclaration, home: boolean): KeyDeclaration {
     layers.home = { store: "home", path: ["settings", ...layers.session.path] };
   }
   const type = key.id === "tools.active" ? { ...key.type, summary: (value: unknown) =>
-    `${key.type.summary!(value)}; Home wake turns omit write, edit and bash` } : key.type;
+    `${key.type.summary!(value)}; Home wake turns omit write, edit, bash and computer` } : key.type;
   return { ...key, type, layers, ...(key.home && Object.hasOwn(key.home, "defaultValue") ? { defaultValue: key.home.defaultValue } : {}) };
 }
 
