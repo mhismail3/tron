@@ -55,7 +55,7 @@ struct ComposerResourceInfoSheet: View {
 
 struct ComposerResourceContentBody: View {
     let preview: ComposerResourceContentPresentation.Preview
-    let source: CommandInfo.Source
+    let source: CommandInfoSource
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

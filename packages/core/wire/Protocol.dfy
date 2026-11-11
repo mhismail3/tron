@@ -11,6 +11,7 @@
 // @swift HomeStatus HomeContextProjection HomeTaskPage HomeTaskStatusResult HomeTaskHistoryPage
 // @swift HomeMemoryView HomeMemoryEvidencePage HomeChapterList HomeProfileList
 // @swift AdministrativeDrainSnapshot GatewayRestartResponse
+// @swift SessionCommands CommandDetail TronModuleList
 module Protocol {
   datatype Option<T> = None | Some(v: T)
   datatype Nullable<T> = Null | NonNull(v: T)
@@ -1531,9 +1532,13 @@ module Protocol {
       resourceOrigin: Option<CommandInfoResourceOrigin>,
       distribution: Option<ResourceDistribution>,
       content: Option<string>,
-      contentBytes: Option<real>,
+      contentBytes: Option<int>,
       contentTruncated: Option<bool>
     )
+
+  /// `session.commands`: the session's invocable skills, prompts and extension commands.
+  // @wire
+  datatype SessionCommands = SessionCommands(commands: seq<CommandInfo>)
 
   /// Wire projection of one built-in Tron extension definition.
   // @wire
@@ -1543,6 +1548,10 @@ module Protocol {
       tools: seq<string>,
       commands: seq<string>
     )
+
+  /// `modules.list`: the built-in Tron extension definitions.
+  // @wire
+  datatype TronModuleList = TronModuleList(modules: seq<TronModuleSummary>)
 
   // @wire enum
   datatype PackageNodeRequirementStatus = satisfied | unsatisfied | invalid

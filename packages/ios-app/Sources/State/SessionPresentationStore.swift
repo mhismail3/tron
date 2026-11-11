@@ -1246,11 +1246,10 @@ extension SessionPresentationStore {
         let generation = commandLoadGeneration
         commandCatalogTarget = nil
         struct Params: Codable { let sessionId: String }
-        struct Response: Decodable { let commands: [CommandInfo] }
         do {
-            let response: Response = try await client.request(
-                "session.commands", Params(sessionId: sessionID)
-            )
+            let response = try GatewayResponseDecoding.decode(
+                try await client.requestValue("session.commands", Params(sessionId: sessionID)),
+                method: "session.commands", SessionCommands.decode)
             guard generation == commandLoadGeneration,
                   ownsSubscription(sessionID: sessionID, requestedToken: token),
                   subscriptionTarget == requestedTarget else { return }

@@ -227,6 +227,26 @@ package indirect enum JsonValue: Hashable, Sendable {
     }
   }
 }
+package enum ResourceDistribution: String, CaseIterable, Hashable, Sendable {
+  case external = "external"
+  case module_ = "module"
+  case local = "local"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ResourceDistribution {
+    switch v {
+    case .string("external"): return .external
+    case .string("module"): return .module_
+    case .string("local"): return .local
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .external: return "\"external\""
+    case .module_: return "\"module\""
+    case .local: return "\"local\""
+    }
+  }
+}
 package enum AdministrativeDrainPhase: String, CaseIterable, Hashable, Sendable {
   case idle = "idle"
   case preparing = "preparing"
@@ -332,6 +352,16 @@ package struct AdministrativeDrainBlockerSummary: Hashable, Sendable {
   package let admittedAt: String?
   package let progressAt: String?
   package let ageMs: Double?
+  package init(id: String, category: AdministrativeDrainBlockerCategory, sessionId: String? = nil, method: String? = nil, state: AdministrativeDrainBlockerSummaryState, admittedAt: String? = nil, progressAt: String? = nil, ageMs: Double? = nil) {
+    self.id = id
+    self.category = category
+    self.sessionId = sessionId
+    self.method = method
+    self.state = state
+    self.admittedAt = admittedAt
+    self.progressAt = progressAt
+    self.ageMs = ageMs
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> AdministrativeDrainBlockerSummary {
     let o = try wObj(v, p)
     let f_id: String = wAbsent(o.value("id")) ? "" : try wStr(o.value("id")!, p + ".id")
@@ -366,6 +396,16 @@ package struct AdministrativeDrainSnapshot: Hashable, Sendable {
   package let blockers: [AdministrativeDrainBlockerSummary]
   package let omittedCount: Int
   package let suspectProjectionCount: Int
+  package init(drainId: String, revision: Int, phase: AdministrativeDrainPhase, blockerCount: Int, blockerCounts: WireMap<Int>, blockers: [AdministrativeDrainBlockerSummary], omittedCount: Int, suspectProjectionCount: Int) {
+    self.drainId = drainId
+    self.revision = revision
+    self.phase = phase
+    self.blockerCount = blockerCount
+    self.blockerCounts = blockerCounts
+    self.blockers = blockers
+    self.omittedCount = omittedCount
+    self.suspectProjectionCount = suspectProjectionCount
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> AdministrativeDrainSnapshot {
     let o = try wObj(v, p)
     let f_drainId: String = wAbsent(o.value("drainId")) ? "" : try wStr(o.value("drainId")!, p + ".drainId")
@@ -399,6 +439,15 @@ package struct GatewayRestartResponse: Hashable, Sendable {
   package let drainId: String?
   package let drainRevision: Int?
   package let drain: AdministrativeDrainSnapshot
+  package init(restarting: Bool, scheduled: Bool, restartNow: Bool? = nil, activeSessionIds: [String]? = nil, drainId: String? = nil, drainRevision: Int? = nil, drain: AdministrativeDrainSnapshot) {
+    self.restarting = restarting
+    self.scheduled = scheduled
+    self.restartNow = restartNow
+    self.activeSessionIds = activeSessionIds
+    self.drainId = drainId
+    self.drainRevision = drainRevision
+    self.drain = drain
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> GatewayRestartResponse {
     let o = try wObj(v, p)
     let f_restarting: Bool = wAbsent(o.value("restarting")) ? false : try wBool(o.value("restarting")!, p + ".restarting")
@@ -457,6 +506,239 @@ package enum ExtensionRunLifecycleState: String, CaseIterable, Hashable, Sendabl
     }
   }
 }
+package enum CommandInfoSource: String, CaseIterable, Hashable, Sendable {
+  case skill = "skill"
+  case prompt = "prompt"
+  case `extension` = "extension"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> CommandInfoSource {
+    switch v {
+    case .string("skill"): return .skill
+    case .string("prompt"): return .prompt
+    case .string("extension"): return .`extension`
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .skill: return "\"skill\""
+    case .prompt: return "\"prompt\""
+    case .`extension`: return "\"extension\""
+    }
+  }
+}
+package enum CommandInfoResourceScope: String, CaseIterable, Hashable, Sendable {
+  case user = "user"
+  case project = "project"
+  case temporary = "temporary"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> CommandInfoResourceScope {
+    switch v {
+    case .string("user"): return .user
+    case .string("project"): return .project
+    case .string("temporary"): return .temporary
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .user: return "\"user\""
+    case .project: return "\"project\""
+    case .temporary: return "\"temporary\""
+    }
+  }
+}
+package enum CommandInfoResourceOrigin: String, CaseIterable, Hashable, Sendable {
+  case package = "package"
+  case topLevel = "top-level"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> CommandInfoResourceOrigin {
+    switch v {
+    case .string("package"): return .package
+    case .string("top-level"): return .topLevel
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .package: return "\"package\""
+    case .topLevel: return "\"top-level\""
+    }
+  }
+}
+package struct CommandInfo: Hashable, Sendable {
+  package let name: String
+  package let title: String?
+  package let description: String?
+  package let argumentHint: String?
+  package let source: CommandInfoSource
+  package let sourcePath: String?
+  package let resourceSource: String?
+  package let resourceScope: CommandInfoResourceScope?
+  package let resourceOrigin: CommandInfoResourceOrigin?
+  package let distribution: ResourceDistribution?
+  package init(name: String, title: String? = nil, description: String? = nil, argumentHint: String? = nil, source: CommandInfoSource, sourcePath: String? = nil, resourceSource: String? = nil, resourceScope: CommandInfoResourceScope? = nil, resourceOrigin: CommandInfoResourceOrigin? = nil, distribution: ResourceDistribution? = nil) {
+    self.name = name
+    self.title = title
+    self.description = description
+    self.argumentHint = argumentHint
+    self.source = source
+    self.sourcePath = sourcePath
+    self.resourceSource = resourceSource
+    self.resourceScope = resourceScope
+    self.resourceOrigin = resourceOrigin
+    self.distribution = distribution
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> CommandInfo {
+    let o = try wObj(v, p)
+    let f_name: String = wAbsent(o.value("name")) ? "" : try wStr(o.value("name")!, p + ".name")
+    let f_title: String? = wAbsent(o.value("title")) ? nil : try wStr(o.value("title")!, p + ".title")
+    let f_description: String? = wAbsent(o.value("description")) ? nil : try wStr(o.value("description")!, p + ".description")
+    let f_argumentHint: String? = wAbsent(o.value("argumentHint")) ? nil : try wStr(o.value("argumentHint")!, p + ".argumentHint")
+    let f_source: CommandInfoSource = wAbsent(o.value("source")) ? try wMissing(p + ".source") : try CommandInfoSource.decode(o.value("source")!, p + ".source")
+    let f_sourcePath: String? = wAbsent(o.value("sourcePath")) ? nil : try wStr(o.value("sourcePath")!, p + ".sourcePath")
+    let f_resourceSource: String? = wAbsent(o.value("resourceSource")) ? nil : try wStr(o.value("resourceSource")!, p + ".resourceSource")
+    let f_resourceScope: CommandInfoResourceScope? = wAbsent(o.value("resourceScope")) ? nil : try CommandInfoResourceScope.decode(o.value("resourceScope")!, p + ".resourceScope")
+    let f_resourceOrigin: CommandInfoResourceOrigin? = wAbsent(o.value("resourceOrigin")) ? nil : try CommandInfoResourceOrigin.decode(o.value("resourceOrigin")!, p + ".resourceOrigin")
+    let f_distribution: ResourceDistribution? = wAbsent(o.value("distribution")) ? nil : try ResourceDistribution.decode(o.value("distribution")!, p + ".distribution")
+    return CommandInfo(name: f_name, title: f_title, description: f_description, argumentHint: f_argumentHint, source: f_source, sourcePath: f_sourcePath, resourceSource: f_resourceSource, resourceScope: f_resourceScope, resourceOrigin: f_resourceOrigin, distribution: f_distribution)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"name\":" + wEscape(self.name)
+    s += (self.title == nil ? "" : ",\"title\":" + wEscape(self.title!))
+    s += (self.description == nil ? "" : ",\"description\":" + wEscape(self.description!))
+    s += (self.argumentHint == nil ? "" : ",\"argumentHint\":" + wEscape(self.argumentHint!))
+    s += ",\"source\":" + self.source.encode()
+    s += (self.sourcePath == nil ? "" : ",\"sourcePath\":" + wEscape(self.sourcePath!))
+    s += (self.resourceSource == nil ? "" : ",\"resourceSource\":" + wEscape(self.resourceSource!))
+    s += (self.resourceScope == nil ? "" : ",\"resourceScope\":" + self.resourceScope!.encode())
+    s += (self.resourceOrigin == nil ? "" : ",\"resourceOrigin\":" + self.resourceOrigin!.encode())
+    s += (self.distribution == nil ? "" : ",\"distribution\":" + self.distribution!.encode())
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct CommandDetail: Hashable, Sendable {
+  package let name: String
+  package let title: String?
+  package let description: String?
+  package let argumentHint: String?
+  package let source: CommandInfoSource
+  package let sourcePath: String?
+  package let resourceSource: String?
+  package let resourceScope: CommandInfoResourceScope?
+  package let resourceOrigin: CommandInfoResourceOrigin?
+  package let distribution: ResourceDistribution?
+  package let content: String?
+  package let contentBytes: Int?
+  package let contentTruncated: Bool?
+  package init(name: String, title: String? = nil, description: String? = nil, argumentHint: String? = nil, source: CommandInfoSource, sourcePath: String? = nil, resourceSource: String? = nil, resourceScope: CommandInfoResourceScope? = nil, resourceOrigin: CommandInfoResourceOrigin? = nil, distribution: ResourceDistribution? = nil, content: String? = nil, contentBytes: Int? = nil, contentTruncated: Bool? = nil) {
+    self.name = name
+    self.title = title
+    self.description = description
+    self.argumentHint = argumentHint
+    self.source = source
+    self.sourcePath = sourcePath
+    self.resourceSource = resourceSource
+    self.resourceScope = resourceScope
+    self.resourceOrigin = resourceOrigin
+    self.distribution = distribution
+    self.content = content
+    self.contentBytes = contentBytes
+    self.contentTruncated = contentTruncated
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> CommandDetail {
+    let o = try wObj(v, p)
+    let f_name: String = wAbsent(o.value("name")) ? "" : try wStr(o.value("name")!, p + ".name")
+    let f_title: String? = wAbsent(o.value("title")) ? nil : try wStr(o.value("title")!, p + ".title")
+    let f_description: String? = wAbsent(o.value("description")) ? nil : try wStr(o.value("description")!, p + ".description")
+    let f_argumentHint: String? = wAbsent(o.value("argumentHint")) ? nil : try wStr(o.value("argumentHint")!, p + ".argumentHint")
+    let f_source: CommandInfoSource = wAbsent(o.value("source")) ? try wMissing(p + ".source") : try CommandInfoSource.decode(o.value("source")!, p + ".source")
+    let f_sourcePath: String? = wAbsent(o.value("sourcePath")) ? nil : try wStr(o.value("sourcePath")!, p + ".sourcePath")
+    let f_resourceSource: String? = wAbsent(o.value("resourceSource")) ? nil : try wStr(o.value("resourceSource")!, p + ".resourceSource")
+    let f_resourceScope: CommandInfoResourceScope? = wAbsent(o.value("resourceScope")) ? nil : try CommandInfoResourceScope.decode(o.value("resourceScope")!, p + ".resourceScope")
+    let f_resourceOrigin: CommandInfoResourceOrigin? = wAbsent(o.value("resourceOrigin")) ? nil : try CommandInfoResourceOrigin.decode(o.value("resourceOrigin")!, p + ".resourceOrigin")
+    let f_distribution: ResourceDistribution? = wAbsent(o.value("distribution")) ? nil : try ResourceDistribution.decode(o.value("distribution")!, p + ".distribution")
+    let f_content: String? = wAbsent(o.value("content")) ? nil : try wStr(o.value("content")!, p + ".content")
+    let f_contentBytes: Int? = wAbsent(o.value("contentBytes")) ? nil : try wInt(o.value("contentBytes")!, p + ".contentBytes", nat: false)
+    let f_contentTruncated: Bool? = wAbsent(o.value("contentTruncated")) ? nil : try wBool(o.value("contentTruncated")!, p + ".contentTruncated")
+    return CommandDetail(name: f_name, title: f_title, description: f_description, argumentHint: f_argumentHint, source: f_source, sourcePath: f_sourcePath, resourceSource: f_resourceSource, resourceScope: f_resourceScope, resourceOrigin: f_resourceOrigin, distribution: f_distribution, content: f_content, contentBytes: f_contentBytes, contentTruncated: f_contentTruncated)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"name\":" + wEscape(self.name)
+    s += (self.title == nil ? "" : ",\"title\":" + wEscape(self.title!))
+    s += (self.description == nil ? "" : ",\"description\":" + wEscape(self.description!))
+    s += (self.argumentHint == nil ? "" : ",\"argumentHint\":" + wEscape(self.argumentHint!))
+    s += ",\"source\":" + self.source.encode()
+    s += (self.sourcePath == nil ? "" : ",\"sourcePath\":" + wEscape(self.sourcePath!))
+    s += (self.resourceSource == nil ? "" : ",\"resourceSource\":" + wEscape(self.resourceSource!))
+    s += (self.resourceScope == nil ? "" : ",\"resourceScope\":" + self.resourceScope!.encode())
+    s += (self.resourceOrigin == nil ? "" : ",\"resourceOrigin\":" + self.resourceOrigin!.encode())
+    s += (self.distribution == nil ? "" : ",\"distribution\":" + self.distribution!.encode())
+    s += (self.content == nil ? "" : ",\"content\":" + wEscape(self.content!))
+    s += (self.contentBytes == nil ? "" : ",\"contentBytes\":" + String(self.contentBytes!))
+    s += (self.contentTruncated == nil ? "" : ",\"contentTruncated\":" + (self.contentTruncated! ? "true" : "false"))
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct SessionCommands: Hashable, Sendable {
+  package let commands: [CommandInfo]
+  package init(commands: [CommandInfo]) {
+    self.commands = commands
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionCommands {
+    let o = try wObj(v, p)
+    let f_commands: [CommandInfo] = wAbsent(o.value("commands")) ? [] : try wSeq(o.value("commands")!, p + ".commands") { x, q in try CommandInfo.decode(x, q) }
+    return SessionCommands(commands: f_commands)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"commands\":" + "[" + self.commands.map { $0.encode() }.joined(separator: ",") + "]"
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct TronModuleSummary: Hashable, Sendable {
+  package let name: String
+  package let purpose: String
+  package let tools: [String]
+  package let commands: [String]
+  package init(name: String, purpose: String, tools: [String], commands: [String]) {
+    self.name = name
+    self.purpose = purpose
+    self.tools = tools
+    self.commands = commands
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> TronModuleSummary {
+    let o = try wObj(v, p)
+    let f_name: String = wAbsent(o.value("name")) ? "" : try wStr(o.value("name")!, p + ".name")
+    let f_purpose: String = wAbsent(o.value("purpose")) ? "" : try wStr(o.value("purpose")!, p + ".purpose")
+    let f_tools: [String] = wAbsent(o.value("tools")) ? [] : try wSeq(o.value("tools")!, p + ".tools") { x, q in try wStr(x, q) }
+    let f_commands: [String] = wAbsent(o.value("commands")) ? [] : try wSeq(o.value("commands")!, p + ".commands") { x, q in try wStr(x, q) }
+    return TronModuleSummary(name: f_name, purpose: f_purpose, tools: f_tools, commands: f_commands)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"name\":" + wEscape(self.name)
+    s += ",\"purpose\":" + wEscape(self.purpose)
+    s += ",\"tools\":" + "[" + self.tools.map { wEscape($0) }.joined(separator: ",") + "]"
+    s += ",\"commands\":" + "[" + self.commands.map { wEscape($0) }.joined(separator: ",") + "]"
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct TronModuleList: Hashable, Sendable {
+  package let modules: [TronModuleSummary]
+  package init(modules: [TronModuleSummary]) {
+    self.modules = modules
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> TronModuleList {
+    let o = try wObj(v, p)
+    let f_modules: [TronModuleSummary] = wAbsent(o.value("modules")) ? [] : try wSeq(o.value("modules")!, p + ".modules") { x, q in try TronModuleSummary.decode(x, q) }
+    return TronModuleList(modules: f_modules)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"modules\":" + "[" + self.modules.map { $0.encode() }.joined(separator: ",") + "]"
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
 package enum HomeProfileListItemKind: String, CaseIterable, Hashable, Sendable {
   case preference = "preference"
   case standingDecision = "standing-decision"
@@ -513,6 +795,17 @@ package struct HomeProfileListItem: Hashable, Sendable {
   package let status: HomeProfileListItemStatus
   package let createdAt: String
   package let updatedAt: String
+  package init(id: String, revisionId: String, kind: HomeProfileListItemKind, path: String, text: String, confirmed: Bool, status: HomeProfileListItemStatus, createdAt: String, updatedAt: String) {
+    self.id = id
+    self.revisionId = revisionId
+    self.kind = kind
+    self.path = path
+    self.text = text
+    self.confirmed = confirmed
+    self.status = status
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeProfileListItem {
     let o = try wObj(v, p)
     let f_id: String = wAbsent(o.value("id")) ? "" : try wStr(o.value("id")!, p + ".id")
@@ -543,6 +836,10 @@ package struct HomeProfileListItem: Hashable, Sendable {
 package struct HomeProfileList: Hashable, Sendable {
   package let items: [HomeProfileListItem]
   package let unclassified: Int
+  package init(items: [HomeProfileListItem], unclassified: Int) {
+    self.items = items
+    self.unclassified = unclassified
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeProfileList {
     let o = try wObj(v, p)
     let f_items: [HomeProfileListItem] = wAbsent(o.value("items")) ? [] : try wSeq(o.value("items")!, p + ".items") { x, q in try HomeProfileListItem.decode(x, q) }
@@ -586,6 +883,14 @@ package struct HomeChapterContents: Hashable, Sendable {
   package let homeReplies: Int
   package let tasksDelegated: Int
   package let topics: [String]
+  package init(firstAt: String? = nil, lastAt: String? = nil, userMessages: Int, homeReplies: Int, tasksDelegated: Int, topics: [String]) {
+    self.firstAt = firstAt
+    self.lastAt = lastAt
+    self.userMessages = userMessages
+    self.homeReplies = homeReplies
+    self.tasksDelegated = tasksDelegated
+    self.topics = topics
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeChapterContents {
     let o = try wObj(v, p)
     let f_firstAt: String? = wAbsent(o.value("firstAt")) ? nil : try wStr(o.value("firstAt")!, p + ".firstAt")
@@ -618,6 +923,18 @@ package struct HomeChapterSummary: Hashable, Sendable {
   package let bytes: Int?
   package let entries: Int?
   package let contents: HomeChapterContents?
+  package init(sessionId: String, ordinal: Int, state: HomeChapterSummaryState, createdAt: String, activationStarted: Bool, sessionPresent: Bool, sealedAt: String? = nil, bytes: Int? = nil, entries: Int? = nil, contents: HomeChapterContents? = nil) {
+    self.sessionId = sessionId
+    self.ordinal = ordinal
+    self.state = state
+    self.createdAt = createdAt
+    self.activationStarted = activationStarted
+    self.sessionPresent = sessionPresent
+    self.sealedAt = sealedAt
+    self.bytes = bytes
+    self.entries = entries
+    self.contents = contents
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeChapterSummary {
     let o = try wObj(v, p)
     let f_sessionId: String = wAbsent(o.value("sessionId")) ? "" : try wStr(o.value("sessionId")!, p + ".sessionId")
@@ -652,6 +969,12 @@ package struct HomeChapterListLimits: Hashable, Sendable {
   package let softEntries: Int
   package let hardBytes: Int
   package let hardEntries: Int
+  package init(softBytes: Int, softEntries: Int, hardBytes: Int, hardEntries: Int) {
+    self.softBytes = softBytes
+    self.softEntries = softEntries
+    self.hardBytes = hardBytes
+    self.hardEntries = hardEntries
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeChapterListLimits {
     let o = try wObj(v, p)
     let f_softBytes: Int = wAbsent(o.value("softBytes")) ? 0 : try wInt(o.value("softBytes")!, p + ".softBytes", nat: false)
@@ -675,6 +998,13 @@ package struct HomeChapterList: Hashable, Sendable {
   package let enabled: Bool
   package let limits: HomeChapterListLimits
   package let chapters: [HomeChapterSummary]
+  package init(homeId: String, generation: Int, enabled: Bool, limits: HomeChapterListLimits, chapters: [HomeChapterSummary]) {
+    self.homeId = homeId
+    self.generation = generation
+    self.enabled = enabled
+    self.limits = limits
+    self.chapters = chapters
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeChapterList {
     let o = try wObj(v, p)
     let f_homeId: String = wAbsent(o.value("homeId")) ? "" : try wStr(o.value("homeId")!, p + ".homeId")
@@ -699,6 +1029,12 @@ package struct HomeMemoryEvidence: Hashable, Sendable {
   package let sessionId: String
   package let entryId: String
   package let sourceDigest: String
+  package init(index: Int, sessionId: String, entryId: String, sourceDigest: String) {
+    self.index = index
+    self.sessionId = sessionId
+    self.entryId = entryId
+    self.sourceDigest = sourceDigest
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryEvidence {
     let o = try wObj(v, p)
     let f_index: Int = wAbsent(o.value("index")) ? 0 : try wInt(o.value("index")!, p + ".index", nat: false)
@@ -805,6 +1141,13 @@ package struct HomeMemoryItemDisplay: Hashable, Sendable {
   package let target: String?
   package let toolCount: Int?
   package let status: HomeMemoryItemDisplayStatus?
+  package init(kind: HomeMemoryItemDisplayKind, toolName: String? = nil, target: String? = nil, toolCount: Int? = nil, status: HomeMemoryItemDisplayStatus? = nil) {
+    self.kind = kind
+    self.toolName = toolName
+    self.target = target
+    self.toolCount = toolCount
+    self.status = status
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryItemDisplay {
     let o = try wObj(v, p)
     let f_kind: HomeMemoryItemDisplayKind = wAbsent(o.value("kind")) ? try wMissing(p + ".kind") : try HomeMemoryItemDisplayKind.decode(o.value("kind")!, p + ".kind")
@@ -843,6 +1186,12 @@ package struct HomeMemoryItemProjection: Hashable, Sendable {
   package let text: String
   package let omitted: Bool
   package let omissions: [String]
+  package init(format: HomeMemoryItemProjectionFormat, text: String, omitted: Bool, omissions: [String]) {
+    self.format = format
+    self.text = text
+    self.omitted = omitted
+    self.omissions = omissions
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryItemProjection {
     let o = try wObj(v, p)
     let f_format: HomeMemoryItemProjectionFormat = wAbsent(o.value("format")) ? .memoryProjection : try HomeMemoryItemProjectionFormat.decode(o.value("format")!, p + ".format")
@@ -878,6 +1227,11 @@ package struct HomeMemoryItemSummary: Hashable, Sendable {
   package let format: HomeMemoryItemSummaryFormat
   package let text: String
   package let truncated: Bool
+  package init(format: HomeMemoryItemSummaryFormat, text: String, truncated: Bool) {
+    self.format = format
+    self.text = text
+    self.truncated = truncated
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryItemSummary {
     let o = try wObj(v, p)
     let f_format: HomeMemoryItemSummaryFormat = wAbsent(o.value("format")) ? .memorySummary : try HomeMemoryItemSummaryFormat.decode(o.value("format")!, p + ".format")
@@ -902,6 +1256,16 @@ package struct HomeMemoryItem: Hashable, Sendable {
   package let display: HomeMemoryItemDisplay?
   package let projection: HomeMemoryItemProjection
   package let summary: Nullable<HomeMemoryItemSummary>
+  package init(index: Int, kind: HomeMemoryItemKind, attribution: HomeMemoryItemAttribution, timestamp: String? = nil, evidence: HomeMemoryEvidence, display: HomeMemoryItemDisplay? = nil, projection: HomeMemoryItemProjection, summary: Nullable<HomeMemoryItemSummary>) {
+    self.index = index
+    self.kind = kind
+    self.attribution = attribution
+    self.timestamp = timestamp
+    self.evidence = evidence
+    self.display = display
+    self.projection = projection
+    self.summary = summary
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryItem {
     let o = try wObj(v, p)
     let f_index: Int = wAbsent(o.value("index")) ? 0 : try wInt(o.value("index")!, p + ".index", nat: false)
@@ -938,6 +1302,18 @@ package struct HomeMemoryViewLine: Hashable, Sendable {
   package let firstAt: String?
   package let lastAt: String?
   package let item: HomeMemoryItem?
+  package init(inCurrentView: Bool, startsIndividualMessages: Bool, start: Int, span: Int, text: Nullable<String>, truncated: Bool, kind: HomeMemoryItemKind? = nil, firstAt: String? = nil, lastAt: String? = nil, item: HomeMemoryItem? = nil) {
+    self.inCurrentView = inCurrentView
+    self.startsIndividualMessages = startsIndividualMessages
+    self.start = start
+    self.span = span
+    self.text = text
+    self.truncated = truncated
+    self.kind = kind
+    self.firstAt = firstAt
+    self.lastAt = lastAt
+    self.item = item
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryViewLine {
     let o = try wObj(v, p)
     let f_inCurrentView: Bool = wAbsent(o.value("inCurrentView")) ? false : try wBool(o.value("inCurrentView")!, p + ".inCurrentView")
@@ -973,6 +1349,13 @@ package struct HomeMemoryView: Hashable, Sendable {
   package let totalMessages: Int
   package let lines: [HomeMemoryViewLine]
   package let nextCursor: String?
+  package init(homeId: String, revision: String, totalMessages: Int, lines: [HomeMemoryViewLine], nextCursor: String? = nil) {
+    self.homeId = homeId
+    self.revision = revision
+    self.totalMessages = totalMessages
+    self.lines = lines
+    self.nextCursor = nextCursor
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryView {
     let o = try wObj(v, p)
     let f_homeId: String = wAbsent(o.value("homeId")) ? "" : try wStr(o.value("homeId")!, p + ".homeId")
@@ -1015,6 +1398,16 @@ package struct HomeMemoryEvidencePage: Hashable, Sendable {
   package let previousOffset: Int?
   package let totalCharacters: Int
   package let metadata: WireMap<JsonValue>
+  package init(format: HomeMemoryEvidencePageFormat, evidence: HomeMemoryEvidence, text: String, offset: Int, nextOffset: Int? = nil, previousOffset: Int? = nil, totalCharacters: Int, metadata: WireMap<JsonValue>) {
+    self.format = format
+    self.evidence = evidence
+    self.text = text
+    self.offset = offset
+    self.nextOffset = nextOffset
+    self.previousOffset = previousOffset
+    self.totalCharacters = totalCharacters
+    self.metadata = metadata
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryEvidencePage {
     let o = try wObj(v, p)
     let f_format: HomeMemoryEvidencePageFormat = wAbsent(o.value("format")) ? .canonicalHistory : try HomeMemoryEvidencePageFormat.decode(o.value("format")!, p + ".format")
@@ -1091,6 +1484,12 @@ package struct HomeStatusHostPressure: Hashable, Sendable {
   package let load1PerCpu: Double
   package let eventLoopUtilization: Double
   package let sampledAt: String
+  package init(level: HomeStatusHostPressureLevel, load1PerCpu: Double, eventLoopUtilization: Double, sampledAt: String) {
+    self.level = level
+    self.load1PerCpu = load1PerCpu
+    self.eventLoopUtilization = eventLoopUtilization
+    self.sampledAt = sampledAt
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeStatusHostPressure {
     let o = try wObj(v, p)
     let f_level: HomeStatusHostPressureLevel = wAbsent(o.value("level")) ? try wMissing(p + ".level") : try HomeStatusHostPressureLevel.decode(o.value("level")!, p + ".level")
@@ -1110,6 +1509,9 @@ package struct HomeStatusHostPressure: Hashable, Sendable {
 }
 package struct HomeStatusWorkers: Hashable, Sendable {
   package let running: Int
+  package init(running: Int) {
+    self.running = running
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeStatusWorkers {
     let o = try wObj(v, p)
     let f_running: Int = wAbsent(o.value("running")) ? 0 : try wInt(o.value("running")!, p + ".running", nat: false)
@@ -1197,6 +1599,11 @@ package struct HomeContextBreakdownActivation: Hashable, Sendable {
   package let state: HomeContextBreakdownActivationState
   package let kind: HomeContextBreakdownActivationKind
   package let startedAt: String
+  package init(state: HomeContextBreakdownActivationState, kind: HomeContextBreakdownActivationKind, startedAt: String) {
+    self.state = state
+    self.kind = kind
+    self.startedAt = startedAt
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeContextBreakdownActivation {
     let o = try wObj(v, p)
     let f_state: HomeContextBreakdownActivationState = wAbsent(o.value("state")) ? try wMissing(p + ".state") : try HomeContextBreakdownActivationState.decode(o.value("state")!, p + ".state")
@@ -1245,6 +1652,11 @@ package struct HomeContextSection: Hashable, Sendable {
   package let id: HomeContextSectionId
   package let tokens: Int
   package let count: Int?
+  package init(id: HomeContextSectionId, tokens: Int, count: Int? = nil) {
+    self.id = id
+    self.tokens = tokens
+    self.count = count
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeContextSection {
     let o = try wObj(v, p)
     let f_id: HomeContextSectionId = wAbsent(o.value("id")) ? try wMissing(p + ".id") : try HomeContextSectionId.decode(o.value("id")!, p + ".id")
@@ -1265,6 +1677,12 @@ package struct HomeContextBreakdown: Hashable, Sendable {
   package let contextWindow: Int
   package let effectiveTokens: Int
   package let sections: [HomeContextSection]
+  package init(activation: HomeContextBreakdownActivation, contextWindow: Int, effectiveTokens: Int, sections: [HomeContextSection]) {
+    self.activation = activation
+    self.contextWindow = contextWindow
+    self.effectiveTokens = effectiveTokens
+    self.sections = sections
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeContextBreakdown {
     let o = try wObj(v, p)
     let f_activation: HomeContextBreakdownActivation = wAbsent(o.value("activation")) ? try wMissing(p + ".activation") : try HomeContextBreakdownActivation.decode(o.value("activation")!, p + ".activation")
@@ -1327,6 +1745,10 @@ package indirect enum HomeContextProjection: Hashable, Sendable {
 package struct HomeStatusReadiness: Hashable, Sendable {
   package let ready: Bool
   package let gaps: [String]
+  package init(ready: Bool, gaps: [String]) {
+    self.ready = ready
+    self.gaps = gaps
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeStatusReadiness {
     let o = try wObj(v, p)
     let f_ready: Bool = wAbsent(o.value("ready")) ? false : try wBool(o.value("ready")!, p + ".ready")
@@ -1369,6 +1791,10 @@ package enum HomeStatusRecoveryAction: String, CaseIterable, Hashable, Sendable 
 package struct HomeStatusRecovery: Hashable, Sendable {
   package let action: HomeStatusRecoveryAction
   package let reason: String?
+  package init(action: HomeStatusRecoveryAction, reason: String? = nil) {
+    self.action = action
+    self.reason = reason
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeStatusRecovery {
     let o = try wObj(v, p)
     let f_action: HomeStatusRecoveryAction = wAbsent(o.value("action")) ? try wMissing(p + ".action") : try HomeStatusRecoveryAction.decode(o.value("action")!, p + ".action")
@@ -1407,6 +1833,12 @@ package struct HomeStatusChapter: Hashable, Sendable {
   package let currentBytes: Int?
   package let currentEntries: Int?
   package let recoveryDecision: HomeStatusChapterRecoveryDecision
+  package init(count: Int, currentBytes: Int? = nil, currentEntries: Int? = nil, recoveryDecision: HomeStatusChapterRecoveryDecision) {
+    self.count = count
+    self.currentBytes = currentBytes
+    self.currentEntries = currentEntries
+    self.recoveryDecision = recoveryDecision
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeStatusChapter {
     let o = try wObj(v, p)
     let f_count: Int = wAbsent(o.value("count")) ? 0 : try wInt(o.value("count")!, p + ".count", nat: false)
@@ -1427,6 +1859,10 @@ package struct HomeStatusChapter: Hashable, Sendable {
 package struct HomeMemoryStatusEpisodicNodesByLevelItem: Hashable, Sendable {
   package let level: Double
   package let count: Double
+  package init(level: Double, count: Double) {
+    self.level = level
+    self.count = count
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatusEpisodicNodesByLevelItem {
     let o = try wObj(v, p)
     let f_level: Double = wAbsent(o.value("level")) ? 0 : try wNum(o.value("level")!, p + ".level")
@@ -1445,6 +1881,12 @@ package struct HomeMemoryStatusEpisodicNodes: Hashable, Sendable {
   package let free: Double
   package let summary: Double
   package let byLevel: [HomeMemoryStatusEpisodicNodesByLevelItem]
+  package init(total: Double, free: Double, summary: Double, byLevel: [HomeMemoryStatusEpisodicNodesByLevelItem]) {
+    self.total = total
+    self.free = free
+    self.summary = summary
+    self.byLevel = byLevel
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatusEpisodicNodes {
     let o = try wObj(v, p)
     let f_total: Double = wAbsent(o.value("total")) ? 0 : try wNum(o.value("total")!, p + ".total")
@@ -1468,6 +1910,13 @@ package struct HomeMemoryStatusEpisodicViewPartsItem: Hashable, Sendable {
   package let messages: Double
   package let bytes: Double
   package let built: Bool
+  package init(address: String, start: Double, messages: Double, bytes: Double, built: Bool) {
+    self.address = address
+    self.start = start
+    self.messages = messages
+    self.bytes = bytes
+    self.built = built
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatusEpisodicViewPartsItem {
     let o = try wObj(v, p)
     let f_address: String = wAbsent(o.value("address")) ? "" : try wStr(o.value("address")!, p + ".address")
@@ -1494,6 +1943,14 @@ package struct HomeMemoryStatusEpisodicView: Hashable, Sendable {
   package let budgetBytes: Double
   package let built: Int
   package let unbuilt: Int
+  package init(parts: [HomeMemoryStatusEpisodicViewPartsItem], truncatedParts: Double, bytes: Double, budgetBytes: Double, built: Int, unbuilt: Int) {
+    self.parts = parts
+    self.truncatedParts = truncatedParts
+    self.bytes = bytes
+    self.budgetBytes = budgetBytes
+    self.built = built
+    self.unbuilt = unbuilt
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatusEpisodicView {
     let o = try wObj(v, p)
     let f_parts: [HomeMemoryStatusEpisodicViewPartsItem] = wAbsent(o.value("parts")) ? [] : try wSeq(o.value("parts")!, p + ".parts") { x, q in try HomeMemoryStatusEpisodicViewPartsItem.decode(x, q) }
@@ -1518,6 +1975,10 @@ package struct HomeMemoryStatusEpisodicView: Hashable, Sendable {
 package struct HomeMemoryStatusEpisodicCoverage: Hashable, Sendable {
   package let admitted: Double
   package let summarized: Double
+  package init(admitted: Double, summarized: Double) {
+    self.admitted = admitted
+    self.summarized = summarized
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatusEpisodicCoverage {
     let o = try wObj(v, p)
     let f_admitted: Double = wAbsent(o.value("admitted")) ? 0 : try wNum(o.value("admitted")!, p + ".admitted")
@@ -1533,6 +1994,9 @@ package struct HomeMemoryStatusEpisodicCoverage: Hashable, Sendable {
 }
 package struct HomeMemoryStatusEpisodicPump: Hashable, Sendable {
   package let busy: Double
+  package init(busy: Double) {
+    self.busy = busy
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatusEpisodicPump {
     let o = try wObj(v, p)
     let f_busy: Double = wAbsent(o.value("busy")) ? 0 : try wNum(o.value("busy")!, p + ".busy")
@@ -1547,6 +2011,10 @@ package struct HomeMemoryStatusEpisodicPump: Hashable, Sendable {
 package struct HomeMemoryStatusEpisodicBlocked: Hashable, Sendable {
   package let reason: String
   package let detail: String?
+  package init(reason: String, detail: String? = nil) {
+    self.reason = reason
+    self.detail = detail
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatusEpisodicBlocked {
     let o = try wObj(v, p)
     let f_reason: String = wAbsent(o.value("reason")) ? "" : try wStr(o.value("reason")!, p + ".reason")
@@ -1565,6 +2033,12 @@ package struct HomeMemoryStatusEpisodicTokensSinceOpen: Hashable, Sendable {
   package let output: Double
   package let cacheRead: Double
   package let cacheWrite: Double
+  package init(input: Double, output: Double, cacheRead: Double, cacheWrite: Double) {
+    self.input = input
+    self.output = output
+    self.cacheRead = cacheRead
+    self.cacheWrite = cacheWrite
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatusEpisodicTokensSinceOpen {
     let o = try wObj(v, p)
     let f_input: Double = wAbsent(o.value("input")) ? 0 : try wNum(o.value("input")!, p + ".input")
@@ -1585,6 +2059,10 @@ package struct HomeMemoryStatusEpisodicTokensSinceOpen: Hashable, Sendable {
 package struct HomeMemoryStatusEpisodicTokens: Hashable, Sendable {
   package let used: Double
   package let sinceOpen: HomeMemoryStatusEpisodicTokensSinceOpen
+  package init(used: Double, sinceOpen: HomeMemoryStatusEpisodicTokensSinceOpen) {
+    self.used = used
+    self.sinceOpen = sinceOpen
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatusEpisodicTokens {
     let o = try wObj(v, p)
     let f_used: Double = wAbsent(o.value("used")) ? 0 : try wNum(o.value("used")!, p + ".used")
@@ -1608,6 +2086,17 @@ package struct HomeMemoryStatusEpisodic: Hashable, Sendable {
   package let pump: HomeMemoryStatusEpisodicPump
   package let blocked: Nullable<HomeMemoryStatusEpisodicBlocked>
   package let tokens: HomeMemoryStatusEpisodicTokens
+  package init(sourceSessionId: String, generation: Double, messages: Int, nodes: HomeMemoryStatusEpisodicNodes, view: HomeMemoryStatusEpisodicView, coverage: HomeMemoryStatusEpisodicCoverage, pump: HomeMemoryStatusEpisodicPump, blocked: Nullable<HomeMemoryStatusEpisodicBlocked>, tokens: HomeMemoryStatusEpisodicTokens) {
+    self.sourceSessionId = sourceSessionId
+    self.generation = generation
+    self.messages = messages
+    self.nodes = nodes
+    self.view = view
+    self.coverage = coverage
+    self.pump = pump
+    self.blocked = blocked
+    self.tokens = tokens
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatusEpisodic {
     let o = try wObj(v, p)
     let f_sourceSessionId: String = wAbsent(o.value("sourceSessionId")) ? "" : try wStr(o.value("sourceSessionId")!, p + ".sourceSessionId")
@@ -1644,6 +2133,16 @@ package struct HomeMemoryStatus: Hashable, Sendable {
   package let episodic: HomeMemoryStatusEpisodic?
   package let blocked: String?
   package let reason: String?
+  package init(paused: Bool? = nil, configured: Bool, open: Bool, models: [String]? = nil, spentTokens: Int? = nil, episodic: HomeMemoryStatusEpisodic? = nil, blocked: String? = nil, reason: String? = nil) {
+    self.paused = paused
+    self.configured = configured
+    self.`open` = `open`
+    self.models = models
+    self.spentTokens = spentTokens
+    self.episodic = episodic
+    self.blocked = blocked
+    self.reason = reason
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeMemoryStatus {
     let o = try wObj(v, p)
     let f_paused: Bool? = wAbsent(o.value("paused")) ? nil : try wBool(o.value("paused")!, p + ".paused")
@@ -1691,6 +2190,29 @@ package struct HomeStatus: Hashable, Sendable {
   package let sessionPresent: Bool
   package let waitingForUser: Bool?
   package let memory: HomeMemoryStatus
+  package init(taskRecovery: HomeStatusTaskRecovery, hostPressure: HomeStatusHostPressure, workers: HomeStatusWorkers, phase: HomeStatusPhase, activation: HomeContextProjection, readiness: HomeStatusReadiness, recovery: HomeStatusRecovery, available: Bool, reason: String? = nil, enabled: Bool, homeId: String? = nil, sessionId: String? = nil, openSessionId: String? = nil, bindingRevision: Double? = nil, generation: Int? = nil, routeGeneration: Int? = nil, chapter: HomeStatusChapter? = nil, live: Bool, sessionPresent: Bool, waitingForUser: Bool? = nil, memory: HomeMemoryStatus) {
+    self.taskRecovery = taskRecovery
+    self.hostPressure = hostPressure
+    self.workers = workers
+    self.phase = phase
+    self.activation = activation
+    self.readiness = readiness
+    self.recovery = recovery
+    self.available = available
+    self.reason = reason
+    self.enabled = enabled
+    self.homeId = homeId
+    self.sessionId = sessionId
+    self.openSessionId = openSessionId
+    self.bindingRevision = bindingRevision
+    self.generation = generation
+    self.routeGeneration = routeGeneration
+    self.chapter = chapter
+    self.live = live
+    self.sessionPresent = sessionPresent
+    self.waitingForUser = waitingForUser
+    self.memory = memory
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeStatus {
     let o = try wObj(v, p)
     let f_taskRecovery: HomeStatusTaskRecovery = wAbsent(o.value("taskRecovery")) ? try wMissing(p + ".taskRecovery") : try HomeStatusTaskRecovery.decode(o.value("taskRecovery")!, p + ".taskRecovery")
@@ -1745,6 +2267,10 @@ package struct HomeStatus: Hashable, Sendable {
 package struct HomeTaskCounts: Hashable, Sendable {
   package let active: Double
   package let finished: Double
+  package init(active: Double, finished: Double) {
+    self.active = active
+    self.finished = finished
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskCounts {
     let o = try wObj(v, p)
     let f_active: Double = wAbsent(o.value("active")) ? 0 : try wNum(o.value("active")!, p + ".active")
@@ -1762,6 +2288,11 @@ package struct HomeTaskCheckinRequestRefs: Hashable, Sendable {
   package let branch: String?
   package let commit: String?
   package let issue: String?
+  package init(branch: String? = nil, commit: String? = nil, issue: String? = nil) {
+    self.branch = branch
+    self.commit = commit
+    self.issue = issue
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskCheckinRequestRefs {
     let o = try wObj(v, p)
     let f_branch: String? = wAbsent(o.value("branch")) ? nil : try wStr(o.value("branch")!, p + ".branch")
@@ -1813,6 +2344,20 @@ package struct HomeTaskCheckin: Hashable, Sendable {
   package let operationId: String
   package let at: String
   package let attention: HomeTaskCheckinAttention
+  package init(step: String, done: String, next: String, blocker: String? = nil, refs: HomeTaskCheckinRequestRefs? = nil, needsAttention: Bool? = nil, id: String, taskId: String, sessionId: String, operationId: String, at: String, attention: HomeTaskCheckinAttention) {
+    self.step = step
+    self.done = done
+    self.next = next
+    self.blocker = blocker
+    self.refs = refs
+    self.needsAttention = needsAttention
+    self.id = id
+    self.taskId = taskId
+    self.sessionId = sessionId
+    self.operationId = operationId
+    self.at = at
+    self.attention = attention
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskCheckin {
     let o = try wObj(v, p)
     let f_step: String = wAbsent(o.value("step")) ? "" : try wStr(o.value("step")!, p + ".step")
@@ -1901,6 +2446,13 @@ package struct HomeTaskSummarySpend: Hashable, Sendable {
   package let outputTokens: Int
   package let cacheReadTokens: Int?
   package let cacheWriteTokens: Int?
+  package init(sourceDigest: String, inputTokens: Int, outputTokens: Int, cacheReadTokens: Int? = nil, cacheWriteTokens: Int? = nil) {
+    self.sourceDigest = sourceDigest
+    self.inputTokens = inputTokens
+    self.outputTokens = outputTokens
+    self.cacheReadTokens = cacheReadTokens
+    self.cacheWriteTokens = cacheWriteTokens
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskSummarySpend {
     let o = try wObj(v, p)
     let f_sourceDigest: String = wAbsent(o.value("sourceDigest")) ? "" : try wStr(o.value("sourceDigest")!, p + ".sourceDigest")
@@ -1934,6 +2486,21 @@ package struct HomeTaskSummary: Hashable, Sendable {
   package let attention: Bool
   package let checkins: [HomeTaskCheckin]
   package let pendingGrant: Bool
+  package init(title: String, project: String, taskId: String, createdAt: Int, updatedAt: Int, sessionId: Nullable<String>, target: String, lifecycle: HomeTaskLifecycle, outcome: Nullable<HomeTaskOutcome>, spend: Nullable<HomeTaskSummarySpend>, attention: Bool, checkins: [HomeTaskCheckin], pendingGrant: Bool) {
+    self.title = title
+    self.project = project
+    self.taskId = taskId
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
+    self.sessionId = sessionId
+    self.target = target
+    self.lifecycle = lifecycle
+    self.outcome = outcome
+    self.spend = spend
+    self.attention = attention
+    self.checkins = checkins
+    self.pendingGrant = pendingGrant
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskSummary {
     let o = try wObj(v, p)
     let f_title: String = wAbsent(o.value("title")) ? "" : try wStr(o.value("title")!, p + ".title")
@@ -1972,6 +2539,10 @@ package struct HomeTaskSummary: Hashable, Sendable {
 package struct HomeTaskTerminalEvidence: Hashable, Sendable {
   package let outcome: HomeTaskOutcome
   package let reason: String
+  package init(outcome: HomeTaskOutcome, reason: String) {
+    self.outcome = outcome
+    self.reason = reason
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskTerminalEvidence {
     let o = try wObj(v, p)
     let f_outcome: HomeTaskOutcome = wAbsent(o.value("outcome")) ? .unknown : try HomeTaskOutcome.decode(o.value("outcome")!, p + ".outcome")
@@ -1987,6 +2558,9 @@ package struct HomeTaskTerminalEvidence: Hashable, Sendable {
 }
 package struct HomeTaskIntent: Hashable, Sendable {
   package let text: String
+  package init(text: String) {
+    self.text = text
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskIntent {
     let o = try wObj(v, p)
     let f_text: String = wAbsent(o.value("text")) ? "" : try wStr(o.value("text")!, p + ".text")
@@ -2036,6 +2610,13 @@ package struct HomeTaskWakeDelivery: Hashable, Sendable {
   package let generation: Int
   package let routeGeneration: Int
   package let messageDigest: String
+  package init(sessionId: String, operationId: String, generation: Int, routeGeneration: Int, messageDigest: String) {
+    self.sessionId = sessionId
+    self.operationId = operationId
+    self.generation = generation
+    self.routeGeneration = routeGeneration
+    self.messageDigest = messageDigest
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskWakeDelivery {
     let o = try wObj(v, p)
     let f_sessionId: String = wAbsent(o.value("sessionId")) ? "" : try wStr(o.value("sessionId")!, p + ".sessionId")
@@ -2059,6 +2640,11 @@ package struct HomeTaskWake: Hashable, Sendable {
   package let state: HomeTaskWakeState
   package let routeGeneration: Int
   package let delivery: Nullable<HomeTaskWakeDelivery>
+  package init(state: HomeTaskWakeState, routeGeneration: Int, delivery: Nullable<HomeTaskWakeDelivery>) {
+    self.state = state
+    self.routeGeneration = routeGeneration
+    self.delivery = delivery
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskWake {
     let o = try wObj(v, p)
     let f_state: HomeTaskWakeState = wAbsent(o.value("state")) ? try wMissing(p + ".state") : try HomeTaskWakeState.decode(o.value("state")!, p + ".state")
@@ -2077,6 +2663,10 @@ package struct HomeTaskWake: Hashable, Sendable {
 package struct HomeTaskSubagents: Hashable, Sendable {
   package let started: Int
   package let stoppedAtEnd: Nullable<Int>
+  package init(started: Int, stoppedAtEnd: Nullable<Int>) {
+    self.started = started
+    self.stoppedAtEnd = stoppedAtEnd
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskSubagents {
     let o = try wObj(v, p)
     let f_started: Int = wAbsent(o.value("started")) ? 0 : try wInt(o.value("started")!, p + ".started", nat: false)
@@ -2096,6 +2686,13 @@ package struct HomeTaskSubagentRun: Hashable, Sendable {
   package let state: ExtensionRunLifecycleState
   package let startedAt: String
   package let lastActivityAt: Nullable<String>
+  package init(runId: String, agent: String, state: ExtensionRunLifecycleState, startedAt: String, lastActivityAt: Nullable<String>) {
+    self.runId = runId
+    self.agent = agent
+    self.state = state
+    self.startedAt = startedAt
+    self.lastActivityAt = lastActivityAt
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskSubagentRun {
     let o = try wObj(v, p)
     let f_runId: String = wAbsent(o.value("runId")) ? "" : try wStr(o.value("runId")!, p + ".runId")
@@ -2118,6 +2715,10 @@ package struct HomeTaskSubagentRun: Hashable, Sendable {
 package struct HomeTaskSubagentRuns: Hashable, Sendable {
   package let total: Int
   package let runs: [HomeTaskSubagentRun]
+  package init(total: Int, runs: [HomeTaskSubagentRun]) {
+    self.total = total
+    self.runs = runs
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskSubagentRuns {
     let o = try wObj(v, p)
     let f_total: Int = wAbsent(o.value("total")) ? 0 : try wInt(o.value("total")!, p + ".total", nat: false)
@@ -2134,6 +2735,10 @@ package struct HomeTaskSubagentRuns: Hashable, Sendable {
 package struct HomeTaskWorkerModel: Hashable, Sendable {
   package let provider: String
   package let id: String
+  package init(provider: String, id: String) {
+    self.provider = provider
+    self.id = id
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskWorkerModel {
     let o = try wObj(v, p)
     let f_provider: String = wAbsent(o.value("provider")) ? "" : try wStr(o.value("provider")!, p + ".provider")
@@ -2166,6 +2771,26 @@ package struct HomeTaskStatusResult: Hashable, Sendable {
   package let subagents: HomeTaskSubagents
   package let subagentRuns: HomeTaskSubagentRuns
   package let checkins: [HomeTaskCheckin]
+  package init(taskId: String, homeId: String, createdAt: Int, updatedAt: Int, intent: HomeTaskIntent, title: String, project: String, sessionId: Nullable<String>, target: String, lifecycle: HomeTaskLifecycle, operationId: Nullable<String>, spend: Nullable<HomeTaskSummarySpend>, terminalEvidence: Nullable<HomeTaskTerminalEvidence>, wake: Nullable<HomeTaskWake>, workerModel: Nullable<HomeTaskWorkerModel>, subagents: HomeTaskSubagents, subagentRuns: HomeTaskSubagentRuns, checkins: [HomeTaskCheckin]) {
+    self.taskId = taskId
+    self.homeId = homeId
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
+    self.intent = intent
+    self.title = title
+    self.project = project
+    self.sessionId = sessionId
+    self.target = target
+    self.lifecycle = lifecycle
+    self.operationId = operationId
+    self.spend = spend
+    self.terminalEvidence = terminalEvidence
+    self.wake = wake
+    self.workerModel = workerModel
+    self.subagents = subagents
+    self.subagentRuns = subagentRuns
+    self.checkins = checkins
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskStatusResult {
     let o = try wObj(v, p)
     let f_taskId: String = wAbsent(o.value("taskId")) ? "" : try wStr(o.value("taskId")!, p + ".taskId")
@@ -2220,6 +2845,16 @@ package struct HomeTaskHistoryItem: Hashable, Sendable {
   package let lifecycle: HomeTaskLifecycle
   package let outcome: Nullable<HomeTaskOutcome>
   package let checkin: HomeTaskCheckin?
+  package init(id: String, at: String, taskId: String, operationId: Nullable<String>, operationNumber: Int, lifecycle: HomeTaskLifecycle, outcome: Nullable<HomeTaskOutcome>, checkin: HomeTaskCheckin? = nil) {
+    self.id = id
+    self.at = at
+    self.taskId = taskId
+    self.operationId = operationId
+    self.operationNumber = operationNumber
+    self.lifecycle = lifecycle
+    self.outcome = outcome
+    self.checkin = checkin
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskHistoryItem {
     let o = try wObj(v, p)
     let f_id: String = wAbsent(o.value("id")) ? "" : try wStr(o.value("id")!, p + ".id")
@@ -2250,6 +2885,12 @@ package struct HomeTaskHistoryPage: Hashable, Sendable {
   package let total: Int
   package let complete: Bool
   package let nextCursor: String?
+  package init(items: [HomeTaskHistoryItem], total: Int, complete: Bool, nextCursor: String? = nil) {
+    self.items = items
+    self.total = total
+    self.complete = complete
+    self.nextCursor = nextCursor
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskHistoryPage {
     let o = try wObj(v, p)
     let f_items: [HomeTaskHistoryItem] = wAbsent(o.value("items")) ? [] : try wSeq(o.value("items")!, p + ".items") { x, q in try HomeTaskHistoryItem.decode(x, q) }
@@ -2271,6 +2912,11 @@ package struct HomeTaskPage: Hashable, Sendable {
   package let items: [HomeTaskSummary]
   package let nextCursor: String?
   package let counts: HomeTaskCounts
+  package init(items: [HomeTaskSummary], nextCursor: String? = nil, counts: HomeTaskCounts) {
+    self.items = items
+    self.nextCursor = nextCursor
+    self.counts = counts
+  }
   package static func decode(_ v: WireJSON, _ p: String = "$") throws -> HomeTaskPage {
     let o = try wObj(v, p)
     let f_items: [HomeTaskSummary] = wAbsent(o.value("items")) ? [] : try wSeq(o.value("items")!, p + ".items") { x, q in try HomeTaskSummary.decode(x, q) }

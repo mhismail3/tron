@@ -55,7 +55,7 @@ struct HostedToolSheetsPolishFixture: View {
         VStack(spacing: 20) {
             ForEach(0..<3) { index in
                 let kind: ComposerResourceEntry.Kind = [.command, .skill, .prompt][index]
-                let source: CommandInfo.Source = [.extension, .skill, .prompt][index]
+                let source: CommandInfoSource = [.extension, .skill, .prompt][index]
                 let empty = scenario == "picker-alternate" ? index != 0 : index == 0
                 let names = ["review", "skill:apple-design", "review"]
                 let descriptions = ["Review the selected changes", "Apple's approach to interface design", "Review the selected changes"]

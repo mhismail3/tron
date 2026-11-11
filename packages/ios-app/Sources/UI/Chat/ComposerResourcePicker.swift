@@ -13,11 +13,11 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
     var invocationName: String { commandInfo.name }
     var description: String? { commandInfo.description }
     var argumentHint: String? { commandInfo.argumentHint }
-    var source: CommandInfo.Source { commandInfo.source }
+    var source: CommandInfoSource { commandInfo.source }
     var sourcePath: String? { commandInfo.sourcePath }
     var resourceSource: String? { commandInfo.resourceSource }
-    var resourceScope: CommandInfo.ResourceScope? { commandInfo.resourceScope }
-    var resourceOrigin: CommandInfo.ResourceOrigin? { commandInfo.resourceOrigin }
+    var resourceScope: CommandInfoResourceScope? { commandInfo.resourceScope }
+    var resourceOrigin: CommandInfoResourceOrigin? { commandInfo.resourceOrigin }
     fileprivate let normalizedName: String
     fileprivate let normalizedSearch: String
 
@@ -68,7 +68,7 @@ enum ComposerResourceContentPresentation {
         let isTruncated: Bool
     }
 
-    static func preview(_ content: String, source: CommandInfo.Source, sourceTruncated: Bool) -> Preview {
+    static func preview(_ content: String, source: CommandInfoSource, sourceTruncated: Bool) -> Preview {
         let text = body(content, source: source)
         guard source == .extension else { return Preview(text: text, isTruncated: sourceTruncated) }
         var end = text.index(text.startIndex, offsetBy: 480, limitedBy: text.endIndex) ?? text.endIndex
@@ -83,7 +83,7 @@ enum ComposerResourceContentPresentation {
         return Preview(text: String(text[..<end]), isTruncated: sourceTruncated || end < text.endIndex)
     }
 
-    static func body(_ content: String, source: CommandInfo.Source) -> String {
+    static func body(_ content: String, source: CommandInfoSource) -> String {
         guard source != .extension else { return content }
 
         var normalized = content
@@ -632,14 +632,14 @@ struct ComposerResourcePicker: View {
 }
 
 struct ComposerResourceBadges: View {
-    let origin: CommandInfo.ResourceOrigin?
-    let scope: CommandInfo.ResourceScope?
+    let origin: CommandInfoResourceOrigin?
+    let scope: CommandInfoResourceScope?
     let hookProvenance: HookProvenance?
     let accent: Color
 
     init(
-        origin: CommandInfo.ResourceOrigin? = nil,
-        scope: CommandInfo.ResourceScope? = nil,
+        origin: CommandInfoResourceOrigin? = nil,
+        scope: CommandInfoResourceScope? = nil,
         hookProvenance: HookProvenance? = nil,
         accent: Color
     ) {
@@ -649,7 +649,7 @@ struct ComposerResourceBadges: View {
         self.accent = accent
     }
 
-    static func titles(origin: CommandInfo.ResourceOrigin?, scope: CommandInfo.ResourceScope?) -> [String] {
+    static func titles(origin: CommandInfoResourceOrigin?, scope: CommandInfoResourceScope?) -> [String] {
         if scope == .project { return ["Project"] }
         return scope == .user && origin == .topLevel ? ["User"] : []
     }
@@ -670,7 +670,7 @@ struct ComposerResourceDetailSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @PresentationState private var detail: CommandResourceDetail?
+    @PresentationState private var detail: CommandDetail?
     @PresentationState private var loadError: String?
     @PresentationState private var loadRevision = 0
     @PresentationState private var detailGeneration = 0

@@ -260,7 +260,9 @@ struct ExtensionsSettingsView: View {
         loadingModules = modules == nil
         defer { if refreshModulesIsCurrent(request) { loadingModules = false } }
         do {
-            let loaded: TronModuleList = try await model.client.request("modules.list", EmptyParams())
+            let loaded = try GatewayResponseDecoding.decode(
+                try await model.client.requestValue("modules.list", EmptyParams()),
+                method: "modules.list", TronModuleList.decode)
             guard refreshModulesIsCurrent(request) else { return }
             modules = loaded
             moduleError = nil
