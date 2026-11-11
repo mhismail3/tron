@@ -351,7 +351,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 nodes: [SessionTreeNode(id: "fixture-prompt", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
                     kind: "message", label: bookmarkLabel, preview: "Nested history prompt", role: .user,
                     depth: 0, childCount: 0, isCurrentPath: true)], older: nil, newer: nil, totalEntries: 1))
-        case "model.list": result = .object(["models": try JSONValue.encode(Self.models)])
+        case "model.list": result = try JSONValue.wire(ModelPage(models: Self.models).encode())
         case "provider.list": result = .object(["providers": .array([])])
         case "session.workspace.inspect": result = .object(["cwd": .string("/workspace"), "exists": .bool(true), "isGitRepository": .bool(false)])
         default: result = .object([:])
