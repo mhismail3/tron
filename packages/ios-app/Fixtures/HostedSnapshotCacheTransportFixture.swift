@@ -23,7 +23,7 @@ actor SnapshotCacheFixtureGateway {
             firstMessage: "A summary, not a transcript")
         try await socket?.deliver(JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("event"), "topic": .string("session.summary"), "sessionId": .string("cache-live"),
-            "payload": try JSONValue.encode(update)])))
+            "payload": try JSONValue.wire(update.encode())])))
     }
 
     func response(_ method: String) throws -> JSONValue? {

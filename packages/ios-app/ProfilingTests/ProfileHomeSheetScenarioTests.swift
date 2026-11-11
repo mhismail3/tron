@@ -111,7 +111,7 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
                     updatedAt: GatewayTimestamp.preciseString(from: Date()), activeSince: session.activeSince,
                     messageCount: session.messageCount + revision, firstMessage: session.firstMessage
                 )
-                try await fixture.deliver(topic: "session.summary", sessionID: nil, payload: JSONValue.encode(update))
+                try await fixture.deliver(topic: "session.summary", sessionID: nil, payload: JSONValue.wire(update.encode()))
                 ProfileScenarioLedger.shared.add("summaries.delivered")
             }
             offset += .seconds(1)
