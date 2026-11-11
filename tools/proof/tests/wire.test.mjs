@@ -5,7 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { PROTOCOL_SWIFT, parseWire, reachable, swiftRoots } from "../dafny2wire/dafny2wire.mjs";
+import { PROTOCOL_SWIFT, emitSwift, parseWire, reachable, swiftCodable, swiftFields, swiftRoots } from "../dafny2wire/dafny2wire.mjs";
 import { mulberry32 } from "./random.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -116,8 +116,32 @@ test("protocol: types.ts and the iOS decoders are generated, and the TypeScript 
   assert.equal(appLines.filter(([, i]) => i < lines.length).length, appTypes.size * 12);
   assert.deepEqual(runSwift("app", join(ROOT, PROTOCOL_SWIFT), [...appTypes], appLines.map(([line]) => line)), appLines.map(([, i]) => swift[i]),
     "the iOS app's checked-in decoders read every value of their datatypes as the generated Swift codec does");
+  const swiftByName = new Map(swiftFields(types).map((ty) => [ty.name, ty]));
+  const literal = (t, text) => (byName.get(t.kind)?.kind === "enum" ? byName.get(t.kind).ctors.find((c) => `${t.kind}.${c.name}` === text).wire : JSON.parse(text));
+  const withDefaults = (t, v) => {
+    if (v === null || v === undefined) return v;
+    if (t.kind === "seq") return v.map((x) => withDefaults(t.arg, x));
+    if (t.kind === "map") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, withDefaults(t.arg, x)]));
+    if (t.kind === "Option" || t.kind === "Nullable") return withDefaults(t.arg, v);
+    const ty = swiftByName.get(t.kind);
+    if (!ty || ty.kind === "enum") return v;
+    if (ty.kind === "bykind") {
+      const kind = v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+      const c = ty.ctors.find((k, i) => ty.kinds[i].includes(kind));
+      return c?.fields.length ? withDefaults(c.fields[0].type, v) : v;
+    }
+    const c = ty.kind === "tagged" ? ty.ctors.find((k) => k.wire === v[ty.tag]) : ty.ctors[0];
+    const out = { ...v };
+    for (const f of c.fields) {
+      if (out[f.wire] === undefined && f.fallback) out[f.wire] = literal(f.type, f.fallback);
+      else if (out[f.wire] !== undefined) out[f.wire] = withDefaults(f.type, out[f.wire]);
+    }
+    return out;
+  };
   const ts = corpus.map(tsOut);
-  const differ = lines.map((line, i) => [line.split("\t")[0], ts[i], swift[i]]).filter(([, a, b]) => a !== b);
+  const expected = lines.map((line) => { const [name, json] = line.split("\t"); return W[`encode${name}`](withDefaults({ kind: name }, W[`decode${name}`](JSON.parse(json)))); });
+  const differ = lines.map((line, i) => [line.split("\t")[0], expected[i], swift[i]]).filter(([, a, b]) => a !== b);
+  assert.ok(expected.some((line, i) => line !== ts[i]), "some seeded values omit a field the Swift codec defaults");
   assert.deepEqual(differ.slice(0, 3), [], `${differ.length} of ${lines.length} values differ between TypeScript and Swift`);
   assert.deepEqual(ts.slice(lines.length), [
     'ERR $.blockerCounts["nope"]', "ERR $.available", "ERR $", "ERR $", "ERR $.id", "ERR $[\"a\"][1][\"b\"]", "ERR $", "ERR $.provider", "ERR $.attention",
@@ -223,4 +247,35 @@ test("generated TypeScript and Swift codecs agree byte for byte", async (t) => {
     'ERR $.parts[0].arguments["k"][1]', '{"seq":1,"events":[{"type":"Stopped"}],"parts":[]}', '{"seq":1,"events":[],"parts":[{"kind":"Text","text":"t"}]}',
     "ERR $.events[0].sample.version", "ERR $.events[0].sample.level", "ERR $.events[0].sample.bold",
   ]);
+});
+
+test("Swift field defaults and the Codable opt-in: what the generator emits and what it refuses", () => {
+  const source = (extra, fields) => [
+    "// @swift R", extra,
+    "// @wire enum", "datatype Phase = idle | running",
+    "// @wire enum", "datatype Level = {:wire 1} one | {:wire 2} two",
+    "// @wire enum", "datatype Mood = calm | unknown",
+    "// @wire", `datatype R = R(phase: Phase, level: Level, mood: Mood, ${fields})`,
+  ].join("\n");
+  const emit = (extra, fields = "count: int") => {
+    const src = source(extra, fields);
+    return emitSwift(reachable(parseWire(src), swiftRoots(src)), "t.dfy", swiftCodable(src));
+  };
+  const swift = emit("// @swift-codable Phase", "count: int := 0, on: Option<bool> := Some(false), lvl: Level := Level.two");
+  assert.match(swift, /^package enum Phase: String, CaseIterable, Codable, Hashable, Sendable \{$/m);
+  assert.equal((swift.match(/Codable/g) ?? []).length, 1, "only the listed enum takes Codable");
+  assert.match(swift, /package let on: Bool$/m);
+  assert.match(swift, /let f_on: Bool = wAbsent\(o\.value\("on"\)\) \? false :/);
+  assert.match(swift, /let f_count: Int = wAbsent\(o\.value\("count"\)\) \? 0 :/);
+  assert.match(swift, /count: Int = 0, on: Bool = false, lvl: Level = \.two\)/);
+  assert.match(swift, /s \+= ",\\"on\\":" \+ \(self\.on \? "true" : "false"\)/, "a defaulted optional is always written");
+  for (const [extra, message] of [
+    ["// @swift-codable Level", /only an enum whose wire values are all strings/],
+    ["// @swift-codable Mood", /an enum with an unknown value/],
+    ["// @swift-codable R", /only an enum whose wire values are all strings/],
+    ["// @swift-codable Nope", /not a datatype the @swift roots reach/],
+  ]) assert.throws(() => emit(extra), message);
+  for (const fields of ["on: Option<bool> := Some(\"x\")", "count: int := true", "lvl: Level := two", "count: int := Some(0)"]) {
+    assert.throws(() => emit("", fields), /a default is a qualified constructor/);
+  }
 });

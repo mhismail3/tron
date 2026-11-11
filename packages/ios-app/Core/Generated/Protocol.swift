@@ -227,6 +227,32 @@ package indirect enum JsonValue: Hashable, Sendable {
     }
   }
 }
+package enum SessionPhase: String, CaseIterable, Codable, Hashable, Sendable {
+  case idle = "idle"
+  case running = "running"
+  case compacting = "compacting"
+  case retrying = "retrying"
+  case interrupted = "interrupted"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionPhase {
+    switch v {
+    case .string("idle"): return .idle
+    case .string("running"): return .running
+    case .string("compacting"): return .compacting
+    case .string("retrying"): return .retrying
+    case .string("interrupted"): return .interrupted
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .idle: return "\"idle\""
+    case .running: return "\"running\""
+    case .compacting: return "\"compacting\""
+    case .retrying: return "\"retrying\""
+    case .interrupted: return "\"interrupted\""
+    }
+  }
+}
 package enum ResourceDistribution: String, CaseIterable, Hashable, Sendable {
   case external = "external"
   case module_ = "module"
@@ -2711,7 +2737,7 @@ package struct HomeTaskCheckin: Hashable, Sendable {
   package let operationId: String
   package let at: String
   package let attention: HomeTaskCheckinAttention
-  package init(step: String, done: String, next: String, blocker: String? = nil, refs: HomeTaskCheckinRequestRefs? = nil, needsAttention: Bool? = nil, id: String, taskId: String, sessionId: String, operationId: String, at: String, attention: HomeTaskCheckinAttention) {
+  package init(step: String, done: String, next: String, blocker: String? = nil, refs: HomeTaskCheckinRequestRefs? = nil, needsAttention: Bool? = nil, id: String, taskId: String, sessionId: String, operationId: String, at: String, attention: HomeTaskCheckinAttention = .none) {
     self.step = step
     self.done = done
     self.next = next
