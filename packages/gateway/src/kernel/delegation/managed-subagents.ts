@@ -183,8 +183,34 @@ function validateSdkPeers(entries: Entry[]): void {
   }
 }
 
+function treeIdentity(root: string): string {
+  const stamp = (path: string) => {
+    const stat = lstatSync(path, { bigint: true });
+    return `${path}\0${stat.dev}:${stat.ino}:${stat.mode}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  };
+  const rows: string[] = [];
+  for (let parent = dirname(root); dirname(parent) !== parent; parent = dirname(parent)) {
+    const stat = lstatSync(parent, { bigint: true });
+    rows.push(`${parent}\0${stat.dev}:${stat.ino}:${stat.mode}`);
+  }
+  const walk = (directory: string): void => {
+    rows.push(stamp(directory));
+    const handle = opendirSync(directory);
+    try {
+      for (let item = handle.readSync(); item !== null; item = handle.readSync()) {
+        const path = join(directory, item.name);
+        if (item.isDirectory()) walk(path);
+        else rows.push(stamp(path));
+      }
+    } finally { handle.closeSync(); }
+  };
+  walk(root);
+  return rows.sort().join("\n");
+}
+
 export class ManagedSubagents {
   readonly root: string;
+  private verifiedTree: string | undefined;
   constructor(private readonly tronHome: string, private readonly logger?: ModuleLog) {
     this.tronHome = resolve(tronHome);
     let ancestor = this.tronHome;
@@ -227,7 +253,12 @@ export class ManagedSubagents {
 
   verify(): string {
     if (!existsSync(this.root)) throw new GatewayError("conflict", "managed pi-subagents unavailable: install the selected Tron closure before activation");
-    this.verifyRoot(this.root, closureEntries());
+    const identity = treeIdentity(this.root);
+    if (identity !== this.verifiedTree) {
+      this.verifiedTree = undefined;
+      this.verifyRoot(this.root, closureEntries());
+      this.verifiedTree = identity;
+    }
     return this.root;
   }
 
