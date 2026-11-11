@@ -88,7 +88,11 @@ describe("prompt journeys across the real Gateway process", () => {
       expect(status.result).toEqual({ status: "completed", result: { operationId: admitted.result.operationId } });
       await phone.close();
 
-      await gateway.restart();
+      const normalRestartStarted = performance.now();
+      await gateway.restart({ whileStopped: async () => {
+        console.info("normal Gateway shutdown ms", performance.now() - normalRestartStarted);
+      } });
+      console.info("normal Gateway process restart ms", performance.now() - normalRestartStarted);
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
       expect(gateway.provider.requests).toHaveLength(1);
       expect(gateway.provider.requests[0]!.messages.filter((message) => message.role === "user")).toHaveLength(1);
