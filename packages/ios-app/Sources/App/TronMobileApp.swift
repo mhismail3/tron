@@ -20,6 +20,7 @@ struct TronMobileApp: App {
     @State private var hostedModel: AppModel
 
     init() {
+        HostedPresentationProbe.installIdleCapture()
         if ProcessInfo.processInfo.environment["TRON_UI_LOCK_RENDERING"] == "1" {
             UIView.setAnimationsEnabled(false)
         }
@@ -35,7 +36,9 @@ struct TronMobileApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-            if ProcessInfo.processInfo.arguments.contains("-tron-tool-sheets-polish-fixture") {
+            if ProcessInfo.processInfo.arguments.contains("-tron-idle-control") {
+                HostedIdleControlFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-tool-sheets-polish-fixture") {
                 HostedToolSheetsPolishFixture().environment(hostedModel)
             } else if ProcessInfo.processInfo.arguments.contains("-tron-home-dashboard-fixture") {
                 HostedHomeDashboardFixture()

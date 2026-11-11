@@ -107,6 +107,11 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
   independent transaction roots; their layout updates cannot rely on the presenter's
   transaction ([UI locks](../../UITests/Locks/README.md)). Normal journeys are unchanged.
 
+- **Hosted idle evidence.** `PresentationActivityCoordinator` exposes only aggregate current
+  mounted/activity counts to `HostedPresentationProbe` through bounded weak references, never
+  copied surface state or surface identity strings. The simulator process supervisor owns
+  trigger, capture and retention ([idle diagnostics](../../docs/development.md#proving-idle-diagnostics)).
+
 ## Invariants
 
 - One authority per fact: no second lifecycle phase, receipt map, queue mirror or event journal.
