@@ -2364,6 +2364,60 @@ export function decodePackageProvides(v: unknown, p = "$"): PackageProvides {
 export function encodePackageProvides(v: PackageProvides): string {
   return "{" + (',"skills":' + "[" + v.skills.map((x) => JSON.stringify(x)).join(",") + "]" + ',"prompts":' + "[" + v.prompts.map((x) => JSON.stringify(x)).join(",") + "]" + ',"themes":' + "[" + v.themes.map((x) => JSON.stringify(x)).join(",") + "]" + ',"subagents":' + "[" + v.subagents.map((x) => JSON.stringify(x)).join(",") + "]" + ',"tools":' + "[" + v.tools.map((x) => JSON.stringify(x)).join(",") + "]" + ',"commands":' + "[" + v.commands.map((x) => JSON.stringify(x)).join(",") + "]").slice(1) + "}";
 }
+export type PackageScope = "user" | "project";
+const PackageScopeValues: ReadonlyArray<unknown> = ["user", "project"];
+export function decodePackageScope(v: unknown, p = "$"): PackageScope { if (!PackageScopeValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as PackageScope; }
+export function encodePackageScope(v: PackageScope): string { return JSON.stringify(v); }
+/**
+ * One configured package as `packages.list` answers it: Pi's configured package, what it
+ * provides, and why it is ignored or may not run, when it is.
+ */
+export interface PackageSummary {
+  source: string;
+  scope: PackageScope;
+  filtered: boolean;
+  installedPath?: string;
+  provides?: PackageProvides;
+  conflict?: PackageConflict;
+  nodeRequirement?: PackageNodeRequirement;
+}
+export function decodePackageSummary(v: unknown, p = "$"): PackageSummary {
+  const o = obj(v, p);
+  only(o, p, ["source","scope","filtered","installedPath","provides","conflict","nodeRequirement"]);
+  return { source: str(own(o, "source"), p + ".source"), scope: decodePackageScope(own(o, "scope"), p + ".scope"), filtered: bool(own(o, "filtered"), p + ".filtered"), ...(own(o, "installedPath") === undefined ? {} : { installedPath: str(own(o, "installedPath"), p + ".installedPath") }), ...(own(o, "provides") === undefined ? {} : { provides: decodePackageProvides(own(o, "provides"), p + ".provides") }), ...(own(o, "conflict") === undefined ? {} : { conflict: decodePackageConflict(own(o, "conflict"), p + ".conflict") }), ...(own(o, "nodeRequirement") === undefined ? {} : { nodeRequirement: decodePackageNodeRequirement(own(o, "nodeRequirement"), p + ".nodeRequirement") }) };
+}
+export function encodePackageSummary(v: PackageSummary): string {
+  return "{" + (',"source":' + JSON.stringify(v.source) + ',"scope":' + encodePackageScope(v.scope) + ',"filtered":' + JSON.stringify(v.filtered) + (v.installedPath === undefined ? "" : ',"installedPath":' + JSON.stringify(v.installedPath)) + (v.provides === undefined ? "" : ',"provides":' + encodePackageProvides(v.provides)) + (v.conflict === undefined ? "" : ',"conflict":' + encodePackageConflict(v.conflict)) + (v.nodeRequirement === undefined ? "" : ',"nodeRequirement":' + encodePackageNodeRequirement(v.nodeRequirement))).slice(1) + "}";
+}
+/** `packages.list`: the configured packages and Pi's resolved resources for the directory. */
+export interface PackageInventory { packages: PackageSummary[]; resources: JsonValue; providesDiagnostic?: string }
+export function decodePackageInventory(v: unknown, p = "$"): PackageInventory {
+  const o = obj(v, p);
+  only(o, p, ["packages","resources","providesDiagnostic"]);
+  return { packages: seq(own(o, "packages"), p + ".packages", (x, q) => decodePackageSummary(x, q)), resources: decodeJsonValue(own(o, "resources"), p + ".resources"), ...(own(o, "providesDiagnostic") === undefined ? {} : { providesDiagnostic: str(own(o, "providesDiagnostic"), p + ".providesDiagnostic") }) };
+}
+export function encodePackageInventory(v: PackageInventory): string {
+  return "{" + (',"packages":' + "[" + v.packages.map((x) => encodePackageSummary(x)).join(",") + "]" + ',"resources":' + encodeJsonValue(v.resources) + (v.providesDiagnostic === undefined ? "" : ',"providesDiagnostic":' + JSON.stringify(v.providesDiagnostic))).slice(1) + "}";
+}
+export interface PackageUpdate { source: string; displayName: string; type: string; scope: PackageScope }
+export function decodePackageUpdate(v: unknown, p = "$"): PackageUpdate {
+  const o = obj(v, p);
+  only(o, p, ["source","displayName","type","scope"]);
+  return { source: str(own(o, "source"), p + ".source"), displayName: str(own(o, "displayName"), p + ".displayName"), type: str(own(o, "type"), p + ".type"), scope: decodePackageScope(own(o, "scope"), p + ".scope") };
+}
+export function encodePackageUpdate(v: PackageUpdate): string {
+  return "{" + (',"source":' + JSON.stringify(v.source) + ',"displayName":' + JSON.stringify(v.displayName) + ',"type":' + JSON.stringify(v.type) + ',"scope":' + encodePackageScope(v.scope)).slice(1) + "}";
+}
+/** `packages.checkUpdates`: the configured packages with an available update. */
+export interface PackageUpdates { updates: PackageUpdate[] }
+export function decodePackageUpdates(v: unknown, p = "$"): PackageUpdates {
+  const o = obj(v, p);
+  only(o, p, ["updates"]);
+  return { updates: seq(own(o, "updates"), p + ".updates", (x, q) => decodePackageUpdate(x, q)) };
+}
+export function encodePackageUpdates(v: PackageUpdates): string {
+  return "{" + (',"updates":' + "[" + v.updates.map((x) => encodePackageUpdate(x)).join(",") + "]").slice(1) + "}";
+}
 export type HomeProfileListItemKind = "preference" | "standing-decision" | "delegation-default" | "fact" | "correction";
 const HomeProfileListItemKindValues: ReadonlyArray<unknown> = ["preference", "standing-decision", "delegation-default", "fact", "correction"];
 export function decodeHomeProfileListItemKind(v: unknown, p = "$"): HomeProfileListItemKind { if (!HomeProfileListItemKindValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as HomeProfileListItemKind; }

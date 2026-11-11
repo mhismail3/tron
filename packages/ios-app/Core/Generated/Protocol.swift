@@ -739,6 +739,245 @@ package struct TronModuleList: Hashable, Sendable {
     return "{" + String(s.dropFirst()) + "}"
   }
 }
+package enum PackageNodeRequirementStatus: String, CaseIterable, Hashable, Sendable {
+  case satisfied = "satisfied"
+  case unsatisfied = "unsatisfied"
+  case invalid = "invalid"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> PackageNodeRequirementStatus {
+    switch v {
+    case .string("satisfied"): return .satisfied
+    case .string("unsatisfied"): return .unsatisfied
+    case .string("invalid"): return .invalid
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .satisfied: return "\"satisfied\""
+    case .unsatisfied: return "\"unsatisfied\""
+    case .invalid: return "\"invalid\""
+    }
+  }
+}
+package struct PackageNodeRequirement: Hashable, Sendable {
+  package let range: String
+  package let runtime: String
+  package let status: PackageNodeRequirementStatus
+  package init(range: String, runtime: String, status: PackageNodeRequirementStatus) {
+    self.range = range
+    self.runtime = runtime
+    self.status = status
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> PackageNodeRequirement {
+    let o = try wObj(v, p)
+    let f_range: String = wAbsent(o.value("range")) ? "" : try wStr(o.value("range")!, p + ".range")
+    let f_runtime: String = wAbsent(o.value("runtime")) ? "" : try wStr(o.value("runtime")!, p + ".runtime")
+    let f_status: PackageNodeRequirementStatus = wAbsent(o.value("status")) ? try wMissing(p + ".status") : try PackageNodeRequirementStatus.decode(o.value("status")!, p + ".status")
+    return PackageNodeRequirement(range: f_range, runtime: f_runtime, status: f_status)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"range\":" + wEscape(self.range)
+    s += ",\"runtime\":" + wEscape(self.runtime)
+    s += ",\"status\":" + self.status.encode()
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package enum PackageConflictCode: String, CaseIterable, Hashable, Sendable {
+  case managedProvider = "managed-provider"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> PackageConflictCode {
+    switch v {
+    case .string("managed-provider"): return .managedProvider
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .managedProvider: return "\"managed-provider\""
+    }
+  }
+}
+package struct PackageConflict: Hashable, Sendable {
+  package let code: PackageConflictCode
+  package let message: String
+  package init(code: PackageConflictCode, message: String) {
+    self.code = code
+    self.message = message
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> PackageConflict {
+    let o = try wObj(v, p)
+    let f_code: PackageConflictCode = wAbsent(o.value("code")) ? .managedProvider : try PackageConflictCode.decode(o.value("code")!, p + ".code")
+    let f_message: String = wAbsent(o.value("message")) ? "" : try wStr(o.value("message")!, p + ".message")
+    return PackageConflict(code: f_code, message: f_message)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"code\":" + self.code.encode()
+    s += ",\"message\":" + wEscape(self.message)
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct PackageProvides: Hashable, Sendable {
+  package let skills: [String]
+  package let prompts: [String]
+  package let themes: [String]
+  package let subagents: [String]
+  package let tools: [String]
+  package let commands: [String]
+  package init(skills: [String], prompts: [String], themes: [String], subagents: [String], tools: [String], commands: [String]) {
+    self.skills = skills
+    self.prompts = prompts
+    self.themes = themes
+    self.subagents = subagents
+    self.tools = tools
+    self.commands = commands
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> PackageProvides {
+    let o = try wObj(v, p)
+    let f_skills: [String] = wAbsent(o.value("skills")) ? [] : try wSeq(o.value("skills")!, p + ".skills") { x, q in try wStr(x, q) }
+    let f_prompts: [String] = wAbsent(o.value("prompts")) ? [] : try wSeq(o.value("prompts")!, p + ".prompts") { x, q in try wStr(x, q) }
+    let f_themes: [String] = wAbsent(o.value("themes")) ? [] : try wSeq(o.value("themes")!, p + ".themes") { x, q in try wStr(x, q) }
+    let f_subagents: [String] = wAbsent(o.value("subagents")) ? [] : try wSeq(o.value("subagents")!, p + ".subagents") { x, q in try wStr(x, q) }
+    let f_tools: [String] = wAbsent(o.value("tools")) ? [] : try wSeq(o.value("tools")!, p + ".tools") { x, q in try wStr(x, q) }
+    let f_commands: [String] = wAbsent(o.value("commands")) ? [] : try wSeq(o.value("commands")!, p + ".commands") { x, q in try wStr(x, q) }
+    return PackageProvides(skills: f_skills, prompts: f_prompts, themes: f_themes, subagents: f_subagents, tools: f_tools, commands: f_commands)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"skills\":" + "[" + self.skills.map { wEscape($0) }.joined(separator: ",") + "]"
+    s += ",\"prompts\":" + "[" + self.prompts.map { wEscape($0) }.joined(separator: ",") + "]"
+    s += ",\"themes\":" + "[" + self.themes.map { wEscape($0) }.joined(separator: ",") + "]"
+    s += ",\"subagents\":" + "[" + self.subagents.map { wEscape($0) }.joined(separator: ",") + "]"
+    s += ",\"tools\":" + "[" + self.tools.map { wEscape($0) }.joined(separator: ",") + "]"
+    s += ",\"commands\":" + "[" + self.commands.map { wEscape($0) }.joined(separator: ",") + "]"
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package enum PackageScope: String, CaseIterable, Hashable, Sendable {
+  case user = "user"
+  case project = "project"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> PackageScope {
+    switch v {
+    case .string("user"): return .user
+    case .string("project"): return .project
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .user: return "\"user\""
+    case .project: return "\"project\""
+    }
+  }
+}
+package struct PackageSummary: Hashable, Sendable {
+  package let source: String
+  package let scope: PackageScope
+  package let filtered: Bool
+  package let installedPath: String?
+  package let provides: PackageProvides?
+  package let conflict: PackageConflict?
+  package let nodeRequirement: PackageNodeRequirement?
+  package init(source: String, scope: PackageScope, filtered: Bool, installedPath: String? = nil, provides: PackageProvides? = nil, conflict: PackageConflict? = nil, nodeRequirement: PackageNodeRequirement? = nil) {
+    self.source = source
+    self.scope = scope
+    self.filtered = filtered
+    self.installedPath = installedPath
+    self.provides = provides
+    self.conflict = conflict
+    self.nodeRequirement = nodeRequirement
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> PackageSummary {
+    let o = try wObj(v, p)
+    let f_source: String = wAbsent(o.value("source")) ? "" : try wStr(o.value("source")!, p + ".source")
+    let f_scope: PackageScope = wAbsent(o.value("scope")) ? try wMissing(p + ".scope") : try PackageScope.decode(o.value("scope")!, p + ".scope")
+    let f_filtered: Bool = wAbsent(o.value("filtered")) ? false : try wBool(o.value("filtered")!, p + ".filtered")
+    let f_installedPath: String? = wAbsent(o.value("installedPath")) ? nil : try wStr(o.value("installedPath")!, p + ".installedPath")
+    let f_provides: PackageProvides? = wAbsent(o.value("provides")) ? nil : try PackageProvides.decode(o.value("provides")!, p + ".provides")
+    let f_conflict: PackageConflict? = wAbsent(o.value("conflict")) ? nil : try PackageConflict.decode(o.value("conflict")!, p + ".conflict")
+    let f_nodeRequirement: PackageNodeRequirement? = wAbsent(o.value("nodeRequirement")) ? nil : try PackageNodeRequirement.decode(o.value("nodeRequirement")!, p + ".nodeRequirement")
+    return PackageSummary(source: f_source, scope: f_scope, filtered: f_filtered, installedPath: f_installedPath, provides: f_provides, conflict: f_conflict, nodeRequirement: f_nodeRequirement)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"source\":" + wEscape(self.source)
+    s += ",\"scope\":" + self.scope.encode()
+    s += ",\"filtered\":" + (self.filtered ? "true" : "false")
+    s += (self.installedPath == nil ? "" : ",\"installedPath\":" + wEscape(self.installedPath!))
+    s += (self.provides == nil ? "" : ",\"provides\":" + self.provides!.encode())
+    s += (self.conflict == nil ? "" : ",\"conflict\":" + self.conflict!.encode())
+    s += (self.nodeRequirement == nil ? "" : ",\"nodeRequirement\":" + self.nodeRequirement!.encode())
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct PackageInventory: Hashable, Sendable {
+  package let packages: [PackageSummary]
+  package let resources: JsonValue
+  package let providesDiagnostic: String?
+  package init(packages: [PackageSummary], resources: JsonValue, providesDiagnostic: String? = nil) {
+    self.packages = packages
+    self.resources = resources
+    self.providesDiagnostic = providesDiagnostic
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> PackageInventory {
+    let o = try wObj(v, p)
+    let f_packages: [PackageSummary] = wAbsent(o.value("packages")) ? [] : try wSeq(o.value("packages")!, p + ".packages") { x, q in try PackageSummary.decode(x, q) }
+    let f_resources: JsonValue = o.value("resources") == nil ? .null_ : try JsonValue.decode(o.value("resources")!, p + ".resources")
+    let f_providesDiagnostic: String? = wAbsent(o.value("providesDiagnostic")) ? nil : try wStr(o.value("providesDiagnostic")!, p + ".providesDiagnostic")
+    return PackageInventory(packages: f_packages, resources: f_resources, providesDiagnostic: f_providesDiagnostic)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"packages\":" + "[" + self.packages.map { $0.encode() }.joined(separator: ",") + "]"
+    s += ",\"resources\":" + self.resources.encode()
+    s += (self.providesDiagnostic == nil ? "" : ",\"providesDiagnostic\":" + wEscape(self.providesDiagnostic!))
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct PackageUpdate: Hashable, Sendable {
+  package let source: String
+  package let displayName: String
+  package let type: String
+  package let scope: PackageScope
+  package init(source: String, displayName: String, type: String, scope: PackageScope) {
+    self.source = source
+    self.displayName = displayName
+    self.type = type
+    self.scope = scope
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> PackageUpdate {
+    let o = try wObj(v, p)
+    let f_source: String = wAbsent(o.value("source")) ? "" : try wStr(o.value("source")!, p + ".source")
+    let f_displayName: String = wAbsent(o.value("displayName")) ? "" : try wStr(o.value("displayName")!, p + ".displayName")
+    let f_type: String = wAbsent(o.value("type")) ? "" : try wStr(o.value("type")!, p + ".type")
+    let f_scope: PackageScope = wAbsent(o.value("scope")) ? try wMissing(p + ".scope") : try PackageScope.decode(o.value("scope")!, p + ".scope")
+    return PackageUpdate(source: f_source, displayName: f_displayName, type: f_type, scope: f_scope)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"source\":" + wEscape(self.source)
+    s += ",\"displayName\":" + wEscape(self.displayName)
+    s += ",\"type\":" + wEscape(self.type)
+    s += ",\"scope\":" + self.scope.encode()
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct PackageUpdates: Hashable, Sendable {
+  package let updates: [PackageUpdate]
+  package init(updates: [PackageUpdate]) {
+    self.updates = updates
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> PackageUpdates {
+    let o = try wObj(v, p)
+    let f_updates: [PackageUpdate] = wAbsent(o.value("updates")) ? [] : try wSeq(o.value("updates")!, p + ".updates") { x, q in try PackageUpdate.decode(x, q) }
+    return PackageUpdates(updates: f_updates)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"updates\":" + "[" + self.updates.map { $0.encode() }.joined(separator: ",") + "]"
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
 package enum HomeProfileListItemKind: String, CaseIterable, Hashable, Sendable {
   case preference = "preference"
   case standingDecision = "standing-decision"

@@ -101,8 +101,9 @@ struct ExtensionsSettingsView: View {
 
                 if let inventory {
                     localThemesGroup(inventory)
-                    if inventory.resources.objectValue?.isEmpty == false {
-                        TronTechnicalJSONRow(value: inventory.resources, title: "Technical Details",
+                    let resources = JSONValue(inventory.resources)
+                    if resources.objectValue?.isEmpty == false {
+                        TronTechnicalJSONRow(value: resources, title: "Technical Details",
                                              subtitle: "View paths, provenance, status, and other resolved resource data",
                                              sheetTitle: "Resolved Resources JSON", accent: .tronSlate)
                     }
@@ -176,7 +177,7 @@ struct ExtensionsSettingsView: View {
     private var resolutionSummary: String {
         guard let inventory else { return "Waiting for the Gateway resource projection" }
         let packageCount = inventory.packages.count
-        let themeCount = PackageThemesPresentation.items(from: inventory.resources).count
+        let themeCount = PackageThemesPresentation.items(from: JSONValue(inventory.resources)).count
         return "\(packageCount) installed package\(packageCount == 1 ? "" : "s") · \(themeCount) resolved theme\(themeCount == 1 ? "" : "s")"
     }
 
@@ -373,7 +374,7 @@ struct ExtensionsSettingsView: View {
     @ViewBuilder
     private func localThemesGroup(_ inventory: PackageInventory) -> some View {
         let items = PackageThemesPresentation.localItems(
-            from: inventory.resources,
+            from: JSONValue(inventory.resources),
             packages: inventory.packages
         )
         if !items.isEmpty {

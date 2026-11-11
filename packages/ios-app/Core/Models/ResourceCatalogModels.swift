@@ -75,82 +75,42 @@ package enum CommandCatalogPolicy {
     }
 }
 
-package struct PackageSummary: Codable, Hashable, Identifiable, Sendable {
-    package enum Scope: String, Codable, Sendable { case user, project }
-    package let source: String
-    package let scope: Scope
-    package let filtered: Bool
-    let installedPath: String?
-    package var provides: PackageProvides? = nil
-    package var conflict: PackageConflict? = nil
-    package var nodeRequirement: PackageNodeRequirement? = nil
+extension PackageSummary: Identifiable {
     package var id: String { "\(scope.rawValue):\(source)" }
     package var isBundled: Bool { source.hasPrefix("tron:") }
     package var scopeLabel: String { isBundled ? "Bundled with Tron" : scope == .project ? "Project" : "Global" }
 }
 
-package struct PackageNodeRequirement: Codable, Hashable, Sendable {
-    package let range: String
-    package let runtime: String
-    package let status: String
-
+extension PackageNodeRequirement {
     package var tag: String? {
         switch status {
-        case "satisfied": nil
-        case "invalid": "Unreadable Node range"
-        default: "Needs Node \(range)"
+        case .satisfied: nil
+        case .invalid: "Unreadable Node range"
+        case .unsatisfied: "Needs Node \(range)"
         }
     }
 
     package var notice: String? {
         switch status {
-        case "satisfied":
+        case .satisfied:
             return nil
-        case "invalid":
+        case .invalid:
             return "This package declares Node “\(range)”, which isn’t a valid version range, so Tron can’t check it against Node \(runtime) on this Mac. The package is still loaded."
-        default:
+        case .unsatisfied:
             return "This package needs Node \(range), but this Mac runs Node \(runtime). It is still loaded, but it may fail until Tron ships a Node it supports."
         }
     }
-}
-
-package struct PackageConflict: Codable, Hashable, Sendable {
-    package let code: String
-    package let message: String
-}
-
-package struct PackageProvides: Codable, Hashable, Sendable {
-    package let skills: [String]
-    package let prompts: [String]
-    package let themes: [String]
-    package let subagents: [String]
-    package let tools: [String]
-    package let commands: [String]
-}
-
-package struct PackageInventory: Codable, Hashable, Sendable {
-    package let packages: [PackageSummary]
-    package let resources: JSONValue
-    package var providesDiagnostic: String? = nil
 }
 
 extension TronModuleSummary: Identifiable {
     package var id: String { name }
 }
 
-package struct PackageUpdate: Codable, Hashable, Identifiable, Sendable {
-    package let source: String
-    let displayName: String
-    let type: String
-    package let scope: PackageSummary.Scope
+extension PackageUpdate: Identifiable {
     package var id: String { "\(scope.rawValue):\(source)" }
 }
 
 package enum PackageCatalogPolicy {
-    private struct UpdateEnvelope: Encodable {
-        let updates: [PackageUpdate]
-    }
-
     static let maximumPackages = 256
     static let maximumUpdates = 256
     static let maximumStringBytes = 8_192
@@ -171,8 +131,8 @@ package enum PackageCatalogPolicy {
                 throw invalidCatalog("a package entry is empty, oversized, or duplicated")
             }
         }
-        try validateResources(inventory.resources)
-        guard let encoded = try? JSONEncoder().encode(inventory), encoded.count <= maximumEncodedBytes else {
+        try validateResources(JSONValue(inventory.resources))
+        guard inventory.encode().utf8.count <= maximumEncodedBytes else {
             throw invalidCatalog("it exceeds the \(maximumEncodedBytes / 1_024) KiB response limit")
         }
         return inventory
@@ -190,14 +150,13 @@ package enum PackageCatalogPolicy {
                   update.id.utf8.count <= maximumStringBytes,
                   !update.displayName.isEmpty,
                   update.displayName.utf8.count <= maximumStringBytes,
-                  !update.type.isEmpty,
-                  update.type.utf8.count <= maximumStringBytes,
+                  !update.`type`.isEmpty,
+                  update.`type`.utf8.count <= maximumStringBytes,
                   identities.insert(update.id).inserted else {
                 throw invalidCatalog("an update entry is empty, oversized, or duplicated")
             }
         }
-        guard let encoded = try? JSONEncoder().encode(UpdateEnvelope(updates: updates)),
-              encoded.count <= maximumEncodedBytes else {
+        guard PackageUpdates(updates: updates).encode().utf8.count <= maximumEncodedBytes else {
             throw invalidCatalog("it exceeds the \(maximumEncodedBytes / 1_024) KiB response limit")
         }
         return updates
