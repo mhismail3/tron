@@ -497,6 +497,74 @@ package struct GatewayRestartResponse: Hashable, Sendable {
     return "{" + String(s.dropFirst()) + "}"
   }
 }
+package struct SessionSummaryUpdate: Hashable, Sendable {
+  package let sessionId: String
+  package let summaryRevision: Int
+  package let phase: SessionPhase
+  package let foregroundPhase: SessionPhase?
+  package let hasActiveSubagents: Bool
+  package let waitingForUser: Bool
+  package let name: String?
+  package let updatedAt: String
+  package let activeSince: String?
+  package let messageCount: Int
+  package let firstMessage: String
+  package let completionRevision: Int
+  package let attentionRevision: Int
+  package let isUnread: Bool
+  package init(sessionId: String, summaryRevision: Int, phase: SessionPhase, foregroundPhase: SessionPhase? = nil, hasActiveSubagents: Bool = false, waitingForUser: Bool = false, name: String? = nil, updatedAt: String, activeSince: String? = nil, messageCount: Int, firstMessage: String, completionRevision: Int = 0, attentionRevision: Int = 0, isUnread: Bool = false) {
+    self.sessionId = sessionId
+    self.summaryRevision = summaryRevision
+    self.phase = phase
+    self.foregroundPhase = foregroundPhase
+    self.hasActiveSubagents = hasActiveSubagents
+    self.waitingForUser = waitingForUser
+    self.name = name
+    self.updatedAt = updatedAt
+    self.activeSince = activeSince
+    self.messageCount = messageCount
+    self.firstMessage = firstMessage
+    self.completionRevision = completionRevision
+    self.attentionRevision = attentionRevision
+    self.isUnread = isUnread
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionSummaryUpdate {
+    let o = try wObj(v, p)
+    let f_sessionId: String = wAbsent(o.value("sessionId")) ? "" : try wStr(o.value("sessionId")!, p + ".sessionId")
+    let f_summaryRevision: Int = wAbsent(o.value("summaryRevision")) ? 0 : try wInt(o.value("summaryRevision")!, p + ".summaryRevision", nat: false)
+    let f_phase: SessionPhase = wAbsent(o.value("phase")) ? try wMissing(p + ".phase") : try SessionPhase.decode(o.value("phase")!, p + ".phase")
+    let f_foregroundPhase: SessionPhase? = wAbsent(o.value("foregroundPhase")) ? nil : try SessionPhase.decode(o.value("foregroundPhase")!, p + ".foregroundPhase")
+    let f_hasActiveSubagents: Bool = wAbsent(o.value("hasActiveSubagents")) ? false : try wBool(o.value("hasActiveSubagents")!, p + ".hasActiveSubagents")
+    let f_waitingForUser: Bool = wAbsent(o.value("waitingForUser")) ? false : try wBool(o.value("waitingForUser")!, p + ".waitingForUser")
+    let f_name: String? = wAbsent(o.value("name")) ? nil : try wStr(o.value("name")!, p + ".name")
+    let f_updatedAt: String = wAbsent(o.value("updatedAt")) ? "" : try wStr(o.value("updatedAt")!, p + ".updatedAt")
+    let f_activeSince: String? = wAbsent(o.value("activeSince")) ? nil : try wStr(o.value("activeSince")!, p + ".activeSince")
+    let f_messageCount: Int = wAbsent(o.value("messageCount")) ? 0 : try wInt(o.value("messageCount")!, p + ".messageCount", nat: false)
+    let f_firstMessage: String = wAbsent(o.value("firstMessage")) ? "" : try wStr(o.value("firstMessage")!, p + ".firstMessage")
+    let f_completionRevision: Int = wAbsent(o.value("completionRevision")) ? 0 : try wInt(o.value("completionRevision")!, p + ".completionRevision", nat: false)
+    let f_attentionRevision: Int = wAbsent(o.value("attentionRevision")) ? 0 : try wInt(o.value("attentionRevision")!, p + ".attentionRevision", nat: false)
+    let f_isUnread: Bool = wAbsent(o.value("isUnread")) ? false : try wBool(o.value("isUnread")!, p + ".isUnread")
+    return SessionSummaryUpdate(sessionId: f_sessionId, summaryRevision: f_summaryRevision, phase: f_phase, foregroundPhase: f_foregroundPhase, hasActiveSubagents: f_hasActiveSubagents, waitingForUser: f_waitingForUser, name: f_name, updatedAt: f_updatedAt, activeSince: f_activeSince, messageCount: f_messageCount, firstMessage: f_firstMessage, completionRevision: f_completionRevision, attentionRevision: f_attentionRevision, isUnread: f_isUnread)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"sessionId\":" + wEscape(self.sessionId)
+    s += ",\"summaryRevision\":" + String(self.summaryRevision)
+    s += ",\"phase\":" + self.phase.encode()
+    s += (self.foregroundPhase == nil ? "" : ",\"foregroundPhase\":" + self.foregroundPhase!.encode())
+    s += ",\"hasActiveSubagents\":" + (self.hasActiveSubagents ? "true" : "false")
+    s += ",\"waitingForUser\":" + (self.waitingForUser ? "true" : "false")
+    s += (self.name == nil ? "" : ",\"name\":" + wEscape(self.name!))
+    s += ",\"updatedAt\":" + wEscape(self.updatedAt)
+    s += (self.activeSince == nil ? "" : ",\"activeSince\":" + wEscape(self.activeSince!))
+    s += ",\"messageCount\":" + String(self.messageCount)
+    s += ",\"firstMessage\":" + wEscape(self.firstMessage)
+    s += ",\"completionRevision\":" + String(self.completionRevision)
+    s += ",\"attentionRevision\":" + String(self.attentionRevision)
+    s += ",\"isUnread\":" + (self.isUnread ? "true" : "false")
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
 package enum ExtensionRunLifecycleState: String, CaseIterable, Hashable, Sendable {
   case queued = "queued"
   case running = "running"

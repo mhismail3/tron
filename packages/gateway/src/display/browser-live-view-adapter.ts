@@ -24,7 +24,7 @@ function browserGeneration(cdpUrl: string, runtimeGeneration: string): string | 
 
 const TRUSTED_BROWSER_EXTENSION_SOURCES = new Set([
   "git:github.com/fitchmultz/pi-agent-browser-native",
-  "git:github.com/fitchmultz/pi-agent-browser-native@d6cde09af8d7757bbfba5a4ffaf83381bb392683",
+  "git:github.com/fitchmultz/pi-agent-browser-native@6346982c0fec9e00b9f3ef6997cfb2d6f6893c6d",
 ]);
 
 function isTrustedBrowserOwner(owner: ExtensionOwner, toolName: string): boolean {
