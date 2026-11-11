@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -15,6 +15,10 @@ const PROTOCOL = join(ROOT, "packages/core/wire/Protocol.dfy");
 test("protocol: types.ts and the iOS decoders are generated, and the TypeScript and tolerant Swift codecs agree byte for byte", async (t) => {
   const check = spawnSync(join(ROOT, "scripts/tron"), ["proof", "wire", "--protocol", "--check"], { encoding: "utf8" });
   assert.equal(check.status, 0, check.stderr);
+  const doctor = spawnSync("/bin/bash", [join(ROOT, "tools/proof/bootstrap.sh"), "doctor"], { encoding: "utf8" });
+  assert.equal(doctor.status, 0, `pinned Dafny unavailable: ${doctor.stderr || doctor.stdout}`);
+  const resolve = spawnSync(join(process.env.XDG_CACHE_HOME || join(homedir(), "Library/Caches"), "tron-proof/bin/dafny"), ["resolve", PROTOCOL], { encoding: "utf8" });
+  assert.equal(resolve.status, 0, `Protocol.dfy is not valid Dafny under the pinned toolchain:\n${resolve.stdout}${resolve.stderr}`);
   const dir = mkdtempSync(join(tmpdir(), "tron-proof-protocol-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const gen = spawnSync(join(ROOT, "scripts/tron"), ["proof", "wire", "--generate", PROTOCOL, dir], { encoding: "utf8" });

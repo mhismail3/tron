@@ -1622,7 +1622,7 @@ module Protocol {
       scope: PackageScope,
       filtered: bool,
       installedPath: Option<string>,
-      provides: Option<PackageProvides>,
+      provides_: Option<PackageProvides>,
       conflict: Option<PackageConflict>,
       nodeRequirement: Option<PackageNodeRequirement>
     )
@@ -2137,7 +2137,7 @@ module Protocol {
       sessionId: string,
       operationId: string,
       at: string,
-      attention: HomeTaskCheckinAttention := none
+      attention: HomeTaskCheckinAttention := HomeTaskCheckinAttention.none
     )
 
   // @wire enum
