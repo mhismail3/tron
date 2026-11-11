@@ -50,7 +50,7 @@ enum CanonicalResourceChipPresentation {
     }
 
     static func detailEntry(for resource: ComposerResourceInvocation) -> ComposerResourceEntry? {
-        let source: CommandInfo.Source = switch resource.source {
+        let source: CommandInfoSource = switch resource.source {
         case .skill: .skill
         case .prompt: .prompt
         case .extension: .extension

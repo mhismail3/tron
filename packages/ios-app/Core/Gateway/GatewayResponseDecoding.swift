@@ -17,6 +17,18 @@ package enum GatewayResponseDecoding {
         }
     }
 
+    package static func decode<Response>(
+        _ value: JSONValue,
+        method: String,
+        _ decode: (WireJSON, String) throws -> Response
+    ) throws -> Response {
+        do {
+            return try value.decodeWire(decode)
+        } catch let error as DecodingError {
+            throw failure(method: method, error: error)
+        }
+    }
+
     static func failure(method: String, error: DecodingError) -> GatewayFailure {
         let diagnosis: (category: String, summary: String, path: [CodingKey])
         switch error {

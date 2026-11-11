@@ -3143,9 +3143,9 @@ struct ChatView: View {
         }
         let intent = composerInvocationIntent()
         let typedInvocation = intent.typed
-        let invoked: [(source: CommandInfo.Source, name: String)] = intent.staged.map { ($0.source, $0.name) }
+        let invoked: [(source: CommandInfoSource, name: String)] = intent.staged.map { ($0.source, $0.name) }
             + (typedInvocation.map { invocation in
-                let source: CommandInfo.Source = switch invocation.source {
+                let source: CommandInfoSource = switch invocation.source {
                 case .skill: .skill
                 case .prompt: .prompt
                 case .extension: .extension

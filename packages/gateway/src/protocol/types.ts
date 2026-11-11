@@ -140,10 +140,31 @@ export interface AdministrativeDrainSnapshot {
 export function decodeAdministrativeDrainSnapshot(v: unknown, p = "$"): AdministrativeDrainSnapshot {
   const o = obj(v, p);
   only(o, p, ["drainId","revision","phase","blockerCount","blockerCounts","blockers","omittedCount","suspectProjectionCount"]);
-  return { drainId: str(own(o, "drainId"), p + ".drainId"), revision: num(own(o, "revision"), p + ".revision"), phase: decodeAdministrativeDrainPhase(own(o, "phase"), p + ".phase"), blockerCount: num(own(o, "blockerCount"), p + ".blockerCount"), blockerCounts: dict(own(o, "blockerCounts"), p + ".blockerCounts", (x, q) => num(x, q), decodeAdministrativeDrainBlockerCategory), blockers: seq(own(o, "blockers"), p + ".blockers", (x, q) => decodeAdministrativeDrainBlockerSummary(x, q)), omittedCount: num(own(o, "omittedCount"), p + ".omittedCount"), suspectProjectionCount: num(own(o, "suspectProjectionCount"), p + ".suspectProjectionCount") };
+  return { drainId: str(own(o, "drainId"), p + ".drainId"), revision: int(own(o, "revision"), p + ".revision"), phase: decodeAdministrativeDrainPhase(own(o, "phase"), p + ".phase"), blockerCount: int(own(o, "blockerCount"), p + ".blockerCount"), blockerCounts: dict(own(o, "blockerCounts"), p + ".blockerCounts", (x, q) => int(x, q), decodeAdministrativeDrainBlockerCategory), blockers: seq(own(o, "blockers"), p + ".blockers", (x, q) => decodeAdministrativeDrainBlockerSummary(x, q)), omittedCount: int(own(o, "omittedCount"), p + ".omittedCount"), suspectProjectionCount: int(own(o, "suspectProjectionCount"), p + ".suspectProjectionCount") };
 }
 export function encodeAdministrativeDrainSnapshot(v: AdministrativeDrainSnapshot): string {
   return "{" + (',"drainId":' + JSON.stringify(v.drainId) + ',"revision":' + encNum(v.revision) + ',"phase":' + encodeAdministrativeDrainPhase(v.phase) + ',"blockerCount":' + encNum(v.blockerCount) + ',"blockerCounts":' + encDict(v.blockerCounts, (x) => encNum(x)) + ',"blockers":' + "[" + v.blockers.map((x) => encodeAdministrativeDrainBlockerSummary(x)).join(",") + "]" + ',"omittedCount":' + encNum(v.omittedCount) + ',"suspectProjectionCount":' + encNum(v.suspectProjectionCount)).slice(1) + "}";
+}
+/**
+ * `gateway.restart`: whether the Gateway restarts now or after its administrative drain settles.
+ * A restart-now request while a drain is in progress answers only the flags and the drain.
+ */
+export interface GatewayRestartResponse {
+  restarting: boolean;
+  scheduled: boolean;
+  restartNow?: boolean;
+  activeSessionIds?: string[];
+  drainId?: string;
+  drainRevision?: number;
+  drain: AdministrativeDrainSnapshot;
+}
+export function decodeGatewayRestartResponse(v: unknown, p = "$"): GatewayRestartResponse {
+  const o = obj(v, p);
+  only(o, p, ["restarting","scheduled","restartNow","activeSessionIds","drainId","drainRevision","drain"]);
+  return { restarting: bool(own(o, "restarting"), p + ".restarting"), scheduled: bool(own(o, "scheduled"), p + ".scheduled"), ...(own(o, "restartNow") === undefined ? {} : { restartNow: bool(own(o, "restartNow"), p + ".restartNow") }), ...(own(o, "activeSessionIds") === undefined ? {} : { activeSessionIds: seq(own(o, "activeSessionIds"), p + ".activeSessionIds", (x, q) => str(x, q)) }), ...(own(o, "drainId") === undefined ? {} : { drainId: str(own(o, "drainId"), p + ".drainId") }), ...(own(o, "drainRevision") === undefined ? {} : { drainRevision: int(own(o, "drainRevision"), p + ".drainRevision") }), drain: decodeAdministrativeDrainSnapshot(own(o, "drain"), p + ".drain") };
+}
+export function encodeGatewayRestartResponse(v: GatewayRestartResponse): string {
+  return "{" + (',"restarting":' + JSON.stringify(v.restarting) + ',"scheduled":' + JSON.stringify(v.scheduled) + (v.restartNow === undefined ? "" : ',"restartNow":' + JSON.stringify(v.restartNow)) + (v.activeSessionIds === undefined ? "" : ',"activeSessionIds":' + "[" + v.activeSessionIds.map((x) => JSON.stringify(x)).join(",") + "]") + (v.drainId === undefined ? "" : ',"drainId":' + JSON.stringify(v.drainId)) + (v.drainRevision === undefined ? "" : ',"drainRevision":' + encNum(v.drainRevision)) + ',"drain":' + encodeAdministrativeDrainSnapshot(v.drain)).slice(1) + "}";
 }
 export interface SessionSummary {
   id: string;
@@ -2253,10 +2274,20 @@ export interface CommandDetail {
 export function decodeCommandDetail(v: unknown, p = "$"): CommandDetail {
   const o = obj(v, p);
   only(o, p, ["name","title","description","argumentHint","source","sourcePath","resourceSource","resourceScope","resourceOrigin","distribution","content","contentBytes","contentTruncated"]);
-  return { name: str(own(o, "name"), p + ".name"), ...(own(o, "title") === undefined ? {} : { title: str(own(o, "title"), p + ".title") }), ...(own(o, "description") === undefined ? {} : { description: str(own(o, "description"), p + ".description") }), ...(own(o, "argumentHint") === undefined ? {} : { argumentHint: str(own(o, "argumentHint"), p + ".argumentHint") }), source: decodeCommandInfoSource(own(o, "source"), p + ".source"), ...(own(o, "sourcePath") === undefined ? {} : { sourcePath: str(own(o, "sourcePath"), p + ".sourcePath") }), ...(own(o, "resourceSource") === undefined ? {} : { resourceSource: str(own(o, "resourceSource"), p + ".resourceSource") }), ...(own(o, "resourceScope") === undefined ? {} : { resourceScope: decodeCommandInfoResourceScope(own(o, "resourceScope"), p + ".resourceScope") }), ...(own(o, "resourceOrigin") === undefined ? {} : { resourceOrigin: decodeCommandInfoResourceOrigin(own(o, "resourceOrigin"), p + ".resourceOrigin") }), ...(own(o, "distribution") === undefined ? {} : { distribution: decodeResourceDistribution(own(o, "distribution"), p + ".distribution") }), ...(own(o, "content") === undefined ? {} : { content: str(own(o, "content"), p + ".content") }), ...(own(o, "contentBytes") === undefined ? {} : { contentBytes: num(own(o, "contentBytes"), p + ".contentBytes") }), ...(own(o, "contentTruncated") === undefined ? {} : { contentTruncated: bool(own(o, "contentTruncated"), p + ".contentTruncated") }) };
+  return { name: str(own(o, "name"), p + ".name"), ...(own(o, "title") === undefined ? {} : { title: str(own(o, "title"), p + ".title") }), ...(own(o, "description") === undefined ? {} : { description: str(own(o, "description"), p + ".description") }), ...(own(o, "argumentHint") === undefined ? {} : { argumentHint: str(own(o, "argumentHint"), p + ".argumentHint") }), source: decodeCommandInfoSource(own(o, "source"), p + ".source"), ...(own(o, "sourcePath") === undefined ? {} : { sourcePath: str(own(o, "sourcePath"), p + ".sourcePath") }), ...(own(o, "resourceSource") === undefined ? {} : { resourceSource: str(own(o, "resourceSource"), p + ".resourceSource") }), ...(own(o, "resourceScope") === undefined ? {} : { resourceScope: decodeCommandInfoResourceScope(own(o, "resourceScope"), p + ".resourceScope") }), ...(own(o, "resourceOrigin") === undefined ? {} : { resourceOrigin: decodeCommandInfoResourceOrigin(own(o, "resourceOrigin"), p + ".resourceOrigin") }), ...(own(o, "distribution") === undefined ? {} : { distribution: decodeResourceDistribution(own(o, "distribution"), p + ".distribution") }), ...(own(o, "content") === undefined ? {} : { content: str(own(o, "content"), p + ".content") }), ...(own(o, "contentBytes") === undefined ? {} : { contentBytes: int(own(o, "contentBytes"), p + ".contentBytes") }), ...(own(o, "contentTruncated") === undefined ? {} : { contentTruncated: bool(own(o, "contentTruncated"), p + ".contentTruncated") }) };
 }
 export function encodeCommandDetail(v: CommandDetail): string {
   return "{" + (',"name":' + JSON.stringify(v.name) + (v.title === undefined ? "" : ',"title":' + JSON.stringify(v.title)) + (v.description === undefined ? "" : ',"description":' + JSON.stringify(v.description)) + (v.argumentHint === undefined ? "" : ',"argumentHint":' + JSON.stringify(v.argumentHint)) + ',"source":' + encodeCommandInfoSource(v.source) + (v.sourcePath === undefined ? "" : ',"sourcePath":' + JSON.stringify(v.sourcePath)) + (v.resourceSource === undefined ? "" : ',"resourceSource":' + JSON.stringify(v.resourceSource)) + (v.resourceScope === undefined ? "" : ',"resourceScope":' + encodeCommandInfoResourceScope(v.resourceScope)) + (v.resourceOrigin === undefined ? "" : ',"resourceOrigin":' + encodeCommandInfoResourceOrigin(v.resourceOrigin)) + (v.distribution === undefined ? "" : ',"distribution":' + encodeResourceDistribution(v.distribution)) + (v.content === undefined ? "" : ',"content":' + JSON.stringify(v.content)) + (v.contentBytes === undefined ? "" : ',"contentBytes":' + encNum(v.contentBytes)) + (v.contentTruncated === undefined ? "" : ',"contentTruncated":' + JSON.stringify(v.contentTruncated))).slice(1) + "}";
+}
+/** `session.commands`: the session's invocable skills, prompts and extension commands. */
+export interface SessionCommands { commands: CommandInfo[] }
+export function decodeSessionCommands(v: unknown, p = "$"): SessionCommands {
+  const o = obj(v, p);
+  only(o, p, ["commands"]);
+  return { commands: seq(own(o, "commands"), p + ".commands", (x, q) => decodeCommandInfo(x, q)) };
+}
+export function encodeSessionCommands(v: SessionCommands): string {
+  return "{" + (',"commands":' + "[" + v.commands.map((x) => encodeCommandInfo(x)).join(",") + "]").slice(1) + "}";
 }
 /** Wire projection of one built-in Tron extension definition. */
 export interface TronModuleSummary { name: string; purpose: string; tools: string[]; commands: string[] }
@@ -2267,6 +2298,16 @@ export function decodeTronModuleSummary(v: unknown, p = "$"): TronModuleSummary 
 }
 export function encodeTronModuleSummary(v: TronModuleSummary): string {
   return "{" + (',"name":' + JSON.stringify(v.name) + ',"purpose":' + JSON.stringify(v.purpose) + ',"tools":' + "[" + v.tools.map((x) => JSON.stringify(x)).join(",") + "]" + ',"commands":' + "[" + v.commands.map((x) => JSON.stringify(x)).join(",") + "]").slice(1) + "}";
+}
+/** `modules.list`: the built-in Tron extension definitions. */
+export interface TronModuleList { modules: TronModuleSummary[] }
+export function decodeTronModuleList(v: unknown, p = "$"): TronModuleList {
+  const o = obj(v, p);
+  only(o, p, ["modules"]);
+  return { modules: seq(own(o, "modules"), p + ".modules", (x, q) => decodeTronModuleSummary(x, q)) };
+}
+export function encodeTronModuleList(v: TronModuleList): string {
+  return "{" + (',"modules":' + "[" + v.modules.map((x) => encodeTronModuleSummary(x)).join(",") + "]").slice(1) + "}";
 }
 export type PackageNodeRequirementStatus = "satisfied" | "unsatisfied" | "invalid";
 const PackageNodeRequirementStatusValues: ReadonlyArray<unknown> = ["satisfied", "unsatisfied", "invalid"];

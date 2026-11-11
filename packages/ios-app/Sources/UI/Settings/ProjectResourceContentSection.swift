@@ -3,7 +3,7 @@ import TronMobileCore
 
 struct ProjectResourceContentSection: View {
     let selection: ProjectResourceSelection
-    let detail: CommandResourceDetail?
+    let detail: CommandDetail?
     let subagentDetail: SubagentResourceDetail?
     let loadError: String?
     let accent: Color
@@ -12,7 +12,7 @@ struct ProjectResourceContentSection: View {
 
     private var readsInReader: Bool { selection.kind == .commands || selection.kind == .subagents }
 
-    private var bodySource: CommandInfo.Source {
+    private var bodySource: CommandInfoSource {
         selection.kind == .subagents ? .prompt : selection.commandInfo?.source ?? .extension
     }
 
@@ -95,7 +95,7 @@ struct ProjectResourceReading: Identifiable {
     let id: String
     let title: String
     let text: String
-    let source: CommandInfo.Source
+    let source: CommandInfoSource
     let truncated: Bool
 }
 

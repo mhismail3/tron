@@ -17,6 +17,40 @@ final class TronPadSheetPresentationUITests: XCTestCase {
     }
 
     @MainActor
+    func testQueuedFilePreviewPreservesScenePlacementInBothRoutes() {
+        for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
+            for home in [true, false] {
+                XCUIDevice.shared.orientation = orientation
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready",
+                    "-foreground-queued-editor", "-foreground-queued-file"]
+                app.launch()
+                defer { app.terminate() }
+                let window = app.windows.firstMatch.frame
+                let destination = app.buttons[home ? "home-pinned-row" : "session-row-home-shell-fixture:ordinary-session"]
+                XCTAssertTrue(destination.waitForExistence(timeout: 15), app.debugDescription)
+                destination.tap()
+                let file = app.buttons["File attachment, queued-note.txt"].firstMatch
+                XCTAssertTrue(file.waitForExistence(timeout: 15), app.debugDescription)
+                file.tap()
+                let done = app.buttons["Done"].firstMatch
+                let reader = sheetFrame(app, title: "queued-note.txt", done: done)
+                if window.width >= 1100 {
+                    assertTrailingColumn(reader, in: window)
+                } else {
+                    XCTAssertEqual(reader.midX, window.midX, accuracy: 2, "The file preview retains centered-card placement")
+                    XCTAssertGreaterThan(reader.minX, window.minX + 16)
+                    XCTAssertGreaterThan(reader.minY, window.minY + 20)
+                }
+                keepScreenshot(app, "queued-file-\(home ? "home" : "session")-\(orientation.rawValue)")
+                done.tap()
+                XCTAssertTrue(app.staticTexts["queued-note.txt"].waitForNonExistence(timeout: 5), app.debugDescription)
+                app.terminate()
+            }
+        }
+    }
+
+    @MainActor
     func testWideLandscapePrimarySheetsAreTrailingColumnsBesideAnInteractiveChat() {
         let app = launchHomeChat(orientation: .landscapeLeft)
         defer { app.terminate() }
