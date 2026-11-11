@@ -9,13 +9,13 @@ extension HomeSheet {
         }
     }
 
-    @ViewBuilder func memory(_ view: HomeMemoryViewDTO) -> some View {
+    @ViewBuilder func memory(_ view: HomeMemoryView) -> some View {
         if case .memorySummary(let line, _) = destination {
             memorySummary(line, halves: view.lines)
         }
     }
 
-    func memoryLines(_ lines: [HomeMemoryViewDTO.Line]) -> some View {
+    func memoryLines(_ lines: [HomeMemoryViewLine]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
                 if index > 0 { divider() }
@@ -24,7 +24,7 @@ extension HomeSheet {
         }
     }
 
-    func memoryLineRow(_ line: HomeMemoryViewDTO.Line) -> some View {
+    func memoryLineRow(_ line: HomeMemoryViewLine) -> some View {
         Button {
             if let item = line.item { present(.memoryItem(item)) }
             else { present(.memorySummary(line, sessionID: memoryFilter)) }
@@ -42,7 +42,7 @@ extension HomeSheet {
         .accessibilityIdentifier(line.isSummary ? "home-memory-summary-\(line.start)-\(line.span)" : "home-memory-row-\(line.start)")
     }
 
-    private func memorySummary(_ line: HomeMemoryViewDTO.Line, halves: [HomeMemoryViewDTO.Line]) -> some View {
+    private func memorySummary(_ line: HomeMemoryViewLine, halves: [HomeMemoryViewLine]) -> some View {
         TronSettingsSections(alignment: .leading, spacing: 18) {
             TronGlassCard(accent: accent) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -61,9 +61,9 @@ extension HomeSheet {
         .imageScale(.small)
     }
 
-    func memoryDetail(_ item: HomeMemoryItemDTO) -> some View {
+    func memoryDetail(_ item: HomeMemoryItem) -> some View {
         let message = item.projection.text
-        let remembered = item.summary.map { HomeMemoryPresentation.strip($0.text) }
+        let remembered = item.summary.value.map { HomeMemoryPresentation.strip($0.text) }
             .flatMap { HomeMemoryPresentation.differs($0, from: message) ? $0 : nil }
         return TronSettingsSections(alignment: .leading, spacing: 18) {
             if let remembered {
@@ -103,7 +103,7 @@ extension HomeSheet {
         .imageScale(.small)
     }
 
-    func evidenceSheet(_ page: HomeMemoryEvidencePageDTO) -> some View {
+    func evidenceSheet(_ page: HomeMemoryEvidencePage) -> some View {
         TronSettingsSections(alignment: .leading, spacing: 18) {
             Text(page.text)
                 .font(TronFont.mono())
@@ -141,8 +141,8 @@ extension HomeSheet {
             ]
             if let timestamp = item.timestamp { rows.append(.init(title: "Timestamp", value: timestamp, icon: "clock")) }
             if let tool = item.display?.toolName { rows.append(.init(title: "Tool", value: ToolDetailPresentation.displayTitle(for: tool), icon: ToolDetailPresentation.icon(for: tool))) }
-            if let status = item.display?.status { rows.append(.init(title: "Status", value: status, icon: "checkmark.circle")) }
-            if let summary = item.summary {
+            if let status = item.display?.status { rows.append(.init(title: "Status", value: status.rawValue, icon: "checkmark.circle")) }
+            if let summary = item.summary.value {
                 rows.append(.init(title: "Summary truncated", value: summary.truncated ? "Yes" : "No", icon: "text.badge.minus"))
             }
             return rows
@@ -152,7 +152,7 @@ extension HomeSheet {
                 .init(title: "Message range", value: "\(line.start)–\(line.start + line.span - 1)", icon: "number"),
                 .init(title: "Messages", value: String(line.span), icon: "text.alignleft"),
                 .init(title: "Level", value: String(line.span.trailingZeroBitCount), icon: "square.stack"),
-                .init(title: "Summary bytes", value: String((line.text ?? "").utf8.count), icon: "doc"),
+                .init(title: "Summary bytes", value: String((line.text.value ?? "").utf8.count), icon: "doc"),
                 .init(title: "Summary truncated", value: line.truncated ? "Yes" : "No", icon: "text.badge.minus"),
             ]
             if let sessionID { rows.append(.init(title: "Chapter session ID", value: sessionID, icon: "books.vertical")) }
@@ -181,7 +181,7 @@ extension HomeSheet {
         }
     }
 
-    nonisolated static func attributionIcon(_ attribution: HomeMemoryItemDTO.Attribution) -> String {
+    nonisolated static func attributionIcon(_ attribution: HomeMemoryItemAttribution) -> String {
         switch attribution {
         case .user: "person.fill"
         case .assistant: "house.fill"
@@ -190,7 +190,7 @@ extension HomeSheet {
         }
     }
 
-    nonisolated static func attributionLabel(_ attribution: HomeMemoryItemDTO.Attribution) -> String {
+    nonisolated static func attributionLabel(_ attribution: HomeMemoryItemAttribution) -> String {
         switch attribution {
         case .user: "You"
         case .assistant: "Home"
@@ -200,7 +200,7 @@ extension HomeSheet {
     }
 }
 
-extension HomeMemoryItemDTO {
+extension HomeMemoryItem {
     var isToolActivity: Bool {
         kind == .echo || display?.kind == .toolCall || display?.kind == .toolResult
     }
@@ -208,24 +208,24 @@ extension HomeMemoryItemDTO {
 
 @MainActor
 enum HomeMemoryPresentation {
-    static func icon(_ line: HomeMemoryViewDTO.Line) -> String {
+    static func icon(_ line: HomeMemoryViewLine) -> String {
         guard let item = line.item else { return "text.append" }
         return HomeSheet.attributionIcon(item.attribution)
     }
 
-    static func title(_ line: HomeMemoryViewDTO.Line) -> String {
+    static func title(_ line: HomeMemoryViewLine) -> String {
         if let item = line.item { return HomeSheet.attributionLabel(item.attribution) }
         return "Summary of \(line.span.formatted()) \(line.span == 1 ? "message" : "messages")"
     }
 
-    static func text(_ line: HomeMemoryViewDTO.Line) -> String {
-        guard let item = line.item else { return line.text ?? "Not summarized yet" }
+    static func text(_ line: HomeMemoryViewLine) -> String {
+        guard let item = line.item else { return line.text.value ?? "Not summarized yet" }
         if item.projection.omitted { return "Message left out of memory" }
-        guard item.isToolActivity else { return line.text ?? "Not summarized yet" }
+        guard item.isToolActivity else { return line.text.value ?? "Not summarized yet" }
         let display = item.display
         let tool = display?.toolName.map { ToolDetailPresentation.displayTitle(for: $0) } ?? "Tool"
         if item.kind == .echo || display?.kind == .toolResult {
-            let status = display?.status == "error" ? "Error" : display?.status == "ok" ? "Completed" : "Result"
+            let status = display?.status == .error ? "Error" : display?.status == .ok ? "Completed" : "Result"
             let size = ByteCountFormatter.string(fromByteCount: Int64(item.projection.text.utf8.count), countStyle: .file)
             return "\(tool) · \(status) · \(size) in memory"
         }
@@ -233,7 +233,7 @@ enum HomeMemoryPresentation {
         return [tool + count, display?.target].compactMap { $0 }.joined(separator: " · ")
     }
 
-    static func when(_ line: HomeMemoryViewDTO.Line, now: Date = .now) -> String? {
+    static func when(_ line: HomeMemoryViewLine, now: Date = .now) -> String? {
         line.isSummary ? HomeSheetTime.range(line.firstAt, line.lastAt) : HomeSheetTime.relative(line.firstAt, now: now)
     }
 

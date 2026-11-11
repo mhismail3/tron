@@ -908,7 +908,7 @@ export class EpisodicMemory {
   }
 
   private async compact(step: string, stamp: BuildStamp): Promise<string> {
-    let request = compactorRequest(EPISODIC_COMPACT_PROMPT, step, this.abort.signal, `tron-episodic:${this.dependencies.sessionId}`);
+    let request = compactorRequest(EPISODIC_COMPACT_PROMPT, step, this.abort.signal, `tron-episodic:${this.dependencies.sessionId}`, this.dependencies.sessionId);
     const tries: string[] = [];
     for (let attempt = 0; attempt < EPISODIC_TRIES; attempt += 1) {
       const reply = await this.compactCall(request, stamp);

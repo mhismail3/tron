@@ -853,7 +853,7 @@ struct SessionShellView: View {
         Task {
             defer { openingSessionID = nil }
             do {
-                let status: HomeStatusDTO
+                let status: HomeStatus
                 switch action {
                 case .open:
                     guard let currentStatus = model.homeStatus.status else { return }

@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 extension HomeSheet {
-    func profile(_ list: HomeProfileListDTO) -> some View {
+    func profile(_ list: HomeProfileList) -> some View {
         let active = list.active
         let inactive = list.items.filter { $0.status != .active }
         return TronSettingsSections(alignment: .leading, spacing: 18) {
@@ -24,7 +24,7 @@ extension HomeSheet {
         }
     }
 
-    func emptyProfile(_ list: HomeProfileListDTO) -> some View {
+    func emptyProfile(_ list: HomeProfileList) -> some View {
         TronFeedEmptyState(identifier: "home-profile-viewport") {
             TronSettingsSections(alignment: .leading, spacing: 18) {
                 profileHeader(list)
@@ -33,7 +33,7 @@ extension HomeSheet {
         } placeholder: { profileEmptyPlaceholder }
     }
 
-    @ViewBuilder private func profileHeader(_ list: HomeProfileListDTO) -> some View {
+    @ViewBuilder private func profileHeader(_ list: HomeProfileList) -> some View {
         TronSettingsCaption("About you, organized by area. Confirmed by you and Inferred describe what you have reviewed. Home reads relevant notes; placement grants no execution permission. Unsorted notes await review.").containerValue(\.tronSettingsSection, false)
         profileEditNotices()
     }
@@ -44,11 +44,11 @@ extension HomeSheet {
                              icon: "person.text.rectangle")
     }
 
-    private func profileUnclassifiedCaption(_ list: HomeProfileListDTO) -> some View {
+    private func profileUnclassifiedCaption(_ list: HomeProfileList) -> some View {
         TronSettingsCaption("\(list.unclassified) profile \(list.unclassified == 1 ? "note has" : "notes have") no single kind and \(list.unclassified == 1 ? "is" : "are") not applied.").containerValue(\.tronSettingsSection, false)
     }
 
-    func profileItemDetail(_ item: HomeProfileListDTO.Item) -> some View {
+    func profileItemDetail(_ item: HomeProfileListItem) -> some View {
         TronSettingsSections(alignment: .leading, spacing: 18) {
             profileEditNotices()
             TronGlassCard(accent: accent) {
@@ -86,7 +86,7 @@ extension HomeSheet {
         }
     }
 
-    private func profileItemActions(_ item: HomeProfileListDTO.Item) -> some View {
+    private func profileItemActions(_ item: HomeProfileListItem) -> some View {
         TronSettingsGroup("Change", accent: accent) {
             VStack(spacing: 0) {
                 if !item.confirmed {
@@ -149,7 +149,7 @@ extension HomeSheet {
         }
     }
 
-    private func confirm(_ item: HomeProfileListDTO.Item) {
+    private func confirm(_ item: HomeProfileListItem) {
         changeProfile([HomeProfileChange(action: .confirm, id: item.id, expectedRevision: item.revisionId)],
                       done: "Confirmed: \(HomeChapterPresentation.topicPreview(item.text, limit: 60))")
     }
@@ -204,7 +204,7 @@ extension HomeSheet {
         identity == admission.identity && admission.coordinator.activity(for: admission.identity.surfaceToken).allowsDataPublication
     }
 
-    func loadedProfileItem(_ carried: HomeProfileListDTO.Item) -> HomeProfileListDTO.Item {
+    func loadedProfileItem(_ carried: HomeProfileListItem) -> HomeProfileListItem {
         switch owner.state {
         case .loaded(let read, .profile(let list)), .loading(let read, .some(.profile(let list))):
             guard read.identity == identity else { return carried }
@@ -237,16 +237,16 @@ struct HomeProfileEditState {
 }
 
 struct HomeProfileItemEditor: View {
-    let item: HomeProfileListDTO.Item
+    let item: HomeProfileListItem
     let onSave: (HomeProfileChange, String) -> Void
     @PresentationState private var text: String
-    @PresentationState private var kind: HomeProfileListDTO.Item.Kind
+    @PresentationState private var kind: HomeProfileListItemKind
     @PresentationState private var replaces = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var theme
     private var accent: Color { theme?.accent ?? .tronPrimary }
 
-    init(item: HomeProfileListDTO.Item, onSave: @escaping (HomeProfileChange, String) -> Void) {
+    init(item: HomeProfileListItem, onSave: @escaping (HomeProfileChange, String) -> Void) {
         self.item = item
         self.onSave = onSave
         _text = PresentationState(wrappedValue: item.text)
@@ -277,7 +277,7 @@ struct HomeProfileItemEditor: View {
                 }
                 TronSettingsGroup("Kind", accent: accent) {
                     TronChoiceRow(icon: HomeProfilePresentation.kindIcon(kind), title: "Kind",
-                                  choices: HomeProfileListDTO.Item.Kind.allCases.map { TronChoice(id: $0, label: HomeProfilePresentation.kindTitle($0)) },
+                                  choices: HomeProfileListItemKind.allCases.map { TronChoice(id: $0, label: HomeProfilePresentation.kindTitle($0)) },
                                   selected: kind, accent: accent) { kind = $0 }
                 }
                 TronSettingsGroup("Replace", accent: accent) {
@@ -296,11 +296,11 @@ struct HomeProfileItemEditor: View {
         .tronSaveToolbar(enabled: valid && (changed || replaces)) {
             let preview = HomeChapterPresentation.topicPreview(line, limit: 60)
             if replaces {
-                onSave(HomeProfileChange(action: .supersede, id: item.id, expectedRevision: item.revisionId, text: line, kind: kind),
+                onSave(HomeProfileChange(action: .supersede, id: item.id, expectedRevision: item.revisionId, text: line, kind: kind.rawValue),
                        "Replaced with: \(preview)")
             } else {
                 onSave(HomeProfileChange(action: .refine, id: item.id, expectedRevision: item.revisionId,
-                                         text: line == item.text ? nil : line, kind: kind == item.kind ? nil : kind),
+                                         text: line == item.text ? nil : line, kind: kind == item.kind ? nil : kind.rawValue),
                        "Edited: \(preview)")
             }
             dismiss()
@@ -309,7 +309,7 @@ struct HomeProfileItemEditor: View {
 }
 
 struct HomeProfileRetireEditor: View {
-    let item: HomeProfileListDTO.Item
+    let item: HomeProfileListItem
     let onRetire: (String?) -> Void
     @PresentationState private var reason = ""
     @Environment(\.dismiss) private var dismiss
@@ -359,7 +359,7 @@ struct HomeProfileRetireEditor: View {
 }
 
 enum HomeProfilePresentation {
-    struct Group { let title: String; let items: [HomeProfileListDTO.Item] }
+    struct Group { let title: String; let items: [HomeProfileListItem] }
 
     private static let areas: [(String, String)] = [
         ("life", "Life & people"), ("routines", "Routines & wellbeing"),
@@ -368,7 +368,7 @@ enum HomeProfilePresentation {
         ("corrections", "Corrections"), ("inferred", "Unsorted"), ("prior", "Prior organization")
     ]
 
-    static func groups(_ items: [HomeProfileListDTO.Item]) -> [Group] {
+    static func groups(_ items: [HomeProfileListItem]) -> [Group] {
         areas.compactMap { path, title in
             let members = items.filter { $0.path == path || $0.path.hasPrefix(path + "/") }
                 .sorted { $0.path == $1.path ? $0.createdAt < $1.createdAt : $0.path < $1.path }
@@ -376,7 +376,7 @@ enum HomeProfilePresentation {
         }
     }
 
-    static func kindTitle(_ kind: HomeProfileListDTO.Item.Kind) -> String {
+    static func kindTitle(_ kind: HomeProfileListItemKind) -> String {
         switch kind {
         case .preference: "Preference"
         case .standingDecision: "Standing decision"
@@ -387,10 +387,10 @@ enum HomeProfilePresentation {
     }
 
     static func kindTitle(wire: String) -> String {
-        HomeProfileListDTO.Item.Kind(rawValue: wire).map(kindTitle) ?? wire
+        HomeProfileListItemKind(rawValue: wire).map(kindTitle) ?? wire
     }
 
-    static func kindIcon(_ kind: HomeProfileListDTO.Item.Kind) -> String {
+    static func kindIcon(_ kind: HomeProfileListItemKind) -> String {
         switch kind {
         case .preference: "hand.thumbsup"
         case .standingDecision: "flag"
@@ -400,7 +400,7 @@ enum HomeProfilePresentation {
         }
     }
 
-    static func stateIcon(_ item: HomeProfileListDTO.Item) -> String {
+    static func stateIcon(_ item: HomeProfileListItem) -> String {
         switch item.status {
         case .active: item.confirmed ? "checkmark.seal.fill" : "sparkle"
         case .superseded: "arrow.triangle.2.circlepath"
@@ -408,7 +408,7 @@ enum HomeProfilePresentation {
         }
     }
 
-    static func stateLabel(_ item: HomeProfileListDTO.Item) -> String {
+    static func stateLabel(_ item: HomeProfileListItem) -> String {
         switch item.status {
         case .active: item.confirmed ? "Confirmed by you" : "Inferred"
         case .superseded: "Superseded"
@@ -416,14 +416,14 @@ enum HomeProfilePresentation {
         }
     }
 
-    static func stateAccent(_ item: HomeProfileListDTO.Item) -> Color {
+    static func stateAccent(_ item: HomeProfileListItem) -> Color {
         switch item.status {
         case .active: item.confirmed ? .tronEmerald : .tronAmber
         case .superseded, .retired: .tronSlate
         }
     }
 
-    static func stateLine(_ item: HomeProfileListDTO.Item) -> String {
+    static func stateLine(_ item: HomeProfileListItem) -> String {
         switch item.status {
         case .active: item.confirmed ? "Confirmed by you · " + item.path : "Inferred · " + item.path
         case .superseded: "Replaced by a newer item"
@@ -431,7 +431,7 @@ enum HomeProfilePresentation {
         }
     }
 
-    static func rowContent(_ item: HomeProfileListDTO.Item) -> TronListRowContent {
+    static func rowContent(_ item: HomeProfileListItem) -> TronListRowContent {
         TronListRowContent(title: HomeChapterPresentation.topicPreview(item.text, limit: 160), preview: true,
                            status: TronListStatus(text: stateLabel(item), tone: stateAccent(item)),
                            tags: [TronListTag(text: item.path == "prior" ? "Prior organization" : item.path), TronListTag(text: kindTitle(item.kind))])

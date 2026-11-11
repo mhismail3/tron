@@ -149,7 +149,8 @@ An edit that skips any gate fails it.
 `scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: `--protocol --check`
 passes; the protocol's codecs, on 12 seeded values of each of its datatypes, encode exactly what
 `JSON.stringify` writes for the value built in declaration order, round trip, and agree byte for byte between
-TypeScript and Swift; of eight malformed protocol values TypeScript refuses each at its path and Swift
+TypeScript and Swift, and the iOS app's checked-in decoders read every such value of their datatypes, and the
+malformed ones, exactly as the generated Swift codec does; of eight malformed protocol values TypeScript refuses each at its path and Swift
 refuses the wrong boolean tag, the unknown enum map key and the overflowing number but reads the unknown field,
 the missing and the null field and the unknown `ChatSemanticKind` tolerantly; and the codecs generated from
 `tests/fixtures/wire/Wire.dfy` (one datatype per form) round trip 2,000 seeded random frames plus edge doubles,

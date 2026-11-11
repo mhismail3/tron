@@ -72,7 +72,7 @@ export interface HomeTaskOwnerSettlement {
   taskId: string; sessionId: string; operationId: string;
   markerEntryId: string; terminalEntryId: string; settlementEntryId: string; stoppedAtEnd: number;
 }
-type HomeTaskStatus = HomeTaskRecord & HomeTaskDisplay & { workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns; ownerSettlement: HomeTaskOwnerSettlement | null };
+type HomeTaskStatus = Omit<HomeTaskRecord, "checkins"> & HomeTaskDisplay & { checkins: HomeTaskCheckin[]; workerModel: { provider: string; id: string } | null; subagents: HomeTaskSubagents; subagentRuns: HomeTaskSubagentRuns; ownerSettlement: HomeTaskOwnerSettlement | null };
 interface HomeTaskControlRow {
   taskId: string;
   title: string;

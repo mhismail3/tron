@@ -136,7 +136,7 @@ describe("provider usage across a model catalog refresh", () => {
       credentials: new OpenCodeGoKey(),
     });
     const model = `opencode-go/${runtime.getModels("opencode-go")[0]!.id}`;
-    const queue = new ModelQueueOwner({ runtime, usage: providerUsage, queue: async () => [model], now: () => clock });
+    const queue = new ModelQueueOwner({ tronHome: root, runtime, usage: providerUsage, queue: async () => [model], now: () => clock });
     service = new GatewayService({ display: {} as never,
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root },
       modelRuntime: runtime,

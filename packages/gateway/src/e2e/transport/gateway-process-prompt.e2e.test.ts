@@ -1,3 +1,6 @@
+import assert from "node:assert/strict";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startGatewayProcess, type GatewayProcess, type ProcessClient } from "../../../test-support/gateway-process.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
@@ -52,6 +55,7 @@ describe("prompt journeys across the real Gateway process", () => {
     let release = (): void => {};
     const reached = new Promise<void>((resolve) => { reach = resolve; });
     const released = new Promise<void>((resolve) => { release = resolve; });
+    let lookupPid: number | undefined;
     gateway.provider.script([() => ({ chunks: [head, async () => { reach(); await released; }, tail] })]);
 
     try {
@@ -84,13 +88,43 @@ describe("prompt journeys across the real Gateway process", () => {
       expect(status.result).toEqual({ status: "completed", result: { operationId: admitted.result.operationId } });
       await phone.close();
 
-      await gateway.restart();
+      const normalRestartStarted = performance.now();
+      await gateway.restart({ whileStopped: async () => {
+        console.info("normal Gateway shutdown ms", performance.now() - normalRestartStarted);
+      } });
+      console.info("normal Gateway process restart ms", performance.now() - normalRestartStarted);
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
       expect(gateway.provider.requests).toHaveLength(1);
       expect(gateway.provider.requests[0]!.messages.filter((message) => message.role === "user")).toHaveLength(1);
       expect(gateway.provider.errors).toEqual([]);
+
+      const bin = join(gateway.root, "bin");
+      const pidFile = join(gateway.root, "npm.pid");
+      await mkdir(bin);
+      await writeFile(join(bin, "npm"), `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);\n`, { mode: 0o755 });
+      await gateway.restart({ environment: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` } });
+      expectExactlyOnce(await freshSnapshot(gateway, sessionId));
+      lookupPid = await waitFor(async () => {
+        try { return Number(await readFile(pidFile, "utf8")) || undefined; } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          return undefined;
+        }
+      }, "the real session started its global npm discovery");
+      const restartStarted = performance.now();
+      await gateway.restart({ whileStopped: async () => {
+        console.info("npm discovery shutdown join ms", performance.now() - restartStarted);
+        assert.throws(() => process.kill(lookupPid!, 0), { code: "ESRCH" });
+      } });
+      console.info("npm discovery process restart ms", performance.now() - restartStarted);
+      expectExactlyOnce(await freshSnapshot(gateway, sessionId));
+      expect(gateway.provider.requests).toHaveLength(1);
     } finally {
       release();
+      if (lookupPid !== undefined) {
+        try { process.kill(lookupPid, "SIGKILL"); } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
+      }
     }
   });
 });

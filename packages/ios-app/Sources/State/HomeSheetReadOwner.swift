@@ -2,12 +2,7 @@ import Foundation
 import Observation
 import TronMobileCore
 
-struct HomeMemoryEvidenceDTO: Codable, Equatable, Hashable, Sendable {
-    let index: Int
-    let sessionId: String
-    let entryId: String
-    let sourceDigest: String
-
+extension HomeMemoryEvidence {
     var valid: Bool {
         index >= 0 && [sessionId, entryId].allSatisfy { !$0.isEmpty && $0.utf8.count <= 200 }
             && Self.isDigest(sourceDigest)
@@ -18,84 +13,40 @@ struct HomeMemoryEvidenceDTO: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-struct HomeMemoryItemDTO: Decodable, Equatable, Hashable, Sendable, Identifiable {
-    enum Kind: String, Decodable, Sendable { case user, talk, echo, event }
-    enum Attribution: String, Decodable, Sendable { case user, assistant, tool, event }
-    struct Display: Decodable, Equatable, Hashable, Sendable {
-        enum Kind: String, Decodable, Sendable { case message; case toolCall = "tool-call"; case toolResult = "tool-result" }
-        let kind: Kind
-        let toolName: String?
-        let target: String?
-        let toolCount: Int?
-        let status: String?
-    }
-    struct Projection: Decodable, Equatable, Hashable, Sendable {
-        let format: String
-        let text: String
-        let omitted: Bool
-        let omissions: [String]
-    }
-    struct Summary: Decodable, Equatable, Hashable, Sendable {
-        let format: String
-        let text: String
-        let truncated: Bool
-    }
-    let index: Int
-    let kind: Kind
-    let attribution: Attribution
-    let timestamp: String?
-    let evidence: HomeMemoryEvidenceDTO
-    let display: Display?
-    let projection: Projection
-    let summary: Summary?
-    var id: Int { index }
+extension HomeMemoryItem: Identifiable {
+    package var id: Int { index }
     var valid: Bool {
-        let expected: Attribution = switch kind { case .user: .user; case .talk: .assistant; case .echo: .tool; case .event: .event }
+        let expected: HomeMemoryItemAttribution = switch kind { case .user: .user; case .talk: .assistant; case .echo: .tool; case .event: .event }
         return evidence.valid && evidence.index == index && attribution == expected
-            && projection.format == "memory-projection" && projection.text.utf16.count <= 4096
-            && (summary.map { $0.format == "memory-summary" && $0.text.utf16.count <= 4096 } ?? true)
+            && projection.text.utf16.count <= 4096
+            && (summary.value.map { $0.text.utf16.count <= 4096 } ?? true)
     }
 }
 
-struct HomeMemoryViewDTO: Decodable, Equatable, Sendable {
-    struct Line: Decodable, Equatable, Hashable, Sendable, Identifiable {
-        let start: Int
-        let span: Int
-        let text: String?
-        let truncated: Bool
-        let inCurrentView: Bool
-        let startsIndividualMessages: Bool
-        let kind: HomeMemoryItemDTO.Kind?
-        let firstAt: String?
-        let lastAt: String?
-        let item: HomeMemoryItemDTO?
-        var id: String { "\(start)+\(span)" }
-        var isSummary: Bool { span > 1 }
-        var valid: Bool {
-            start >= 0 && span >= 1 && span & (span - 1) == 0 && start % span == 0
-                && (!startsIndividualMessages || (inCurrentView && span == 1 && start > 0))
-                && (text?.utf16.count ?? 0) <= 4096
-                && [firstAt ?? "", lastAt ?? ""].allSatisfy { $0.utf8.count <= 64 }
-                && (span == 1 ? item.map { $0.valid && $0.index == start && $0.kind == kind } == true : item == nil && kind == nil)
-        }
+extension HomeMemoryViewLine: Identifiable {
+    package var id: String { "\(start)+\(span)" }
+    var isSummary: Bool { span > 1 }
+    var valid: Bool {
+        start >= 0 && span >= 1 && span & (span - 1) == 0 && start % span == 0
+            && (!startsIndividualMessages || (inCurrentView && span == 1 && start > 0))
+            && (text.value?.utf16.count ?? 0) <= 4096
+            && [firstAt ?? "", lastAt ?? ""].allSatisfy { $0.utf8.count <= 64 }
+            && (span == 1 ? item.map { $0.valid && $0.index == start && $0.kind == kind } == true : item == nil && kind == nil)
     }
-    let homeId: String
-    let revision: String
-    let totalMessages: Int
-    let lines: [Line]
-    let nextCursor: String?
+}
 
+extension HomeMemoryView {
     struct Continuation: Hashable, Sendable {
         let cursor: String
         let revision: String
         let homeId: String
     }
 
-    static func decode(_ value: JSONValue, continuation: Continuation?, part: Line? = nil) throws -> Self {
+    static func validated(_ value: JSONValue, continuation: Continuation?, part: HomeMemoryViewLine? = nil) throws -> Self {
         let data = try JSONEncoder.gateway.encode(value)
-        let view = try JSONDecoder.gateway.decode(Self.self, from: data)
+        let view = try value.decodeWire(Self.decode)
         guard data.count <= 128 * 1024, !view.homeId.isEmpty, view.homeId.utf8.count <= 200,
-              HomeMemoryEvidenceDTO.isDigest(view.revision), view.totalMessages >= 0, view.lines.count <= 50,
+              HomeMemoryEvidence.isDigest(view.revision), view.totalMessages >= 0, view.lines.count <= 50,
               view.lines.allSatisfy(\.valid),
               view.nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 1024 && !view.lines.isEmpty }) ?? true else {
             throw invalidHomeRead()
@@ -115,18 +66,10 @@ struct HomeMemoryViewDTO: Decodable, Equatable, Sendable {
     }
 }
 
-struct HomeMemoryEvidencePageDTO: Decodable, Equatable, Sendable {
-    let format: String
-    let evidence: HomeMemoryEvidenceDTO
-    let text: String
-    let offset: Int
-    let nextOffset: Int?
-    let previousOffset: Int?
-    let totalCharacters: Int
-
-    static func decode(_ value: JSONValue, evidence identity: HomeMemoryEvidenceDTO, offset requestedOffset: Int) throws -> Self {
-        let page = try value.decode(Self.self)
-        guard identity.valid, page.format == "canonical-history", page.evidence == identity,
+extension HomeMemoryEvidencePage {
+    static func validated(_ value: JSONValue, evidence identity: HomeMemoryEvidence, offset requestedOffset: Int) throws -> Self {
+        let page = try value.decodeWire(Self.decode)
+        guard identity.valid, page.evidence == identity,
               page.offset == requestedOffset, page.offset >= 0,
               page.text.utf16.count <= 24_000, page.totalCharacters >= page.offset,
               page.text.utf16.count <= page.totalCharacters - page.offset else { throw invalidHomeRead() }
@@ -137,53 +80,26 @@ struct HomeMemoryEvidencePageDTO: Decodable, Equatable, Sendable {
     }
 }
 
-struct HomeChapterListDTO: Decodable, Equatable, Sendable {
-    struct Chapter: Decodable, Equatable, Sendable, Identifiable {
-        enum State: String, Decodable, Sendable { case active, sealed, reserved, materializing }
-        let sessionId: String
-        let ordinal: Int
-        let state: State
-        let createdAt: String
-        let activationStarted: Bool
-        let sessionPresent: Bool
-        let sealedAt: String?
-        let bytes: Int?
-        let entries: Int?
-        let contents: Contents?
-        var id: Int { ordinal }
-        var valid: Bool {
-            !sessionId.isEmpty && sessionId.utf8.count <= 512 && ordinal > 0
-                && [createdAt, sealedAt ?? ""].allSatisfy { $0.utf8.count <= 64 }
-                && (bytes ?? 0) >= 0 && (entries ?? 0) >= 0
-                && (contents.map(\.valid) ?? true)
-        }
+extension HomeChapterSummary: Identifiable {
+    package var id: Int { ordinal }
+    var valid: Bool {
+        !sessionId.isEmpty && sessionId.utf8.count <= 512 && ordinal > 0
+            && [createdAt, sealedAt ?? ""].allSatisfy { $0.utf8.count <= 64 }
+            && (bytes ?? 0) >= 0 && (entries ?? 0) >= 0
+            && (contents.map(\.valid) ?? true)
     }
-    struct Contents: Decodable, Equatable, Sendable {
-        let firstAt: String?
-        let lastAt: String?
-        let userMessages: Int?
-        let homeReplies: Int?
-        let tasksDelegated: Int?
-        let topics: [String]?
-        var valid: Bool {
-            [userMessages, homeReplies, tasksDelegated].allSatisfy { ($0 ?? 0) >= 0 }
-                && (topics?.count ?? 0) <= 8 && (topics ?? []).allSatisfy { $0.count <= 1000 }
-        }
-    }
-    struct Limits: Decodable, Equatable, Sendable {
-        let softBytes: Int
-        let softEntries: Int
-        let hardBytes: Int
-        let hardEntries: Int
-    }
-    let homeId: String
-    let generation: Int
-    let enabled: Bool
-    let limits: Limits
-    let chapters: [Chapter]
+}
 
-    static func decode(_ value: JSONValue) throws -> Self {
-        let list = try value.decode(Self.self)
+extension HomeChapterContents {
+    var valid: Bool {
+        [userMessages, homeReplies, tasksDelegated].allSatisfy { $0 >= 0 }
+            && topics.count <= 8 && topics.allSatisfy { $0.count <= 1000 }
+    }
+}
+
+extension HomeChapterList {
+    static func validated(_ value: JSONValue) throws -> Self {
+        let list = try value.decodeWire(Self.decode)
         guard !list.homeId.isEmpty, list.homeId.utf8.count <= 200, list.generation >= 0,
               list.limits.softBytes > 0, list.limits.softEntries > 0,
               list.limits.hardBytes >= list.limits.softBytes, list.limits.hardEntries >= list.limits.softEntries,
@@ -196,51 +112,38 @@ struct HomeChapterListDTO: Decodable, Equatable, Sendable {
     }
 }
 
-struct HomeContextDTO: Equatable, Sendable {
-    struct Breakdown: Decodable, Equatable, Sendable {
-        struct Activation: Decodable, Equatable, Sendable {
-            enum State: String, Decodable, Sendable { case running, settled }
-            enum Kind: String, Decodable, Sendable { case user, wake }
-            let state: State
-            let kind: Kind
-            let startedAt: String
-        }
-        struct Section: Decodable, Equatable, Sendable, Identifiable {
-            enum ID: String, Decodable, Sendable { case instructions, profile, memory, chapter, results, input }
-            let id: ID
-            let tokens: Int
-            let count: Int?
-        }
-        let activation: Activation
-        let contextWindow: Int
-        let effectiveTokens: Int
-        let sections: [Section]
+extension HomeContextProjection {
+    var breakdown: HomeContextBreakdown? {
+        guard case .availableTrue(_, _, _, _, _, _, let breakdown, _, _) = self else { return nil }
+        return breakdown
     }
 
-    let activation: HomeStatusDTO.Activation
-    let breakdown: Breakdown?
+    static func statesOpen(_ activation: JSONValue?) -> Bool {
+        guard let object = activation?.objectValue, object["available"] == .bool(true) else { return true }
+        return object["activationOpen"]?.boolValue != nil
+    }
 
-    private struct Wire: Decodable { let breakdown: Breakdown? }
-
-    static func decode(_ value: JSONValue) throws -> Self {
-        let activation = try value.decode(HomeStatusDTO.Activation.self)
-        let wire = try value.decode(Wire.self)
-        if let breakdown = wire.breakdown {
+    static func validated(_ value: JSONValue) throws -> Self {
+        let context = try value.decodeWire(Self.decode)
+        guard statesOpen(value) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Available activation must state whether it is open"))
+        }
+        if let breakdown = context.breakdown {
             guard breakdown.sections.count <= 6, breakdown.effectiveTokens >= 0, breakdown.contextWindow > 0,
                   breakdown.sections.allSatisfy({ $0.tokens >= 0 && ($0.count ?? 0) >= 0 }),
                   Set(breakdown.sections.map(\.id)).count == breakdown.sections.count else { throw invalidHomeRead() }
         }
-        return Self(activation: activation, breakdown: wire.breakdown)
+        return context
     }
 }
 
 struct HomeManageDTO: Equatable, Sendable {
-    let status: HomeStatusDTO
-    let context: HomeContextDTO
-    let chapters: HomeChapterListDTO?
-    let tasks: HomeTaskPageDTO?
+    let status: HomeStatus
+    let context: HomeContextProjection
+    let chapters: HomeChapterList?
+    let tasks: HomeTaskPage?
     let permissions: HomeTaskPermissionsDTO?
-    var profile: HomeProfileListDTO? = nil
+    var profile: HomeProfileList? = nil
 }
 
 struct HomeProfileChange: Encodable, Equatable, Sendable {
@@ -249,43 +152,27 @@ struct HomeProfileChange: Encodable, Equatable, Sendable {
     let id: String
     let expectedRevision: String
     var text: String? = nil
-    var kind: HomeProfileListDTO.Item.Kind? = nil
+    var kind: String? = nil
     var reason: String? = nil
 }
 
 struct HomeProfileChangeResultDTO: Decodable, Sendable {
     struct Change: Decodable, Sendable { let changeId: String }
     let changes: [Change]
-    let items: [HomeProfileListDTO.Item]
 }
 
-struct HomeProfileListDTO: Decodable, Equatable, Sendable {
-    struct Item: Decodable, Equatable, Hashable, Sendable, Identifiable {
-        enum Kind: String, Codable, Sendable, CaseIterable {
-            case preference, standingDecision = "standing-decision", delegationDefault = "delegation-default", fact, correction
-        }
-        enum Status: String, Decodable, Sendable { case active, superseded, retired }
-        let id: String
-        let revisionId: String
-        let path: String
-        let kind: Kind
-        let text: String
-        let confirmed: Bool
-        let status: Status
-        let createdAt: String
-        let updatedAt: String
-        var valid: Bool {
-            !id.isEmpty && id.utf8.count <= 200 && !revisionId.isEmpty && revisionId.utf8.count <= 200
-                && !path.isEmpty && path.utf8.count <= 131 && text.utf16.count <= 4096 && [createdAt, updatedAt].allSatisfy { $0.utf8.count <= 64 }
-        }
+extension HomeProfileListItem: Identifiable {
+    var valid: Bool {
+        !id.isEmpty && id.utf8.count <= 200 && !revisionId.isEmpty && revisionId.utf8.count <= 200
+            && !path.isEmpty && path.utf8.count <= 131 && text.utf16.count <= 4096 && [createdAt, updatedAt].allSatisfy { $0.utf8.count <= 64 }
     }
-    let items: [Item]
-    let unclassified: Int
+}
 
-    var active: [Item] { items.filter { $0.status == .active } }
+extension HomeProfileList {
+    var active: [HomeProfileListItem] { items.filter { $0.status == .active } }
 
-    static func decode(_ value: JSONValue) throws -> Self {
-        let list = try value.decode(Self.self)
+    static func validated(_ value: JSONValue) throws -> Self {
+        let list = try value.decodeWire(Self.decode)
         guard list.unclassified >= 0, list.items.count <= 10_000, list.items.allSatisfy(\.valid),
               Set(list.items.map(\.id)).count == list.items.count else { throw invalidHomeRead() }
         return list
@@ -304,7 +191,7 @@ enum HomeChapterPresentation {
         return cut.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces)) + "…"
     }
 
-    static func manageSubtitle(_ chapter: HomeStatusDTO.Chapter) -> String {
+    static func manageSubtitle(_ chapter: HomeStatusChapter) -> String {
         let count = chapter.count == 1 ? "1 chapter" : "\(chapter.count.formatted()) chapters"
         switch chapter.recoveryDecision {
         case .none: return count
@@ -313,7 +200,7 @@ enum HomeChapterPresentation {
         }
     }
 
-    static func stateLabel(_ state: HomeChapterListDTO.Chapter.State) -> String {
+    static func stateLabel(_ state: HomeChapterSummaryState) -> String {
         switch state {
         case .active: "Active"
         case .sealed: "Sealed"
@@ -322,26 +209,25 @@ enum HomeChapterPresentation {
         }
     }
 
-    static func softPercent(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> Int? {
+    static func softPercent(_ chapter: HomeChapterSummary, limits: HomeChapterListLimits) -> Int? {
         guard let bytes = chapter.bytes, let entries = chapter.entries else { return nil }
         return max(ratio(bytes, limits.softBytes), ratio(entries, limits.softEntries))
     }
 
-    static func limitPercent(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> Int? {
+    static func limitPercent(_ chapter: HomeChapterSummary, limits: HomeChapterListLimits) -> Int? {
         guard let bytes = chapter.bytes, let entries = chapter.entries else { return nil }
         let soft = max(ratio(bytes, limits.softBytes), ratio(entries, limits.softEntries))
         return soft < 100 ? soft : max(ratio(bytes, limits.hardBytes), ratio(entries, limits.hardEntries))
     }
 
-    static func contentsLines(_ contents: HomeChapterListDTO.Contents) -> [(icon: String, text: String)] {
-        var lines: [(icon: String, text: String)] = []
-        if let messages = contents.userMessages { lines.append(("person", "\(messages.formatted()) \(messages == 1 ? "user message" : "user messages")")) }
-        if let replies = contents.homeReplies { lines.append(("house", "\(replies.formatted()) Home \(replies == 1 ? "reply" : "replies")")) }
-        if let delegated = contents.tasksDelegated { lines.append(("checklist", "\(delegated.formatted()) \(delegated == 1 ? "task" : "tasks") delegated")) }
-        return lines
+    static func contentsLines(_ contents: HomeChapterContents) -> [(icon: String, text: String)] {
+        let messages = contents.userMessages, replies = contents.homeReplies, delegated = contents.tasksDelegated
+        return [("person", "\(messages.formatted()) \(messages == 1 ? "user message" : "user messages")"),
+                ("house", "\(replies.formatted()) Home \(replies == 1 ? "reply" : "replies")"),
+                ("checklist", "\(delegated.formatted()) \(delegated == 1 ? "task" : "tasks") delegated")]
     }
 
-    static func dateRange(_ chapter: HomeChapterListDTO.Chapter) -> String {
+    static func dateRange(_ chapter: HomeChapterSummary) -> String {
         guard let start = GatewayTimestamp.parse(chapter.createdAt) else { return "Dates unavailable" }
         let style = Date.FormatStyle.dateTime.day().month(.abbreviated).year()
         guard let sealed = chapter.sealedAt else { return "Since \(start.formatted(style))" }
@@ -351,7 +237,7 @@ enum HomeChapterPresentation {
         return from == to ? from : "\(from) – \(to)"
     }
 
-    static func sizeLine(_ chapter: HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits) -> String {
+    static func sizeLine(_ chapter: HomeChapterSummary, limits: HomeChapterListLimits) -> String {
         guard let bytes = chapter.bytes, let entries = chapter.entries else { return "Not measured" }
         let size = "\(entries.formatted()) entries · \(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .binary))"
         let soft = max(ratio(bytes, limits.softBytes), ratio(entries, limits.softEntries))
@@ -386,20 +272,20 @@ enum HomeSheetReadQuery: Hashable, Sendable {
     case taskHistory(String, cursor: String?)
     case chapters
     case profile
-    case memory(sessionID: String?, continuation: HomeMemoryViewDTO.Continuation?)
-    case memoryPart(sessionID: String?, HomeMemoryViewDTO.Line)
-    case evidence(HomeMemoryEvidenceDTO, offset: Int)
+    case memory(sessionID: String?, continuation: HomeMemoryView.Continuation?)
+    case memoryPart(sessionID: String?, HomeMemoryViewLine)
+    case evidence(HomeMemoryEvidence, offset: Int)
 }
 
 enum HomeSheetContent {
     case manage(HomeManageDTO)
-    case status(HomeStatusDTO)
-    case tasks(HomeTaskPageDTO?, HomeStatusDTO), task(HomeTaskDTO?, HomeStatusDTO), permissions(HomeTaskPermissionsDTO?, HomeStatusDTO)
-    case taskHistory(HomeTaskHistoryPageDTO)
-    case chapters(HomeChapterListDTO)
-    case profile(HomeProfileListDTO)
-    case memory(HomeMemoryViewDTO)
-    case evidence(HomeMemoryEvidencePageDTO)
+    case status(HomeStatus)
+    case tasks(HomeTaskPage?, HomeStatus), task(HomeTaskStatusResult?, HomeStatus), permissions(HomeTaskPermissionsDTO?, HomeStatus)
+    case taskHistory(HomeTaskHistoryPage)
+    case chapters(HomeChapterList)
+    case profile(HomeProfileList)
+    case memory(HomeMemoryView)
+    case evidence(HomeMemoryEvidencePage)
 }
 
 @MainActor @Observable
