@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server as HTTPServer, type ServerResponse } from "node:http";
 import { GATEWAY_JSON_MAXIMUM_NODES, jsonNodeCount } from "../protocol/json-budget.js";
+import { encodeFrame } from "../protocol/frames.js";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { abortableRead } from "../util/abortable-read.js";
@@ -462,8 +463,8 @@ function outboundFrameIdentity(
   return { ...sequenced, rebaseline };
 }
 
-function prepareOutboundFrame(value: unknown, maximum: number): PreparedOutboundFrame | undefined {
-  const encoded = JSON.stringify(value);
+function prepareOutboundFrame(value: unknown, maximum: number, method?: string): PreparedOutboundFrame | undefined {
+  const encoded = encodeFrame(value, method);
   if (encoded === undefined) return undefined;
   const bytes = Buffer.byteLength(encoded, "utf8");
   const nodes = jsonNodeCount(value);
@@ -1860,7 +1861,7 @@ export class GatewayServer {
           throw new GatewayError("conflict", "Session synchronization ownership changed before acknowledgement", true);
         }
       }
-      const responseSentIntact = runInRequestSpan(requestSpan, () => stage("frame.write", () => this.send(connection, { type: "response", id: frame.id, ok: true, result })));
+      const responseSentIntact = runInRequestSpan(requestSpan, () => stage("frame.write", () => this.send(connection, { type: "response", id: frame.id, ok: true, result }, frame.method as string)));
       if (responseSentIntact && sessionOpenFlight !== undefined) {
         sessionOpenFlight.answered = true;
         this.markSessionOpenDelivered(connection, requestId, requestId);
@@ -2050,7 +2051,7 @@ export class GatewayServer {
         () => abortableRead(inFlightRpc.controller.signal, () => attempt),
       ));
       if (inFlightRpc.controller.signal.aborted) return;
-      if (runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: true, result }))) {
+      if (runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: true, result }, frame.method as string))) {
         flight.answered = true;
         this.markSessionOpenDelivered(connection, flight.requestId, requestId);
         rpcOutcome = "success";
@@ -2201,8 +2202,8 @@ export class GatewayServer {
     );
   }
 
-  private send(connection: Connection, value: unknown): boolean {
-    return this.sendOutcome(connection, value) === "sent";
+  private send(connection: Connection, value: unknown, method?: string): boolean {
+    return this.sendOutcome(connection, value, undefined, method) === "sent";
   }
 
   private prepareBroadcastFrame(value: unknown): PreparedOutboundFrame | null {
@@ -2243,6 +2244,7 @@ export class GatewayServer {
     connection: Connection,
     value: unknown,
     prepared?: PreparedOutboundFrame | null,
+    method?: string,
   ): "sent" | "fallback" | "failed" {
     if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN) return "failed";
     if (connection.revoked) {
@@ -2254,7 +2256,7 @@ export class GatewayServer {
     }
     try {
       const frame = prepared === undefined
-        ? stage("frame.serialize", () => prepareOutboundFrame(value, this.options.maxFrameBytes))
+        ? stage("frame.serialize", () => prepareOutboundFrame(value, this.options.maxFrameBytes, method))
         : prepared;
       if (!frame) return "failed";
       if (prepared === undefined) bytes("frame.serialize", frame.outputBytes);

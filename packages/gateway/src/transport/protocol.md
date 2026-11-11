@@ -144,6 +144,9 @@ keeps admission, frame preparation, broadcasts and retirement.
   directives and frames of another runtime generation. Without an installed token a
   snapshot supersedes nothing. Dropped frames release their reservation and appear as
   `outboundCoalescedFrames`/`Bytes` in `gateway.resources`.
+- Frames are encoded by `protocol/frames.ts`: the declared values it maps by event
+  topic and response method go through the generated encoders (declaration key order),
+  everything else is `JSON.stringify`. Values are never reshaped, only reordered.
 - A broadcast encodes once per operation; only `session.rebaseline` is per connection.
   Overflow closes that peer with `1013`; a stalled peer is force-closed after one
   second but holds capacity until physical close. Write failures terminate the exact

@@ -1,4 +1,5 @@
 import type { JsonValue, SessionSnapshot } from "../protocol/types.js";
+import { encodeFrame } from "../protocol/frames.js";
 
 export interface BufferedSessionEvent {
   type: "event";
@@ -44,7 +45,7 @@ const MAX_BUFFERED_SYNC_BYTES = 1_048_576;
 
 function serializedEvent(event: BufferedSessionEvent): BufferedSessionEncoding | undefined {
   try {
-    const encoded = JSON.stringify(event);
+    const encoded = encodeFrame(event);
     if (encoded === undefined) return undefined;
     const bytes = Buffer.byteLength(encoded, "utf8");
     return { encoded, bytes, output: encoded, outputBytes: bytes, fallback: false };

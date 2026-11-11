@@ -40,8 +40,10 @@ call of a compiled predicate on parameters; anything else is refused. `bind(comp
 
 The Gateway protocol's value types have one source, `packages/core/wire/Protocol.dfy`: `proof wire --protocol`
 writes `packages/gateway/src/protocol/types.ts` (types, decoders and encoders, generated; never edited) and
-`--check` exits 1 when that file is not what the source generates. The Gateway still writes frames with
-`JSON.stringify` of the values it builds, so the generated encoders serve the codec tests only and the
+`--check` exits 1 when that file is not what the source generates. The Gateway writes the session frames that
+carry declared values (snapshots, transcript items, tree nodes, summaries, commands, tool progress, extension
+presentation) with these encoders, so their keys are in declaration order; `protocol/frames.ts` names which
+frame paths hold which type, and every other frame part is `JSON.stringify` of the value as built. The
 decoders are the protocol's validators. A type another module owns (the display contract, the upstream error)
 is marked `import=<path>`: types.ts imports it and fails to compile unless it equals the stated shape. The
 Swift codec is generated and proven against the TypeScript one in the test below; the iOS app still decodes
