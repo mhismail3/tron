@@ -304,6 +304,7 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
   }
   const compactor: CompactorState = { calls: 0, entered: 0, gate: undefined, release: undefined, failing: false };
   const memoryQueue = options.memoryQueueClock && new ModelQueueOwner({
+    tronHome,
     runtime,
     usage: new ProviderUsageOwner(),
     queue: async () => options.memoryQueue ?? [`${MEMORY_PROVIDER}/${MEMORY_MODEL_ID}`],

@@ -85,6 +85,7 @@ would remove. Test-tooling signals are rows of the
 | `Library/Caches/Logs/app.jsonl` | 10 MiB (the user's chosen cap) | **Not yet measured:** the build that writes this stream is not installed on the phone |
 | iOS incident store | 96 KiB, 7 days | Bounded incident history, independent of the app log's cap |
 | `device-exports/` | 10 bundles | The newest exports; older ones are deleted at write time |
+| `gateway/model-usage.json` (the providers counters ledger) | 8 MiB, 10,000 rows, 30 days; oldest first on startup/completion | Local background/summarizer call counters only, included in backups; no wire/export path ([providers](../src/providers/README.md)) |
 | `gateway/settings/changes/` (the settings change record) | None: kept forever ([change path](settings-contract.md#change-path)) | One entry per settings key changed, a few hundred bytes each, in segments of 500 entries named in `index.json`; `settings.history` reads one segment per page. Its size on disk is the growth signal. **Not yet measured** |
 
 Change a cap only if it holds less than 14 days on the Mac or 7 days on the phone at
