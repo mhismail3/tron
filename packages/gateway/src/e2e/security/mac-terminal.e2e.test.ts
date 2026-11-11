@@ -3,7 +3,7 @@ import { displayOwnerOf, createTestRegistry } from "../../../test-support/gatewa
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { Socket, createServer } from "node:net";
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir, userInfo } from "node:os";
+import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -141,7 +141,7 @@ beforeAll(async () => {
   tailnetIPv4 = addresses;
   await run("swift", ["build", "--package-path", PACKAGE, "--product", "mac-terminal-probe"]);
   probe = join((await run("swift", ["build", "--package-path", PACKAGE, "--show-bin-path"])).trim(), "mac-terminal-probe");
-  root = await realpath(await mkdtemp(join(tmpdir(), "tron-mac-terminal-")));
+  root = await realpath(await mkdtemp(join(execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim(), "tron-mac-terminal-")));
 }, 600_000);
 
 afterAll(async () => {

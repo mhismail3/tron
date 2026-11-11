@@ -269,8 +269,23 @@ export class MacTerminalService {
 
   private async listeners(): Promise<string[]> {
     const output = await this.command("/usr/sbin/netstat", ["-anl", "-p", "tcp"]);
-    return output.split("\n").map(line => line.trim().split(/\s+/u)).filter(fields => fields[5] === "LISTEN"
+    const kernel = output.split("\n").map(line => line.trim().split(/\s+/u)).filter(fields => fields[5] === "LISTEN"
       && fields[3]?.split(".").at(-1) === String(this.port)).map(fields => `${fields[0]} ${fields[3]}`);
+    const files = await this.run("/usr/sbin/lsof", ["-nP", `-iTCP:${this.port}`, "-sTCP:LISTEN", "-Ftn"], 2_000);
+    if (files.timedOut || (files.code !== 0 && (files.code !== 1 || files.output.trim()))) {
+      throw new GatewayError("conflict", "lsof failed while preparing the owned SSH service");
+    }
+    const owned: string[] = [];
+    let family = "";
+    for (const line of files.output.split("\n")) {
+      if (line.startsWith("p") || line.startsWith("f")) family = "";
+      if (line.startsWith("t")) family = line === "tIPv4" ? "tcp4" : "tcp6";
+      if (!line.startsWith("n")) continue;
+      const name = line.slice(1);
+      const split = name.lastIndexOf(":");
+      owned.push(`${family} ${name.slice(0, split).replace(/^\[|\]$/gu, "")}.${name.slice(split + 1)}`);
+    }
+    return [...new Set([...kernel, ...owned])];
   }
 
   private async listening(ip: string, pid: number): Promise<boolean> {
