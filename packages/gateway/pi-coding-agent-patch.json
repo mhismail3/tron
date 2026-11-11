@@ -4,11 +4,11 @@
   "version": "1.5.1",
   "artifact": {
     "path": "third_party/pi-coding-agent/pi-coding-agent-1.5.1-tron.1.tgz",
-    "integrity": "sha512-4ZqsT4VEwc+1LnUgxRlJBwXlhKIPd99ZQeymrT4I6aDH5yrCeo+PS7kJGMtKF62KAXeLJ3hXrB/UUG1KMzFtQQ=="
+    "integrity": "sha512-J86mImReMDe6VthVHnIwzXwZrp5ZskMypRNN9/wTbC1fggdL4h6fGYeOpbUEtWCwgLVYSKnB7kvCJPtsk6u6qw=="
   },
   "patch": {
     "path": "third_party/pi-coding-agent/tron.patch",
-    "sha256": "7e6cd19d5fdfba48e904cfb210cd797a1e15f2f0fc8ebfadc31a82e1176b2007"
+    "sha256": "108da4a739493abf0a87f249960460f82c75f943268f689be379d4219f55e728"
   },
   "license": {
     "path": "third_party/pi-coding-agent/LICENSE",
@@ -31,5 +31,5 @@
     "node": "22.22.0",
     "npm": "10.9.4"
   },
-  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), keeps transcript-held extension prompt sections in the idle session.systemPrompt (#1312), and ends a run start whose preflightResult(\"started\") callback throws without leaving the session busy (#1340), serializes ModelRuntime config reads so readiness cannot overtake a detached registration refresh (#2199), and preserves explicitly requested pending tool names when a host narrows the restored loadout before MCP registration (#2181), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
+  "removeWhen": "When a published @earendil-works/pi-coding-agent release provides projectDir (or a reviewed equivalent the Gateway adopts), keeps transcript-held extension prompt sections in the idle session.systemPrompt (#1312), and ends a run start whose preflightResult(\"started\") callback throws without leaving the session busy (#1340), serializes ModelRuntime config reads so readiness cannot overtake a detached registration refresh (#2199), preserves explicitly requested pending tool names when a host narrows the restored loadout before MCP registration (#2181), and bundles undici 8.12.4 or later in both child entry points (#2470), remove the patch as the Gateway README section 'Tron-patched pi-coding-agent' lists, then npm run update:pi-sdk to that release."
 }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { WAIT_HANG_BOUND_MS } from "../test-support/wait-for.ts";
 import { PATCH_PIN_FILE } from "./check-pi-sdk.mjs";
 import { runUpdate } from "./update-pi-sdk.mjs";
 
@@ -32,6 +33,51 @@ test("accepts the declared tarball and refuses every single fault", (t) => {
   const accepted = check(fixture(t));
   assert.equal(accepted.status, 0, accepted.output);
   assert.match(accepted.output, /pi-coding-agent from third_party\/pi-coding-agent\//u);
+
+  const root = fixture(t);
+  const probe = join(root, "integrity-probe.mjs");
+  writeFileSync(probe, `import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+let current = globalThis.fetch;
+let started = false;
+Object.defineProperty(globalThis, "fetch", {
+  configurable: true,
+  get() { return current; },
+  set(value) {
+    current = value;
+    if (started) return;
+    started = true;
+    queueMicrotask(() => check(value).catch(error => { console.error(error); process.exit(2); }));
+  }
+});
+async function check(fetch) {
+  const server = createServer((request, response) => response.end(request.url === "/trusted" ? "trusted" : "tampered"));
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const integrity = "\\tsha256-" + createHash("sha256").update("trusted").digest("base64");
+  const url = "http://127.0.0.1:" + server.address().port;
+  const trusted = await fetch(url + "/trusted", { integrity });
+  if (await trusted.text() !== "trusted") throw new Error("matching integrity body was not preserved");
+  let rejected = false;
+  try {
+    const response = await fetch(url + "/tampered", { integrity });
+    await response.text();
+  } catch (error) {
+    rejected = /integrity mismatch/i.test(String(error.cause ?? error));
+  }
+  await new Promise(resolve => server.close(resolve));
+  console.log("BUNDLED_SRI_PROBE " + JSON.stringify({ rejected }));
+  process.exit(rejected ? 0 : 1);
+}
+`);
+  const rpc = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent/rpc-entry"));
+  for (const [entry, args] of [[join(gatewayDir, "node_modules", ".bin", "pi"), ["--mode", "rpc"]], [rpc, []]]) {
+    const child = spawnSync(process.execPath, ["--import", probe, entry, ...args, "--offline", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-session"], {
+      encoding: "utf8", timeout: WAIT_HANG_BOUND_MS, cwd: root,
+      env: { PATH: process.env.PATH, HOME: root, TMPDIR: root, PI_CODING_AGENT_DIR: join(root, "agent") },
+    });
+    assert.equal(child.status, 0, `${entry}: ${child.error ?? ""}\n${child.stdout}${child.stderr}`);
+    assert.match(`${child.stdout}${child.stderr}`, /BUNDLED_SRI_PROBE \{"rejected":true\}/u);
+  }
 
   const tampered = fixture(t);
   appendFileSync(join(tampered, json(join(tampered, PATCH_PIN_FILE)).artifact.path), "x");
