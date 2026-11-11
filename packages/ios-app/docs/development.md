@@ -84,7 +84,9 @@ scripts/tron-profile compare BASE_RUN_DIR CANDIDATE_RUN_DIR
 
 It shares the test runner's lane and lease, builds `DevicePerformance`, and refuses a scenario
 whose workload or render check diverged. Scenarios: `ProfilingTests/`
-([performance baseline](performance-baseline.md)).
+([performance baseline](performance-baseline.md)). The Home-sheet scenario sets and restores its
+dashboard filter through `AppLocalBehaviorSettings`, the mounted dashboard's settings owner;
+writing its persisted preferences alone does not update a live dashboard.
 
 Verify runs the scenarios of each `ProfilingTests` class that `scripts/profile.module.json` declares in
 `iosScenarios` once (`--iterations 1`) on each change, and passes them only on their functional receipts

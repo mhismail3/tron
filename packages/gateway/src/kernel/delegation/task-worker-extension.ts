@@ -1,6 +1,6 @@
 import type { ExtensionFactory } from "../pi/coding-agent.js";
 
-const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.13";
+const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.14";
 export const HOME_TASK_PRODUCER_REFUSAL_REASON = "Home tasks can't schedule work, launch or attach a mission, subscribe to a wake, control a run the task did not start, or use an unverified producer; do the work directly or report back.";
 export const HOME_TASK_SEALED_REASON = "The task report is sealed, so this task has ended; no further work runs.";
 export type HomeTaskProducerRefusal = "subagent-mutation" | "unverified-provider" | "schedule" | "wake-subscription";
