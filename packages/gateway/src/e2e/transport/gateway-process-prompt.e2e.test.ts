@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -105,9 +106,12 @@ describe("prompt journeys across the real Gateway process", () => {
           return undefined;
         }
       }, "the real session started its global npm discovery");
+      const restartStarted = performance.now();
       await gateway.restart({ whileStopped: async () => {
-        expect(() => process.kill(lookupPid!, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+        console.info("npm discovery shutdown join ms", performance.now() - restartStarted);
+        assert.throws(() => process.kill(lookupPid!, 0), { code: "ESRCH" });
       } });
+      console.info("npm discovery process restart ms", performance.now() - restartStarted);
       expectExactlyOnce(await freshSnapshot(gateway, sessionId));
       expect(gateway.provider.requests).toHaveLength(1);
     } finally {
