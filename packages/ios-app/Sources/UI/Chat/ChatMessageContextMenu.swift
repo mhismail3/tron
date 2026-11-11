@@ -93,6 +93,7 @@ private struct ChatMessageNativeContent<Content: View>: View {
                 hosted.tronPresentationActivity = values.tronPresentationActivity
                 hosted.tronPresentationStateStore = values.tronPresentationStateStore
                 hosted.tronPresentationStateScope = values.tronPresentationStateScope
+                hosted.tronPadSheetScene = values.tronPadSheetScene
                 hosted.tronPresentationDependencyRead = values.tronPresentationDependencyRead
                 hosted.tronSettingsVisualTheme = values.tronSettingsVisualTheme
                 hosted.tronSettingsSecondaryTextSizeAdjustment = values.tronSettingsSecondaryTextSizeAdjustment
