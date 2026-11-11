@@ -39,7 +39,7 @@ modules stay separate, so read-only consumers do not gain a lockfile dependency.
   connection grouping.
 - The internal workspace is the sibling `<tronHome>/workspace`
   ([workspace](workspace/README.md)). Delegated provider artifacts live under
-  `<tronHome>/internal/subagents/` ([internal-workspace.md](../docs/internal-workspace.md#delegated-provider-root)).
+  `<tronHome>/internal/subagents/` ([internal-workspace.md](../docs/internal-workspace.md#agent-context-and-display)).
 - Uploads are transient and bounded; prompt attachments stay session-owned until
   canonical deletion. Upload expiry, Automation timestamps and catalog windows use the
   host wall clock; upload and Automation IDs use the platform cryptographic UUID.
