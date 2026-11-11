@@ -12,7 +12,8 @@ and `tools/ownership/*.py`, and runs the command as a worker would:
 2. A report run deletes nothing.
 3. `--prune` removes only expired scratch/evidence, bytecode, branches merged into
    origin/main (not merely into a local, unpushed main) that no worktree has checked out (printing the restore command) and merged
-   worktrees with no local files, no process inside and no HEAD activity for 3 days.
+   worktrees with no local files, no process inside, no HEAD activity for 3 days and no unexpired
+   test-results/ evidence the primary checkout lacks (that one is kept and the copy command named).
    Unmerged work, ignored local files such as `.env.local`, a live process, recent
    activity, residue and orphan directories are kept.
 4. Without `lsof` no worktree is pruned, and a `.scratch` symlink to a directory outside
@@ -252,6 +253,8 @@ class PruneTests(TidyCase):
         f.live(self.busy)
         self.recent = f.worktree("merged-recent", merged=True, idle_days=0.5)
         self.unmerged = f.worktree("unmerged", merged=False, idle_days=20)
+        self.evidence = f.worktree("merged-evidence", merged=True, idle_days=5)
+        f.write("test-results/2398/fail-before.log", "first failure\n", root=self.evidence)
         self.done = f.branch("done", merged=True)
         self.wip = f.branch("wip", merged=False)
         f.branch("local-only", merged=False, days_old=20)
@@ -280,6 +283,18 @@ class PruneTests(TidyCase):
         for kept in ("wip", "local-only", "unmerged", "merged-local", "merged-live", "merged-recent"):
             self.assertIn(kept, branches)
         self.assertIn("tidy: branches: ", out)
+        self.assertTrue((self.evidence / "test-results/2398/fail-before.log").exists(), out)
+        copy = f"rsync -a --ignore-existing {self.evidence}/test-results/ {f.repo}/test-results/"
+        self.assertIn(f"kept worktree {self.evidence}: 1 evidence file(s) the primary checkout lacks; keep them with: {copy}", out)
+        self.assertIn(f"tidy: worktree {self.evidence} [merged-evidence] merged 1 evidence file(s) not in the primary checkout", out)
+        f.write("test-results/2398/fail-before.log", "other failure\n")
+        conflict = f.tidy("--prune")
+        self.assertTrue((self.evidence / "test-results/2398/fail-before.log").exists(), conflict.stdout)
+        self.assertEqual(conflict.returncode, 1, conflict.stdout)
+        f.write("test-results/2398/fail-before.log", "first failure\n")
+        copied = f.tidy("--prune")
+        self.assertFalse(self.evidence.exists(), copied.stdout + copied.stderr)
+        self.assertIn(f"tidy: pruned worktree {self.evidence} (branch merged-evidence is on main)", copied.stdout)
 
     def test_a_symlinked_scratch_directory_is_never_followed(self) -> None:
         f = self.f
