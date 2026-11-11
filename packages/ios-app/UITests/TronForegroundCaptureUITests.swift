@@ -8,11 +8,20 @@ final class TronForegroundCaptureUITests: XCTestCase {
     @MainActor func testQueuedEditorKeepsDraftAndValidatesRemovalLight() throws { try captureQueuedEditor(dark: false) }
     @MainActor func testQueuedEditorKeepsDraftAndValidatesRemovalDark() throws { try captureQueuedEditor(dark: true) }
 
+    private struct RPC: Decodable {
+        let index: Int
+        let at: TimeInterval
+        let method: String
+        let params: String
+    }
+
     private struct Observation: Decodable {
         let stack: [String]
         let changes: Int
         let liveAnchors: Int
         let rpc: [String: Int]
+        let rpcTrace: [RPC]
+        let rpcTraceOmitted: Int
         let frames: Int
         let foreground: Int
     }
@@ -49,7 +58,9 @@ final class TronForegroundCaptureUITests: XCTestCase {
         app.buttons["session-context-button"].tap()
         XCTAssertTrue(app.buttons["home-sheet-done-manage"].waitForExistence(timeout: 20))
         let memory = app.descendants(matching: .any)["home-manage-memory-browser"].firstMatch
-        reveal(memory, in: app); memory.tap()
+        reveal(memory, in: app)
+        let manage = try observation(app)
+        memory.tap()
         XCTAssertTrue(app.buttons["home-sheet-done-memory"].waitForExistence(timeout: 20))
         let olderPage = app.descendants(matching: .any)["home-memory-summary-0-16"].firstMatch
         reveal(olderPage, in: app)
@@ -67,10 +78,17 @@ final class TronForegroundCaptureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-sheet-done-memory-item"].waitForExistence(timeout: 20))
         try capture(app, name: "memory-item-\(dark ? "dark" : "light")", forbidden:
                         ["session.open", "session.sync", "session.list", "provider.list", "settings.resolve", "home.status", "home.taskList", "home.memory.view"])
+        let covered = try observation(app)
+        let manageReads = ["home.status": 1, "home.context": 1, "home.chapterList": 1, "home.profileList": 1,
+                           "home.taskList": 1, "settings.resolve": 1]
         app.buttons["home-sheet-done-memory-item"].tap(); app.buttons["home-sheet-done-memory"].tap()
-        try capture(app, name: "manage-revealed-\(dark ? "dark" : "light")",
-                    reads: ["home.status": 1, "home.context": 1, "home.chapterList": 1, "home.profileList": 1, "home.taskList": 1,
-                            "settings.resolve": 1],
+        XCTAssertTrue(waitFor {
+            guard let revealed = try? self.observation(app) else { return false }
+            return revealed.stack == manage.stack && manageReads.allSatisfy { method, expected in
+                revealed.rpc[method, default: 0] - covered.rpc[method, default: 0] == expected
+            }
+        }, "Manage must finish its native reveal and bounded reveal reads before foreground capture: \(app.debugDescription)")
+        try capture(app, name: "manage-revealed-\(dark ? "dark" : "light")", reads: manageReads,
                     forbidden: ["session.open", "session.sync", "session.list", "provider.list", "home.memory.view"])
         app.buttons["home-sheet-done-manage"].tap(); app.buttons["Back"].tap()
         try finish(app, initial: initial, name: "memory-stack-retired")
@@ -233,15 +251,18 @@ final class TronForegroundCaptureUITests: XCTestCase {
         XCTAssertTrue(waitFor { ((try? self.observation(app).frames) ?? 0) >= restored.frames + 120 },
                       "Observe 120 active display cycles, including late native replay")
         let after = try observation(app)
+        let orderedRPC = after.rpcTrace.filter { $0.index > (before.rpcTrace.last?.index ?? 0) }
+            .map { "\($0.index)@\($0.at):\($0.method)(\($0.params))" }.joined(separator: " → ")
+        print("FOREGROUND_RPC \(name) omitted=\(before.rpcTraceOmitted)..\(after.rpcTraceOmitted) \(orderedRPC)")
         let expectedStack = retiringTop ? Array(before.stack.dropLast()) : before.stack
         XCTAssertEqual(after.stack, expectedStack, "Existing native UIKit controllers must remain mounted")
         XCTAssertEqual(after.changes - before.changes, retiringTop ? 1 : 0,
                        "No transient native dismissal/re-presentation, even if the final screenshot matches")
         for (method, expected) in reads {
-            XCTAssertEqual(after.rpc[method, default: 0] - before.rpc[method, default: 0], expected, "Bounded foremost read: \(method)")
+            XCTAssertEqual(after.rpc[method, default: 0] - before.rpc[method, default: 0], expected, "Bounded foremost read: \(method); ordered RPC: \(orderedRPC)")
         }
         for method in forbidden {
-            XCTAssertEqual(after.rpc[method, default: 0] - before.rpc[method, default: 0], 0, "Covered read must wait for reveal: \(method)")
+            XCTAssertEqual(after.rpc[method, default: 0] - before.rpc[method, default: 0], 0, "Covered read must wait for reveal: \(method); ordered RPC: \(orderedRPC)")
         }
         print("FOREGROUND_CAPTURE after \(name) \(Date().timeIntervalSince1970)")
         evidence(app, name: "\(name)-after")
@@ -277,7 +298,9 @@ final class TronForegroundCaptureUITests: XCTestCase {
         hierarchy.name = "\(name)-hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
         if let probe = try? observation(app),
            let data = try? JSONSerialization.data(withJSONObject: ["stack": probe.stack, "changes": probe.changes,
-               "liveAnchors": probe.liveAnchors, "rpc": probe.rpc, "frames": probe.frames, "foreground": probe.foreground], options: [.sortedKeys]),
+               "liveAnchors": probe.liveAnchors, "rpc": probe.rpc,
+               "rpcTrace": probe.rpcTrace.map { ["index": $0.index, "at": $0.at, "method": $0.method, "params": $0.params] as [String: Any] },
+               "rpcTraceOmitted": probe.rpcTraceOmitted, "frames": probe.frames, "foreground": probe.foreground], options: [.sortedKeys]),
            let text = String(data: data, encoding: .utf8) {
             let native = XCTAttachment(string: text)
             native.name = "\(name)-native"; native.lifetime = .keepAlways; add(native)

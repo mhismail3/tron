@@ -1,14 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { GatewayError } from "../errors.js";
-import type { SessionArchiveFilter, SessionSummary } from "../protocol/types.js";
-
-interface SessionListPage {
-  sessions: SessionSummary[];
-  listRevision: number;
-  projectionToken: string;
-  nextCursor?: string;
-  archivedCount?: number;
-}
+import type { SessionArchiveFilter, SessionListPage, SessionSummary } from "../protocol/types.js";
 
 interface SessionListPageSource {
   readonly generation: string;

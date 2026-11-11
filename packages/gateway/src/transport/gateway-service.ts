@@ -9,7 +9,7 @@ import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY } from "../protocol/capabilities.js";
-import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelPage, ModelRef, SessionCommands, TronModuleList } from "../protocol/types.js";
+import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelPage, ModelRef, SessionCommands, SessionListPage, TronModuleList } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../episodic/home-memory-browser.js";
 import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { PI_VERSION } from "../kernel/pi/version.js";
@@ -1186,7 +1186,7 @@ export class GatewayService {
             listRevision: source.listRevision,
             projectionToken: source.projectionToken,
             notModified: true,
-          });
+          } satisfies SessionListPage);
         }
         const page = await this.sessionListPages.firstPage(client.id, scope, source, limit, archived);
         if (client.isRevoked()) {

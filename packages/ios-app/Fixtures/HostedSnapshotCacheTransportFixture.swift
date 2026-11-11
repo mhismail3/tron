@@ -44,14 +44,14 @@ actor SnapshotCacheFixtureGateway {
         }
     }
 
-    private static func snapshot() -> SessionSnapshot {
+    static func snapshot(phase: SessionPhase = .idle) -> SessionSnapshot {
         let content = ContentPart(id: "cache-text", ordinal: 0, thinkingRunOrdinal: nil, type: .text,
             text: transcriptMarker, attachment: nil, redacted: nil, mimeType: nil, blobId: nil,
             toolCallId: nil, name: nil, arguments: nil)
         let message = MessageTranscriptItem(id: "cache-message", parentId: nil, timestamp: time, kind: .message,
             role: .assistant, presentationId: "cache-message", content: [content])
         return SessionSnapshot(sessionId: "cache-live", runtimeGeneration: "fixture", revision: 1, eventSequence: 1,
-            phase: .idle, name: "Before summary", cwd: "/fixture/cache", parentSessionId: nil, model: nil,
+            phase: phase, name: "Before summary", cwd: "/fixture/cache", parentSessionId: nil, model: nil,
             thinkingLevel: "off", availableThinkingLevels: [], contextUsage: nil,
             stats: SessionStats(userMessages: 0, assistantMessages: 1, toolCalls: 0, toolResults: 0, totalMessages: 1,
                 tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0), latestCacheHitRate: nil, cost: 0),
