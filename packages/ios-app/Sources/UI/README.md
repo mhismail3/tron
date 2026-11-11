@@ -54,7 +54,8 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   Dark Burgundy separates saturated purple-leaning `tronPrimary` ink from deep-wine
   `tronPrimarySurface` glass tint. Home dashboard surfaces and the Home/settings sheet family
   consume those canonical roles; light Burgundy and other themes resolve both to the same ink.
-  Dark Burgundy primary ink has a 3:1 rendered contrast floor, an explicit WCAG AA exception
+  On iOS 27.2's native glass, Dark Burgundy primary ink has rendered contrast floors of
+  2.564:1 on Home usage and 2.505:1 in inherited Home Settings, explicit WCAG AA exceptions
   for small primary-colored text; light retains 4.5:1.
   `TronSettingsVisualTheme` carries foreground and surface accents together through inherited
   destinations; an explicit semantic accent keeps its own surface unless one is supplied.
@@ -147,6 +148,9 @@ light/dark, dashboard working dots and composer active/recent/extension states:
 `TronMobileUITests/TronActivityPrimaryColorUITests/testActivityInkFollowsPrimaryThemeLightAndDark`.
 Wine glass hue, native ink contrast and unchanged light ink are checked through Home → Home
 Settings by `TronMobileUITests/TronBurgundyGlassUITests/testWineGlassKeepsInkReadableAndLightBurgundyUnchanged`.
+`TronNotificationInboxUITests/testSheetFollowsGatewayLiveWithoutOfflineRowOrPullToRefresh`
+requires clear read-row glass to differ from the iOS 27.2 sheet by at least four RGB levels;
+unread surfaces and accent-tint checks retain their greater-than-six threshold.
 
 ```bash
 scripts/tron-ios-test run \
