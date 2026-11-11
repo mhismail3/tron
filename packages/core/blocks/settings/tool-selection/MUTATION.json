@@ -3,7 +3,7 @@
   "block": "settings/tool-selection",
   "tier": "high-stakes",
   "laws": "blocks/settings/tool-selection/Block.dfy",
-  "toolHash": "2eb85aae438a0ad4",
+  "toolHash": "5a43c9b70232dc0d",
   "mutants": 121,
   "stillborn": 25,
   "valid": 96,

@@ -3,7 +3,7 @@
   "block": "receipts/invocation-lifecycle",
   "tier": "high-stakes",
   "laws": "blocks/receipts/invocation-lifecycle/Block.dfy",
-  "toolHash": "2eb85aae438a0ad4",
+  "toolHash": "5a43c9b70232dc0d",
   "mutants": 195,
   "stillborn": 40,
   "valid": 155,

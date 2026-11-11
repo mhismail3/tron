@@ -754,6 +754,29 @@ class FastPathTests(VerifyCase):
         r.commit("the wrapped header joined into one purpose line")
         reworded = r.verify("--changed")
         self.assertEqual({step["name"]: step["status"] for step in r.report()["steps"]}["no new comments"], "ok", reworded.stdout)
+        old_purpose = "Run the fixture tool to exercise its source boundary."
+        new_purpose = "Run the fixture tool and expose its command help."
+        for path, prefix, body in (
+                ("tools/fixture/tool.sh", "#!/usr/bin/env bash\n", f"cat <<'HELP'\n{old_purpose}\nHELP\n"),
+                ("tools/fixture/tool.py", "", f"VALUE = {old_purpose!r}\n")):
+            with self.subTest(purpose_path=path):
+                original = prefix + f"# {old_purpose}\n" + body
+                r.write(path, original)
+                r.commit("a tool whose help repeats its purpose")
+                r.git("branch", "-f", "base")
+                r.write(path, prefix + f"# {new_purpose}\n" + body)
+                r.commit("reword the purpose without changing help")
+                help_text = r.verify("--changed")
+                self.assertEqual({step["name"]: step["status"] for step in r.report()["steps"]}["no new comments"],
+                                 "ok", help_text.stdout)
+                r.git("reset", "-q", "--hard", "base")
+                r.write(path, prefix + f"# {new_purpose}\n# {old_purpose}\n" + body)
+                r.commit("a new comment above a retained purpose")
+                retained = r.verify("--changed")
+                self.assertEqual(retained.returncode, 1, retained.stdout)
+                self.assertIn("no new comments FAILED", retained.stdout)
+                self.assertIn(f"{path}:{prefix.count(chr(10)) + 1}: new comment", retained.stdout)
+                r.git("reset", "-q", "--hard", "base")
 
     def test_a_gateway_golden_change_selects_only_the_lock_that_reads_it(self) -> None:
         r = self.repo
