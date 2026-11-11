@@ -26,10 +26,6 @@ final class PackageConfigurationCoordinator {
         let cwd: String?
     }
 
-    private struct UpdateResponse: Decodable {
-        let updates: [PackageUpdate]
-    }
-
     private struct MutationParams: Codable {
         let source: String?
         let local: Bool
@@ -99,10 +95,9 @@ final class PackageConfigurationCoordinator {
         if requiresLiveTask, Task.isCancelled { return false }
         let admission = beginAdmission(target: target, generations: &loadGenerationByTarget)
         do {
-            let inventory: PackageInventory = try await client.request(
-                "packages.list",
-                TargetParams(cwd: target.cwd)
-            )
+            let inventory = try GatewayResponseDecoding.decode(
+                try await client.requestValue("packages.list", TargetParams(cwd: target.cwd)),
+                method: "packages.list", PackageInventory.decode)
             guard (!requiresLiveTask || !Task.isCancelled),
                   admits(admission, generations: loadGenerationByTarget),
                   mutationAdmission.map({ admits($0, generations: mutationGenerationByTarget) }) ?? true else {
@@ -134,11 +129,10 @@ final class PackageConfigurationCoordinator {
         guard !Task.isCancelled else { return false }
         let admission = beginAdmission(target: target, generations: &updateGenerationByTarget)
         do {
-            let response: UpdateResponse = try await client.request(
-                "packages.checkUpdates",
-                TargetParams(cwd: target.cwd),
-                timeout: GatewayRequestTimeout.packageCheckUpdates
-            )
+            let response = try GatewayResponseDecoding.decode(
+                try await client.requestValue("packages.checkUpdates", TargetParams(cwd: target.cwd),
+                                              timeout: GatewayRequestTimeout.packageCheckUpdates),
+                method: "packages.checkUpdates", PackageUpdates.decode)
             guard !Task.isCancelled,
                   admits(admission, generations: updateGenerationByTarget) else { return false }
             let admitted = try PackageCatalogPolicy.admit(response.updates)
@@ -196,7 +190,7 @@ final class PackageConfigurationCoordinator {
         case (.update, nil):
             updatesByTarget[target] = []
         case (.update, .some(let source)), (.remove, .some(let source)):
-            let scope: PackageSummary.Scope = local ? .project : .user
+            let scope: PackageScope = local ? .project : .user
             updatesByTarget[target]?.removeAll { $0.source == source && $0.scope == scope }
         default:
             break

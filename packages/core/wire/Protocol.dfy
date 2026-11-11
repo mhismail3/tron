@@ -11,7 +11,7 @@
 // @swift HomeStatus HomeContextProjection HomeTaskPage HomeTaskStatusResult HomeTaskHistoryPage
 // @swift HomeMemoryView HomeMemoryEvidencePage HomeChapterList HomeProfileList
 // @swift AdministrativeDrainSnapshot GatewayRestartResponse
-// @swift SessionCommands CommandDetail TronModuleList
+// @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates
 module Protocol {
   datatype Option<T> = None | Some(v: T)
   datatype Nullable<T> = Null | NonNull(v: T)
@@ -1585,6 +1585,33 @@ module Protocol {
       tools: seq<string>,
       commands: seq<string>
     )
+
+  // @wire enum
+  datatype PackageScope = user | project
+
+  /// One configured package as `packages.list` answers it: Pi's configured package, what it
+  /// provides, and why it is ignored or may not run, when it is.
+  // @wire
+  datatype PackageSummary = PackageSummary(
+      source: string,
+      scope: PackageScope,
+      filtered: bool,
+      installedPath: Option<string>,
+      provides: Option<PackageProvides>,
+      conflict: Option<PackageConflict>,
+      nodeRequirement: Option<PackageNodeRequirement>
+    )
+
+  /// `packages.list`: the configured packages and Pi's resolved resources for the directory.
+  // @wire
+  datatype PackageInventory = PackageInventory(packages: seq<PackageSummary>, resources: JsonValue, providesDiagnostic: Option<string>)
+
+  // @wire
+  datatype PackageUpdate = PackageUpdate(source: string, displayName: string, type_: string, scope: PackageScope)
+
+  /// `packages.checkUpdates`: the configured packages with an available update.
+  // @wire
+  datatype PackageUpdates = PackageUpdates(updates: seq<PackageUpdate>)
 
   // @wire enum
   datatype HomeProfileListItemKind = preference | {:wire "standing-decision"} standingDecision | {:wire "delegation-default"} delegationDefault | fact | correction

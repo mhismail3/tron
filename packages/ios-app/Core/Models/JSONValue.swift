@@ -326,6 +326,19 @@ package enum JSONValue: Codable, Hashable, Sendable {
     }
 }
 
+extension JSONValue {
+    package init(_ value: JsonValue) {
+        switch value {
+        case .null_: self = .null
+        case .boolean(let value): self = .bool(value)
+        case .number(let value): self = .number(value)
+        case .string(let value): self = .string(value)
+        case .array(let values): self = .array(values.map(JSONValue.init))
+        case .object(let members): self = .object(Dictionary(members.entries.map { ($0.0, JSONValue($0.1)) }, uniquingKeysWith: { _, last in last }))
+        }
+    }
+}
+
 extension WireJSON {
     init(_ value: JSONValue) {
         switch value {
