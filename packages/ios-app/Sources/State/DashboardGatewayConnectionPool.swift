@@ -21,7 +21,7 @@ enum DashboardCatalogRetryPolicy {
 protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
     func dashboardPoolDidUpdate(
         profileID: String,
-        sessions: [SessionSummary],
+        sessions: [CatalogSession],
         state: DashboardServerConnectionState,
         stopReason: String?
     )

@@ -77,9 +77,9 @@ struct SessionShellView: View {
     @State private var showingApps = false
     @State private var projectSettings: ProjectSettingsRoute?
     @State private var presentedSession: AppModel.SessionNavigationRoute?
-    @State private var sessionToDelete: SessionSummary?
+    @State private var sessionToDelete: CatalogSession?
     @State private var archiveConfirmation: SessionArchiveConfirmation?
-    @State private var sessionToRename: SessionSummary?
+    @State private var sessionToRename: CatalogSession?
     @State private var renameName = ""
     @State private var workspaceDisclosure = TronDisclosureState()
     @State private var sessionExpansion: SessionListSessionExpansion
@@ -453,12 +453,12 @@ struct SessionShellView: View {
         )
     }
 
-    private func beginRename(_ session: SessionSummary) {
+    private func beginRename(_ session: CatalogSession) {
         renameName = session.title
         sessionToRename = session
     }
 
-    private func rename(_ session: SessionSummary, name value: String) {
+    private func rename(_ session: CatalogSession, name value: String) {
         let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         Task {
@@ -468,7 +468,7 @@ struct SessionShellView: View {
         }
     }
 
-    private func delete(_ session: SessionSummary) {
+    private func delete(_ session: CatalogSession) {
         Task {
             do {
                 try await model.performOnOwningGateway(session) { try await model.deleteSession(session.id) }
@@ -477,7 +477,7 @@ struct SessionShellView: View {
         }
     }
 
-    private func setArchived(_ session: SessionSummary, archived: Bool) {
+    private func setArchived(_ session: CatalogSession, archived: Bool) {
         Task {
             do { try await model.setSessionArchived(session, archived: archived) }
             catch is CancellationError { return }
@@ -485,7 +485,7 @@ struct SessionShellView: View {
         }
     }
 
-    private func openArchivedSession(_ session: SessionSummary) {
+    private func openArchivedSession(_ session: CatalogSession) {
         guard openingSessionID == nil else { return }
         openingSessionID = session.dashboardID
         let navigationIntent = navigationOwner.begin()
@@ -594,7 +594,7 @@ struct SessionShellView: View {
 
     @ViewBuilder
     private func sessionSections(
-        _ filtered: [SessionSummary],
+        _ filtered: [CatalogSession],
         onRevealArchivedRows: @escaping () -> Void
     ) -> some View {
         if serverFilter.sortMode == .home {
@@ -692,7 +692,7 @@ struct SessionShellView: View {
     }
 
     @ViewBuilder
-    private func homeSections(_ filtered: [SessionSummary]) -> some View {
+    private func homeSections(_ filtered: [CatalogSession]) -> some View {
         let sections = HomeDashboardSections(sessions: filtered)
         let order = sections.revealOrder
         if let inProgressOrder = order[.inProgress] {
@@ -720,7 +720,7 @@ struct SessionShellView: View {
 
     private func cappedHomeSection(
         _ section: HomeDashboardSections.Section,
-        rows: [SessionSummary],
+        rows: [CatalogSession],
         order: Int,
         hint: String
     ) -> some View {
@@ -883,7 +883,7 @@ struct SessionShellView: View {
         }
     }
 
-    private func openSession(_ session: SessionSummary) {
+    private func openSession(_ session: CatalogSession) {
         guard openingSessionID == nil else { return }
         openingSessionID = session.dashboardID
         let navigationIntent = navigationOwner.begin()
@@ -902,7 +902,7 @@ struct SessionShellView: View {
         }
     }
 
-    private func sessionButton(_ session: SessionSummary, showsContext: Bool = false) -> some View {
+    private func sessionButton(_ session: CatalogSession, showsContext: Bool = false) -> some View {
         Button {
             openSession(session)
         } label: {
@@ -1024,7 +1024,7 @@ struct SessionShellView: View {
         }
     }
 
-    private var filteredSessions: [SessionSummary] {
+    private var filteredSessions: [CatalogSession] {
         dashboardPresentation.sessions.filter { session in
             serverFilter.allows(
                 session.gatewayProfileID,
@@ -1312,7 +1312,7 @@ struct DashboardIndicatorSwap<State: Hashable, Content: View>: View {
 }
 
 struct HistoricalSessionRow: View {
-    let session: SessionSummary
+    let session: CatalogSession
     let activity: DashboardSessionActivity
     let showsContext: Bool
     @Environment(\.tronPresentationActivity) private var presentationActivity

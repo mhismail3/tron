@@ -133,6 +133,14 @@ its hittability and unchanged 44-point bounds immediately, polling only while fa
 must complete within the same monotonic five-second deadline; late success is rejected. A fixture that holds a reply to expose a loading state holds it until the
 test releases it, never for a fixed time.
 
+The hosted dashboard reveal probe reports shown section orders independently from animation starts.
+Rows first mounted after the reveal window are already visible without an animation; they contribute
+their shown order, not an animation count. The dashboard journey checks both section presence and an
+unchanged animation count across live updates. Its new worker stays behind a named fixture release
+permit until the test observes absence and posts the release; host/query latency cannot consume a
+fixed injection window. The same fixture-release owner keeps task-list replies behind their existing
+named permit.
+
 Hosted foreground captures retain cumulative RPC counts and the latest 64 indexed, timestamped
 method/parameter records in the native probe. Parameter JSON over 1,024 bytes is explicitly omitted; the probe reports
 how many earlier records were dropped. Captures print the ordered before/after interval before any
@@ -251,6 +259,7 @@ their respective Session scopes. Compaction snapshot provenance uses `session`,
 `global`, `project` or `default`; production admission rejects retired `chat` tags.
 
 ```bash
+scripts/ios-gateway-e2e-test check      # build selected E2E methods; stop the private fixture on every exit
 scripts/ios-gateway-e2e-test all        # prepare, build, run RealGatewayPiBoundaryTests
 scripts/ios-gateway-e2e-test iterate    # after an affected Swift edit
 scripts/ios-gateway-e2e-test all --only-testing TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness

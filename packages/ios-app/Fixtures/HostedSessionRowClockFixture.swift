@@ -80,8 +80,8 @@ struct HostedSessionRowClockFixture: View {
         GatewayTimestamp.relativeDescription(launchedAt.addingTimeInterval(Self.probeOffsets[probeIndex]), relativeTo: launchedAt)
     }
 
-    private func session(offset: TimeInterval) -> SessionSummary {
-        SessionSummary(
+    private func session(offset: TimeInterval) -> CatalogSession {
+        CatalogSession(SessionSummary(
             id: "row-clock-\(Int(offset))",
             name: Self.title,
             cwd: "/workspace/fixture-project",
@@ -91,10 +91,8 @@ struct HostedSessionRowClockFixture: View {
             messageCount: 4,
             firstMessage: Self.title,
             phase: .running,
-            archivedAt: nil,
-            gatewayProfileID: "fixture",
-            gatewayProfileLabel: "Fixture Mac"
-        )
+            archivedAt: nil
+        ), gatewayProfileID: "fixture", gatewayProfileLabel: "Fixture Mac")
     }
 }
 #endif

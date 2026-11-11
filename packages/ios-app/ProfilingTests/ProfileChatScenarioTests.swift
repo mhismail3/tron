@@ -93,12 +93,12 @@ final class ProfileChatRun: ProfileScenarioRun {
 
     private func scriptChatOpening() throws {
         let session = try JSONValue.encode(snapshot)
-        let summary = try JSONValue.encode([SessionSummary(
+        let summary = JSONValue.array([try JSONValue.wire(SessionSummary(
             id: snapshot.sessionId, name: snapshot.name, cwd: snapshot.cwd, parentSessionId: nil,
             createdAt: "2026-09-01T10:00:00.000Z", updatedAt: "2026-09-01T10:05:00.000Z",
             messageCount: snapshot.transcriptTotal ?? snapshot.transcript.count,
             firstMessage: "Profile chat fixture", phase: snapshot.phase, summaryRevision: 1
-        )])
+        ).encode())])
         fixture.handle("session.list") { _ in .object(["sessions": summary, "listRevision": .number(1), "projectionToken": .string("epoch-1:1")]) }
         fixture.handle("session.open") { _ in
             .object([

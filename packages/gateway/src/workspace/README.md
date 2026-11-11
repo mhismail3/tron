@@ -4,7 +4,8 @@
 
 Tron's durable internal workspace (`<tronHome>/workspace`) and the `tron-core`
 extension that tells every Gateway-owned parent runtime who it is, where that
-workspace is, and how delegated children receive those facts.
+workspace is, how to maintain scratch, finished artifacts and living data, and how
+delegated children receive those facts.
 
 ## Owns
 
@@ -14,7 +15,7 @@ workspace is, and how delegated children receive those facts.
 initialize/dispose order around Home), `core-module.ts` (core descriptor, per-runtime Jev)
 and `tron-core-extension.ts`. `web-research-module.ts` composes the shared public-web
 owner for all runtime profiles and its explicit scoped native-child socket bridge. The workspace layout, recovery, display and managed-state
-contract is [internal-workspace.md](../../docs/internal-workspace.md); installed Swift
+guidance is [internal-workspace.md](../../docs/internal-workspace.md); installed Swift
 apps under `state/apps/` are [swift-apps.md](../../docs/swift-apps.md).
 
 The `resourceRoot` policy supplies this same workspace to the native kernel's
@@ -34,7 +35,9 @@ moving its product copy or changing prompt timing.
   the task verbatim. It never rewrites workflow source or mixed `agent`/`workflow`
   requests. Workflow launches, slash/RPC/structured delegation and further children
   bypass the hook, so those tasks must repeat identity, root, availability and
-  ownership explicitly. The handoff grants no authority, cwd, extensions or tools.
+  lifecycle (tmp/files/state, completion, index, owner README, deletion approval) and
+  store ownership explicitly. One shared guidance string supplies parents and direct
+  handoffs. The handoff grants no authority, cwd, extensions or tools.
 - **Pinned provider limits.** `pi-subagents` carries `extensionBindings` only as JSON in
   `PI_SUBAGENT_EXTENSION_BINDINGS` (no extension load, no prompt append) and keeps the
   original binding on resume; its request schema has no per-call extension override;

@@ -185,9 +185,9 @@ private final class HostedAccessibilityFixtureState {
         }
         AutomationDashboardPreferences.save(AutomationDashboardViewPreferences())
         model.sessions = (0..<30).map { index in
-            SessionSummary(id: "session-\(index)", name: "Review project \(index)", cwd: "/workspace/project-\(index / 5)",
+            CatalogSession(SessionSummary(id: "session-\(index)", name: "Review project \(index)", cwd: "/workspace/project-\(index / 5)",
                            parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
-                           messageCount: 1, firstMessage: "Example conversation", phase: .idle, summaryRevision: 1)
+                           messageCount: 1, firstMessage: "Example conversation", phase: .idle, summaryRevision: 1))
         }
     }
 

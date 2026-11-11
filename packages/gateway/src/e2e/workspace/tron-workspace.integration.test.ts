@@ -96,6 +96,12 @@ describe("Tron workspace through the pinned runtime", () => {
       expect(text.match(/## Tron operating context/g)).toHaveLength(1);
       expect(text).toContain(JSON.stringify(f.cwd));
       expect(text).toContain(JSON.stringify(internal));
+      expect(text).toContain("tmp/<taskId>/");
+      expect(text).toContain("files/<topic>-<date>/");
+      expect(text).toContain("files/INDEX.md");
+      expect(text).toContain("state/<name>/");
+      expect(text).toContain("14 days");
+      expect(text).toContain("maintainer approval");
       expect(text).toContain("Project boundary fixture");
       expect(text).not.toContain("GLOBAL CONTENT MUST NOT LEAK");
     }
@@ -123,6 +129,10 @@ describe("Tron workspace through the pinned runtime", () => {
     expect(JSON.stringify(tool)).toContain("Tron workspace handoff");
     expect(JSON.stringify(tool)).toContain(join(f.tronHome, "workspace"));
     expect(JSON.stringify(tool)).toContain("Read only");
+    expect(JSON.stringify(tool)).toContain("tmp/<taskId>/");
+    expect(JSON.stringify(tool)).toContain("files/<topic>-<date>/");
+    expect(JSON.stringify(tool)).toContain("state/<name>/");
+    expect(JSON.stringify(tool)).toContain("maintainer approval");
     expect(f.slot.cwd).toBe(f.cwd);
   }, 15_000);
 

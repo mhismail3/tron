@@ -12,7 +12,7 @@
 // @swift HomeMemoryView HomeMemoryEvidencePage HomeChapterList HomeProfileList
 // @swift AdministrativeDrainSnapshot GatewayRestartResponse
 // @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates ModelPage
-// @swift SessionPhase SessionSummaryUpdate
+// @swift SessionPhase SessionSummaryUpdate SessionListPage
 // @swift ExtensionRunLifecycle SessionProcessLifecycle
 // @swift ExtensionSurfaceKind ExtensionSurfacePlacement ExtensionSurfaceLifecycle ExtensionSurfaceInputMode
 // @swift-codable SessionPhase
