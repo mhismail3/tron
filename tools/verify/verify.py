@@ -24,6 +24,7 @@ import swift_index  # noqa: E402  (the one authority on a fresh iOS index and bu
 sys.path.insert(0, str(ROOT / "tools" / "verify"))
 import vitest_configs  # noqa: E402  (the one reader of the Gateway's listing Vitest configs)
 import mini  # noqa: E402  (the test-host pool's one owner)
+import swift_source
 
 GATEWAY = "packages/gateway"
 RELAY = "packages/push-relay"
@@ -181,38 +182,67 @@ def ios_class(path: str) -> str | None:
     return extended.group(1) if extended else None
 
 
-def owned_journeys() -> list[str]:
-    """The harness's `ui_owned_journeys`: the only selectors its `run-ui` accepts."""
-    try:
-        text = (ROOT / JOURNEY_HARNESS).read_text()
-    except OSError as error:
-        raise VerifyError(f"the real-UI journeys' harness is unreadable: {error}") from error
+def journey_sources(paths: list[str]) -> list[str]:
+    return [path for path in paths if path.startswith(f"{IOS}/UITests/") and is_test(path)
+            and (ROOT / path).is_file() and ios_class(path) == JOURNEY_CLASS]
+
+
+def journey_contract(text: str) -> tuple[list[str], str | None]:
     block = re.search(r"^ui_owned_journeys=\((.*?)^\)", text, re.S | re.M)
     if block is None:
         raise VerifyError(f"{JOURNEY_HARNESS} declares no ui_owned_journeys")
-    return re.findall(r"""['"]([\w/]+)['"]""", block.group(1))
+    owned = re.findall(r"""['"]([\w/]+)['"]""", block.group(1))
+    if not owned:
+        raise VerifyError(f"{JOURNEY_HARNESS} declares no owned real-UI journeys")
+    literal = all(not line.strip() or re.fullmatch(r"""\s*(['"])[\w/]+\1\s*""", line)
+                  for line in block.group(1).splitlines())
+    return owned, text[:block.start()] + "ui_owned_journeys=()" + text[block.end():] if literal else None
 
 
-def journey_selectors(paths: list[str]) -> list[str]:
-    """The owned journeys a change reaches: the test methods a changed extension file declares, or,
-    for the class's own file or an extension declaring no test (shared fixture and helpers), every
-    owned journey."""
-    owned = owned_journeys() if paths else []
+def journey_selectors(paths: list[str], base: str | None, tracked: list[str]) -> list[str]:
+    if not paths:
+        return []
+    try:
+        owned, contract = journey_contract((ROOT / JOURNEY_HARNESS).read_text())
+    except OSError as error:
+        raise VerifyError(f"the real-UI journeys' harness is unreadable: {error}") from error
     selected: set[str] = set()
+    siblings = {path: (ROOT / path).read_text(errors="replace") for path in tracked
+                if path.startswith(f"{IOS}/UITests/") and path.endswith(".swift") and (ROOT / path).is_file()}
+    whole = base is None
+    if base is not None:
+        try:
+            _, previous_contract = journey_contract(git("show", f"{base}:{JOURNEY_HARNESS}"))
+            whole = contract is None or previous_contract != contract
+        except VerifyError:
+            whole = True
     for path in paths:
         if path.split("/")[2] != "UITests":
             raise VerifyError(f"{path}: {JOURNEY_CLASS} journeys live in {IOS}/UITests ({IOS_TARGETS['UITests']})")
-        methods = re.findall(r"func (test\w+)\s*\(", (ROOT / path).read_text())
-        if Path(path).stem == JOURNEY_CLASS or not methods:
-            selected.update(owned)
+        text = (ROOT / path).read_text()
+        members = swift_source.read(text, JOURNEY_CLASS)
+        if members is None:
+            whole = True
             continue
-        for method in methods:
+        for method in (method.name for method in members.methods if method.test):
             selector = f"{IOS_TARGETS['UITests']}/{JOURNEY_CLASS}/{method}"
             if selector not in owned:
                 raise VerifyError(f"{path}: {selector} is not a journey {JOURNEY_HARNESS} run-ui owns")
-            selected.add(selector)
-    return sorted(selected)
-
+        if whole:
+            continue
+        try:
+            changed = swift_source.changed_methods(git("show", f"{base}:{path}"), text, JOURNEY_CLASS,
+                                                   git("diff", "--no-ext-diff", "--no-textconv", "--no-color", "-U0", base, "--", path))
+        except VerifyError:
+            changed = None
+        if changed is None:
+            whole = True
+        else:
+            if any(other != path and re.search(rf"\b{re.escape(method)}\b", other_source)
+                   for other, other_source in siblings.items() for method in changed):
+                whole = True
+            selected.update(f"{IOS_TARGETS['UITests']}/{JOURNEY_CLASS}/{method}" for method in changed)
+    return sorted(owned if whole or not selected else selected)
 
 def journey_evidence(output: str, selectors: list[str], sha: str) -> tuple[list[dict], list[str], list[str]]:
     """Each journey's report.json the harness wrote, checked against its report.sha256 and this
@@ -254,56 +284,27 @@ def ios_selectors(paths: list[str]) -> list[str]:
 
 
 def ios_test_methods(owner: str) -> tuple[list[str], set[str]]:
-    """`Target/Class/testMethod` owners XCTest runs for `Target/Class`: the no-argument, non-private
-    `test` methods declared in the class or its top-level extensions in that target's sources, and
-    the subset that is iPad-only (the method, or the class's setUp, skips unless on an iPad).
-    Fails closed: a test-shaped method whose enclosing top-level type cannot be read makes the
-    class run whole (an empty result) rather than silently dropping a test."""
     target, name = owner.split("/")
     folder = next(path for path, candidate in IOS_TARGETS.items() if candidate == target)
-    top_level = re.compile(r"^(?:(?:final|public|open|private|fileprivate|internal|@\w+(?:\([^)]*\))?)\s+)*"
-                           r"(?:class|struct|enum|actor|extension|protocol)\s+(\w+)")
-    method = re.compile(r"^\s+(?:@\w+(?:\([^)]*\))?\s+)*(?:override\s+)?func\s+(test\w*)\(\)")
-    shaped = re.compile(r"\bfunc\s+(test\w*)\s*\(\s*\)")
-    hidden = re.compile(r"\b(?:private|fileprivate|static|class)\s+func\b")
-    member_line = re.compile(r"^\s+(?:(?:@\w+(?:\([^)]*\))?|override|private|fileprivate|public|open|internal|static|class|nonisolated)\s+)*func\s+(\w+)")
-    found: list[str] = []
-    pad: set[str] = set()
     bodies: dict[str, str] = {}
-    class_pad = False
-    unplaced = False
+    found: list[str] = []
     for source in sorted((ROOT / IOS / folder).rglob("*.swift")):
         text = source.read_text(errors="replace")
         if not re.search(rf"\b(?:class|extension)\s+{re.escape(name)}\b", text):
             continue
-        scope: str | None = None
-        member: str | None = None
-        for line in text.splitlines():
-            if scope == name and (declared_member := member_line.match(line)):
-                member = declared_member.group(1)
-            if scope == name and member:
-                bodies[member] = bodies.get(member, "") + line + "\n"
-            if scope == name and member and IOS_PAD_GATE.search(line):
-                class_pad = class_pad or member in ("setUp", "setUpWithError")
-                pad.add(member)
-            if line[:1] not in ("", " ", "\t", "}", "/", "#") and (
-                    line[:1] != "@" or re.search(r"\b(?:class|struct|enum|actor|extension|protocol|func|var|let)\b", line)):
-                declared = top_level.match(line)
-                scope = declared.group(1) if declared else None
-                member = None
-            elif scope == name and (match := method.match(line)):
-                found += [] if match.group(1) in found else [match.group(1)]
-            elif scope == name and shaped.search(line) and not hidden.search(line):
-                unplaced = True
-            elif scope is None and shaped.search(line) and not hidden.search(line):
-                unplaced = True
-    if unplaced:
-        return [], set()
-    helpers = [helper for helper in pad if helper not in found]
+        members = swift_source.read(text, name)
+        if members is None:
+            return [], set()
+        for method in members.methods:
+            bodies[method.name] = bodies.get(method.name, "") + method.text
+            if method.test and method.name not in found:
+                found.append(method.name)
+    pad = {method for method, body in bodies.items() if IOS_PAD_GATE.search(body)}
+    class_pad = bool(pad & {"setUp", "setUpWithError"})
+    helpers = pad - set(found)
     gated = {test for test in found if class_pad or test in pad
-             or any(re.search(rf"\b{re.escape(helper)}\(", bodies.get(test, "")) for helper in helpers)}
+             or any(re.search(rf"\b{re.escape(helper)}\(", bodies[test]) for helper in helpers)}
     return [f"{owner}/{test}" for test in found], {f"{owner}/{test}" for test in gated}
-
 
 class IosShard(list):
     """Selectors one runner process executes; `pad` shards run on the iPad lane. `seconds` is
@@ -661,6 +662,13 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             else:
                 reasons.append(f"{key}: owns a changed path; its {len(owned)} owned test file(s)")
             selected |= set(owned)
+        if any(path.startswith(f"{IOS}/UITests/") and is_test(path) and path in owner
+               and re.search(rf"\b(?:class|extension)\s+{JOURNEY_CLASS}\b", git("show", f"{base}:{path}")) for path in gone):
+            remaining = journey_sources(tracked)
+            if not remaining:
+                raise VerifyError("removed real-UI journey source leaves no remaining journey files")
+            selected.update(remaining)
+            reasons.append("removed real-UI journey source: all remaining journey files")
         sources = [path for key in changes if key not in narrow for path in changes[key] if not is_test(path)]
         consumers: dict[str, set[str]] = {}
         for importer, hits in importers(sources, tracked).items():
@@ -1136,7 +1144,10 @@ def main(argv: list[str]) -> int:
             groups.setdefault(runner_of(path, nested, mac_terminal), []).append(path)
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
         shards = ios_shards(selectors, ios_method_seconds() if selectors else {})
-        journeys = journey_selectors(groups.get("ios-journeys", [])) if "ios" not in skip else []
+        journey_paths = groups.get("ios-journeys", [])
+        journey_base = base if name == "changed" and all(
+            is_doc(path) or path in journey_paths or path == JOURNEY_HARNESS for path in selection["paths"]) else None
+        journeys = journey_selectors(journey_paths, journey_base, result["tracked"]) if "ios" not in skip else []
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2

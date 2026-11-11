@@ -20,6 +20,13 @@ UIValidation tests.
    (`passedTests`); `--update-locks` passes `TEST_RUNNER_TRON_UPDATE_LOCKS`. Goldens are
    source: commit and rebuild before comparing.
 
+**Declarations.** `swift_source.py` reads Xcode's `swiftc -frontend -dump-parse` output from stdin,
+shared by method shards and real-UI journey selection. Only no-argument, non-private instance
+`test` methods in the named class or its top-level extensions qualify. Strings, comments and
+nested types cannot introduce methods. Parse errors, conditional/macro declarations, source-location
+directives, unsupported attributes or compiler output keep the class whole rather than dropping tests. This is source
+parsing only; selection does not build an app or use a simulator.
+
 **Packing.** Shards are consecutive runs of the selected methods, in selection order, whose
 estimates fit 570 s: twice that plus 60 s of process launch is the runner's unchanged 1200 s
 focused deadline, so a shard keeps it even if every method takes twice its estimate. A method's
