@@ -481,7 +481,6 @@ export function generate(input, outDir) {
   return { types: types.map((t) => t.name), tsLines: ts.split("\n").length, swiftLines: swift.split("\n").length };
 }
 
-/// The named datatypes and every datatype their fields reach, in source order.
 export function reachable(types, roots) {
   const byName = new Map(types.map((t) => [t.name, t]));
   const seen = new Set();
