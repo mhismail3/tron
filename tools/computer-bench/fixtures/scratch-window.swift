@@ -1,4 +1,3 @@
-// Purpose: the computer-bench scratch native window; it never activates itself and writes its control state to argv[1] as JSON.
 import AppKit
 
 final class Bench: NSObject, NSApplicationDelegate {
