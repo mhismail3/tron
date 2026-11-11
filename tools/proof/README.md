@@ -162,7 +162,9 @@ the missing and the null field and the unknown `ChatSemanticKind` tolerantly; an
 `tests/fixtures/wire/Wire.dfy` (one datatype per form) round trip 2,000 seeded random frames plus edge doubles,
 keys and strings, TypeScript and Swift (`swiftc -O`) produce identical bytes and identical normalisations of
 non-canonical inputs (and a Swift-built map encodes in JavaScript order), and of 16 malformed inputs
-TypeScript rejects each at its path and Swift rejects or reads each as stated.
+TypeScript rejects each at its path and Swift rejects or reads each as stated. Its generator test emits Swift from a small source: a listed all-string enum alone takes `Codable`,
+defaulted fields read and write their defaults, and `@swift-codable` on a non-string enum, an enum with an
+`unknown` value, a record or an unreached name, and four malformed defaults, are each refused.
 
 `scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the
 fixture block `demo/meter` (`tests/fixtures/facade`), which names a shell: its `core.mjs` lands in the shell's directory, imports nothing,
