@@ -929,6 +929,8 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 ui_owned_journeys=(
   'TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark'
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testChatDark'
+  'TronMobileUITests/RealGatewayPairAndChatUITests/testAppsLight'
 )
 echo "$* lanes=${TRON_IOS_E2E_UI_LANES:-1}" >>"$FIXTURE_E2E_CALLS"
 [[ "$1" == run-ui ]] || exit 2
@@ -1076,19 +1078,22 @@ class IosLaneTests(VerifyCase):
         calls = Path(self.temp.name) / "e2e-calls.txt"
         r.env["FIXTURE_E2E_CALLS"] = str(calls)
         tooling = json.loads((r.path / "tooling.module.json").read_text())
-        tooling["owns"] += ["scripts/ios-gateway-e2e-test"]
+        tooling["owns"] += ["scripts/ios-gateway-e2e-test", ".gitattributes"]
         r.write("tooling.module.json", json.dumps(tooling))
+        r.write(".gitattributes", "")
         r.write("scripts/ios-gateway-e2e-test", E2E_STUB)
         (r.path / "scripts/ios-gateway-e2e-test").chmod(0o755)
         journeys = "packages/ios-app/UITests/RealGateway"
-        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift",
-                "class RealGatewayPairAndChatUITests {\n    func testPairLight() {}\n    func launch() {}\n}\n")
-        r.write(f"{journeys}/RealGatewayBuildsUITests.swift",
-                "extension RealGatewayPairAndChatUITests {\n    func testBuildsDark() {}\n}\n")
+        klass = ("class RealGatewayPairAndChatUITests {\n    var state = 0\n"
+                 "    func testPairLight() { reveal() }\n    func testChatDark() { launch() }\n    func launch() {}\n}\n")
+        extension = ("extension RealGatewayPairAndChatUITests {\n    func testBuildsDark() { reveal() }\n"
+                     "    func testAppsLight() { reveal() }\n    func reveal() {}\n}\n")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.write(f"{journeys}/RealGatewayBuildsUITests.swift", extension)
         r.commit("journeys")
         r.git("branch", "-f", "base")
-        r.write(f"{journeys}/RealGatewayBuildsUITests.swift",
-                "extension RealGatewayPairAndChatUITests {\n    func testBuildsDark() { _ = 1 }\n}\n")
+        extension = extension.replace("testBuildsDark() { reveal() }", "testBuildsDark() { reveal(); _ = 1 }")
+        r.write(f"{journeys}/RealGatewayBuildsUITests.swift", extension)
         r.commit("one journey changes")
         sha = r.git("rev-parse", "HEAD").strip()
 
@@ -1115,25 +1120,163 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(stale.returncode, 1, stale.stdout)
         self.assertIn("no passing report for this commit", stale.stdout)
 
+        r.git("branch", "-f", "base")
         calls.write_text("")
-        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift",
-                "class RealGatewayPairAndChatUITests {\n    func testPairLight() {}\n    func launch() { _ = 2 }\n}\n")
+        klass = klass.replace("testPairLight() { reveal() }", "testPairLight() { reveal(); _ = 2 }")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.commit("one method in the owning class changes")
+        class_method = r.verify("--changed")
+        self.assertEqual(class_method.returncode, 0, class_method.stdout + class_method.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [
+            "run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight lanes=1"])
+        broad = r.verify("--module", "ios-app/ui-tests", "--plan")
+        self.assertEqual(broad.returncode, 0, broad.stdout + broad.stderr)
+        plan = json.loads(broad.stdout[broad.stdout.index("{"):])
+        [command] = [step["command"] for step in plan["commands"] if step["name"] == "tests: ios-journeys"]
+        self.assertEqual(command.count("--only-testing"), 4)
+
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        opaque = 'reveal(); let value = #"""\n        }\n        func testNotAJourney() {}\n        """#; _ = value'
+        klass = klass.replace("reveal(); _ = 2", opaque)
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.commit("a method contains opaque Swift text")
+        literal = r.verify("--changed")
+        self.assertEqual(literal.returncode, 0, literal.stdout + literal.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [
+            "run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight lanes=1"])
+
+        all_journeys = ("run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testAppsLight"
+                        " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark"
+                        " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testChatDark"
+                        " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight lanes=3")
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        klass = klass.replace("func launch() {}", "func launch() { _ = 2 }")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
         r.commit("shared helper changes")
         every = r.verify("--changed")
         self.assertEqual(every.returncode, 0, every.stdout + every.stderr)
-        self.assertEqual(calls.read_text().splitlines(), [
-            "run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark"
-            " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight lanes=2"])
+        self.assertEqual(calls.read_text().splitlines(), [all_journeys])
+
+        r.git("branch", "-f", "base")
         calls.write_text("")
-        r.write(f"{journeys}/RealGatewayHelpersUITests.swift", "extension RealGatewayPairAndChatUITests {\n    func reveal() {}\n}\n")
+        extension = extension.replace("func reveal() {}", "func reveal() { _ = 3 }")
+        r.write(f"{journeys}/RealGatewayBuildsUITests.swift", extension)
+        r.commit("an extension helper used by the class changes")
+        cross_file = r.verify("--changed")
+        self.assertEqual(cross_file.returncode, 0, cross_file.stdout + cross_file.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [all_journeys])
+
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        klass = klass.replace("var state = 0", "var state = 1")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.commit("shared stored state changes")
+        state = r.verify("--changed")
+        self.assertEqual(state.returncode, 0, state.stdout + state.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [all_journeys])
+
+        r.write(".gitattributes", f"/{journeys}/RealGatewayPairAndChatUITests.swift binary\n")
+        r.commit("Git cannot provide line hunks for this source")
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        klass = klass.replace("_ = value", "_ = value; _ = 6")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.commit("a method changes without line attribution")
+        binary = r.verify("--changed")
+        self.assertEqual(binary.returncode, 0, binary.stdout + binary.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [all_journeys])
+        r.write(".gitattributes", "")
+        r.commit("restore text diffs")
+
+        directive = '#sourceLocation(file: "<stdin>", line: 4)\n'
+        klass = klass.replace("    func testPairLight()", directive + "    func testPairLight()")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.commit("Swift can remap physical source positions")
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        klass = klass.replace("_ = value", "_ = value; _ = 7")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.commit("a method with remapped source positions changes")
+        remapped = r.verify("--changed")
+        self.assertEqual(remapped.returncode, 0, remapped.stdout + remapped.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [all_journeys])
+        klass = klass.replace(directive, "")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.commit("restore physical source positions")
+
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        klass = klass.replace("var state = 1", "var state = 1\n")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.commit("no attributed member changes")
+        empty = r.verify("--changed")
+        self.assertEqual(empty.returncode, 0, empty.stdout + empty.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [all_journeys], "an empty method set must not become a zero-journey success")
+
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        added = "TronMobileUITests/RealGatewayPairAndChatUITests/testLaterDark"
+        r.write("scripts/ios-gateway-e2e-test", E2E_STUB.replace("ui_owned_journeys=(\n", f"ui_owned_journeys=(\n    '{added}'\n"))
+        extension = extension[:-2] + "\n    func testLaterDark() { _ = 4 }\n}\n"
+        r.write(f"{journeys}/RealGatewayBuildsUITests.swift", extension)
+        r.commit("one journey and its literal ownership entry are added")
+        addition = r.verify("--changed")
+        self.assertEqual(addition.returncode, 0, addition.stdout + addition.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [f"run-ui --only-testing {added} lanes=1"])
+        all_journeys = all_journeys.replace(" --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight",
+                                            f" --only-testing {added} --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight")
+
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        harness = r.path / "scripts/ios-gateway-e2e-test"
+        harness.write_text(harness.read_text() + "\nexport FIXTURE_SHARED_HARNESS=1\n")
+        extension = extension.replace("testLaterDark() { _ = 4 }", "testLaterDark() { _ = 6 }")
+        r.write(f"{journeys}/RealGatewayBuildsUITests.swift", extension)
+        r.commit("the shared harness changes beyond its ownership array")
+        shared = r.verify("--changed")
+        self.assertEqual(shared.returncode, 0, shared.stdout + shared.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [all_journeys])
+
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        klass = klass.replace("_ = value", "_ = value; _ = 5")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.write("mods/alpha/alpha.py", "VALUE = 'changed'\n")
+        r.commit("a test method and non-journey source change together")
+        mixed = r.verify("--changed")
+        self.assertEqual(mixed.returncode, 0, mixed.stdout + mixed.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [all_journeys])
+
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        r.write(f"{journeys}/RealGatewayHelpersUITests.swift", "extension RealGatewayPairAndChatUITests {\n    func testUnowned() {}\n}\n")
+        r.commit("a test method is not declared in the harness")
+        unowned = r.verify("--changed")
+        self.assertEqual(unowned.returncode, 2, unowned.stdout + unowned.stderr)
+        self.assertIn("testUnowned is not a journey", unowned.stderr)
+        self.assertEqual(calls.read_text(), "", "an unowned method cannot silently disappear")
+
+        r.write(f"{journeys}/RealGatewayHelpersUITests.swift", "extension RealGatewayPairAndChatUITests {\n    func extraHelper() {}\n}\n")
+        original_harness = harness.read_text()
+        start = original_harness.index("ui_owned_journeys=(")
+        stop = original_harness.index("\n)", start) + 2
+        harness.write_text(original_harness[:start] + "ui_owned_journeys=(\n)" + original_harness[stop:])
+        r.commit("the harness ownership set is empty")
+        unowned = r.verify("--changed")
+        self.assertEqual(unowned.returncode, 2, unowned.stdout + unowned.stderr)
+        self.assertIn("declares no owned real-UI journeys", unowned.stderr)
+        self.assertEqual(calls.read_text(), "", "an empty ownership set cannot become a zero-journey success")
+        harness.write_text(original_harness)
         r.commit("shared extension helper")
         helpers = r.verify("--changed")
         self.assertEqual(helpers.returncode, 0, helpers.stdout + helpers.stderr)
-        self.assertEqual(calls.read_text().splitlines()[-1].rsplit(" ", 1)[-1], "lanes=2")
+        self.assertEqual(calls.read_text().splitlines(), [all_journeys])
         skipped = r.verify("--changed", "--skip", "ios")
         self.assertEqual(r.report()["steps"][-1]["status"], "skipped", skipped.stdout)
         calls.write_text("")
-        r.write(f"{journeys}/RealGatewayHelpersUITests.swift", "extension RealGatewayPairAndChatUITests {\n    func reveal( {}\n}\n")
+        r.write(f"{journeys}/RealGatewayHelpersUITests.swift", "extension RealGatewayPairAndChatUITests {\n    func extraHelper( {}\n}\n")
         r.commit("a journey helper that does not compile")
         broken = r.verify("--changed")
         self.assertEqual(broken.returncode, 1, broken.stdout)
@@ -1210,7 +1353,9 @@ class IosLaneTests(VerifyCase):
         split = 2
         body = "\n".join(f"    @MainActor func {name}() {{}}" for name in methods[:split])
         r.write(f"{ios}/FixtureJourneyUITests.swift", "final class FixtureJourneyUITests {\n"
-                + body + "\n    private func testHelper() {}\n    func testWithArgument(_ value: Int) {}\n}\n")
+                + body + "\n    private func testHelper() {}\n    func testWithArgument(_ value: Int) {}\n"
+                "    @discardableResult private func helper(_ value: Int) -> Int { value }\n"
+                "    private func helper(_ value: String) -> String { value }\n}\n")
         r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {\n"
                 + "\n".join(f"    func {name}() {{}}" for name in methods[split:]) + "\n}\nstruct Other {\n    func testNotAMethodOfTheClass() {}\n}\n")
         (r.path / f"{ios}/TronMacTerminalUITests.swift").unlink()

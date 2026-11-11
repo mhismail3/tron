@@ -223,9 +223,15 @@ Runners are the existing ones:
 | `mac` / `mac-terminal` | `scripts/tron test mac <class>...` (`tools/verify/mac.py`, also the batch's Mac integration lane; Mac Swift sources declare it) / `vitest.mac-terminal.config.ts`, on this Mac |
 | `ios-lanes` | not driven by verify |
 
-`ios-journeys` are the `RealGatewayPairAndChatUITests` files. A changed extension file selects
-the test methods it declares; the class's own file or an extension declaring no test (shared
-fixture and helpers) selects every journey. Each must be in the harness's `ui_owned_journeys`, else selection fails (exit 2). They run
+`ios-journeys` are the `RealGatewayPairAndChatUITests` files. A `--changed` diff confined to their
+test methods selects those methods, in the class or its extensions. The shared compiler reader
+([iOS lane](ios.md)) supplies base/current declaration ranges; every changed line must belong to a
+changed test or its adjacent blank-line separator. Documentation and literal `ui_owned_journeys`
+entry edits may accompany it; any other harness or non-journey code change selects the complete owned set.
+Shared helpers/state, removals, unreadable syntax/metadata and empty attribution also select the
+complete owned set, protecting cross-file callers without a guessed call graph. `--module` and full
+selections stay complete. An empty ownership set or a discovered test absent from the harness's
+`ui_owned_journeys` fails selection (exit 2). They run
 through the harness, which takes its own host slots, on up to 3 lanes
 (`TRON_IOS_E2E_UI_LANES`), as `verify --batch`'s UI journey lane does. A journey passes only with a
 `report.json` whose `report.sha256` matches, `journey_status` is 0, `evidence_complete` is true and
