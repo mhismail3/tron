@@ -4,17 +4,17 @@ import TronMobileCore
 enum HomeSheetDestination: Identifiable {
     case manage
     case memory(sessionID: String?, chapterOrdinal: Int?)
-    case memorySummary(HomeMemoryViewDTO.Line, sessionID: String?)
-    case memoryItem(HomeMemoryItemDTO)
-    case evidence(HomeMemoryEvidenceDTO)
+    case memorySummary(HomeMemoryViewLine, sessionID: String?)
+    case memoryItem(HomeMemoryItem)
+    case evidence(HomeMemoryEvidence)
     case chapters
     case profile
-    case profileItem(HomeProfileListDTO.Item)
-    case chapter(HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits)
+    case profileItem(HomeProfileListItem)
+    case chapter(HomeChapterSummary, limits: HomeChapterListLimits)
     case tasks
     case task(String)
     case taskHistory(String)
-    case checkin(HomeTaskHistoryPageDTO.Item)
+    case checkin(HomeTaskHistoryItem)
 
     var id: String {
         switch self {
@@ -251,7 +251,7 @@ struct HomeSheet: View {
         }
     }
 
-    private var emptyProfileList: HomeProfileListDTO? {
+    private var emptyProfileList: HomeProfileList? {
         switch owner.state {
         case .loaded(let read, .profile(let list)), .loading(let read, .some(.profile(let list))):
             return read.identity.profileID == profileID && read.identity.surfaceToken == token && list.items.isEmpty ? list : nil

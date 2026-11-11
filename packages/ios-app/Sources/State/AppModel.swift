@@ -2875,7 +2875,7 @@ extension AppModel {
             )
         }
         acknowledgePushNavigation(tap)
-        let home = try await (lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true ? HomeStatusDTO.decode(lifecycle.client.requestValue(
+        let home = try await (lifecycle.gatewayInfo?.capabilities.contains("home.v1") == true ? HomeStatus.validated(lifecycle.client.requestValue(
             "home.status", JSONValue.object([:]), expectedConnection: GatewayConnectionAdmission(connectionID: routeAdmission.connectionID))) : nil)
         guard lifecycle.admits(routeAdmission) else { throw CancellationError() }
         let homeSessionID: String? = if let home, [home.sessionId, home.openSessionId].contains(route.sessionID),
@@ -3995,7 +3995,7 @@ extension AppModel {
             guard self.lifecycle.selectedProfileID == fence.profileID,
                   self.lifecycle.admits(admission),
                   String(currentConnectionID) == fence.connectionID else { throw CancellationError() }
-            return try HomeStatusDTO.decode(value)
+            return try HomeStatus.validated(value)
         }
         guard let profileID = lifecycle.selectedProfileID else { return }
         let connectionID = lifecycle.admission?.connectionID.map(String.init)
@@ -4024,8 +4024,8 @@ extension AppModel {
                   !Task.isCancelled, isCurrent() else { throw CancellationError() }
             return value
         }
-        func readTaskStatus() async throws -> HomeStatusDTO {
-            try HomeStatusDTO.decode(try await read("home.status"))
+        func readTaskStatus() async throws -> HomeStatus {
+            try HomeStatus.validated(try await read("home.status"))
         }
         func requireMemoryBrowser() throws {
             guard lifecycle.gatewayInfo?.capabilities.contains("home-memory-view.v1") == true else {
@@ -4040,8 +4040,8 @@ extension AppModel {
         func chapterListCapable() -> Bool {
             lifecycle.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true
         }
-        func readChapterList() async throws -> HomeChapterListDTO {
-            try HomeChapterListDTO.decode(try await read("home.chapterList"))
+        func readChapterList() async throws -> HomeChapterList {
+            try HomeChapterList.validated(try await read("home.chapterList"))
         }
         func profileListCapable() -> Bool {
             lifecycle.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
@@ -4052,17 +4052,17 @@ extension AppModel {
             async let statusValue = read("home.status")
             async let contextValue = read("home.context")
             async let chapterValue: JSONValue? = readsChapters ? read("home.chapterList") : nil
-            async let profileList: HomeProfileListDTO? = profileListCapable()
-                ? optionalRead { try HomeProfileListDTO.decode(try await read("home.profileList")) } : nil
-            let status = try HomeStatusDTO.decode(try await statusValue)
-            let context = try HomeContextDTO.decode(try await contextValue)
+            async let profileList: HomeProfileList? = profileListCapable()
+                ? optionalRead { try HomeProfileList.validated(try await read("home.profileList")) } : nil
+            let status = try HomeStatus.validated(try await statusValue)
+            let context = try HomeContextProjection.validated(try await contextValue)
             let chapterJSON = try await chapterValue
-            let chapters = try chapterJSON.map { try HomeChapterListDTO.decode($0) }
-            var tasks: HomeTaskPageDTO?
+            let chapters = try chapterJSON.map { try HomeChapterList.validated($0) }
+            var tasks: HomeTaskPage?
             var permissions: HomeTaskPermissionsDTO?
             if status.admitsTaskReads {
                 async let taskPage = optionalRead {
-                    try HomeTaskPageDTO.decode(try await read("home.taskList", .object(["limit": .number(20)])))
+                    try HomeTaskPage.validated(try await read("home.taskList", .object(["limit": .number(20)])))
                 }
                 async let taskPermissions = optionalRead {
                     try HomeTaskPermissionsDTO.decode(try await read("home.taskPermissions"))
@@ -4076,16 +4076,16 @@ extension AppModel {
             let status = try await readTaskStatus()
             var params: [String: JSONValue] = ["limit": .number(20), "filter": .string(filter.rawValue)]
             if let cursor { params["cursor"] = .string(cursor) }
-            return .tasks(status.admitsTaskReads ? try HomeTaskPageDTO.decode(try await read("home.taskList", .object(params))) : nil, status)
+            return .tasks(status.admitsTaskReads ? try HomeTaskPage.validated(try await read("home.taskList", .object(params))) : nil, status)
         case .taskHistory(let id, let cursor):
             let status = try await readTaskStatus()
             guard status.admitsTaskReads else { throw GatewayFailure(code: "unavailable", message: "Home task history is unavailable.", retryable: false, details: nil) }
             var params: [String: JSONValue] = ["taskId": .string(id), "limit": .number(20)]
             if let cursor { params["cursor"] = .string(cursor) }
-            return .taskHistory(try HomeTaskHistoryPageDTO.decode(try await read("home.taskHistory", .object(params))))
+            return .taskHistory(try HomeTaskHistoryPage.validated(try await read("home.taskHistory", .object(params))))
         case .task(let id):
             let status = try await readTaskStatus()
-            return .task(status.admitsTaskReads ? try HomeTaskDTO.decode(try await read("home.taskStatus", .object(["taskId": .string(id)])), taskID: id) : nil, status)
+            return .task(status.admitsTaskReads ? try HomeTaskStatusResult.validated(try await read("home.taskStatus", .object(["taskId": .string(id)])), taskID: id) : nil, status)
         case .status:
             return .status(try await readTaskStatus())
         case .permissions:
@@ -4100,22 +4100,22 @@ extension AppModel {
             guard profileListCapable() else {
                 throw GatewayFailure(code: "unsupported", message: "This Gateway does not list the learned profile.", retryable: false, details: nil)
             }
-            return .profile(try HomeProfileListDTO.decode(try await read("home.profileList")))
+            return .profile(try HomeProfileList.validated(try await read("home.profileList")))
         case .memory(let sessionID, let continuation):
             try requireMemoryBrowser()
             var values: [String: JSONValue] = ["limit": .number(20)]
             if let continuation { values["cursor"] = .string(continuation.cursor) }
             if let sessionID { values["sessionId"] = .string(sessionID) }
-            return .memory(try HomeMemoryViewDTO.decode(try await read("home.memory.view", .object(values)), continuation: continuation))
+            return .memory(try HomeMemoryView.validated(try await read("home.memory.view", .object(values)), continuation: continuation))
         case .memoryPart(let sessionID, let line):
             try requireMemoryBrowser()
             var values: [String: JSONValue] = ["part": .object(["start": .number(Double(line.start)), "span": .number(Double(line.span))])]
             if let sessionID { values["sessionId"] = .string(sessionID) }
-            return .memory(try HomeMemoryViewDTO.decode(try await read("home.memory.view", .object(values)), continuation: nil, part: line))
+            return .memory(try HomeMemoryView.validated(try await read("home.memory.view", .object(values)), continuation: nil, part: line))
         case .evidence(let source, let offset):
             try requireMemoryBrowser()
-            let params = JSONValue.object(["evidence": try JSONValue.encode(source), "offset": .number(Double(offset))])
-            return .evidence(try HomeMemoryEvidencePageDTO.decode(try await read("home.memory.evidence", params), evidence: source, offset: offset))
+            let params = JSONValue.object(["evidence": try JSONValue.wire(source.encode()), "offset": .number(Double(offset))])
+            return .evidence(try HomeMemoryEvidencePage.validated(try await read("home.memory.evidence", params), evidence: source, offset: offset))
         }
     }
 
@@ -4135,7 +4135,7 @@ extension AppModel {
         )
     }
 
-    func navigationRouteForHome(profileID: String, status: HomeStatusDTO) throws -> SessionNavigationRoute {
+    func navigationRouteForHome(profileID: String, status: HomeStatus) throws -> SessionNavigationRoute {
         guard lifecycle.selectedProfileID == profileID,
               connectionState == .connected,
               gatewayInfo?.capabilities.contains("home.v1") == true,
@@ -4156,7 +4156,7 @@ extension AppModel {
     func followedHomeRoute(
         from route: SessionNavigationRoute,
         profileID: String,
-        status: HomeStatusDTO
+        status: HomeStatus
     ) throws -> SessionNavigationRoute? {
         let next = try navigationRouteForHome(profileID: profileID, status: status)
         guard next.sessionID != route.sessionID else { return nil }
@@ -4203,7 +4203,7 @@ extension AppModel {
         }
     }
 
-    func designateHomeAndRefreshStatus(authority: HomeMutationCoordinator.Authority) async throws -> HomeStatusDTO {
+    func designateHomeAndRefreshStatus(authority: HomeMutationCoordinator.Authority) async throws -> HomeStatus {
         let designation = try await refreshingHomeStatusIfNotApplied {
             try await homeMutations.designate(authority: authority)
         }
@@ -4683,7 +4683,7 @@ extension AppModel: SessionPresentationStoreDelegate {
                self.gatewayInfo?.capabilities.contains("home-chapter-list.v1") == true {
                 if let value = try? await self.lifecycle.client.requestValue("home.chapterList", JSONValue.object([:]),
                     expectedConnection: GatewayConnectionAdmission(connectionID: connectionID)),
-                   let chapters = try? HomeChapterListDTO.decode(value),
+                   let chapters = try? HomeChapterList.validated(value),
                    chapters.chapters.contains(where: { $0.sessionId == target.sessionID }) {
                     sessions.formUnion(chapters.chapters.map(\.sessionId))
                 }

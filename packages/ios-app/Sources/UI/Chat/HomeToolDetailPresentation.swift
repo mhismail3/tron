@@ -277,7 +277,7 @@ extension HomeToolDetailPresentation {
         }
         let kind = call.detail("kind") ?? call.string("kind")
         let kindTitle = kind.map(HomeProfilePresentation.kindTitle(wire:))
-        let icon = kind.flatMap { HomeProfileListDTO.Item.Kind(rawValue: $0) }.map(HomeProfilePresentation.kindIcon) ?? "person.text.rectangle"
+        let icon = kind.flatMap { HomeProfileListItemKind(rawValue: $0) }.map(HomeProfilePresentation.kindIcon) ?? "person.text.rectangle"
         let status = call.detail("status")
         let header: Header
         if call.running { header = runningHeader(icon: icon, title: title, subtitle: kindTitle) }
@@ -319,9 +319,9 @@ extension HomeToolDetailPresentation {
         let span: Int
         let text: String
 
-        var kind: HomeMemoryItemDTO.Kind? {
+        var kind: HomeMemoryItemKind? {
             guard span <= 1 else { return nil }
-            return ["user", "talk", "echo", "event"].first { text.hasPrefix("\($0): ") }.flatMap(HomeMemoryItemDTO.Kind.init)
+            return ["user", "talk", "echo", "event"].first { text.hasPrefix("\($0): ") }.flatMap(HomeMemoryItemKind.init)
         }
 
         var body: String {
@@ -330,7 +330,7 @@ extension HomeToolDetailPresentation {
         }
 
         var line: Line {
-            let attribution: HomeMemoryItemDTO.Attribution? = kind.map {
+            let attribution: HomeMemoryItemAttribution? = kind.map {
                 switch $0 { case .user: .user; case .talk: .assistant; case .echo: .tool; case .event: .event }
             }
             let title = span <= 1

@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 struct HomePinnedRow: View {
-    let status: HomeStatusDTO?
+    let status: HomeStatus?
     let isChanging: Bool
     var hasUnresolvedCommand = false
     var isStatusUnavailable = false

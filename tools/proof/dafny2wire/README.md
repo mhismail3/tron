@@ -39,13 +39,15 @@ call of a compiled predicate on parameters; anything else is refused. `bind(comp
 ## Wire
 
 The Gateway protocol's value types have one source, `packages/core/wire/Protocol.dfy`: `proof wire --protocol`
-writes `packages/gateway/src/protocol/types.ts` (types, decoders and encoders, generated; never edited) and
-`--check` exits 1 when that file is not what the source generates. The Gateway still writes frames with
+writes `packages/gateway/src/protocol/types.ts` (types, decoders and encoders, generated; never edited) and the
+iOS app's decoders `packages/ios-app/Core/Generated/Protocol.swift` (the datatypes the source's `// @swift`
+lines name and every datatype they reach), and `--check` exits 1 when either file is not what the source generates. The Gateway still writes frames with
 `JSON.stringify` of the values it builds, so the generated encoders serve the codec tests only and the
 decoders are the protocol's validators. A type another module owns (the display contract, the upstream error)
 is marked `import=<path>`: types.ts imports it and fails to compile unless it equals the stated shape. The
-Swift codec is generated and proven against the TypeScript one in the test below; the iOS app still decodes
-with its own models.
+Swift codec is proven against the TypeScript one in the test below. The iOS app decodes those datatypes with it
+(`JSONValue.decodeWire`, which reports a `WireError` as a `DecodingError`) and checks their invariants in its
+own validators beside each consumer; the protocol types not yet listed are still decoded by hand models (#2380).
 
 `dafny2wire/dafny2wire.mjs` (`proof wire --generate`) turns `// @wire` Dafny datatypes into `wire.ts` and
 `Wire.swift` codecs: records; `// @wire enum` (a JSON literal per constructor: `{:wire "x"}`, `{:wire 1}`,
@@ -66,6 +68,10 @@ constructors at a named JSON path. The Swift decoders are tolerant, the iOS deco
 ignored; an absent field, or a null one whose type cannot hold null (not `Nullable<T>`, not a union with a null
 constructor), takes its type's default (`""`, `0`, `false`, empty, `null`, the `unknown` value of an enum that
 has one, an enum's only value, a record of defaults); an unknown value of an enum with an `unknown` value is
-`unknown`. A field with no default (another enum, a union) is still required, and wrong kinds, unknown tags and
+`unknown`. An enum field may declare its own default with Dafny's default-value syntax
+(`attention: HomeTaskCheckinAttention := none`); only the Swift decoder reads it, so TypeScript stays strict. A
+field with no default (another enum, a union) is still required, and wrong kinds, unknown tags and
 unknown map keys are still refused; invariants beyond the shape belong to a validator layer, not the decoder.
-Limits: Swift refuses a lone UTF-16 surrogate, which JavaScript strings can hold.
+Swift declarations are `package`, `Hashable` and `Sendable`; an enum whose wire values are all strings carries
+them as its raw values, and `Nullable.value` reads a nullable as an optional. Limits: Swift refuses a lone UTF-16
+surrogate, which JavaScript strings can hold.

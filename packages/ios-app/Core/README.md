@@ -14,6 +14,10 @@ the hosted test targets link.
   pairing profiles and their store, LAN pin and path snapshots. Typed RPC admission lives in
   [`GatewayResponseDecoding`](Gateway/GatewayResponseDecoding.swift); connection admission values
   live beside protocol identity, and the hub owns its diagnostic topic vocabulary.
+- `Generated/Protocol.swift`: the protocol datatypes' tolerant decoders, generated from
+  `packages/core/wire/Protocol.dfy` by `scripts/tron proof wire --protocol` (never edited;
+  [Wire](../../../tools/proof/dafny2wire/README.md#wire)). `JSONValue.decodeWire` decodes a response with them;
+  the app checks each type's invariants in a validator beside its consumer.
 - `Models/`: wire-compatible value types grouped by authority (connection, session catalog,
   transcript, runtime, resources, workspace, terminal, automations, knowledge, notifications…),
   plus `JSONValue` and `ModelDisplayFormatting`.
