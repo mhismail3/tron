@@ -30,7 +30,21 @@ canonical value as TypeScript.
 ## Preconditions (agents, before Mohsin starts)
 
 1. #2380's generated Swift decoders have landed, or Mohsin decides (b) ships without waiting.
-2. Rebase the candidate onto main; the change set is one merge:
+2. Fix what the candidate's full Gateway lane found (mini, 2c668e80b: 1,685 passed, 24 failed):
+   - 21 transport tests (`server-capacity`, `sync-protocol`, `server-compression`) broadcast toy
+     snapshots and progress items (`{runtimeGeneration, eventSequence, data: "x…"}`). The
+     generated encoders throw on them (`TypeError`/`RangeError`), so the frame is dropped where
+     `JSON.stringify` sent it. Their fixtures must become declared values.
+   - The generated encoders do not check required fields: a missing required string is written as
+     `"source":undefined`, which is not JSON (`encodeCommandInfo({ name: "x" })`), and a missing
+     number or array throws. `dafny2wire` must refuse a missing required field in every encoder
+     before any frame goes through them; a thrown encode still drops that frame.
+   - Declared types must equal what the Gateway sends before their frames join `frames.ts`:
+     `home.taskStatus` sends a superset of `HomeTaskStatusResult` (#2380's slice is widening it),
+     and `session.processTranscript.page` adds `revision` to `ProcessTranscriptLeasePage`.
+   - The 2 protocol-wire lock failures are the golden re-record below; `home-task-dispatch`
+     "bounded backlogs" timed out once (Home frames are not encoded by the candidate).
+3. Rebase the candidate onto main; the change set is one merge:
    - `packages/gateway/src/protocol/frames.ts` and its use in `transport/server.ts` and
      `transport/session-sync.ts`;
    - the v9 contract: `config/GatewayProtocol.json` and its mirrors, checked by
@@ -39,16 +53,16 @@ canonical value as TypeScript.
      `rg -l "protocolVersion: 8|PROTOCOL_VERSION = 8|PROTOCOL_VERSION: \"8\""`);
    - the `Protocol.dfy` header comment and `packages/core/README.md` (`protocol v8`). This is a
      comment-only `Protocol.dfy` edit: `scripts/tron proof wire --protocol --check` must pass.
-3. Mohsin approves the one golden re-record: `protocol-wire.golden.json` changes exactly
+4. Mohsin approves the one golden re-record: `protocol-wire.golden.json` changes exactly
    `declared.gatewayProtocol` 8/8 → 9/9, `handshake.accepted.protocolVersion` 8 → 9 and the
    refusal reason's `gatewayProtocol`/`minProtocol` 8 → 9 (`scripts/tron verify --update-locks
    gateway/e2e`). `client-event-schemas.golden.json` does not move.
-4. Green on the rebased branch: `scripts/tron verify --changed --gateway-host mini`, including
+5. Green on the rebased branch: `scripts/tron verify --changed --gateway-host mini`, including
    its iOS and Mac lanes through the host-slot tooling, and a Debug check on simulators.
    Debug note: the installed Mac launcher accepts only a payload whose protocol equals its own,
    so a v9 Debug Gateway (9848) cannot start under the v8 Mac app. Validate v9 on the mini or a
    fixture launcher; on this Mac, v9 Debug works only after step 1 below.
-5. Park every worker and announce the window: from the merge until step 3 finishes, the v8
+6. Park every worker and announce the window: from the merge until step 3 finishes, the v8
    iPhone cannot connect, and no agent can restart Debug from main until step 1 finishes.
 
 ## Delivery (Mohsin, in this order)
