@@ -222,7 +222,8 @@ Runners are the existing ones:
 | `relay` | the relay's Vitest: `npm test` in `packages/push-relay`, as `verify --batch`'s relay lane |
 | `mac` / `mac-terminal` | `scripts/tron test mac <class>...` (`tools/verify/mac.py`, also the batch's Mac integration lane; Mac Swift sources declare it) / `vitest.mac-terminal.config.ts`, on this Mac |
 | `ios-lanes:<owner>:<entry>` | module-owned Python validation command, after the joined phone/Pad matrix |
-| `ios-lanes` | undeclared legacy harnesses, not driven by verify |
+| `ios-scenarios:<owner>` | the profiler's functional scenarios for the declared ProfilingTests classes, after the joined phone/Pad matrix ([below](#owner-declared-profiling-scenarios)) |
+| `ios-lanes` | undeclared legacy harnesses, not driven by verify (including ProfilingTests classes no owner declares) |
 
 `ios-journeys` are the `RealGatewayPairAndChatUITests` files. A `--changed` diff confined to their
 test methods selects those methods, in the class or its extensions. The shared compiler reader
@@ -241,7 +242,7 @@ through the harness, which takes its own host slots, on up to 3 lanes
 `source` is this commit, clean; the step's `journeyReports` records each report's path, sha256,
 status and revision. `--skip ios` skips them.
 
-When `ios-lanes` (the Gateway E2E and profiling targets, and the UIValidation
+When `ios-lanes` (the Gateway E2E targets, undeclared ProfilingTests classes, and the UIValidation
 journeys that need another harness's fixture: `scripts/ios-mac-terminal-journey`) are selected,
 the run is `incomplete` (exit 1) unless `--skip ios` names them. `--skip mac` covers `mac-terminal`. A `relay` run needs the relay's installed
 lockfile, else verify refuses before step 1 with its `npm ci` command. An empty run fails: it is not evidence.
@@ -274,6 +275,18 @@ runtime evidence format. It must exit 0 and emit actual successful unittest suit
 expected failures. Empty/plain-success commands, incomplete artifact coverage and command failures
 cannot borrow another group's passing count. Acquisition-only exit 73 is incomplete, never coverage;
 a missing current iOS build also leaves owner validation incomplete. `--skip ios` remains explicit.
+
+### Owner-declared profiling scenarios
+
+A module that owns the profiler lists its ProfilingTests classes in `iosScenarios` (class names only). The list
+must match exactly the classes `scripts/tron-profile-ios` runs, and the declaring module must own that profiler
+and its receipt owner (`scripts/tron_profile_report.py`); otherwise selection fails (exit 2). A selected class
+runs its table scenarios once (`--iterations 1`, after the phone/Pad matrix joins), in a results root this verify
+run owns. A scenario passes only with exactly one receipt from this invocation: its XCTest passed as the one
+executed test on this commit from a clean tree, with this iteration count, and it measured workload or render
+evidence. Measured values, numeric budgets and deltas are never judged. A missing, stale, wrong, duplicate or failed
+receipt fails the run; a busy lane (exit 73) is incomplete. A failed or deferred current iOS build prevents the
+invocation. An undeclared ProfilingTests class is `ios-lanes` and stays incomplete.
 
 ## Manifest `verify` declarations
 
