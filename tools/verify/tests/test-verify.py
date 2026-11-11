@@ -996,7 +996,35 @@ ui_owned_journeys=(
   'TronMobileUITests/RealGatewayPairAndChatUITests/testChatDark'
   'TronMobileUITests/RealGatewayPairAndChatUITests/testAppsLight'
 )
+e2e_test_filters=(
+  'TronMobileE2ETests/RealGatewayPiBoundaryTests/testWire'
+)
+e2e_diagnostic_test_filters=(
+  'TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testTimeout'
+)
+e2e_lan_test_filters=(
+  'TronMobileE2ETests/RealGatewayPiBoundaryTests/testLAN'
+)
 echo "$* lanes=${TRON_IOS_E2E_UI_LANES:-1}" >>"$FIXTURE_E2E_CALLS"
+if [[ "$1" == check ]]; then
+  shift
+  while (($#)); do
+    selector="$2"; shift 2
+    [[ "${FIXTURE_E2E_OMIT:-0}" != 1 ]] || continue
+    dir="$(mktemp -d "$TMPDIR/e2e-boundary.XXXXXX")"
+    code=0; [[ "$selector" != *"${FIXTURE_E2E_FAIL:-none}" ]] || code=65
+    python3 - "$dir" "$code" "${FIXTURE_E2E_SKIPPED:-0}" <<'PY'
+import json, sys
+from pathlib import Path
+path, code, skipped = Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+(path / "summary.json").write_text(json.dumps({"passedTests": int(not code and not skipped),
+    "failedTests": int(bool(code)), "skippedTests": skipped, "totalTestCount": 1}))
+PY
+    echo "Focused E2E case $selector completed in 1s (status $code); artifacts: $dir"
+    ((code == 0)) || exit "$code"
+  done
+  exit 0
+fi
 [[ "$1" == run-ui ]] || exit 2
 shift
 revision="${FIXTURE_E2E_REVISION:-$(git -C "$root" rev-parse HEAD)}"
@@ -1052,6 +1080,54 @@ class IosLaneTests(VerifyCase):
         r.commit("ios fixture")
         r.git("branch", "-f", "base")
         return calls
+
+    def test_real_gateway_boundary_tests_execute_through_their_owning_harness(self) -> None:
+        r = self.repo
+        ios_calls = self.ios_fixture()
+        calls = Path(self.temp.name) / "e2e-calls.txt"
+        r.env["FIXTURE_E2E_CALLS"] = str(calls)
+        r.write("scripts/ios-gateway-e2e-test", E2E_STUB)
+        (r.path / "scripts/ios-gateway-e2e-test").chmod(0o755)
+        tooling = json.loads((r.path / "tooling.module.json").read_text())
+        tooling["owns"].append("scripts/ios-gateway-e2e-test")
+        r.write("tooling.module.json", json.dumps(tooling))
+        folder = "packages/ios-app/E2ETests"
+        r.write(f"{folder}/e2e-tests.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        source = "class RealGatewayPiBoundaryTests {\n func testWire() {}\n func testLAN() {}\n}\n"
+        r.write(f"{folder}/RealGatewayPiBoundaryTests.swift", source)
+        r.write(f"{folder}/GatewayTimeoutDiagnosticTests.swift", "class GatewayTimeoutDiagnosticTests { func testTimeout() {} }\n")
+        r.commit("boundary fixture")
+        r.git("branch", "-f", "base")
+        r.write(f"{folder}/RealGatewayPiBoundaryTests.swift", source.replace("testWire() {}", "testWire() { _ = 1 }"))
+        r.commit("boundary test changes")
+        planned = r.verify("--changed", "--plan")
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        self.assertEqual(plan["groups"].get("ios-boundary"), [f"{folder}/RealGatewayPiBoundaryTests.swift"], planned.stdout)
+        command = next(step["command"] for step in plan["commands"] if step["name"] == "tests: ios-boundary")
+        self.assertEqual(command[1:3], ["check", "--only-testing"])
+        self.assertEqual(set(command[3::2]), {"TronMobileE2ETests/RealGatewayPiBoundaryTests/testLAN",
+                                           "TronMobileE2ETests/RealGatewayPiBoundaryTests/testWire"})
+        executed = r.verify("--changed")
+        self.assertEqual(executed.returncode, 0, executed.stdout + executed.stderr)
+        report = r.report()
+        step = next(step for step in report["steps"] if step["name"] == "tests: ios-boundary")
+        self.assertEqual((step["status"], step["tests"], len(step["boundaryReports"])), ("ok", 2, 2))
+        self.assertFalse(ios_calls.exists(), "the E2E owner builds its own target, not the unrelated UIValidation products")
+        for variable in ("FIXTURE_E2E_OMIT", "FIXTURE_E2E_SKIPPED", "FIXTURE_E2E_FAIL"):
+            r.env[variable] = "testWire" if variable.endswith("FAIL") else "1"
+            failed = r.verify("--changed")
+            r.env.pop(variable)
+            self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+            self.assertEqual(r.report()["verdict"], "failed")
+        baseline = r.verify("--module", "ios-app/e2e-tests")
+        self.assertEqual(baseline.returncode, 0, baseline.stdout + baseline.stderr)
+        self.assertEqual(r.report()["passingTests"], 3)
+        before = calls.read_text()
+        r.write(f"{folder}/RealGatewayPiBoundaryTests.swift", source.replace("func testWire", "func testUnowned() {}\n func testWire"))
+        refused = r.verify("--changed", "--plan")
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn("testUnowned", refused.stderr)
+        self.assertEqual(calls.read_text(), before)
 
     def test_ios_change_builds_once_checks_references_and_runs_only_the_ui_locks(self) -> None:
         r = self.repo

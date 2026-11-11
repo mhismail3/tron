@@ -4770,9 +4770,19 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             result = self.e2e(command, *(arg for owner in selectors for arg in ("--only-testing", owner)),
                               harness=harness, environment=environment, timeout=120)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            if command == "check":
+                status = self.e2e("status", harness=harness, environment=environment)
+                self.assertIn("Gateway: stopped", status.stdout)
+                self.assertIn("Fault proxy: stopped", status.stdout)
             return calls.read_text().splitlines()
         finally:
             self.e2e("stop", harness=harness, environment=environment)
+
+    def test_boundary_check_builds_selected_lanes_and_retires_its_fixture(self) -> None:
+        owners = ["TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness",
+                  "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes",
+                  "TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testBothRawTimeoutNamesProduceTheSameTransportDiagnostic"]
+        self.assertEqual(self.boundary_selection_run("check", owners), owners)
 
     def test_boundary_default_still_runs_both_owned_methods_in_order(self) -> None:
         self.assertEqual(self.boundary_selection_run("run", []), [
@@ -4974,6 +4984,7 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
         harness = worktree / "scripts/ios-gateway-e2e-test"
         self.runnable_products(worktree)
         calls = self.root / "actual-xcodebuild-calls.txt"
+        (worktree / "packages/ios-app").mkdir()
         environment = self.readiness_node_environment(self.environment)
         environment.update({
             "FAKE_XCODEBUILD_CALLS": str(calls),
@@ -4981,8 +4992,11 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
         })
 
         try:
-            result = self.e2e("run", harness=harness, environment=environment, timeout=120)
+            result = self.e2e("check", harness=harness, environment=environment, timeout=120)
             self.assertEqual(result.returncode, 65, result.stdout + result.stderr)
+            status = self.e2e("status", harness=harness, environment=environment)
+            self.assertIn("Gateway: stopped", status.stdout)
+            self.assertIn("Fault proxy: stopped", status.stdout)
             self.assertEqual(calls.read_text().splitlines(), [
                 "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools",
             ])

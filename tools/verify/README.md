@@ -219,6 +219,7 @@ Runners are the existing ones:
 | `python` / `python-here` / `shell` | `python3` / `bash` per file; `python-here` (`PYTHON_HERE`: tests reading this Mac's Pi session store) runs on this Mac, never the pool |
 | `ios` | `scripts/tron-ios-test run --only-testing <target>/<class>/<test>` shards: the UIValidation targets |
 | `ios-journeys` | `scripts/ios-gateway-e2e-test run-ui --only-testing <journey>`: the real-UI journeys |
+| `ios-boundary` | `scripts/ios-gateway-e2e-test check --only-testing <method>`: the Gateway E2E target, with its own build and private fixture |
 | `relay` | the relay's Vitest: `npm test` in `packages/push-relay`, as `verify --batch`'s relay lane |
 | `mac` / `mac-terminal` | `scripts/tron test mac <class>...` (`tools/verify/mac.py`, also the batch's Mac integration lane; Mac Swift sources declare it) / `vitest.mac-terminal.config.ts`, on this Mac |
 | `ios-lanes:<owner>:<entry>` | module-owned Python validation command, after the joined phone/Pad matrix |
@@ -242,7 +243,17 @@ through the harness, which takes its own host slots, on up to 3 lanes
 `source` is this commit, clean; the step's `journeyReports` records each report's path, sha256,
 status and revision. `--skip ios` skips them.
 
-When `ios-lanes` (the Gateway E2E targets, undeclared ProfilingTests classes, and the UIValidation
+`ios-boundary` selects every test method in each selected `E2ETests` class. Its methods must match
+exactly the owning harness's literal normal, LAN and diagnostic catalogs; unreadable, missing or
+unregistered methods fail selection. The harness builds and stamps its own GatewayE2E products,
+renews a private Gateway per case, enables LAN only for the LAN cases, and stops its fixture on
+success, failure or cancellation. It needs no live Gateway, production install or restart. A case
+counts only with its successful completion record and its own XCTest summary proving exactly one
+pass, zero failures and zero skips; verify records each summary's path and SHA-256. Missing, empty,
+skipped, duplicate or failed cases fail the group. The unrelated UIValidation build is not needed
+for an E2E-only selection. `--skip ios` remains explicit; acquisition-only exit 73 is incomplete.
+
+When `ios-lanes` (undeclared ProfilingTests classes and the UIValidation
 journeys that need another harness's fixture: `scripts/ios-mac-terminal-journey`) are selected,
 the run is `incomplete` (exit 1) unless `--skip ios` names them. `--skip mac` covers `mac-terminal`. A `relay` run needs the relay's installed
 lockfile, else verify refuses before step 1 with its `npm ci` command. An empty run fails: it is not evidence.

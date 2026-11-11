@@ -251,6 +251,7 @@ their respective Session scopes. Compaction snapshot provenance uses `session`,
 `global`, `project` or `default`; production admission rejects retired `chat` tags.
 
 ```bash
+scripts/ios-gateway-e2e-test check      # build selected E2E methods; stop the private fixture on every exit
 scripts/ios-gateway-e2e-test all        # prepare, build, run RealGatewayPiBoundaryTests
 scripts/ios-gateway-e2e-test iterate    # after an affected Swift edit
 scripts/ios-gateway-e2e-test all --only-testing TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness
