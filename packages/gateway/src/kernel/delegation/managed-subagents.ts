@@ -119,10 +119,18 @@ const resolveModule = (from, specifier) => {
 })().then(() => parentPort.postMessage({}), (error) => parentPort.postMessage({ error: String(error && error.message || error) }));
 `;
 
+let decodedClosure: { key: string; entries: Entry[] } | undefined;
+
 function closureEntries(): Entry[] {
   const archivePath = join(gatewayRoot, pin.closure.path);
-  const metadata = lstatSync(archivePath);
-  if (!metadata.isFile() || metadata.size > 64 * 1024 * 1024) throw new GatewayError("conflict", "invalid managed pi-subagents closure file");
+  const metadata = lstatSync(archivePath, { bigint: true });
+  if (!metadata.isFile() || metadata.size > 64n * 1024n * 1024n) throw new GatewayError("conflict", "invalid managed pi-subagents closure file");
+  const key = [archivePath, pin.closure.sha512, metadata.dev, metadata.ino, metadata.size, metadata.mtimeNs, metadata.ctimeNs].join("\0");
+  if (decodedClosure?.key !== key) decodedClosure = { key, entries: decodeClosure(archivePath) };
+  return decodedClosure.entries;
+}
+
+function decodeClosure(archivePath: string): Entry[] {
   const archive = readFileSync(archivePath);
   if (createHash("sha512").update(archive).digest("hex") !== pin.closure.sha512) {
     throw new GatewayError("conflict", "managed pi-subagents closure SHA-512 mismatch");
