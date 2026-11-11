@@ -1,0 +1,7 @@
+{
+  "layer": "L5",
+  "purpose": "Computer- and browser-use scorecard: fixed local tasks per tool (agent-browser, Cua, browser-use) and Tron surface, reporting success rate, wall time and function coverage (#2476).",
+  "owns": [
+    "**"
+  ]
+}

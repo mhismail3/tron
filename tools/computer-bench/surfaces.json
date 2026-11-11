@@ -1,0 +1,24 @@
+{
+  "surfaces": {
+    "home": "Home agent session (and Home-target automations)",
+    "worker": "Delegated Home task worker / ordinary interactive session / newSessionInWorkspace automation run",
+    "subagent": "pi-subagents child run (worker agent definition)"
+  },
+  "reach": {
+    "agent-browser": {
+      "home": { "reach": "shell", "evidence": "HOME_TOOL_NAMES has no agent_browser (packages/gateway/src/modules/home/home-runtime-policy.ts:3); Home profile sets noExtensions (packages/gateway/src/modules/home/home-session-profile.ts:18-20); the binary is reachable only through bash, which Home admits on user turns only (home-runtime-policy.ts:9-12)" },
+      "worker": { "reach": "first-class", "evidence": "agent_browser from the pinned pi-agent-browser-native package in the agent settings; live view trusts only that source (packages/gateway/src/display/browser-live-view-adapter.ts:25-31); binary on PATH via packages/gateway/src/runtime/node-command-environment.ts:173" },
+      "subagent": { "reach": "first-class", "evidence": "~/.tron/agent/agents/worker.md lists agent_browser and loads the package through subagentOnlyExtensions; builtin agents get it only when their definition lists it" }
+    },
+    "cua": {
+      "home": { "reach": "shell", "evidence": "computer is not in HOME_TOOL_NAMES (home-runtime-policy.ts:3) and tron-computer is not a Home module (home-session-profile.ts:18); Home reached the driver on 2026-11-10 by calling cua-driver --socket $TMPDIR/tron-cua-*/s from bash" },
+      "worker": { "reach": "first-class", "evidence": "tron-computer is an ordinary module (packages/gateway/src/extensions/tron-modules.ts:16) registering computer (packages/gateway/src/display/tron-computer-extension.ts:11); ordinary profile has no tool filter (packages/gateway/src/kernel/host/session-profile.ts:32-36)" },
+      "subagent": { "reach": "none", "evidence": "children do not inherit Gateway-only extensions (packages/gateway/src/workspace/tron-core-extension.ts:26); worker.md tools omit computer" }
+    },
+    "browser-use": {
+      "home": { "reach": "none", "evidence": "not installed in Tron; only the evaluation venv ~/Workspace/browser-use-eval-20261110/.venv exists" },
+      "worker": { "reach": "none", "evidence": "not installed in Tron" },
+      "subagent": { "reach": "none", "evidence": "not installed in Tron" }
+    }
+  }
+}
