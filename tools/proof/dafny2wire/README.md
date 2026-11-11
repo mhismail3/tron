@@ -46,7 +46,8 @@ lines name and every datatype they reach), and `--check` exits 1 when either fil
 decoders are the protocol's validators. A type another module owns (the display contract, the upstream error)
 is marked `import=<path>`: types.ts imports it and fails to compile unless it equals the stated shape. The
 Swift codec is proven against the TypeScript one in the test below. The iOS app decodes those datatypes with it
-(`JSONValue.decodeWire`, which reports a `WireError` as a `DecodingError`) and checks their invariants in its
+(`JSONValue.decodeWire`, which reports a `WireError` as a `DecodingError`; an RPC response goes through
+`GatewayResponseDecoding`, which reports that as the method's `invalid_response` failure) and checks their invariants in its
 own validators beside each consumer; the protocol types not yet listed are still decoded by hand models (#2380).
 
 `dafny2wire/dafny2wire.mjs` (`proof wire --generate`) turns `// @wire` Dafny datatypes into `wire.ts` and
@@ -71,5 +72,5 @@ has one, an enum's only value, a record of defaults); an unknown value of an enu
 `unknown`. A field with no default (another enum, a union) is still required, and wrong kinds, unknown tags and
 unknown map keys are still refused; invariants beyond the shape belong to a validator layer, not the decoder.
 Swift declarations are `package`, `Hashable` and `Sendable`; an enum whose wire values are all strings carries
-them as its raw values, and `Nullable.value` reads a nullable as an optional. Limits: Swift refuses a lone UTF-16
+them as its raw values, `Nullable.value` reads a nullable as an optional, and a `WireMap` subscript reads one key. Limits: Swift refuses a lone UTF-16
 surrogate, which JavaScript strings can hold.

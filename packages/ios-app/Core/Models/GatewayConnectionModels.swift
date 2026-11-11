@@ -252,58 +252,6 @@ package struct GatewayUpdateStatus: Codable, Hashable, Sendable {
     }
 }
 
-package enum AdministrativeDrainPhase: String, Codable, Hashable, Sendable {
-    case idle, preparing, waiting, complete, failed
-
-    package var isTerminal: Bool { self == .complete || self == .failed }
-}
-
-package enum AdministrativeDrainBlockerCategory: String, Codable, Hashable, Sendable, CaseIterable {
-    case slotAdmission = "slot-admission"
-    case promptPreflight = "prompt-preflight"
-    case foregroundAgentOperation = "foreground-agent-operation"
-    case queuedMutation = "queued-mutation"
-    case compactionExport = "compaction-export"
-    case detachedExtensionRun = "detached-extension-run"
-    case terminalReceiptPersistence = "terminal-receipt-persistence"
-    case rpcMutation = "rpc-mutation"
-    case extensionCommandPromptUI = "extension-command-prompt-ui"
-    case administrativeProviderPackageOperation = "administrative-provider-package-operation"
-    case providerLogin = "provider-login"
-    case automationDispatch = "automation-dispatch"
-    case automationTerminalPersistence = "automation-terminal-persistence"
-}
-
-package struct AdministrativeDrainSnapshot: Codable, Hashable, Sendable {
-    package let drainId: String
-    let revision: Int
-    package let phase: AdministrativeDrainPhase
-    package let blockerCount: Int
-    package let blockerCounts: [String: Int]
-    package let omittedCount: Int
-    package let suspectProjectionCount: Int
-
-    package init(
-        drainId: String, revision: Int, phase: AdministrativeDrainPhase, blockerCount: Int,
-        blockerCounts: [String: Int], omittedCount: Int, suspectProjectionCount: Int
-    ) {
-        self.drainId = drainId
-        self.revision = revision
-        self.phase = phase
-        self.blockerCount = blockerCount
-        self.blockerCounts = blockerCounts
-        self.omittedCount = omittedCount
-        self.suspectProjectionCount = suspectProjectionCount
-    }
-}
-
-package struct GatewayRestartResponse: Codable, Hashable, Sendable {
-    package let restarting: Bool
-    package let scheduled: Bool
-    let restartNow: Bool?
-    package let drain: AdministrativeDrainSnapshot?
-}
-
 package struct GatewayInfo: Codable, Hashable, Sendable {
     package let gatewayVersion: String
     package let piVersion: String

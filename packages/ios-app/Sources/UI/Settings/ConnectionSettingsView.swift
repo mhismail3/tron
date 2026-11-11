@@ -272,6 +272,10 @@ enum AdministrativeDrainPollingOwner: Equatable {
     }
 }
 
+extension AdministrativeDrainPhase {
+    var isTerminal: Bool { self == .complete || self == .failed }
+}
+
 enum AdministrativeDrainPresentation {
     static func shouldPoll(
         owner: AdministrativeDrainPollingOwner?,
@@ -332,7 +336,7 @@ enum AdministrativeDrainPresentation {
         case .detachedExtensionRun: singular = "detached run"
         case .terminalReceiptPersistence: singular = "completion receipt"
         case .rpcMutation: singular = "running request"
-        case .extensionCommandPromptUI: singular = "extension interaction"
+        case .extensionCommandPromptUi: singular = "extension interaction"
         case .administrativeProviderPackageOperation: singular = "provider or package update"
         case .providerLogin: singular = "provider login"
         case .automationDispatch: singular = "automation dispatch"
@@ -731,10 +735,9 @@ struct GatewayConnectionDetailView: View {
                 onConfirm: {
                     Task {
                         guard let response = await model.requestGatewayRestart(for: currentProfile),
-                              response.scheduled,
-                              let drain = response.drain else { return }
-                        drainPollingOwner = .restart(drainID: drain.drainId)
-                        drainSnapshot = drain
+                              response.scheduled else { return }
+                        drainPollingOwner = .restart(drainID: response.drain.drainId)
+                        drainSnapshot = response.drain
                     }
                 }
             )
@@ -751,10 +754,9 @@ struct GatewayConnectionDetailView: View {
                 icon: "bolt.fill",
                 onConfirm: {
                     Task {
-                        guard let response = await model.requestGatewayRestart(for: currentProfile, restartNow: true),
-                              let drain = response.drain else { return }
-                        drainPollingOwner = .restart(drainID: drain.drainId)
-                        drainSnapshot = drain
+                        guard let response = await model.requestGatewayRestart(for: currentProfile, restartNow: true) else { return }
+                        drainPollingOwner = .restart(drainID: response.drain.drainId)
+                        drainSnapshot = response.drain
                     }
                 }
             )

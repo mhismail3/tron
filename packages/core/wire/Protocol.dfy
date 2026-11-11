@@ -10,6 +10,7 @@
 // iOS app decodes the datatypes `@swift` names and every datatype they reach.
 // @swift HomeStatus HomeContextProjection HomeTaskPage HomeTaskStatusResult HomeTaskHistoryPage
 // @swift HomeMemoryView HomeMemoryEvidencePage HomeChapterList HomeProfileList
+// @swift AdministrativeDrainSnapshot GatewayRestartResponse
 module Protocol {
   datatype Option<T> = None | Some(v: T)
   datatype Nullable<T> = Null | NonNull(v: T)
@@ -75,13 +76,26 @@ module Protocol {
   // @wire
   datatype AdministrativeDrainSnapshot = AdministrativeDrainSnapshot(
       drainId: string,
-      revision: real,
+      revision: int,
       phase: AdministrativeDrainPhase,
-      blockerCount: real,
-      blockerCounts: map<AdministrativeDrainBlockerCategory, real>,
+      blockerCount: int,
+      blockerCounts: map<AdministrativeDrainBlockerCategory, int>,
       blockers: seq<AdministrativeDrainBlockerSummary>,
-      omittedCount: real,
-      suspectProjectionCount: real
+      omittedCount: int,
+      suspectProjectionCount: int
+    )
+
+  /// `gateway.restart`: whether the Gateway restarts now or after its administrative drain settles.
+  /// A restart-now request while a drain is in progress answers only the flags and the drain.
+  // @wire
+  datatype GatewayRestartResponse = GatewayRestartResponse(
+      restarting: bool,
+      scheduled: bool,
+      restartNow: Option<bool>,
+      activeSessionIds: Option<seq<string>>,
+      drainId: Option<string>,
+      drainRevision: Option<int>,
+      drain: AdministrativeDrainSnapshot
     )
 
   // @wire
