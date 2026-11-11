@@ -101,7 +101,9 @@ package struct PresentedProcessLifecycle: Codable, Hashable, Sendable {
     }
 
     package init(from decoder: Decoder) throws {
-        try self.init(wire: JSONValue(from: decoder).decodeWire(SessionProcessLifecycle.decode))
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            try Self(wire: SessionProcessLifecycle.decode(input, path))
+        }
     }
 
     package init(wire value: SessionProcessLifecycle) throws {
@@ -206,7 +208,12 @@ package struct PresentedProcessActivity: Codable, Hashable, Identifiable, Sendab
     }
 
     package init(from decoder: Decoder) throws {
-        let value = try JSONValue(from: decoder).decodeWire(SessionProcessActivity.decode)
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            try Self(wire: SessionProcessActivity.decode(input, path))
+        }
+    }
+
+    package init(wire value: SessionProcessActivity) throws {
         guard let kind = PresentedProcessKind(rawValue: value.kind.rawValue),
               let mode = PresentedProcessExecutionMode(rawValue: value.executionMode.rawValue),
               let source = PresentedProcessSource(rawValue: value.source.rawValue),
