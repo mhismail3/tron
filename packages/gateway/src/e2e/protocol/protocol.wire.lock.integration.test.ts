@@ -69,6 +69,12 @@ describe("gateway/protocol wire contract locks", () => {
 
     const accepted = await handshake(gateway, declared.protocolVersion);
     const refused = await handshake(gateway, declared.protocolVersion + 1);
+    const older = await handshake(gateway, declared.minProtocolVersion - 1);
+    expect(older.frames, "a client older than the minimum gets no hello").toEqual([]);
+    expect(older.close, "a client older than the minimum is refused with the mismatch close naming the Gateway's range").toEqual({
+      code: 4006,
+      reason: JSON.stringify({ code: "protocol_mismatch", gatewayProtocol: declared.protocolVersion, minProtocol: declared.minProtocolVersion }),
+    });
 
     const client = await gateway.connect("phone");
     const calls: Array<{ method: string; params: Record<string, unknown>; response: { ok: boolean; result?: unknown; error?: unknown } }> = [];
