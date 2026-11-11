@@ -152,7 +152,7 @@ mutate) makes `proof check` fail on a copy of the block with a verification erro
 An edit that skips any gate fails it.
 
 `scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: `--protocol --check`
-passes; the protocol's codecs, on 12 seeded values of each of its datatypes, encode exactly what
+passes and the pinned Dafny resolves `Protocol.dfy`; the protocol's codecs, on 12 seeded values of each of its datatypes, encode exactly what
 `JSON.stringify` writes for the value built in declaration order, round trip, and agree byte for byte between
 TypeScript and Swift, and the iOS app's checked-in decoders read every such value of their datatypes, and the
 malformed ones, exactly as the generated Swift codec does; of eight malformed protocol values TypeScript refuses each at its path and Swift
