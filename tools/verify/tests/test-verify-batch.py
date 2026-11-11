@@ -112,7 +112,11 @@ class BatchTests(unittest.TestCase):
                     'GIT_AUTHOR_NAME': 'Fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
         self.env['GIT_COMMITTER_DATE'] = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
-        self.git('init', '-q', '-b', 'main')
+        self.primary = Path(self.temporary.name) / 'primary'
+        subprocess.run(['git', 'init', '-q', '-b', 'primary', str(self.primary)], env=self.env, check=True)
+        subprocess.run(['git', '-C', str(self.primary), 'commit', '-q', '--allow-empty', '-m', 'repository root'], env=self.env, check=True)
+        subprocess.run(['git', '-C', str(self.primary), 'worktree', 'add', '-q', '-b', 'main', str(self.root)], env=self.env, check=True)
+        self.common = self.primary / '.git'
         for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py', 'vitest_configs.py', 'mac.py', 'mini.py'):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
             text = source.read_text()
@@ -302,7 +306,7 @@ if sys.argv[1] in ('run', 'checkpoint'):
         return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=clone, env=self.env, text=True).strip()
 
     def repair(self):
-        return [json.loads(path.read_text()) for path in sorted((self.root / '.git/verify/repairs').glob('*.json'))]
+        return [json.loads(path.read_text()) for path in sorted((self.common / 'verify/repairs').glob('*.json'))]
 
     def review(self, repair, decision='ACCEPT', binding=None):
         return self.run_batch('--review', repair['culprit'], '--decision', decision, '--reviewer', 'fixture-reviewer',
@@ -321,13 +325,25 @@ if sys.argv[1] in ('run', 'checkpoint'):
         return result
 
     def reports(self):
-        return [json.loads(path.read_text()) for path in sorted((self.root / '.git/verify/batches').glob('*/report.json'), key=lambda path: path.stat().st_mtime_ns)]
+        return [json.loads(path.read_text()) for path in sorted((self.common / 'verify/batches').glob('*/report.json'), key=lambda path: path.stat().st_mtime_ns)]
+
+    def test_a_batch_in_the_primary_checkout_is_refused_before_it_runs(self):
+        """#2485: landings fast-forward the primary checkout (AGENTS.md), which moved the source under a
+        running batch; a batch runs only in a linked worktree, which nothing else moves."""
+        self.land('good', 'yes')
+        subprocess.run(['git', '-C', str(self.primary), 'checkout', '-q', '--detach', 'main'], env=self.env, check=True)
+        result = subprocess.run(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.primary,
+                                env=self.env, capture_output=True, text=True, timeout=90)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('batch runs only in a linked worktree', result.stdout + result.stderr)
+        self.assertIn('git worktree add --detach', result.stdout + result.stderr)
+        self.assertFalse((self.common / 'verify/batches').exists())
 
     def test_green_exact_range_repeat_and_read_only_plan(self):
         self.land('good', 'yes')
         result = self.run_batch('--base', self.base, '--plan')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertFalse((self.root / '.git/verify').exists())
+        self.assertFalse((self.common / 'verify').exists())
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         report = self.reports()[-1]
@@ -336,7 +352,7 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertTrue(all(lane['seconds'] >= 0 for lane in report['results']))
         self.assertEqual([line for line in (self.root / 'test-results/executed').read_text().splitlines() if line.startswith('mini-job')],
                          ['mini-job wait=2700', 'mini-job wait=2700'])
-        self.assertEqual(json.loads((self.root / '.git/verify/green.json').read_text())['commit'], self.git('rev-parse', 'HEAD'))
+        self.assertEqual(json.loads((self.common / 'verify/green.json').read_text())['commit'], self.git('rev-parse', 'HEAD'))
         self.assertIn('no uncovered commits', self.run_batch().stdout)
         self.assertEqual(len(self.reports()), 1)
 
@@ -366,7 +382,7 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertTrue(all(lane['exit'] == 0 for name, lane in lanes.items() if name not in ('full verify', 'Gateway default', 'Gateway nested')))
         self.assertEqual(report['failures'], [])
         self.assertFalse((self.root / 'test-results/issue-writes').exists(), 'no issue is filed for a missing result')
-        self.assertFalse((self.root / '.git/verify/green.json').exists())
+        self.assertFalse((self.common / 'verify/green.json').exists())
 
     def test_a_mini_without_a_result_during_attribution_concludes_nothing_and_is_not_memoized(self):
         self.land('bad', 'yes')
@@ -382,16 +398,16 @@ if sys.argv[1] in ('run', 'checkpoint'):
                                                 'or not set up; attribution resumes on the next batch')
         self.assertEqual([probe['outcome'] for probe in attribution['probes']], ['no-result'])
         self.assertIsNone(failure['repair'])
-        self.assertEqual(list((self.root / '.git/verify').glob('attributions/*.json')), [])
-        self.assertEqual(list((self.root / '.git/verify').glob('probes/*.json')), [])
-        self.assertEqual(list((self.root / '.git/verify').glob('repairs/*.json')), [])
+        self.assertEqual(list((self.common / 'verify').glob('attributions/*.json')), [])
+        self.assertEqual(list((self.common / 'verify').glob('probes/*.json')), [])
+        self.assertEqual(list((self.common / 'verify').glob('repairs/*.json')), [])
 
     def test_repeat_requires_explicit_flag_and_executes_all_lanes(self):
         self.land('good', 'yes')
         first = self.run_batch('--base', self.base)
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
         head = self.git('rev-parse', 'HEAD')
-        original = json.loads((self.root / '.git/verify/green.json').read_text())
+        original = json.loads((self.common / 'verify/green.json').read_text())
         self.assertEqual(original['commit'], head)
 
         no_op = self.run_batch()
@@ -408,7 +424,7 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(report['head'], head)
         self.assertEqual(len(report['results']), 9)
         self.assertTrue(all(result['exit'] == 0 for result in report['results']))
-        updated = json.loads((self.root / '.git/verify/green.json').read_text())
+        updated = json.loads((self.common / 'verify/green.json').read_text())
         self.assertEqual((updated['commit'], updated['verdict']), (head, 'green'))
         self.assertTrue(Path(updated['report']).is_file())
 
@@ -437,7 +453,7 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(report['verdict'], 'uncovered')
         self.assertEqual(len(report['results']), 9)
         self.assertIn('boundary-run-ui', (self.root / 'test-results/executed').read_text())
-        self.assertFalse((self.root / '.git/verify/green.json').exists())
+        self.assertFalse((self.common / 'verify/green.json').exists())
 
     def test_all_lanes_after_red_case_only_merge_attribution_twice_and_issue_dedupe(self):
         self.land('good', 'yes')
@@ -468,15 +484,16 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
         again = self.reports()[-1]
         self.assertTrue(again['failures'][0]['attribution']['reused'])
-        self.assertEqual(len(list((self.root / '.git/verify/issue-writes').glob('*.json'))), 1)
+        self.assertEqual(len(list((self.common / 'verify/issue-writes').glob('*.json'))), 1)
         self.assertIn('work comment 100', (self.root / 'test-results/issue-writes').read_text())
-        self.assertEqual(len(self.git('worktree', 'list', '--porcelain').split('worktree ')) - 1, 1)
+        self.assertEqual([line.split(' ', 1)[1] for line in self.git('worktree', 'list', '--porcelain').splitlines() if line.startswith('worktree ')],
+                         [os.path.realpath(self.primary), os.path.realpath(self.root)])
         self.land('new-range', 'yes')
         self.assertEqual(self.run_batch('--base', self.base).returncode, 1)
         later = self.reports()[-1]['failures'][0]['attribution']
         self.assertEqual(later['commit'], culprit)
         self.assertTrue(any(p.get('reused') for p in later['probes']))
-        self.assertEqual(len(list((self.root / '.git/verify/issue-writes').glob('*.json'))), 1)
+        self.assertEqual(len(list((self.common / 'verify/issue-writes').glob('*.json'))), 1)
 
     def test_octopus_landing_is_unresolved_not_guessed(self):
         for name in ('one', 'two'):
@@ -558,11 +575,11 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertEqual(report['activeLane'], 'attribution: Gateway default')
         self.assertEqual(report['results'][1]['exit'], 1)
         self.assertTrue((Path(report['evidence'])).is_file())
-        [progress] = (self.root / '.git/verify/batches').glob('*/attribution-1-0/progress.json')
+        [progress] = (self.common / 'verify/batches').glob('*/attribution-1-0/progress.json')
         probes = json.loads(progress.read_text())['probes']
         self.assertEqual([(p['outcome'], p['selectedTests']) for p in probes], [('selector-error', 0)])
-        self.assertFalse(list((self.root / '.git/verify/attributions').glob('*.json')), 'a selector error is never memoized')
-        self.assertFalse((self.root / '.git/verify/green.json').exists())
+        self.assertFalse(list((self.common / 'verify/attributions').glob('*.json')), 'a selector error is never memoized')
+        self.assertFalse((self.common / 'verify/green.json').exists())
         self.assertFalse(self.git('for-each-ref', 'refs/heads/revert/'))
 
     def test_lane_timing_is_recorded_and_never_changes_the_verdict(self):
@@ -778,7 +795,7 @@ if sys.argv[1] == 'clean':
         process = subprocess.Popen(['scripts/tron', 'verify', '--batch', '--base', self.base], cwd=self.root,
                                    env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         try:
-            marker = self.root / '.git/cleanup.pid'
+            marker = self.common / 'cleanup.pid'
             deadline = time.monotonic() + 30
             while not marker.exists() and time.monotonic() < deadline:
                 time.sleep(.02)
@@ -787,7 +804,7 @@ if sys.argv[1] == 'clean':
             output, _ = process.communicate(timeout=40)
             self.assertEqual(process.returncode, 130, output)
             self.assertEqual(self.reports()[-1]['verdict'], 'interrupted')
-            progress = json.loads(next((self.root / '.git/verify/batches').glob('*/attribution-*/progress.json')).read_text())
+            progress = json.loads(next((self.common / 'verify/batches').glob('*/attribution-*/progress.json')).read_text())
             self.assertEqual(progress['cleanup'][-1]['exit'], 130)
             self.assertTrue(Path(progress['retainedWorktree']).is_dir())
         finally:
@@ -801,11 +818,11 @@ if sys.argv[1] == 'clean':
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertIn('source changed', self.reports()[-1]['error'])
-        self.assertFalse((self.root / '.git/verify/green.json').exists())
+        self.assertFalse((self.common / 'verify/green.json').exists())
 
     def test_overlap_refuses_without_wait(self):
         import fcntl
-        state = self.root / '.git/verify'
+        state = self.common / 'verify'
         state.mkdir()
         with (state / 'batch.lock').open('w') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
@@ -893,7 +910,7 @@ if sys.argv[1] == 'clean':
         green = self.run_batch('--base', self.base)
         self.assertEqual(green.returncode, 0, green.stdout + green.stderr)
         self.assertEqual(self.reports()[-1]['verdict'], 'green')
-        self.assertEqual(json.loads((self.root / '.git/verify/green.json').read_text())['commit'], head)
+        self.assertEqual(json.loads((self.common / 'verify/green.json').read_text())['commit'], head)
         again = self.review(repair)
         self.assertNotEqual(again.returncode, 0)
         self.assertEqual(len(self.reverts_on_remote(culprit)), 1, 'a repeated ACCEPT never adds a second revert')
@@ -1120,7 +1137,7 @@ while other and not Path('test-results/started-'+other).exists() and time.time()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         report = self.reports()[-1]
         self.assertEqual(len(report['results']), 9)
-        first = json.loads(next((self.root / '.git/verify/batches').glob('*/first-report.json')).read_text())
+        first = json.loads(next((self.common / 'verify/batches').glob('*/first-report.json')).read_text())
         self.assertEqual([lane['name'] for lane in first['results']], [lane['name'] for lane in report['lanes']])
         self.assertIn('boundary-run-ui', (self.root / 'test-results/executed').read_text())
 
@@ -1254,12 +1271,12 @@ while other and not Path('test-results/started-'+other).exists() and time.time()
         self.assertEqual(report['results'][1]['status'], 'uncovered')
         self.assertEqual(report['failures'][0]['attribution'], {'status': 'unresolved', 'reason': 'owner provided no exact-case attribution selector',
                                                                 'candidates': report['commits']})
-        body = next((self.root / '.git/verify/batches').glob('*/failure-*/issue.md')).read_text()
+        body = next((self.common / 'verify/batches').glob('*/failure-*/issue.md')).read_text()
         self.assertIn(f"Candidates: all {len(report['commits'])} covered commits of the range.", body)
         self.assertIn(f"Files: {len(report['files'])} changed in the range (`report.json` `files`).", body)
         self.assertFalse([sha for sha in report['commits'] if sha != report['head'] and sha in body])
-        self.assertFalse(list((self.root / '.git/verify/batches').glob('*/attribution-*')))
-        self.assertFalse((self.root / '.git/verify/attributions').exists())
+        self.assertFalse(list((self.common / 'verify/batches').glob('*/attribution-*')))
+        self.assertFalse((self.common / 'verify/attributions').exists())
         self.assertFalse(self.repair())
 
     def assert_never_publishes(self, marker):
@@ -1271,7 +1288,7 @@ while other and not Path('test-results/started-'+other).exists() and time.time()
         result = self.run_batch('--base', self.base)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertNotEqual(self.reports()[-1]['verdict'], 'green')
-        self.assertFalse((self.root / '.git/verify/green.json').exists())
+        self.assertFalse((self.common / 'verify/green.json').exists())
         self.assertFalse([r for r in self.repair() if r['state'] != 'refused'])
         self.assertEqual(self.remote_git('rev-parse', 'main'), tip)
         return self.reports()[-1]
