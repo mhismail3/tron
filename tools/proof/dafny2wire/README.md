@@ -41,7 +41,9 @@ call of a compiled predicate on parameters; anything else is refused. `bind(comp
 The Gateway protocol's value types have one source, `packages/core/wire/Protocol.dfy`: `proof wire --protocol`
 writes `packages/gateway/src/protocol/types.ts` (types, decoders and encoders, generated; never edited) and the
 iOS app's decoders `packages/ios-app/Core/Generated/Protocol.swift` (the datatypes the source's `// @swift`
-lines name and every datatype they reach), and `--check` exits 1 when either file is not what the source generates. The Gateway still writes frames with
+lines name and every datatype they reach; an enum a `// @swift-codable` line names, which must have only string
+wire values, also takes the standard library's `Codable`, for as long as a hand Codable container holds it: today
+`SessionPhase`, inside `SessionSnapshot`, owed back by #2380's slice 7), and `--check` exits 1 when either file is not what the source generates. The Gateway still writes frames with
 `JSON.stringify` of the values it builds, so the generated encoders serve the codec tests only and the
 decoders are the protocol's validators. A type another module owns (the display contract, the upstream error)
 is marked `import=<path>`: types.ts imports it and fails to compile unless it equals the stated shape. The
@@ -70,7 +72,10 @@ ignored; an absent field, or a null one whose type cannot hold null (not `Nullab
 constructor), takes its type's default (`""`, `0`, `false`, empty, `null`, the `unknown` value of an enum that
 has one, an enum's only value, a record of defaults); an unknown value of an enum with an `unknown` value is
 `unknown`. An enum field may declare its own default with Dafny's default-value syntax
-(`attention: HomeTaskCheckinAttention := HomeTaskCheckinAttention.none`; Dafny needs the qualified name); only the Swift decoder reads it, so TypeScript stays strict. A
+(`attention: HomeTaskCheckinAttention := HomeTaskCheckinAttention.none`), a scalar field a literal
+(`summaryRevision: int := 0`), and an optional field `Some(<default>)` (`isUnread: Option<bool> := Some(false)`),
+which makes it a non-optional Swift field that reads absent as the default and is always written; only the Swift
+codec reads a default, so TypeScript stays as declared. A
 field with no default (another enum, a union) is still required, and wrong kinds, unknown tags and
 unknown map keys are still refused; invariants beyond the shape belong to a validator layer, not the decoder.
 Swift declarations are `package`, `Hashable` and `Sendable`, and a record has a `package` memberwise init whose

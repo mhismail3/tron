@@ -1,8 +1,6 @@
 import Foundation
 
-package enum SessionPhase: String, Codable, Hashable, Sendable {
-    case idle, running, compacting, retrying, interrupted
-
+extension SessionPhase {
     package var isActive: Bool { self == .running || self == .compacting || self == .retrying }
 }
 

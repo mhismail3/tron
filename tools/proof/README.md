@@ -154,14 +154,17 @@ An edit that skips any gate fails it.
 `scripts/tron-node exec node --test tools/proof/tests/wire.test.mjs` runs `proof wire`: `--protocol --check`
 passes and the pinned Dafny resolves `Protocol.dfy`; the protocol's codecs, on 12 seeded values of each of its datatypes, encode exactly what
 `JSON.stringify` writes for the value built in declaration order, round trip, and agree byte for byte between
-TypeScript and Swift, and the iOS app's checked-in decoders read every such value of their datatypes, and the
+TypeScript and Swift (Swift writing the Swift-only field defaults TypeScript omits, which some seeded values
+exercise), and the iOS app's checked-in decoders read every such value of their datatypes, and the
 malformed ones, exactly as the generated Swift codec does; of eight malformed protocol values TypeScript refuses each at its path and Swift
 refuses the wrong boolean tag, the unknown enum map key and the overflowing number but reads the unknown field,
 the missing and the null field and the unknown `ChatSemanticKind` tolerantly; and the codecs generated from
 `tests/fixtures/wire/Wire.dfy` (one datatype per form) round trip 2,000 seeded random frames plus edge doubles,
 keys and strings, TypeScript and Swift (`swiftc -O`) produce identical bytes and identical normalisations of
 non-canonical inputs (and a Swift-built map encodes in JavaScript order), and of 16 malformed inputs
-TypeScript rejects each at its path and Swift rejects or reads each as stated.
+TypeScript rejects each at its path and Swift rejects or reads each as stated. Its generator test emits Swift from a small source: a listed all-string enum alone takes `Codable`,
+defaulted fields read and write their defaults, and `@swift-codable` on a non-string enum, an enum with an
+`unknown` value, a record or an unreached name, and four malformed defaults, are each refused.
 
 `scripts/tron-node exec node --test tools/proof/tests/facade.test.mjs` generates the façade of the
 fixture block `demo/meter` (`tests/fixtures/facade`), which names a shell: its `core.mjs` lands in the shell's directory, imports nothing,
