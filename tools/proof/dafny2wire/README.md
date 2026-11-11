@@ -70,7 +70,7 @@ ignored; an absent field, or a null one whose type cannot hold null (not `Nullab
 constructor), takes its type's default (`""`, `0`, `false`, empty, `null`, the `unknown` value of an enum that
 has one, an enum's only value, a record of defaults); an unknown value of an enum with an `unknown` value is
 `unknown`. An enum field may declare its own default with Dafny's default-value syntax
-(`attention: HomeTaskCheckinAttention := none`); only the Swift decoder reads it, so TypeScript stays strict. A
+(`attention: HomeTaskCheckinAttention := HomeTaskCheckinAttention.none`; Dafny needs the qualified name); only the Swift decoder reads it, so TypeScript stays strict. A
 field with no default (another enum, a union) is still required, and wrong kinds, unknown tags and
 unknown map keys are still refused; invariants beyond the shape belong to a validator layer, not the decoder.
 Swift declarations are `package`, `Hashable` and `Sendable`, and a record has a `package` memberwise init whose

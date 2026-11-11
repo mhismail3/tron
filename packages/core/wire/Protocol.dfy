@@ -11,7 +11,7 @@
 // @swift HomeStatus HomeContextProjection HomeTaskPage HomeTaskStatusResult HomeTaskHistoryPage
 // @swift HomeMemoryView HomeMemoryEvidencePage HomeChapterList HomeProfileList
 // @swift AdministrativeDrainSnapshot GatewayRestartResponse
-// @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates
+// @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates ModelPage
 module Protocol {
   datatype Option<T> = None | Some(v: T)
   datatype Nullable<T> = Null | NonNull(v: T)
@@ -1310,11 +1310,36 @@ module Protocol {
 
   // @wire
   datatype ContextWindowLimits = ContextWindowLimits(
-      minimum: real,
-      maximum: real,
-      default_: real,
-      longContextThreshold: Option<real>
+      minimum: int,
+      maximum: int,
+      default_: int,
+      longContextThreshold: Option<int>
     )
+
+  /// A model's price per million tokens, present when either price is nonzero.
+  // @wire
+  datatype ModelTokenPrice = ModelTokenPrice(input: real, output: real)
+
+  /// One model as `model.list` answers it.
+  // @wire
+  datatype ModelSummary = ModelSummary(
+      provider: string,
+      id: string,
+      name: string,
+      virtual: bool,
+      reasoning: bool,
+      input: seq<string>,
+      contextWindow: int,
+      contextWindowLimits: Option<ContextWindowLimits>,
+      maxTokens: int,
+      available: bool,
+      releaseDate: Option<string>,
+      cost: Option<ModelTokenPrice>
+    )
+
+  /// `model.list`: one page of the model catalog.
+  // @wire
+  datatype ModelPage = ModelPage(models: seq<ModelSummary>, nextCursor: Option<string>)
 
   // @wire enum
   datatype ContextWindowPolicySource = model | global | project | session
@@ -1597,7 +1622,7 @@ module Protocol {
       scope: PackageScope,
       filtered: bool,
       installedPath: Option<string>,
-      provides: Option<PackageProvides>,
+      provides_: Option<PackageProvides>,
       conflict: Option<PackageConflict>,
       nodeRequirement: Option<PackageNodeRequirement>
     )
@@ -2112,7 +2137,7 @@ module Protocol {
       sessionId: string,
       operationId: string,
       at: string,
-      attention: HomeTaskCheckinAttention := none
+      attention: HomeTaskCheckinAttention := HomeTaskCheckinAttention.none
     )
 
   // @wire enum

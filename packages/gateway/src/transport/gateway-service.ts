@@ -9,7 +9,7 @@ import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY } from "../protocol/capabilities.js";
-import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelRef, SessionCommands, TronModuleList } from "../protocol/types.js";
+import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelPage, ModelRef, SessionCommands, TronModuleList } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../episodic/home-memory-browser.js";
 import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { PI_VERSION } from "../kernel/pi/version.js";
@@ -2401,6 +2401,7 @@ export class GatewayService {
       }))).flat().map((model) => `${model.provider}\0${model.id}`));
       const projected = await Promise.all(modelRuntime.getModels().map(async (model) => {
         const releaseDate = await this.modelReleaseDates.modelReleaseDate(model.provider, model.id);
+        const limits = contextWindowLimits(model);
         const priced = model.cost.input > 0 || model.cost.output > 0;
         return {
           provider: model.provider,
@@ -2410,7 +2411,7 @@ export class GatewayService {
           reasoning: model.reasoning,
           input: model.input,
           contextWindow: model.contextWindow,
-          contextWindowLimits: contextWindowLimits(model),
+          ...(limits === undefined ? {} : { contextWindowLimits: limits }),
           maxTokens: model.maxTokens,
           available: available.has(`${model.provider}\0${model.id}`)
             && (openAIModelEligibility(modelRuntime)?.isEligibleInRuntime(modelRuntime, model.provider, model.id) ?? true),
@@ -2420,7 +2421,7 @@ export class GatewayService {
       }));
       return openAIModelEligibility(modelRuntime)?.orderAccountModels(projected) ?? projected;
     });
-    return safeJson({ models: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) });
+    return safeJson({ models: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) } satisfies ModelPage);
   }
 }
 
