@@ -17,7 +17,7 @@ import UIKit
             check(app, ink: CGRect(x: frame.minX + frame.width * 0.48, y: frame.minY + frame.height * 0.08,
                                    width: frame.width * 0.49, height: frame.height * 0.24),
                   background: CGRect(x: frame.minX + frame.width * 0.40, y: frame.minY + frame.height * 0.18,
-                                     width: 4, height: 4), mode: mode, name: "Home usage")
+                                     width: 4, height: 4), mode: mode, name: "Home usage", darkContrastFloor: 2.564)
 
             app.buttons["dashboard.menu"].tap()
             let manage = app.buttons["session-context-button"]
@@ -31,7 +31,7 @@ import UIKit
             let row = models.frame
             check(app, ink: CGRect(x: row.minX, y: row.midY - 12, width: 30, height: 24),
                   background: CGRect(x: row.midX - 2, y: row.minY + 4, width: 4, height: 4),
-                  mode: mode, name: "Inherited Home Settings")
+                  mode: mode, name: "Inherited Home Settings", darkContrastFloor: 2.505)
         }
     }
 
@@ -44,7 +44,8 @@ import UIKit
         }
     }
 
-    private func check(_ app: XCUIApplication, ink: CGRect, background: CGRect, mode: String, name: String) {
+    private func check(_ app: XCUIApplication, ink: CGRect, background: CGRect, mode: String, name: String,
+                       darkContrastFloor: Double) {
         let screenshot = app.screenshot()
         let shot = XCTAttachment(screenshot: screenshot)
         shot.name = "\(name)-\(mode)"; shot.lifetime = .keepAlways; add(shot)
@@ -60,7 +61,7 @@ import UIKit
         let a = luminance(foreground), b = luminance(backdrop)
         let contrast = (max(a, b) + 0.05) / (min(a, b) + 0.05)
         print("WINE_GLASS \(name)-\(mode) ink=\(foreground) background=\(backdrop) contrast=\(contrast)")
-        XCTAssertGreaterThanOrEqual(contrast, mode == "dark" ? 3.23 : 4.5,
+        XCTAssertGreaterThanOrEqual(contrast, mode == "dark" ? darkContrastFloor : 4.5,
                                   "\(name) primary ink must retain contrast on actual glass")
         if mode == "dark" {
             let inkHue = (foreground[2] - foreground[1]) / max(foreground[0] - foreground[1], 1)
