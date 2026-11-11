@@ -221,7 +221,8 @@ Runners are the existing ones:
 | `ios-journeys` | `scripts/ios-gateway-e2e-test run-ui --only-testing <journey>`: the real-UI journeys |
 | `relay` | the relay's Vitest: `npm test` in `packages/push-relay`, as `verify --batch`'s relay lane |
 | `mac` / `mac-terminal` | `scripts/tron test mac <class>...` (`tools/verify/mac.py`, also the batch's Mac integration lane; Mac Swift sources declare it) / `vitest.mac-terminal.config.ts`, on this Mac |
-| `ios-lanes` | not driven by verify |
+| `ios-lanes:<owner>:<entry>` | module-owned Python validation command, after the joined phone/Pad matrix |
+| `ios-lanes` | undeclared legacy harnesses, not driven by verify |
 
 `ios-journeys` are the `RealGatewayPairAndChatUITests` files. A `--changed` diff confined to their
 test methods selects those methods, in the class or its extensions. The shared compiler reader
@@ -244,6 +245,35 @@ When `ios-lanes` (the Gateway E2E and profiling targets, and the UIValidation
 journeys that need another harness's fixture: `scripts/ios-mac-terminal-journey`) are selected,
 the run is `incomplete` (exit 1) unless `--skip ios` names them. `--skip mac` covers `mac-terminal`. A `relay` run needs the relay's installed
 lockfile, else verify refuses before step 1 with its `npm ci` command. An empty run fails: it is not evidence.
+
+## Owner-declared iOS validation
+
+An explicit module manifest may bind complete UIValidation classes to its Python artifact validator:
+
+```json
+"iosLanes": [
+  {
+    "classes": ["TronMobileUITests/ExampleDiagnosticUITests"],
+    "command": ["<owned-script.py>", "<validation-mode>"]
+  }
+]
+```
+
+The command's first argument must be a tracked `.py` script owned by the declaring module; arguments
+are passed literally, never through a shell. Classes must resolve to tracked UIValidation sources,
+with only one owner command per class. Invalid, missing or unowned replacements fail selection
+(exit 2), before any class is removed from ordinary shards. A class without a declaration is not
+excluded by this mechanism. Existing undeclared legacy harnesses retain their incomplete result.
+
+Selected classes use one owner job per declaration, not ordinary shards. Selecting the declaring
+module also selects its classes, including test-only validator edits; `--all` includes every owner
+job, so the batch's full-verify lane uses the same route. Lock-only recording stays lock-only.
+Jobs execute serially after the ordinary phone/Pad matrix joins, and after any real-UI journey group.
+The validator owns its fresh leased runs and artifact assertions; verification adds no callbacks or
+runtime evidence format. It must exit 0 and emit actual successful unittest suites with no skips or
+expected failures. Empty/plain-success commands, incomplete artifact coverage and command failures
+cannot borrow another group's passing count. Acquisition-only exit 73 is incomplete, never coverage;
+a missing current iOS build also leaves owner validation incomplete. `--skip ios` remains explicit.
 
 ## Manifest `verify` declarations
 

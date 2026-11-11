@@ -57,6 +57,7 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   | `dependsOn` | no | other module ids |
   | `dynamicEdges` | no | `{to, kind, via?, why}`: `to` is another module id; `kind` is `registration`, `spawn`, `fs-read`, `generated` or `wire`; `via` is a tracked repo-relative path; `why` is non-empty |
   | `verify` | no | `scripts/tron …` commands |
+  | `iosLanes` | no | class-owned Python validator declarations: `classes` holds exact `Target/Class` identities; `command` is an argument list starting with a tracked `.py` script this module owns ([execution contract](../verify/README.md#owner-declared-ios-validation)) |
   | `riskClass` | no | `kernel`, `contracts`, `persistence`, `security`, `lifecycle`, `ios-ui`, `mac-installer` |
   | `directories` | no | whole-directory modules below this manifest: `{"<dir>": {"name", "layer", "verify"?}}`; see [Directory modules](#directory-modules) |
 

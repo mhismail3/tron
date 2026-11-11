@@ -182,6 +182,35 @@ def ios_class(path: str) -> str | None:
     return extended.group(1) if extended else None
 
 
+def ios_owner_jobs(modules: dict, tracked: list[str]) -> tuple[dict, dict]:
+    declared = {key: module for key, module in modules.items() if "iosLanes" in module}
+    if not declared:
+        return {}, {}
+    classes: dict[str, list[str]] = {}
+    for path in tracked:
+        for folder, target in IOS_TARGETS.items():
+            if path.startswith(f"{IOS}/{folder}/") and is_test(path) and (ROOT / path).is_file() and (name := ios_class(path)):
+                classes.setdefault(f"{target}/{name}", []).append(path)
+    jobs, routes, claimed = {}, {}, set()
+    for key, module in declared.items():
+        problems = ownership.ios_lane_problems(module["iosLanes"], module["owned"])
+        if problems:
+            raise VerifyError(f"{key}: " + "; ".join(problems))
+        for index, entry in enumerate(module["iosLanes"], 1):
+            files = []
+            for name in entry["classes"]:
+                if name not in classes:
+                    raise VerifyError(f"{key}: iosLanes class {name} has no tracked UIValidation test source")
+                if name in claimed:
+                    raise VerifyError(f"{key}: iosLanes class {name} has more than one owner command")
+                claimed.add(name)
+                files.extend(classes[name])
+            group = f"ios-lanes:{key}:{index}"
+            jobs[group] = {**entry, "owner": key}
+            routes.update({path: group for path in files})
+    return jobs, routes
+
+
 def journey_sources(paths: list[str]) -> list[str]:
     return [path for path in paths if path.startswith(f"{IOS}/UITests/") and is_test(path)
             and (ROOT / path).is_file() and ios_class(path) == JOURNEY_CLASS]
@@ -714,6 +743,12 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
                 batch_tests |= set(locks)
                 reasons.append(f"full batch required; widened to every lock ({len(locks)} files) in batch: {', '.join(full_reasons)}")
         declared |= (chosen - narrow) & modules.keys()
+    if mode != "update-locks":
+        jobs, routes = ios_owner_jobs(modules, tracked)
+        owner_sources = {path for path, group in routes.items() if jobs[group]["owner"] in (declared | chosen)}
+        selected.update(owner_sources)
+        if owner_sources:
+            reasons.append(f"owner verification: {len(owner_sources)} registered iOS source file(s)")
     for key in sorted(declared):
         external = set()
         for command in modules[key].get("verify", []):
@@ -960,6 +995,13 @@ def python_count(output: str) -> int:
     return total
 
 
+def ios_owner_count(output: str) -> int:
+    ran = re.findall(r"^Ran (\d+) tests?", output, re.M)
+    if not ran or "0" in ran or not re.search(r"^OK$", output, re.M) or re.search(r"^OK \(", output, re.M):
+        return 0
+    return sum(int(count) for count in ran)
+
+
 def per_file(interpreter: str, files: list[str]) -> str:
     return " && ".join(f"echo {shlex.quote(FILE_MARKER + path)} && {interpreter} {shlex.quote(path)}" for path in files)
 
@@ -990,6 +1032,8 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         lanes = [*(["--lane", lane] if lane else []), *(["--device-type", IOS_PAD_DEVICE_TYPE] if pad else [])]
         wait = ["--host-slot-wait-seconds", "0"] if opportunistic else ["--host-slot-wait-seconds", "30"] if ios_wait else []
         return ([str(ROOT / "scripts/tron-ios-test"), "run", *lanes, *wait, *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
+    if group.startswith("ios-lanes:"):
+        return ([sys.executable, str(ROOT / selectors[0]), *selectors[1:]], ROOT, ios_owner_count)
     if group == "ios-journeys":
         return ([str(ROOT / JOURNEY_HARNESS), "run-ui", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, None)
     if group == "mac-terminal":
@@ -1140,8 +1184,11 @@ def main(argv: list[str]) -> int:
     nested, mac_terminal = nested_files()
     groups: dict[str, list[str]] = {}
     try:
+        owner_jobs, owner_routes = ios_owner_jobs(modules, result["tracked"])
+        if name == "update-locks":
+            owner_routes = {}
         for path in selection["tests"]:
-            groups.setdefault(runner_of(path, nested, mac_terminal), []).append(path)
+            groups.setdefault(owner_routes[path] if path in owner_routes else runner_of(path, nested, mac_terminal), []).append(path)
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
         shards = ios_shards(selectors, ios_method_seconds() if selectors else {})
         journey_paths = groups.get("ios-journeys", [])
@@ -1152,7 +1199,7 @@ def main(argv: list[str]) -> int:
         print(f"verify: {error}", file=sys.stderr)
         return 2
     skipped_group = lambda group: group.split("-")[0] in skip  # noqa: E731  (--skip ios covers ios-lanes)
-    ios_lane = "ios" not in skip and ((name == "all" and any(key.startswith("ios-app/") for key in modules)) or "ios" in groups or (
+    ios_lane = "ios" not in skip and ((name == "all" and any(key.startswith("ios-app/") for key in modules)) or "ios" in groups or any(group in owner_jobs for group in groups) or (
         name == "changed" and any(key.startswith("ios-app/") for key in selection["modules"])))
     gateway_touched = (name == "all" and any(key.startswith("gateway/") for key in modules)) or any(key.startswith("gateway/") for key in selection["modules"]) \
         or any(path.startswith(f"{GATEWAY}/") for path in selection["tests"])
@@ -1225,7 +1272,7 @@ def main(argv: list[str]) -> int:
                 commands.append({"name": f"tests: {group}", "notRun": "explicit skip" if skipped_group(group) else "requires owning harness"})
             else:
                 for label, shard in zip(test_step_names(group, shards, False),
-                                        shards if group == "ios" else [journeys] if group == "ios-journeys" else [selectors]):
+                                        shards if group == "ios" else [journeys] if group == "ios-journeys" else [owner_jobs[group]["command"]] if group in owner_jobs else [selectors]):
                     command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host)
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
@@ -1370,12 +1417,21 @@ def main(argv: list[str]) -> int:
                     result["status"] = "failed"
                     reds.append(f"{label}: no passing report for this commit from {', '.join(missing)}")
                 continue
-            command, cwd, count = test_spec(group, files, selectors, run.logs, ios_wait=name != "all", gateway_host=gateway_host)
+            if group in owner_jobs and (ios_broken or any(step["name"] == "ios build" and step["status"] == "deferred" for step in run.steps)):
+                run.skipped(label, "owner validation needs a successful current iOS build")
+                no_result.append(f"{label}: owner validation could not run")
+                continue
+            payload = owner_jobs[group]["command"] if group in owner_jobs else selectors
+            command, cwd, count = test_spec(group, files, payload, run.logs, ios_wait=name != "all", gateway_host=gateway_host)
             report = run.logs / f"{group}-vitest.json"
             report.unlink(missing_ok=True)
             on_mini = gateway_host == "mini" and (group.startswith("gateway") or group == "python")
             env = {**update, "TRON_VERIFY_COMMIT": sha} if on_mini else update
             result = run.step(label, command, cwd=cwd, count=count, env=env)
+            if group in owner_jobs and result["exit"] == 73:
+                result.update(status="no result", tests=0, reason="owner validation could not acquire its iOS lane")
+                no_result.append(f"{label}: owner validation could not acquire its iOS lane")
+                continue
             if on_mini and (reason := mini.no_result_reason(result["exit"], (ROOT / result["log"]).read_text(errors="replace"))):
                 result.update(status="no result", reason=reason)
                 no_result.append(f"{label}: the mini gave no result: {reason}")
