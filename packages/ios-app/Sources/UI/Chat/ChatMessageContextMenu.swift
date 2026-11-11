@@ -17,6 +17,7 @@ struct ChatMessageCopyMenu: ViewModifier {
 
     func body(content: Content) -> some View {
         ChatMessageContextMenuSurface(content: content, text: text, mutationIdentity: mutationIdentity, actions: actions)
+            .accessibilityElement(children: .contain)
             .accessibilityActions {
                 if !text.isEmpty { Button("Copy") {
                     UIPasteboard.general.string = text
@@ -30,6 +31,9 @@ struct ChatMessageCopyMenu: ViewModifier {
 }
 
 private struct ChatMessageContextMenuSurface<Content: View>: UIViewControllerRepresentable {
+    @Environment(\.self) private var inheritedValues
+    @Environment(AppModel.self) private var model: AppModel?
+
     let content: Content
     let text: String
     let mutationIdentity: String?
@@ -38,7 +42,7 @@ private struct ChatMessageContextMenuSurface<Content: View>: UIViewControllerRep
     func makeCoordinator() -> ChatMessageContextMenuOwner { ChatMessageContextMenuOwner() }
 
     func makeUIViewController(context: Context) -> UIHostingController<ChatMessageNativeContent<Content>> {
-        let host = UIHostingController(rootView: ChatMessageNativeContent(content: content, values: context.environment))
+        let host = UIHostingController(rootView: ChatMessageNativeContent(content: content, values: inheritedValues, model: model))
         host.safeAreaRegions = []
         host.sizingOptions = .intrinsicContentSize
         host.view.backgroundColor = .clear
@@ -47,7 +51,7 @@ private struct ChatMessageContextMenuSurface<Content: View>: UIViewControllerRep
     }
 
     func updateUIViewController(_ host: UIHostingController<ChatMessageNativeContent<Content>>, context: Context) {
-        host.rootView = ChatMessageNativeContent(content: content, values: context.environment)
+        host.rootView = ChatMessageNativeContent(content: content, values: inheritedValues, model: model)
         context.coordinator.text = text
         context.coordinator.mutationIdentity = mutationIdentity
         context.coordinator.actions = actions
@@ -68,7 +72,36 @@ private struct ChatMessageContextMenuSurface<Content: View>: UIViewControllerRep
 private struct ChatMessageNativeContent<Content: View>: View {
     let content: Content
     let values: EnvironmentValues
-    var body: some View { content.environment(\.self, values) }
+    let model: AppModel?
+
+    var body: some View {
+        content
+            .transformEnvironment(\.self) { hosted in
+                hosted.colorScheme = values.colorScheme
+                hosted.dynamicTypeSize = values.dynamicTypeSize
+                hosted.layoutDirection = values.layoutDirection
+                hosted.locale = values.locale
+                hosted.font = values.font
+                hosted.isEnabled = values.isEnabled
+                hosted.scenePhase = values.scenePhase
+                hosted.chatTranscriptSheetRoutes = values.chatTranscriptSheetRoutes
+                hosted.canonicalResourceSessionID = values.canonicalResourceSessionID
+                hosted.chatAnnotationPresenter = values.chatAnnotationPresenter
+                hosted.markdownImageContext = values.markdownImageContext
+                hosted.tronPresentationActivityCoordinator = values.tronPresentationActivityCoordinator
+                hosted.tronPresentationSurfaceToken = values.tronPresentationSurfaceToken
+                hosted.tronPresentationActivity = values.tronPresentationActivity
+                hosted.tronPresentationStateStore = values.tronPresentationStateStore
+                hosted.tronPresentationStateScope = values.tronPresentationStateScope
+                hosted.tronPadSheetScene = values.tronPadSheetScene
+                hosted.tronPresentationDependencyRead = values.tronPresentationDependencyRead
+                hosted.tronSettingsVisualTheme = values.tronSettingsVisualTheme
+                hosted.tronSettingsSecondaryTextSizeAdjustment = values.tronSettingsSecondaryTextSizeAdjustment
+                hosted.tronTitleWidthCap = values.tronTitleWidthCap
+                hosted.tronSheetContentLoading = values.tronSheetContentLoading
+            }
+            .environment(model)
+    }
 }
 
 final class ChatMessageContextMenuOwner: NSObject, UIContextMenuInteractionDelegate {
