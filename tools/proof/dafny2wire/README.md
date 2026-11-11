@@ -69,7 +69,9 @@ constructors at a named JSON path. The Swift decoders are tolerant, the iOS deco
 ignored; an absent field, or a null one whose type cannot hold null (not `Nullable<T>`, not a union with a null
 constructor), takes its type's default (`""`, `0`, `false`, empty, `null`, the `unknown` value of an enum that
 has one, an enum's only value, a record of defaults); an unknown value of an enum with an `unknown` value is
-`unknown`. A field with no default (another enum, a union) is still required, and wrong kinds, unknown tags and
+`unknown`. An enum field may declare its own default with Dafny's default-value syntax
+(`attention: HomeTaskCheckinAttention := none`); only the Swift decoder reads it, so TypeScript stays strict. A
+field with no default (another enum, a union) is still required, and wrong kinds, unknown tags and
 unknown map keys are still refused; invariants beyond the shape belong to a validator layer, not the decoder.
 Swift declarations are `package`, `Hashable` and `Sendable`; an enum whose wire values are all strings carries
 them as its raw values, `Nullable.value` reads a nullable as an optional, and a `WireMap` subscript reads one key. Limits: Swift refuses a lone UTF-16

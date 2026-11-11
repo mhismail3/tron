@@ -2076,7 +2076,7 @@ module Protocol {
       sessionId: string,
       operationId: string,
       at: string,
-      attention: HomeTaskCheckinAttention
+      attention: HomeTaskCheckinAttention := none
     )
 
   // @wire enum

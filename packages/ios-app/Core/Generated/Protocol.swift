@@ -1826,7 +1826,7 @@ package struct HomeTaskCheckin: Hashable, Sendable {
     let f_sessionId: String = wAbsent(o.value("sessionId")) ? "" : try wStr(o.value("sessionId")!, p + ".sessionId")
     let f_operationId: String = wAbsent(o.value("operationId")) ? "" : try wStr(o.value("operationId")!, p + ".operationId")
     let f_at: String = wAbsent(o.value("at")) ? "" : try wStr(o.value("at")!, p + ".at")
-    let f_attention: HomeTaskCheckinAttention = wAbsent(o.value("attention")) ? try wMissing(p + ".attention") : try HomeTaskCheckinAttention.decode(o.value("attention")!, p + ".attention")
+    let f_attention: HomeTaskCheckinAttention = wAbsent(o.value("attention")) ? .none : try HomeTaskCheckinAttention.decode(o.value("attention")!, p + ".attention")
     return HomeTaskCheckin(step: f_step, done: f_done, next: f_next, blocker: f_blocker, refs: f_refs, needsAttention: f_needsAttention, id: f_id, taskId: f_taskId, sessionId: f_sessionId, operationId: f_operationId, at: f_at, attention: f_attention)
   }
   package func encode() -> String {

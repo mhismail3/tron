@@ -77,6 +77,7 @@ test("protocol: types.ts and the iOS decoders are generated, and the TypeScript 
     'JsonValue\t{"a":[1,{"b":1e400}]}',
     'ChatSemanticKind\t"brandNew"',
     'ModelRef\t{"provider":null,"id":"x"}',
+    'HomeTaskCheckin\t{"step":"s","done":"d","next":"n","id":"c","taskId":"t","sessionId":"w","operationId":"o","at":"a"}',
   ];
   const corpus = [...lines, ...bad];
   const tsOut = (line) => {
@@ -115,11 +116,12 @@ test("protocol: types.ts and the iOS decoders are generated, and the TypeScript 
   const differ = lines.map((line, i) => [line.split("\t")[0], ts[i], swift[i]]).filter(([, a, b]) => a !== b);
   assert.deepEqual(differ.slice(0, 3), [], `${differ.length} of ${lines.length} values differ between TypeScript and Swift`);
   assert.deepEqual(ts.slice(lines.length), [
-    'ERR $.blockerCounts["nope"]', "ERR $.available", "ERR $", "ERR $", "ERR $.id", "ERR $[\"a\"][1][\"b\"]", "ERR $", "ERR $.provider",
+    'ERR $.blockerCounts["nope"]', "ERR $.available", "ERR $", "ERR $", "ERR $.id", "ERR $[\"a\"][1][\"b\"]", "ERR $", "ERR $.provider", "ERR $.attention",
   ]);
   assert.deepEqual(swift.slice(lines.length), [
     'ERR $.blockerCounts["nope"]', "ERR $.available", '{"available":true}', '{"kind":"automation","automationId":"a"}',
     '{"provider":"p","id":""}', "ERR $[\"a\"][1][\"b\"]", '"unknown"', '{"provider":"","id":"x"}',
+    '{"step":"s","done":"d","next":"n","id":"c","taskId":"t","sessionId":"w","operationId":"o","at":"a","attention":"none"}',
   ]);
   assert.equal(lines.length, types.length * 12);
 });

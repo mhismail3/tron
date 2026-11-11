@@ -36,7 +36,8 @@ export function parseWire(src) {
       const fields = p < 0 ? [] : splitTop(rest.slice(p + 1, rest.lastIndexOf(")")), ",").map((f) => {
         const { text, doc } = takeDocs(f);
         const [n, ...t] = text.split(":");
-        return { name: n.trim(), wire: n.trim().replace(/_$/, ""), type: parseType(t.join(":").trim()), doc };
+        const [type, fallback] = t.join(":").split(":=").map((x) => x.trim());
+        return { name: n.trim(), wire: n.trim().replace(/_$/, ""), type: parseType(type), doc, ...(fallback ? { fallback } : {}) };
       });
       return { name: cname, wire: attr ? JSON.parse(attr[1]) : cname, fields };
     });
@@ -58,7 +59,10 @@ export function parseWire(src) {
     }
     if (!["string", "bool", "int", "nat", "real", "Absent"].includes(t.kind) && !byName.has(t.kind)) throw new Error(`${where}: unknown type ${t.kind}`);
   };
-  for (const ty of types) for (const c of ty.ctors) for (const f of c.fields) check(f.type, `${ty.name}.${c.name}.${f.name}`);
+  for (const ty of types) for (const c of ty.ctors) for (const f of c.fields) {
+    check(f.type, `${ty.name}.${c.name}.${f.name}`);
+    if (f.fallback && !byName.get(f.type.kind)?.ctors.some((e) => byName.get(f.type.kind).kind === "enum" && e.name === f.fallback)) throw new Error(`${ty.name}.${c.name}.${f.name}: a default names a constructor of the field's enum`);
+  }
   for (const ty of types.filter((t) => t.kind === "bykind")) {
     const kinds = ty.ctors.map((c) => (c.fields.length ? jsonKinds(c.fields[0].type, byName) : ["null"]));
     const all = kinds.flat();
@@ -218,7 +222,7 @@ export function emitSwift(types, source) {
     const at = `o.value("${f.wire}")`, path = `p + ".${f.wire}"`, name = `f_${f.wire}`;
     if (f.type.kind === "Option") return `${indent}let ${name}: ${swType(f.type)} = ${absent(f.type.arg, at)} ? nil : ${dec(f.type.arg, `${at}!`, path)}`;
     if (f.type.kind === "Nullable") return `${indent}let ${name}: ${swType(f.type)} = ${at} == nil ? .null : ${dec(f.type, `${at}!`, path)}`;
-    const def = swDefault(f.type)?.replace("${wire}", f.wire);
+    const def = f.fallback ? `.${swiftName(lc(f.fallback))}` : swDefault(f.type)?.replace("${wire}", f.wire);
     return `${indent}let ${name}: ${swType(f.type)} = ${absent(f.type, at)} ? ${def ?? `try wMissing(${path})`} : ${dec(f.type, `${at}!`, path)}`;
   });
   const holdsNull = (t) => t.kind === "Nullable" || (byName.get(t.kind)?.kind === "bykind" && byName.get(t.kind).ctors.some((c) => !c.fields.length));
