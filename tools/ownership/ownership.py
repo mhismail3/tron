@@ -16,7 +16,7 @@ STEM = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LAYERS = {f"L{n}" for n in range(6)}
 EDGE_KINDS = {"registration", "spawn", "fs-read", "generated", "wire"}
 RISK_CLASSES = {"kernel", "contracts", "persistence", "security", "lifecycle", "ios-ui", "mac-installer"}
-FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "verify", "riskClass", "layout", "directories"}
+FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "verify", "iosLanes", "riskClass", "layout", "directories"}
 ROOT_MANIFEST = "root.module.json"
 EDGE_FIELDS = {"to", "kind", "via", "why"}
 FORBIDDEN = set("[]{}\\")
@@ -202,6 +202,26 @@ def one_of(value: object, options) -> bool:
     return isinstance(value, str) and value in options
 
 
+def ios_lane_problems(value, owned) -> list[str]:
+    if not isinstance(value, list):
+        return ["iosLanes must be a list"]
+    problems = []
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != {"classes", "command"}:
+            problems.append("iosLanes entries require only classes and command")
+            continue
+        classes, command = entry["classes"], entry["command"]
+        if not isinstance(classes, list) or not classes or any(not isinstance(name, str) or not re.fullmatch(r"\w+/\w+", name) for name in classes):
+            problems.append("iosLanes classes must name exact Target/Class identities")
+        elif len(set(classes)) != len(classes):
+            problems.append("iosLanes classes must be unique")
+        if not isinstance(command, list) or not command or any(not isinstance(arg, str) or not arg or "\0" in arg for arg in command):
+            problems.append("iosLanes command must be a nonempty argument list")
+        elif command[0] not in owned or not command[0].endswith(".py"):
+            problems.append("iosLanes command must start with a tracked Python script owned by this module")
+    return problems
+
+
 def reject_duplicate_keys(pairs):
     keys = [key for key, _ in pairs]
     duplicate = sorted({key for key in keys if keys.count(key) > 1})
@@ -328,6 +348,7 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
         for command in strings(data.get("verify", []), "verify", problems):
             if not command.startswith("scripts/tron "):
                 problems.append(f"verify {command!r} must be a 'scripts/tron …' command")
+        problems.extend(ios_lane_problems(data.get("iosLanes", []), module["owned"]))
         for risk in unique_list(data.get("riskClass", []), "riskClass", problems):
             if not one_of(risk, RISK_CLASSES):
                 problems.append(f"riskClass {risk!r} must be one of {', '.join(sorted(RISK_CLASSES))}")
@@ -345,6 +366,7 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
     summary = {m["id"]: {"manifest": k, "folder": m["folder"], "layer": m["data"].get("layer"), "owned": m["owned"],
                          "purpose": m["data"].get("purpose") if isinstance(m["data"].get("purpose"), str) else "",
                          "verify": [c for c in listed(m, "verify") if isinstance(c, str)],
+                         **({"iosLanes": m["data"]["iosLanes"]} if "iosLanes" in m["data"] else {}),
                          "dependsOn": [d for d in listed(m, "dependsOn") if isinstance(d, str)],
                          "riskClass": [r for r in listed(m, "riskClass") if isinstance(r, str)],
                          "dynamicTargets": [e["to"] for e in listed(m, "dynamicEdges")

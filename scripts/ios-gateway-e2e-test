@@ -305,10 +305,14 @@ provision_test_simulator() {
 run_bounded() {
   local phase="$1" failure_exit="$2" overall="$3" no_output="$4" artifact="$5"; shift 5
   local evidence="$run_root/$phase-evidence" output="$run_root/$phase.log" status
+  local -a idle_arguments=()
+  if [[ "$phase" == */test && -n "$ui_simulator_id" ]]; then
+    idle_arguments=(--idle-simulator "$ui_simulator_id")
+  fi
   if NSUnbufferedIO=YES python3 "$process_owner" \
     --log "$output" --evidence-dir "$evidence" \
     --overall-seconds "$overall" --no-output-seconds "$no_output" \
-    --artifact "$artifact" -- "$@"; then
+    --artifact "$artifact" ${idle_arguments[@]+"${idle_arguments[@]}"} -- "$@"; then
     status=0
   else
     status=$?
