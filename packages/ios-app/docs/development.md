@@ -205,8 +205,10 @@ selection must not depend on an undeclared fresh-product prerequisite. The owner
 output, propagates build/run/oracle failures and cancellation, and resolves only each invocation's
 single exact completion receipt, never a global newest run. Both run metadata source identities
 must match the owner's unchanged worktree fingerprint. The pair requires one simulator slot at
-a time and belongs in the harnessed iOS phase, after ordinary phone/Pad work settles, not inside
-the ordinary Python lane or a combined UI shard. Selection routing belongs to verify's harness owner.
+a time. `scripts/ios.module.json` declares this class's owner command: normal verification selects
+it after the ordinary phone/Pad matrix joins, not in the default Python lane or a combined UI shard.
+The selected replacement owns both fresh runs and their artifact assertions; ordinary-shard exclusion
+requires that replacement to be selected. Failed or deferred current builds prevent its invocation.
 
 The artifact oracle checks real XCTest completion, exact run/simulator/app PID and kernel-birth
 provenance, external main-thread stacks, live repeating CA animation and canonical surface counts.
