@@ -23,6 +23,9 @@ extension HomeStatus {
         case .availableTrue(let start, _, let viewLines, let viewBytes, let effectiveTokens, let contextWindow, _, let refusalReason, let refusalDetail):
             (activationCounts, activationTexts, activationStart) = ([viewLines, viewBytes, effectiveTokens, contextWindow], [refusalReason, refusalDetail], start.value)
         }
+        guard HomeContextProjection.statesOpen(value.objectValue?["activation"]) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Available activation must state whether it is open"))
+        }
         let taskRecoveryValid = switch status.taskRecovery {
         case .availableTrue: true
         case .availableFalse(let reason): !reason.isEmpty && reason.utf8.count <= 1024

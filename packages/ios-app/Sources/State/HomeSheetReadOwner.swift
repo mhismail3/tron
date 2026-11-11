@@ -118,8 +118,16 @@ extension HomeContextProjection {
         return breakdown
     }
 
+    static func statesOpen(_ activation: JSONValue?) -> Bool {
+        guard let object = activation?.objectValue, object["available"] == .bool(true) else { return true }
+        return object["activationOpen"]?.boolValue != nil
+    }
+
     static func validated(_ value: JSONValue) throws -> Self {
         let context = try value.decodeWire(Self.decode)
+        guard statesOpen(value) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Available activation must state whether it is open"))
+        }
         if let breakdown = context.breakdown {
             guard breakdown.sections.count <= 6, breakdown.effectiveTokens >= 0, breakdown.contextWindow > 0,
                   breakdown.sections.allSatisfy({ $0.tokens >= 0 && ($0.count ?? 0) >= 0 }),
