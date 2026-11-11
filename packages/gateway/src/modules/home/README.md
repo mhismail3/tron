@@ -102,12 +102,12 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
 - **Profile** (`home-session-profile.ts`) is fixed per runtime. An unrecorded new Home uses
   its creation recipe once; later runtimes read the record (enabled Home, otherwise ordinary).
   Only `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-projects`,
-  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-home`, `tron-home-research` and `tron-web-research` load.
+  `tron-ask-user`, `tron-display`, `tron-notify`, `tron-schedule`, `tron-computer`, `tron-home`, `tron-home-research` and `tron-web-research` load.
   [Projects](../projects/README.md) owns tap-gated lifecycle actions. Shared Pi file/search/shell tools allow direct
-  work; only canonical maintainer turns admit general writes, edits or shell execution.
+  work; only canonical maintainer turns admit general writes, edits, shell execution or `computer`.
   Home's current recipe owns model, thinking and tools on creation/reconstruction and every request; chapter choices are records, never overrides.
   Rollover carries only directional authorization ceilings (e.g. images blocked until approved) and the explicit chapter window.
-  Settings counts enabled tools; every producer-owned input is a wake and withholds `write`, `edit` and `bash`.
+  Settings counts enabled tools; every producer-owned input is a wake and withholds `write`, `edit`, `bash` and `computer`.
   Agent `SYSTEM.md`/`APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
   model on its Gateway-runtime view; the profile owns explicit model admission and physical
@@ -181,7 +181,7 @@ changes keep its store, cursors and spend.
 - **Shared tools:** Pi owns `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`,
   including paging, truncation and errors. Resource trust is not a file sandbox. Global
   skills are discoverable through the shared loader; project executable resources remain
-  excluded. Wake requests omit write/edit/bash declarations and reject forged calls at
+  excluded. Wake requests omit write/edit/bash/computer declarations and reject forged calls at
   execution against the canonical current activation. Existing task, Profile, settings and
   automation authority is unchanged; fetched text never promotes a wake to a user turn.
 - **Settings tool:** Home changes settings through the one change path as `home`,

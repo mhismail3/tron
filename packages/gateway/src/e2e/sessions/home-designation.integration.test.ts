@@ -235,10 +235,10 @@ async function homeStatus(f: Fixture): Promise<HomeStatus> {
 }
 
 const HOME_EXTENSIONS = [
-  "tron-ask-user", "tron-compaction-policy", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify", "tron-projects", "tron-settings", "tron-web-research",
+  "tron-ask-user", "tron-compaction-policy", "tron-computer", "tron-context-window", "tron-display", "tron-home", "tron-home-research", "tron-notify", "tron-projects", "tron-settings", "tron-web-research",
 ];
 const HOME_TOOLS = [
-  "ask_user", "bash", "date", "delegate", "display", "edit", "find", "grep", "ls", "memory_search", "notify", "obligation",
+  "ask_user", "bash", "computer", "date", "delegate", "display", "edit", "find", "grep", "ls", "memory_search", "notify", "obligation",
   "profile", "projects", "read", "session_read", "session_search", "settings", "task", "web_search", "write", "zoom",
 ];
 
@@ -361,7 +361,7 @@ describe("Tron Home designation", () => {
     expect(extensionNames(homeContext)).toEqual(HOME_EXTENSIONS);
     expect(homeContext.skills.skills).toEqual([]);
     expect(registeredTools(homeContext).some((name) => name.startsWith("mcp__"))).toBe(false);
-    for (const excluded of ["tron-core", "tron-native-capture", "tron-computer", "tron-schedule"]) {
+    for (const excluded of ["tron-core", "tron-native-capture", "tron-schedule"]) {
       expect(extensionNames(homeContext)).not.toContain(excluded);
     }
 
