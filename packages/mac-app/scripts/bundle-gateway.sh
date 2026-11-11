@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Stage the Tron Gateway payload and Login Item launcher into the Mac wrapper's resource tree; run by Mac builds.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
