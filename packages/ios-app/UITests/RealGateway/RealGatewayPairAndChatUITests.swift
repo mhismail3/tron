@@ -1839,12 +1839,6 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return XCTWaiter().wait(for: [absent], timeout: timeout) == .completed
     }
 
-    @MainActor
-    func assistantReply(_ app: XCUIApplication, containing text: String) -> XCUIElement {
-        app.textViews.matching(identifier: "chat.assistant.selectable-text")
-            .descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
-    }
-
     func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: element)
         return XCTWaiter().wait(for: [enabled], timeout: timeout) == .completed

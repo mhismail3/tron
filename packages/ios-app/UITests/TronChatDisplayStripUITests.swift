@@ -121,7 +121,7 @@ final class TronChatDisplayStripUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch("-chat-display-segment-continuation")
         defer { app.terminate() }
-        let summary = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Segment continuation settled.")).firstMatch
+        let summary = assistantReply(app, containing: "Segment continuation settled.")
         XCTAssertTrue(summary.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertFalse(app.staticTexts["Conversation unavailable"].exists, app.debugDescription)
         let photo = thumbnail(app, "Segment photo")
