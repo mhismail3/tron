@@ -117,7 +117,7 @@ class BatchTests(unittest.TestCase):
         subprocess.run(['git', '-C', str(self.primary), 'commit', '-q', '--allow-empty', '-m', 'repository root'], env=self.env, check=True)
         subprocess.run(['git', '-C', str(self.primary), 'worktree', 'add', '-q', '-b', 'main', str(self.root)], env=self.env, check=True)
         self.common = self.primary / '.git'
-        for file in ('batch.py', 'verify.py', 'timing.py', 'host_lock.py', 'vitest_configs.py', 'mac.py', 'mini.py'):
+        for file in sorted(source.name for source in (ROOT / 'tools/verify').glob('*.py')):
             source = Path(os.environ.get('TRON_BATCH_UNDER_TEST', ROOT / 'tools/verify/batch.py')) if file == 'batch.py' else Path(os.environ.get('TRON_VERIFY_UNDER_TEST', ROOT / 'tools/verify' / file))
             text = source.read_text()
             text = text.replace("'/tmp/tron-full-gateway.lock'", repr(str(Path(self.temporary.name) / 'full-gateway.lock')))

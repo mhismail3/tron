@@ -228,8 +228,10 @@ test methods selects those methods, in the class or its extensions. The shared c
 ([iOS lane](ios.md)) supplies base/current declaration ranges; every changed line must belong to a
 changed test or its adjacent blank-line separator. Documentation and literal `ui_owned_journeys`
 entry edits may accompany it; any other harness or non-journey code change selects the complete owned set.
-Shared helpers/state, removals, unreadable syntax/metadata and empty attribution also select the
-complete owned set, protecting cross-file callers without a guessed call graph. `--module` and full
+Shared helpers/state, test-method references in sibling sources, removals, unreadable syntax/metadata
+and empty attribution also select the complete owned set, protecting cross-file callers without a
+guessed call graph. Deleted journey files retain that selection through their base ownership, even
+when no surviving journey file changed. `--module` and full
 selections stay complete. An empty ownership set or a discovered test absent from the harness's
 `ui_owned_journeys` fails selection (exit 2). They run
 through the harness, which takes its own host slots, on up to 3 lanes

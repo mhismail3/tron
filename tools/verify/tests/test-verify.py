@@ -1150,6 +1150,19 @@ class IosLaneTests(VerifyCase):
                         " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testBuildsDark"
                         " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testChatDark"
                         " --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testPairLight lanes=3")
+        extension = extension.replace("testAppsLight() { reveal() }", "testAppsLight() { reveal(); testPairLight() }")
+        r.write(f"{journeys}/RealGatewayBuildsUITests.swift", extension)
+        r.commit("another extension reuses a journey as executable code")
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        klass = klass.replace("_ = value", "_ = value; _ = 8")
+        r.write(f"{journeys}/RealGatewayPairAndChatUITests.swift", klass)
+        r.commit("a journey called by another extension changes")
+        cross_test = r.verify("--changed")
+        with self.subTest("cross-file test callers remain covered"):
+            self.assertEqual(cross_test.returncode, 0, cross_test.stdout + cross_test.stderr)
+            self.assertEqual(calls.read_text().splitlines(), [all_journeys])
+
         r.git("branch", "-f", "base")
         calls.write_text("")
         klass = klass.replace("func launch() {}", "func launch() { _ = 2 }")
@@ -1214,6 +1227,22 @@ class IosLaneTests(VerifyCase):
         empty = r.verify("--changed")
         self.assertEqual(empty.returncode, 0, empty.stdout + empty.stderr)
         self.assertEqual(calls.read_text().splitlines(), [all_journeys], "an empty method set must not become a zero-journey success")
+
+        retired = f"{journeys}/RealGatewayRetiredUITests.swift"
+        r.write(retired, "extension RealGatewayPairAndChatUITests {\n    func testRetiredDark() {}\n}\n")
+        r.write("scripts/ios-gateway-e2e-test", E2E_STUB.replace("ui_owned_journeys=(\n",
+                "ui_owned_journeys=(\n    'TronMobileUITests/RealGatewayPairAndChatUITests/testRetiredDark'\n"))
+        r.commit("a dedicated test-only journey extension")
+        r.git("branch", "-f", "base")
+        calls.write_text("")
+        r.git("rm", retired)
+        r.write("scripts/ios-gateway-e2e-test", E2E_STUB)
+        r.write("mods/alpha/test-alpha.py", "UNRELATED = 1\n" + PASSING)
+        r.commit("a complete journey source is deleted alongside another passing test")
+        deleted = r.verify("--changed")
+        with self.subTest("deleted journey source cannot hide behind another passing test"):
+            self.assertEqual(deleted.returncode, 0, deleted.stdout + deleted.stderr)
+            self.assertEqual(calls.read_text().splitlines(), [all_journeys])
 
         r.git("branch", "-f", "base")
         calls.write_text("")

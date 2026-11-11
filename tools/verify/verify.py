@@ -182,6 +182,11 @@ def ios_class(path: str) -> str | None:
     return extended.group(1) if extended else None
 
 
+def journey_sources(paths: list[str]) -> list[str]:
+    return [path for path in paths if path.startswith(f"{IOS}/UITests/") and is_test(path)
+            and (ROOT / path).is_file() and ios_class(path) == JOURNEY_CLASS]
+
+
 def journey_contract(text: str) -> tuple[list[str], str | None]:
     block = re.search(r"^ui_owned_journeys=\((.*?)^\)", text, re.S | re.M)
     if block is None:
@@ -194,7 +199,7 @@ def journey_contract(text: str) -> tuple[list[str], str | None]:
     return owned, text[:block.start()] + "ui_owned_journeys=()" + text[block.end():] if literal else None
 
 
-def journey_selectors(paths: list[str], base: str | None) -> list[str]:
+def journey_selectors(paths: list[str], base: str | None, tracked: list[str]) -> list[str]:
     if not paths:
         return []
     try:
@@ -202,6 +207,8 @@ def journey_selectors(paths: list[str], base: str | None) -> list[str]:
     except OSError as error:
         raise VerifyError(f"the real-UI journeys' harness is unreadable: {error}") from error
     selected: set[str] = set()
+    siblings = {path: (ROOT / path).read_text(errors="replace") for path in tracked
+                if path.startswith(f"{IOS}/UITests/") and path.endswith(".swift") and (ROOT / path).is_file()}
     whole = base is None
     if base is not None:
         try:
@@ -231,6 +238,9 @@ def journey_selectors(paths: list[str], base: str | None) -> list[str]:
         if changed is None:
             whole = True
         else:
+            if any(other != path and re.search(rf"\b{re.escape(method)}\b", other_source)
+                   for other, other_source in siblings.items() for method in changed):
+                whole = True
             selected.update(f"{IOS_TARGETS['UITests']}/{JOURNEY_CLASS}/{method}" for method in changed)
     return sorted(owned if whole or not selected else selected)
 
@@ -652,6 +662,13 @@ def select(mode: str, target: str | None, base: str, modules: dict, tracked: lis
             else:
                 reasons.append(f"{key}: owns a changed path; its {len(owned)} owned test file(s)")
             selected |= set(owned)
+        if any(path.startswith(f"{IOS}/UITests/") and is_test(path) and path in owner
+               and re.search(rf"\b(?:class|extension)\s+{JOURNEY_CLASS}\b", git("show", f"{base}:{path}")) for path in gone):
+            remaining = journey_sources(tracked)
+            if not remaining:
+                raise VerifyError("removed real-UI journey source leaves no remaining journey files")
+            selected.update(remaining)
+            reasons.append("removed real-UI journey source: all remaining journey files")
         sources = [path for key in changes if key not in narrow for path in changes[key] if not is_test(path)]
         consumers: dict[str, set[str]] = {}
         for importer, hits in importers(sources, tracked).items():
@@ -1130,7 +1147,7 @@ def main(argv: list[str]) -> int:
         journey_paths = groups.get("ios-journeys", [])
         journey_base = base if name == "changed" and all(
             is_doc(path) or path in journey_paths or path == JOURNEY_HARNESS for path in selection["paths"]) else None
-        journeys = journey_selectors(journey_paths, journey_base) if "ios" not in skip else []
+        journeys = journey_selectors(journey_paths, journey_base, result["tracked"]) if "ios" not in skip else []
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
