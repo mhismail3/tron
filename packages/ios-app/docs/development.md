@@ -86,6 +86,11 @@ It shares the test runner's lane and lease, builds `DevicePerformance`, and refu
 whose workload or render check diverged. Scenarios: `ProfilingTests/`
 ([performance baseline](performance-baseline.md)).
 
+Verify runs the scenarios of each `ProfilingTests` class that `scripts/profile.module.json` declares in
+`iosScenarios` once (`--iterations 1`) on each change, and passes them only on their functional receipts
+([verify](../../../tools/verify/README.md#owner-declared-profiling-scenarios)). Measured numbers stay diagnostic:
+`--self-test` and `compare` are never validation gates.
+
 #### Attribution: finding the owner
 
 `scripts/tron-profile ios --self-test --trace time-profiler` proves attribution;

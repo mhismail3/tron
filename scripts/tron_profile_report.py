@@ -278,6 +278,71 @@ def load_report(path: Path) -> dict[str, Any]:
     return report
 
 
+def functional_receipt(results: Path, scenario: str, test: str, iterations: int, worktree: Path, revision: str,
+                       render: bool) -> Path:
+    if not results.is_dir():
+        raise ReportError(f"{scenario}: no receipt (no profiler results at {results})")
+    matches = []
+    for run_dir in sorted(results.iterdir()):
+        if not run_dir.is_dir() or run_dir.is_symlink():
+            continue
+        if not (run_dir / "report.json").is_file():
+            raise ReportError(f"{scenario}: no receipt (run {run_dir.name} wrote no report)")
+        report = load_report(run_dir)
+        if report.get("scenario") == scenario:
+            matches.append((run_dir, report))
+    if not matches:
+        raise ReportError(f"{scenario}: no receipt (no report for this scenario under {results})")
+    if len(matches) > 1:
+        raise ReportError(f"{scenario}: {len(matches)} receipts; one invocation writes exactly one")
+    run_dir, report = matches[0]
+    problems = []
+    source = report.get("source") if isinstance(report.get("source"), dict) else {}
+    context = report.get("context") if isinstance(report.get("context"), dict) else {}
+    metrics = report["metrics"]
+    summary = _read_summary(run_dir / "xctest-summary.json")
+    artifacts = report.get("artifacts") if isinstance(report.get("artifacts"), dict) else {}
+    if report.get("tool") != "ios":
+        problems.append(f"measured tool {report.get('tool')!r}, not ios")
+    if report.get("run_id") != run_dir.name:
+        problems.append("the report does not name its own run directory")
+    if source.get("worktree") != str(worktree.resolve()):
+        problems.append(f"measured another worktree ({source.get('worktree')})")
+    if source.get("revision") != revision:
+        problems.append(f"measured revision {source.get('revision')}, not {revision}")
+    if source.get("dirty") is not False:
+        problems.append("measured uncommitted changes")
+    if context.get("test") != test:
+        problems.append(f"measured test {context.get('test')}, not {test}")
+    if context.get("iterations") != iterations:
+        problems.append(f"recorded {context.get('iterations')} iterations, not {iterations}")
+    for metric_id in ("time.wall", "cpu.time"):
+        if metric_id not in metrics:
+            problems.append(f"no {metric_id} measurement")
+    if any(metric.get("count") != iterations for metric in metrics.values()):
+        problems.append(f"a measurement lacks one value per iteration ({iterations})")
+    if not any(metric_id.startswith("scenario.") and not metric_id.startswith("scenario.render.") for metric_id in metrics):
+        problems.append("no workload measurement: the scenario left no evidence its workload ran")
+    if render and not any(metric_id.startswith("scenario.render.") for metric_id in metrics):
+        problems.append("no render measurement: the scenario's render check left no counters")
+    if not (summary.get("passedTests") == 1 and summary.get("failedTests") == 0 and summary.get("totalTestCount") == 1):
+        problems.append("its XCTest did not pass as the one executed test")
+    xcresult = artifacts.get("xcresult")
+    if not xcresult or not Path(xcresult).exists():
+        problems.append("its xcresult is missing")
+    if problems:
+        raise ReportError(f"{scenario}: receipt {run_dir.name} is not functional evidence: " + "; ".join(problems))
+    return run_dir
+
+
+def _read_summary(path: Path) -> dict[str, Any]:
+    try:
+        summary = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return summary if isinstance(summary, dict) else {}
+
+
 def compare_metric(base: dict[str, Any], candidate: dict[str, Any], floor: float) -> dict[str, Any]:
     if base["unit"] != candidate["unit"] or base["better"] != candidate["better"]:
         return {"verdict": "incomparable", "reason": "unit or direction changed"}
@@ -430,6 +495,15 @@ def main(argv: list[str]) -> int:
     compare_parser.add_argument("--json", action="store_true")
     compare_parser.add_argument("--allow-mismatch", action="store_true")
 
+    receipt = commands.add_parser("receipt", help="check one scenario's functional receipt in a profiler results root")
+    receipt.add_argument("--results-root", required=True, type=Path)
+    receipt.add_argument("--scenario", required=True)
+    receipt.add_argument("--test", required=True)
+    receipt.add_argument("--iterations", required=True, type=int)
+    receipt.add_argument("--worktree", required=True, type=Path)
+    receipt.add_argument("--revision", required=True)
+    receipt.add_argument("--render", action="store_true")
+
     status = commands.add_parser("status", help="show this worktree's newest report of each tool")
     status.add_argument("--worktree", required=True, type=Path)
     commands.add_parser("environment", help="print the host environment record")
@@ -453,6 +527,11 @@ def main(argv: list[str]) -> int:
             destination = write_report(report, args.run_dir)
             sys.stdout.write(markdown_summary(report))
             sys.stdout.write(f"\nReport: {destination}\n")
+            return EXIT_OK
+        if args.command == "receipt":
+            run_dir = functional_receipt(args.results_root, args.scenario, args.test, args.iterations,
+                                         args.worktree, args.revision, args.render)
+            sys.stdout.write(f"receipt ok: {args.scenario} {run_dir}\n")
             return EXIT_OK
         if args.command == "compare":
             if not (0 <= args.floor < 1):

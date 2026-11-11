@@ -15,5 +15,12 @@
     "tron-profile-relay.mjs",
     "tron_profile_attribution.py",
     "tron_profile_report.py"
+  ],
+  "iosScenarios": [
+    "ProfileChatScenarioTests",
+    "ProfileComposerScenarioTests",
+    "ProfileControlScenarioTests",
+    "ProfileDashboardScenarioTests",
+    "ProfileHomeSheetScenarioTests"
   ]
 }
