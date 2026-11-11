@@ -119,7 +119,9 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
 
 - **Pin.** `pi-subagents-pin.json`: fork commit, archive and lockfile SHA-256, Node/npm build
   versions, closure SHA-512; `fork.repository` stays null until a public fork exists. A retained
-  predecessor pin binds its exact archive, lockfile and closure. Artifacts live in `artifacts/`.
+  predecessor pin binds its exact archive, lockfile and closure. Artifacts live in `artifacts/`;
+  source keeps only the current and retained predecessor's inputs. The current provider closure
+  resolves its HTTP dependency to undici 8.12.4, independently of the SDK child bundles above.
 - **Check** (offline): both selections' inputs and identity, and every non-peer dependency of
   the lock-resolved graph inside the closure with matching `resolved`/`integrity`.
 - **Build:** `npm run build:pi-subagents-closure` with the pinned toolchain (`TRON_NODE_BIN`);
