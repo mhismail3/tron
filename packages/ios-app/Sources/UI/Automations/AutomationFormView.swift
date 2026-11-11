@@ -35,13 +35,13 @@ struct AutomationDateSelection: Identifiable {
 }
 
 struct AutomationSessionPickerSheet: View {
-    let sessions: [SessionSummary]
+    let sessions: [CatalogSession]
     let selectedID: String
-    let onSelect: (SessionSummary) -> Void
+    let onSelect: (CatalogSession) -> Void
     @Environment(\.dismiss) private var dismiss
     @PresentationState private var search = ""
 
-    private var filteredSessions: [SessionSummary] {
+    private var filteredSessions: [CatalogSession] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return sessions }
         return sessions.filter { $0.title.localizedCaseInsensitiveContains(query) || $0.cwd.localizedCaseInsensitiveContains(query) }
@@ -84,7 +84,7 @@ struct AutomationSessionPickerSheet: View {
         .tronSettingsVisualTheme(accent: .tronPrimary, surfaceAccent: .tronPrimarySurface)
     }
 
-    private func row(_ session: SessionSummary) -> some View {
+    private func row(_ session: CatalogSession) -> some View {
         let selected = session.id == selectedID
         return Button {
             onSelect(session)
@@ -188,7 +188,7 @@ struct AutomationFormView: View {
             && !model.isReconcilingForeground
             && selectedEndpoint?.profile.capabilities.contains(AutomationAdmissionPolicy.capability) == true
     }
-    private var sessions: [SessionSummary] {
+    private var sessions: [CatalogSession] {
         model.visibleSessions.filter { session in
             session.gatewayProfileID == selectedProfileID
                 || (session.gatewayProfileID == nil && selectedProfileID == model.profiles.selected?.id)

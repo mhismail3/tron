@@ -2,14 +2,14 @@ import SwiftUI
 import TronMobileCore
 
 struct SessionArchiveConfirmation: Identifiable {
-    let session: SessionSummary
+    let session: CatalogSession
     let archived: Bool
     var id: String { "\(archived ? "archive" : "unarchive").\(session.dashboardID)" }
 }
 
 extension View {
     func sessionRowTrailingSwipe(
-        session: SessionSummary,
+        session: CatalogSession,
         archiveIsAvailable: Bool,
         onArchive: @escaping () -> Void,
         onDelete: @escaping () -> Void,

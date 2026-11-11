@@ -200,7 +200,7 @@ private actor NotificationInboxGateway {
                                createdAt: now, updatedAt: now, messageCount: 4, firstMessage: $0.name, phase: .idle,
                                summaryRevision: 1)
             }
-            return .success(.object(["sessions": try! JSONValue.encode(summaries), "nextCursor": .null,
+            return .success(.object(["sessions": .array(summaries.map { try! JSONValue.wire($0.encode()) }), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("inbox-fixture:1"), "archivedCount": .number(0)]))
         default:
             return nil

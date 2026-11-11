@@ -13,15 +13,9 @@ enum SnapshotCachePolicy {
 
 actor SnapshotCache {
     struct Value: Sendable {
-        let sessions: [SessionSummary]
+        let sessions: [CatalogSession]
         let archivedCount: Int?
         static let empty = Value(sessions: [], archivedCount: nil)
-    }
-
-    private struct Document: Decodable {
-        let version: Int
-        let sessions: [SessionSummary]
-        let archivedCount: Int?
     }
 
     private let root: URL
@@ -69,7 +63,7 @@ actor SnapshotCache {
                 )
                 return .empty
             }
-            let document = try JSONDecoder.gateway.decode(Document.self, from: data)
+            let document = try Self.decodedDocument(data)
             guard document.version == 4 else {
                 try? FileManager.default.removeItem(at: source)
                 performanceSignposts.end(
@@ -103,7 +97,7 @@ actor SnapshotCache {
     func save(
         profileID: String,
         generation: Int = 0,
-        sessions: [SessionSummary],
+        sessions: [CatalogSession],
         archivedCount: Int? = nil,
     ) {
         guard !removedProfileIDs.contains(profileID),
@@ -167,18 +161,17 @@ actor SnapshotCache {
     }
 
     private static func admittedSessions(
-        _ sessions: [SessionSummary]
-    ) -> [(summary: SessionSummary, encoded: Data)] {
+        _ sessions: [CatalogSession]
+    ) -> [(summary: CatalogSession, encoded: Data)] {
         let budget = SnapshotCachePolicy.maximumEncodedBytes - SnapshotCachePolicy.envelopeReserveBytes
-        let encoder = JSONEncoder.gateway
         var estimatedBytes = 0
         var seen: Set<String> = []
-        var admitted: [(summary: SessionSummary, encoded: Data)] = []
+        var admitted: [(summary: CatalogSession, encoded: Data)] = []
         for session in sessions where admitted.count < SnapshotCachePolicy.maximumSessionCount {
             guard !session.isArchived,
                   !session.id.isEmpty,
-                  admitsEncodingShape(session, maximumBytes: SnapshotCachePolicy.maximumEncodedSessionBytes),
-                  let encoded = try? encoder.encode(session),
+                  admitsEncodingShape(session.summary, maximumBytes: SnapshotCachePolicy.maximumEncodedSessionBytes),
+                  case let encoded = Data(session.summary.encode().utf8),
                   encoded.count <= SnapshotCachePolicy.maximumEncodedSessionBytes,
                   estimatedBytes <= budget - encoded.count,
                   seen.insert(session.id).inserted else { continue }
@@ -186,6 +179,29 @@ actor SnapshotCache {
             estimatedBytes += encoded.count
         }
         return admitted
+    }
+
+    private static let documentLimits = JSONValueDecodingLimits(
+        maximumDepth: 8,
+        maximumNodes: 32_768,
+        maximumCollectionMembers: 8_192,
+        maximumStringBytes: SnapshotCachePolicy.maximumEncodedBytes,
+        maximumTotalStringBytes: SnapshotCachePolicy.maximumEncodedBytes
+    )
+
+    private static func decodedDocument(_ data: Data) throws -> (version: Int, sessions: [CatalogSession], archivedCount: Int?) {
+        let value = try JSONDecoder.gateway(jsonValueLimits: documentLimits).decode(JSONValue.self, from: data)
+        guard let document = value.objectValue, let version = document["version"]?.intValue,
+              case .array(let rows)? = document["sessions"] else { throw CocoaError(.coderReadCorrupt) }
+        let archived = document["archivedCount"]
+        let archivedCount = archived == nil || archived == .null ? nil : archived?.intValue
+        guard archived == nil || archived == .null || archivedCount != nil else { throw CocoaError(.coderReadCorrupt) }
+        let sessions = try rows.map { row in
+            let summary = try row.decodeWire(SessionSummary.decode)
+            guard summary.admitted else { throw CocoaError(.coderReadCorrupt) }
+            return CatalogSession(summary)
+        }
+        return (version, sessions, archivedCount)
     }
 
     private static func encodedDocument(rows: [Data], archivedCount: Int?) -> Data {

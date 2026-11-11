@@ -24,7 +24,7 @@ enum HostedSettingsChangesReview {
         let worker = SessionSummary(id: workerSessionID, name: "Restructure 0.4: compare ownership metadata",
             cwd: "/workspace/tron", parentSessionId: nil, homeTaskId: workerTaskID, createdAt: iso(-7200), updatedAt: iso(-3600),
             messageCount: 4, firstMessage: "Compare ownership metadata", phase: .idle, summaryRevision: 1)
-        return .object(["sessions": .array([try! JSONValue.encode(worker)]), "nextCursor": .null,
+        return .object(["sessions": .array([try! JSONValue.wire(worker.encode())]), "nextCursor": .null,
                         "listRevision": .number(1), "projectionToken": .string("settings-changes-review:1"),
                         "archivedCount": .number(0)])
     }
