@@ -264,5 +264,5 @@ package struct SessionAttentionProjection: Codable, Hashable, Sendable {
 }
 
 extension SessionSummaryUpdate {
-    package var admitted: Bool { completionRevision >= 0 && attentionRevision >= 0 }
+    package var admitted: Bool { !sessionId.isEmpty && completionRevision >= 0 && attentionRevision >= 0 }
 }
