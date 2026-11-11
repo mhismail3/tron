@@ -2234,7 +2234,7 @@ extension SessionPresentationStore {
     private static func installingProcessActivities(
         _ snapshot: SessionSnapshot,
         preserving previous: [PresentedProcessActivity],
-        previousOverview: SessionProcessOverview?
+        previousOverview: PresentedProcessOverview?
     ) -> SessionSnapshot {
         var result = snapshot
         var admitted = SessionProcessAdmissionPolicy.admitted(snapshot.processActivities ?? [])

@@ -14,6 +14,7 @@
 // @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates ModelPage
 // @swift SessionPhase SessionSummaryUpdate
 // @swift ExtensionRunLifecycle SessionProcessLifecycle SessionProcessActivity
+// @swift SessionProcessOverview SessionProcessDelta ProcessTranscriptChanged
 // @swift ExtensionSurfaceKind ExtensionSurfacePlacement ExtensionSurfaceLifecycle ExtensionSurfaceInputMode
 // @swift-codable SessionPhase
 module Protocol {
@@ -780,6 +781,26 @@ module Protocol {
       omissions: Option<SessionProcessOverviewOmissions>,
       /// Child omissions are distinct from Gateway row-cap omissions.
       extensionChildOmissions: Option<ExtensionRunActivityLifecycleOmissions>
+    )
+
+  // @wire
+  datatype SessionProcessDelta = SessionProcessDelta(
+      activity: Option<SessionProcessActivity>,
+      removedProcessIds: Option<seq<string>>,
+      processRevision: real,
+      processAsOf: string,
+      overview: SessionProcessOverview
+    )
+
+  // @wire
+  datatype ProcessTranscriptChanged = ProcessTranscriptChanged(
+      leaseId: string,
+      processId: Option<string>,
+      revision: Option<string>,
+      total: Option<real>,
+      leafEntryId: Option<string>,
+      closed: Option<bool>,
+      reason: Option<string>
     )
 
   // @wire enum

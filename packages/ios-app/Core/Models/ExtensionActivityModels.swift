@@ -86,6 +86,22 @@ package struct ExtensionActivityOmissions: Codable, Hashable, Sendable {
     let count: Int
     let bytes: Int
     let reason: String
+
+    init(count: Int, bytes: Int, reason: String) {
+        self.count = count
+        self.bytes = bytes
+        self.reason = reason
+    }
+
+    package init(from decoder: Decoder) throws {
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            let value = try SessionProcessOverviewOmissions.decode(input, path)
+            guard let count = Int(exactly: value.count), let bytes = Int(exactly: value.bytes) else {
+                throw WireError(path: path, message: "invalid extension activity omission integers")
+            }
+            return Self(count: count, bytes: bytes, reason: value.reason.rawValue)
+        }
+    }
 }
 
 package enum ExtensionActivityAdmissionPolicy {

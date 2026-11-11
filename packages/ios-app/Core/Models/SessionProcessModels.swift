@@ -101,7 +101,9 @@ package struct PresentedProcessLifecycle: Codable, Hashable, Sendable {
     }
 
     package init(from decoder: Decoder) throws {
-        try self.init(wire: JSONValue(from: decoder).decodeWire(SessionProcessLifecycle.decode))
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            try Self(wire: SessionProcessLifecycle.decode(input, path))
+        }
     }
 
     package init(wire value: SessionProcessLifecycle) throws {
@@ -206,7 +208,12 @@ package struct PresentedProcessActivity: Codable, Hashable, Identifiable, Sendab
     }
 
     package init(from decoder: Decoder) throws {
-        let value = try JSONValue(from: decoder).decodeWire(SessionProcessActivity.decode)
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            try Self(wire: SessionProcessActivity.decode(input, path))
+        }
+    }
+
+    package init(wire value: SessionProcessActivity) throws {
         guard let kind = PresentedProcessKind(rawValue: value.kind.rawValue),
               let mode = PresentedProcessExecutionMode(rawValue: value.executionMode.rawValue),
               let source = PresentedProcessSource(rawValue: value.source.rawValue),
@@ -252,20 +259,49 @@ package struct SessionProcessOmissions: Codable, Hashable, Sendable {
     package let count: Int
     package let bytes: Int
     package let reason: String
+
+    package init(count: Int, bytes: Int, reason: String) {
+        self.count = count
+        self.bytes = bytes
+        self.reason = reason
+    }
+
+    package init(from decoder: Decoder) throws {
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            try Self(wire: SessionProcessOverviewOmissions.decode(input, path))
+        }
+    }
+
+    package init(wire value: SessionProcessOverviewOmissions) throws {
+        guard let count = Int(exactly: value.count), let bytes = Int(exactly: value.bytes) else {
+            throw WireError(path: "$", message: "invalid process omission integers")
+        }
+        self.init(count: count, bytes: bytes, reason: value.reason.rawValue)
+    }
 }
 
-package enum SessionProcessOverviewVisibility: String, Codable, CaseIterable, Sendable {
+package enum PresentedProcessOverviewVisibility: String, Codable, CaseIterable, Sendable {
     case hidden, active, recent
+
+    package init(from decoder: Decoder) throws {
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            let value = try SessionProcessOverviewVisibility.decode(input, path)
+            guard let visibility = Self(rawValue: value.rawValue) else {
+                throw WireError(path: path, message: "unknown process overview visibility")
+            }
+            return visibility
+        }
+    }
 }
 
-package struct SessionProcessOverview: Codable, Hashable, Sendable {
+package struct PresentedProcessOverview: Codable, Hashable, Sendable {
     let version: Int
     package let revision: Int
     let asOf: String
     package let activeCount: Int
     package let recentCount: Int
     let problemCount: Int
-    package let visibility: SessionProcessOverviewVisibility
+    package let visibility: PresentedProcessOverviewVisibility
     let nearestExpiry: String?
     let omissions: SessionProcessOmissions?
 
@@ -276,7 +312,7 @@ package struct SessionProcessOverview: Codable, Hashable, Sendable {
         activeCount: Int,
         recentCount: Int,
         problemCount: Int,
-        visibility: SessionProcessOverviewVisibility,
+        visibility: PresentedProcessOverviewVisibility,
         nearestExpiry: String? = nil,
         omissions: SessionProcessOmissions? = nil
     ) {
@@ -290,17 +326,57 @@ package struct SessionProcessOverview: Codable, Hashable, Sendable {
         self.nearestExpiry = nearestExpiry
         self.omissions = omissions
     }
+
+    package init(from decoder: Decoder) throws {
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            try Self(wire: SessionProcessOverview.decode(input, path))
+        }
+    }
+
+    package init(wire value: SessionProcessOverview) throws {
+        guard let revision = Int(exactly: value.revision),
+              let activeCount = Int(exactly: value.activeCount),
+              let recentCount = Int(exactly: value.recentCount),
+              let problemCount = Int(exactly: value.problemCount),
+              let visibility = PresentedProcessOverviewVisibility(rawValue: value.visibility.rawValue) else {
+            throw WireError(path: "$", message: "invalid process overview projection")
+        }
+        self.init(revision: revision, asOf: value.asOf, activeCount: activeCount, recentCount: recentCount,
+                  problemCount: problemCount, visibility: visibility, nearestExpiry: value.nearestExpiry,
+                  omissions: try value.omissions.map(SessionProcessOmissions.init(wire:)))
+    }
 }
 
-package struct SessionProcessDelta: Codable, Hashable, Sendable {
+package struct PresentedProcessDelta: Codable, Hashable, Sendable {
     package let activity: PresentedProcessActivity?
     package let removedProcessIds: [String]?
     package let processRevision: Int
     let processAsOf: String
-    package let overview: SessionProcessOverview
+    package let overview: PresentedProcessOverview
+
+    package init(activity: PresentedProcessActivity?, removedProcessIds: [String]?, processRevision: Int,
+                 processAsOf: String, overview: PresentedProcessOverview) {
+        self.activity = activity
+        self.removedProcessIds = removedProcessIds
+        self.processRevision = processRevision
+        self.processAsOf = processAsOf
+        self.overview = overview
+    }
+
+    package init(from decoder: Decoder) throws {
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            let value = try SessionProcessDelta.decode(input, path)
+            guard let revision = Int(exactly: value.processRevision) else {
+                throw WireError(path: path, message: "invalid process revision")
+            }
+            return try Self(activity: value.activity.map(PresentedProcessActivity.init(wire:)),
+                            removedProcessIds: value.removedProcessIds, processRevision: revision,
+                            processAsOf: value.processAsOf, overview: PresentedProcessOverview(wire: value.overview))
+        }
+    }
 }
 
-package struct ProcessTranscriptChanged: Codable, Hashable, Sendable {
+package struct PresentedProcessTranscriptChanged: Codable, Hashable, Sendable {
     package let leaseId: String
     let processId: String?
     package let revision: String?
@@ -320,6 +396,20 @@ package struct ProcessTranscriptChanged: Codable, Hashable, Sendable {
         self.leafEntryId = leafEntryId
         self.closed = closed
         self.reason = reason
+    }
+
+    package init(from decoder: Decoder) throws {
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            let value = try ProcessTranscriptChanged.decode(input, path)
+            let total = try value.total.map { number -> Int in
+                guard let integer = Int(exactly: number) else {
+                    throw WireError(path: path + ".total", message: "invalid transcript total")
+                }
+                return integer
+            }
+            return Self(leaseId: value.leaseId, processId: value.processId, revision: value.revision,
+                        total: total, leafEntryId: value.leafEntryId, closed: value.closed, reason: value.reason)
+        }
     }
 }
 
@@ -376,7 +466,7 @@ package enum SessionProcessAdmissionPolicy {
             .prefix(maximumActivities))
     }
 
-    package static func admits(_ overview: SessionProcessOverview) -> Bool {
+    package static func admits(_ overview: PresentedProcessOverview) -> Bool {
         guard overview.version == 1,
               overview.revision >= 0,
               validTimestamp(overview.asOf),
@@ -397,7 +487,7 @@ package enum SessionProcessAdmissionPolicy {
         }
     }
 
-    package static func admits(_ delta: SessionProcessDelta) -> Bool {
+    package static func admits(_ delta: PresentedProcessDelta) -> Bool {
         let removals = delta.removedProcessIds ?? []
         guard delta.processRevision >= 0,
               validTimestamp(delta.processAsOf),
@@ -422,7 +512,7 @@ package enum SessionProcessAdmissionPolicy {
 
     package static func admitsMountedSubset(
         _ activities: [PresentedProcessActivity],
-        overview: SessionProcessOverview
+        overview: PresentedProcessOverview
     ) -> Bool {
         guard activities.allSatisfy({ $0.visibility == .active || $0.visibility == .recent }) else { return false }
         let active = activities.filter { $0.visibility == .active }.count
@@ -467,7 +557,7 @@ package enum SessionProcessAdmissionPolicy {
         return true
     }
 
-    package static func admits(_ change: ProcessTranscriptChanged) -> Bool {
+    package static func admits(_ change: PresentedProcessTranscriptChanged) -> Bool {
         guard boundedNonempty(change.leaseId, 256),
               change.processId.map({ boundedNonempty($0, 512) }) ?? true,
               change.revision.map({ boundedNonempty($0, 256) }) ?? true,

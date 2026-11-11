@@ -243,7 +243,7 @@ final class AppModel {
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
-    private var processTranscriptInvalidationSinks: [UUID: (ProcessTranscriptChanged) -> Void] = [:]
+    private var processTranscriptInvalidationSinks: [UUID: (PresentedProcessTranscriptChanged) -> Void] = [:]
     var actionablePushNavigationRequest: PushNavigationRequest? {
         guard didStart, sceneAllowsCatalogRefresh, pushNavigationActivationReady else { return nil }
         return pushNavigationRequest
@@ -851,7 +851,7 @@ extension AppModel {
     }
 
     @discardableResult
-    func registerProcessTranscriptInvalidationSink(_ sink: @escaping (ProcessTranscriptChanged) -> Void) -> UUID {
+    func registerProcessTranscriptInvalidationSink(_ sink: @escaping (PresentedProcessTranscriptChanged) -> Void) -> UUID {
         let id = UUID()
         processTranscriptInvalidationSinks[id] = sink
         return id
