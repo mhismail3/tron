@@ -811,6 +811,125 @@ package struct SessionProcessLifecycle: Hashable, Sendable {
     return "{" + String(s.dropFirst()) + "}"
   }
 }
+package enum ExtensionSurfaceKind: String, CaseIterable, Hashable, Sendable {
+  case header = "header"
+  case footer = "footer"
+  case widget = "widget"
+  case custom = "custom"
+  case overlay = "overlay"
+  case editor = "editor"
+  case toolRenderer = "toolRenderer"
+  case messageRenderer = "messageRenderer"
+  case entryRenderer = "entryRenderer"
+  case markdown = "markdown"
+  case unknown = "unknown"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ExtensionSurfaceKind {
+    switch v {
+    case .string("header"): return .header
+    case .string("footer"): return .footer
+    case .string("widget"): return .widget
+    case .string("custom"): return .custom
+    case .string("overlay"): return .overlay
+    case .string("editor"): return .editor
+    case .string("toolRenderer"): return .toolRenderer
+    case .string("messageRenderer"): return .messageRenderer
+    case .string("entryRenderer"): return .entryRenderer
+    case .string("markdown"): return .markdown
+    case .string("unknown"): return .unknown
+    default: return .unknown
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .header: return "\"header\""
+    case .footer: return "\"footer\""
+    case .widget: return "\"widget\""
+    case .custom: return "\"custom\""
+    case .overlay: return "\"overlay\""
+    case .editor: return "\"editor\""
+    case .toolRenderer: return "\"toolRenderer\""
+    case .messageRenderer: return "\"messageRenderer\""
+    case .entryRenderer: return "\"entryRenderer\""
+    case .markdown: return "\"markdown\""
+    case .unknown: return "\"unknown\""
+    }
+  }
+}
+package enum ExtensionSurfacePlacement: String, CaseIterable, Hashable, Sendable {
+  case header = "header"
+  case footer = "footer"
+  case aboveEditor = "aboveEditor"
+  case belowEditor = "belowEditor"
+  case transcript = "transcript"
+  case overlay = "overlay"
+  case fullscreen = "fullscreen"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ExtensionSurfacePlacement {
+    switch v {
+    case .string("header"): return .header
+    case .string("footer"): return .footer
+    case .string("aboveEditor"): return .aboveEditor
+    case .string("belowEditor"): return .belowEditor
+    case .string("transcript"): return .transcript
+    case .string("overlay"): return .overlay
+    case .string("fullscreen"): return .fullscreen
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .header: return "\"header\""
+    case .footer: return "\"footer\""
+    case .aboveEditor: return "\"aboveEditor\""
+    case .belowEditor: return "\"belowEditor\""
+    case .transcript: return "\"transcript\""
+    case .overlay: return "\"overlay\""
+    case .fullscreen: return "\"fullscreen\""
+    }
+  }
+}
+package enum ExtensionSurfaceLifecycle: String, CaseIterable, Hashable, Sendable {
+  case retained = "retained"
+  case blocking = "blocking"
+  case transient = "transient"
+  case restored = "restored"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ExtensionSurfaceLifecycle {
+    switch v {
+    case .string("retained"): return .retained
+    case .string("blocking"): return .blocking
+    case .string("transient"): return .transient
+    case .string("restored"): return .restored
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .retained: return "\"retained\""
+    case .blocking: return "\"blocking\""
+    case .transient: return "\"transient\""
+    case .restored: return "\"restored\""
+    }
+  }
+}
+package enum ExtensionSurfaceInputMode: String, CaseIterable, Hashable, Sendable {
+  case none = "none"
+  case keys = "keys"
+  case textAndKeys = "textAndKeys"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ExtensionSurfaceInputMode {
+    switch v {
+    case .string("none"): return .none
+    case .string("keys"): return .keys
+    case .string("textAndKeys"): return .textAndKeys
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .none: return "\"none\""
+    case .keys: return "\"keys\""
+    case .textAndKeys: return "\"textAndKeys\""
+    }
+  }
+}
 package struct ContextWindowLimits: Hashable, Sendable {
   package let minimum: Int
   package let maximum: Int
