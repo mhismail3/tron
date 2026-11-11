@@ -746,6 +746,14 @@ class FastPathTests(VerifyCase):
         r.commit("a reworded purpose line")
         reworded = r.verify("--changed")
         self.assertEqual({step["name"]: step["status"] for step in r.report()["steps"]}["no new comments"], "ok", reworded.stdout)
+        r.git("reset", "-q", "--hard", "base")
+        r.write("tools/fixture/tool.py", "# Fixture tool that a test runs to prove\n# one rule across two lines.\nVALUE = 1\n")
+        r.commit("a wrapped purpose header")
+        r.git("branch", "-f", "base")
+        r.write("tools/fixture/tool.py", "# Fixture tool that a test runs to prove one rule across two lines.\nVALUE = 1\n")
+        r.commit("the wrapped header joined into one purpose line")
+        reworded = r.verify("--changed")
+        self.assertEqual({step["name"]: step["status"] for step in r.report()["steps"]}["no new comments"], "ok", reworded.stdout)
 
     def test_a_gateway_golden_change_selects_only_the_lock_that_reads_it(self) -> None:
         r = self.repo
