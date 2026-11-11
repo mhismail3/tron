@@ -202,6 +202,19 @@ async function launchGatewayProcess(
     TRON_GATEWAY_HOST: "127.0.0.1",
     TRON_GATEWAY_PORT: String(port),
   };
+  const trace = join(root, "spawn-trace.mjs");
+  const traceLog = join(root, "spawn-trace.jsonl");
+  await writeFile(trace, `import { ChildProcess } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+const native = ChildProcess.prototype.spawn;
+ChildProcess.prototype.spawn = function(options) {
+  const stack = new Error().stack;
+  const result = native.call(this, options);
+  const record = { event: 'spawn', parent: process.pid, pid: this.pid, file: options.file, args: options.args, stack };
+  appendFileSync(${JSON.stringify(traceLog)}, JSON.stringify(record) + '\\n');
+  this.once('exit', (code, signal) => appendFileSync(${JSON.stringify(traceLog)}, JSON.stringify({event:'exit',pid:this.pid,code,signal}) + '\\n'));
+  return result;
+};`);
   const clients = new Set<WebSocket>();
   let child!: ChildProcess;
   let output = "";
@@ -212,7 +225,7 @@ async function launchGatewayProcess(
   const launch = async (extra: Record<string, string> = {}) => {
     const startedAt = (await readLog()).filter((record) => record.event === "gateway.startup-budget").length;
     output = "";
-    child = spawn(process.execPath, ["--experimental-transform-types", "--no-warnings",
+    child = spawn(process.execPath, ["--experimental-transform-types", "--no-warnings", "--import", pathToFileURL(trace).href,
       ...preloads.flatMap((preload) => ["--import", pathToFileURL(preload).href]),
       join(gatewayRoot, "src", "index.ts")], { cwd: gatewayRoot, stdio: ["ignore", "pipe", "pipe"], env: { ...environment, ...extra } });
     spawned(child);
@@ -229,6 +242,7 @@ async function launchGatewayProcess(
     clients.clear();
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
     await joinExit(child, label, boundMs);
+    console.error("GATEWAY SPAWN TRACE", await readFile(traceLog, "utf8").catch(() => "no children"));
   };
   await launch();
 
