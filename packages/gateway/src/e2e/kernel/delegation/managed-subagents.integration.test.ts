@@ -16,6 +16,15 @@ import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
 
 const closureDecodes = vi.hoisted(() => ({ sizes: [] as number[] }));
+const receiptReads = vi.hoisted(() => ({ paths: [] as string[] }));
+vi.mock("node:fs", async (original) => {
+  const fs = await original<typeof import("node:fs")>();
+  const readFileSync = ((path: Parameters<typeof fs.readFileSync>[0], ...rest: unknown[]) => {
+    if (String(path).endsWith("tron-install-receipt.json")) receiptReads.paths.push(String(path));
+    return (fs.readFileSync as (...args: unknown[]) => unknown)(path, ...rest);
+  }) as typeof fs.readFileSync;
+  return { ...fs, default: { ...fs, readFileSync }, readFileSync };
+});
 vi.mock("node:zlib", async (original) => {
   const zlib = await original<typeof import("node:zlib")>();
   return { ...zlib, gunzipSync: (input: Buffer, options?: import("node:zlib").ZlibOptions) => {
@@ -141,6 +150,7 @@ it.each([
       facts.passed = true;
       return;
     }
+    const verifiedBeforeLoad = receiptReads.paths.length;
     const slot = await registry.create(cwd);
     await slot.setModel(model.provider, model.id);
     const resources = await slot.resources() as unknown as {
@@ -152,6 +162,7 @@ it.each([
     const pin = JSON.parse(await readFile(new URL("../../../../pi-subagents-pin.json", import.meta.url), "utf8")) as { closure: { path: string } };
     const closureBytes = (await stat(new URL(`../../../../${pin.closure.path}`, import.meta.url))).size;
     expect(closureDecodes.sizes.filter(size => size === closureBytes), "the pinned closure is decoded once per process").toHaveLength(1);
+    expect(receiptReads.paths.slice(verifiedBeforeLoad), "an unchanged verified install is not byte-compared again on session load").toEqual([]);
     if (conflict) {
       expect(resources.subagentDiagnostics).toContain("fallbackModels");
       expect(resources.subagentDiagnostics).toContain("invalid-worker");

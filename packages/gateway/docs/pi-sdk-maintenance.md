@@ -136,8 +136,9 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
   Stable installation is maintainer-only.
 - **Admission:** one `ManagedSubagents` selection per payload and home serves runtime and admin
   loads, discovery, `session.resources` and `packages.list`. It revalidates receipt and files
-  (every installed file byte-compared on each load, against the pinned archive decoded once per process
-  and re-read and re-hashed whenever the archive file's identity changes),
+  (every installed file byte-compared against the SHA-512-checked pinned archive, decoded once per process;
+  a load re-compares, re-reading the archive if its file identity changed, only when the installed
+  tree's lstat identity, or an ancestor's, changed since the last passing compare),
   checks SDK peer ranges, requires `PI_SUBAGENTS_TEMP_ROOT` = `delegatedArtifactRoot(tronHome)`
   (else `conflict`), sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to the payload's
   `pi-coding-agent`, confines `pi.extensions|skills|prompts` to the verified root, and gives the
