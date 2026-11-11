@@ -33,6 +33,9 @@ Commands:
                                     Claude subscription smoke of the pinned Pi: Fable 5.2,
                                     the Claude Code version it sends, Tron's wiring tests
                                     (tools/claude-provider-smoke)
+  computer-bench [--tools <list>] [--reps N] [--only <tasks>] [--foreground] [--json <file>] [--markdown <file>]
+                                    Computer- and browser-use scorecard: fixed local tasks per
+                                    tool and Tron surface (tools/computer-bench)
   build gateway                     Build Gateway directly with pinned Node
   migrate connections-residue --tron-home <dir> [--apply --backup <new dir>]
   migrate connections-residue --restore --backup <dir>
@@ -252,6 +255,10 @@ case "$cmd" in
   provider-smoke)
     use_pinned_node
     exec node "$ROOT/tools/claude-provider-smoke/smoke.mjs" "$@"
+    ;;
+  computer-bench)
+    use_pinned_node
+    exec node "$ROOT/tools/computer-bench/bench.mjs" "$@"
     ;;
   home-layout)
     exec python3 "$ROOT/tools/home-layout/home_layout.py" "$@"
