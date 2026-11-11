@@ -151,9 +151,11 @@ and trust requirements. Preserve canonical ownership and safety boundaries.
 
 ## 5. Report and follow through
 
-Write the report privately to a user-selected artifact path or the internal
-workspace's `files/`, not into source. Keep raw evidence private and bounded;
-retain only what is needed to reproduce the numbers. Produce the report sections
+Write the finished report privately to a user-selected artifact path or the internal
+workspace's `files/home-audit-<date>/`, not into source; add its purpose and relative
+link to `files/INDEX.md`. Keep raw task scratch in `tmp/<taskId>/`; before finishing,
+retain only evidence needed to reproduce the numbers with the report and delete
+remaining audit-owned scratch. Never delete retained files or state without approval. Produce the report sections
 in the template plus machine-readable metric rows when useful. Present a useful
 report with `display`; do not emit a dashboard image merely for decoration.
 
