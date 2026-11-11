@@ -22,24 +22,36 @@ package enum SessionProcessSource: String, Codable, CaseIterable, Sendable {
 package enum SessionProcessLifecycleState: String, Codable, CaseIterable, Sendable {
     case queued, running, paused, completed, failed, stopped, rejected, interrupted, unknown
 
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(SessionProcessState.decode)
+        guard let state = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown process state") }
+        self = state
+    }
+
     package var isActive: Bool { switch self { case .queued, .running, .paused: true; default: false } }
     package var isTerminal: Bool { switch self { case .completed, .failed, .stopped, .rejected, .interrupted: true; default: false } }
     var isProblem: Bool { switch self { case .failed, .rejected, .interrupted: true; default: false } }
     package var displayName: String { rawValue == "unknown" ? "Unknown" : rawValue.capitalized }
 }
 
-package enum SessionProcessAttention: String, Codable, CaseIterable, Sendable {
+package enum PresentedProcessAttention: String, Codable, CaseIterable, Sendable {
     case none, activeLongRunning, needsAttention
+
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(SessionProcessAttention.decode)
+        guard let attention = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown process attention") }
+        self = attention
+    }
 }
 
 package enum SessionProcessVisibility: String, Codable, CaseIterable, Sendable {
     case active, recent, historical, unknown
 }
 
-package struct SessionProcessLifecycle: Codable, Hashable, Sendable {
+package struct PresentedProcessLifecycle: Codable, Hashable, Sendable {
     let version: Int
     package let state: SessionProcessLifecycleState
-    let attention: SessionProcessAttention
+    let attention: PresentedProcessAttention
     package let sequence: Int
     let observedAt: String
     let producerUpdatedAt: String?
@@ -49,7 +61,7 @@ package struct SessionProcessLifecycle: Codable, Hashable, Sendable {
     package init(
         version: Int = 1,
         state: SessionProcessLifecycleState,
-        attention: SessionProcessAttention = .none,
+        attention: PresentedProcessAttention = .none,
         sequence: Int,
         observedAt: String,
         producerUpdatedAt: String? = nil,
@@ -66,6 +78,18 @@ package struct SessionProcessLifecycle: Codable, Hashable, Sendable {
         self.recentUntil = recentUntil
     }
 
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(SessionProcessLifecycle.decode)
+        guard let state = SessionProcessLifecycleState(rawValue: value.state.rawValue),
+              let attention = PresentedProcessAttention(rawValue: value.attention.rawValue),
+              let sequence = Int(exactly: value.sequence) else {
+            throw WireError(path: "$", message: "invalid process lifecycle projection")
+        }
+        self.init(state: state, attention: attention, sequence: sequence, observedAt: value.observedAt,
+                  producerUpdatedAt: value.producerUpdatedAt, terminalAt: value.terminalAt,
+                  recentUntil: value.recentUntil)
+    }
+
     package var isSettled: Bool {
         state.isTerminal || (state == .paused && terminalAt != nil)
     }
@@ -80,7 +104,7 @@ package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable
     package let executionMode: SessionProcessExecutionMode
     let source: SessionProcessSource
     let parentProcessId: String?
-    package let lifecycle: SessionProcessLifecycle
+    package let lifecycle: PresentedProcessLifecycle
     package let visibility: SessionProcessVisibility
     package let startedAt: String?
     package let title: String
@@ -109,7 +133,7 @@ package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable
         executionMode: SessionProcessExecutionMode,
         source: SessionProcessSource,
         parentProcessId: String? = nil,
-        lifecycle: SessionProcessLifecycle,
+        lifecycle: PresentedProcessLifecycle,
         visibility: SessionProcessVisibility,
         startedAt: String? = nil,
         title: String,
@@ -402,7 +426,7 @@ package enum SessionProcessAdmissionPolicy {
         return change.revision != nil || change.closed == true
     }
 
-    private static func admits(_ lifecycle: SessionProcessLifecycle, visibility: SessionProcessVisibility) -> Bool {
+    private static func admits(_ lifecycle: PresentedProcessLifecycle, visibility: SessionProcessVisibility) -> Bool {
         guard lifecycle.version == 1, lifecycle.sequence >= 0,
               validTimestamp(lifecycle.observedAt),
               lifecycle.producerUpdatedAt.map(validTimestamp) ?? true,

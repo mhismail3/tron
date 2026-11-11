@@ -73,7 +73,10 @@ the hosted test targets link.
   composition; no model is a second cache or reducer. Extension activity lifecycle presentation
   records temporarily retain their existing Encodable representation for handwritten snapshot
   containers and byte budgets; their Decodable initializers delegate to the separately named
-  generated ExtensionRun lifecycle values. These adapters are S7 deletion debt tracked in #2380;
+  generated ExtensionRun lifecycle values. Process lifecycle records use the same split:
+  `PresentedProcessLifecycle`, `PresentedProcessAttention` and `SessionProcessLifecycleState`
+  delegate decoding to generated SessionProcess values while keeping their existing encoders.
+  These adapters are S7 deletion debt tracked in #2380;
   generated records have no Encodable bridge.
 
 `UpstreamErrorInfo` decodes disposable Gateway error classification beside the

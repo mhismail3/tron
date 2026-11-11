@@ -203,7 +203,7 @@ private final class HostedAccessibilityFixtureState {
         let now = Date.now
         return SessionProcessActivity(
             processId: "live-worker", kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
-            lifecycle: SessionProcessLifecycle(state: completed ? .completed : .running, sequence: completed ? 2 : 1,
+            lifecycle: PresentedProcessLifecycle(state: completed ? .completed : .running, sequence: completed ? 2 : 1,
                                                observedAt: now.ISO8601Format(), terminalAt: completed ? now.ISO8601Format() : nil,
                                                recentUntil: completed ? now.addingTimeInterval(300).ISO8601Format() : nil),
             visibility: completed ? .recent : .active, startedAt: now.addingTimeInterval(-42).ISO8601Format(), title: "worker",
