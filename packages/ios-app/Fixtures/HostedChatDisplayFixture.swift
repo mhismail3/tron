@@ -175,17 +175,20 @@ struct HostedChatDisplayFixture: View {
 }
 
 @MainActor
-enum HostedHomeTaskListRelease {
-    private static var permits = 0
-    private static var waiters: [CheckedContinuation<Void, Never>] = []
+final class HostedHomeFixtureRelease {
+    static let taskList = HostedHomeFixtureRelease(notification: "com.tron.mobile.fixture.home.release-task-list")
+    static let newWorker = HostedHomeFixtureRelease(notification: "com.tron.mobile.fixture.home.release-worker")
+    private var permits = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    static func observe() {
-        DarwinTrigger.observe("com.tron.mobile.fixture.home.release-task-list") {
-            if waiters.isEmpty { permits += 1 } else { waiters.removeFirst().resume() }
+    private init(notification: String) {
+        DarwinTrigger.observe(notification) { [weak self] in
+            guard let self else { return }
+            if self.waiters.isEmpty { self.permits += 1 } else { self.waiters.removeFirst().resume() }
         }
     }
 
-    static func wait() async {
+    func wait() async {
         if permits > 0 { permits -= 1; return }
         await withCheckedContinuation { waiters.append($0) }
     }
@@ -242,7 +245,8 @@ struct HostedHomeDashboardFixture: View {
             emptyContext: arguments.contains("-home-context-empty"),
             sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""))
         self.gateway = gateway
-        if arguments.contains("-home-sheet-presentation-loading") { HostedHomeTaskListRelease.observe() }
+        if arguments.contains("-home-sheet-presentation-loading") { _ = HostedHomeFixtureRelease.taskList }
+        if arguments.contains("-home-dashboard-held-worker") { _ = HostedHomeFixtureRelease.newWorker }
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture"), token: "fixture-token")
@@ -368,6 +372,13 @@ struct HostedHomeDashboardFixture: View {
             } catch { self.error = error.localizedDescription }
         }
         .task(id: ready) {
+            guard ready, arguments.contains("-home-dashboard-held-worker") else { return }
+            await HostedHomeFixtureRelease.newWorker.wait()
+            guard !Task.isCancelled, !newWorkerAdded else { return }
+            newWorkerAdded = true
+            model.sessions.append(HostedHomeDashboardWorkers.newWorker.withGatewaySource(id: profile.id, label: profile.label))
+        }
+        .task(id: ready) {
             guard ready else { return }
             await gateway.observeHomeReads { summary in homeReads = summary }
             while !Task.isCancelled {
@@ -387,9 +398,7 @@ struct HostedHomeDashboardFixture: View {
                     await model.refreshSessions()
                 }
                 if firstRevealAt == nil, !TronDashboardRevealProbe.shared.reveals.isEmpty { firstRevealAt = Date() }
-                let newWorkerDue = !arguments.contains("-home-dashboard-new-worker-late")
-                    || firstRevealAt.map { Date().timeIntervalSince($0) > 9 } == true
-                if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded, newWorkerDue,
+                if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded,
                    model.sessions.contains(where: \.isHomeWorker) {
                     newWorkerAdded = true
                     model.sessions = model.sessions + [HostedHomeDashboardWorkers.newWorker.withGatewaySource(id: profile.id, label: profile.label)]
@@ -711,7 +720,7 @@ private actor HostedHomeShellGateway {
                 let active = HostedHomeTaskHistoryFixture.row(taskSummary("active"))
                 return (.object(["items": .array(params["filter"]?.stringValue == "finished" ? [] : [active])]), nil)
             }
-            if sheetState == "presentation-loading" { await HostedHomeTaskListRelease.wait() }
+            if sheetState == "presentation-loading" { await HostedHomeFixtureRelease.taskList.wait() }
             if sheetState == "tasks-error", taskListReads == 2 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Task list unavailable"), "retryable": .bool(true)]))
             }
