@@ -53,7 +53,10 @@ module or a Gateway child. Stock Remote Login, system SSH files and PF are untou
 - **Status:** paired-iPhone `macTerminal.status` returns username, port, numeric
   hosts, hostKeys/fingerprint, serviceState/detail, enrolled/enrolledKey. It never
   starts or repairs anything. Running requires owned config/key/job/argv plus
-  exact kernel listener and PID evidence. Passive health checks do not open
+  exact listener and PID evidence: the port's listeners are the union of netstat's
+  kernel table (every user's sockets) and lsof (this user's), because macOS can return an
+  empty netstat table to processes attributed to Tron.app. When it does, another user's wildcard
+  listener is invisible, so the exact-listener proof then covers this user's sockets only. Passive health checks do not open
   unauthenticated SSH connections; the client verifies the presented key before auth.
 - **Recovery:** stale address, absent Tailnet, port conflict or job failure is
   explicit. Recovery validates the newly assigned address and preserves host key
