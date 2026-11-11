@@ -1,7 +1,8 @@
 # Asynchronous full-main batches and causal revert
 
 Pre-merge evidence is the fast [affected check](README.md). Full E2E coverage runs after landing,
-asynchronously, through `verify --batch` in a persistent clean worktree on fetched main;
+asynchronously, through `verify --batch` in a persistent clean linked worktree on fetched main (never the
+primary checkout, which landings fast-forward; the batch refuses it);
 feature landings never wait for it ([P2](../../docs/PRINCIPLES.md#p2-whole-system-health-is-a-batch-signal-not-a-commit-gate)).
 The trigger is a separate owner (Home's batch Automation); this owner never schedules,
 installs, deploys or restarts anything. Every terminal run prints one JSON `batchResult`

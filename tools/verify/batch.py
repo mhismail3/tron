@@ -997,6 +997,10 @@ def main(argv: list[str]) -> int:
         if args.plan:
             print(json.dumps(plan, indent=2))
             return 0
+        if Path(verify.git('rev-parse', '--path-format=absolute', '--git-dir').strip()) == state.parent:
+            raise verify.VerifyError('batch runs only in a linked worktree: landings fast-forward the primary checkout, '
+                                     'which would change the source under a running batch; prepare one with '
+                                     '`git worktree add --detach <path> origin/main` and run scripts/tron verify --batch there')
         with Locks(state):
             current = json.loads(green_path.read_text()) if green_path.exists() else None
             if current != green:

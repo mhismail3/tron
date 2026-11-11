@@ -71,7 +71,8 @@ Commands:
                                     Live logs and partial test-results/verify/<sha>.json;
                                     no empty test passes, queue or landing gate.
   verify --batch [--base <main-anchor> | --repeat] [--plan]
-                                    Async full-main batch; first use needs --base, then
+                                    Async full-main batch, run in a linked worktree (never
+                                    the primary checkout); first use needs --base, then
                                     raw last-green owns coverage. Proves a red's culprit
                                     with fresh exact-case controls, prepares its revert;
                                     publishes only after review, once
