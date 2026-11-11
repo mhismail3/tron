@@ -129,6 +129,7 @@ the exact release version, delete the declaration, `third_party/pi-coding-agent/
   and updates the reviewed version in `src/kernel/delegation/task-worker-extension.ts`.
   An unreviewed version is refused before launch. Validate actual Home-task launch/resume
   and retained refusals, not only an ordinary session's child execution.
+- **Advertisement lifetime:** global npm discovery runs through the provider's owned setup-command primitive. Reload cancels and joins superseded lookups; session shutdown cancels and joins the current lookup before returning. Unavailable global discovery still permits local agents. The real Gateway prompt/restart journey holds an npm lookup open and checks its PID is gone before the replacement process launches.
 - **Install and activation:** `npm run install:pi-subagents -- <gateway-home>` extracts the
   closure offline into `<gateway-home>/internal/pi-subagents/<version>` with a receipt and
   publishes by rename; valid roots are reused, damaged ones refused, none pruned. Every startup

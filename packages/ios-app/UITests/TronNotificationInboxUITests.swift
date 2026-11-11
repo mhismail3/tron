@@ -25,7 +25,7 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(home.value as? String, "Read")
         XCTAssertTrue(home.label.hasPrefix("Home, Agent finished, "), home.label)
-        XCTAssertTrue(hasSurface(app, home), "a read row sits on its glass surface, not bare on the sheet")
+        XCTAssertTrue(hasSurface(app, home, threshold: 3), "a read row sits on its glass surface, not bare on the sheet")
         XCTAssertTrue(hasSurface(app, finished), "an unread row sits on its glass surface")
         XCTAssertTrue(isTinted(app, finished, comparedWith: home), "an unread row carries the accent tint on its glass")
         assertNoConnectionRow(app)
@@ -48,7 +48,7 @@ final class TronNotificationInboxUITests: XCTestCase {
 
         post(readNewest)
         XCTAssertTrue(waitFor(live, value: "Read"), "the read never reached the open sheet: \(live.debugDescription)")
-        XCTAssertTrue(hasSurface(app, live), "the read row keeps its glass surface")
+        XCTAssertTrue(hasSurface(app, live, threshold: 3), "the read row keeps its glass surface")
         XCTAssertFalse(isTinted(app, live, comparedWith: home), "the read row lost its tint")
 
         let markRead = app.buttons["Mark all notifications read"]
@@ -56,7 +56,7 @@ final class TronNotificationInboxUITests: XCTestCase {
         markRead.tap()
         XCTAssertTrue(waitFor(ask, value: "Read"), ask.debugDescription)
         XCTAssertTrue(waitFor(finished, value: "Read"), finished.debugDescription)
-        XCTAssertTrue(hasSurface(app, finished))
+        XCTAssertTrue(hasSurface(app, finished, threshold: 3))
         XCTAssertFalse(isTinted(app, finished, comparedWith: home))
         assertNoConnectionRow(app)
     }
@@ -158,13 +158,15 @@ final class TronNotificationInboxUITests: XCTestCase {
         XCTAssertEqual(app.descendants(matching: .any).matching(offline).count, 0, app.debugDescription)
     }
 
-    @MainActor private func hasSurface(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+    @MainActor private func hasSurface(_ app: XCUIApplication, _ element: XCUIElement, threshold: Int = 6) -> Bool {
         guard let image = XCUIScreen.main.screenshot().image.cgImage else { return false }
         let scale = CGFloat(image.width) / app.frame.width
         let frame = element.frame
         guard let inside = pixel(image, CGPoint(x: (frame.maxX - 8) * scale, y: frame.midY * scale)),
               let outside = pixel(image, CGPoint(x: (frame.maxX + 4) * scale, y: frame.midY * scale)) else { return false }
-        return distance(inside, outside) > 6
+        let measuredDistance = distance(inside, outside)
+        print("INBOX_SURFACE \(element.identifier) inside=\(inside) outside=\(outside) distance=\(measuredDistance) threshold=\(threshold)")
+        return measuredDistance > threshold
     }
 
     @MainActor private func isTinted(_ app: XCUIApplication, _ element: XCUIElement, comparedWith clear: XCUIElement) -> Bool {

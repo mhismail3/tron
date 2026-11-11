@@ -299,7 +299,7 @@ describe("settings renderer contract", () => {
     }) as unknown as { options: Array<{ value: { provider: string; id: string } }> };
     expect(chatModels.options.some(option => option.value.provider === "tron" && option.value.id === "subagent")).toBe(true);
     f.registry.setSettings(f.settingsModel, f.settingsChanges);
-    const queue = new ModelQueueOwner({ runtime: f.modelRuntime, usage: new ProviderUsageOwner(),
+    const queue = new ModelQueueOwner({ tronHome: f.tronHome, runtime: f.modelRuntime, usage: new ProviderUsageOwner(),
       queue: role => f.registry.modelQueueOf(role, "home") });
     f.faux.setResponses(Array.from({ length: 3 }, () => async (_context, _options, _state, model) =>
       fauxAssistantMessage(`Queue editor provider request: ${model.id}`)));
@@ -338,7 +338,7 @@ describe("settings renderer contract", () => {
       expect(await f.registry.modelQueueOf(role, "home")).toEqual([...values].reverse());
       const completion = await queue.complete(role, () => ({ context: {
         messages: [{ role: "user", content: "Verify saved queue routing", timestamp: Date.now() }],
-      } }));
+      } }), { caller: { taskId: "queue-editor-test" }, kind: "background" });
       expect(`${completion.model.provider}/${completion.model.id}`).toBe(values[1]);
       expect(completion.message.content).toContainEqual({ type: "text", text: `Queue editor provider request: ${completion.model.id}` });
       evidence.push({ role, effectiveModel: completion.model.id, message: completion.message });
