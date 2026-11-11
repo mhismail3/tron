@@ -1444,6 +1444,9 @@ shutil.copytree(source, clone)
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.latest_metadata()["source"], self.source_identity())
+        run = Path(self.latest_metadata()["result_bundle"]).parent
+        process = json.loads((run / "test-evidence/process.json").read_text())
+        self.assertEqual(process["idle_simulator"], self.owned_udid())
 
     def test_run_passes_the_source_revision_and_its_state_to_the_test_process(self) -> None:
         log = self.root / "xcode-environment.log"
@@ -4328,6 +4331,9 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             [entry for entry in invocations if entry["action"] == "build"],
             [{"action": "build", "scheme": "Tron UI Validation", "test_plan": "UIValidation"}],
         )
+        builds = list((self.root / "e2e-state/attempts").glob("*-evidence/process.json"))
+        self.assertEqual(len(builds), 1)
+        self.assertIsNone(json.loads(builds[0].read_text())["idle_simulator"])
         runs = [entry for entry in invocations if entry["action"] == "run"]
         self.assertEqual([entry["test_filter"] for entry in runs], self.owned_ui_journeys())
         for entry in runs:
@@ -4349,6 +4355,9 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             with self.subTest(journey=journey):
                 for name in (*expected_artifacts, "report.json", "report.sha256"):
                     self.assertTrue((directory / name).exists(), f"missing {name} in {directory}")
+                process = json.loads((directory / "test-evidence/process.json").read_text())
+                marker = json.loads((self.state / "simulator.json").read_text())
+                self.assertEqual(process["idle_simulator"], marker["udid"])
                 report = json.loads((directory / "report.json").read_text())
                 self.assertEqual(report["journey"], journey)
                 self.assertEqual(report["journey_status"], 0)
@@ -4980,6 +4989,8 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             latest = self.root / "e2e-state/results/latest"
             self.assertTrue(latest.is_symlink())
             self.assertFalse((latest / "FocusedE2E.xcresult").exists())
+            process = json.loads((latest / "test-evidence/process.json").read_text())
+            self.assertIsNone(process["idle_simulator"])
         finally:
             self.e2e("stop", harness=harness, environment=environment)
 

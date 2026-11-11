@@ -75,6 +75,7 @@ final class PresentationActivityCoordinator {
               !retiredTokens.contains(token),
               parent.map({ !retiredTokens.contains($0) }) ?? true else { return }
         #if HOSTED_TEST
+        HostedPresentationProbe.observeForIdleCapture(self)
         HostedPresentationProbe.record?("register", "\(token.id)#\(token.generation) parent=\(parent?.id ?? "root")")
         #endif
         surfaces[token] = Surface(parent: parent, dependencies: dependencies
@@ -127,6 +128,22 @@ final class PresentationActivityCoordinator {
         guard let topmostToken else { return true }
         return refreshDependencies(for: topmostToken).contains(.sessionCatalog)
     }
+
+    #if HOSTED_TEST
+    var hostedIdleSnapshot: [String: Int] {
+        let limit = 64
+        var snapshot = ["mounted": surfaces.count, "activityCountLimit": limit,
+                        "activityCountsTruncated": order.count > limit ? 1 : 0]
+        guard order.count <= limit else { return snapshot }
+        let activities = order.map { activity(for: $0) }
+        snapshot.merge([
+            "active": activities.filter { $0 == .active }.count,
+            "covered": activities.filter { $0 == .covered }.count,
+            "continuousAnimationAllowed": activities.filter(\.allowsContinuousAnimation).count,
+        ], uniquingKeysWith: { _, current in current })
+        return snapshot
+    }
+    #endif
 
     private func rememberRetired(_ token: PresentationSurfaceToken) {
         guard retiredTokens.insert(token).inserted else { return }

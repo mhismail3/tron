@@ -150,8 +150,81 @@ PPID 1 nor high CPU proves abandonment: diagnose with `scripts/tron-ios-test sta
   state (exit 74). `scripts/ios-test-process.py` owns each Xcode process group and its deadlines.
   Timeout process listings and samples include only that group; the saved process listing is
   capped at 64 KiB, with up to four samples capped at 256,000 bytes each.
+- `tron-ios-test` test phases and `ios-gateway-e2e-test run-ui` journey test phases pass their
+  leased simulator UUID to the process supervisor for one passive XCTest idle capture.
+  Builds and non-UI Gateway boundary tests do not opt in. A streamed `Wait for com.tron.mobile.testhost to idle` with no subsequent XCTest
+  progress for 15 seconds is **provisional prolonged idle**, not a proven 60-second stall or a
+  CPU/wakeup measurement. An actual `App animations complete notification not received` warning
+  confirms only that same wait; it can also trigger capture when streamed output was delayed.
+  Other XCTest progress retires the pending wait; host/Xcode chatter does not. No timeout,
+  retry, animation setting, event or test result changes.
+- Read `test-evidence/xctest-idle.json`, `app-capture.json`, `app-main-thread.sample.txt` and,
+  when the app main queue answers, `app-animation-state.json` in the **same run directory**.
+  Admission resolves that simulator's `com.tron.mobile.testhost` app container, its plist
+  executable and exactly one live `proc_pidpath` match, rechecked before SIGUSR2 and sampling.
+  No name-only process match, device input or other simulator is used. The hosted app's
+  PID/launch readiness receipt must match the independently read kernel process birth
+  (seconds/microseconds), and both executable and birth are rechecked immediately before
+  signalling. Persistent readiness from another process incarnation cannot authorize SIGUSR2;
+  sampling still proceeds if readiness fails, after rechecking the same executable/incarnation. An unanswered main queue retains `not-received-within-2s` plus the
+  external sample rather than waiting for the app to recover.
+- Capture runs off the stream reader with a 15-second total command budget, 3-second command
+  limits (10 for the one-second sample and symbolication), a two-second snapshot wait and a bounded 20-second
+  join on exit. Diagnostic commands are owned subprocess groups, killed on deadline/output
+  overflow; any partial sample stdout survives its deadline. PID listing is capped at 64 KiB; sample and snapshot each at 256,000 bytes (sample
+  retains its beginning if capped). Capture failure is evidence, never a test failure.
+- `HostedPresentationProbe` installs this signal hook only in `HOSTED_TEST`. It reads the actual
+  window layer trees (at most 16 windows, 512 layers, depth 24, 128 animations, 16 per layer)
+  and timing/repeat/visibility metadata, never pixels, view text, animation keys or surface
+  identities. Its at-most-16 weak coordinator references read aggregate mounted/activity
+  counts directly from `PresentationActivityCoordinator`; activity counting is omitted and marked
+  truncated above 64 mounted surfaces. These reads are not a second surface graph.
+  Limits/truncation are explicit. Three fixed cache files hold readiness, the supervisor request and the latest snapshot;
+  Kernel process birth, PID, random launch identity and a per-capture request nonce fence
+  readiness and snapshots. No hook ships in normal builds.
+  Public layer inspection cannot explain private SwiftUI/render-server work or prove why XCTest
+  waited. A responsive main thread with repeating CA animation is evidence, not a root cause.
 - A pass needs one executed, passing test and writes `coverage.json`; partial evidence is kept.
 - A hosted launch without a fixture argument renders the production `ProductionSceneRoot`.
+
+### Proving idle diagnostics
+
+The existing process-evidence owner runs two exact UI selectors in separate supervised helper
+invocations and then applies its artifact oracles. The default Python mode remains simulator-free:
+
+```bash
+python3 scripts/test-ios-process-evidence.py
+python3 scripts/test-ios-process-evidence.py --hosted-idle
+```
+
+`--hosted-idle` owns the diagnostic pair: a `checkpoint` of
+`TronMobileUITests/TronIdleControlUITests/testActualXCTestIdleControls` builds and runs first;
+a serial `run` of `testBlockedMainThreadIdleCapture` reuses those exact products. It intentionally
+pays an incremental build even when a calling verifier already built: standalone or source-only
+selection must not depend on an undeclared fresh-product prerequisite. The owner streams helper
+output, propagates build/run/oracle failures and cancellation, and resolves only each invocation's
+single exact completion receipt, never a global newest run. Both run metadata source identities
+must match the owner's unchanged worktree fingerprint. The pair requires one simulator slot at
+a time. `scripts/ios.module.json` declares this class's owner command: normal verification selects
+it after the ordinary phone/Pad matrix joins, not in the default Python lane or a combined UI shard.
+The selected replacement owns both fresh runs and their artifact assertions; ordinary-shard exclusion
+requires that replacement to be selected. Failed or deferred current builds prevent its invocation.
+
+The artifact oracle checks real XCTest completion, exact run/simulator/app PID and kernel-birth
+provenance, external main-thread stacks, live repeating CA animation and canonical surface counts.
+Baseline, shipped active/covered orb and SwiftUI-repeat controls must finish without consuming the
+capture; only the UIView repeat control holds idle long enough. The blocked-main control must
+retain an unanswered signal and a sleeping main-thread stack while completing normally. Both
+artificial holds last20s, solely to exercise capture, not change product/test timeouts.
+The simulator-free process suite also launches two real native owned-process incarnations and
+plants previous-birth readiness at the current PID. It requires no signal/request, live successor
+and a retained external sample: this tests stale readiness without claiming actual PID reuse.
+
+Retained runs can be inspected without a simulator:
+
+```bash
+python3 scripts/test-ios-process-evidence.py --idle-controls-run <first-run-dir> --blocked-main-run <second-run-dir>
+```
 
 ## Gateway fixture work
 
