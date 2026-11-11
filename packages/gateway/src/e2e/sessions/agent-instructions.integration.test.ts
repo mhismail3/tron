@@ -44,6 +44,11 @@ const FIXTURE_EXTENSION = `export default function(pi) {
     parameters: { type: "object", properties: {} },
     execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
   });
+  if (process.env.FIXTURE_BROWSER_TOOL) pi.registerTool({
+    name: "agent_browser", label: "Browser", description: "fixture browser",
+    parameters: { type: "object", properties: {} },
+    execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+  });
   if (process.env.FIXTURE_FORCE_PROMPT) pi.on("before_agent_start", async () => ({ systemPrompt: process.env.FIXTURE_FORCE_PROMPT }));
   let sectionTurns = 0;
   if (process.env.FIXTURE_ONCE_SECTION) pi.on("before_agent_start", event => {
@@ -235,6 +240,21 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     expect(during.text).toBe(received);
     const tools = idle.sections.find(section => section.id === "tools")!;
     expect(tools.entries!.map(entry => entry.name)).toEqual(["fixture_tool"]);
+  }, 20_000);
+
+  it("tells the agent to do on-screen work itself only with a computer or browser tool, and Mac work only with computer", async () => {
+    vi.stubEnv("FIXTURE_BROWSER_TOOL", "1");
+    const f = await fixture();
+    const operating = async (tools: string[]) => {
+      await f.slot.setTools(tools);
+      return (await instructions(f.slot)).sections.find(section => section.id === "tron")!.text;
+    };
+    const computer = await operating(["computer"]);
+    expect(computer).toContain("Do on-screen work yourself, by default and liberally: web flows (consoles, dashboards, OAuth consent, forms), macOS permission prompts and dialogs, app windows, and storing secrets in Keychain without echoing them to chat, logs or files. Use whichever available computer or browser tool does each step fastest and most accurately");
+    const browser = await operating(["agent_browser"]);
+    expect(browser).toContain("Do on-screen work yourself, by default and liberally: web flows (consoles, dashboards, OAuth consent, forms). Use whichever available computer or browser tool");
+    expect(browser).not.toContain("macOS permission prompts");
+    expect(await operating(["fixture_tool"])).not.toContain("Do on-screen work yourself");
   }, 20_000);
 
   it.each([false, true])("shows an unrecognised forced prompt verbatim instead of guessing its structure (MCP=%s)", async (mcp) => {

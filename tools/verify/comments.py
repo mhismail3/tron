@@ -294,7 +294,10 @@ def new_purpose(base: str, path: str, mode: str, text: str) -> str:
     purpose = layout.purpose(text.encode())
     before = subprocess.run(["git", "show", f"{base}:{path}"], cwd=ROOT, capture_output=True).stdout
     old = layout.purpose(before) if before else ""
-    return purpose if not old or old == purpose or old not in text else ""
+    if not purpose or not old or old == purpose:
+        return purpose
+    rest = [line for line in text.split("\n") if purpose not in line]
+    return "" if any(old in line for line in rest) else purpose
 
 
 def added_lines(base: str, path: str) -> set[int]:
