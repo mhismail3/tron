@@ -14,6 +14,7 @@
 // @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates ModelPage
 // @swift SessionPhase SessionSummaryUpdate SessionListPage
 // @swift ExtensionRunLifecycle SessionProcessLifecycle
+// @swift ExtensionSurfaceKind ExtensionSurfacePlacement ExtensionSurfaceLifecycle ExtensionSurfaceInputMode
 // @swift-codable SessionPhase
 module Protocol {
   datatype Option<T> = None | Some(v: T)

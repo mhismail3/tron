@@ -479,13 +479,35 @@ package struct ExtensionSurface: Codable, Hashable, Identifiable, Sendable {
     package enum Kind: String, Codable, Sendable {
         case header, footer, widget, custom, overlay, editor, toolRenderer, messageRenderer, entryRenderer, markdown, unknown
         package init(from decoder: Decoder) throws {
-            let raw = try decoder.singleValueContainer().decode(String.self)
-            self = Kind(rawValue: raw) ?? .unknown
+            let value = try JSONValue(from: decoder).decodeWire(ExtensionSurfaceKind.decode)
+            guard let kind = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown surface kind") }
+            self = kind
         }
     }
-    package enum Placement: String, Codable, Sendable { case header, footer, aboveEditor, belowEditor, transcript, overlay, fullscreen }
-    package enum Lifecycle: String, Codable, Sendable { case retained, blocking, transient, restored }
-    package enum InputMode: String, Codable, Sendable { case none, keys, textAndKeys }
+    package enum Placement: String, Codable, Sendable {
+        case header, footer, aboveEditor, belowEditor, transcript, overlay, fullscreen
+        package init(from decoder: Decoder) throws {
+            let value = try JSONValue(from: decoder).decodeWire(ExtensionSurfacePlacement.decode)
+            guard let placement = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown surface placement") }
+            self = placement
+        }
+    }
+    package enum Lifecycle: String, Codable, Sendable {
+        case retained, blocking, transient, restored
+        package init(from decoder: Decoder) throws {
+            let value = try JSONValue(from: decoder).decodeWire(ExtensionSurfaceLifecycle.decode)
+            guard let lifecycle = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown surface lifecycle") }
+            self = lifecycle
+        }
+    }
+    package enum InputMode: String, Codable, Sendable {
+        case none, keys, textAndKeys
+        package init(from decoder: Decoder) throws {
+            let value = try JSONValue(from: decoder).decodeWire(ExtensionSurfaceInputMode.decode)
+            guard let mode = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown surface input mode") }
+            self = mode
+        }
+    }
     package struct Provenance: Codable, Hashable, Sendable {
         package var source: String?
         package var path: String?
