@@ -197,6 +197,7 @@ private final class SnapshotCacheFixtureDriver {
     }
 
     func inspectFiles() {
+        guard mode != "row-compat" else { return }
         let files = (try? FileManager.default.contentsOfDirectory(at: cacheRoot, includingPropertiesForKeys: nil)) ?? []
         var documents: [[String: Any]] = []
         for url in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
