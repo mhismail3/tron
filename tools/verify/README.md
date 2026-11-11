@@ -99,7 +99,9 @@ installed there, a job refuses with the `scripts/tron-node install` or (Python l
 Execution reads committed state: uncommitted or untracked changes are refused
 (exit 2). `--plan` additionally includes staged, working and untracked paths; add new
 files to Git before relying on their ownership. Each step prints `[i/N] name …`, its
-live log, result and wall time. The first failure stops the run and prints its tail.
+live log, result and wall time. A red step prints its tail and the run goes on, so one run names every red;
+the verdict lists them in step order, first red first. Only work a red makes meaningless is skipped: a failed
+`ios build` skips `layers ios`, the iOS shards and the real-UI journeys.
 `test-results/verify/<sha>.json` is atomically updated before/after every step;
 `running` and `interrupted` are not passes. SIGINT/SIGTERM stops and joins the owned
 step process group while retaining partial results. Full logs are in

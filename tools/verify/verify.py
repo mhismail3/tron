@@ -1276,22 +1276,23 @@ def main(argv: list[str]) -> int:
     run.on_update = lambda: finish("interrupted" if any(s["status"] == "interrupted" for s in run.steps) else "running",
                                    "partial results; verification is not complete", announce=False)
     run.on_update()
+    reds: list[str] = []
     try:
         for label, command, options in checks:
             if command is None:
                 run.skipped(label, "the change touches no Markdown, manifest or Gateway source a generated block reads")
             elif run.step(label, command, **options)["status"] == "failed":
-                return finish("failed", f"{label} failed")
+                reds.append(f"{label} failed")
         if gateway_touched:
             for label, command in gateway_checks:
                 cwd = ROOT if label == "layers gateway" else ROOT / GATEWAY
                 if run.step(label, command, cwd=cwd)["status"] == "failed":
-                    return finish("failed", f"{label} failed")
+                    reds.append(f"{label} failed")
         stale = ios_index_stale()
-        ios_deferred = False
+        ios_deferred = ios_broken = False
         if ios_lane:
             if run.step("ios source policy", ios_policy)["status"] == "failed":
-                return finish("failed", "ios source policy failed")
+                reds.append("ios source policy failed")
             if stale is None:
                 run.reused("ios build", "the test products are already stamped for this commit", [ios_test, "build", *(["--host-slot-wait-seconds", "30"] if name != "all" else [])])
             else:
@@ -1300,18 +1301,21 @@ def main(argv: list[str]) -> int:
                     built.update(status="deferred", deferredTests=groups.get("ios", []))
                     ios_deferred = True
                 elif built["status"] == "failed":
-                    return finish("failed", "ios build failed")
-            if not ios_deferred:
+                    reds.append("ios build failed")
+                    ios_broken = True
+            if not ios_deferred and not ios_broken:
                 stale = None
-        if ios_deferred:
+        if ios_broken:
+            run.skipped("layers ios", "ios build failed")
+        elif ios_deferred:
             run.skipped("layers ios", "iOS slot unavailable; build/index/tests deferred to batch")
         elif stale is not None:
             run.skipped("layers ios", f"no fresh iOS index for this commit: {stale}")
         elif run.step("layers ios", [tron, "layers", "ios", "--base", base])["status"] == "failed":
-            return finish("failed", "layers ios failed")
+            reds.append("layers ios failed")
 
         update = {"TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
-        not_run = []
+        not_run, no_result = [], []
         for group in sorted(groups):
             files = groups[group]
             label = f"tests: {group}"
@@ -1324,6 +1328,10 @@ def main(argv: list[str]) -> int:
                 continue
             if group == "ios":
                 labels = test_step_names("ios", shards, False)
+                if ios_broken:
+                    for label in labels:
+                        run.skipped(label, "ios build failed")
+                    continue
                 if ios_deferred:
                     for label in labels:
                         run.skipped(label, "iOS acquisition deferred to batch")
@@ -1331,8 +1339,10 @@ def main(argv: list[str]) -> int:
                     continue
                 env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
                 failed_shards, ios_deferred = run_ios_shards(run, shards, labels, files, name != "all", env, ios_phone_lanes())
-                if failed_shards:
-                    return finish("failed", "; ".join(failed_shards))
+                reds.extend(failed_shards)
+                continue
+            if group == "ios-journeys" and ios_broken:
+                run.skipped(label, "ios build failed")
                 continue
             if group == "ios-journeys":
                 command, cwd, _ = test_spec(group, files, journeys, run.logs)
@@ -1342,10 +1352,10 @@ def main(argv: list[str]) -> int:
                 if failed or result["status"] == "failed":
                     result.update(status="failed", failedTests=failed)
                     print("\n".join(f"    failed: {journey}" for journey in failed), flush=True)
-                    return finish("failed", f"{label} failed")
-                if missing:
+                    reds.append(f"{label} failed")
+                elif missing:
                     result["status"] = "failed"
-                    return finish("failed", f"{label}: no passing report for this commit from {', '.join(missing)}")
+                    reds.append(f"{label}: no passing report for this commit from {', '.join(missing)}")
                 continue
             command, cwd, count = test_spec(group, files, selectors, run.logs, ios_wait=name != "all", gateway_host=gateway_host)
             report = run.logs / f"{group}-vitest.json"
@@ -1355,7 +1365,8 @@ def main(argv: list[str]) -> int:
             result = run.step(label, command, cwd=cwd, count=count, env=env)
             if on_mini and (reason := mini.no_result_reason(result["exit"], (ROOT / result["log"]).read_text(errors="replace"))):
                 result.update(status="no result", reason=reason)
-                return finish("incomplete", f"{label}: the mini gave no result: {reason}")
+                no_result.append(f"{label}: the mini gave no result: {reason}")
+                continue
             if group in ('gateway', 'gateway-nested'):
                 result['caseOutcomes'], result['caseEvidenceComplete'] = case_outcomes(report)
             if group in ("gateway", "gateway-nested") and result["status"] == "failed":
@@ -1363,11 +1374,15 @@ def main(argv: list[str]) -> int:
                 result["failedTests"] = list(failed)
                 print("\n".join(f"    failed: {identity}" for identity in failed), flush=True)
             if result["status"] == "failed":
-                return finish("failed", f"{label} failed")
-            if not result.get("tests"):
+                reds.append(f"{label} failed")
+            elif not result.get("tests"):
                 result["status"] = "failed"
-                return finish("failed", f"{label} ran zero passing tests: an empty group is not evidence")
+                reds.append(f"{label} ran zero passing tests: an empty group is not evidence")
         passing = sum(step.get("tests") or 0 for step in run.steps if step["name"].startswith("tests:"))
+        if reds:
+            return finish("failed", "; ".join(reds))
+        if no_result:
+            return finish("incomplete", "; ".join(no_result))
         if not_run:
             return finish("incomplete", f"selected tests were not run: {', '.join(not_run)} (pass --skip to accept explicitly)")
         if passing == 0 and any(step["status"] == "deferred" for step in run.steps):
