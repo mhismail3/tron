@@ -97,7 +97,8 @@ The iPhone pins the private host identity at enrollment
   the same load; accepted calls outlive a waiter's Stop. Observation images come from
   disposable files removed before publication. Cua telemetry is off; missing Cua
   assets disable only this tool. Before foreground input, inspect the whole desktop
-  for system dialogs; the agent never approves OS permissions.
+  for system dialogs; the agent handles permission prompts itself under the operating
+  context (`workspace/tron-core-extension.ts`).
 - A native executor keeps its tool promise through native cleanup
   ([native-tool settlement](../../docs/native-tool-settlement.md)).
 
