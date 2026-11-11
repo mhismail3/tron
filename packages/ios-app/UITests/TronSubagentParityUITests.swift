@@ -79,7 +79,7 @@ final class TronSubagentParityUITests: XCTestCase {
             app.launchArguments = ["-tron-subagent-parity-fixture", "-home-chip-labels", "-\(scheme)"]
             app.launch()
             defer { app.terminate() }
-            XCTAssertTrue(app.staticTexts["The requested changes are ready for review."].waitForExistence(timeout: 10))
+            XCTAssertTrue(assistantReply(app, labeled: "The requested changes are ready for review.").waitForExistence(timeout: 10))
             XCTAssertTrue(app.buttons["Manage task, Completed, 42ms"].exists, app.debugDescription)
             XCTAssertTrue(app.buttons["Send notification, Completed, 18ms"].exists, app.debugDescription)
             XCTAssertTrue(app.buttons["Worker · Simplify Home chip labels, Reported"].exists, app.debugDescription)
@@ -169,8 +169,9 @@ final class TronSubagentParityUITests: XCTestCase {
             defer { app.terminate() }
             let errors = app.buttons.matching(NSPredicate(format: "label == %@", "Tron · Notification, Error"))
             XCTAssertTrue(errors.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertEqual(errors.count, 2)
             for index in 0..<2 {
-                errors.element(boundBy: 1 - index).tap()
+                inVisualOrder(errors)[index].tap()
                 let text = index == 0 ? "HTTP 429" : "Long error context"
                 XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
                 try capture("852-error-\(scheme)-\(index)")
@@ -197,7 +198,7 @@ final class TronSubagentParityUITests: XCTestCase {
         try capture("852-notification-run")
         XCTAssertGreaterThanOrEqual(frames[1].midY - frames[0].midY, 44, "Independent targets must not overlap")
         XCTAssertLessThanOrEqual(frames[1].midY - frames[0].midY, 46, "A contiguous run must not repeat turn spacing")
-        let first = errors.element(boundBy: 1)
+        let first = inVisualOrder(errors)[0]
         first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .withOffset(CGVector(dx: 0, dy: 20)).tap()
         XCTAssertTrue(app.staticTexts["HTTP 429"].waitForExistence(timeout: 5), "Expanded target must open its own event, not its neighbour")
@@ -213,7 +214,7 @@ final class TronSubagentParityUITests: XCTestCase {
         let errors = app.buttons.matching(NSPredicate(format: "label == %@", "Tron · Notification, Error"))
         XCTAssertTrue(errors.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(errors.count, 2)
-        XCTAssertTrue(app.staticTexts["Conversation between independent events."].exists, app.debugDescription)
+        XCTAssertTrue(assistantReply(app, labeled: "Conversation between independent events.").exists, app.debugDescription)
         XCTAssertTrue(app.buttons["Read file, Interrupted"].exists, app.debugDescription)
         let frames = [errors.element(boundBy: 0).frame, errors.element(boundBy: 1).frame].sorted { $0.minY < $1.minY }
         XCTAssertGreaterThan(frames[1].midY - frames[0].midY, 80, "Prose and tools must remain chronological boundaries, not join an event run")

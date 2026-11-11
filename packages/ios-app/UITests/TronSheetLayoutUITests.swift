@@ -117,7 +117,12 @@ import XCTest
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
-        for _ in 0..<12 where !element.isHittable { app.swipeUp() }
+        for _ in 0..<12 {
+            let laidOut = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !element.exists || !element.frame.isEmpty }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [laidOut], timeout: 10), .completed, app.debugDescription)
+            if element.isHittable { break }
+            app.swipeUp()
+        }
         XCTAssertTrue(element.isHittable, app.debugDescription)
     }
 

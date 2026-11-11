@@ -833,7 +833,7 @@ final class TronHomeSheetsUITests: XCTestCase {
             }
             for _ in 0..<8 { app.swipeDown() }
             let lists = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Manage task, Completed,'"))
-            let list = lists.element(boundBy: lists.count - 1)
+            let list = inVisualOrder(lists)[0]
             for _ in 0..<12 where !(list.exists && list.isHittable) { app.swipeDown() }
             list.tap()
             XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 5), app.debugDescription)
@@ -1061,7 +1061,9 @@ final class TronHomeSheetsUITests: XCTestCase {
     @MainActor private func toolSheet(_ app: XCUIApplication, _ name: String, chip label: String, index: Int, outcome: String,
                                       _ checks: () -> Void) {
         let chips = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label + ","))
-        let chip = chips.element(boundBy: index)
+        let newestFirst = Array(inVisualOrder(chips).reversed())
+        XCTAssertLessThan(index, newestFirst.count, "\(name): \(label) chips \(newestFirst.map(\.label))")
+        let chip = newestFirst[index]
         for _ in 0..<12 where !(chip.exists && chip.isHittable) { app.swipeDown() }
         open(app, chip, ready: "home-tool-detail", name: "tool-\(name)")
         let pill = element(app, "home-tool-outcome")

@@ -211,7 +211,7 @@ final class TronNewSessionUITests: XCTestCase {
         app.buttons["Done"].tap()
         XCTAssertTrue(wait(source, "label CONTAINS 'fixture-new-branch'"), "Closing the child must retain the branch before reopening its base picker")
         source.tap()
-        app.buttons.matching(identifier: "Start From").element(boundBy: 1).tap()
+        app.buttons.matching(identifier: "Start From").element.tap()
         XCTAssertTrue(app.buttons["fixture-base"].waitForExistence(timeout: 10)); app.buttons["fixture-base"].tap()
     }
     @MainActor private func launch(_ scenario: String) -> XCUIApplication {
