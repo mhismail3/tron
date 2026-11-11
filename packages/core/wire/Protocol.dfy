@@ -7,8 +7,7 @@
 // `real` is a JSON float64 number and `int` a JSON integer in the safe range. Frames are still encoded by
 // the Gateway's own JSON.stringify of the values it builds, so this file changes no frame bytes; a change
 // here is a wire change (AGENTS.md "Architecture invariants": iOS, Gateway and Mac ship in lockstep). The
-// iOS app decodes the datatypes `@swift` names and every datatype they reach; an enum `@swift-codable` names is
-// also Codable while a hand Codable container still holds it (each is owed back when that container is generated).
+// iOS app decodes the datatypes `@swift` names and every datatype they reach.
 // @swift HomeStatus HomeContextProjection HomeTaskPage HomeTaskStatusResult HomeTaskHistoryPage
 // @swift HomeMemoryView HomeMemoryEvidencePage HomeChapterList HomeProfileList
 // @swift AdministrativeDrainSnapshot GatewayRestartResponse
@@ -138,8 +137,6 @@ module Protocol {
       archivedAt: Option<string>
     )
 
-  /// `session.list` archive filter. `exclude` is the dashboard projection; `only`
-  /// is the archived container.
   /// `session.list`: one page of the session catalog. `notModified` answers a first page whose
   /// projection token is the client's own, with no sessions.
   // @wire
@@ -152,6 +149,8 @@ module Protocol {
       notModified: Option<bool>
     )
 
+  /// `session.list` archive filter. `exclude` is the dashboard projection; `only`
+  /// is the archived container.
   // @wire enum
   datatype SessionArchiveFilter = exclude | only
 

@@ -5,7 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { PROTOCOL_SWIFT, parseWire, reachable, swiftFields, swiftRoots } from "../dafny2wire/dafny2wire.mjs";
+import { PROTOCOL_SWIFT, emitSwift, parseWire, reachable, swiftCodable, swiftFields, swiftRoots } from "../dafny2wire/dafny2wire.mjs";
 import { mulberry32 } from "./random.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -247,4 +247,35 @@ test("generated TypeScript and Swift codecs agree byte for byte", async (t) => {
     'ERR $.parts[0].arguments["k"][1]', '{"seq":1,"events":[{"type":"Stopped"}],"parts":[]}', '{"seq":1,"events":[],"parts":[{"kind":"Text","text":"t"}]}',
     "ERR $.events[0].sample.version", "ERR $.events[0].sample.level", "ERR $.events[0].sample.bold",
   ]);
+});
+
+test("Swift field defaults and the Codable opt-in: what the generator emits and what it refuses", () => {
+  const source = (extra, fields) => [
+    "// @swift R", extra,
+    "// @wire enum", "datatype Phase = idle | running",
+    "// @wire enum", "datatype Level = {:wire 1} one | {:wire 2} two",
+    "// @wire enum", "datatype Mood = calm | unknown",
+    "// @wire", `datatype R = R(phase: Phase, level: Level, mood: Mood, ${fields})`,
+  ].join("\n");
+  const emit = (extra, fields = "count: int") => {
+    const src = source(extra, fields);
+    return emitSwift(reachable(parseWire(src), swiftRoots(src)), "t.dfy", swiftCodable(src));
+  };
+  const swift = emit("// @swift-codable Phase", "count: int := 0, on: Option<bool> := Some(false), lvl: Level := Level.two");
+  assert.match(swift, /^package enum Phase: String, CaseIterable, Codable, Hashable, Sendable \{$/m);
+  assert.equal((swift.match(/Codable/g) ?? []).length, 1, "only the listed enum takes Codable");
+  assert.match(swift, /package let on: Bool$/m);
+  assert.match(swift, /let f_on: Bool = wAbsent\(o\.value\("on"\)\) \? false :/);
+  assert.match(swift, /let f_count: Int = wAbsent\(o\.value\("count"\)\) \? 0 :/);
+  assert.match(swift, /count: Int = 0, on: Bool = false, lvl: Level = \.two\)/);
+  assert.match(swift, /s \+= ",\\"on\\":" \+ \(self\.on \? "true" : "false"\)/, "a defaulted optional is always written");
+  for (const [extra, message] of [
+    ["// @swift-codable Level", /only an enum whose wire values are all strings/],
+    ["// @swift-codable Mood", /an enum with an unknown value/],
+    ["// @swift-codable R", /only an enum whose wire values are all strings/],
+    ["// @swift-codable Nope", /not a datatype the @swift roots reach/],
+  ]) assert.throws(() => emit(extra), message);
+  for (const fields of ["on: Option<bool> := Some(\"x\")", "count: int := true", "lvl: Level := two", "count: int := Some(0)"]) {
+    assert.throws(() => emit("", fields), /a default is a qualified constructor/);
+  }
 });

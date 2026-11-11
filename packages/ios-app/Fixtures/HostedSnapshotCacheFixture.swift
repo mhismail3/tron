@@ -149,8 +149,8 @@ private final class SnapshotCacheFixtureDriver {
     private func phaseFrames() {
         var members: [String] = [], decoded: [String] = []
         for raw in ["idle", "running", "compacting", "retrying", "interrupted"] {
-            guard let phase = SessionPhase(rawValue: raw),
-                  let frame = try? JSONEncoder.gateway.encode(SnapshotCacheFixtureGateway.snapshot(phase: phase)) else { continue }
+            guard let sessionPhase = SessionPhase(rawValue: raw),
+                  let frame = try? JSONEncoder.gateway.encode(SnapshotCacheFixtureGateway.snapshot(phase: sessionPhase)) else { continue }
             let text = String(decoding: frame, as: UTF8.self)
             members += text.components(separatedBy: "\"phase\":").dropFirst().map { String($0.prefix(while: { $0 != "," && $0 != "}" })) }
             decoded.append((try? JSONDecoder.gateway.decode(SessionSnapshot.self, from: frame).phase.rawValue) ?? "<refused>")

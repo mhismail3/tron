@@ -215,8 +215,6 @@ export function encodeSessionSummary(v: SessionSummary): string {
   return "{" + (',"id":' + JSON.stringify(v.id) + (v.name === undefined ? "" : ',"name":' + JSON.stringify(v.name)) + ',"cwd":' + JSON.stringify(v.cwd) + ',"kind":' + encodeSessionKind(v.kind) + (v.parentSessionId === undefined ? "" : ',"parentSessionId":' + JSON.stringify(v.parentSessionId)) + (v.creationOrigin === undefined ? "" : ',"creationOrigin":' + encodeSessionCreationOrigin(v.creationOrigin)) + (v.homeTaskId === undefined ? "" : ',"homeTaskId":' + JSON.stringify(v.homeTaskId)) + ',"createdAt":' + JSON.stringify(v.createdAt) + ',"updatedAt":' + JSON.stringify(v.updatedAt) + (v.activeSince === undefined ? "" : ',"activeSince":' + JSON.stringify(v.activeSince)) + ',"messageCount":' + encNum(v.messageCount) + ',"firstMessage":' + JSON.stringify(v.firstMessage) + ',"phase":' + encodeSessionPhase(v.phase) + (v.foregroundPhase === undefined ? "" : ',"foregroundPhase":' + encodeSessionPhase(v.foregroundPhase)) + (v.hasActiveSubagents === undefined ? "" : ',"hasActiveSubagents":' + JSON.stringify(v.hasActiveSubagents)) + (v.waitingForUser === undefined ? "" : ',"waitingForUser":' + JSON.stringify(v.waitingForUser)) + ',"summaryRevision":' + encNum(v.summaryRevision) + (v.completionRevision === undefined ? "" : ',"completionRevision":' + encNum(v.completionRevision)) + (v.attentionRevision === undefined ? "" : ',"attentionRevision":' + encNum(v.attentionRevision)) + (v.isUnread === undefined ? "" : ',"isUnread":' + JSON.stringify(v.isUnread)) + (v.archivedAt === undefined ? "" : ',"archivedAt":' + JSON.stringify(v.archivedAt))).slice(1) + "}";
 }
 /**
- * `session.list` archive filter. `exclude` is the dashboard projection; `only`
- * is the archived container.
  * `session.list`: one page of the session catalog. `notModified` answers a first page whose
  * projection token is the client's own, with no sessions.
  */
@@ -236,6 +234,10 @@ export function decodeSessionListPage(v: unknown, p = "$"): SessionListPage {
 export function encodeSessionListPage(v: SessionListPage): string {
   return "{" + (',"sessions":' + "[" + v.sessions.map((x) => encodeSessionSummary(x)).join(",") + "]" + ',"listRevision":' + encNum(v.listRevision) + ',"projectionToken":' + JSON.stringify(v.projectionToken) + (v.nextCursor === undefined ? "" : ',"nextCursor":' + JSON.stringify(v.nextCursor)) + (v.archivedCount === undefined ? "" : ',"archivedCount":' + encNum(v.archivedCount)) + (v.notModified === undefined ? "" : ',"notModified":' + JSON.stringify(v.notModified))).slice(1) + "}";
 }
+/**
+ * `session.list` archive filter. `exclude` is the dashboard projection; `only`
+ * is the archived container.
+ */
 export type SessionArchiveFilter = "exclude" | "only";
 const SessionArchiveFilterValues: ReadonlyArray<unknown> = ["exclude", "only"];
 export function decodeSessionArchiveFilter(v: unknown, p = "$"): SessionArchiveFilter { if (!SessionArchiveFilterValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as SessionArchiveFilter; }
