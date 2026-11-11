@@ -125,7 +125,12 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
    baselines check every block without `--base` (loaded generators need Gateway dependencies).
 4. the privacy guard over `git diff <base>..HEAD`, except the guard's own needle file, which its
    full and staged scans exempt too
-5. `git diff --check`
+5. `git diff --check`, then `tools/verify/comments.py`: a comment that starts on a line the change adds
+   fails the run (charter: code carries no comments), except shebangs, the directives a tool reads and the
+   tooling purpose line: one line at the file's head (after the shebang and directives), and not while the
+   file still holds an earlier purpose line; whether that line states a purpose is review's call. It reads
+   TypeScript/JavaScript (not JSX), Python, shell, Swift and CSS; Dafny (its `///` docs and `// @wire` feed `dafny2wire`), C/Objective-C and
+   generated files are out of its scope
 6. When the selection touches the Gateway: `npm run check` (production and test
    support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
 7. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane
