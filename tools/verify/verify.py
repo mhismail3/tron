@@ -171,6 +171,8 @@ def runner_of(path: str, nested: set, mac_terminal: set) -> str:
     if path.endswith(".sh"):
         return "shell"
     if path.startswith(f"{IOS}/"):
+        if path.split("/")[2] == "E2ETests":
+            return "ios-boundary"
         if path.split("/")[2] not in IOS_TARGETS:
             return "ios-lanes"
         name = ios_class(path)
@@ -323,6 +325,57 @@ def ios_lane_jobs(modules: dict, tracked: list[str]) -> tuple[dict, dict]:
             jobs[group] = {**entry, "owner": key}
             routes.update({path: group for path in files})
     return jobs, routes
+
+
+def boundary_selectors(paths: list[str]) -> list[str]:
+    if not paths:
+        return []
+    try:
+        text = (ROOT / JOURNEY_HARNESS).read_text()
+    except OSError as error:
+        raise VerifyError(f"the Gateway boundary harness is unreadable: {error}") from error
+    owned = []
+    for name in ("e2e_test_filters", "e2e_lan_test_filters", "e2e_diagnostic_test_filters"):
+        block = re.search(rf"^{name}=\((.*?)^\)", text, re.S | re.M)
+        if block is None or any(line.strip() and not re.fullmatch(r'''\s*(['"])TronMobileE2ETests/\w+/\w+\1\s*''', line)
+                                for line in block.group(1).splitlines()):
+            raise VerifyError(f"{JOURNEY_HARNESS}: {name} must declare literal boundary methods")
+        owned.extend(re.findall(r'''['"](TronMobileE2ETests/\w+/\w+)['"]''', block.group(1)))
+    if not owned or len(set(owned)) != len(owned):
+        raise VerifyError(f"{JOURNEY_HARNESS}: boundary ownership is empty or duplicated")
+    selected = set()
+    for path in paths:
+        name = ios_class(path)
+        members = swift_source.read((ROOT / path).read_text(), name) if name else None
+        if members is None:
+            raise VerifyError(f"{path}: cannot read the Gateway boundary methods")
+        methods = {f"TronMobileE2ETests/{name}/{method.name}" for method in members.methods if method.test}
+        declared = {selector for selector in owned if selector.split("/")[1] == name}
+        if not methods or methods != declared:
+            raise VerifyError(f"{path}: boundary methods differ from {JOURNEY_HARNESS}: {sorted(methods ^ declared)}")
+        selected.update(methods)
+    return sorted(selected)
+
+
+def boundary_evidence(output: str, selectors: list[str]) -> tuple[list[dict], list[str]]:
+    reports, passing, seen = [], set(), set()
+    for selector, status, directory in re.findall(r"^Focused E2E case (\S+) completed in \d+s \(status (\d+)\); artifacts: (.+)$", output, re.M):
+        if selector not in selectors or selector in seen:
+            passing.discard(selector)
+            continue
+        seen.add(selector)
+        path = Path(directory) / "summary.json"
+        try:
+            raw = path.read_bytes()
+            summary = json.loads(raw)
+        except (OSError, ValueError):
+            continue
+        reports.append({"selector": selector, "status": int(status), "summary": str(path), "sha256": hashlib.sha256(raw).hexdigest()})
+        if status == "0" and isinstance(summary, dict) and all(summary.get(key) == value for key, value in {
+            "passedTests": 1, "failedTests": 0, "skippedTests": 0, "totalTestCount": 1,
+        }.items()):
+            passing.add(selector)
+    return reports, [selector for selector in selectors if selector not in passing]
 
 
 def journey_sources(paths: list[str]) -> list[str]:
@@ -1160,6 +1213,8 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         return ([sys.executable, str(ROOT / selectors[0]), *selectors[1:]], ROOT, ios_owner_count)
     if group.startswith("ios-scenarios:"):
         return (profile_command(selectors, ios_wait), ROOT, None)
+    if group == "ios-boundary":
+        return ([str(ROOT / JOURNEY_HARNESS), "check", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, None)
     if group == "ios-journeys":
         return ([str(ROOT / JOURNEY_HARNESS), "run-ui", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, None)
     if group == "mac-terminal":
@@ -1319,6 +1374,7 @@ def main(argv: list[str]) -> int:
             for group, files in groups.items():
                 if group.startswith("ios-scenarios:"):
                     validate_profile_methods(files)
+        boundaries = boundary_selectors(groups.get("ios-boundary", [])) if "ios" not in skip else []
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
         shards = ios_shards(selectors, ios_method_seconds() if selectors else {})
         journey_paths = groups.get("ios-journeys", [])
@@ -1330,7 +1386,7 @@ def main(argv: list[str]) -> int:
         return 2
     skipped_group = lambda group: group.split("-")[0] in skip  # noqa: E731  (--skip ios covers ios-lanes)
     ios_lane = "ios" not in skip and ((name == "all" and any(key.startswith("ios-app/") for key in modules)) or "ios" in groups or any(group in owner_jobs for group in groups) or (
-        name == "changed" and any(key.startswith("ios-app/") for key in selection["modules"])))
+        name == "changed" and any(key.startswith("ios-app/") and key != "ios-app/e2e-tests" for key in selection["modules"])))
     gateway_touched = (name == "all" and any(key.startswith("gateway/") for key in modules)) or any(key.startswith("gateway/") for key in selection["modules"]) \
         or any(path.startswith(f"{GATEWAY}/") for path in selection["tests"])
 
@@ -1402,7 +1458,7 @@ def main(argv: list[str]) -> int:
                 commands.append({"name": f"tests: {group}", "notRun": "explicit skip" if skipped_group(group) else "requires owning harness"})
             else:
                 for label, shard in zip(test_step_names(group, shards, False),
-                                        shards if group == "ios" else [journeys] if group == "ios-journeys" else [profile_scenario_names(files)] if group.startswith("ios-scenarios:") else [owner_jobs[group]["command"]] if group in owner_jobs else [selectors]):
+                                        shards if group == "ios" else [boundaries] if group == "ios-boundary" else [journeys] if group == "ios-journeys" else [profile_scenario_names(files)] if group.startswith("ios-scenarios:") else [owner_jobs[group]["command"]] if group in owner_jobs else [selectors]):
                     command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host)
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
@@ -1530,6 +1586,18 @@ def main(argv: list[str]) -> int:
                 env = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
                 failed_shards, ios_deferred = run_ios_shards(run, shards, labels, files, name != "all", env, ios_phone_lanes())
                 reds.extend(failed_shards)
+                continue
+            if group == "ios-boundary":
+                command, cwd, _ = test_spec(group, files, boundaries, run.logs)
+                result = run.step(label, command, cwd=cwd)
+                reports, missing = boundary_evidence((ROOT / result["log"]).read_text(errors="replace"), boundaries)
+                result.update(boundaryReports=reports, tests=len(boundaries) - len(missing))
+                if result["exit"] == 73:
+                    result.update(status="no result", reason="boundary harness could not acquire its iOS lane")
+                    no_result.append(f"{label}: boundary harness could not acquire its iOS lane")
+                elif result["status"] == "failed" or missing:
+                    result.update(status="failed", failedTests=missing)
+                    reds.append(f"{label}: failed or no passing boundary summary for {', '.join(missing)}")
                 continue
             if group == "ios-journeys" and ios_broken:
                 run.skipped(label, "ios build failed")
