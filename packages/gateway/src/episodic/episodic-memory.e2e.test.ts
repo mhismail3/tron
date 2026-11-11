@@ -333,7 +333,7 @@ async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}, r
   const limits = resolveLimits(overrides);
   const gate: Gate = { paused: false, inFlight: 0, waiters: [] };
   const compactor: Fixture["compactor"] = { calls: 0, inFlight: 0, maxConcurrent: 0, feedbackTurns: 0, levelZeroBodies: [], prompts: [] };
-  const defaultSummarizer = singleModelSummarizer(modelRuntime, model);
+  const defaultSummarizer = singleModelSummarizer(modelRuntime, model, home);
   const summarizer: EpisodicSummarizer = async (request) => {
     compactor.calls += 1;
     compactor.inFlight += 1;

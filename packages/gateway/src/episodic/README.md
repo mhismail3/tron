@@ -130,8 +130,12 @@ workspace record `gateway/workspace-state/episodic-initialized.json`.
   unwritable records block `permanent-failure`; read failures `source-unavailable`.
   Blocks persist; Home calls `resumeIngested()` once per activation. Calls ask for
   reasoning `off` (clamped) with an 8,192-token output ceiling; prefer background
-  models that can disable reasoning. Spend (`usage.totalTokens`, else every billed
-  bucket) is recorded, never capped: nodes build only when missing or invalidated.
+  models that can disable reasoning. The lifetime spend scalar counts returned
+  summarizer messages (`usage.totalTokens`, else the returned token buckets), never
+  caps builds, and cannot attribute discarded fallback or thrown attempts. Nodes build
+  only when missing or invalidated. The [providers ledger](../providers/README.md)
+  records queue-level per-call counters with source-session attribution; episodic
+  state and its wire status remain unchanged.
 - **Caching.** pi-ai's own marks on the system prompt and the step, `long`
   retention, and `sessionId` `tron-episodic:<source session id>` as the cache key.
 

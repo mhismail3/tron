@@ -174,8 +174,8 @@ function homeOwnerFactory(workspace: TronWorkspace, inputs: () => HomeCompositio
       memorySummarizer: composition.homeMemorySummarizer ?? (() => {
         const queue = composition.modelQueue;
         if (!queue) throw new GatewayError("unsupported", "Home memory needs the Gateway model runtime");
-        return createQueueSummarizer({ complete: async (role, request, signal) =>
-          queue.complete(role, request, signal, await memoryModels()) });
+        return createQueueSummarizer({ complete: async (role, request, attribution, signal) =>
+          queue.complete(role, request, attribution, signal, await memoryModels()) });
       }),
       ...(composition.homeMemoryDiagnostic ? { memoryDiagnostic: composition.homeMemoryDiagnostic } : {}),
       ...(composition.homeRequestDiagnostic ? { requestDiagnostic: composition.homeRequestDiagnostic } : {}),
