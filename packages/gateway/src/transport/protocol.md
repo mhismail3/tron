@@ -22,7 +22,7 @@ requests, cancellation, receipts, ordered delivery and liveness. Methods:
   upgrade answers retryable `busy` meanwhile), `POST /v1/pair` (rate-limited one-time
   enrollment), `POST|DELETE|GET /v1/uploads[/:id]` ([uploads](../machine/uploads.md)),
   `GET /v1/blobs/:id`, `GET /v1/sessions/:id/display-artifacts/:id` and the live-view
-  routes ([display](../display/README.md)), `GET /v1/socket` (protocol 8 WebSocket).
+  routes ([display](../display/README.md)), `GET /v1/socket` (protocol 9 WebSocket).
 - `upload-http.ts` owns the three upload exchanges; its synchronous dispatcher returns
   no work for other paths, so live-view open/frame keep their credential cut without
   an inserted await.

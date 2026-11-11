@@ -246,7 +246,7 @@ if (args.includes("worktree")) {
     socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
     try {
       await new Promise<void>(resolve => socket.once("open", resolve));
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 8 }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 9 }));
       await waitFor(() => frames.some(frame => frame.type === "hello") || undefined, "native socket authenticated");
       for (const method of ["projects.inspect", "projects.list"]) {
         await rm(marker, { force: true });

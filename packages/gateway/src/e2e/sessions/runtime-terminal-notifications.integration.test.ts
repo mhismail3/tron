@@ -149,7 +149,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       uploads: {} as any, sessions: value.registry,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
-        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine-terminal-test", machineName: "test", capabilities: [] }),
+        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 9, minProtocolVersion: 9, machineId: "machine-terminal-test", machineName: "test", capabilities: [] }),
 
         releaseClient: vi.fn(),
         invoke: async (context: any, method: string, params: any) => {
@@ -179,7 +179,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       const frames: any[] = [];
       socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
       await once(socket, "open");
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, ...(mobile ? { clientRole: "mobile" } : {}) }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, ...(mobile ? { clientRole: "mobile" } : {}) }));
       await waitFor(() => frames.some(frame => frame.type === "hello"), `${prefix} hello`);
       const request = async (id: string, method: string, params: Record<string, unknown>) => {
         socket.send(JSON.stringify({ type: "request", id, method, params }));
@@ -340,7 +340,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     const frames: any[] = [];
     socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
     await once(socket, "open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, clientRole: "mobile" }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 9, clientRole: "mobile" }));
     await waitFor(() => frames.some(frame => frame.type === "hello"), "the mobile hello");
     let requestSequence = 0;
     const request = async (method: string, params: object) => {
