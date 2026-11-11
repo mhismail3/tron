@@ -80,7 +80,7 @@ automation owner. Its `get cdp-url` result carries an opaque `browser_live` sour
 `display` consumes without connecting; live sources default to floating. Authority is
 finalized SDK package provenance of the configured
 `git:github.com/fitchmultz/pi-agent-browser-native` source (not a code-hash
-attestation), qualified with wrapper 0.4.1 at `d6cde09af8d7757bbfba5a4ffaf83381bb392683` and engine 0.33.2;
+attestation), qualified with wrapper 0.9.19 at `6346982c0fec9e00b9f3ef6997cfb2d6f6893c6d` and engine 0.42.0;
 updates need requalification. `browser-fork-receipts.integration.test.ts` exercises
 explicit `open` then `get cdp-url` through the pinned fork with both controlled CLI
 envelopes and the real engine (including a viewed frame), parent resealing, cold
