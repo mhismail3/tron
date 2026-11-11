@@ -17,6 +17,7 @@ struct ChatMessageCopyMenu: ViewModifier {
 
     func body(content: Content) -> some View {
         ChatMessageContextMenuSurface(content: content, text: text, mutationIdentity: mutationIdentity, actions: actions)
+            .accessibilityRepresentation { content }
             .accessibilityActions {
                 if !text.isEmpty { Button("Copy") {
                     UIPasteboard.general.string = text

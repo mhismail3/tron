@@ -42,7 +42,7 @@ final class TronInteractionHapticsUITests: XCTestCase {
         let app = launch(); defer { app.terminate() }
         app.buttons["Copy"].tap()
         assertHaptics(app, "copied")
-        app.descendants(matching: .any).matching(identifier: "fixture.copy-message").element.press(forDuration: 1)
+        app.staticTexts["Copy this message"].press(forDuration: 1)
         let copy = app.buttons["Copy"].firstMatch
         XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
         assertHaptics(app, "copied")
