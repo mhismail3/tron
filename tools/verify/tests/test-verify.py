@@ -819,6 +819,17 @@ class FastPathTests(VerifyCase):
 
 
 class ContractTests(VerifyCase):
+    def test_one_run_names_every_red_step_with_the_first_first(self) -> None:
+        r = self.repo
+        r.write("mods/alpha/alpha.py", "VALUE = 'alpha' \n")
+        r.write("mods/alpha/test-alpha.py", FAILING)
+        r.commit("a whitespace red and a test red")
+        failed = r.verify("--changed")
+        self.assertEqual(failed.returncode, 1, failed.stdout)
+        self.assertIn("verify: FAILED — git diff --check failed; tests: python failed", failed.stdout)
+        steps = {step["name"]: step["status"] for step in r.report()["steps"]}
+        self.assertEqual((steps["git diff --check"], steps["tests: python"]), ("failed", "failed"))
+
     def test_a_runner_group_that_runs_zero_tests_fails(self) -> None:
         r = self.repo
         r.write("mods/beta/test-beta.py", "import unittest\nunittest.main()\n")
@@ -981,8 +992,9 @@ class IosLaneTests(VerifyCase):
         policy = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
                                 env={**r.env, "FIXTURE_IOS_POLICY_EXIT": "1"}, capture_output=True, text=True)
         self.assertEqual(policy.returncode, 1, policy.stdout)
-        self.assertIn("ios source policy failed", policy.stdout)
-        self.assertEqual(calls.read_text(), "")
+        self.assertIn("verify: FAILED — ios source policy failed", policy.stdout)
+        self.assertEqual(calls.read_text().splitlines(), ["run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"],
+                         "a static red still runs the selected tests, so one run names every red")
         calls.write_text("")
         module = r.verify("--module", "ios-app/ui-tests")
         self.assertEqual(module.returncode, 1, module.stdout)
@@ -1089,6 +1101,15 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(calls.read_text().splitlines()[-1].rsplit(" ", 1)[-1], "lanes=2")
         skipped = r.verify("--changed", "--skip", "ios")
         self.assertEqual(r.report()["steps"][-1]["status"], "skipped", skipped.stdout)
+        calls.write_text("")
+        r.write(f"{journeys}/RealGatewayHelpersUITests.swift", "extension RealGatewayPairAndChatUITests {\n    func reveal( {}\n}\n")
+        r.commit("a journey helper that does not compile")
+        broken = r.verify("--changed")
+        self.assertEqual(broken.returncode, 1, broken.stdout)
+        self.assertIn("verify: FAILED — ios build failed", broken.stdout)
+        steps = {step["name"]: step for step in r.report()["steps"]}
+        self.assertEqual((steps["tests: ios-journeys"]["status"], steps["tests: ios-journeys"]["reason"]), ("skipped", "ios build failed"))
+        self.assertEqual(calls.read_text(), "", "no journey runs on a source that does not build")
 
     def test_an_extension_file_runs_as_the_class_it_extends(self) -> None:
         """#1522: a file that extends another file's XCTestCase class runs as that class, in that class's lane."""

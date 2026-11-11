@@ -295,7 +295,7 @@ def execute(root: Path, lane: dict, directory: Path) -> dict:
                 result['probe'] = {'name': failed['name'], 'command': command, 'cwd': failed['cwd']}
             failures = failed.get('failedTests', []) if failed else []
             detail = (root / failed['log']).read_text(errors='replace') if failed and failed.get('log') else ''
-            result['signature'] = signature(report['message'], failures, detail, root)
+            result['signature'] = signature(f"{failed['name']} failed" if failed else report['message'], failures, detail, root)
     elif lane.get('vitest'):
         output = log.read_text(errors='replace')
         previous = verify.ROOT
