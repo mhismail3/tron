@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { singleModelSummarizer } from "../../test-support/settings-dependencies.js";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +16,7 @@ import { EpisodicStore } from "./episodic-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
-type Reply = "line" | "reasoning-only" | "copy-example" | "limit";
+type Reply = "line" | "reasoning-only" | "copy-example" | "limit" | "cache-line" | "cache-error" | "cache-unknown";
 
 async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
   const bodies: Array<Record<string, unknown>> = [];
@@ -28,6 +28,20 @@ async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
       const body = JSON.parse(raw) as Record<string, unknown>;
       bodies.push(body);
       const selected = reply(body);
+      if (selected === "cache-line" || selected === "cache-error" || selected === "cache-unknown") {
+        const events = [
+          { type: "message_start", message: { id: "summary-usage", type: "message", role: "assistant", model: body.model, content: [],
+            stop_reason: null, usage: selected === "cache-unknown" ? {} : { input_tokens: 7, output_tokens: 0, cache_read_input_tokens: 90, cache_creation_input_tokens: 30,
+              cache_creation: { ephemeral_1h_input_tokens: 20, ephemeral_5m_input_tokens: 10 } } } },
+          ...(selected === "cache-error" ? [{ type: "error", error: { type: "invalid_request_error", message: "private provider failure text" } }]
+            : [{ type: "content_block_start", index: 0, content_block: { type: "text", text: "summary content must not persist" } },
+              { type: "content_block_stop", index: 0 },
+              { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: selected === "cache-unknown" ? {} : { output_tokens: 11 } }, { type: "message_stop" }]),
+        ];
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""));
+        return;
+      }
       if (selected === "limit") {
         response.writeHead(429, { "content-type": "application/json" });
         response.end(JSON.stringify({ error: { message: "subscription_sharing_usage_limit_exceeded: plan usage limit reached" } }));
@@ -99,6 +113,9 @@ async function fixture(reply: (body: Record<string, unknown>) => Reply) {
         thinkingLevelMap: { off: null, minimal: null, low: "low", high: "high" } },
       { id: "plain", name: "Plain", reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 65_536 },
     ],
+  }, "local-anthropic": {
+    baseUrl: `http://127.0.0.1:${local.port}`, api: "anthropic-messages", apiKey: "local-anthropic-test-key",
+    models: [{ id: "cache-model", name: "Cache model", reasoning: false, input: ["text"], contextWindow: 200_000, maxTokens: 4_096 }],
   } } }));
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath, refreshOnCreate: false });
   return { root, runtime, ...local };
@@ -114,7 +131,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     for (let index = 0; index < 4; index++) manager.appendMessage({ role: "user", content: `message ${index} ${"detail ".repeat(100)}`, timestamp: Date.now() });
     const workspace = new TronWorkspace(join(f.root, "home"));
     cleanups.push(async () => { await workspace.dispose(); });
-    const queue = new ModelQueueOwner({ runtime: f.runtime, usage: { read: async () => ({ providers: [] }) },
+    const queue = new ModelQueueOwner({ tronHome: f.root, runtime: f.runtime, usage: { read: async () => ({ providers: [] }) },
       queue: async () => ["local-openai/plain", "local-openai/reasoner"] });
     const memory = await EpisodicMemory.open({ workspace, sessionId: manager.getSessionId(),
       sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!),
@@ -128,17 +145,160 @@ describe("the episodic summarizer on a reasoning model", () => {
     expect([...stored.nodes.values()].filter(node => node.level === 0)).toHaveLength(4);
     expect([...stored.nodes.values()].some(node => node.level === 2 && node.kind === "summary")).toBe(true);
     expect(memory.status().blocked).toBeNull();
+    await memory.dispose();
+    const usagePath = join(f.root, "gateway/model-usage.json");
+    const ledger = JSON.parse(await readFile(usagePath, "utf8"));
+    expect(ledger.version).toBe(1);
+    expect(ledger.records).toHaveLength(f.bodies.length);
+    expect(ledger.records.map((record: { model: string }) => record.model)).toEqual(f.bodies.map(body => body.model));
+    for (const record of ledger.records) {
+      expect(Object.keys(record).sort()).toEqual(["timestamp", "provider", "model", "role", "kind", "caller", "status",
+        "input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "cacheWrite5m"].sort());
+      expect(record).toMatchObject({ provider: "local-openai", role: "background", kind: "summarizer",
+        caller: { sessionId: manager.getSessionId() }, cacheWrite1h: null, cacheWrite5m: null });
+      expect(record.timestamp).toBeGreaterThan(0);
+      expect(record).toMatchObject(record.status === "error"
+        ? { input: null, output: null, cacheRead: null, cacheWrite: null }
+        : { status: "stop", input: 40, output: 20, cacheRead: 0, cacheWrite: 0 });
+    }
+    expect(ledger.records.filter((record: { status: string }) => record.status === "error")).toHaveLength(1);
+    expect((await stat(usagePath)).mode & 0o777).toBe(0o600);
+    expect(await readFile(usagePath, "utf8")).not.toMatch(/message 0|detail |subscription_sharing_usage_limit_exceeded|summarized line|local-test-key/);
     await mkdir(join(GATEWAY_ROOT, "test-results/episodic-reasoning-model"), { recursive: true });
     await writeFile(join(GATEWAY_ROOT, "test-results/episodic-reasoning-model/fallback.json"), JSON.stringify({ models: f.bodies.map(body => body.model), status: memory.status() }, null, 2) + "\n");
+  });
+
+  it("retains real cache buckets, partial errors, aborted and thrown calls without content", async () => {
+    let reply: Reply = "cache-line";
+    const f = await fixture(() => reply);
+    const queue = new ModelQueueOwner({ tronHome: f.root, runtime: f.runtime, usage: { read: async () => ({ providers: [] }) },
+      queue: async () => ["local-anthropic/cache-model"] });
+    await queue.initialize();
+    const path = join(f.root, "gateway/model-usage.json");
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ version: 1, records: [] });
+    const summarize = createQueueSummarizer(queue);
+    const request = compactorRequest("private system prompt", "private source message", new AbortController().signal, "private-cache-key", "source-session");
+    expect((await summarize(request)).stopReason).toBe("stop");
+    reply = "cache-error";
+    expect((await summarize(request)).stopReason).toBe("error");
+    reply = "cache-unknown";
+    expect((await summarize(request)).stopReason).toBe("stop");
+    const aborted = new AbortController();
+    aborted.abort();
+    expect((await summarize({ ...request, signal: aborted.signal })).stopReason).toBe("aborted");
+    await expect(queue.complete("background", () => ({ context: null as never }),
+      { kind: "background", caller: { taskId: "owning-task" } })).rejects.toBeInstanceOf(Error);
+    const ledger = JSON.parse(await readFile(path, "utf8"));
+    expect(ledger.records.map((record: { status: string }) => record.status)).toEqual(["stop", "error", "stop", "aborted", "threw"]);
+    expect(ledger.records[0]).toMatchObject({ provider: "local-anthropic", model: "cache-model", kind: "summarizer",
+      caller: { sessionId: "source-session" }, input: 7, output: 11, cacheRead: 90, cacheWrite: 30, cacheWrite1h: 20, cacheWrite5m: 10 });
+    expect(ledger.records[1]).toMatchObject({ input: 7, output: 0, cacheRead: 90, cacheWrite: 30, cacheWrite1h: 20, cacheWrite5m: 10 });
+    for (const record of ledger.records.slice(2)) {
+      expect(record).toMatchObject({ input: null, output: null, cacheRead: null, cacheWrite: null, cacheWrite1h: null, cacheWrite5m: null });
+    }
+    expect(ledger.records[4]).toMatchObject({ kind: "background", caller: { taskId: "owning-task" } });
+    expect(f.bodies).toHaveLength(3);
+    expect(await readFile(path, "utf8")).not.toMatch(/private|summary content|local-anthropic-test-key/);
+  });
+
+  it("restores and prunes the durable ledger by age, record count and encoded bytes", async () => {
+    const f = await fixture(() => "line");
+    let now = Date.parse("2026-11-11T00:00:00Z");
+    const queue = () => new ModelQueueOwner({ tronHome: f.root, runtime: f.runtime, usage: { read: async () => ({ providers: [] }) },
+      now: () => now, queue: async () => ["local-openai/plain"] });
+    const request = compactorRequest("private", "private", new AbortController().signal, "cache-key", "source-session");
+    await createQueueSummarizer(queue())(request);
+    const path = join(f.root, "gateway/model-usage.json");
+    const original = JSON.parse(await readFile(path, "utf8")).records[0];
+    const records = Array.from({ length: 10_000 }, (_, index) => ({ ...original, timestamp: now - 10_000 + index }));
+    await writeFile(path, JSON.stringify({ version: 1, records }));
+    await createQueueSummarizer(queue())(request);
+    let restored = JSON.parse(await readFile(path, "utf8")).records;
+    expect(restored).toHaveLength(10_000);
+    expect(restored[0].timestamp).toBe(now - 9_999);
+    expect(restored.at(-1).timestamp).toBe(now);
+    now += 30 * 24 * 60 * 60_000;
+    await queue().initialize();
+    restored = JSON.parse(await readFile(path, "utf8")).records;
+    expect(restored).toHaveLength(1);
+    expect(restored[0]).toEqual(original);
+    now++;
+    await queue().initialize();
+    expect(JSON.parse(await readFile(path, "utf8")).records).toEqual([]);
+    const longModel = "m".repeat(1_024);
+    f.runtime.registerProvider("local-openai", { models: [{ id: longModel, name: "Large model ID", reasoning: false,
+      input: ["text"], contextWindow: 200_000, maxTokens: 4_096 }] });
+    const large = { ...original, model: longModel, caller: { sessionId: "s".repeat(256) }, timestamp: now - 1 };
+    const capacity = Math.floor((8 * 1024 * 1024 - Buffer.byteLength('{"version":1,"records":[]}\n')) / (Buffer.byteLength(JSON.stringify(large)) + 1));
+    await writeFile(path, JSON.stringify({ version: 1, records: Array.from({ length: capacity }, () => large) }));
+    const largeQueue = new ModelQueueOwner({ tronHome: f.root, runtime: f.runtime, usage: { read: async () => ({ providers: [] }) },
+      now: () => now, queue: async () => [`local-openai/${longModel}`] });
+    await Promise.all([1, 2].map(() => createQueueSummarizer(largeQueue)({ ...request, sessionId: large.caller.sessionId })));
+    restored = JSON.parse(await readFile(path, "utf8")).records;
+    expect((await stat(path)).size).toBeLessThanOrEqual(8 * 1024 * 1024);
+    expect(restored).toHaveLength(capacity);
+    expect(restored.filter((record: { timestamp: number }) => record.timestamp === now)).toHaveLength(2);
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect(f.bodies).toHaveLength(4);
+  });
+
+  it("refuses corrupt data before dispatch and exposes write failure without resetting or replaying", async () => {
+    const f = await fixture(() => "line");
+    const diagnostics: unknown[] = [];
+    const queue = new ModelQueueOwner({ tronHome: f.root, runtime: f.runtime, usage: { read: async () => ({ providers: [] }) },
+      queue: async () => ["local-openai/plain"], log: record => diagnostics.push(record) });
+    await queue.initialize();
+    const path = join(f.root, "gateway/model-usage.json");
+    const request = compactorRequest("private", "private", new AbortController().signal, "cache-key", "source-session");
+    const summarize = createQueueSummarizer(queue);
+    const malformed = ["{broken private bytes", JSON.stringify({ version: 1, records: [], prompt: "must not persist" }),
+      " ".repeat(8 * 1024 * 1024 + 1)];
+    for (const document of malformed) {
+      await writeFile(path, document);
+      await expect(queue.initialize()).rejects.toMatchObject({ message: "Model usage ledger invalid-store" });
+      await expect(summarize(request)).rejects.toMatchObject({ message: "Model usage ledger invalid-store" });
+      expect(await readFile(path, "utf8")).toBe(document);
+    }
+    expect(f.bodies).toHaveLength(0);
+    expect(diagnostics).toHaveLength(6);
+    expect(diagnostics).toEqual(Array.from({ length: 6 }, () => ({ event: "model-queue.usage-failed", code: "invalid-store" })));
+    await rm(path);
+    const protectedPath = join(f.root, "protected.json");
+    const empty = JSON.stringify({ version: 1, records: [] });
+    await writeFile(protectedPath, empty);
+    await symlink(protectedPath, path);
+    await expect(queue.initialize()).rejects.toMatchObject({ message: "Model usage ledger read-failed" });
+    expect((await lstat(path)).isSymbolicLink()).toBe(true);
+    expect(await readFile(protectedPath, "utf8")).toBe(empty);
+    await rm(path);
+    await mkdir(path);
+    await expect(queue.initialize()).rejects.toMatchObject({ message: "Model usage ledger invalid-store" });
+    expect((await stat(path)).isDirectory()).toBe(true);
+    expect(f.bodies).toHaveLength(0);
+    await rm(path, { recursive: true });
+    await writeFile(path, empty);
+    const before = await readFile(path, "utf8");
+    await chmod(join(f.root, "gateway"), 0o500);
+    try {
+      const completed = await summarize(request);
+      expect(completed.stopReason).toBe("stop");
+      expect(completed.content).toContainEqual({ type: "text", text: "user: a summarized line" });
+      expect(await readFile(path, "utf8")).toBe(before);
+      expect(f.bodies).toHaveLength(1);
+      expect(diagnostics.at(-1)).toEqual({ event: "model-queue.usage-failed", code: "write-failed" });
+    } finally { await chmod(join(f.root, "gateway"), 0o700); }
+    await summarize(request);
+    expect(f.bodies).toHaveLength(2);
+    expect(JSON.parse(await readFile(path, "utf8")).records).toHaveLength(1);
   });
 
   it("asks each model for the least reasoning it supports, and a plain model for none", async () => {
     trackCase(0);
     const f = await fixture(() => "line");
-    const request = compactorRequest(EPISODIC_COMPACT_PROMPT, "Compress this message.", new AbortController().signal, "tron-episodic:test");
-    const reasoned = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "reasoner" })(request);
-    const always = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "always-reasons" })(request);
-    const plain = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "plain" })(request);
+    const request = compactorRequest(EPISODIC_COMPACT_PROMPT, "Compress this message.", new AbortController().signal, "tron-episodic:test", "test-session");
+    const reasoned = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "reasoner" }, f.root)(request);
+    const always = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "always-reasons" }, f.root)(request);
+    const plain = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "plain" }, f.root)(request);
     const [reasonerBody, alwaysBody, plainBody] = f.bodies;
     expect(reasoned.content.filter((part) => part.type === "text").map((part) => part.text).join("")).toBe("user: a summarized line");
     expect([always.stopReason, plain.stopReason]).toEqual(["stop", "stop"]);
@@ -169,7 +329,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     cleanups.push(async () => { await workspace.dispose(); });
     const memory = await EpisodicMemory.open({
       workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!),
-      summarizer: singleModelSummarizer(f.runtime, { provider: "local-openai", id: "plain" }),
+      summarizer: singleModelSummarizer(f.runtime, { provider: "local-openai", id: "plain" }, f.root),
       limits: { nodeBytes: 256, viewBytes: 128, jobs: 1 },
     });
     cleanups.push(async () => { await memory.dispose(); });
@@ -209,7 +369,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     cleanups.push(async () => { await workspace.dispose(); });
     const memory = await EpisodicMemory.open({
       workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!),
-      summarizer: singleModelSummarizer(f.runtime, { provider: "local-openai", id: "always-reasons" }),
+      summarizer: singleModelSummarizer(f.runtime, { provider: "local-openai", id: "always-reasons" }, f.root),
     });
     cleanups.push(async () => { await memory.dispose(); });
     await memory.entriesCommitted(manager.getSessionId());

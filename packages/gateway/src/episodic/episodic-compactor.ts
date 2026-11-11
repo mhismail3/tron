@@ -89,7 +89,8 @@ function turnToMessage(turn: EpisodicCompactorRequest["turns"][number], model: M
 }
 
 export function createQueueSummarizer(queue: Pick<ModelQueueOwner, "complete">): EpisodicSummarizer {
-  return async (request) => (await queue.complete("background", model => summaryRequest(request, model), request.signal)).message;
+  return async (request) => (await queue.complete("background", model => summaryRequest(request, model),
+    { caller: { sessionId: request.sessionId }, kind: "summarizer" }, request.signal)).message;
 }
 
 function summaryRequest(request: EpisodicCompactorRequest, model: Model<Api>): { context: Context; options: SimpleStreamOptions } {
@@ -154,8 +155,8 @@ export function classifyThrown(error: unknown): EpisodicFailureClass {
   return providerErrorClass(synthetic);
 }
 
-export function compactorRequest(system: string, step: string, signal: AbortSignal, cacheKey: string): EpisodicCompactorRequest {
-  return { system, turns: [{ role: "user", text: step }], signal, cacheKey };
+export function compactorRequest(system: string, step: string, signal: AbortSignal, cacheKey: string, sessionId: string): EpisodicCompactorRequest {
+  return { system, turns: [{ role: "user", text: step }], signal, cacheKey, sessionId };
 }
 
 export function withFeedback(request: EpisodicCompactorRequest, reply: string, feedback: string): EpisodicCompactorRequest {
