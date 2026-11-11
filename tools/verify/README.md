@@ -280,11 +280,15 @@ a missing current iOS build also leaves owner validation incomplete. `--skip ios
 
 A module that owns the profiler lists its ProfilingTests classes in `iosScenarios` (class names only). The list
 must match exactly the classes `scripts/tron-profile-ios` runs, and the declaring module must own that profiler
-and its receipt owner (`scripts/tron_profile_report.py`); otherwise selection fails (exit 2). A selected class
+and its receipt owner (`scripts/tron_profile_report.py`); otherwise selection fails (exit 2). Each declared class's
+XCTest methods must match its table entries exactly: a method without a scenario, or a scenario without a method,
+fails selection (exit 2) naming it. A selected class
 runs its table scenarios once (`--iterations 1`, after the phone/Pad matrix joins), in a results root this verify
 run owns. A scenario passes only with exactly one receipt from this invocation: its XCTest passed as the one
-executed test on this commit from a clean tree, with this iteration count, and it measured workload or render
-evidence. Measured values, numeric budgets and deltas are never judged. A missing, stale, wrong, duplicate or failed
+executed test on this commit from a clean tree, with this iteration count, and it measured workload evidence (a
+`scenario.` measurement that is not `scenario.render.`) and, for product scenarios, render evidence (a
+`scenario.render.` counter; the self-test controls have no render check). Measured values, numeric budgets and deltas
+are never judged. A missing, stale, wrong, duplicate or failed
 receipt fails the run; a busy lane (exit 73) is incomplete. A failed or deferred current iOS build prevents the
 invocation. An undeclared ProfilingTests class is `ios-lanes` and stays incomplete.
 

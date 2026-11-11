@@ -243,6 +243,7 @@ class FunctionalReceipts(unittest.TestCase):
         document = metrics or samples({
             "time.wall": ("ns", "lower", [1.0] * iterations),
             "cpu.time": ("ns", "lower", [2.0] * iterations),
+            "scenario.transport.frames": ("count", "lower", [8.0] * iterations),
             "scenario.render.rows": ("count", "lower", [3.0] * iterations),
         })
         document["context"] = {"test": test, "iterations": iterations}
@@ -257,11 +258,11 @@ class FunctionalReceipts(unittest.TestCase):
         return run
 
     def receipt(self, scenario: str = "idle-dashboard", test: str = TEST, iterations: int = 1,
-                revision: str | None = None) -> subprocess.CompletedProcess[str]:
+                revision: str | None = None, render: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(REPORT), "receipt", "--results-root", str(self.results), "--scenario", scenario,
              "--test", test, "--iterations", str(iterations), "--worktree", str(self.repo),
-             "--revision", revision or self.revision],
+             "--revision", revision or self.revision, *(["--render"] if render else [])],
             capture_output=True, text=True, timeout=60)
 
     def test_a_receipt_of_this_revision_passes_and_names_its_run(self) -> None:
@@ -345,12 +346,41 @@ class FunctionalReceipts(unittest.TestCase):
             "time.wall": ("ns", "lower", [1.0]), "cpu.time": ("ns", "lower", [2.0])}))
         result = self.receipt()
         self.assertEqual(result.returncode, 2)
-        self.assertIn("workload or render", result.stderr)
+        self.assertIn("no workload measurement", result.stderr)
+
+    def test_a_product_scenario_without_render_counters_is_refused(self) -> None:
+        self.measure("20260101T000000Z-idle-dashboard-a", metrics=samples({
+            "time.wall": ("ns", "lower", [1.0]), "cpu.time": ("ns", "lower", [2.0]),
+            "scenario.transport.frames": ("count", "lower", [8.0]),
+        }))
+        result = self.receipt()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("no render measurement", result.stderr)
+
+    def test_render_counters_alone_are_not_workload_evidence(self) -> None:
+        self.measure("20260101T000000Z-idle-dashboard-a", metrics=samples({
+            "time.wall": ("ns", "lower", [1.0]), "cpu.time": ("ns", "lower", [2.0]),
+            "scenario.render.rows": ("count", "lower", [3.0]),
+        }))
+        result = self.receipt()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("no workload measurement", result.stderr)
+
+    def test_a_control_scenario_has_workload_but_no_render_check(self) -> None:
+        self.measure("20260101T000000Z-control-a", scenario="control",
+                     test="TronMobileProfiling/ProfileControlScenarioTests/testControl", metrics=samples({
+                         "time.wall": ("ns", "lower", [1.0]), "cpu.time": ("ns", "lower", [2.0]),
+                         "scenario.control.ticks": ("count", "lower", [20.0]),
+                     }))
+        result = self.receipt(scenario="control", test="TronMobileProfiling/ProfileControlScenarioTests/testControl",
+                              render=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_measured_values_never_decide_the_receipt(self) -> None:
         self.measure("20260101T000000Z-idle-dashboard-a", metrics=samples({
             "time.wall": ("ns", "lower", [9e18]),
             "cpu.time": ("ns", "lower", [1e-3]),
+            "scenario.transport.frames": ("count", "lower", [0.0]),
             "scenario.render.rows": ("count", "lower", [0.0]),
         }))
         result = self.receipt()

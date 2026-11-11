@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import hashlib
 import json
 import os
@@ -190,21 +191,25 @@ def ios_class(path: str) -> str | None:
     return extended.group(1) if extended else None
 
 
-def profile_scenarios() -> dict[str, str]:
+def profile_table() -> tuple[dict[str, str], set[str]]:
     table: dict[str, str] = {}
+    controls: set[str] = set()
     for node in ast.parse((ROOT / PROFILE_TABLE).read_text()).body:
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id in ("SCENARIOS", "CONTROL_SCENARIOS"):
-            table.update({name: value[0] for name, value in ast.literal_eval(node.value).items()})
+            entries = ast.literal_eval(node.value)
+            table.update({name: value[0] for name, value in entries.items()})
+            if node.target.id == "CONTROL_SCENARIOS":
+                controls.update(entries)
     if not table:
         raise VerifyError(f"{PROFILE_TABLE} declares no profiling scenarios")
-    return table
+    return table, controls
 
 
 def profile_jobs(modules: dict, tracked: list[str]) -> tuple[dict, dict]:
     declared = {key: module for key, module in modules.items() if "iosScenarios" in module}
     if not declared:
         return {}, {}
-    table = profile_scenarios()
+    table, _ = profile_table()
     table_classes = {test.split("/")[0] for test in table.values()}
     sources: dict[str, list[str]] = {}
     for path in tracked:
@@ -224,6 +229,15 @@ def profile_jobs(modules: dict, tracked: list[str]) -> tuple[dict, dict]:
         for name in classes:
             if not sources.get(name):
                 raise VerifyError(f"{key}: iosScenarios class {name} has no tracked ProfilingTests source")
+            read = xctest_class(PROFILE_SOURCES, name)
+            if read is None:
+                raise VerifyError(f"{key}: the XCTest methods of {name} cannot be read, so its scenarios cannot be proven registered")
+            registered = {test.split("/")[1] for test in table.values() if test.split("/")[0] == name}
+            unregistered = [method for method in read[1] if method not in registered]
+            absent = sorted(registered - set(read[1]))
+            if unregistered or absent:
+                raise VerifyError(f"{key}: {name} disagrees with {PROFILE_TABLE} (XCTest methods without a scenario: "
+                                  f"{unregistered}; scenarios without a method: {absent})")
             files.extend(sources[name])
         group = f"ios-scenarios:{key}"
         jobs[group] = {"owner": key, "classes": list(classes)}
@@ -233,7 +247,8 @@ def profile_jobs(modules: dict, tracked: list[str]) -> tuple[dict, dict]:
 
 def profile_scenario_names(files: list[str]) -> list[str]:
     classes = {ios_class(path) for path in files}
-    return [name for name, test in profile_scenarios().items() if test.split("/")[0] in classes]
+    table, _ = profile_table()
+    return [name for name, test in table.items() if test.split("/")[0] in classes]
 
 
 def profile_command(scenarios: list[str], wait: bool) -> list[str]:
@@ -251,12 +266,13 @@ def profile_run(run: "Run", label: str, scenarios: list[str], wait: bool, sha: s
         return "no result", "owner validation could not acquire its iOS lane"
     if result["status"] != "ok":
         return "red", f"profiler run failed (exit {result['exit']})"
-    tests = profile_scenarios()
+    tests, controls = profile_table()
     problems = []
     for scenario in scenarios:
         checked = subprocess.run(
             [sys.executable, str(ROOT / PROFILE_RECEIPTS), "receipt", "--results-root", str(root / "ios"), "--scenario", scenario,
              "--test", f"{PROFILE_TARGET}/{tests[scenario]}", "--iterations", str(PROFILE_ITERATIONS),
+             *([] if scenario in controls else ["--render"]),
              "--worktree", str(ROOT), "--revision", sha], capture_output=True, text=True)
         if checked.returncode:
             problems.append(checked.stderr.strip())
@@ -405,22 +421,32 @@ def ios_selectors(paths: list[str]) -> list[str]:
     return owners
 
 
-def ios_test_methods(owner: str) -> tuple[list[str], set[str]]:
-    target, name = owner.split("/")
-    folder = next(path for path, candidate in IOS_TARGETS.items() if candidate == target)
+@functools.lru_cache(maxsize=None)
+def xctest_class(folder: str, name: str) -> tuple[dict[str, str], tuple[str, ...]] | None:
     bodies: dict[str, str] = {}
     found: list[str] = []
-    for source in sorted((ROOT / IOS / folder).rglob("*.swift")):
+    for source in sorted((ROOT / folder).rglob("*.swift")):
         text = source.read_text(errors="replace")
         if not re.search(rf"\b(?:class|extension)\s+{re.escape(name)}\b", text):
             continue
         members = swift_source.read(text, name)
         if members is None:
-            return [], set()
+            return None
         for method in members.methods:
             bodies[method.name] = bodies.get(method.name, "") + method.text
             if method.test and method.name not in found:
                 found.append(method.name)
+    return bodies, tuple(found)
+
+
+def ios_test_methods(owner: str) -> tuple[list[str], set[str]]:
+    target, name = owner.split("/")
+    folder = next(path for path, candidate in IOS_TARGETS.items() if candidate == target)
+    read = xctest_class(f"{IOS}/{folder}", name)
+    if read is None:
+        return [], set()
+    bodies, found = read
+    found = list(found)
     pad = {method for method, body in bodies.items() if IOS_PAD_GATE.search(body)}
     class_pad = bool(pad & {"setUp", "setUpWithError"})
     helpers = pad - set(found)

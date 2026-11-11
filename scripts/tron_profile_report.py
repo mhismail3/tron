@@ -278,7 +278,8 @@ def load_report(path: Path) -> dict[str, Any]:
     return report
 
 
-def functional_receipt(results: Path, scenario: str, test: str, iterations: int, worktree: Path, revision: str) -> Path:
+def functional_receipt(results: Path, scenario: str, test: str, iterations: int, worktree: Path, revision: str,
+                       render: bool) -> Path:
     if not results.is_dir():
         raise ReportError(f"{scenario}: no receipt (no profiler results at {results})")
     matches = []
@@ -320,8 +321,10 @@ def functional_receipt(results: Path, scenario: str, test: str, iterations: int,
             problems.append(f"no {metric_id} measurement")
     if any(metric.get("count") != iterations for metric in metrics.values()):
         problems.append(f"a measurement lacks one value per iteration ({iterations})")
-    if not any(metric_id.startswith("scenario.") for metric_id in metrics):
-        problems.append("no workload or render measurement: the scenario left no evidence it ran")
+    if not any(metric_id.startswith("scenario.") and not metric_id.startswith("scenario.render.") for metric_id in metrics):
+        problems.append("no workload measurement: the scenario left no evidence its workload ran")
+    if render and not any(metric_id.startswith("scenario.render.") for metric_id in metrics):
+        problems.append("no render measurement: the scenario's render check left no counters")
     if not (summary.get("passedTests") == 1 and summary.get("failedTests") == 0 and summary.get("totalTestCount") == 1):
         problems.append("its XCTest did not pass as the one executed test")
     xcresult = artifacts.get("xcresult")
@@ -499,6 +502,7 @@ def main(argv: list[str]) -> int:
     receipt.add_argument("--iterations", required=True, type=int)
     receipt.add_argument("--worktree", required=True, type=Path)
     receipt.add_argument("--revision", required=True)
+    receipt.add_argument("--render", action="store_true")
 
     status = commands.add_parser("status", help="show this worktree's newest report of each tool")
     status.add_argument("--worktree", required=True, type=Path)
@@ -526,7 +530,7 @@ def main(argv: list[str]) -> int:
             return EXIT_OK
         if args.command == "receipt":
             run_dir = functional_receipt(args.results_root, args.scenario, args.test, args.iterations,
-                                         args.worktree, args.revision)
+                                         args.worktree, args.revision, args.render)
             sys.stdout.write(f"receipt ok: {args.scenario} {run_dir}\n")
             return EXIT_OK
         if args.command == "compare":
