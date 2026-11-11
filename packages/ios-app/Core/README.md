@@ -72,8 +72,9 @@ the hosted test targets link.
 - **Models.** Model identity is always `(provider, id)`. Cross-file references are plain value
   composition; no model is a second cache or reducer. Extension activity lifecycle presentation
   records temporarily retain their existing Encodable representation for handwritten snapshot
-  containers and byte budgets; their Decodable initializers delegate to the separately named
-  generated ExtensionRun lifecycle values. Process lifecycle/activity/overview/delta/transcript-change
+  containers and byte budgets; their Decodable initializers keep generated ExtensionRun lifecycle
+  decoding and exact numeric projection inside decodeWire's corruption-error boundary.
+  Process lifecycle/activity/overview/delta/transcript-change
   records, their enums and process/extension omission records follow that split: generated decoding
   and exact integer projection stay inside the shared decodeWire corruption-error boundary;
   existing hand encoders retain their field sets and byte budgets. The local duration sample anchor

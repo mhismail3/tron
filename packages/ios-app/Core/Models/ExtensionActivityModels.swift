@@ -58,25 +58,27 @@ package struct ExtensionActivityLifecycle: Codable, Hashable, Sendable {
     }
 
     package init(from decoder: Decoder) throws {
-        let value = try JSONValue(from: decoder).decodeWire(ExtensionRunLifecycle.decode)
-        guard let state = ExtensionActivityLifecycleState(rawValue: value.state.rawValue),
-              let attention = ExtensionActivityAttention(rawValue: value.attention.rawValue),
-              let sequence = Int(exactly: value.sequence) else {
-            throw WireError(path: "$", message: "invalid lifecycle projection")
-        }
-        let visibility = try value.visibility.map { wire in
-            guard let visibility = ExtensionActivityVisibility(rawValue: wire.rawValue) else {
-                throw WireError(path: "$.visibility", message: "unknown lifecycle visibility")
+        self = try JSONValue(from: decoder).decodeWire { input, path in
+            let value = try ExtensionRunLifecycle.decode(input, path)
+            guard let state = ExtensionActivityLifecycleState(rawValue: value.state.rawValue),
+                  let attention = ExtensionActivityAttention(rawValue: value.attention.rawValue),
+                  let sequence = Int(exactly: value.sequence) else {
+                throw WireError(path: path, message: "invalid lifecycle projection")
             }
-            return visibility
+            let visibility = try value.visibility.map { wire in
+                guard let visibility = ExtensionActivityVisibility(rawValue: wire.rawValue) else {
+                    throw WireError(path: path + ".visibility", message: "unknown lifecycle visibility")
+                }
+                return visibility
+            }
+            let remainingMs = try value.remainingMs.map { wire in
+                guard let remaining = Int(exactly: wire) else { throw WireError(path: path + ".remainingMs", message: "expected integer") }
+                return remaining
+            }
+            return Self(state: state, attention: attention, sequence: sequence, observedAt: value.observedAt,
+                        producerUpdatedAt: value.producerUpdatedAt, terminalAt: value.terminalAt,
+                        recentUntil: value.recentUntil, visibility: visibility, remainingMs: remainingMs)
         }
-        let remainingMs = try value.remainingMs.map { wire in
-            guard let remaining = Int(exactly: wire) else { throw WireError(path: "$.remainingMs", message: "expected integer") }
-            return remaining
-        }
-        self.init(state: state, attention: attention, sequence: sequence, observedAt: value.observedAt,
-                  producerUpdatedAt: value.producerUpdatedAt, terminalAt: value.terminalAt,
-                  recentUntil: value.recentUntil, visibility: visibility, remainingMs: remainingMs)
     }
 
     package var isTerminal: Bool { state.isTerminal }
