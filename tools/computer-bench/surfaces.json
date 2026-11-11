@@ -7,14 +7,14 @@
   },
   "reach": {
     "agent-browser": {
-      "home": { "reach": "shell", "evidence": "HOME_TOOL_NAMES omits agent_browser (packages/gateway/src/modules/home/home-runtime-policy.ts:3-7); Home profile sets noExtensions (home-session-profile.ts:24); bash is admitted only on maintainer turns (home-runtime-policy.ts:9-12)" },
+      "home": { "reach": "shell", "evidence": "HOME_TOOL_NAMES omits agent_browser (packages/gateway/src/modules/home/home-runtime-policy.ts:3-7); Home profile sets noExtensions (home-session-profile.ts:20); bash is admitted only on maintainer turns (home-runtime-policy.ts:9-12)" },
       "home-wake": { "reach": "none", "evidence": "Home has no agent_browser declaration; homeToolAvailable excludes bash on non-user turns (home-runtime-policy.ts:9-12)" },
       "worker": { "reach": "first-class", "evidence": "agent_browser from the pinned pi-agent-browser-native package in the agent settings; live view trusts only that source (packages/gateway/src/display/browser-live-view-adapter.ts:25-31); binary on PATH via packages/gateway/src/runtime/node-command-environment.ts:173" },
       "subagent": { "reach": "first-class", "evidence": "~/.tron/agent/agents/worker.md lists agent_browser and loads the package through subagentOnlyExtensions; builtin agents get it only when their definition lists it" }
     },
     "cua": {
-      "home": { "reach": "first-class", "evidence": "HOME_TOOL_NAMES includes computer; homeToolAvailable admits it only on user turns (packages/gateway/src/modules/home/home-runtime-policy.ts:3-12); Home profile loads tron-computer (home-session-profile.ts:8); home-tool-admission.e2e.test.ts proves admission and forged wake-call refusal" },
-      "home-wake": { "reach": "none", "evidence": "homeToolAvailable excludes computer on non-user turns (home-runtime-policy.ts:9-12); home-tool-admission.e2e.test.ts covers automation, scheduler and task-result wakes" },
+      "home": { "reach": "first-class", "evidence": "HOME_TOOL_NAMES includes computer; homeToolAvailable admits it only on user turns (packages/gateway/src/modules/home/home-runtime-policy.ts:3-12); Home profile loads tron-computer (home-session-profile.ts:8); packages/gateway/src/e2e/automations/home-tool-admission.e2e.test.ts proves admission and forged-nonce input refusal" },
+      "home-wake": { "reach": "none", "evidence": "homeToolAvailable excludes computer on non-user turns (home-runtime-policy.ts:9-12); packages/gateway/src/e2e/automations/home-tool-admission.e2e.test.ts covers automation, scheduler and task-result wakes" },
       "worker": { "reach": "first-class", "evidence": "tron-computer is an ordinary module (packages/gateway/src/extensions/tron-modules.ts:16) registering computer (packages/gateway/src/display/tron-computer-extension.ts:11); ordinary profile has no tool filter (packages/gateway/src/kernel/host/session-profile.ts:32-36)" },
       "subagent": { "reach": "none", "evidence": "children do not inherit Gateway-only extensions (packages/gateway/src/workspace/tron-core-extension.ts:26); worker.md tools omit computer" }
     },
