@@ -31,6 +31,7 @@ from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -313,6 +314,15 @@ class DriverProtocol(unittest.TestCase):
             with self.assertRaisesRegex(contract.ProtocolContractError,
                                         r"profiling driver protocol 9 does not match the contract's 8"):
                 contract.verify_source_contract(copy)
+
+    def test_every_settings_layer_the_driver_writes_is_one_the_gateway_accepts(self) -> None:
+        service = (ROOT / "packages/gateway/src/transport/gateway-service.ts").read_text()
+        accepted = re.search(r"layer: oneOf\(change\.layer, `\$\{label\}\.layer`, \[([^\]]+)\]", service)
+        self.assertIsNotNone(accepted, "settings.change no longer names its layers where this check reads them")
+        layers = set(re.findall(r'"([a-z]+)"', accepted.group(1)))
+        written = set(re.findall(r'\blayer: "([a-z]+)"', DRIVER.read_text()))
+        self.assertTrue(written, "the profiling driver writes no settings layer")
+        self.assertLessEqual(written, layers, f"the profiling driver writes layers the Gateway refuses: {sorted(written - layers)}")
 
 
 def load_gateway_profiler():
