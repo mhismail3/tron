@@ -25,7 +25,8 @@ promotion: `scripts/gateway-payload-deploy.mjs` ([host control](../../gateway/sr
   writes `app/build-inputs.json`, fingerprints
   `app/**` and `runtime/**`, and stamps a runtime epoch. Writers hold a lock and publish payload,
   launcher and icon from a private staging root by backup renames; failure restores the prior
-  projection. macOS tools are used by absolute path (`/usr/bin/find`, `/usr/bin/stat`,
+  projection. `--help` and `-h` print the nine-line usage header, not internal source text.
+  macOS tools are used by absolute path (`/usr/bin/find`, `/usr/bin/stat`,
   `/bin/realpath`, …); any write bit or failed scan is refused.
 - **Staging cancellation.** The staging shell owns each copying/validation command in
   its Bash job table. Signal/exit cleanup stops and joins those jobs before the caller
