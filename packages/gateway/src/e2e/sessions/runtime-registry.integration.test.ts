@@ -4113,6 +4113,38 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }
   });
 
+  it("probes the bound session's file when a rebind lands between a failed receipt append and its retry", async () => {
+    const fixture = await coldFixture("canonical-receipt-rebind-retry");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      sessionManager: SessionManager;
+      persistCanonicalCustomEntry: (customType: string, data: unknown, identity: string) => Promise<void>;
+    };
+    const bound = internal.sessionManager;
+    const replacementDirectory = join(fixture.root, "rebind-replacement");
+    await mkdir(replacementDirectory, { recursive: true });
+    const replacement = SessionManager.create(fixture.cwd, replacementDirectory);
+    replacement.appendMessage({ role: "user", content: "replacement prompt", timestamp: Date.now() });
+    replacement.appendMessage(fauxAssistantMessage("replacement answer"));
+    const receipt = makeInvocationReceipt({
+      version: 1, receiptId: "rebind-receipt", receiptKind: "start",
+      invocationId: "rebind-invocation", operationId: "rebind-operation", sessionId: slot.id,
+      source: "plain", lifecycle: "staged", origin: { kind: "user", confidence: "boundary" },
+      sequence: 1, createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    vi.spyOn(bound, "appendCustomEntry").mockImplementationOnce(() => {
+      internal.sessionManager = replacement;
+      throw new Error("append refused before any byte was written");
+    });
+    try {
+      await internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receipt, "rebind-receipt");
+    } finally {
+      internal.sessionManager = bound;
+    }
+    expect(await readFile(bound.getSessionFile()!, "utf8")).toContain("rebind-receipt");
+    expect(await readFile(replacement.getSessionFile()!, "utf8")).not.toContain("rebind-receipt");
+  });
+
   it("retains the exact extension receipt owner when Pi stages its terminal receipt but disk append fails", async () => {
     const workRegistry = new GatewayWorkRegistry();
     const fixture = await coldFixture("extension-staged-receipt", { workRegistry });
