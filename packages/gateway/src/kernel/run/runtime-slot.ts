@@ -1316,6 +1316,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           },
         } : {}),
         ...(taskWorker ? {
+          policyStream: baseStream => (model, context, options) => baseStream(model, context,
+            model.provider === "anthropic" ? { ...options, cacheRetention: "long" } : options),
           finishTurn: workerFinishTurn(this, created, taskWorker),
         } : {}),
       });

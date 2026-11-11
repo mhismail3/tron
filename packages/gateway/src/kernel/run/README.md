@@ -133,6 +133,10 @@ actual K3 host; native frames do not select product modules or keep another list
   replacement, live conversion/preparation and ordered stream-policy composition.
   Its complete abort-aware AgentSession stream boundary handles synchronous/asynchronous
   setup and result-only streams for ordinary responses and summarization.
+  `RuntimeSlot` composes task-worker policy at this boundary: admitted workers request
+  one-hour Anthropic cache retention, including cold-resumed tasks. Ordinary interactive
+  sessions and subagent children retain Pi's default five-minute retention. Other providers
+  are unchanged; this policy does not enable cache warming.
 
 ## Contract
 
