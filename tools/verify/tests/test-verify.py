@@ -29,6 +29,7 @@ The last run's output is kept in `test-results/verify-cli/`.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -903,6 +904,7 @@ if [[ "$1" == run && -n "${FIXTURE_IOS_SECONDS:-}" ]]; then
 fi
 case "$1" in
   build)
+    if [[ -n "${FIXTURE_IOS_BUILD_EXIT:-}" ]]; then echo "build exits $FIXTURE_IOS_BUILD_EXIT" >&2; exit "$FIXTURE_IOS_BUILD_EXIT"; fi
     mkdir -p "$TRON_IOS_TEST_DERIVED_DATA/Build/Products"
     find "$root/packages/ios-app" -name '*.swift' | sort | xargs xcrun swiftc -module-name App -parse-as-library \
       -emit-library -o "$TRON_IOS_TEST_DERIVED_DATA/App.dylib" -index-store-path "$TRON_IOS_TEST_DERIVED_DATA/Index.noindex/DataStore"
@@ -921,6 +923,68 @@ case "$1" in
     echo "iOS test run complete: $dir" ;;
 esac
 """
+
+
+PROFILE_STUB = r'''#!/usr/bin/env python3
+import ast, json, os, subprocess, sys
+from pathlib import Path
+
+root = Path(__file__).resolve().parent.parent
+args = sys.argv[1:]
+with Path(os.environ["FIXTURE_PROFILE_CALLS"]).open("a") as calls:
+    calls.write(" ".join(args) + "\n")
+fault = os.environ.get("FIXTURE_PROFILE_FAULT", "")
+if args[:1] != ["ios"]:
+    sys.exit(2)
+if fault == "busy":
+    print("host slot wait expired; deferred")
+    sys.exit(73)
+tests = {}
+controls = set()
+for node in ast.parse((root / "scripts/tron-profile-ios").read_text()).body:
+    if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") in ("SCENARIOS", "CONTROL_SCENARIOS"):
+        entries = ast.literal_eval(node.value)
+        tests.update({name: value[0] for name, value in entries.items()})
+        if node.target.id == "CONTROL_SCENARIOS":
+            controls.update(entries)
+scenarios = [args[index + 1] for index, arg in enumerate(args) if arg == "--scenario"]
+results = Path(os.environ["TRON_PROFILE_RESULTS_DIR"]) / "ios"
+for number, scenario in enumerate(scenarios):
+    if fault == "fail" and number == 0:
+        print(f"TRON_PROFILE_FAILURE scenario={scenario}", file=sys.stderr)
+        sys.exit(65)
+    for copy in range(2 if fault == "duplicate" and number == 0 else 1):
+        if fault == "missing":
+            break
+        run = results / f"20260101T00000{number}Z-{scenario}-{copy}"
+        run.mkdir(parents=True)
+        (run / "TestResults.xcresult").mkdir()
+        failed = 1 if fault == "summary-failed" else 0
+        (run / "xctest-summary.json").write_text(json.dumps({"passedTests": 1, "failedTests": failed, "skippedTests": 0, "totalTestCount": 1}))
+        metrics = {"time.wall": {"unit": "ns", "better": "lower", "values": [1.0]},
+                   "cpu.time": {"unit": "ns", "better": "lower", "values": [2.0]}}
+        if fault != "no-workload":
+            metrics["scenario.transport.frames"] = {"unit": "count", "better": "lower", "values": [8.0]}
+        if fault != "no-render" and scenario not in controls:
+            metrics["scenario.render.rows"] = {"unit": "count", "better": "lower", "values": [3.0]}
+        samples = run / "samples.json"
+        samples.write_text(json.dumps({"schema": "tron.profile-samples.v1", "metrics": metrics,
+                                       "context": {"test": f"TronMobileProfiling/{tests[scenario]}", "iterations": 1}}))
+        subprocess.run([sys.executable, str(root / "scripts/tron_profile_report.py"), "write", "--tool", "ios", "--scenario", scenario,
+                        "--samples", str(samples), "--run-dir", str(run), "--worktree", str(root),
+                        "--artifact", f"xcresult={run / 'TestResults.xcresult'}", "--artifact", f"samples={samples}"],
+                       check=True, capture_output=True)
+        report_path = run / "report.json"
+        report = json.loads(report_path.read_text())
+        if fault == "stale":
+            report["source"]["revision"] = "0" * 40
+        if fault == "dirty":
+            report["source"]["dirty"] = True
+        if fault == "wrong-test":
+            report["context"]["test"] = "TronMobileProfiling/ProfileControlScenarioTests/testControl"
+        report_path.write_text(json.dumps(report))
+print("profile scenarios complete")
+'''
 
 
 E2E_STUB = r"""#!/bin/bash
@@ -1428,6 +1492,177 @@ class IosLaneTests(VerifyCase):
         self.assertIn("StrayUITests.swift declares or extends no XCTestCase class", refused.stderr)
         skipped = r.verify("--module", "ios-app/ui-tests", "--skip", "ios", "--plan")
         self.assertEqual(skipped.returncode, 0, skipped.stderr)
+
+    PROFILE_METHODS = {
+        "ProfileChatScenarioTests": ("testIdleChat", "testStreamingReply", "testToolLoop"),
+        "ProfileComposerScenarioTests": ("testComposerTyping",),
+        "ProfileControlScenarioTests": ("testControl", "testControlExtraCPU", "testControlExtraDisk", "testControlExtraWakeups"),
+        "ProfileDashboardScenarioTests": ("testIdleDashboard", "testSummaryStorm"),
+        "ProfileHomeSheetScenarioTests": ("testHomeCompletedSheet",),
+    }
+    PROFILE_CLASSES = tuple(PROFILE_METHODS)
+
+    def profile_class(self, name: str, lines: str = "", methods: tuple[str, ...] | None = None) -> str:
+        methods = self.PROFILE_METHODS[name] if methods is None else methods
+        return f"final class {name} {{\n{lines}" + "".join(f"    func {method}() {{}}\n" for method in methods) + "}\n"
+
+    def profile_fixture(self) -> Path:
+        r = self.repo
+        self.ios_fixture()
+        ios = "packages/ios-app"
+        calls = Path(self.temp.name) / "profile-calls.txt"
+        r.env["FIXTURE_PROFILE_CALLS"] = str(calls)
+        shutil.copy2(ROOT / "scripts/tron_profile_report.py", r.path / "scripts/tron_profile_report.py")
+        profiler = (ROOT / "scripts/tron-profile-ios").read_text()
+        table = [ast.get_source_segment(profiler, node) for node in ast.parse(profiler).body
+                 if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") in ("SCENARIOS", "CONTROL_SCENARIOS")]
+        r.write("scripts/tron-profile-ios", "\n".join(table) + "\n")
+        r.write("scripts/tron-profile", PROFILE_STUB)
+        (r.path / "scripts/tron-profile").chmod(0o755)
+        r.write("scripts/profile.module.json", json.dumps({
+            "layer": "L5", "owns": ["profile.module.json", "tron-profile", "tron-profile-ios", "tron_profile_report.py"],
+            "iosScenarios": list(self.PROFILE_CLASSES)}))
+        r.write(f"{ios}/ProfilingTests/profiling.module.json", json.dumps({"layer": "L5", "owns": ["**"]}))
+        for name in self.PROFILE_CLASSES:
+            r.write(f"{ios}/ProfilingTests/{name}.swift", self.profile_class(name))
+        r.write(f"{ios}/ProfilingTests/ProfileBaselineTests.swift", "final class ProfileBaselineTests {}\n")
+        r.commit("profiling fixture")
+        r.git("branch", "-f", "base")
+        return calls
+
+    def test_a_profiling_scenario_change_runs_its_functional_receipts_through_the_profiler(self) -> None:
+        r = self.repo
+        calls = self.profile_fixture()
+        ios = "packages/ios-app"
+        r.write(f"{ios}/ProfilingTests/ProfileDashboardScenarioTests.swift", self.profile_class("ProfileDashboardScenarioTests", '    let title = "Dashboard"\n'))
+        r.commit("dashboard scenario change")
+        planned = r.verify("--changed", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        self.assertTrue(any(command["name"] == "tests: ios-scenarios:repo/profile" and "--iterations" in command["command"]
+                            for command in plan["commands"]))
+
+        result = r.verify("--changed")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = r.report()
+        step = next(step for step in report["steps"] if step["name"] == "tests: ios-scenarios:repo/profile")
+        self.assertEqual((step["status"], step["tests"]), ("ok", 2))
+        self.assertEqual(report["verdict"], "passed")
+        self.assertEqual(calls.read_text().splitlines(), [
+            "ios --iterations 1 --host-slot-wait-seconds 30 --scenario idle-dashboard --scenario summary-storm"])
+        self.assertFalse(any(name.startswith("ios-lanes") for name in report["groups"]))
+
+        for fault in ("missing", "fail", "stale", "wrong-test", "dirty", "duplicate", "no-workload", "no-render", "summary-failed"):
+            with self.subTest(fault=fault):
+                r.env["FIXTURE_PROFILE_FAULT"] = fault
+                failed = r.verify("--changed")
+                self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+                self.assertEqual(r.report()["verdict"], "failed")
+                del r.env["FIXTURE_PROFILE_FAULT"]
+
+        r.env["FIXTURE_PROFILE_FAULT"] = "busy"
+        calls.write_text("")
+        busy = r.verify("--changed")
+        self.assertEqual(busy.returncode, 1, busy.stdout)
+        self.assertEqual(r.report()["verdict"], "incomplete")
+        self.assertIn("could not acquire its iOS lane", busy.stdout)
+        del r.env["FIXTURE_PROFILE_FAULT"]
+
+        calls.write_text("")
+        r.env["FIXTURE_IOS_BUILD_EXIT"] = "70"
+        r.write(f"{ios}/ProfilingTests/ProfileDashboardScenarioTests.swift", self.profile_class("ProfileDashboardScenarioTests", '    let title = "Changed"\n'))
+        r.commit("dashboard scenario change with a failing build")
+        broken = r.verify("--changed")
+        self.assertEqual(broken.returncode, 1, broken.stdout)
+        self.assertIn("ios build failed", broken.stdout)
+        self.assertEqual(calls.read_text(), "", "a failed current build never invokes the profiler")
+        r.env["FIXTURE_IOS_BUILD_EXIT"] = "73"
+        deferred = r.verify("--changed")
+        self.assertEqual(deferred.returncode, 1, deferred.stdout)
+        self.assertEqual(r.report()["verdict"], "incomplete")
+        self.assertEqual(calls.read_text(), "", "a deferred build never invokes the profiler")
+        del r.env["FIXTURE_IOS_BUILD_EXIT"]
+
+        r.git("branch", "-f", "base")
+        profiler = (r.path / "scripts/tron-profile-ios").read_text()
+        r.write("scripts/tron-profile-ios", profiler.replace("Fixed synthetic 10 Hz main-thread workload.",
+                                                              "Fixed synthetic 10 Hz main-thread workload, owner-changed."))
+        r.commit("the profiler owner changes without a scenario source edit")
+        calls.write_text("")
+        owner = r.verify("--changed")
+        self.assertEqual(owner.returncode, 0, owner.stdout + owner.stderr)
+        owner_step = next(step for step in r.report()["steps"] if step["name"] == "tests: ios-scenarios:repo/profile")
+        self.assertEqual(owner_step["tests"], 11, "the owner's declared classes select every scenario it runs")
+
+        r.git("branch", "-f", "base")
+        r.write(f"{ios}/ProfilingTests/ProfileBaselineTests.swift", "final class ProfileBaselineTests { let value = 2 }\n")
+        r.commit("a performance baseline without a functional scenario")
+        calls.write_text("")
+        undeclared = r.verify("--changed")
+        self.assertEqual(undeclared.returncode, 1, undeclared.stdout)
+        self.assertIn("selected tests were not run: ios-lanes", undeclared.stdout)
+        self.assertEqual(calls.read_text(), "", "an undeclared source never borrows the profiler's pass")
+
+    def test_a_declared_class_runs_exactly_the_methods_its_table_registers(self) -> None:
+        r = self.repo
+        self.profile_fixture()
+        path = "packages/ios-app/ProfilingTests/ProfileDashboardScenarioTests.swift"
+        cases = {
+            "a new XCTest method without a scenario": (
+                ("testIdleDashboard", "testSummaryStorm", "testRenamedStorm"), "testRenamedStorm"),
+            "a table scenario whose method was renamed away": (
+                ("testIdleDashboard",), "['testSummaryStorm']"),
+        }
+        for label, (methods, fragment) in cases.items():
+            with self.subTest(label):
+                r.write(path, self.profile_class("ProfileDashboardScenarioTests", methods=methods))
+                r.commit(label)
+                refused = r.verify("--changed", "--plan")
+                self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+                self.assertIn("ProfileDashboardScenarioTests disagrees", refused.stderr)
+                self.assertIn(fragment, refused.stderr)
+        r.write(path, self.profile_class("ProfileDashboardScenarioTests", lines="#if DEBUG\n    func conditionalHelper() {}\n#endif"))
+        r.commit("a profiling class cannot be read unconditionally")
+        r.git("branch", "-f", "base")
+        r.write("README.md", "# Fixture\n\nUnrelated documentation.\n")
+        r.commit("documentation does not need a profiling compiler read")
+        documentation = r.verify("--changed", "--plan")
+        self.assertEqual(documentation.returncode, 0, documentation.stdout + documentation.stderr)
+        unrelated = r.verify("--module", "repo/alpha", "--plan")
+        self.assertEqual(unrelated.returncode, 0, unrelated.stdout + unrelated.stderr)
+        selected = r.verify("--module", "repo/profile", "--plan")
+        self.assertEqual(selected.returncode, 2, selected.stdout + selected.stderr)
+        self.assertIn("XCTest methods of ProfileDashboardScenarioTests cannot be read", selected.stderr)
+
+    def test_a_profiling_declaration_must_match_the_profiler_table_and_its_owned_files(self) -> None:
+        r = self.repo
+        self.profile_fixture()
+        manifest = json.loads((r.path / "scripts/profile.module.json").read_text())
+        owned = list(manifest["owns"])
+        cases = {
+            "omits a table class": ([name for name in self.PROFILE_CLASSES if name != "ProfileControlScenarioTests"], owned),
+            "names an unknown class": ([*self.PROFILE_CLASSES, "ProfileGhostScenarioTests"], owned),
+        }
+        for label, (classes, files) in cases.items():
+            with self.subTest(label):
+                manifest.update(iosScenarios=classes, owns=files)
+                r.write("scripts/profile.module.json", json.dumps(manifest))
+                r.commit(f"a profiling declaration that {label}")
+                refused = r.verify("--changed", "--plan")
+                self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+                self.assertIn("iosScenarios", refused.stderr)
+                manifest.update(iosScenarios=list(self.PROFILE_CLASSES), owns=owned)
+                r.write("scripts/profile.module.json", json.dumps(manifest))
+                r.commit("restore the profiling declaration")
+        for moved_path in ("tron-profile-ios", "tron_profile_report.py"):
+            with self.subTest(moved_path=moved_path):
+                r.write("scripts/elsewhere.module.json", json.dumps({"layer": "L5", "owns": [moved_path]}))
+                manifest.update(owns=[name for name in owned if name != moved_path])
+                r.write("scripts/profile.module.json", json.dumps(manifest))
+                r.commit("a profiler owner input moves to another module")
+                moved = r.verify("--changed", "--plan")
+                self.assertEqual(moved.returncode, 2, moved.stdout + moved.stderr)
+                self.assertIn("iosScenarios", moved.stderr)
 
     def test_ipad_only_methods_run_in_their_own_shards_on_the_worktrees_ipad_lane(self) -> None:
         """#2331: a test that skips unless on an iPad (in itself, its class's setUp or a helper it

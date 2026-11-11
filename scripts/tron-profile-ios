@@ -26,6 +26,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import fcntl
+import math
 import os
 from pathlib import Path
 import re
@@ -915,6 +916,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                         help="reuse products only if they were built from this worktree's current source state")
     parser.add_argument("--self-test", action="store_true",
                         help="run the control scenario and its known-bad variants and verify the expected deltas")
+    parser.add_argument("--host-slot-wait-seconds", type=float, metavar="N",
+                        help="bound host-slot acquisition only: exit 73 if no slot frees within N seconds "
+                             "(default: wait for a slot)")
     parser.add_argument("--trace", choices=sorted(attribution.TEMPLATES), metavar="TEMPLATE",
                         help="also record an xctrace capture of the measured windows and write attribution.json/.md "
                              f"({', '.join(sorted(attribution.TEMPLATES))}); the report is marked traced and "
@@ -937,6 +941,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         parser.error("choose --scenario NAME, --scenario all, --self-test, or --list")
     if arguments.self_test and arguments.scenario:
         parser.error("--self-test runs only the control scenarios; run product scenarios separately")
+    if arguments.host_slot_wait_seconds is not None and (
+            not math.isfinite(arguments.host_slot_wait_seconds) or arguments.host_slot_wait_seconds < 0):
+        parser.error("--host-slot-wait-seconds must be a finite nonnegative number")
     if arguments.self_test and arguments.trace not in (None, "time-profiler"):
         parser.error("--self-test verifies attribution only with --trace time-profiler")
     return arguments
@@ -956,11 +963,13 @@ def main(argv: list[str]) -> int:
         print(f"error: {error}", file=sys.stderr)
         return error.code
     if os.environ.get("TRON_IOS_TEST_LOCK_HELD") != "1":
+        bounded_wait = [] if arguments.host_slot_wait_seconds is None else [
+            "--host-slot-wait-seconds", str(arguments.host_slot_wait_seconds)]
         try:
             os.execv(sys.executable, [
                 sys.executable, str(LOCKER), "--lock", str(lane.state_root / "lease.lock"),
                 "--marker", str(lane.state_root / "simulator.json"),
-                "--development-state", str(development_state_path()), "--host-slot", "--", str(Path(__file__).resolve()),
+                "--development-state", str(development_state_path()), "--host-slot", *bounded_wait, "--", str(Path(__file__).resolve()),
                 *argv, "--lane", lane.label,
             ])
         except OSError as error:

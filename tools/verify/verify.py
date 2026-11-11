@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import functools
 import hashlib
 import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -42,6 +45,12 @@ NOT_DRIVEN = ("ios-lanes",)
 JOURNEY_CLASS = "RealGatewayPairAndChatUITests"
 JOURNEY_HARNESS = "scripts/ios-gateway-e2e-test"
 JOURNEY_LANES = 3
+PROFILE_SOURCES = f"{IOS}/ProfilingTests"
+PROFILE_HARNESS = "scripts/tron-profile"
+PROFILE_TABLE = "scripts/tron-profile-ios"
+PROFILE_RECEIPTS = "scripts/tron_profile_report.py"
+PROFILE_TARGET = "TronMobileProfiling"
+PROFILE_ITERATIONS = 1
 JOURNEY_LINE = re.compile(r"^Real-UI journey (\S+) completed in \d+s \(status (\d+)\); evidence: (\S+)$", re.M)
 IOS_DEADLINE_SECONDS = 1200
 IOS_LAUNCH_SECONDS = 60
@@ -182,7 +191,112 @@ def ios_class(path: str) -> str | None:
     return extended.group(1) if extended else None
 
 
+def profile_table() -> tuple[dict[str, str], set[str]]:
+    table: dict[str, str] = {}
+    controls: set[str] = set()
+    for node in ast.parse((ROOT / PROFILE_TABLE).read_text()).body:
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id in ("SCENARIOS", "CONTROL_SCENARIOS"):
+            entries = ast.literal_eval(node.value)
+            table.update({name: value[0] for name, value in entries.items()})
+            if node.target.id == "CONTROL_SCENARIOS":
+                controls.update(entries)
+    if not table:
+        raise VerifyError(f"{PROFILE_TABLE} declares no profiling scenarios")
+    return table, controls
+
+
+def profile_jobs(modules: dict, tracked: list[str]) -> tuple[dict, dict]:
+    declared = {key: module for key, module in modules.items() if "iosScenarios" in module}
+    if not declared:
+        return {}, {}
+    table, _ = profile_table()
+    table_classes = {test.split("/")[0] for test in table.values()}
+    sources: dict[str, list[str]] = {}
+    for path in tracked:
+        if path.startswith(f"{PROFILE_SOURCES}/") and is_test(path) and (ROOT / path).is_file() and (name := ios_class(path)):
+            sources.setdefault(name, []).append(path)
+    jobs, routes = {}, {}
+    for key, module in declared.items():
+        unowned = [path for path in (PROFILE_HARNESS, PROFILE_TABLE, PROFILE_RECEIPTS) if path not in module["owned"]]
+        if unowned:
+            raise VerifyError(f"{key}: iosScenarios runs a profiler this module does not own: {', '.join(unowned)}")
+        classes = module["iosScenarios"]
+        if set(classes) != table_classes:
+            raise VerifyError(f"{key}: iosScenarios must name exactly the classes {PROFILE_TABLE} runs "
+                              f"(unlisted: {sorted(table_classes - set(classes))}; "
+                              f"unknown: {sorted(set(classes) - table_classes)})")
+        files = []
+        for name in classes:
+            if not sources.get(name):
+                raise VerifyError(f"{key}: iosScenarios class {name} has no tracked ProfilingTests source")
+            files.extend(sources[name])
+        group = f"ios-scenarios:{key}"
+        jobs[group] = {"owner": key, "classes": list(classes)}
+        routes.update({path: group for path in files})
+    return jobs, routes
+
+
+def validate_profile_methods(files: list[str]) -> None:
+    table, _ = profile_table()
+    for name in sorted({ios_class(path) for path in files} - {None}):
+        read = xctest_class(PROFILE_SOURCES, name)
+        if read is None:
+            raise VerifyError(f"the XCTest methods of {name} cannot be read, so its scenarios cannot be proven registered")
+        registered = {test.split("/")[1] for test in table.values() if test.split("/")[0] == name}
+        unregistered = [method for method in read[1] if method not in registered]
+        absent = sorted(registered - set(read[1]))
+        if unregistered or absent:
+            raise VerifyError(f"{name} disagrees with {PROFILE_TABLE} (XCTest methods without a scenario: "
+                              f"{unregistered}; scenarios without a method: {absent})")
+
+
+def profile_scenario_names(files: list[str]) -> list[str]:
+    classes = {ios_class(path) for path in files}
+    table, _ = profile_table()
+    return [name for name, test in table.items() if test.split("/")[0] in classes]
+
+
+def profile_command(scenarios: list[str], wait: bool) -> list[str]:
+    return [str(ROOT / PROFILE_HARNESS), "ios", "--iterations", str(PROFILE_ITERATIONS),
+            *(["--host-slot-wait-seconds", "30"] if wait else []),
+            *[arg for name in scenarios for arg in ("--scenario", name)]]
+
+
+def profile_run(run: "Run", label: str, scenarios: list[str], wait: bool, sha: str) -> tuple[str, str] | None:
+    root = run.logs / "profile"
+    shutil.rmtree(root, ignore_errors=True)
+    result = run.step(label, profile_command(scenarios, wait), env={"TRON_PROFILE_RESULTS_DIR": str(root)})
+    if result["exit"] == 73:
+        result.update(status="no result", tests=0, reason="owner validation could not acquire its iOS lane")
+        return "no result", "owner validation could not acquire its iOS lane"
+    if result["status"] != "ok":
+        return "red", f"profiler run failed (exit {result['exit']})"
+    tests, controls = profile_table()
+    problems = []
+    for scenario in scenarios:
+        checked = subprocess.run(
+            [sys.executable, str(ROOT / PROFILE_RECEIPTS), "receipt", "--results-root", str(root / "ios"), "--scenario", scenario,
+             "--test", f"{PROFILE_TARGET}/{tests[scenario]}", "--iterations", str(PROFILE_ITERATIONS),
+             *([] if scenario in controls else ["--render"]),
+             "--worktree", str(ROOT), "--revision", sha], capture_output=True, text=True)
+        if checked.returncode:
+            problems.append(checked.stderr.strip())
+        else:
+            print(checked.stdout.strip(), flush=True)
+    if problems:
+        result.update(status="failed", tests=None)
+        return "red", "; ".join(problems)
+    result["tests"] = len(scenarios)
+    return None
+
+
 def ios_owner_jobs(modules: dict, tracked: list[str]) -> tuple[dict, dict]:
+    lanes, lane_routes = ios_lane_jobs(modules, tracked)
+    scenarios, scenario_routes = profile_jobs(modules, tracked)
+    return {**lanes, **scenarios}, {**lane_routes, **scenario_routes}
+
+
+def ios_lane_jobs(modules: dict, tracked: list[str]) -> tuple[dict, dict]:
     declared = {key: module for key, module in modules.items() if "iosLanes" in module}
     if not declared:
         return {}, {}
@@ -312,22 +426,32 @@ def ios_selectors(paths: list[str]) -> list[str]:
     return owners
 
 
-def ios_test_methods(owner: str) -> tuple[list[str], set[str]]:
-    target, name = owner.split("/")
-    folder = next(path for path, candidate in IOS_TARGETS.items() if candidate == target)
+@functools.lru_cache(maxsize=None)
+def xctest_class(folder: str, name: str) -> tuple[dict[str, str], tuple[str, ...]] | None:
     bodies: dict[str, str] = {}
     found: list[str] = []
-    for source in sorted((ROOT / IOS / folder).rglob("*.swift")):
+    for source in sorted((ROOT / folder).rglob("*.swift")):
         text = source.read_text(errors="replace")
         if not re.search(rf"\b(?:class|extension)\s+{re.escape(name)}\b", text):
             continue
         members = swift_source.read(text, name)
         if members is None:
-            return [], set()
+            return None
         for method in members.methods:
             bodies[method.name] = bodies.get(method.name, "") + method.text
             if method.test and method.name not in found:
                 found.append(method.name)
+    return bodies, tuple(found)
+
+
+def ios_test_methods(owner: str) -> tuple[list[str], set[str]]:
+    target, name = owner.split("/")
+    folder = next(path for path, candidate in IOS_TARGETS.items() if candidate == target)
+    read = xctest_class(f"{IOS}/{folder}", name)
+    if read is None:
+        return [], set()
+    bodies, found = read
+    found = list(found)
     pad = {method for method, body in bodies.items() if IOS_PAD_GATE.search(body)}
     class_pad = bool(pad & {"setUp", "setUpWithError"})
     helpers = pad - set(found)
@@ -1034,6 +1158,8 @@ def test_spec(group: str, files: list[str], selectors: list[str], logs: Path, io
         return ([str(ROOT / "scripts/tron-ios-test"), "run", *lanes, *wait, *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, ios_count)
     if group.startswith("ios-lanes:"):
         return ([sys.executable, str(ROOT / selectors[0]), *selectors[1:]], ROOT, ios_owner_count)
+    if group.startswith("ios-scenarios:"):
+        return (profile_command(selectors, ios_wait), ROOT, None)
     if group == "ios-journeys":
         return ([str(ROOT / JOURNEY_HARNESS), "run-ui", *[arg for owner in selectors for arg in ("--only-testing", owner)]], ROOT, None)
     if group == "mac-terminal":
@@ -1189,6 +1315,10 @@ def main(argv: list[str]) -> int:
             owner_routes = {}
         for path in selection["tests"]:
             groups.setdefault(owner_routes[path] if path in owner_routes else runner_of(path, nested, mac_terminal), []).append(path)
+        if "ios" not in skip:
+            for group, files in groups.items():
+                if group.startswith("ios-scenarios:"):
+                    validate_profile_methods(files)
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
         shards = ios_shards(selectors, ios_method_seconds() if selectors else {})
         journey_paths = groups.get("ios-journeys", [])
@@ -1272,7 +1402,7 @@ def main(argv: list[str]) -> int:
                 commands.append({"name": f"tests: {group}", "notRun": "explicit skip" if skipped_group(group) else "requires owning harness"})
             else:
                 for label, shard in zip(test_step_names(group, shards, False),
-                                        shards if group == "ios" else [journeys] if group == "ios-journeys" else [owner_jobs[group]["command"]] if group in owner_jobs else [selectors]):
+                                        shards if group == "ios" else [journeys] if group == "ios-journeys" else [profile_scenario_names(files)] if group.startswith("ios-scenarios:") else [owner_jobs[group]["command"]] if group in owner_jobs else [selectors]):
                     command, cwd, _ = test_spec(group, files, shard, ROOT / "test-results/verify" / sha, ios_wait=name != "all", gateway_host=gateway_host)
                     commands.append({"name": label, "command": command, "cwd": str(cwd.relative_to(ROOT)),
                                      **({"estimatedSeconds": round(shard.seconds, 1)} if group == "ios" else {})})
@@ -1420,6 +1550,12 @@ def main(argv: list[str]) -> int:
             if group in owner_jobs and (ios_broken or any(step["name"] == "ios build" and step["status"] == "deferred" for step in run.steps)):
                 run.skipped(label, "owner validation needs a successful current iOS build")
                 no_result.append(f"{label}: owner validation could not run")
+                continue
+            if group.startswith("ios-scenarios:"):
+                outcome = profile_run(run, label, profile_scenario_names(files), name != "all", sha)
+                if outcome is not None:
+                    verdict, reason = outcome
+                    (no_result if verdict == "no result" else reds).append(f"{label}: {reason}")
                 continue
             payload = owner_jobs[group]["command"] if group in owner_jobs else selectors
             command, cwd, count = test_spec(group, files, payload, run.logs, ios_wait=name != "all", gateway_host=gateway_host)

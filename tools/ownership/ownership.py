@@ -16,7 +16,7 @@ STEM = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 LAYERS = {f"L{n}" for n in range(6)}
 EDGE_KINDS = {"registration", "spawn", "fs-read", "generated", "wire"}
 RISK_CLASSES = {"kernel", "contracts", "persistence", "security", "lifecycle", "ios-ui", "mac-installer"}
-FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "verify", "iosLanes", "riskClass", "layout", "directories"}
+FIELDS = {"layer", "purpose", "owns", "dependsOn", "dynamicEdges", "verify", "iosLanes", "iosScenarios", "riskClass", "layout", "directories"}
 ROOT_MANIFEST = "root.module.json"
 EDGE_FIELDS = {"to", "kind", "via", "why"}
 FORBIDDEN = set("[]{}\\")
@@ -222,6 +222,14 @@ def ios_lane_problems(value, owned) -> list[str]:
     return problems
 
 
+def ios_scenario_problems(value) -> list[str]:
+    if not isinstance(value, list) or not value or any(not isinstance(name, str) or not re.fullmatch(r"\w+", name) for name in value):
+        return ["iosScenarios must be a nonempty list of ProfilingTests class names"]
+    if len(set(value)) != len(value):
+        return ["iosScenarios class names must be unique"]
+    return []
+
+
 def reject_duplicate_keys(pairs):
     keys = [key for key, _ in pairs]
     duplicate = sorted({key for key in keys if keys.count(key) > 1})
@@ -349,6 +357,8 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
             if not command.startswith("scripts/tron "):
                 problems.append(f"verify {command!r} must be a 'scripts/tron …' command")
         problems.extend(ios_lane_problems(data.get("iosLanes", []), module["owned"]))
+        if "iosScenarios" in data:
+            problems.extend(ios_scenario_problems(data["iosScenarios"]))
         for risk in unique_list(data.get("riskClass", []), "riskClass", problems):
             if not one_of(risk, RISK_CLASSES):
                 problems.append(f"riskClass {risk!r} must be one of {', '.join(sorted(RISK_CLASSES))}")
@@ -367,6 +377,7 @@ def check(rev: str | None = None, shrink: bool = False) -> tuple[dict, list[str]
                          "purpose": m["data"].get("purpose") if isinstance(m["data"].get("purpose"), str) else "",
                          "verify": [c for c in listed(m, "verify") if isinstance(c, str)],
                          **({"iosLanes": m["data"]["iosLanes"]} if "iosLanes" in m["data"] else {}),
+                         **({"iosScenarios": m["data"]["iosScenarios"]} if "iosScenarios" in m["data"] else {}),
                          "dependsOn": [d for d in listed(m, "dependsOn") if isinstance(d, str)],
                          "riskClass": [r for r in listed(m, "riskClass") if isinstance(r, str)],
                          "dynamicTargets": [e["to"] for e in listed(m, "dynamicEdges")

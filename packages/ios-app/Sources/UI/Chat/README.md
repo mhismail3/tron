@@ -97,6 +97,8 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   responder (own drag, handles, loupe, Annotate + system menu), so nothing moves (#2383; device feel
   needs a Tron Device check). A staged quote's tap keeps the sheet open and reveals the source above it via
   `ChatAnnotationPresenter` + a detached `ChatScrollCoordinator` reveal, then flashes it (#2387).
+  An anchored quote exposes `chat.annotation.quote` as one button while its source presenter is
+  available; its combined accessibility label remains the quoted text.
   Staged selections anchor by run-scoped UTF-16 range for their highlight (not persisted). Code blocks, tables and blockquotes keep their own renderers, and a selection
   does not cross them (#1112). Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937), created lazily on first use because SwiftUI
