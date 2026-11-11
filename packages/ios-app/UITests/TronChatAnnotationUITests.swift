@@ -125,7 +125,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         first.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
         let editor = commentField(in: app)
         XCTAssertTrue(editor.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.otherElements["chat.annotation.quote"].exists || app.staticTexts["chat.annotation.quote"].exists)
+        XCTAssertTrue(app.buttons["chat.annotation.quote"].exists, app.debugDescription)
         XCTAssertTrue(app.buttons["Delete annotation"].exists)
         XCTAssertGreaterThan(app.buttons["Save annotation"].frame.minY, app.windows.firstMatch.frame.height * 0.35, "The sheet opens at medium")
         keepScreenshot(app, "899-4-sheet")
