@@ -13,7 +13,7 @@
 // @swift HomeMemoryView HomeMemoryEvidencePage HomeChapterList HomeProfileList
 // @swift AdministrativeDrainSnapshot GatewayRestartResponse
 // @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates ModelPage
-// @swift SessionPhase
+// @swift SessionPhase SessionSummaryUpdate
 // @swift-codable SessionPhase
 module Protocol {
   datatype Option<T> = None | Some(v: T)

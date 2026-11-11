@@ -264,22 +264,26 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
 
     private protocol PayloadAdapter {
         func decode<T: Decodable>(_ type: T.Type) throws -> T
+        func decodeWire<T>(_ decode: (WireJSON, String) throws -> T) throws -> T
     }
 
     private struct DecoderPayloadAdapter: PayloadAdapter {
         let decoder: Decoder
         func decode<T: Decodable>(_ type: T.Type) throws -> T { try T(from: decoder) }
+        func decodeWire<T>(_ decode: (WireJSON, String) throws -> T) throws -> T { try JSONValue(from: decoder).decodeWire(decode) }
     }
 
     private struct JSONValuePayloadAdapter: PayloadAdapter {
         let payload: JSONValue
         func decode<T: Decodable>(_ type: T.Type) throws -> T { try payload.decode(type) }
+        func decodeWire<T>(_ decode: (WireJSON, String) throws -> T) throws -> T { try payload.decodeWire(decode) }
     }
 
     private static func prepare(topic: String, adapter: some PayloadAdapter) -> GatewayEventPreparation {
         switch topic {
         case "session.summary":
-            return (try? adapter.decode(SessionSummaryUpdate.self)).map(GatewayEventPreparation.sessionSummary) ?? .none
+            guard let update = try? adapter.decodeWire(SessionSummaryUpdate.decode), update.admitted else { return .none }
+            return .sessionSummary(update)
         case "automation.changed":
             return (try? adapter.decode(AutomationChanged.self)).map(GatewayEventPreparation.automationChanged) ?? .none
         case "notification.inbox.changed":

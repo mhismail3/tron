@@ -121,7 +121,7 @@ final class ProfileDashboardRun: ProfileScenarioRun {
                 messageCount: session.messageCount + (appendsMessages ? revisions[index] - 1 : 0),
                 firstMessage: session.firstMessage
             )
-            try await fixture.deliver(topic: "session.summary", sessionID: nil, payload: JSONValue.encode(update))
+            try await fixture.deliver(topic: "session.summary", sessionID: nil, payload: JSONValue.wire(update.encode()))
             ProfileScenarioLedger.shared.add("summaries.delivered")
         }
         try await profileSleep(until: window, from: start)

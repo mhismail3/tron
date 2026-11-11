@@ -434,7 +434,7 @@ enum ProfileTranscript {
             messageCount: snapshot.transcriptTotal ?? snapshot.transcript.count, firstMessage: "Profile chat fixture"
         )
         return ProfileScriptedFrame(offset: offset, topic: "session.summary",
-                                    data: try frame(topic: "session.summary", sessionID: nil, payload: JSONValue.encode(update)),
+                                    data: try frame(topic: "session.summary", sessionID: nil, payload: JSONValue.wire(update.encode())),
                                     eventSequence: nil)
     }
 
