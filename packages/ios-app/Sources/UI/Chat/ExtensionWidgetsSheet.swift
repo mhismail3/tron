@@ -5,11 +5,11 @@ struct SessionActivitySheet: View {
     let sessionID: String
     let extensionContent: ExtensionRetainedContent
     let omittedExtensionContentCount: Int
-    let processActivities: [SessionProcessActivity]
+    let processActivities: [PresentedProcessActivity]
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
-    @PresentationState private var selectedProcess: SessionProcessActivity?
+    @PresentationState private var selectedProcess: PresentedProcessActivity?
     @PresentationState private var detent: PresentationDetent = .medium
     @PresentationState private var appSettings = AppLocalBehaviorSettings.shared
 
@@ -71,11 +71,11 @@ struct SessionActivitySheet: View {
         .accessibilityIdentifier("session-activity-sheet")
     }
 
-    private var activities: [SessionProcessActivity] { processActivities }
+    private var activities: [PresentedProcessActivity] { processActivities }
 
     private enum Row: Identifiable {
         case heading(String)
-        case process(SessionProcessActivity)
+        case process(PresentedProcessActivity)
         case extensions
 
         var id: String {

@@ -709,6 +709,69 @@ package struct ExtensionRunLifecycle: Hashable, Sendable {
     return "{" + String(s.dropFirst()) + "}"
   }
 }
+package enum SessionProcessKind: String, CaseIterable, Hashable, Sendable {
+  case command = "command"
+  case subagent = "subagent"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessKind {
+    switch v {
+    case .string("command"): return .command
+    case .string("subagent"): return .subagent
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .command: return "\"command\""
+    case .subagent: return "\"subagent\""
+    }
+  }
+}
+package enum SessionProcessExecutionMode: String, CaseIterable, Hashable, Sendable {
+  case foreground = "foreground"
+  case background = "background"
+  case synchronous = "synchronous"
+  case asynchronous = "asynchronous"
+  case unknown = "unknown"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessExecutionMode {
+    switch v {
+    case .string("foreground"): return .foreground
+    case .string("background"): return .background
+    case .string("synchronous"): return .synchronous
+    case .string("asynchronous"): return .asynchronous
+    case .string("unknown"): return .unknown
+    default: return .unknown
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .foreground: return "\"foreground\""
+    case .background: return "\"background\""
+    case .synchronous: return "\"synchronous\""
+    case .asynchronous: return "\"asynchronous\""
+    case .unknown: return "\"unknown\""
+    }
+  }
+}
+package enum SessionProcessSource: String, CaseIterable, Hashable, Sendable {
+  case mainAssistant = "mainAssistant"
+  case delegatedAgent = "delegatedAgent"
+  case admittedExtension = "admittedExtension"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessSource {
+    switch v {
+    case .string("mainAssistant"): return .mainAssistant
+    case .string("delegatedAgent"): return .delegatedAgent
+    case .string("admittedExtension"): return .admittedExtension
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .mainAssistant: return "\"mainAssistant\""
+    case .delegatedAgent: return "\"delegatedAgent\""
+    case .admittedExtension: return "\"admittedExtension\""
+    }
+  }
+}
 package enum SessionProcessState: String, CaseIterable, Hashable, Sendable {
   case queued = "queued"
   case running = "running"
@@ -767,6 +830,29 @@ package enum SessionProcessAttention: String, CaseIterable, Hashable, Sendable {
     }
   }
 }
+package enum SessionProcessVisibility: String, CaseIterable, Hashable, Sendable {
+  case active = "active"
+  case recent = "recent"
+  case historical = "historical"
+  case unknown = "unknown"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessVisibility {
+    switch v {
+    case .string("active"): return .active
+    case .string("recent"): return .recent
+    case .string("historical"): return .historical
+    case .string("unknown"): return .unknown
+    default: return .unknown
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .active: return "\"active\""
+    case .recent: return "\"recent\""
+    case .historical: return "\"historical\""
+    case .unknown: return "\"unknown\""
+    }
+  }
+}
 package struct SessionProcessLifecycle: Hashable, Sendable {
   package let version: Literal1
   package let state: SessionProcessState
@@ -808,6 +894,114 @@ package struct SessionProcessLifecycle: Hashable, Sendable {
     s += (self.producerUpdatedAt == nil ? "" : ",\"producerUpdatedAt\":" + wEscape(self.producerUpdatedAt!))
     s += (self.terminalAt == nil ? "" : ",\"terminalAt\":" + wEscape(self.terminalAt!))
     s += (self.recentUntil == nil ? "" : ",\"recentUntil\":" + wEscape(self.recentUntil!))
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct SessionProcessActivity: Hashable, Sendable {
+  package let version: Literal1
+  package let processId: String
+  package let kind: SessionProcessKind
+  package let executionMode: SessionProcessExecutionMode
+  package let source: SessionProcessSource
+  package let parentProcessId: String?
+  package let lifecycle: SessionProcessLifecycle
+  package let visibility: SessionProcessVisibility
+  package let startedAt: String?
+  package let durationMs: Double?
+  package let title: String
+  package let command: String?
+  package let currentTool: String?
+  package let currentPathBasename: String?
+  package let model: String?
+  package let thinking: String?
+  package let outputTail: String?
+  package let outputTruncated: Bool
+  package let toolCount: Double?
+  package let turnCount: Double?
+  package let childCount: Double?
+  package let toolCallId: String?
+  package let runId: String?
+  package let childSessionRef: String?
+  package init(version: Literal1, processId: String, kind: SessionProcessKind, executionMode: SessionProcessExecutionMode, source: SessionProcessSource, parentProcessId: String? = nil, lifecycle: SessionProcessLifecycle, visibility: SessionProcessVisibility, startedAt: String? = nil, durationMs: Double? = nil, title: String, command: String? = nil, currentTool: String? = nil, currentPathBasename: String? = nil, model: String? = nil, thinking: String? = nil, outputTail: String? = nil, outputTruncated: Bool, toolCount: Double? = nil, turnCount: Double? = nil, childCount: Double? = nil, toolCallId: String? = nil, runId: String? = nil, childSessionRef: String? = nil) {
+    self.version = version
+    self.processId = processId
+    self.kind = kind
+    self.executionMode = executionMode
+    self.source = source
+    self.parentProcessId = parentProcessId
+    self.lifecycle = lifecycle
+    self.visibility = visibility
+    self.startedAt = startedAt
+    self.durationMs = durationMs
+    self.title = title
+    self.command = command
+    self.currentTool = currentTool
+    self.currentPathBasename = currentPathBasename
+    self.model = model
+    self.thinking = thinking
+    self.outputTail = outputTail
+    self.outputTruncated = outputTruncated
+    self.toolCount = toolCount
+    self.turnCount = turnCount
+    self.childCount = childCount
+    self.toolCallId = toolCallId
+    self.runId = runId
+    self.childSessionRef = childSessionRef
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessActivity {
+    let o = try wObj(v, p)
+    let f_version: Literal1 = wAbsent(o.value("version")) ? .v1 : try Literal1.decode(o.value("version")!, p + ".version")
+    let f_processId: String = wAbsent(o.value("processId")) ? "" : try wStr(o.value("processId")!, p + ".processId")
+    let f_kind: SessionProcessKind = wAbsent(o.value("kind")) ? try wMissing(p + ".kind") : try SessionProcessKind.decode(o.value("kind")!, p + ".kind")
+    let f_executionMode: SessionProcessExecutionMode = wAbsent(o.value("executionMode")) ? .unknown : try SessionProcessExecutionMode.decode(o.value("executionMode")!, p + ".executionMode")
+    let f_source: SessionProcessSource = wAbsent(o.value("source")) ? try wMissing(p + ".source") : try SessionProcessSource.decode(o.value("source")!, p + ".source")
+    let f_parentProcessId: String? = wAbsent(o.value("parentProcessId")) ? nil : try wStr(o.value("parentProcessId")!, p + ".parentProcessId")
+    let f_lifecycle: SessionProcessLifecycle = wAbsent(o.value("lifecycle")) ? try wMissing(p + ".lifecycle") : try SessionProcessLifecycle.decode(o.value("lifecycle")!, p + ".lifecycle")
+    let f_visibility: SessionProcessVisibility = wAbsent(o.value("visibility")) ? .unknown : try SessionProcessVisibility.decode(o.value("visibility")!, p + ".visibility")
+    let f_startedAt: String? = wAbsent(o.value("startedAt")) ? nil : try wStr(o.value("startedAt")!, p + ".startedAt")
+    let f_durationMs: Double? = wAbsent(o.value("durationMs")) ? nil : try wNum(o.value("durationMs")!, p + ".durationMs")
+    let f_title: String = wAbsent(o.value("title")) ? "" : try wStr(o.value("title")!, p + ".title")
+    let f_command: String? = wAbsent(o.value("command")) ? nil : try wStr(o.value("command")!, p + ".command")
+    let f_currentTool: String? = wAbsent(o.value("currentTool")) ? nil : try wStr(o.value("currentTool")!, p + ".currentTool")
+    let f_currentPathBasename: String? = wAbsent(o.value("currentPathBasename")) ? nil : try wStr(o.value("currentPathBasename")!, p + ".currentPathBasename")
+    let f_model: String? = wAbsent(o.value("model")) ? nil : try wStr(o.value("model")!, p + ".model")
+    let f_thinking: String? = wAbsent(o.value("thinking")) ? nil : try wStr(o.value("thinking")!, p + ".thinking")
+    let f_outputTail: String? = wAbsent(o.value("outputTail")) ? nil : try wStr(o.value("outputTail")!, p + ".outputTail")
+    let f_outputTruncated: Bool = wAbsent(o.value("outputTruncated")) ? false : try wBool(o.value("outputTruncated")!, p + ".outputTruncated")
+    let f_toolCount: Double? = wAbsent(o.value("toolCount")) ? nil : try wNum(o.value("toolCount")!, p + ".toolCount")
+    let f_turnCount: Double? = wAbsent(o.value("turnCount")) ? nil : try wNum(o.value("turnCount")!, p + ".turnCount")
+    let f_childCount: Double? = wAbsent(o.value("childCount")) ? nil : try wNum(o.value("childCount")!, p + ".childCount")
+    let f_toolCallId: String? = wAbsent(o.value("toolCallId")) ? nil : try wStr(o.value("toolCallId")!, p + ".toolCallId")
+    let f_runId: String? = wAbsent(o.value("runId")) ? nil : try wStr(o.value("runId")!, p + ".runId")
+    let f_childSessionRef: String? = wAbsent(o.value("childSessionRef")) ? nil : try wStr(o.value("childSessionRef")!, p + ".childSessionRef")
+    return SessionProcessActivity(version: f_version, processId: f_processId, kind: f_kind, executionMode: f_executionMode, source: f_source, parentProcessId: f_parentProcessId, lifecycle: f_lifecycle, visibility: f_visibility, startedAt: f_startedAt, durationMs: f_durationMs, title: f_title, command: f_command, currentTool: f_currentTool, currentPathBasename: f_currentPathBasename, model: f_model, thinking: f_thinking, outputTail: f_outputTail, outputTruncated: f_outputTruncated, toolCount: f_toolCount, turnCount: f_turnCount, childCount: f_childCount, toolCallId: f_toolCallId, runId: f_runId, childSessionRef: f_childSessionRef)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"version\":" + self.version.encode()
+    s += ",\"processId\":" + wEscape(self.processId)
+    s += ",\"kind\":" + self.kind.encode()
+    s += ",\"executionMode\":" + self.executionMode.encode()
+    s += ",\"source\":" + self.source.encode()
+    s += (self.parentProcessId == nil ? "" : ",\"parentProcessId\":" + wEscape(self.parentProcessId!))
+    s += ",\"lifecycle\":" + self.lifecycle.encode()
+    s += ",\"visibility\":" + self.visibility.encode()
+    s += (self.startedAt == nil ? "" : ",\"startedAt\":" + wEscape(self.startedAt!))
+    s += (self.durationMs == nil ? "" : ",\"durationMs\":" + wFormat(self.durationMs!))
+    s += ",\"title\":" + wEscape(self.title)
+    s += (self.command == nil ? "" : ",\"command\":" + wEscape(self.command!))
+    s += (self.currentTool == nil ? "" : ",\"currentTool\":" + wEscape(self.currentTool!))
+    s += (self.currentPathBasename == nil ? "" : ",\"currentPathBasename\":" + wEscape(self.currentPathBasename!))
+    s += (self.model == nil ? "" : ",\"model\":" + wEscape(self.model!))
+    s += (self.thinking == nil ? "" : ",\"thinking\":" + wEscape(self.thinking!))
+    s += (self.outputTail == nil ? "" : ",\"outputTail\":" + wEscape(self.outputTail!))
+    s += ",\"outputTruncated\":" + (self.outputTruncated ? "true" : "false")
+    s += (self.toolCount == nil ? "" : ",\"toolCount\":" + wFormat(self.toolCount!))
+    s += (self.turnCount == nil ? "" : ",\"turnCount\":" + wFormat(self.turnCount!))
+    s += (self.childCount == nil ? "" : ",\"childCount\":" + wFormat(self.childCount!))
+    s += (self.toolCallId == nil ? "" : ",\"toolCallId\":" + wEscape(self.toolCallId!))
+    s += (self.runId == nil ? "" : ",\"runId\":" + wEscape(self.runId!))
+    s += (self.childSessionRef == nil ? "" : ",\"childSessionRef\":" + wEscape(self.childSessionRef!))
     return "{" + String(s.dropFirst()) + "}"
   }
 }

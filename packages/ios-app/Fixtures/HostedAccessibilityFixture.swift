@@ -199,9 +199,9 @@ private final class HostedAccessibilityFixtureState {
         model.installHostedAuthoritativeSnapshot(snapshot)
     }
 
-    private static func process(completed: Bool, output: String) -> SessionProcessActivity {
+    private static func process(completed: Bool, output: String) -> PresentedProcessActivity {
         let now = Date.now
-        return SessionProcessActivity(
+        return PresentedProcessActivity(
             processId: "live-worker", kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
             lifecycle: PresentedProcessLifecycle(state: completed ? .completed : .running, sequence: completed ? 2 : 1,
                                                observedAt: now.ISO8601Format(), terminalAt: completed ? now.ISO8601Format() : nil,

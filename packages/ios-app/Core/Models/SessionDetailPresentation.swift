@@ -16,7 +16,7 @@ package struct SessionHistoryPresentation: Hashable, Sendable {
 
 package struct SessionProcessPresentation: Hashable, Sendable {
     package let sessionID: String
-    package let activities: [SessionProcessActivity]
+    package let activities: [PresentedProcessActivity]
 
     package init(_ snapshot: SessionSnapshot, previous: Self? = nil) {
         sessionID = snapshot.sessionId

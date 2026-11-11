@@ -1,9 +1,21 @@
 import Foundation
 
-package enum SessionProcessKind: String, Codable, CaseIterable, Sendable { case command, subagent }
+package enum PresentedProcessKind: String, Codable, CaseIterable, Sendable {
+    case command, subagent
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(SessionProcessKind.decode)
+        guard let kind = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown process kind") }
+        self = kind
+    }
+}
 
-package enum SessionProcessExecutionMode: String, Codable, CaseIterable, Sendable {
+package enum PresentedProcessExecutionMode: String, Codable, CaseIterable, Sendable {
     case foreground, background, synchronous, asynchronous, unknown
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(SessionProcessExecutionMode.decode)
+        guard let mode = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown process execution mode") }
+        self = mode
+    }
     package var displayName: String {
         switch self {
         case .foreground: "Foreground"
@@ -15,8 +27,13 @@ package enum SessionProcessExecutionMode: String, Codable, CaseIterable, Sendabl
     }
 }
 
-package enum SessionProcessSource: String, Codable, CaseIterable, Sendable {
+package enum PresentedProcessSource: String, Codable, CaseIterable, Sendable {
     case mainAssistant, delegatedAgent, admittedExtension
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(SessionProcessSource.decode)
+        guard let source = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown process source") }
+        self = source
+    }
 }
 
 package enum SessionProcessLifecycleState: String, Codable, CaseIterable, Sendable {
@@ -44,8 +61,13 @@ package enum PresentedProcessAttention: String, Codable, CaseIterable, Sendable 
     }
 }
 
-package enum SessionProcessVisibility: String, Codable, CaseIterable, Sendable {
+package enum PresentedProcessVisibility: String, Codable, CaseIterable, Sendable {
     case active, recent, historical, unknown
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(SessionProcessVisibility.decode)
+        guard let visibility = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown process visibility") }
+        self = visibility
+    }
 }
 
 package struct PresentedProcessLifecycle: Codable, Hashable, Sendable {
@@ -79,7 +101,10 @@ package struct PresentedProcessLifecycle: Codable, Hashable, Sendable {
     }
 
     package init(from decoder: Decoder) throws {
-        let value = try JSONValue(from: decoder).decodeWire(SessionProcessLifecycle.decode)
+        try self.init(wire: JSONValue(from: decoder).decodeWire(SessionProcessLifecycle.decode))
+    }
+
+    package init(wire value: SessionProcessLifecycle) throws {
         guard let state = SessionProcessLifecycleState(rawValue: value.state.rawValue),
               let attention = PresentedProcessAttention(rawValue: value.attention.rawValue),
               let sequence = Int(exactly: value.sequence) else {
@@ -97,15 +122,15 @@ package struct PresentedProcessLifecycle: Codable, Hashable, Sendable {
     package var isActiveWork: Bool { !isSettled && state.isActive }
 }
 
-package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
+package struct PresentedProcessActivity: Codable, Hashable, Identifiable, Sendable {
     let version: Int
     package let processId: String
-    package let kind: SessionProcessKind
-    package let executionMode: SessionProcessExecutionMode
-    let source: SessionProcessSource
+    package let kind: PresentedProcessKind
+    package let executionMode: PresentedProcessExecutionMode
+    let source: PresentedProcessSource
     let parentProcessId: String?
     package let lifecycle: PresentedProcessLifecycle
-    package let visibility: SessionProcessVisibility
+    package let visibility: PresentedProcessVisibility
     package let startedAt: String?
     package let title: String
     let command: String?
@@ -129,12 +154,12 @@ package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable
     package init(
         version: Int = 1,
         processId: String,
-        kind: SessionProcessKind,
-        executionMode: SessionProcessExecutionMode,
-        source: SessionProcessSource,
+        kind: PresentedProcessKind,
+        executionMode: PresentedProcessExecutionMode,
+        source: PresentedProcessSource,
         parentProcessId: String? = nil,
         lifecycle: PresentedProcessLifecycle,
-        visibility: SessionProcessVisibility,
+        visibility: PresentedProcessVisibility,
         startedAt: String? = nil,
         title: String,
         command: String? = nil,
@@ -178,6 +203,32 @@ package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable
         self.toolCallId = toolCallId
         self.runId = runId
         self.childSessionRef = childSessionRef
+    }
+
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(SessionProcessActivity.decode)
+        guard let kind = PresentedProcessKind(rawValue: value.kind.rawValue),
+              let mode = PresentedProcessExecutionMode(rawValue: value.executionMode.rawValue),
+              let source = PresentedProcessSource(rawValue: value.source.rawValue),
+              let visibility = PresentedProcessVisibility(rawValue: value.visibility.rawValue) else {
+            throw WireError(path: "$", message: "invalid process activity projection")
+        }
+        self.init(processId: value.processId, kind: kind, executionMode: mode, source: source,
+                  parentProcessId: value.parentProcessId, lifecycle: try PresentedProcessLifecycle(wire: value.lifecycle),
+                  visibility: visibility, startedAt: value.startedAt, title: value.title, command: value.command,
+                  currentTool: value.currentTool, currentPathBasename: value.currentPathBasename,
+                  model: value.model, thinking: value.thinking, outputTail: value.outputTail,
+                  outputTruncated: value.outputTruncated, durationMs: try Self.integer(value.durationMs, "$.durationMs"),
+                  toolCount: try Self.integer(value.toolCount, "$.toolCount"),
+                  turnCount: try Self.integer(value.turnCount, "$.turnCount"),
+                  childCount: try Self.integer(value.childCount, "$.childCount"),
+                  toolCallId: value.toolCallId, runId: value.runId, childSessionRef: value.childSessionRef)
+    }
+
+    private static func integer(_ value: Double?, _ path: String) throws -> Int? {
+        guard let value else { return nil }
+        guard let result = Int(exactly: value) else { throw WireError(path: path, message: "expected integer") }
+        return result
     }
 
     func retainingDurationSample(from previous: Self?) -> Self {
@@ -242,7 +293,7 @@ package struct SessionProcessOverview: Codable, Hashable, Sendable {
 }
 
 package struct SessionProcessDelta: Codable, Hashable, Sendable {
-    package let activity: SessionProcessActivity?
+    package let activity: PresentedProcessActivity?
     package let removedProcessIds: [String]?
     package let processRevision: Int
     let processAsOf: String
@@ -283,7 +334,7 @@ package enum SessionProcessAdmissionPolicy {
     static let maximumOutputBytes = 32 * 1_024
     package static let maximumEncodedBytes = 256 * 1_024
 
-    package static func admits(_ process: SessionProcessActivity) -> Bool {
+    package static func admits(_ process: PresentedProcessActivity) -> Bool {
         guard process.version == 1,
               boundedNonempty(process.processId, 512),
               process.parentProcessId.map({ boundedNonempty($0, 512) }) ?? true,
@@ -317,7 +368,7 @@ package enum SessionProcessAdmissionPolicy {
         return true
     }
 
-    package static func admitted(_ processes: [SessionProcessActivity]) -> [SessionProcessActivity] {
+    package static func admitted(_ processes: [PresentedProcessActivity]) -> [PresentedProcessActivity] {
         var seen = Set<String>()
         return Array(processes
             .filter { $0.kind == .subagent && admits($0) && seen.insert($0.processId).inserted }
@@ -370,7 +421,7 @@ package enum SessionProcessAdmissionPolicy {
     }
 
     package static func admitsMountedSubset(
-        _ activities: [SessionProcessActivity],
+        _ activities: [PresentedProcessActivity],
         overview: SessionProcessOverview
     ) -> Bool {
         guard activities.allSatisfy({ $0.visibility == .active || $0.visibility == .recent }) else { return false }
@@ -426,7 +477,7 @@ package enum SessionProcessAdmissionPolicy {
         return change.revision != nil || change.closed == true
     }
 
-    private static func admits(_ lifecycle: PresentedProcessLifecycle, visibility: SessionProcessVisibility) -> Bool {
+    private static func admits(_ lifecycle: PresentedProcessLifecycle, visibility: PresentedProcessVisibility) -> Bool {
         guard lifecycle.version == 1, lifecycle.sequence >= 0,
               validTimestamp(lifecycle.observedAt),
               lifecycle.producerUpdatedAt.map(validTimestamp) ?? true,
@@ -480,11 +531,11 @@ package enum SessionProcessAdmissionPolicy {
 
 package enum SessionProcessProjection {
     package struct Sections: Equatable, Sendable {
-        package let active: [SessionProcessActivity]
-        package let recent: [SessionProcessActivity]
+        package let active: [PresentedProcessActivity]
+        package let recent: [PresentedProcessActivity]
     }
 
-    package static func sections(_ activities: [SessionProcessActivity]) -> Sections {
+    package static func sections(_ activities: [PresentedProcessActivity]) -> Sections {
         let admitted = SessionProcessAdmissionPolicy.admitted(activities)
         return Sections(
             active: admitted.filter { $0.visibility == .active },
@@ -493,9 +544,9 @@ package enum SessionProcessProjection {
     }
 
     package static func mountedActivity(
-        selected: SessionProcessActivity,
-        activities: [SessionProcessActivity]
-    ) -> SessionProcessActivity? {
+        selected: PresentedProcessActivity,
+        activities: [PresentedProcessActivity]
+    ) -> PresentedProcessActivity? {
         let admitted = SessionProcessAdmissionPolicy.admitted(activities)
         if let exact = admitted.first(where: { $0.processId == selected.processId }) { return exact }
         guard selected.kind == .subagent,
@@ -510,7 +561,7 @@ package enum SessionProcessProjection {
         return successors.count == 1 ? successors[0] : nil
     }
 
-    package static func precedes(_ lhs: SessionProcessActivity, _ rhs: SessionProcessActivity) -> Bool {
+    package static func precedes(_ lhs: PresentedProcessActivity, _ rhs: PresentedProcessActivity) -> Bool {
         let lhsBucket = lhs.visibility == .active ? 0 : 1
         let rhsBucket = rhs.visibility == .active ? 0 : 1
         if lhsBucket != rhsBucket { return lhsBucket < rhsBucket }
