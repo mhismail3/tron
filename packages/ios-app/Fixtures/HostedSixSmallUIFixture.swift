@@ -88,11 +88,11 @@ struct HostedSixSmallUIFixture: View {
         ("deepseek-v4-pro", "DeepSeek V4 Pro", 0.30, 1.20),
         ("kimi-k2.7-code", "Kimi K2.7 Code", 0.40, 1.60)
     ].map { id, name, input, output in
-        try! JSONDecoder.gateway.decode(ModelSummary.self, from: JSONSerialization.data(withJSONObject: [
+        try! ModelSummary.decode(wParse(String(decoding: JSONSerialization.data(withJSONObject: [
             "provider": "opencode-go", "id": id, "name": name, "reasoning": true, "input": ["text"],
             "contextWindow": 1000000, "maxTokens": 32768, "available": true,
             "cost": ["input": input, "output": output, "cacheRead": 0, "cacheWrite": 0], "releaseDate": "2026-09-01"
-        ]))
+        ]), as: UTF8.self)))
     }
 
     static func checkin(blocked: Bool) -> ChatToolPresentation {

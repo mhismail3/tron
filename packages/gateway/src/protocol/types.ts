@@ -1958,10 +1958,53 @@ export interface ContextWindowLimits { minimum: number; maximum: number; default
 export function decodeContextWindowLimits(v: unknown, p = "$"): ContextWindowLimits {
   const o = obj(v, p);
   only(o, p, ["minimum","maximum","default","longContextThreshold"]);
-  return { minimum: num(own(o, "minimum"), p + ".minimum"), maximum: num(own(o, "maximum"), p + ".maximum"), default: num(own(o, "default"), p + ".default"), ...(own(o, "longContextThreshold") === undefined ? {} : { longContextThreshold: num(own(o, "longContextThreshold"), p + ".longContextThreshold") }) };
+  return { minimum: int(own(o, "minimum"), p + ".minimum"), maximum: int(own(o, "maximum"), p + ".maximum"), default: int(own(o, "default"), p + ".default"), ...(own(o, "longContextThreshold") === undefined ? {} : { longContextThreshold: int(own(o, "longContextThreshold"), p + ".longContextThreshold") }) };
 }
 export function encodeContextWindowLimits(v: ContextWindowLimits): string {
   return "{" + (',"minimum":' + encNum(v.minimum) + ',"maximum":' + encNum(v.maximum) + ',"default":' + encNum(v.default) + (v.longContextThreshold === undefined ? "" : ',"longContextThreshold":' + encNum(v.longContextThreshold))).slice(1) + "}";
+}
+/** A model's price per million tokens, present when either price is nonzero. */
+export interface ModelTokenPrice { input: number; output: number }
+export function decodeModelTokenPrice(v: unknown, p = "$"): ModelTokenPrice {
+  const o = obj(v, p);
+  only(o, p, ["input","output"]);
+  return { input: num(own(o, "input"), p + ".input"), output: num(own(o, "output"), p + ".output") };
+}
+export function encodeModelTokenPrice(v: ModelTokenPrice): string {
+  return "{" + (',"input":' + encNum(v.input) + ',"output":' + encNum(v.output)).slice(1) + "}";
+}
+/** One model as `model.list` answers it. */
+export interface ModelSummary {
+  provider: string;
+  id: string;
+  name: string;
+  virtual: boolean;
+  reasoning: boolean;
+  input: string[];
+  contextWindow: number;
+  contextWindowLimits?: ContextWindowLimits;
+  maxTokens: number;
+  available: boolean;
+  releaseDate?: string;
+  cost?: ModelTokenPrice;
+}
+export function decodeModelSummary(v: unknown, p = "$"): ModelSummary {
+  const o = obj(v, p);
+  only(o, p, ["provider","id","name","virtual","reasoning","input","contextWindow","contextWindowLimits","maxTokens","available","releaseDate","cost"]);
+  return { provider: str(own(o, "provider"), p + ".provider"), id: str(own(o, "id"), p + ".id"), name: str(own(o, "name"), p + ".name"), virtual: bool(own(o, "virtual"), p + ".virtual"), reasoning: bool(own(o, "reasoning"), p + ".reasoning"), input: seq(own(o, "input"), p + ".input", (x, q) => str(x, q)), contextWindow: int(own(o, "contextWindow"), p + ".contextWindow"), ...(own(o, "contextWindowLimits") === undefined ? {} : { contextWindowLimits: decodeContextWindowLimits(own(o, "contextWindowLimits"), p + ".contextWindowLimits") }), maxTokens: int(own(o, "maxTokens"), p + ".maxTokens"), available: bool(own(o, "available"), p + ".available"), ...(own(o, "releaseDate") === undefined ? {} : { releaseDate: str(own(o, "releaseDate"), p + ".releaseDate") }), ...(own(o, "cost") === undefined ? {} : { cost: decodeModelTokenPrice(own(o, "cost"), p + ".cost") }) };
+}
+export function encodeModelSummary(v: ModelSummary): string {
+  return "{" + (',"provider":' + JSON.stringify(v.provider) + ',"id":' + JSON.stringify(v.id) + ',"name":' + JSON.stringify(v.name) + ',"virtual":' + JSON.stringify(v.virtual) + ',"reasoning":' + JSON.stringify(v.reasoning) + ',"input":' + "[" + v.input.map((x) => JSON.stringify(x)).join(",") + "]" + ',"contextWindow":' + encNum(v.contextWindow) + (v.contextWindowLimits === undefined ? "" : ',"contextWindowLimits":' + encodeContextWindowLimits(v.contextWindowLimits)) + ',"maxTokens":' + encNum(v.maxTokens) + ',"available":' + JSON.stringify(v.available) + (v.releaseDate === undefined ? "" : ',"releaseDate":' + JSON.stringify(v.releaseDate)) + (v.cost === undefined ? "" : ',"cost":' + encodeModelTokenPrice(v.cost))).slice(1) + "}";
+}
+/** `model.list`: one page of the model catalog. */
+export interface ModelPage { models: ModelSummary[]; nextCursor?: string }
+export function decodeModelPage(v: unknown, p = "$"): ModelPage {
+  const o = obj(v, p);
+  only(o, p, ["models","nextCursor"]);
+  return { models: seq(own(o, "models"), p + ".models", (x, q) => decodeModelSummary(x, q)), ...(own(o, "nextCursor") === undefined ? {} : { nextCursor: str(own(o, "nextCursor"), p + ".nextCursor") }) };
+}
+export function encodeModelPage(v: ModelPage): string {
+  return "{" + (',"models":' + "[" + v.models.map((x) => encodeModelSummary(x)).join(",") + "]" + (v.nextCursor === undefined ? "" : ',"nextCursor":' + JSON.stringify(v.nextCursor))).slice(1) + "}";
 }
 export type ContextWindowPolicySource = "model" | "global" | "project" | "session";
 const ContextWindowPolicySourceValues: ReadonlyArray<unknown> = ["model", "global", "project", "session"];

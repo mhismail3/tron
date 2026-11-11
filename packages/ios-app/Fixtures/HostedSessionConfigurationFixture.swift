@@ -112,7 +112,7 @@ struct HostedSessionConfigurationFixture: View {
 }
 
 private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
-    static let models = try! JSONDecoder.gateway.decode([ModelSummary].self, from: Data(#"[{"provider":"fixture","id":"model","name":"Fixture Model","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-01"},{"provider":"fixture","id":"alternative","name":"Alternative Model","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-02"}]"#.utf8))
+    static let models = try! ModelPage.decode(wParse(#"{"models":[{"provider":"fixture","id":"model","name":"Fixture Model","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-01"},{"provider":"fixture","id":"alternative","name":"Alternative Model","reasoning":true,"input":["text"],"contextWindow":200000,"maxTokens":32000,"available":true,"releaseDate":"2026-01-02"}]}"#)).models
     private var bookmarkLabel: String?
     private var snapshot: SessionSnapshot
     private var hello = true
@@ -351,7 +351,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 nodes: [SessionTreeNode(id: "fixture-prompt", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
                     kind: "message", label: bookmarkLabel, preview: "Nested history prompt", role: .user,
                     depth: 0, childCount: 0, isCurrentPath: true)], older: nil, newer: nil, totalEntries: 1))
-        case "model.list": result = .object(["models": try JSONValue.encode(Self.models)])
+        case "model.list": result = try JSONValue.wire(ModelPage(models: Self.models).encode())
         case "provider.list": result = .object(["providers": .array([])])
         case "session.workspace.inspect": result = .object(["cwd": .string("/workspace"), "exists": .bool(true), "isGitRepository": .bool(false)])
         default: result = .object([:])
