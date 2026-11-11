@@ -268,7 +268,7 @@ enum SessionProcessRowPresentation {
     private static let maximumActionCharacters = 96
     private static let absentValues: Set<String> = ["null", "undefined"]
 
-    static func tone(for lifecycle: SessionProcessLifecycle) -> SessionProcessRowTone {
+    static func tone(for lifecycle: PresentedProcessLifecycle) -> SessionProcessRowTone {
         switch lifecycle.state {
         case .queued, .running: .inProgress
         case .paused: lifecycle.isSettled ? .pausedSettled : .inProgress
@@ -277,7 +277,7 @@ enum SessionProcessRowPresentation {
         }
     }
 
-    static func statusText(for lifecycle: SessionProcessLifecycle) -> String {
+    static func statusText(for lifecycle: PresentedProcessLifecycle) -> String {
         switch lifecycle.state {
         case .running: "Live"
         case .paused: lifecycle.isSettled ? "Paused" : "Pausing…"
@@ -352,14 +352,14 @@ enum SessionProcessRowPresentation {
 
 enum ReadOnlySubagentStopControlPolicy {
     static func isVisible(
-        lifecycle: SessionProcessLifecycle,
+        lifecycle: PresentedProcessLifecycle,
         supportsAbort: Bool
     ) -> Bool {
         lifecycle.isActiveWork && supportsAbort
     }
 
     static func isEnabled(
-        lifecycle: SessionProcessLifecycle,
+        lifecycle: PresentedProcessLifecycle,
         hasAbortAuthority: Bool,
         supportsAbort: Bool,
         isConnected: Bool,

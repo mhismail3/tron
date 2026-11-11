@@ -565,6 +565,20 @@ package struct SessionSummaryUpdate: Hashable, Sendable {
     return "{" + String(s.dropFirst()) + "}"
   }
 }
+package enum Literal1: CaseIterable, Hashable, Sendable {
+  case v1
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> Literal1 {
+    switch v {
+    case .number(1): return .v1
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .v1: return "1"
+    }
+  }
+}
 package enum ExtensionRunLifecycleState: String, CaseIterable, Hashable, Sendable {
   case queued = "queued"
   case running = "running"
@@ -598,6 +612,203 @@ package enum ExtensionRunLifecycleState: String, CaseIterable, Hashable, Sendabl
     case .rejected: return "\"rejected\""
     case .unknown: return "\"unknown\""
     }
+  }
+}
+package enum ExtensionRunAttention: String, CaseIterable, Hashable, Sendable {
+  case none = "none"
+  case activeLongRunning = "activeLongRunning"
+  case needsAttention = "needsAttention"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ExtensionRunAttention {
+    switch v {
+    case .string("none"): return .none
+    case .string("activeLongRunning"): return .activeLongRunning
+    case .string("needsAttention"): return .needsAttention
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .none: return "\"none\""
+    case .activeLongRunning: return "\"activeLongRunning\""
+    case .needsAttention: return "\"needsAttention\""
+    }
+  }
+}
+package enum ExtensionRunVisibility: String, CaseIterable, Hashable, Sendable {
+  case current = "current"
+  case recent = "recent"
+  case historical = "historical"
+  case unknown = "unknown"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ExtensionRunVisibility {
+    switch v {
+    case .string("current"): return .current
+    case .string("recent"): return .recent
+    case .string("historical"): return .historical
+    case .string("unknown"): return .unknown
+    default: return .unknown
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .current: return "\"current\""
+    case .recent: return "\"recent\""
+    case .historical: return "\"historical\""
+    case .unknown: return "\"unknown\""
+    }
+  }
+}
+package struct ExtensionRunLifecycle: Hashable, Sendable {
+  package let version: Literal1
+  package let state: ExtensionRunLifecycleState
+  package let attention: ExtensionRunAttention
+  package let sequence: Double
+  package let observedAt: String
+  package let producerUpdatedAt: String?
+  package let terminalAt: String?
+  package let recentUntil: String?
+  package let visibility: ExtensionRunVisibility?
+  package let remainingMs: Double?
+  package init(version: Literal1, state: ExtensionRunLifecycleState, attention: ExtensionRunAttention, sequence: Double, observedAt: String, producerUpdatedAt: String? = nil, terminalAt: String? = nil, recentUntil: String? = nil, visibility: ExtensionRunVisibility? = nil, remainingMs: Double? = nil) {
+    self.version = version
+    self.state = state
+    self.attention = attention
+    self.sequence = sequence
+    self.observedAt = observedAt
+    self.producerUpdatedAt = producerUpdatedAt
+    self.terminalAt = terminalAt
+    self.recentUntil = recentUntil
+    self.visibility = visibility
+    self.remainingMs = remainingMs
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ExtensionRunLifecycle {
+    let o = try wObj(v, p)
+    let f_version: Literal1 = wAbsent(o.value("version")) ? .v1 : try Literal1.decode(o.value("version")!, p + ".version")
+    let f_state: ExtensionRunLifecycleState = wAbsent(o.value("state")) ? .unknown : try ExtensionRunLifecycleState.decode(o.value("state")!, p + ".state")
+    let f_attention: ExtensionRunAttention = wAbsent(o.value("attention")) ? try wMissing(p + ".attention") : try ExtensionRunAttention.decode(o.value("attention")!, p + ".attention")
+    let f_sequence: Double = wAbsent(o.value("sequence")) ? 0 : try wNum(o.value("sequence")!, p + ".sequence")
+    let f_observedAt: String = wAbsent(o.value("observedAt")) ? "" : try wStr(o.value("observedAt")!, p + ".observedAt")
+    let f_producerUpdatedAt: String? = wAbsent(o.value("producerUpdatedAt")) ? nil : try wStr(o.value("producerUpdatedAt")!, p + ".producerUpdatedAt")
+    let f_terminalAt: String? = wAbsent(o.value("terminalAt")) ? nil : try wStr(o.value("terminalAt")!, p + ".terminalAt")
+    let f_recentUntil: String? = wAbsent(o.value("recentUntil")) ? nil : try wStr(o.value("recentUntil")!, p + ".recentUntil")
+    let f_visibility: ExtensionRunVisibility? = wAbsent(o.value("visibility")) ? nil : try ExtensionRunVisibility.decode(o.value("visibility")!, p + ".visibility")
+    let f_remainingMs: Double? = wAbsent(o.value("remainingMs")) ? nil : try wNum(o.value("remainingMs")!, p + ".remainingMs")
+    return ExtensionRunLifecycle(version: f_version, state: f_state, attention: f_attention, sequence: f_sequence, observedAt: f_observedAt, producerUpdatedAt: f_producerUpdatedAt, terminalAt: f_terminalAt, recentUntil: f_recentUntil, visibility: f_visibility, remainingMs: f_remainingMs)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"version\":" + self.version.encode()
+    s += ",\"state\":" + self.state.encode()
+    s += ",\"attention\":" + self.attention.encode()
+    s += ",\"sequence\":" + wFormat(self.sequence)
+    s += ",\"observedAt\":" + wEscape(self.observedAt)
+    s += (self.producerUpdatedAt == nil ? "" : ",\"producerUpdatedAt\":" + wEscape(self.producerUpdatedAt!))
+    s += (self.terminalAt == nil ? "" : ",\"terminalAt\":" + wEscape(self.terminalAt!))
+    s += (self.recentUntil == nil ? "" : ",\"recentUntil\":" + wEscape(self.recentUntil!))
+    s += (self.visibility == nil ? "" : ",\"visibility\":" + self.visibility!.encode())
+    s += (self.remainingMs == nil ? "" : ",\"remainingMs\":" + wFormat(self.remainingMs!))
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package enum SessionProcessState: String, CaseIterable, Hashable, Sendable {
+  case queued = "queued"
+  case running = "running"
+  case paused = "paused"
+  case completed = "completed"
+  case failed = "failed"
+  case stopped = "stopped"
+  case rejected = "rejected"
+  case interrupted = "interrupted"
+  case unknown = "unknown"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessState {
+    switch v {
+    case .string("queued"): return .queued
+    case .string("running"): return .running
+    case .string("paused"): return .paused
+    case .string("completed"): return .completed
+    case .string("failed"): return .failed
+    case .string("stopped"): return .stopped
+    case .string("rejected"): return .rejected
+    case .string("interrupted"): return .interrupted
+    case .string("unknown"): return .unknown
+    default: return .unknown
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .queued: return "\"queued\""
+    case .running: return "\"running\""
+    case .paused: return "\"paused\""
+    case .completed: return "\"completed\""
+    case .failed: return "\"failed\""
+    case .stopped: return "\"stopped\""
+    case .rejected: return "\"rejected\""
+    case .interrupted: return "\"interrupted\""
+    case .unknown: return "\"unknown\""
+    }
+  }
+}
+package enum SessionProcessAttention: String, CaseIterable, Hashable, Sendable {
+  case none = "none"
+  case activeLongRunning = "activeLongRunning"
+  case needsAttention = "needsAttention"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessAttention {
+    switch v {
+    case .string("none"): return .none
+    case .string("activeLongRunning"): return .activeLongRunning
+    case .string("needsAttention"): return .needsAttention
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .none: return "\"none\""
+    case .activeLongRunning: return "\"activeLongRunning\""
+    case .needsAttention: return "\"needsAttention\""
+    }
+  }
+}
+package struct SessionProcessLifecycle: Hashable, Sendable {
+  package let version: Literal1
+  package let state: SessionProcessState
+  package let attention: SessionProcessAttention
+  package let sequence: Double
+  package let observedAt: String
+  package let producerUpdatedAt: String?
+  package let terminalAt: String?
+  package let recentUntil: String?
+  package init(version: Literal1, state: SessionProcessState, attention: SessionProcessAttention, sequence: Double, observedAt: String, producerUpdatedAt: String? = nil, terminalAt: String? = nil, recentUntil: String? = nil) {
+    self.version = version
+    self.state = state
+    self.attention = attention
+    self.sequence = sequence
+    self.observedAt = observedAt
+    self.producerUpdatedAt = producerUpdatedAt
+    self.terminalAt = terminalAt
+    self.recentUntil = recentUntil
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionProcessLifecycle {
+    let o = try wObj(v, p)
+    let f_version: Literal1 = wAbsent(o.value("version")) ? .v1 : try Literal1.decode(o.value("version")!, p + ".version")
+    let f_state: SessionProcessState = wAbsent(o.value("state")) ? .unknown : try SessionProcessState.decode(o.value("state")!, p + ".state")
+    let f_attention: SessionProcessAttention = wAbsent(o.value("attention")) ? try wMissing(p + ".attention") : try SessionProcessAttention.decode(o.value("attention")!, p + ".attention")
+    let f_sequence: Double = wAbsent(o.value("sequence")) ? 0 : try wNum(o.value("sequence")!, p + ".sequence")
+    let f_observedAt: String = wAbsent(o.value("observedAt")) ? "" : try wStr(o.value("observedAt")!, p + ".observedAt")
+    let f_producerUpdatedAt: String? = wAbsent(o.value("producerUpdatedAt")) ? nil : try wStr(o.value("producerUpdatedAt")!, p + ".producerUpdatedAt")
+    let f_terminalAt: String? = wAbsent(o.value("terminalAt")) ? nil : try wStr(o.value("terminalAt")!, p + ".terminalAt")
+    let f_recentUntil: String? = wAbsent(o.value("recentUntil")) ? nil : try wStr(o.value("recentUntil")!, p + ".recentUntil")
+    return SessionProcessLifecycle(version: f_version, state: f_state, attention: f_attention, sequence: f_sequence, observedAt: f_observedAt, producerUpdatedAt: f_producerUpdatedAt, terminalAt: f_terminalAt, recentUntil: f_recentUntil)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"version\":" + self.version.encode()
+    s += ",\"state\":" + self.state.encode()
+    s += ",\"attention\":" + self.attention.encode()
+    s += ",\"sequence\":" + wFormat(self.sequence)
+    s += ",\"observedAt\":" + wEscape(self.observedAt)
+    s += (self.producerUpdatedAt == nil ? "" : ",\"producerUpdatedAt\":" + wEscape(self.producerUpdatedAt!))
+    s += (self.terminalAt == nil ? "" : ",\"terminalAt\":" + wEscape(self.terminalAt!))
+    s += (self.recentUntil == nil ? "" : ",\"recentUntil\":" + wEscape(self.recentUntil!))
+    return "{" + String(s.dropFirst()) + "}"
   }
 }
 package struct ContextWindowLimits: Hashable, Sendable {
