@@ -136,7 +136,10 @@ test releases it, never for a fixed time.
 The hosted dashboard reveal probe reports shown section orders independently from animation starts.
 Rows first mounted after the reveal window are already visible without an animation; they contribute
 their shown order, not an animation count. The dashboard journey checks both section presence and an
-unchanged animation count across live updates.
+unchanged animation count across live updates. Its new worker stays behind a named fixture release
+permit until the test observes absence and posts the release; host/query latency cannot consume a
+fixed injection window. The same fixture-release owner keeps task-list replies behind their existing
+named permit.
 
 Hosted foreground captures retain cumulative RPC counts and the latest 64 indexed, timestamped
 method/parameter records in the native probe. Parameter JSON over 1,024 bytes is explicitly omitted; the probe reports
