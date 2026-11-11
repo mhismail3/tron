@@ -121,8 +121,10 @@ executed: an unmatched selector is not evidence. Screenshots stay in the reporte
 A synthesized tap or drag returns only after the app is idle, so a sheet detent it settles is read
 directly afterwards. An `XCTNSPredicateExpectation` or `waitForExistence` polls first after about 1 s,
 and each poll takes accessibility snapshots that cost seconds under host load, so a short window over
-already-settled state fails on load, not behaviour (#2410). A fixture that holds a reply to expose a
-loading state holds it until the test releases it, never for a fixed time.
+already-settled state fails on load, not behaviour (#2410). Settings Editor/Revert readiness reads
+its hittability and unchanged 44-point bounds immediately, polling only while false. Each evaluation
+must complete within the same monotonic five-second deadline; late success is rejected. A fixture that holds a reply to expose a loading state holds it until the
+test releases it, never for a fixed time.
 
 ### Simulator lifecycle
 

@@ -716,9 +716,21 @@ final class TronSmokeUITests: XCTestCase {
         for target in [editor, reset] {
             let scale = CGFloat(XCUIScreen.main.screenshot().image.cgImage?.width ?? 0) / app.windows.firstMatch.frame.width
             func points(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
-            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-                predicate: NSPredicate { _, _ in target.isHittable && points(target.frame.height) >= 44 && points(target.frame.width) >= 44 },
-                object: target)], timeout: 5), .completed, "\(target.label): \(target.frame)")
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(5))
+            let isReady = {
+                let matches = target.isHittable && points(target.frame.height) >= 44 && points(target.frame.width) >= 44
+                return matches && clock.now <= deadline
+            }
+            var ready = isReady()
+            while !ready && clock.now < deadline {
+                let remaining = clock.now.duration(to: deadline).components
+                let pause = max(0, min(0.1, Double(remaining.seconds) + Double(remaining.attoseconds) / 1e18))
+                RunLoop.current.run(until: Date().addingTimeInterval(pause))
+                guard clock.now < deadline else { break }
+                ready = isReady()
+            }
+            XCTAssertTrue(ready, "\(target.label): \(target.frame)")
         }
         XCTAssertFalse(editor.frame.intersects(reset.frame), "Editing and Revert must not share targets")
         editor.tap()
