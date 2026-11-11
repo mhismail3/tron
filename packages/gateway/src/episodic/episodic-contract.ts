@@ -161,6 +161,7 @@ export interface EpisodicUsage { input: number; output: number; cacheRead: numbe
 export const EPISODIC_STATUS_PARTS = 1_024;
 
 export interface EpisodicCompactorRequest {
+  sessionId: string;
   system: string;
   turns: Array<{ role: "user" | "assistant"; text: string }>;
   signal: AbortSignal;

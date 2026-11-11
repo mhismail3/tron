@@ -66,6 +66,6 @@ export async function setHomeMemoryModels(registry: RuntimeRegistry,
   await setModelQueue({ registry, agentDir: options.agentDir, tronHome: options.tronHome, trust: options.trust, modelRuntime }, "background", models);
 }
 
-export function singleModelSummarizer(runtime: ModelRuntime, model: { provider: string; id: string }) {
-  return createQueueSummarizer(new ModelQueueOwner({ runtime, usage: { read: async () => ({ providers: [] }) }, queue: async () => [`${model.provider}/${model.id}`] }));
+export function singleModelSummarizer(runtime: ModelRuntime, model: { provider: string; id: string }, tronHome: string) {
+  return createQueueSummarizer(new ModelQueueOwner({ tronHome, runtime, usage: { read: async () => ({ providers: [] }) }, queue: async () => [`${model.provider}/${model.id}`] }));
 }

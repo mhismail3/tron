@@ -13,6 +13,7 @@ import {
   type ModelQueueRole, type ModelQueueSource, type QueueModelState,
 } from "./model-queue-extension.js";
 import { tronHomePath } from "../foundation/tron-home-layout.js";
+import { ModelUsageLedger, ModelUsageLedgerError, type ModelUsageCaller, type ModelUsageIdentity } from "./model-usage-ledger.js";
 
 const MODEL_QUEUE_SKIP_PERCENT = 95;
 const RECORD_MS = 15 * 60_000;
@@ -38,6 +39,7 @@ async function writeProjectionFile(path: string, contents: string): Promise<void
 interface QueueAvailability { role: ModelQueueRole; models: QueueModelState[] }
 
 export type ModelQueueRecord =
+  | { event: "model-queue.usage-failed"; code: ModelUsageLedgerError["code"] }
   | { event: "model-queue.skip"; role: ModelQueueRole; model: string; reason: string }
   | { event: "model-queue.projection"; role: "subagent"; scope: "global" | "task-launch"; sessionId?: string;
       status: "published"; models: readonly string[] }
@@ -45,6 +47,7 @@ export type ModelQueueRecord =
       status: "failed"; reason: string };
 
 export interface ModelQueueOptions {
+  tronHome: string;
   runtime: ModelRuntime;
   usage: Pick<ProviderUsageOwner, "read">;
   queue(role: ModelQueueRole): Promise<readonly string[]>;
@@ -66,8 +69,16 @@ export class ModelQueueOwner {
   private readonly records = new Map<string, { reason: string; until: number }>();
   private readonly now: () => number;
   private publishing: Promise<void> = Promise.resolve();
+  private readonly usageLedger: ModelUsageLedger;
 
-  constructor(private readonly options: ModelQueueOptions) { this.now = options.now ?? Date.now; }
+  constructor(private readonly options: ModelQueueOptions) {
+    this.now = options.now ?? Date.now;
+    this.usageLedger = new ModelUsageLedger(options.tronHome, this.now);
+  }
+
+  async initialize(): Promise<void> {
+    await this.withUsageLedger(() => this.usageLedger.initialize());
+  }
 
   queue(role: ModelQueueRole): Promise<readonly string[]> { return this.options.queue(role); }
 
@@ -106,6 +117,7 @@ export class ModelQueueOwner {
   }
 
   async complete(role: ModelQueueRole, request: (model: Model<Api>) => { context: Context; options?: SimpleStreamOptions },
+    attribution: { caller: ModelUsageCaller; kind: ModelUsageIdentity["kind"] },
     signal?: AbortSignal, selected?: readonly string[]): Promise<{ message: AssistantMessage; model: Model<Api> }> {
     const availability = await this.availability(role, signal, selected);
     const states = availability.models.map(entry => ({ ...entry }));
@@ -116,8 +128,18 @@ export class ModelQueueOwner {
       }
       const ref = splitModelRef(entry.model)!;
       const model = this.options.runtime.getModel(ref.provider, ref.id)!;
+      const identity: ModelUsageIdentity = { provider: model.provider, model: model.id, role, kind: attribution.kind,
+        caller: "sessionId" in attribution.caller ? { sessionId: attribution.caller.sessionId } : { taskId: attribution.caller.taskId } };
       const { context, options } = request(model);
-      const message = await this.options.runtime.completeSimple(model, context, { ...options, ...(signal ? { signal } : {}) });
+      await this.withUsageLedger(() => this.usageLedger.check(identity));
+      let message: AssistantMessage;
+      try {
+        message = await this.options.runtime.completeSimple(model, context, { ...options, ...(signal ? { signal } : {}) });
+      } catch (error) {
+        await this.withUsageLedger(() => this.usageLedger.record(identity, "threw"));
+        throw error;
+      }
+      await this.withUsageLedger(() => this.usageLedger.record(identity, message.stopReason, message.usage));
       if (message.stopReason === "error" && isUsageLimitError(message.errorMessage)) {
         const reason = usageLimitReason(message.errorMessage!);
         this.recordUsageLimit(role, entry.model, reason);
@@ -186,6 +208,14 @@ export class ModelQueueOwner {
     });
     this.publishing = release.catch(() => {});
     await release;
+  }
+
+  private async withUsageLedger(action: () => Promise<void>): Promise<void> {
+    try { await action(); }
+    catch (error) {
+      if (error instanceof ModelUsageLedgerError) this.options.log?.({ event: "model-queue.usage-failed", code: error.code });
+      throw error;
+    }
   }
 
   private async hasAuth(provider: string): Promise<boolean> {

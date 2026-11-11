@@ -8,7 +8,7 @@ release dates, virtual models and provider-specific request policy (Moonshot Kim
 
 ## Owns
 
-`provider-usage.ts`, `openai-model-eligibility.ts` (`OpenAIModelEligibility`),
+`provider-usage.ts`, `model-usage-ledger.ts`, `openai-model-eligibility.ts` (`OpenAIModelEligibility`),
 `context-window-policy.ts`, `model-queue.ts` and `model-queue-extension.ts`,
 `recent-models.ts`, `model-release-date-catalog.ts` (+ JSON data), `virtual-model.ts`,
 `kimi-k3-policy.ts`, `claude-code-identity.ts`, `anthropic-full-context.ts`, `jev-model-pricing.ts`,
@@ -93,6 +93,29 @@ and before worker controls, reading canonical fixed settings and the worker fact
   Its `contextPolicy` factory constructs the concrete session policy after SDK creation;
   the runtime keeps only the neutral `ContextPolicy` port and exact-session binding.
   The provider policy remains the sole owner of budgets and canonical overrides.
+- **Background call ledger.** `ModelQueueOwner.complete` is the sole observation seam;
+  every `runtime.completeSimple` call settles to one row, including queue fallbacks,
+  returned errors/aborts and thrown failures. `model-usage-ledger.ts` alone stores these
+  counters in `<tronHome>/gateway/model-usage.json` (version 1, 0600, included in backups).
+  Missing initializes empty; malformed, oversized, non-regular or unreadable data refuses
+  startup or the next call before dispatch, never resets. Durable atomic publications
+  serialize, fsync and prune oldest first: newest 30 days, at most 10,000 rows and 8 MiB,
+  enforced on startup and completion; idle files are pruned on next startup/completion.
+  A write failure rejects that call and diagnoses without retrying its model request;
+  the prior file remains unless rename succeeded before a failed directory sync, in
+  which case publication is uncertain and the next operation reads the actual file.
+  The allowlist is provider/model, queue role, call kind, completion timestamp (Unix ms),
+  owning session or task ID, fixed outcome and fresh input/output/cache-read/cache-write
+  counters. Known `cacheWrite1h` is split from total writes to derive 5m writes; absent or
+  invalid counters stay null. Error/abort replies containing only SDK-initialized zeros
+  have unknown counters, as do thrown calls. No prompts, responses, credentials, headers,
+  arbitrary provider error text or cost estimates are stored. No ledger data is exported,
+  sent to providers or exposed through wire/UI. Home supplies the source session as the
+  caller and marks `summarizer`; other direct queue callers supply their explicit owner.
+  Hidden SDK retries and crash-interrupted calls are not separate rows. A completion
+  that outlives its summarizer wait still records when it settles while Gateway lives.
+  Existing episodic lifetime spend is unchanged and is not a second per-call ledger;
+  it is neither summed with these rows nor expected to equal a retained-window total.
 - **Model recency.** The provider descriptor owns `RecentModelStore`, `model.recent`
   and the `modelUsed` hook. Only admitted user-input runs record usage; preference
   writes stay off the run path, failures diagnose, and shutdown drains writes before
@@ -127,6 +150,7 @@ failures. OpenCode Go's usage endpoint retains its distinct entitlement/auth/oth
 
 | Signal | Level | Meaning |
 |---|---|---|
+| `model-queue.usage-failed` | error | The local counters ledger refused startup/call or failed publication: `source: models`, fixed `code` (`invalid-store`, `read-failed`, `write-failed`); no provider exception text; inspect `gateway/model-usage.json` locally and preserve corrupt bytes |
 | `model-queue.skip` | warning | A fallback queue skipped a model for a background call, or a call hit a usage limit: `source: models`, `code` (queue role); the message names `provider/id` and the reason |
 | `model-queue.projection` | info when published; warning on failure | A parent published the exact child model-queue projection before launch (`global` or `task-launch`, ordered model IDs), or publication failed and the child tool call was blocked |
 | `model.release-dates` | info on refresh; warning on failure or ignored persisted data | A release-date fetch completed or persisted state was rejected: `updated`, `providers`, `unrecognizedDates`, up to three `unknownDateSamples`, `reason` |

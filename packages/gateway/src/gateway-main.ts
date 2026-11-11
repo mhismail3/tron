@@ -203,12 +203,14 @@ const homeTaskDiagnostic = (record: HomeTaskDiagnostic) => logger.log(record.eve
     || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
     "Home task lifecycle", { source: "home", ...record });
 const modelQueue = new ModelQueueOwner({
+  tronHome: config.tronHome,
   runtime: modelRuntime,
   usage: providerUsage,
   queue: role => sessions.modelQueueOf(role),
   projectionPath: modelQueueProjectionPath(config.tronHome),
   log: (record) => {
-    if (record.event === "model-queue.skip") logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
+    if (record.event === "model-queue.usage-failed") logger.log("error", `Model usage ledger ${record.code}`, { event: record.event, source: "models", code: record.code });
+    else if (record.event === "model-queue.skip") logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
       event: record.event, source: "models", code: record.role,
     });
     else logger.log(record.status === "failed" ? "warning" : "info",
@@ -216,6 +218,7 @@ const modelQueue = new ModelQueueOwner({
       { event: record.event, source: "models", code: record.role, ...(record.sessionId ? { sessionId: record.sessionId } : {}) });
   },
 });
+await modelQueue.initialize();
 let automationHomeTrigger: AutomationHomeTrigger | undefined;
 const homeComposition: HomeComposition = {
   triggerSources: () => automationHomeTrigger ? [automationHomeTrigger] : [],
