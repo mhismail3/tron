@@ -3463,18 +3463,18 @@ extension AppModel {
         await sessionPresentation.loadCommands(sessionID: sessionID)
     }
 
-    func commandDetail(sessionID: String, command: CommandInfo) async throws -> CommandResourceDetail {
+    func commandDetail(sessionID: String, command: CommandInfo) async throws -> CommandDetail {
         guard let target = presentationTarget(for: sessionID),
               admitsLiveSessionCommands(target) else { throw CancellationError() }
         struct Params: Encodable {
             let sessionId: String
-            let source: CommandInfo.Source
+            let source: String
             let name: String
         }
-        let detail: CommandResourceDetail = try await client.request(
-            "session.commandDetail",
-            Params(sessionId: sessionID, source: command.source, name: command.name)
-        )
+        let detail = try GatewayResponseDecoding.decode(
+            try await client.requestValue("session.commandDetail",
+                Params(sessionId: sessionID, source: command.source.rawValue, name: command.name)),
+            method: "session.commandDetail", CommandDetail.decode)
         guard presentationTarget(for: sessionID) == target,
               admitsLiveSessionCommands(target) else { throw CancellationError() }
         return try CommandResourceDetailPolicy.admit(detail, matching: command)

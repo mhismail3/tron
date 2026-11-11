@@ -9,7 +9,7 @@ import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY } from "../protocol/capabilities.js";
-import type { GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelRef } from "../protocol/types.js";
+import type { CommandDetail, GatewayRestartResponse, HomeTaskStatusResult, JsonValue, ModelRef, SessionCommands, TronModuleList } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../episodic/home-memory-browser.js";
 import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { PI_VERSION } from "../kernel/pi/version.js";
@@ -1595,13 +1595,14 @@ export class GatewayService {
         return safeJson(slot.tree());
       }
       case "session.commands":
-        return safeJson({ commands: (await this.openedSlot(client, params)).commands() });
+        return safeJson({ commands: (await this.openedSlot(client, params)).commands() } satisfies SessionCommands);
       case "session.commandDetail": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await slot.commandDetail(
+        const detail: CommandDetail = await slot.commandDetail(
           oneOf(params.source, "source", ["extension", "skill", "prompt"] as const),
           string(params.name, "name", { max: 8_192 }),
-        ));
+        );
+        return safeJson(detail);
       }
       case "session.subagentDetail":
         return safeJson(await (await this.openedSlot(client, params)).subagentDetail(string(params.name, "name", { max: 8_192 })));
@@ -1878,7 +1879,7 @@ export class GatewayService {
         return safeJson(await this.dependencies.packages.list(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
       case "modules.list": {
         rejectUnknownFields(params, [], "Module listing");
-        return safeJson({ modules: tronModuleSummaries(this.dependencies.sessions.moduleHost) });
+        return safeJson({ modules: tronModuleSummaries(this.dependencies.sessions.moduleHost) } satisfies TronModuleList);
       }
       case "hooks.list":
         rejectUnknownFields(params, ["cwd"], "Hook listing");

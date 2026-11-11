@@ -56,7 +56,7 @@ struct ProjectResourceSelection: Identifiable {
         guard kind == .prompts || kind == .skills || kind == .commands,
               let object = value.objectValue,
               let name = object["name"]?.stringValue, !name.isEmpty else { return nil }
-        let source: CommandInfo.Source = switch kind {
+        let source: CommandInfoSource = switch kind {
         case .skills: .skill
         case .commands: .extension
         default: .prompt
@@ -68,8 +68,8 @@ struct ProjectResourceSelection: Identifiable {
             source: source,
             sourcePath: object["path"]?.stringValue ?? object["resolvedPath"]?.stringValue,
             resourceSource: object["source"]?.stringValue,
-            resourceScope: object["scope"]?.stringValue.flatMap(CommandInfo.ResourceScope.init(rawValue:)),
-            resourceOrigin: object["origin"]?.stringValue.flatMap(CommandInfo.ResourceOrigin.init(rawValue:))
+            resourceScope: object["scope"]?.stringValue.flatMap(CommandInfoResourceScope.init(rawValue:)),
+            resourceOrigin: object["origin"]?.stringValue.flatMap(CommandInfoResourceOrigin.init(rawValue:))
         )
     }
 
@@ -80,8 +80,8 @@ struct ProjectResourceOverviewRow: Identifiable, Equatable, Sendable {
     let title: String
     let subtitle: String?
     let value: JSONValue
-    let resourceScope: CommandInfo.ResourceScope?
-    let resourceOrigin: CommandInfo.ResourceOrigin?
+    let resourceScope: CommandInfoResourceScope?
+    let resourceOrigin: CommandInfoResourceOrigin?
     let distribution: ResourceDistribution?
 }
 
@@ -141,16 +141,16 @@ enum ProjectResourceOverviewPresentation {
                 subtitle: kind == .subagents ? subagentSubtitle(value) : subtitle(value),
                 value: value,
                 resourceScope: scope(kind: kind, value),
-                resourceOrigin: value.objectValue?["origin"]?.stringValue.flatMap(CommandInfo.ResourceOrigin.init(rawValue:)),
+                resourceOrigin: value.objectValue?["origin"]?.stringValue.flatMap(CommandInfoResourceOrigin.init(rawValue:)),
                 distribution: value.objectValue?["distribution"]?.stringValue.flatMap(ResourceDistribution.init(rawValue:))
             )
         }
     }
 
-    private static func scope(kind: ProjectResourceKind, _ value: JSONValue) -> CommandInfo.ResourceScope? {
+    private static func scope(kind: ProjectResourceKind, _ value: JSONValue) -> CommandInfoResourceScope? {
         let object = value.objectValue ?? [:]
         let raw = kind == .subagents ? object["source"]?.stringValue : (object["scope"] ?? object["resourceScope"])?.stringValue
-        return raw.flatMap(CommandInfo.ResourceScope.init(rawValue:))
+        return raw.flatMap(CommandInfoResourceScope.init(rawValue:))
     }
 
     private static func extensionCommands(_ raw: JSONValue?) -> [JSONValue] {
@@ -470,7 +470,7 @@ struct ProjectResourceDetailSheet: View {
     let onDone: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @PresentationState private var detail: CommandResourceDetail?
+    @PresentationState private var detail: CommandDetail?
     @PresentationState private var subagentDetail: SubagentResourceDetail?
     @PresentationState private var loadError: String?
     @PresentationState private var loadRevision = 0

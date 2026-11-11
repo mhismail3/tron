@@ -1,94 +1,13 @@
 import Foundation
 
-package enum ResourceDistribution: String, Codable, Hashable, Sendable {
-    case external
-    case module
-    case local
-}
-
-package struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
-    package enum Source: String, Codable, Sendable { case `extension`, skill, prompt }
-    package enum ResourceScope: String, Codable, Sendable { case user, project, temporary }
-    package enum ResourceOrigin: String, Codable, Sendable { case package, topLevel = "top-level" }
-
-    package let name: String
-    package let title: String?
-    package let description: String?
-    package let argumentHint: String?
-    package let source: Source
-    package let sourcePath: String?
-    package let resourceSource: String?
-    package let resourceScope: ResourceScope?
-    package let resourceOrigin: ResourceOrigin?
+extension CommandInfo: Identifiable {
     package var id: String { "\(source.rawValue):\(name)" }
-
-    package init(
-        name: String,
-        description: String?,
-        argumentHint: String?,
-        source: Source,
-        sourcePath: String?,
-        resourceSource: String? = nil,
-        resourceScope: ResourceScope? = nil,
-        resourceOrigin: ResourceOrigin? = nil,
-        title: String? = nil
-    ) {
-        self.name = name
-        self.title = title
-        self.description = description
-        self.argumentHint = argumentHint
-        self.source = source
-        self.sourcePath = sourcePath
-        self.resourceSource = resourceSource
-        self.resourceScope = resourceScope
-        self.resourceOrigin = resourceOrigin
-    }
-}
-
-package struct CommandResourceDetail: Codable, Hashable, Sendable {
-    package let name: String
-    package let description: String?
-    package let argumentHint: String?
-    let source: CommandInfo.Source
-    package let sourcePath: String?
-    package let resourceSource: String?
-    package let resourceScope: CommandInfo.ResourceScope?
-    package let resourceOrigin: CommandInfo.ResourceOrigin?
-    package let content: String?
-    package let contentBytes: Int?
-    package let contentTruncated: Bool?
-
-    init(
-        name: String,
-        description: String?,
-        argumentHint: String?,
-        source: CommandInfo.Source,
-        sourcePath: String?,
-        resourceSource: String?,
-        resourceScope: CommandInfo.ResourceScope?,
-        resourceOrigin: CommandInfo.ResourceOrigin?,
-        content: String?,
-        contentBytes: Int?,
-        contentTruncated: Bool?
-    ) {
-        self.name = name
-        self.description = description
-        self.argumentHint = argumentHint
-        self.source = source
-        self.sourcePath = sourcePath
-        self.resourceSource = resourceSource
-        self.resourceScope = resourceScope
-        self.resourceOrigin = resourceOrigin
-        self.content = content
-        self.contentBytes = contentBytes
-        self.contentTruncated = contentTruncated
-    }
 }
 
 package enum CommandResourceDetailPolicy {
     static let maximumContentBytes = 96 * 1_024
 
-    package static func admit(_ detail: CommandResourceDetail, matching command: CommandInfo) throws -> CommandResourceDetail {
+    package static func admit(_ detail: CommandDetail, matching command: CommandInfo) throws -> CommandDetail {
         let projectedBytes = detail.content?.utf8.count
         let metadata = [
             detail.name,
@@ -140,8 +59,7 @@ package enum CommandCatalogPolicy {
                 throw invalidCatalog()
             }
         }
-        guard let encoded = try? JSONEncoder.gateway.encode(commands),
-              encoded.count <= maximumEncodedBytes else {
+        guard ("[" + commands.map { $0.encode() }.joined(separator: ",") + "]").utf8.count <= maximumEncodedBytes else {
             throw invalidCatalog()
         }
         return commands
@@ -216,16 +134,8 @@ package struct PackageInventory: Codable, Hashable, Sendable {
     package var providesDiagnostic: String? = nil
 }
 
-package struct TronModuleSummary: Codable, Hashable, Identifiable, Sendable {
-    package let name: String
-    package let purpose: String
-    package let tools: [String]
-    package let commands: [String]
+extension TronModuleSummary: Identifiable {
     package var id: String { name }
-}
-
-package struct TronModuleList: Codable, Hashable, Sendable {
-    package let modules: [TronModuleSummary]
 }
 
 package struct PackageUpdate: Codable, Hashable, Identifiable, Sendable {

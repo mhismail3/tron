@@ -246,6 +246,8 @@ export function emitSwift(types, source) {
     } else if (ty.kind === "record") {
       const c = ty.ctors[0];
       out.push(`package struct ${ty.name}: Hashable, Sendable {`, ...present(c).map((f) => `  package let ${swiftName(f.wire)}: ${swType(f.type)}`),
+        `  package init(${present(c).map((f) => `${label(f.wire)}: ${swType(f.type)}${f.type.kind === "Option" ? " = nil" : ""}`).join(", ")}) {`,
+        ...present(c).map((f) => `    self.${swiftName(f.wire)} = ${swiftName(f.wire)}`), `  }`,
         `  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ${ty.name} {`, `    let o = try wObj(v, p)`, ...decLets(c, "    "),
         `    return ${ty.name}(${decArgs(c)})`, `  }`,
         present(c).length ? `  package func encode() -> String {\n    var s = ""\n${present(c).map((f) => `    s += ${encField(f, "self.")}`).join("\n")}\n    return "{" + String(s.dropFirst()) + "}"\n  }` : `  package func encode() -> String { "{}" }`, `}`);
