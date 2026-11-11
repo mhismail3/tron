@@ -69,6 +69,11 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   existing rows never animate stack-wide. An outgoing prompt installs at full natural size and
   only fades and rises 20 points over 280 ms, keeping its physical row through canonical
   replacement. Streaming text reveals newly admitted words by opacity only (220 ms fade).
+- **Message menus.** The native menu hosts one real content tree and exposes its actual descendants,
+  never a second accessibility rendering. The host forwards public traits and app-owned model,
+  route, resource, presentation and theme context; its private SwiftUI layout/scroll environment
+  belongs to that host and is not copied from the surrounding transcript. UIKit owns the native
+  preview and menu lifetime; mutable actions recheck the live window, item identity and current action.
 - **Composer.** Drafting works during opening and active turns; only submission waits. Send
   replaces Stop when a draft exists; `acceptsQueuedPrompts` alone allows steering (the send
   menu picks steer or follow-up). Stop is preemptive and fenced by the operation ID. Queue cards
