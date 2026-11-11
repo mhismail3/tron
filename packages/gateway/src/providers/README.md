@@ -101,9 +101,11 @@ and before worker controls, reading canonical fixed settings and the worker fact
   startup or the next call before dispatch, never resets. Durable atomic publications
   serialize, fsync and prune oldest first: newest 30 days, at most 10,000 rows and 8 MiB,
   enforced on startup and completion; idle files are pruned on next startup/completion.
-  A write failure rejects that call and diagnoses without retrying its model request;
+  An accounting failure after completion diagnoses but preserves the completed model
+  reply or original thrown error, without replay. That call may have missing usage;
   the prior file remains unless rename succeeded before a failed directory sync, in
   which case publication is uncertain and the next operation reads the actual file.
+  Startup and pre-dispatch ledger failures still refuse; corrupt bytes never reset.
   The allowlist is provider/model, queue role, call kind, completion timestamp (Unix ms),
   owning session or task ID, fixed outcome and fresh input/output/cache-read/cache-write
   counters. Known `cacheWrite1h` is split from total writes to derive 5m writes; absent or

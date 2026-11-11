@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { singleModelSummarizer } from "../../test-support/settings-dependencies.js";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -262,11 +262,27 @@ describe("the episodic summarizer on a reasoning model", () => {
     expect(f.bodies).toHaveLength(0);
     expect(diagnostics).toHaveLength(6);
     expect(diagnostics).toEqual(Array.from({ length: 6 }, () => ({ event: "model-queue.usage-failed", code: "invalid-store" })));
-    await writeFile(path, JSON.stringify({ version: 1, records: [] }));
+    await rm(path);
+    const protectedPath = join(f.root, "protected.json");
+    const empty = JSON.stringify({ version: 1, records: [] });
+    await writeFile(protectedPath, empty);
+    await symlink(protectedPath, path);
+    await expect(queue.initialize()).rejects.toMatchObject({ message: "Model usage ledger read-failed" });
+    expect((await lstat(path)).isSymbolicLink()).toBe(true);
+    expect(await readFile(protectedPath, "utf8")).toBe(empty);
+    await rm(path);
+    await mkdir(path);
+    await expect(queue.initialize()).rejects.toMatchObject({ message: "Model usage ledger invalid-store" });
+    expect((await stat(path)).isDirectory()).toBe(true);
+    expect(f.bodies).toHaveLength(0);
+    await rm(path, { recursive: true });
+    await writeFile(path, empty);
     const before = await readFile(path, "utf8");
     await chmod(join(f.root, "gateway"), 0o500);
     try {
-      await expect(summarize(request)).rejects.toMatchObject({ message: "Model usage ledger write-failed" });
+      const completed = await summarize(request);
+      expect(completed.stopReason).toBe("stop");
+      expect(completed.content).toContainEqual({ type: "text", text: "user: a summarized line" });
       expect(await readFile(path, "utf8")).toBe(before);
       expect(f.bodies).toHaveLength(1);
       expect(diagnostics.at(-1)).toEqual({ event: "model-queue.usage-failed", code: "write-failed" });

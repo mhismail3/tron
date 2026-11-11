@@ -136,10 +136,10 @@ export class ModelQueueOwner {
       try {
         message = await this.options.runtime.completeSimple(model, context, { ...options, ...(signal ? { signal } : {}) });
       } catch (error) {
-        await this.withUsageLedger(() => this.usageLedger.record(identity, "threw"));
+        await this.withUsageLedger(() => this.usageLedger.record(identity, "threw"), true);
         throw error;
       }
-      await this.withUsageLedger(() => this.usageLedger.record(identity, message.stopReason, message.usage));
+      await this.withUsageLedger(() => this.usageLedger.record(identity, message.stopReason, message.usage), true);
       if (message.stopReason === "error" && isUsageLimitError(message.errorMessage)) {
         const reason = usageLimitReason(message.errorMessage!);
         this.recordUsageLimit(role, entry.model, reason);
@@ -210,10 +210,13 @@ export class ModelQueueOwner {
     await release;
   }
 
-  private async withUsageLedger(action: () => Promise<void>): Promise<void> {
+  private async withUsageLedger(action: () => Promise<void>, completed = false): Promise<void> {
     try { await action(); }
     catch (error) {
-      if (error instanceof ModelUsageLedgerError) this.options.log?.({ event: "model-queue.usage-failed", code: error.code });
+      if (error instanceof ModelUsageLedgerError) {
+        this.options.log?.({ event: "model-queue.usage-failed", code: error.code });
+        if (completed) return;
+      }
       throw error;
     }
   }
