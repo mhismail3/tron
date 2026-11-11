@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { parseWire } from "../dafny2wire/dafny2wire.mjs";
+import { PROTOCOL_SWIFT, parseWire, reachable, swiftRoots } from "../dafny2wire/dafny2wire.mjs";
 import { mulberry32 } from "./random.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const FIXTURE = join(ROOT, "tools/proof/tests/fixtures/wire/Wire.dfy");
 const PROTOCOL = join(ROOT, "packages/core/wire/Protocol.dfy");
 
-test("protocol: types.ts is generated, and its TypeScript and tolerant Swift codecs agree byte for byte", async (t) => {
+test("protocol: types.ts and the iOS decoders are generated, and the TypeScript and tolerant Swift codecs agree byte for byte", async (t) => {
   const check = spawnSync(join(ROOT, "scripts/tron"), ["proof", "wire", "--protocol", "--check"], { encoding: "utf8" });
   assert.equal(check.status, 0, check.stderr);
   const dir = mkdtempSync(join(tmpdir(), "tron-proof-protocol-"));
@@ -27,11 +27,14 @@ test("protocol: types.ts is generated, and its TypeScript and tolerant Swift cod
   const pick = (xs) => xs[Math.floor(rnd() * xs.length)];
   const STRINGS = ["", "a", 'q"uote', "back\\slash", "line\nbreak", "\u0001ctl", "é ✓ 😀", "2026-11-09T09:00:00.000Z"];
   const DOUBLES = [0, 1, 7, 100, 0.5, 1 / 3, 1e21, 5e-324, -2, 1700000000000];
+  const INTS = [0, 1, 7, 100, -2, 1700000000000, Number.MAX_SAFE_INTEGER];
   const value = (ft, depth) => {
     switch (ft.kind) {
       case "string": return pick(STRINGS);
       case "bool": return rnd() < 0.5;
-      case "real": case "int": case "nat": return pick(DOUBLES);
+      case "real": return pick(DOUBLES);
+      case "int": return pick(INTS);
+      case "nat": return Math.abs(pick(INTS));
       case "seq": return depth > 3 ? [] : Array.from({ length: Math.floor(rnd() * 3) }, () => value(ft.arg, depth + 1));
       case "map": {
         const keys = ft.key.kind === "string" ? ["a", "b", "1", "z"] : byName.get(ft.key.kind).ctors.map((c) => c.wire);
@@ -81,23 +84,33 @@ test("protocol: types.ts is generated, and its TypeScript and tolerant Swift cod
     try { return W[`encode${name}`](W[`decode${name}`](JSON.parse(json))); }
     catch (error) { if (!(error instanceof W.WireError)) throw error; return `ERR ${error.path}`; }
   };
-  writeFileSync(join(dir, "corpus.txt"), `${corpus.join("\n")}\n`);
-  writeFileSync(join(dir, "main.swift"), [
-    "import Foundation",
-    "func roundTrip(_ name: Substring, _ v: WireJSON) throws -> String {",
-    "  switch name {",
-    ...types.map((ty) => `  case "${ty.name}": return try ${ty.name}.decode(v).encode()`),
-    '  default: return "NO TYPE"',
-    "  }",
-    "}",
-    "let text = try! String(contentsOfFile: CommandLine.arguments[1], encoding: .utf8)",
-    'for line in text.split(separator: "\\n") {',
-    '  let parts = line.split(separator: "\\t", maxSplits: 1)',
-    '  do { print(try roundTrip(parts[0], try wParse(String(parts[1])))) } catch let e as WireError { print("ERR \\(e.path)") } catch { print("ERR ?") }',
-    "}",
-  ].join("\n"));
-  execFileSync("swiftc", ["-O", join(dir, "Wire.swift"), join(dir, "main.swift"), "-o", join(dir, "roundtrip")], { stdio: "pipe" });
-  const swift = execFileSync(join(dir, "roundtrip"), [join(dir, "corpus.txt")], { encoding: "utf8", maxBuffer: 1 << 28 }).split("\n").slice(0, corpus.length);
+  const runSwift = (name, source, typeNames, input) => {
+    const sub = join(dir, name);
+    mkdirSync(sub);
+    writeFileSync(join(sub, "corpus.txt"), `${input.join("\n")}\n`);
+    writeFileSync(join(sub, "main.swift"), [
+      "import Foundation",
+      "func roundTrip(_ name: Substring, _ v: WireJSON) throws -> String {",
+      "  switch name {",
+      ...typeNames.map((n) => `  case "${n}": return try ${n}.decode(v).encode()`),
+      '  default: return "NO TYPE"',
+      "  }",
+      "}",
+      "let text = try! String(contentsOfFile: CommandLine.arguments[1], encoding: .utf8)",
+      'for line in text.split(separator: "\\n") {',
+      '  let parts = line.split(separator: "\\t", maxSplits: 1)',
+      '  do { print(try roundTrip(parts[0], try wParse(String(parts[1])))) } catch let e as WireError { print("ERR \\(e.path)") } catch { print("ERR ?") }',
+      "}",
+    ].join("\n"));
+    execFileSync("swiftc", ["-O", "-package-name", "wire", source, join(sub, "main.swift"), "-o", join(sub, "roundtrip")], { stdio: "pipe" });
+    return execFileSync(join(sub, "roundtrip"), [join(sub, "corpus.txt")], { encoding: "utf8", maxBuffer: 1 << 28 }).split("\n").slice(0, input.length);
+  };
+  const swift = runSwift("all", join(dir, "Wire.swift"), types.map((ty) => ty.name), corpus);
+  const appTypes = new Set(reachable(types, swiftRoots(readFileSync(PROTOCOL, "utf8"))).map((ty) => ty.name));
+  const appLines = corpus.map((line, i) => [line, i]).filter(([line]) => appTypes.has(line.split("\t")[0]));
+  assert.equal(appLines.filter(([, i]) => i < lines.length).length, appTypes.size * 12);
+  assert.deepEqual(runSwift("app", join(ROOT, PROTOCOL_SWIFT), [...appTypes], appLines.map(([line]) => line)), appLines.map(([, i]) => swift[i]),
+    "the iOS app's checked-in decoders read every value of their datatypes as the generated Swift codec does");
   const ts = corpus.map(tsOut);
   const differ = lines.map((line, i) => [line.split("\t")[0], ts[i], swift[i]]).filter(([, a, b]) => a !== b);
   assert.deepEqual(differ.slice(0, 3), [], `${differ.length} of ${lines.length} values differ between TypeScript and Swift`);
@@ -181,7 +194,7 @@ test("generated TypeScript and Swift codecs agree byte for byte", async (t) => {
     "}",
     'print(WireMap<Int>([("b", 1), ("1", 2), ("a", 3), ("0", 4), ("b", 5)]).encode { String($0) })',
   ].join("\n"));
-  execFileSync("swiftc", ["-O", join(dir, "Wire.swift"), join(dir, "main.swift"), "-o", join(dir, "roundtrip")], { stdio: "pipe" });
+  execFileSync("swiftc", ["-O", "-package-name", "wire", join(dir, "Wire.swift"), join(dir, "main.swift"), "-o", join(dir, "roundtrip")], { stdio: "pipe" });
   const swiftLines = execFileSync(join(dir, "roundtrip"), [join(dir, "corpus.jsonl")], { encoding: "utf8", maxBuffer: 1 << 28 }).split("\n");
   const swift = swiftLines.slice(0, corpus.length);
   const built = { b: 1, 1: 2, a: 3, 0: 4 }; built.b = 5;

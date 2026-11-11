@@ -6,6 +6,7 @@ const obj = (v: unknown, p: string): Record<string, unknown> => { if (typeof v !
 const str = (v: unknown, p: string): string => { if (typeof v !== "string") throw new WireError(p, "expected string"); return v; };
 const bool = (v: unknown, p: string): boolean => { if (typeof v !== "boolean") throw new WireError(p, "expected boolean"); return v; };
 const num = (v: unknown, p: string): number => { if (typeof v !== "number" || !Number.isFinite(v)) throw new WireError(p, "expected number"); return v; };
+const int = (v: unknown, p: string): number => { if (!Number.isSafeInteger(v)) throw new WireError(p, "expected integer"); return v as number; };
 const seq = <T>(v: unknown, p: string, f: (x: unknown, p: string) => T): T[] => { if (!Array.isArray(v)) throw new WireError(p, "expected array"); return v.map((x, i) => f(x, `${p}[${i}]`)); };
 const dict = <T>(v: unknown, p: string, f: (x: unknown, p: string) => T, key?: (k: unknown, p: string) => unknown): Record<string, T> => { const o = obj(v, p); const r: Record<string, T> = {}; for (const k of Object.keys(o)) if (key) key(k, `${p}[${JSON.stringify(k)}]`); for (const k of Object.keys(o)) Object.defineProperty(r, k, { value: f(o[k], `${p}[${JSON.stringify(k)}]`), enumerable: true, writable: true, configurable: true }); return r; };
 // An own property only: inherited names (constructor, toString, __proto__) are never fields.
@@ -2362,7 +2363,7 @@ export interface HomeProfileList { items: HomeProfileListItem[]; unclassified: n
 export function decodeHomeProfileList(v: unknown, p = "$"): HomeProfileList {
   const o = obj(v, p);
   only(o, p, ["items","unclassified"]);
-  return { items: seq(own(o, "items"), p + ".items", (x, q) => decodeHomeProfileListItem(x, q)), unclassified: num(own(o, "unclassified"), p + ".unclassified") };
+  return { items: seq(own(o, "items"), p + ".items", (x, q) => decodeHomeProfileListItem(x, q)), unclassified: int(own(o, "unclassified"), p + ".unclassified") };
 }
 export function encodeHomeProfileList(v: HomeProfileList): string {
   return "{" + (',"items":' + "[" + v.items.map((x) => encodeHomeProfileListItem(x)).join(",") + "]" + ',"unclassified":' + encNum(v.unclassified)).slice(1) + "}";
@@ -2392,7 +2393,7 @@ export interface HomeChapterContents {
 export function decodeHomeChapterContents(v: unknown, p = "$"): HomeChapterContents {
   const o = obj(v, p);
   only(o, p, ["firstAt","lastAt","userMessages","homeReplies","tasksDelegated","topics"]);
-  return { ...(own(o, "firstAt") === undefined ? {} : { firstAt: str(own(o, "firstAt"), p + ".firstAt") }), ...(own(o, "lastAt") === undefined ? {} : { lastAt: str(own(o, "lastAt"), p + ".lastAt") }), userMessages: num(own(o, "userMessages"), p + ".userMessages"), homeReplies: num(own(o, "homeReplies"), p + ".homeReplies"), tasksDelegated: num(own(o, "tasksDelegated"), p + ".tasksDelegated"), topics: seq(own(o, "topics"), p + ".topics", (x, q) => str(x, q)) };
+  return { ...(own(o, "firstAt") === undefined ? {} : { firstAt: str(own(o, "firstAt"), p + ".firstAt") }), ...(own(o, "lastAt") === undefined ? {} : { lastAt: str(own(o, "lastAt"), p + ".lastAt") }), userMessages: int(own(o, "userMessages"), p + ".userMessages"), homeReplies: int(own(o, "homeReplies"), p + ".homeReplies"), tasksDelegated: int(own(o, "tasksDelegated"), p + ".tasksDelegated"), topics: seq(own(o, "topics"), p + ".topics", (x, q) => str(x, q)) };
 }
 export function encodeHomeChapterContents(v: HomeChapterContents): string {
   return "{" + ((v.firstAt === undefined ? "" : ',"firstAt":' + JSON.stringify(v.firstAt)) + (v.lastAt === undefined ? "" : ',"lastAt":' + JSON.stringify(v.lastAt)) + ',"userMessages":' + encNum(v.userMessages) + ',"homeReplies":' + encNum(v.homeReplies) + ',"tasksDelegated":' + encNum(v.tasksDelegated) + ',"topics":' + "[" + v.topics.map((x) => JSON.stringify(x)).join(",") + "]").slice(1) + "}";
@@ -2423,7 +2424,7 @@ export interface HomeChapterSummary {
 export function decodeHomeChapterSummary(v: unknown, p = "$"): HomeChapterSummary {
   const o = obj(v, p);
   only(o, p, ["sessionId","ordinal","state","createdAt","activationStarted","sessionPresent","sealedAt","bytes","entries","contents"]);
-  return { sessionId: str(own(o, "sessionId"), p + ".sessionId"), ordinal: num(own(o, "ordinal"), p + ".ordinal"), state: decodeHomeChapterSummaryState(own(o, "state"), p + ".state"), createdAt: str(own(o, "createdAt"), p + ".createdAt"), activationStarted: bool(own(o, "activationStarted"), p + ".activationStarted"), sessionPresent: bool(own(o, "sessionPresent"), p + ".sessionPresent"), ...(own(o, "sealedAt") === undefined ? {} : { sealedAt: str(own(o, "sealedAt"), p + ".sealedAt") }), ...(own(o, "bytes") === undefined ? {} : { bytes: num(own(o, "bytes"), p + ".bytes") }), ...(own(o, "entries") === undefined ? {} : { entries: num(own(o, "entries"), p + ".entries") }), ...(own(o, "contents") === undefined ? {} : { contents: decodeHomeChapterContents(own(o, "contents"), p + ".contents") }) };
+  return { sessionId: str(own(o, "sessionId"), p + ".sessionId"), ordinal: int(own(o, "ordinal"), p + ".ordinal"), state: decodeHomeChapterSummaryState(own(o, "state"), p + ".state"), createdAt: str(own(o, "createdAt"), p + ".createdAt"), activationStarted: bool(own(o, "activationStarted"), p + ".activationStarted"), sessionPresent: bool(own(o, "sessionPresent"), p + ".sessionPresent"), ...(own(o, "sealedAt") === undefined ? {} : { sealedAt: str(own(o, "sealedAt"), p + ".sealedAt") }), ...(own(o, "bytes") === undefined ? {} : { bytes: int(own(o, "bytes"), p + ".bytes") }), ...(own(o, "entries") === undefined ? {} : { entries: int(own(o, "entries"), p + ".entries") }), ...(own(o, "contents") === undefined ? {} : { contents: decodeHomeChapterContents(own(o, "contents"), p + ".contents") }) };
 }
 export function encodeHomeChapterSummary(v: HomeChapterSummary): string {
   return "{" + (',"sessionId":' + JSON.stringify(v.sessionId) + ',"ordinal":' + encNum(v.ordinal) + ',"state":' + encodeHomeChapterSummaryState(v.state) + ',"createdAt":' + JSON.stringify(v.createdAt) + ',"activationStarted":' + JSON.stringify(v.activationStarted) + ',"sessionPresent":' + JSON.stringify(v.sessionPresent) + (v.sealedAt === undefined ? "" : ',"sealedAt":' + JSON.stringify(v.sealedAt)) + (v.bytes === undefined ? "" : ',"bytes":' + encNum(v.bytes)) + (v.entries === undefined ? "" : ',"entries":' + encNum(v.entries)) + (v.contents === undefined ? "" : ',"contents":' + encodeHomeChapterContents(v.contents))).slice(1) + "}";
@@ -2432,7 +2433,7 @@ export interface HomeChapterListLimits { softBytes: number; softEntries: number;
 export function decodeHomeChapterListLimits(v: unknown, p = "$"): HomeChapterListLimits {
   const o = obj(v, p);
   only(o, p, ["softBytes","softEntries","hardBytes","hardEntries"]);
-  return { softBytes: num(own(o, "softBytes"), p + ".softBytes"), softEntries: num(own(o, "softEntries"), p + ".softEntries"), hardBytes: num(own(o, "hardBytes"), p + ".hardBytes"), hardEntries: num(own(o, "hardEntries"), p + ".hardEntries") };
+  return { softBytes: int(own(o, "softBytes"), p + ".softBytes"), softEntries: int(own(o, "softEntries"), p + ".softEntries"), hardBytes: int(own(o, "hardBytes"), p + ".hardBytes"), hardEntries: int(own(o, "hardEntries"), p + ".hardEntries") };
 }
 export function encodeHomeChapterListLimits(v: HomeChapterListLimits): string {
   return "{" + (',"softBytes":' + encNum(v.softBytes) + ',"softEntries":' + encNum(v.softEntries) + ',"hardBytes":' + encNum(v.hardBytes) + ',"hardEntries":' + encNum(v.hardEntries)).slice(1) + "}";
@@ -2452,7 +2453,7 @@ export interface HomeChapterList {
 export function decodeHomeChapterList(v: unknown, p = "$"): HomeChapterList {
   const o = obj(v, p);
   only(o, p, ["homeId","generation","enabled","limits","chapters"]);
-  return { homeId: str(own(o, "homeId"), p + ".homeId"), generation: num(own(o, "generation"), p + ".generation"), enabled: bool(own(o, "enabled"), p + ".enabled"), limits: decodeHomeChapterListLimits(own(o, "limits"), p + ".limits"), chapters: seq(own(o, "chapters"), p + ".chapters", (x, q) => decodeHomeChapterSummary(x, q)) };
+  return { homeId: str(own(o, "homeId"), p + ".homeId"), generation: int(own(o, "generation"), p + ".generation"), enabled: bool(own(o, "enabled"), p + ".enabled"), limits: decodeHomeChapterListLimits(own(o, "limits"), p + ".limits"), chapters: seq(own(o, "chapters"), p + ".chapters", (x, q) => decodeHomeChapterSummary(x, q)) };
 }
 export function encodeHomeChapterList(v: HomeChapterList): string {
   return "{" + (',"homeId":' + JSON.stringify(v.homeId) + ',"generation":' + encNum(v.generation) + ',"enabled":' + JSON.stringify(v.enabled) + ',"limits":' + encodeHomeChapterListLimits(v.limits) + ',"chapters":' + "[" + v.chapters.map((x) => encodeHomeChapterSummary(x)).join(",") + "]").slice(1) + "}";
@@ -2462,7 +2463,7 @@ export interface HomeMemoryEvidence { index: number; sessionId: string; entryId:
 export function decodeHomeMemoryEvidence(v: unknown, p = "$"): HomeMemoryEvidence {
   const o = obj(v, p);
   only(o, p, ["index","sessionId","entryId","sourceDigest"]);
-  return { index: num(own(o, "index"), p + ".index"), sessionId: str(own(o, "sessionId"), p + ".sessionId"), entryId: str(own(o, "entryId"), p + ".entryId"), sourceDigest: str(own(o, "sourceDigest"), p + ".sourceDigest") };
+  return { index: int(own(o, "index"), p + ".index"), sessionId: str(own(o, "sessionId"), p + ".sessionId"), entryId: str(own(o, "entryId"), p + ".entryId"), sourceDigest: str(own(o, "sourceDigest"), p + ".sourceDigest") };
 }
 export function encodeHomeMemoryEvidence(v: HomeMemoryEvidence): string {
   return "{" + (',"index":' + encNum(v.index) + ',"sessionId":' + JSON.stringify(v.sessionId) + ',"entryId":' + JSON.stringify(v.entryId) + ',"sourceDigest":' + JSON.stringify(v.sourceDigest)).slice(1) + "}";
@@ -2494,7 +2495,7 @@ export interface HomeMemoryItemDisplay {
 export function decodeHomeMemoryItemDisplay(v: unknown, p = "$"): HomeMemoryItemDisplay {
   const o = obj(v, p);
   only(o, p, ["kind","toolName","target","toolCount","status"]);
-  return { kind: decodeHomeMemoryItemDisplayKind(own(o, "kind"), p + ".kind"), ...(own(o, "toolName") === undefined ? {} : { toolName: str(own(o, "toolName"), p + ".toolName") }), ...(own(o, "target") === undefined ? {} : { target: str(own(o, "target"), p + ".target") }), ...(own(o, "toolCount") === undefined ? {} : { toolCount: num(own(o, "toolCount"), p + ".toolCount") }), ...(own(o, "status") === undefined ? {} : { status: decodeHomeMemoryItemDisplayStatus(own(o, "status"), p + ".status") }) };
+  return { kind: decodeHomeMemoryItemDisplayKind(own(o, "kind"), p + ".kind"), ...(own(o, "toolName") === undefined ? {} : { toolName: str(own(o, "toolName"), p + ".toolName") }), ...(own(o, "target") === undefined ? {} : { target: str(own(o, "target"), p + ".target") }), ...(own(o, "toolCount") === undefined ? {} : { toolCount: int(own(o, "toolCount"), p + ".toolCount") }), ...(own(o, "status") === undefined ? {} : { status: decodeHomeMemoryItemDisplayStatus(own(o, "status"), p + ".status") }) };
 }
 export function encodeHomeMemoryItemDisplay(v: HomeMemoryItemDisplay): string {
   return "{" + (',"kind":' + encodeHomeMemoryItemDisplayKind(v.kind) + (v.toolName === undefined ? "" : ',"toolName":' + JSON.stringify(v.toolName)) + (v.target === undefined ? "" : ',"target":' + JSON.stringify(v.target)) + (v.toolCount === undefined ? "" : ',"toolCount":' + encNum(v.toolCount)) + (v.status === undefined ? "" : ',"status":' + encodeHomeMemoryItemDisplayStatus(v.status))).slice(1) + "}";
@@ -2541,7 +2542,7 @@ export interface HomeMemoryItem {
 export function decodeHomeMemoryItem(v: unknown, p = "$"): HomeMemoryItem {
   const o = obj(v, p);
   only(o, p, ["index","kind","attribution","timestamp","evidence","display","projection","summary"]);
-  return { index: num(own(o, "index"), p + ".index"), kind: decodeHomeMemoryItemKind(own(o, "kind"), p + ".kind"), attribution: decodeHomeMemoryItemAttribution(own(o, "attribution"), p + ".attribution"), ...(own(o, "timestamp") === undefined ? {} : { timestamp: str(own(o, "timestamp"), p + ".timestamp") }), evidence: decodeHomeMemoryEvidence(own(o, "evidence"), p + ".evidence"), ...(own(o, "display") === undefined ? {} : { display: decodeHomeMemoryItemDisplay(own(o, "display"), p + ".display") }), projection: decodeHomeMemoryItemProjection(own(o, "projection"), p + ".projection"), summary: (own(o, "summary") === null ? null : decodeHomeMemoryItemSummary(own(o, "summary"), p + ".summary")) };
+  return { index: int(own(o, "index"), p + ".index"), kind: decodeHomeMemoryItemKind(own(o, "kind"), p + ".kind"), attribution: decodeHomeMemoryItemAttribution(own(o, "attribution"), p + ".attribution"), ...(own(o, "timestamp") === undefined ? {} : { timestamp: str(own(o, "timestamp"), p + ".timestamp") }), evidence: decodeHomeMemoryEvidence(own(o, "evidence"), p + ".evidence"), ...(own(o, "display") === undefined ? {} : { display: decodeHomeMemoryItemDisplay(own(o, "display"), p + ".display") }), projection: decodeHomeMemoryItemProjection(own(o, "projection"), p + ".projection"), summary: (own(o, "summary") === null ? null : decodeHomeMemoryItemSummary(own(o, "summary"), p + ".summary")) };
 }
 export function encodeHomeMemoryItem(v: HomeMemoryItem): string {
   return "{" + (',"index":' + encNum(v.index) + ',"kind":' + encodeHomeMemoryItemKind(v.kind) + ',"attribution":' + encodeHomeMemoryItemAttribution(v.attribution) + (v.timestamp === undefined ? "" : ',"timestamp":' + JSON.stringify(v.timestamp)) + ',"evidence":' + encodeHomeMemoryEvidence(v.evidence) + (v.display === undefined ? "" : ',"display":' + encodeHomeMemoryItemDisplay(v.display)) + ',"projection":' + encodeHomeMemoryItemProjection(v.projection) + ',"summary":' + (v.summary === null ? "null" : encodeHomeMemoryItemSummary(v.summary))).slice(1) + "}";
@@ -2567,7 +2568,7 @@ export interface HomeMemoryViewLine {
 export function decodeHomeMemoryViewLine(v: unknown, p = "$"): HomeMemoryViewLine {
   const o = obj(v, p);
   only(o, p, ["inCurrentView","startsIndividualMessages","start","span","text","truncated","kind","firstAt","lastAt","item"]);
-  return { inCurrentView: bool(own(o, "inCurrentView"), p + ".inCurrentView"), startsIndividualMessages: bool(own(o, "startsIndividualMessages"), p + ".startsIndividualMessages"), start: num(own(o, "start"), p + ".start"), span: num(own(o, "span"), p + ".span"), text: (own(o, "text") === null ? null : str(own(o, "text"), p + ".text")), truncated: bool(own(o, "truncated"), p + ".truncated"), ...(own(o, "kind") === undefined ? {} : { kind: decodeHomeMemoryItemKind(own(o, "kind"), p + ".kind") }), ...(own(o, "firstAt") === undefined ? {} : { firstAt: str(own(o, "firstAt"), p + ".firstAt") }), ...(own(o, "lastAt") === undefined ? {} : { lastAt: str(own(o, "lastAt"), p + ".lastAt") }), ...(own(o, "item") === undefined ? {} : { item: decodeHomeMemoryItem(own(o, "item"), p + ".item") }) };
+  return { inCurrentView: bool(own(o, "inCurrentView"), p + ".inCurrentView"), startsIndividualMessages: bool(own(o, "startsIndividualMessages"), p + ".startsIndividualMessages"), start: int(own(o, "start"), p + ".start"), span: int(own(o, "span"), p + ".span"), text: (own(o, "text") === null ? null : str(own(o, "text"), p + ".text")), truncated: bool(own(o, "truncated"), p + ".truncated"), ...(own(o, "kind") === undefined ? {} : { kind: decodeHomeMemoryItemKind(own(o, "kind"), p + ".kind") }), ...(own(o, "firstAt") === undefined ? {} : { firstAt: str(own(o, "firstAt"), p + ".firstAt") }), ...(own(o, "lastAt") === undefined ? {} : { lastAt: str(own(o, "lastAt"), p + ".lastAt") }), ...(own(o, "item") === undefined ? {} : { item: decodeHomeMemoryItem(own(o, "item"), p + ".item") }) };
 }
 export function encodeHomeMemoryViewLine(v: HomeMemoryViewLine): string {
   return "{" + (',"inCurrentView":' + JSON.stringify(v.inCurrentView) + ',"startsIndividualMessages":' + JSON.stringify(v.startsIndividualMessages) + ',"start":' + encNum(v.start) + ',"span":' + encNum(v.span) + ',"text":' + (v.text === null ? "null" : JSON.stringify(v.text)) + ',"truncated":' + JSON.stringify(v.truncated) + (v.kind === undefined ? "" : ',"kind":' + encodeHomeMemoryItemKind(v.kind)) + (v.firstAt === undefined ? "" : ',"firstAt":' + JSON.stringify(v.firstAt)) + (v.lastAt === undefined ? "" : ',"lastAt":' + JSON.stringify(v.lastAt)) + (v.item === undefined ? "" : ',"item":' + encodeHomeMemoryItem(v.item))).slice(1) + "}";
@@ -2583,7 +2584,7 @@ export interface HomeMemoryView {
 export function decodeHomeMemoryView(v: unknown, p = "$"): HomeMemoryView {
   const o = obj(v, p);
   only(o, p, ["homeId","revision","totalMessages","lines","nextCursor"]);
-  return { homeId: str(own(o, "homeId"), p + ".homeId"), revision: str(own(o, "revision"), p + ".revision"), totalMessages: num(own(o, "totalMessages"), p + ".totalMessages"), lines: seq(own(o, "lines"), p + ".lines", (x, q) => decodeHomeMemoryViewLine(x, q)), ...(own(o, "nextCursor") === undefined ? {} : { nextCursor: str(own(o, "nextCursor"), p + ".nextCursor") }) };
+  return { homeId: str(own(o, "homeId"), p + ".homeId"), revision: str(own(o, "revision"), p + ".revision"), totalMessages: int(own(o, "totalMessages"), p + ".totalMessages"), lines: seq(own(o, "lines"), p + ".lines", (x, q) => decodeHomeMemoryViewLine(x, q)), ...(own(o, "nextCursor") === undefined ? {} : { nextCursor: str(own(o, "nextCursor"), p + ".nextCursor") }) };
 }
 export function encodeHomeMemoryView(v: HomeMemoryView): string {
   return "{" + (',"homeId":' + JSON.stringify(v.homeId) + ',"revision":' + JSON.stringify(v.revision) + ',"totalMessages":' + encNum(v.totalMessages) + ',"lines":' + "[" + v.lines.map((x) => encodeHomeMemoryViewLine(x)).join(",") + "]" + (v.nextCursor === undefined ? "" : ',"nextCursor":' + JSON.stringify(v.nextCursor))).slice(1) + "}";
@@ -2610,7 +2611,7 @@ export interface HomeMemoryEvidencePage {
 export function decodeHomeMemoryEvidencePage(v: unknown, p = "$"): HomeMemoryEvidencePage {
   const o = obj(v, p);
   only(o, p, ["format","evidence","text","offset","nextOffset","previousOffset","totalCharacters","metadata"]);
-  return { format: decodeHomeMemoryEvidencePageFormat(own(o, "format"), p + ".format"), evidence: decodeHomeMemoryEvidence(own(o, "evidence"), p + ".evidence"), text: str(own(o, "text"), p + ".text"), offset: num(own(o, "offset"), p + ".offset"), ...(own(o, "nextOffset") === undefined ? {} : { nextOffset: num(own(o, "nextOffset"), p + ".nextOffset") }), ...(own(o, "previousOffset") === undefined ? {} : { previousOffset: num(own(o, "previousOffset"), p + ".previousOffset") }), totalCharacters: num(own(o, "totalCharacters"), p + ".totalCharacters"), metadata: dict(own(o, "metadata"), p + ".metadata", (x, q) => decodeJsonValue(x, q)) };
+  return { format: decodeHomeMemoryEvidencePageFormat(own(o, "format"), p + ".format"), evidence: decodeHomeMemoryEvidence(own(o, "evidence"), p + ".evidence"), text: str(own(o, "text"), p + ".text"), offset: int(own(o, "offset"), p + ".offset"), ...(own(o, "nextOffset") === undefined ? {} : { nextOffset: int(own(o, "nextOffset"), p + ".nextOffset") }), ...(own(o, "previousOffset") === undefined ? {} : { previousOffset: int(own(o, "previousOffset"), p + ".previousOffset") }), totalCharacters: int(own(o, "totalCharacters"), p + ".totalCharacters"), metadata: dict(own(o, "metadata"), p + ".metadata", (x, q) => decodeJsonValue(x, q)) };
 }
 export function encodeHomeMemoryEvidencePage(v: HomeMemoryEvidencePage): string {
   return "{" + (',"format":' + encodeHomeMemoryEvidencePageFormat(v.format) + ',"evidence":' + encodeHomeMemoryEvidence(v.evidence) + ',"text":' + JSON.stringify(v.text) + ',"offset":' + encNum(v.offset) + (v.nextOffset === undefined ? "" : ',"nextOffset":' + encNum(v.nextOffset)) + (v.previousOffset === undefined ? "" : ',"previousOffset":' + encNum(v.previousOffset)) + ',"totalCharacters":' + encNum(v.totalCharacters) + ',"metadata":' + encDict(v.metadata, (x) => encodeJsonValue(x))).slice(1) + "}";
@@ -2680,7 +2681,7 @@ export interface HomeStatusWorkers { running: number }
 export function decodeHomeStatusWorkers(v: unknown, p = "$"): HomeStatusWorkers {
   const o = obj(v, p);
   only(o, p, ["running"]);
-  return { running: num(own(o, "running"), p + ".running") };
+  return { running: int(own(o, "running"), p + ".running") };
 }
 export function encodeHomeStatusWorkers(v: HomeStatusWorkers): string {
   return "{" + (',"running":' + encNum(v.running)).slice(1) + "}";
@@ -2727,7 +2728,7 @@ export interface HomeContextSection {
 export function decodeHomeContextSection(v: unknown, p = "$"): HomeContextSection {
   const o = obj(v, p);
   only(o, p, ["id","tokens","count"]);
-  return { id: decodeHomeContextSectionId(own(o, "id"), p + ".id"), tokens: num(own(o, "tokens"), p + ".tokens"), ...(own(o, "count") === undefined ? {} : { count: num(own(o, "count"), p + ".count") }) };
+  return { id: decodeHomeContextSectionId(own(o, "id"), p + ".id"), tokens: int(own(o, "tokens"), p + ".tokens"), ...(own(o, "count") === undefined ? {} : { count: int(own(o, "count"), p + ".count") }) };
 }
 export function encodeHomeContextSection(v: HomeContextSection): string {
   return "{" + (',"id":' + encodeHomeContextSectionId(v.id) + ',"tokens":' + encNum(v.tokens) + (v.count === undefined ? "" : ',"count":' + encNum(v.count))).slice(1) + "}";
@@ -2737,7 +2738,7 @@ export interface HomeContextBreakdown { activation: HomeContextBreakdownActivati
 export function decodeHomeContextBreakdown(v: unknown, p = "$"): HomeContextBreakdown {
   const o = obj(v, p);
   only(o, p, ["activation","contextWindow","effectiveTokens","sections"]);
-  return { activation: decodeHomeContextBreakdownActivation(own(o, "activation"), p + ".activation"), contextWindow: num(own(o, "contextWindow"), p + ".contextWindow"), effectiveTokens: num(own(o, "effectiveTokens"), p + ".effectiveTokens"), sections: seq(own(o, "sections"), p + ".sections", (x, q) => decodeHomeContextSection(x, q)) };
+  return { activation: decodeHomeContextBreakdownActivation(own(o, "activation"), p + ".activation"), contextWindow: int(own(o, "contextWindow"), p + ".contextWindow"), effectiveTokens: int(own(o, "effectiveTokens"), p + ".effectiveTokens"), sections: seq(own(o, "sections"), p + ".sections", (x, q) => decodeHomeContextSection(x, q)) };
 }
 export function encodeHomeContextBreakdown(v: HomeContextBreakdown): string {
   return "{" + (',"activation":' + encodeHomeContextBreakdownActivation(v.activation) + ',"contextWindow":' + encNum(v.contextWindow) + ',"effectiveTokens":' + encNum(v.effectiveTokens) + ',"sections":' + "[" + v.sections.map((x) => encodeHomeContextSection(x)).join(",") + "]").slice(1) + "}";
@@ -2780,7 +2781,7 @@ export function decodeHomeContextProjection(v: unknown, p = "$"): HomeContextPro
   const o = obj(v, p);
   switch (own(o, "available")) {
     case false: only(o, p, ["available"]); return { available: false };
-    case true: only(o, p, ["available","activationStartEntryId","activationOpen","viewLines","viewBytes","effectiveTokens","contextWindow","breakdown","lastRefusalReason","lastRefusalDetail"]); return { available: true, activationStartEntryId: (own(o, "activationStartEntryId") === null ? null : str(own(o, "activationStartEntryId"), p + ".activationStartEntryId")), activationOpen: bool(own(o, "activationOpen"), p + ".activationOpen"), ...(own(o, "viewLines") === undefined ? {} : { viewLines: num(own(o, "viewLines"), p + ".viewLines") }), ...(own(o, "viewBytes") === undefined ? {} : { viewBytes: num(own(o, "viewBytes"), p + ".viewBytes") }), ...(own(o, "effectiveTokens") === undefined ? {} : { effectiveTokens: num(own(o, "effectiveTokens"), p + ".effectiveTokens") }), ...(own(o, "contextWindow") === undefined ? {} : { contextWindow: num(own(o, "contextWindow"), p + ".contextWindow") }), ...(own(o, "breakdown") === undefined ? {} : { breakdown: decodeHomeContextBreakdown(own(o, "breakdown"), p + ".breakdown") }), ...(own(o, "lastRefusalReason") === undefined ? {} : { lastRefusalReason: str(own(o, "lastRefusalReason"), p + ".lastRefusalReason") }), ...(own(o, "lastRefusalDetail") === undefined ? {} : { lastRefusalDetail: str(own(o, "lastRefusalDetail"), p + ".lastRefusalDetail") }) };
+    case true: only(o, p, ["available","activationStartEntryId","activationOpen","viewLines","viewBytes","effectiveTokens","contextWindow","breakdown","lastRefusalReason","lastRefusalDetail"]); return { available: true, activationStartEntryId: (own(o, "activationStartEntryId") === null ? null : str(own(o, "activationStartEntryId"), p + ".activationStartEntryId")), activationOpen: bool(own(o, "activationOpen"), p + ".activationOpen"), ...(own(o, "viewLines") === undefined ? {} : { viewLines: int(own(o, "viewLines"), p + ".viewLines") }), ...(own(o, "viewBytes") === undefined ? {} : { viewBytes: int(own(o, "viewBytes"), p + ".viewBytes") }), ...(own(o, "effectiveTokens") === undefined ? {} : { effectiveTokens: int(own(o, "effectiveTokens"), p + ".effectiveTokens") }), ...(own(o, "contextWindow") === undefined ? {} : { contextWindow: int(own(o, "contextWindow"), p + ".contextWindow") }), ...(own(o, "breakdown") === undefined ? {} : { breakdown: decodeHomeContextBreakdown(own(o, "breakdown"), p + ".breakdown") }), ...(own(o, "lastRefusalReason") === undefined ? {} : { lastRefusalReason: str(own(o, "lastRefusalReason"), p + ".lastRefusalReason") }), ...(own(o, "lastRefusalDetail") === undefined ? {} : { lastRefusalDetail: str(own(o, "lastRefusalDetail"), p + ".lastRefusalDetail") }) };
     default: throw new WireError(p + ".available", `unknown variant ${JSON.stringify(own(o, "available"))}`);
   }
 }
@@ -2820,7 +2821,7 @@ export interface HomeStatusChapter { count: number; currentBytes?: number; curre
 export function decodeHomeStatusChapter(v: unknown, p = "$"): HomeStatusChapter {
   const o = obj(v, p);
   only(o, p, ["count","currentBytes","currentEntries","recoveryDecision"]);
-  return { count: num(own(o, "count"), p + ".count"), ...(own(o, "currentBytes") === undefined ? {} : { currentBytes: num(own(o, "currentBytes"), p + ".currentBytes") }), ...(own(o, "currentEntries") === undefined ? {} : { currentEntries: num(own(o, "currentEntries"), p + ".currentEntries") }), recoveryDecision: decodeHomeStatusChapterRecoveryDecision(own(o, "recoveryDecision"), p + ".recoveryDecision") };
+  return { count: int(own(o, "count"), p + ".count"), ...(own(o, "currentBytes") === undefined ? {} : { currentBytes: int(own(o, "currentBytes"), p + ".currentBytes") }), ...(own(o, "currentEntries") === undefined ? {} : { currentEntries: int(own(o, "currentEntries"), p + ".currentEntries") }), recoveryDecision: decodeHomeStatusChapterRecoveryDecision(own(o, "recoveryDecision"), p + ".recoveryDecision") };
 }
 export function encodeHomeStatusChapter(v: HomeStatusChapter): string {
   return "{" + (',"count":' + encNum(v.count) + (v.currentBytes === undefined ? "" : ',"currentBytes":' + encNum(v.currentBytes)) + (v.currentEntries === undefined ? "" : ',"currentEntries":' + encNum(v.currentEntries)) + ',"recoveryDecision":' + encodeHomeStatusChapterRecoveryDecision(v.recoveryDecision)).slice(1) + "}";
@@ -2869,7 +2870,7 @@ export interface HomeMemoryStatusEpisodicView {
 export function decodeHomeMemoryStatusEpisodicView(v: unknown, p = "$"): HomeMemoryStatusEpisodicView {
   const o = obj(v, p);
   only(o, p, ["parts","truncatedParts","bytes","budgetBytes","built","unbuilt"]);
-  return { parts: seq(own(o, "parts"), p + ".parts", (x, q) => decodeHomeMemoryStatusEpisodicViewPartsItem(x, q)), truncatedParts: num(own(o, "truncatedParts"), p + ".truncatedParts"), bytes: num(own(o, "bytes"), p + ".bytes"), budgetBytes: num(own(o, "budgetBytes"), p + ".budgetBytes"), built: num(own(o, "built"), p + ".built"), unbuilt: num(own(o, "unbuilt"), p + ".unbuilt") };
+  return { parts: seq(own(o, "parts"), p + ".parts", (x, q) => decodeHomeMemoryStatusEpisodicViewPartsItem(x, q)), truncatedParts: num(own(o, "truncatedParts"), p + ".truncatedParts"), bytes: num(own(o, "bytes"), p + ".bytes"), budgetBytes: num(own(o, "budgetBytes"), p + ".budgetBytes"), built: int(own(o, "built"), p + ".built"), unbuilt: int(own(o, "unbuilt"), p + ".unbuilt") };
 }
 export function encodeHomeMemoryStatusEpisodicView(v: HomeMemoryStatusEpisodicView): string {
   return "{" + (',"parts":' + "[" + v.parts.map((x) => encodeHomeMemoryStatusEpisodicViewPartsItem(x)).join(",") + "]" + ',"truncatedParts":' + encNum(v.truncatedParts) + ',"bytes":' + encNum(v.bytes) + ',"budgetBytes":' + encNum(v.budgetBytes) + ',"built":' + encNum(v.built) + ',"unbuilt":' + encNum(v.unbuilt)).slice(1) + "}";
@@ -2935,7 +2936,7 @@ export interface HomeMemoryStatusEpisodic {
 export function decodeHomeMemoryStatusEpisodic(v: unknown, p = "$"): HomeMemoryStatusEpisodic {
   const o = obj(v, p);
   only(o, p, ["sourceSessionId","generation","messages","nodes","view","coverage","pump","blocked","tokens"]);
-  return { sourceSessionId: str(own(o, "sourceSessionId"), p + ".sourceSessionId"), generation: num(own(o, "generation"), p + ".generation"), messages: num(own(o, "messages"), p + ".messages"), nodes: decodeHomeMemoryStatusEpisodicNodes(own(o, "nodes"), p + ".nodes"), view: decodeHomeMemoryStatusEpisodicView(own(o, "view"), p + ".view"), coverage: decodeHomeMemoryStatusEpisodicCoverage(own(o, "coverage"), p + ".coverage"), pump: decodeHomeMemoryStatusEpisodicPump(own(o, "pump"), p + ".pump"), blocked: (own(o, "blocked") === null ? null : decodeHomeMemoryStatusEpisodicBlocked(own(o, "blocked"), p + ".blocked")), tokens: decodeHomeMemoryStatusEpisodicTokens(own(o, "tokens"), p + ".tokens") };
+  return { sourceSessionId: str(own(o, "sourceSessionId"), p + ".sourceSessionId"), generation: num(own(o, "generation"), p + ".generation"), messages: int(own(o, "messages"), p + ".messages"), nodes: decodeHomeMemoryStatusEpisodicNodes(own(o, "nodes"), p + ".nodes"), view: decodeHomeMemoryStatusEpisodicView(own(o, "view"), p + ".view"), coverage: decodeHomeMemoryStatusEpisodicCoverage(own(o, "coverage"), p + ".coverage"), pump: decodeHomeMemoryStatusEpisodicPump(own(o, "pump"), p + ".pump"), blocked: (own(o, "blocked") === null ? null : decodeHomeMemoryStatusEpisodicBlocked(own(o, "blocked"), p + ".blocked")), tokens: decodeHomeMemoryStatusEpisodicTokens(own(o, "tokens"), p + ".tokens") };
 }
 export function encodeHomeMemoryStatusEpisodic(v: HomeMemoryStatusEpisodic): string {
   return "{" + (',"sourceSessionId":' + JSON.stringify(v.sourceSessionId) + ',"generation":' + encNum(v.generation) + ',"messages":' + encNum(v.messages) + ',"nodes":' + encodeHomeMemoryStatusEpisodicNodes(v.nodes) + ',"view":' + encodeHomeMemoryStatusEpisodicView(v.view) + ',"coverage":' + encodeHomeMemoryStatusEpisodicCoverage(v.coverage) + ',"pump":' + encodeHomeMemoryStatusEpisodicPump(v.pump) + ',"blocked":' + (v.blocked === null ? "null" : encodeHomeMemoryStatusEpisodicBlocked(v.blocked)) + ',"tokens":' + encodeHomeMemoryStatusEpisodicTokens(v.tokens)).slice(1) + "}";
@@ -2967,7 +2968,7 @@ export interface HomeMemoryStatus {
 export function decodeHomeMemoryStatus(v: unknown, p = "$"): HomeMemoryStatus {
   const o = obj(v, p);
   only(o, p, ["paused","configured","open","models","spentTokens","episodic","blocked","reason"]);
-  return { ...(own(o, "paused") === undefined ? {} : { paused: bool(own(o, "paused"), p + ".paused") }), configured: bool(own(o, "configured"), p + ".configured"), open: bool(own(o, "open"), p + ".open"), ...(own(o, "models") === undefined ? {} : { models: seq(own(o, "models"), p + ".models", (x, q) => str(x, q)) }), ...(own(o, "spentTokens") === undefined ? {} : { spentTokens: num(own(o, "spentTokens"), p + ".spentTokens") }), ...(own(o, "episodic") === undefined ? {} : { episodic: decodeHomeMemoryStatusEpisodic(own(o, "episodic"), p + ".episodic") }), ...(own(o, "blocked") === undefined ? {} : { blocked: str(own(o, "blocked"), p + ".blocked") }), ...(own(o, "reason") === undefined ? {} : { reason: str(own(o, "reason"), p + ".reason") }) };
+  return { ...(own(o, "paused") === undefined ? {} : { paused: bool(own(o, "paused"), p + ".paused") }), configured: bool(own(o, "configured"), p + ".configured"), open: bool(own(o, "open"), p + ".open"), ...(own(o, "models") === undefined ? {} : { models: seq(own(o, "models"), p + ".models", (x, q) => str(x, q)) }), ...(own(o, "spentTokens") === undefined ? {} : { spentTokens: int(own(o, "spentTokens"), p + ".spentTokens") }), ...(own(o, "episodic") === undefined ? {} : { episodic: decodeHomeMemoryStatusEpisodic(own(o, "episodic"), p + ".episodic") }), ...(own(o, "blocked") === undefined ? {} : { blocked: str(own(o, "blocked"), p + ".blocked") }), ...(own(o, "reason") === undefined ? {} : { reason: str(own(o, "reason"), p + ".reason") }) };
 }
 export function encodeHomeMemoryStatus(v: HomeMemoryStatus): string {
   return "{" + ((v.paused === undefined ? "" : ',"paused":' + JSON.stringify(v.paused)) + ',"configured":' + JSON.stringify(v.configured) + ',"open":' + JSON.stringify(v.open) + (v.models === undefined ? "" : ',"models":' + "[" + v.models.map((x) => JSON.stringify(x)).join(",") + "]") + (v.spentTokens === undefined ? "" : ',"spentTokens":' + encNum(v.spentTokens)) + (v.episodic === undefined ? "" : ',"episodic":' + encodeHomeMemoryStatusEpisodic(v.episodic)) + (v.blocked === undefined ? "" : ',"blocked":' + JSON.stringify(v.blocked)) + (v.reason === undefined ? "" : ',"reason":' + JSON.stringify(v.reason))).slice(1) + "}";
@@ -3027,7 +3028,7 @@ export interface HomeStatus {
 export function decodeHomeStatus(v: unknown, p = "$"): HomeStatus {
   const o = obj(v, p);
   only(o, p, ["taskRecovery","hostPressure","workers","phase","activation","readiness","recovery","available","reason","enabled","homeId","sessionId","openSessionId","bindingRevision","generation","routeGeneration","chapter","live","sessionPresent","waitingForUser","memory"]);
-  return { taskRecovery: decodeHomeStatusTaskRecovery(own(o, "taskRecovery"), p + ".taskRecovery"), hostPressure: decodeHomeStatusHostPressure(own(o, "hostPressure"), p + ".hostPressure"), workers: decodeHomeStatusWorkers(own(o, "workers"), p + ".workers"), phase: decodeHomeStatusPhase(own(o, "phase"), p + ".phase"), activation: decodeHomeContextProjection(own(o, "activation"), p + ".activation"), readiness: decodeHomeStatusReadiness(own(o, "readiness"), p + ".readiness"), recovery: decodeHomeStatusRecovery(own(o, "recovery"), p + ".recovery"), available: bool(own(o, "available"), p + ".available"), ...(own(o, "reason") === undefined ? {} : { reason: str(own(o, "reason"), p + ".reason") }), enabled: bool(own(o, "enabled"), p + ".enabled"), ...(own(o, "homeId") === undefined ? {} : { homeId: str(own(o, "homeId"), p + ".homeId") }), ...(own(o, "sessionId") === undefined ? {} : { sessionId: str(own(o, "sessionId"), p + ".sessionId") }), ...(own(o, "openSessionId") === undefined ? {} : { openSessionId: str(own(o, "openSessionId"), p + ".openSessionId") }), ...(own(o, "bindingRevision") === undefined ? {} : { bindingRevision: num(own(o, "bindingRevision"), p + ".bindingRevision") }), ...(own(o, "generation") === undefined ? {} : { generation: num(own(o, "generation"), p + ".generation") }), ...(own(o, "routeGeneration") === undefined ? {} : { routeGeneration: num(own(o, "routeGeneration"), p + ".routeGeneration") }), ...(own(o, "chapter") === undefined ? {} : { chapter: decodeHomeStatusChapter(own(o, "chapter"), p + ".chapter") }), live: bool(own(o, "live"), p + ".live"), sessionPresent: bool(own(o, "sessionPresent"), p + ".sessionPresent"), ...(own(o, "waitingForUser") === undefined ? {} : { waitingForUser: bool(own(o, "waitingForUser"), p + ".waitingForUser") }), memory: decodeHomeMemoryStatus(own(o, "memory"), p + ".memory") };
+  return { taskRecovery: decodeHomeStatusTaskRecovery(own(o, "taskRecovery"), p + ".taskRecovery"), hostPressure: decodeHomeStatusHostPressure(own(o, "hostPressure"), p + ".hostPressure"), workers: decodeHomeStatusWorkers(own(o, "workers"), p + ".workers"), phase: decodeHomeStatusPhase(own(o, "phase"), p + ".phase"), activation: decodeHomeContextProjection(own(o, "activation"), p + ".activation"), readiness: decodeHomeStatusReadiness(own(o, "readiness"), p + ".readiness"), recovery: decodeHomeStatusRecovery(own(o, "recovery"), p + ".recovery"), available: bool(own(o, "available"), p + ".available"), ...(own(o, "reason") === undefined ? {} : { reason: str(own(o, "reason"), p + ".reason") }), enabled: bool(own(o, "enabled"), p + ".enabled"), ...(own(o, "homeId") === undefined ? {} : { homeId: str(own(o, "homeId"), p + ".homeId") }), ...(own(o, "sessionId") === undefined ? {} : { sessionId: str(own(o, "sessionId"), p + ".sessionId") }), ...(own(o, "openSessionId") === undefined ? {} : { openSessionId: str(own(o, "openSessionId"), p + ".openSessionId") }), ...(own(o, "bindingRevision") === undefined ? {} : { bindingRevision: num(own(o, "bindingRevision"), p + ".bindingRevision") }), ...(own(o, "generation") === undefined ? {} : { generation: int(own(o, "generation"), p + ".generation") }), ...(own(o, "routeGeneration") === undefined ? {} : { routeGeneration: int(own(o, "routeGeneration"), p + ".routeGeneration") }), ...(own(o, "chapter") === undefined ? {} : { chapter: decodeHomeStatusChapter(own(o, "chapter"), p + ".chapter") }), live: bool(own(o, "live"), p + ".live"), sessionPresent: bool(own(o, "sessionPresent"), p + ".sessionPresent"), ...(own(o, "waitingForUser") === undefined ? {} : { waitingForUser: bool(own(o, "waitingForUser"), p + ".waitingForUser") }), memory: decodeHomeMemoryStatus(own(o, "memory"), p + ".memory") };
 }
 export function encodeHomeStatus(v: HomeStatus): string {
   return "{" + (',"taskRecovery":' + encodeHomeStatusTaskRecovery(v.taskRecovery) + ',"hostPressure":' + encodeHomeStatusHostPressure(v.hostPressure) + ',"workers":' + encodeHomeStatusWorkers(v.workers) + ',"phase":' + encodeHomeStatusPhase(v.phase) + ',"activation":' + encodeHomeContextProjection(v.activation) + ',"readiness":' + encodeHomeStatusReadiness(v.readiness) + ',"recovery":' + encodeHomeStatusRecovery(v.recovery) + ',"available":' + JSON.stringify(v.available) + (v.reason === undefined ? "" : ',"reason":' + JSON.stringify(v.reason)) + ',"enabled":' + JSON.stringify(v.enabled) + (v.homeId === undefined ? "" : ',"homeId":' + JSON.stringify(v.homeId)) + (v.sessionId === undefined ? "" : ',"sessionId":' + JSON.stringify(v.sessionId)) + (v.openSessionId === undefined ? "" : ',"openSessionId":' + JSON.stringify(v.openSessionId)) + (v.bindingRevision === undefined ? "" : ',"bindingRevision":' + encNum(v.bindingRevision)) + (v.generation === undefined ? "" : ',"generation":' + encNum(v.generation)) + (v.routeGeneration === undefined ? "" : ',"routeGeneration":' + encNum(v.routeGeneration)) + (v.chapter === undefined ? "" : ',"chapter":' + encodeHomeStatusChapter(v.chapter)) + ',"live":' + JSON.stringify(v.live) + ',"sessionPresent":' + JSON.stringify(v.sessionPresent) + (v.waitingForUser === undefined ? "" : ',"waitingForUser":' + JSON.stringify(v.waitingForUser)) + ',"memory":' + encodeHomeMemoryStatus(v.memory)).slice(1) + "}";
@@ -3122,14 +3123,14 @@ export function decodeHomeTaskCheckin(v: unknown, p = "$"): HomeTaskCheckin {
 export function encodeHomeTaskCheckin(v: HomeTaskCheckin): string {
   return "{" + (',"step":' + JSON.stringify(v.step) + ',"done":' + JSON.stringify(v.done) + ',"next":' + JSON.stringify(v.next) + (v.blocker === undefined ? "" : ',"blocker":' + JSON.stringify(v.blocker)) + (v.refs === undefined ? "" : ',"refs":' + encodeHomeTaskCheckinRequestRefs(v.refs)) + (v.needsAttention === undefined ? "" : ',"needsAttention":' + JSON.stringify(v.needsAttention)) + ',"id":' + JSON.stringify(v.id) + ',"taskId":' + JSON.stringify(v.taskId) + ',"sessionId":' + JSON.stringify(v.sessionId) + ',"operationId":' + JSON.stringify(v.operationId) + ',"at":' + JSON.stringify(v.at) + ',"attention":' + encodeHomeTaskCheckinAttention(v.attention)).slice(1) + "}";
 }
-export type HomeTaskSummaryLifecycle = "pending" | "active" | "terminal";
-const HomeTaskSummaryLifecycleValues: ReadonlyArray<unknown> = ["pending", "active", "terminal"];
-export function decodeHomeTaskSummaryLifecycle(v: unknown, p = "$"): HomeTaskSummaryLifecycle { if (!HomeTaskSummaryLifecycleValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as HomeTaskSummaryLifecycle; }
-export function encodeHomeTaskSummaryLifecycle(v: HomeTaskSummaryLifecycle): string { return JSON.stringify(v); }
-export type HomeTaskSummaryOutcome = "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown";
-const HomeTaskSummaryOutcomeValues: ReadonlyArray<unknown> = ["progress", "needs-input", "final", "limited", "interrupted", "unknown"];
-export function decodeHomeTaskSummaryOutcome(v: unknown, p = "$"): HomeTaskSummaryOutcome { if (!HomeTaskSummaryOutcomeValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as HomeTaskSummaryOutcome; }
-export function encodeHomeTaskSummaryOutcome(v: HomeTaskSummaryOutcome): string { return JSON.stringify(v); }
+export type HomeTaskLifecycle = "pending" | "active" | "terminal";
+const HomeTaskLifecycleValues: ReadonlyArray<unknown> = ["pending", "active", "terminal"];
+export function decodeHomeTaskLifecycle(v: unknown, p = "$"): HomeTaskLifecycle { if (!HomeTaskLifecycleValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as HomeTaskLifecycle; }
+export function encodeHomeTaskLifecycle(v: HomeTaskLifecycle): string { return JSON.stringify(v); }
+export type HomeTaskOutcome = "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown";
+const HomeTaskOutcomeValues: ReadonlyArray<unknown> = ["progress", "needs-input", "final", "limited", "interrupted", "unknown"];
+export function decodeHomeTaskOutcome(v: unknown, p = "$"): HomeTaskOutcome { if (!HomeTaskOutcomeValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as HomeTaskOutcome; }
+export function encodeHomeTaskOutcome(v: HomeTaskOutcome): string { return JSON.stringify(v); }
 /**
  * `inputTokens` is fresh input; cache read/write are separate (#1250). Records
  * from before that omit both cache fields and count cache inside `inputTokens`.
@@ -3144,7 +3145,7 @@ export interface HomeTaskSummarySpend {
 export function decodeHomeTaskSummarySpend(v: unknown, p = "$"): HomeTaskSummarySpend {
   const o = obj(v, p);
   only(o, p, ["sourceDigest","inputTokens","outputTokens","cacheReadTokens","cacheWriteTokens"]);
-  return { sourceDigest: str(own(o, "sourceDigest"), p + ".sourceDigest"), inputTokens: num(own(o, "inputTokens"), p + ".inputTokens"), outputTokens: num(own(o, "outputTokens"), p + ".outputTokens"), ...(own(o, "cacheReadTokens") === undefined ? {} : { cacheReadTokens: num(own(o, "cacheReadTokens"), p + ".cacheReadTokens") }), ...(own(o, "cacheWriteTokens") === undefined ? {} : { cacheWriteTokens: num(own(o, "cacheWriteTokens"), p + ".cacheWriteTokens") }) };
+  return { sourceDigest: str(own(o, "sourceDigest"), p + ".sourceDigest"), inputTokens: int(own(o, "inputTokens"), p + ".inputTokens"), outputTokens: int(own(o, "outputTokens"), p + ".outputTokens"), ...(own(o, "cacheReadTokens") === undefined ? {} : { cacheReadTokens: int(own(o, "cacheReadTokens"), p + ".cacheReadTokens") }), ...(own(o, "cacheWriteTokens") === undefined ? {} : { cacheWriteTokens: int(own(o, "cacheWriteTokens"), p + ".cacheWriteTokens") }) };
 }
 export function encodeHomeTaskSummarySpend(v: HomeTaskSummarySpend): string {
   return "{" + (',"sourceDigest":' + JSON.stringify(v.sourceDigest) + ',"inputTokens":' + encNum(v.inputTokens) + ',"outputTokens":' + encNum(v.outputTokens) + (v.cacheReadTokens === undefined ? "" : ',"cacheReadTokens":' + encNum(v.cacheReadTokens)) + (v.cacheWriteTokens === undefined ? "" : ',"cacheWriteTokens":' + encNum(v.cacheWriteTokens))).slice(1) + "}";
@@ -3160,8 +3161,8 @@ export interface HomeTaskSummary {
   /** The worker session the task dispatched (the task's `sessionId`), or null before dispatch. */
   sessionId: string | null;
   target: string;
-  lifecycle: HomeTaskSummaryLifecycle;
-  outcome: HomeTaskSummaryOutcome | null;
+  lifecycle: HomeTaskLifecycle;
+  outcome: HomeTaskOutcome | null;
   /**
    * `inputTokens` is fresh input; cache read/write are separate (#1250). Records
    * from before that omit both cache fields and count cache inside `inputTokens`.
@@ -3174,27 +3175,103 @@ export interface HomeTaskSummary {
 export function decodeHomeTaskSummary(v: unknown, p = "$"): HomeTaskSummary {
   const o = obj(v, p);
   only(o, p, ["title","project","taskId","createdAt","updatedAt","sessionId","target","lifecycle","outcome","spend","attention","checkins","pendingGrant"]);
-  return { title: str(own(o, "title"), p + ".title"), project: str(own(o, "project"), p + ".project"), taskId: str(own(o, "taskId"), p + ".taskId"), createdAt: num(own(o, "createdAt"), p + ".createdAt"), updatedAt: num(own(o, "updatedAt"), p + ".updatedAt"), sessionId: (own(o, "sessionId") === null ? null : str(own(o, "sessionId"), p + ".sessionId")), target: str(own(o, "target"), p + ".target"), lifecycle: decodeHomeTaskSummaryLifecycle(own(o, "lifecycle"), p + ".lifecycle"), outcome: (own(o, "outcome") === null ? null : decodeHomeTaskSummaryOutcome(own(o, "outcome"), p + ".outcome")), spend: (own(o, "spend") === null ? null : decodeHomeTaskSummarySpend(own(o, "spend"), p + ".spend")), attention: bool(own(o, "attention"), p + ".attention"), checkins: seq(own(o, "checkins"), p + ".checkins", (x, q) => decodeHomeTaskCheckin(x, q)), pendingGrant: bool(own(o, "pendingGrant"), p + ".pendingGrant") };
+  return { title: str(own(o, "title"), p + ".title"), project: str(own(o, "project"), p + ".project"), taskId: str(own(o, "taskId"), p + ".taskId"), createdAt: int(own(o, "createdAt"), p + ".createdAt"), updatedAt: int(own(o, "updatedAt"), p + ".updatedAt"), sessionId: (own(o, "sessionId") === null ? null : str(own(o, "sessionId"), p + ".sessionId")), target: str(own(o, "target"), p + ".target"), lifecycle: decodeHomeTaskLifecycle(own(o, "lifecycle"), p + ".lifecycle"), outcome: (own(o, "outcome") === null ? null : decodeHomeTaskOutcome(own(o, "outcome"), p + ".outcome")), spend: (own(o, "spend") === null ? null : decodeHomeTaskSummarySpend(own(o, "spend"), p + ".spend")), attention: bool(own(o, "attention"), p + ".attention"), checkins: seq(own(o, "checkins"), p + ".checkins", (x, q) => decodeHomeTaskCheckin(x, q)), pendingGrant: bool(own(o, "pendingGrant"), p + ".pendingGrant") };
 }
 export function encodeHomeTaskSummary(v: HomeTaskSummary): string {
-  return "{" + (',"title":' + JSON.stringify(v.title) + ',"project":' + JSON.stringify(v.project) + ',"taskId":' + JSON.stringify(v.taskId) + ',"createdAt":' + encNum(v.createdAt) + ',"updatedAt":' + encNum(v.updatedAt) + ',"sessionId":' + (v.sessionId === null ? "null" : JSON.stringify(v.sessionId)) + ',"target":' + JSON.stringify(v.target) + ',"lifecycle":' + encodeHomeTaskSummaryLifecycle(v.lifecycle) + ',"outcome":' + (v.outcome === null ? "null" : encodeHomeTaskSummaryOutcome(v.outcome)) + ',"spend":' + (v.spend === null ? "null" : encodeHomeTaskSummarySpend(v.spend)) + ',"attention":' + JSON.stringify(v.attention) + ',"checkins":' + "[" + v.checkins.map((x) => encodeHomeTaskCheckin(x)).join(",") + "]" + ',"pendingGrant":' + JSON.stringify(v.pendingGrant)).slice(1) + "}";
+  return "{" + (',"title":' + JSON.stringify(v.title) + ',"project":' + JSON.stringify(v.project) + ',"taskId":' + JSON.stringify(v.taskId) + ',"createdAt":' + encNum(v.createdAt) + ',"updatedAt":' + encNum(v.updatedAt) + ',"sessionId":' + (v.sessionId === null ? "null" : JSON.stringify(v.sessionId)) + ',"target":' + JSON.stringify(v.target) + ',"lifecycle":' + encodeHomeTaskLifecycle(v.lifecycle) + ',"outcome":' + (v.outcome === null ? "null" : encodeHomeTaskOutcome(v.outcome)) + ',"spend":' + (v.spend === null ? "null" : encodeHomeTaskSummarySpend(v.spend)) + ',"attention":' + JSON.stringify(v.attention) + ',"checkins":' + "[" + v.checkins.map((x) => encodeHomeTaskCheckin(x)).join(",") + "]" + ',"pendingGrant":' + JSON.stringify(v.pendingGrant)).slice(1) + "}";
 }
-export type HomeTaskStatusResultLifecycle = "pending" | "active" | "terminal";
-const HomeTaskStatusResultLifecycleValues: ReadonlyArray<unknown> = ["pending", "active", "terminal"];
-export function decodeHomeTaskStatusResultLifecycle(v: unknown, p = "$"): HomeTaskStatusResultLifecycle { if (!HomeTaskStatusResultLifecycleValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as HomeTaskStatusResultLifecycle; }
-export function encodeHomeTaskStatusResultLifecycle(v: HomeTaskStatusResultLifecycle): string { return JSON.stringify(v); }
-export type HomeTaskStatusResultTerminalEvidenceOutcome = "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown";
-const HomeTaskStatusResultTerminalEvidenceOutcomeValues: ReadonlyArray<unknown> = ["progress", "needs-input", "final", "limited", "interrupted", "unknown"];
-export function decodeHomeTaskStatusResultTerminalEvidenceOutcome(v: unknown, p = "$"): HomeTaskStatusResultTerminalEvidenceOutcome { if (!HomeTaskStatusResultTerminalEvidenceOutcomeValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as HomeTaskStatusResultTerminalEvidenceOutcome; }
-export function encodeHomeTaskStatusResultTerminalEvidenceOutcome(v: HomeTaskStatusResultTerminalEvidenceOutcome): string { return JSON.stringify(v); }
-export interface HomeTaskStatusResultTerminalEvidence { outcome: HomeTaskStatusResultTerminalEvidenceOutcome }
-export function decodeHomeTaskStatusResultTerminalEvidence(v: unknown, p = "$"): HomeTaskStatusResultTerminalEvidence {
+export interface HomeTaskTerminalEvidence { outcome: HomeTaskOutcome; reason: string }
+export function decodeHomeTaskTerminalEvidence(v: unknown, p = "$"): HomeTaskTerminalEvidence {
   const o = obj(v, p);
-  only(o, p, ["outcome"]);
-  return { outcome: decodeHomeTaskStatusResultTerminalEvidenceOutcome(own(o, "outcome"), p + ".outcome") };
+  only(o, p, ["outcome","reason"]);
+  return { outcome: decodeHomeTaskOutcome(own(o, "outcome"), p + ".outcome"), reason: str(own(o, "reason"), p + ".reason") };
 }
-export function encodeHomeTaskStatusResultTerminalEvidence(v: HomeTaskStatusResultTerminalEvidence): string {
-  return "{" + (',"outcome":' + encodeHomeTaskStatusResultTerminalEvidenceOutcome(v.outcome)).slice(1) + "}";
+export function encodeHomeTaskTerminalEvidence(v: HomeTaskTerminalEvidence): string {
+  return "{" + (',"outcome":' + encodeHomeTaskOutcome(v.outcome) + ',"reason":' + JSON.stringify(v.reason)).slice(1) + "}";
+}
+export interface HomeTaskIntent { text: string }
+export function decodeHomeTaskIntent(v: unknown, p = "$"): HomeTaskIntent {
+  const o = obj(v, p);
+  only(o, p, ["text"]);
+  return { text: str(own(o, "text"), p + ".text") };
+}
+export function encodeHomeTaskIntent(v: HomeTaskIntent): string {
+  return "{" + (',"text":' + JSON.stringify(v.text)).slice(1) + "}";
+}
+export type HomeTaskWakeState = "pending" | "claimed" | "admitted" | "terminal" | "acknowledged" | "blocked" | "outcome-unknown";
+const HomeTaskWakeStateValues: ReadonlyArray<unknown> = ["pending", "claimed", "admitted", "terminal", "acknowledged", "blocked", "outcome-unknown"];
+export function decodeHomeTaskWakeState(v: unknown, p = "$"): HomeTaskWakeState { if (!HomeTaskWakeStateValues.includes(v)) throw new WireError(p, `unknown value ${JSON.stringify(v)}`); return v as HomeTaskWakeState; }
+export function encodeHomeTaskWakeState(v: HomeTaskWakeState): string { return JSON.stringify(v); }
+/** The session operation a task's result wake was delivered into. */
+export interface HomeTaskWakeDelivery {
+  sessionId: string;
+  operationId: string;
+  generation: number;
+  routeGeneration: number;
+  messageDigest: string;
+}
+export function decodeHomeTaskWakeDelivery(v: unknown, p = "$"): HomeTaskWakeDelivery {
+  const o = obj(v, p);
+  only(o, p, ["sessionId","operationId","generation","routeGeneration","messageDigest"]);
+  return { sessionId: str(own(o, "sessionId"), p + ".sessionId"), operationId: str(own(o, "operationId"), p + ".operationId"), generation: int(own(o, "generation"), p + ".generation"), routeGeneration: int(own(o, "routeGeneration"), p + ".routeGeneration"), messageDigest: str(own(o, "messageDigest"), p + ".messageDigest") };
+}
+export function encodeHomeTaskWakeDelivery(v: HomeTaskWakeDelivery): string {
+  return "{" + (',"sessionId":' + JSON.stringify(v.sessionId) + ',"operationId":' + JSON.stringify(v.operationId) + ',"generation":' + encNum(v.generation) + ',"routeGeneration":' + encNum(v.routeGeneration) + ',"messageDigest":' + JSON.stringify(v.messageDigest)).slice(1) + "}";
+}
+/** The task's result wake to Home; null until the task is terminal. */
+export interface HomeTaskWake { state: HomeTaskWakeState; routeGeneration: number; delivery: HomeTaskWakeDelivery | null }
+export function decodeHomeTaskWake(v: unknown, p = "$"): HomeTaskWake {
+  const o = obj(v, p);
+  only(o, p, ["state","routeGeneration","delivery"]);
+  return { state: decodeHomeTaskWakeState(own(o, "state"), p + ".state"), routeGeneration: int(own(o, "routeGeneration"), p + ".routeGeneration"), delivery: (own(o, "delivery") === null ? null : decodeHomeTaskWakeDelivery(own(o, "delivery"), p + ".delivery")) };
+}
+export function encodeHomeTaskWake(v: HomeTaskWake): string {
+  return "{" + (',"state":' + encodeHomeTaskWakeState(v.state) + ',"routeGeneration":' + encNum(v.routeGeneration) + ',"delivery":' + (v.delivery === null ? "null" : encodeHomeTaskWakeDelivery(v.delivery))).slice(1) + "}";
+}
+/** Subagents the worker started, and how many were still running when its operation ended. */
+export interface HomeTaskSubagents { started: number; stoppedAtEnd: number | null }
+export function decodeHomeTaskSubagents(v: unknown, p = "$"): HomeTaskSubagents {
+  const o = obj(v, p);
+  only(o, p, ["started","stoppedAtEnd"]);
+  return { started: int(own(o, "started"), p + ".started"), stoppedAtEnd: (own(o, "stoppedAtEnd") === null ? null : int(own(o, "stoppedAtEnd"), p + ".stoppedAtEnd")) };
+}
+export function encodeHomeTaskSubagents(v: HomeTaskSubagents): string {
+  return "{" + (',"started":' + encNum(v.started) + ',"stoppedAtEnd":' + (v.stoppedAtEnd === null ? "null" : encNum(v.stoppedAtEnd))).slice(1) + "}";
+}
+export interface HomeTaskSubagentRun {
+  runId: string;
+  agent: string;
+  state: ExtensionRunLifecycleState;
+  startedAt: string;
+  lastActivityAt: string | null;
+}
+export function decodeHomeTaskSubagentRun(v: unknown, p = "$"): HomeTaskSubagentRun {
+  const o = obj(v, p);
+  only(o, p, ["runId","agent","state","startedAt","lastActivityAt"]);
+  return { runId: str(own(o, "runId"), p + ".runId"), agent: str(own(o, "agent"), p + ".agent"), state: decodeExtensionRunLifecycleState(own(o, "state"), p + ".state"), startedAt: str(own(o, "startedAt"), p + ".startedAt"), lastActivityAt: (own(o, "lastActivityAt") === null ? null : str(own(o, "lastActivityAt"), p + ".lastActivityAt")) };
+}
+export function encodeHomeTaskSubagentRun(v: HomeTaskSubagentRun): string {
+  return "{" + (',"runId":' + JSON.stringify(v.runId) + ',"agent":' + JSON.stringify(v.agent) + ',"state":' + encodeExtensionRunLifecycleState(v.state) + ',"startedAt":' + JSON.stringify(v.startedAt) + ',"lastActivityAt":' + (v.lastActivityAt === null ? "null" : JSON.stringify(v.lastActivityAt))).slice(1) + "}";
+}
+/** The worker's live subagent runs: at most 20 of `total`. */
+export interface HomeTaskSubagentRuns { total: number; runs: HomeTaskSubagentRun[] }
+export function decodeHomeTaskSubagentRuns(v: unknown, p = "$"): HomeTaskSubagentRuns {
+  const o = obj(v, p);
+  only(o, p, ["total","runs"]);
+  return { total: int(own(o, "total"), p + ".total"), runs: seq(own(o, "runs"), p + ".runs", (x, q) => decodeHomeTaskSubagentRun(x, q)) };
+}
+export function encodeHomeTaskSubagentRuns(v: HomeTaskSubagentRuns): string {
+  return "{" + (',"total":' + encNum(v.total) + ',"runs":' + "[" + v.runs.map((x) => encodeHomeTaskSubagentRun(x)).join(",") + "]").slice(1) + "}";
+}
+/** The model of the task's worker session. */
+export interface HomeTaskWorkerModel { provider: string; id: string }
+export function decodeHomeTaskWorkerModel(v: unknown, p = "$"): HomeTaskWorkerModel {
+  const o = obj(v, p);
+  only(o, p, ["provider","id"]);
+  return { provider: str(own(o, "provider"), p + ".provider"), id: str(own(o, "id"), p + ".id") };
+}
+export function encodeHomeTaskWorkerModel(v: HomeTaskWorkerModel): string {
+  return "{" + (',"provider":' + JSON.stringify(v.provider) + ',"id":' + JSON.stringify(v.id)).slice(1) + "}";
 }
 /**
  * home.taskStatus: the fields a client reads from one task's current status. The
@@ -3202,18 +3279,35 @@ export function encodeHomeTaskStatusResultTerminalEvidence(v: HomeTaskStatusResu
  */
 export interface HomeTaskStatusResult {
   taskId: string;
-  lifecycle: HomeTaskStatusResultLifecycle;
+  homeId: string;
+  createdAt: number;
+  updatedAt: number;
+  intent: HomeTaskIntent;
+  /** The name a task is shown by (HomeTaskDisplay). */
+  title: string;
+  /** The target directory's last path component. */
+  project: string;
+  /** The worker session the task dispatched, or null before dispatch. */
+  sessionId: string | null;
+  target: string;
+  lifecycle: HomeTaskLifecycle;
   operationId: string | null;
   spend: HomeTaskSummarySpend | null;
-  terminalEvidence: HomeTaskStatusResultTerminalEvidence | null;
+  terminalEvidence: HomeTaskTerminalEvidence | null;
+  wake: HomeTaskWake | null;
+  workerModel: HomeTaskWorkerModel | null;
+  subagents: HomeTaskSubagents;
+  subagentRuns: HomeTaskSubagentRuns;
+  /** The latest check-ins, oldest first. */
+  checkins: HomeTaskCheckin[];
 }
 export function decodeHomeTaskStatusResult(v: unknown, p = "$"): HomeTaskStatusResult {
   const o = obj(v, p);
-  only(o, p, ["taskId","lifecycle","operationId","spend","terminalEvidence"]);
-  return { taskId: str(own(o, "taskId"), p + ".taskId"), lifecycle: decodeHomeTaskStatusResultLifecycle(own(o, "lifecycle"), p + ".lifecycle"), operationId: (own(o, "operationId") === null ? null : str(own(o, "operationId"), p + ".operationId")), spend: (own(o, "spend") === null ? null : decodeHomeTaskSummarySpend(own(o, "spend"), p + ".spend")), terminalEvidence: (own(o, "terminalEvidence") === null ? null : decodeHomeTaskStatusResultTerminalEvidence(own(o, "terminalEvidence"), p + ".terminalEvidence")) };
+  only(o, p, ["taskId","homeId","createdAt","updatedAt","intent","title","project","sessionId","target","lifecycle","operationId","spend","terminalEvidence","wake","workerModel","subagents","subagentRuns","checkins"]);
+  return { taskId: str(own(o, "taskId"), p + ".taskId"), homeId: str(own(o, "homeId"), p + ".homeId"), createdAt: int(own(o, "createdAt"), p + ".createdAt"), updatedAt: int(own(o, "updatedAt"), p + ".updatedAt"), intent: decodeHomeTaskIntent(own(o, "intent"), p + ".intent"), title: str(own(o, "title"), p + ".title"), project: str(own(o, "project"), p + ".project"), sessionId: (own(o, "sessionId") === null ? null : str(own(o, "sessionId"), p + ".sessionId")), target: str(own(o, "target"), p + ".target"), lifecycle: decodeHomeTaskLifecycle(own(o, "lifecycle"), p + ".lifecycle"), operationId: (own(o, "operationId") === null ? null : str(own(o, "operationId"), p + ".operationId")), spend: (own(o, "spend") === null ? null : decodeHomeTaskSummarySpend(own(o, "spend"), p + ".spend")), terminalEvidence: (own(o, "terminalEvidence") === null ? null : decodeHomeTaskTerminalEvidence(own(o, "terminalEvidence"), p + ".terminalEvidence")), wake: (own(o, "wake") === null ? null : decodeHomeTaskWake(own(o, "wake"), p + ".wake")), workerModel: (own(o, "workerModel") === null ? null : decodeHomeTaskWorkerModel(own(o, "workerModel"), p + ".workerModel")), subagents: decodeHomeTaskSubagents(own(o, "subagents"), p + ".subagents"), subagentRuns: decodeHomeTaskSubagentRuns(own(o, "subagentRuns"), p + ".subagentRuns"), checkins: seq(own(o, "checkins"), p + ".checkins", (x, q) => decodeHomeTaskCheckin(x, q)) };
 }
 export function encodeHomeTaskStatusResult(v: HomeTaskStatusResult): string {
-  return "{" + (',"taskId":' + JSON.stringify(v.taskId) + ',"lifecycle":' + encodeHomeTaskStatusResultLifecycle(v.lifecycle) + ',"operationId":' + (v.operationId === null ? "null" : JSON.stringify(v.operationId)) + ',"spend":' + (v.spend === null ? "null" : encodeHomeTaskSummarySpend(v.spend)) + ',"terminalEvidence":' + (v.terminalEvidence === null ? "null" : encodeHomeTaskStatusResultTerminalEvidence(v.terminalEvidence))).slice(1) + "}";
+  return "{" + (',"taskId":' + JSON.stringify(v.taskId) + ',"homeId":' + JSON.stringify(v.homeId) + ',"createdAt":' + encNum(v.createdAt) + ',"updatedAt":' + encNum(v.updatedAt) + ',"intent":' + encodeHomeTaskIntent(v.intent) + ',"title":' + JSON.stringify(v.title) + ',"project":' + JSON.stringify(v.project) + ',"sessionId":' + (v.sessionId === null ? "null" : JSON.stringify(v.sessionId)) + ',"target":' + JSON.stringify(v.target) + ',"lifecycle":' + encodeHomeTaskLifecycle(v.lifecycle) + ',"operationId":' + (v.operationId === null ? "null" : JSON.stringify(v.operationId)) + ',"spend":' + (v.spend === null ? "null" : encodeHomeTaskSummarySpend(v.spend)) + ',"terminalEvidence":' + (v.terminalEvidence === null ? "null" : encodeHomeTaskTerminalEvidence(v.terminalEvidence)) + ',"wake":' + (v.wake === null ? "null" : encodeHomeTaskWake(v.wake)) + ',"workerModel":' + (v.workerModel === null ? "null" : encodeHomeTaskWorkerModel(v.workerModel)) + ',"subagents":' + encodeHomeTaskSubagents(v.subagents) + ',"subagentRuns":' + encodeHomeTaskSubagentRuns(v.subagentRuns) + ',"checkins":' + "[" + v.checkins.map((x) => encodeHomeTaskCheckin(x)).join(",") + "]").slice(1) + "}";
 }
 /**
  * A finite lineage event: every operation, including those with no check-ins, and
@@ -3225,17 +3319,17 @@ export interface HomeTaskHistoryItem {
   taskId: string;
   operationId: string | null;
   operationNumber: number;
-  lifecycle: HomeTaskStatusResultLifecycle;
-  outcome: HomeTaskStatusResultTerminalEvidenceOutcome | null;
+  lifecycle: HomeTaskLifecycle;
+  outcome: HomeTaskOutcome | null;
   checkin?: HomeTaskCheckin;
 }
 export function decodeHomeTaskHistoryItem(v: unknown, p = "$"): HomeTaskHistoryItem {
   const o = obj(v, p);
   only(o, p, ["id","at","taskId","operationId","operationNumber","lifecycle","outcome","checkin"]);
-  return { id: str(own(o, "id"), p + ".id"), at: str(own(o, "at"), p + ".at"), taskId: str(own(o, "taskId"), p + ".taskId"), operationId: (own(o, "operationId") === null ? null : str(own(o, "operationId"), p + ".operationId")), operationNumber: num(own(o, "operationNumber"), p + ".operationNumber"), lifecycle: decodeHomeTaskStatusResultLifecycle(own(o, "lifecycle"), p + ".lifecycle"), outcome: (own(o, "outcome") === null ? null : decodeHomeTaskStatusResultTerminalEvidenceOutcome(own(o, "outcome"), p + ".outcome")), ...(own(o, "checkin") === undefined ? {} : { checkin: decodeHomeTaskCheckin(own(o, "checkin"), p + ".checkin") }) };
+  return { id: str(own(o, "id"), p + ".id"), at: str(own(o, "at"), p + ".at"), taskId: str(own(o, "taskId"), p + ".taskId"), operationId: (own(o, "operationId") === null ? null : str(own(o, "operationId"), p + ".operationId")), operationNumber: int(own(o, "operationNumber"), p + ".operationNumber"), lifecycle: decodeHomeTaskLifecycle(own(o, "lifecycle"), p + ".lifecycle"), outcome: (own(o, "outcome") === null ? null : decodeHomeTaskOutcome(own(o, "outcome"), p + ".outcome")), ...(own(o, "checkin") === undefined ? {} : { checkin: decodeHomeTaskCheckin(own(o, "checkin"), p + ".checkin") }) };
 }
 export function encodeHomeTaskHistoryItem(v: HomeTaskHistoryItem): string {
-  return "{" + (',"id":' + JSON.stringify(v.id) + ',"at":' + JSON.stringify(v.at) + ',"taskId":' + JSON.stringify(v.taskId) + ',"operationId":' + (v.operationId === null ? "null" : JSON.stringify(v.operationId)) + ',"operationNumber":' + encNum(v.operationNumber) + ',"lifecycle":' + encodeHomeTaskStatusResultLifecycle(v.lifecycle) + ',"outcome":' + (v.outcome === null ? "null" : encodeHomeTaskStatusResultTerminalEvidenceOutcome(v.outcome)) + (v.checkin === undefined ? "" : ',"checkin":' + encodeHomeTaskCheckin(v.checkin))).slice(1) + "}";
+  return "{" + (',"id":' + JSON.stringify(v.id) + ',"at":' + JSON.stringify(v.at) + ',"taskId":' + JSON.stringify(v.taskId) + ',"operationId":' + (v.operationId === null ? "null" : JSON.stringify(v.operationId)) + ',"operationNumber":' + encNum(v.operationNumber) + ',"lifecycle":' + encodeHomeTaskLifecycle(v.lifecycle) + ',"outcome":' + (v.outcome === null ? "null" : encodeHomeTaskOutcome(v.outcome)) + (v.checkin === undefined ? "" : ',"checkin":' + encodeHomeTaskCheckin(v.checkin))).slice(1) + "}";
 }
 export interface HomeTaskHistoryPage {
   items: HomeTaskHistoryItem[];
@@ -3247,7 +3341,7 @@ export interface HomeTaskHistoryPage {
 export function decodeHomeTaskHistoryPage(v: unknown, p = "$"): HomeTaskHistoryPage {
   const o = obj(v, p);
   only(o, p, ["items","total","complete","nextCursor"]);
-  return { items: seq(own(o, "items"), p + ".items", (x, q) => decodeHomeTaskHistoryItem(x, q)), total: num(own(o, "total"), p + ".total"), complete: bool(own(o, "complete"), p + ".complete"), ...(own(o, "nextCursor") === undefined ? {} : { nextCursor: str(own(o, "nextCursor"), p + ".nextCursor") }) };
+  return { items: seq(own(o, "items"), p + ".items", (x, q) => decodeHomeTaskHistoryItem(x, q)), total: int(own(o, "total"), p + ".total"), complete: bool(own(o, "complete"), p + ".complete"), ...(own(o, "nextCursor") === undefined ? {} : { nextCursor: str(own(o, "nextCursor"), p + ".nextCursor") }) };
 }
 export function encodeHomeTaskHistoryPage(v: HomeTaskHistoryPage): string {
   return "{" + (',"items":' + "[" + v.items.map((x) => encodeHomeTaskHistoryItem(x)).join(",") + "]" + ',"total":' + encNum(v.total) + ',"complete":' + JSON.stringify(v.complete) + (v.nextCursor === undefined ? "" : ',"nextCursor":' + JSON.stringify(v.nextCursor))).slice(1) + "}";

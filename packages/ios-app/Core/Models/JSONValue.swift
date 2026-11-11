@@ -311,9 +311,31 @@ package enum JSONValue: Codable, Hashable, Sendable {
         try JSONDecoder.gateway.decode(type, from: JSONEncoder.gateway.encode(self))
     }
 
+    package static func wire(_ encoded: String) throws -> JSONValue {
+        try JSONDecoder.gateway.decode(JSONValue.self, from: Data(encoded.utf8))
+    }
+
+    package func decodeWire<T>(_ decode: (WireJSON, String) throws -> T) throws -> T {
+        do { return try decode(WireJSON(self), "$") }
+        catch let error as WireError { throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: error.description)) }
+    }
+
     package var prettyPrinted: String {
         guard let data = try? JSONEncoder.pretty.encode(self) else { return "" }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+extension WireJSON {
+    init(_ value: JSONValue) {
+        switch value {
+        case .null: self = .null
+        case .bool(let value): self = .bool(value)
+        case .number(let value): self = .number(value)
+        case .string(let value): self = .string(value)
+        case .array(let values): self = .array(values.map(WireJSON.init))
+        case .object(let members): self = .object(WireObject(members.map { ($0.key, WireJSON($0.value)) }))
+        }
     }
 }
 

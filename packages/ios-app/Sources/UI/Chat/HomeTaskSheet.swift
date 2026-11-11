@@ -58,7 +58,7 @@ struct HomeTaskSheet: View {
     private var openableWorkerSession: String? {
         guard onOpenSession != nil, case .loaded(let read, .task(let task?, _)) = owner.state,
               read.identity == identity else { return nil }
-        return task.workerSessionId
+        return task.sessionId.value
     }
     private struct TaskID: Hashable { let identity: HomeSheetReadIdentity?; let request: UUID; let active: Bool }
 
@@ -173,13 +173,13 @@ struct HomeTaskSheet: View {
         }
     }
 
-    @ViewBuilder func recovery(_ status: HomeStatusDTO) -> some View {
-        if !status.available || status.taskRecovery?.available != true {
-            TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery?.reason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
+    @ViewBuilder func recovery(_ status: HomeStatus) -> some View {
+        if !status.available || status.taskRecovery != .availableTrue {
+            TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery.refusalReason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
         }
     }
 
-    private func taskDetail(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
+    private func taskDetail(_ task: HomeTaskStatusResult, status: HomeStatus) -> some View {
         let title = HomeTaskPresentation.title(title: task.title, briefText: task.intent.text, project: task.project)
         return TronSettingsSections(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 9) {
@@ -189,10 +189,10 @@ struct HomeTaskSheet: View {
                         .foregroundStyle(Color.tronTextPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
-                    TronStatusPill(text: HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome),
-                                   accent: Self.taskAccent(task.lifecycle, outcome: task.terminalEvidence?.outcome))
+                    TronStatusPill(text: HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: task.terminalEvidence.value?.outcome),
+                                   accent: Self.taskAccent(task.lifecycle, outcome: task.terminalEvidence.value?.outcome))
                 }
-                Text([task.project, dateLine(created: task.createdAt, updated: task.updatedAt)].compactMap { $0 }.joined(separator: " · "))
+                Text([task.project.isEmpty ? nil : task.project, dateLine(created: task.createdAt, updated: task.updatedAt)].compactMap { $0 }.joined(separator: " · "))
                     .font(SessionSummaryTypography.detail)
                     .foregroundStyle(Color.tronTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -203,7 +203,7 @@ struct HomeTaskSheet: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home-task-header")
             briefCard(task.intent.text)
-            if let terminal = task.terminalEvidence {
+            if let terminal = task.terminalEvidence.value {
                 TronSettingsGroup("Result", accent: accent) {
                     TronSettingsRow(icon: Self.taskIcon(task.lifecycle, outcome: terminal.outcome),
                                     title: terminal.outcome.rawValue.capitalized, subtitle: terminal.reason,
@@ -240,15 +240,15 @@ struct HomeTaskSheet: View {
         }
     }
 
-    @ViewBuilder private func workerCard(_ task: HomeTaskDTO) -> some View {
-        let runs = task.subagentRuns.flatMap { $0.total > 0 ? $0 : nil }
+    @ViewBuilder private func workerCard(_ task: HomeTaskStatusResult) -> some View {
+        let runs = task.subagentRuns.total > 0 ? task.subagentRuns : nil
         TronSettingsGroup("Worker", accent: accent) {
                 VStack(spacing: 0) {
                     let rows = workerRows(task)
-                    if let checkin = task.checkins?.last {
+                    if let checkin = task.checkins.last {
                         HomeTaskCheckinView(checkin: checkin, identifier: "home-task-checkin",
-                            context: checkin.operationId == task.operationId
-                                ? "Current operation · \(HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: task.terminalEvidence?.outcome))"
+                            context: checkin.operationId == task.operationId.value
+                                ? "Current operation · \(HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: task.terminalEvidence.value?.outcome))"
                                 : "Earlier operation", heading: "Latest check-in")
                         TronSettingsDivider(accent: accent)
                     }
@@ -273,9 +273,9 @@ struct HomeTaskSheet: View {
                         ForEach(Array(runs.runs.enumerated()), id: \.element.id) { index, run in
                             if index > 0 { TronSettingsDivider(accent: accent) }
                             TronSettingsRow(icon: "person.crop.circle.badge.clock", title: run.agent,
-                                            subtitle: HomeSheetTime.relative(run.lastActivityAt ?? run.startedAt),
+                                            subtitle: HomeSheetTime.relative(run.lastActivityAt.value ?? run.startedAt),
                                             subtitleLineLimit: nil, accent: accent, subtitleFont: TronTypography.subheadline) {
-                                TronStatusPill(text: run.state.capitalized, accent: accent)
+                                TronStatusPill(text: run.state.rawValue.capitalized, accent: accent)
                             }
                             .tronListMarkers("home-task-run-\(run.id)")
                         }
@@ -288,11 +288,11 @@ struct HomeTaskSheet: View {
             }
     }
 
-    private func workerRows(_ task: HomeTaskDTO) -> [(icon: String, title: String, value: String, id: String)] {
+    private func workerRows(_ task: HomeTaskStatusResult) -> [(icon: String, title: String, value: String, id: String)] {
         var rows: [(icon: String, title: String, value: String, id: String)] = []
-        if let model = task.workerModel { rows.append(("cpu", "Model", model.displayName, "home-task-model")) }
-        if let subagents = task.subagents { rows.append(("person.2", "Subagents", Self.subagentLine(subagents), "home-task-subagents")) }
-        if let spend = task.spend {
+        if let model = task.workerModel.value { rows.append(("cpu", "Model", model.displayName, "home-task-model")) }
+        rows.append(("person.2", "Subagents", Self.subagentLine(task.subagents), "home-task-subagents"))
+        if let spend = task.spend.value {
             rows.append(("gauge.with.dots.needle.33percent", "Tokens",
                          HomeTaskPresentation.spendText(spend),
                          "home-task-spend"))
@@ -300,9 +300,9 @@ struct HomeTaskSheet: View {
         return rows
     }
 
-    @ViewBuilder private func redeliverCard(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {
+    @ViewBuilder private func redeliverCard(_ task: HomeTaskStatusResult, status: HomeStatus) -> some View {
         let redeliverable = status.enabled && task.homeId == status.homeId ? status.routeGeneration.flatMap { route in
-            task.wake.flatMap { wake in wake.canRedeliver && wake.routeGeneration != route ? route : nil }
+            task.wake.value.flatMap { wake in wake.canRedeliver && wake.routeGeneration != route ? route : nil }
         } : nil
         if let route = redeliverable {
             TronSettingsGroup("Redeliver", detail: "Deliver this unadmitted result to the current Home. This does not replay the task.",
@@ -321,9 +321,9 @@ struct HomeTaskSheet: View {
         "Created \(HomeSheetTime.relative(milliseconds: created)) · updated \(HomeSheetTime.relative(milliseconds: updated))"
     }
 
-    static func subagentLine(_ subagents: HomeTaskDTO.Subagents) -> String {
+    static func subagentLine(_ subagents: HomeTaskSubagents) -> String {
         let started = "\(subagents.started.formatted()) started"
-        guard let stopped = subagents.stoppedAtEnd else { return started }
+        guard let stopped = subagents.stoppedAtEnd.value else { return started }
         return "\(started) · \(stopped.formatted()) stopped at end"
     }
 

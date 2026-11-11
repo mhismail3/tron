@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 struct HomeTaskCheckinSheet: View {
-    let item: HomeTaskHistoryPageDTO.Item
+    let item: HomeTaskHistoryItem
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
@@ -28,7 +28,7 @@ struct HomeTaskCheckinSheet: View {
 }
 
 struct HomeTaskCheckinView: View {
-    let checkin: HomeTaskCheckinDTO
+    let checkin: HomeTaskCheckin
     let identifier: String
     var context: String? = nil
     var heading: String? = nil
@@ -110,15 +110,13 @@ struct HomeTaskCheckinView: View {
     private var metadata: String? {
         var facts = context.map { [$0] } ?? []
         if checkin.needsAttention == true { facts.append("Needs attention") }
-        if let attention = checkin.attention, attention != "none" {
-            let label = switch attention {
-            case "requested": "Attention requested"
-            case "pending": "Attention pending"
-            case "rate-limited": "Attention rate-limited"
-            default: attention
-            }
-            facts.append(label)
+        let attention: String? = switch checkin.attention {
+        case .none: nil
+        case .requested: "Attention requested"
+        case .pending: "Attention pending"
+        case .rateLimited: "Attention rate-limited"
         }
+        if let attention { facts.append(attention) }
         return facts.isEmpty ? nil : facts.joined(separator: " · ")
     }
     private func section(_ title: String, text: String, suffix: String) -> some View {

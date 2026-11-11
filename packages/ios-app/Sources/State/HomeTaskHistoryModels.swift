@@ -1,31 +1,20 @@
 import Foundation
 import TronMobileCore
 
-struct HomeTaskHistoryPageDTO: Decodable, Equatable, Sendable {
-    struct Item: Decodable, Equatable, Sendable, Identifiable {
-        let id: String
-        let at: String
-        let taskId: String
-        let operationId: String?
-        let operationNumber: Int
-        let lifecycle: HomeTaskLifecycle
-        let outcome: HomeTaskOutcome?
-        let checkin: HomeTaskCheckinDTO?
-        var valid: Bool {
-            historyText(id, bytes: 200) && GatewayTimestamp.parse(at) != nil && historyID(taskId)
-                && (operationId.map(historyID) ?? true) && operationNumber > 0
-                && ((lifecycle == .terminal) == (outcome != nil)) && (checkin?.valid ?? true)
-                && (checkin.map { $0.id == id && $0.at == at && $0.taskId == taskId && $0.operationId == operationId } ?? true)
-        }
-        var operationLabel: String { operationNumber == 1 ? "Original operation" : "Resume \(operationNumber - 1)" }
-        var stateLabel: String { HomeTaskPresentation.stateLabel(lifecycle: lifecycle, outcome: outcome) }
+extension HomeTaskHistoryItem: Identifiable {
+    var valid: Bool {
+        historyText(id, bytes: 200) && GatewayTimestamp.parse(at) != nil && historyID(taskId)
+            && (operationId.value.map(historyID) ?? true) && operationNumber > 0
+            && ((lifecycle == .terminal) == (outcome != .null)) && (checkin?.valid ?? true)
+            && (checkin.map { $0.id == id && $0.at == at && $0.taskId == taskId && $0.operationId == operationId.value } ?? true)
     }
-    let items: [Item]
-    let total: Int
-    let complete: Bool
-    let nextCursor: String?
-    static func decode(_ value: JSONValue) throws -> Self {
-        let page = try value.decode(Self.self)
+    var operationLabel: String { operationNumber == 1 ? "Original operation" : "Resume \(operationNumber - 1)" }
+    var stateLabel: String { HomeTaskPresentation.stateLabel(lifecycle: lifecycle, outcome: outcome.value) }
+}
+
+extension HomeTaskHistoryPage {
+    static func validated(_ value: JSONValue) throws -> Self {
+        let page = try value.decodeWire(Self.decode)
         guard page.items.count <= 50, page.total >= page.items.count, page.items.allSatisfy(\.valid),
               Set(page.items.map(\.id)).count == page.items.count,
               zip(page.items, page.items.dropFirst()).allSatisfy({ GatewayTimestamp.parse($0.at)! >= GatewayTimestamp.parse($1.at)! }),

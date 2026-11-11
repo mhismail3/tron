@@ -136,7 +136,7 @@ struct AutomationFormView: View {
     @PresentationState private var actionContent = ""
     @PresentationState private var targetMode: AutomationTargetMode = .workspace
     @PresentationState private var targetSessionID = ""
-    @PresentationState private var homeTargetStatus: HomeStatusDTO?
+    @PresentationState private var homeTargetStatus: HomeStatus?
     @PresentationState private var savedHomeTarget: GatewayAutomationTarget?
     @PresentationState private var archivedTargetTitle: String?
     @PresentationState private var editingDateField: AutomationDateSelection?
@@ -762,7 +762,7 @@ struct AutomationFormView: View {
         guard let client, selectedEndpoint?.profile.capabilities.contains("home.v1") == true else { return }
         do {
             let value: JSONValue = try await client.request("home.status")
-            let status = try HomeStatusDTO.decode(value)
+            let status = try HomeStatus.validated(value)
             guard !Task.isCancelled, generation == presentationReadGeneration,
                   foreground == model.foregroundReconciliationGeneration,
                   selectedProfileID == profileID, selectedEndpoint?.profile.connectionID == connectionID,

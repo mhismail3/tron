@@ -44,7 +44,7 @@ extension HomeToolDetailPresentation {
             return taskList(call)
         case "status":
             guard let taskID, let details = call.details,
-                  let status = try? HomeTaskDTO.decode(.object(details), taskID: taskID) else { return nil }
+                  let status = try? HomeTaskStatusResult.validated(.object(details), taskID: taskID) else { return nil }
             return taskStatus(status, details: details, icon: icon)
         case "report":
             guard let details = call.details, let page = details["text"]?.stringValue,
@@ -125,44 +125,43 @@ extension HomeToolDetailPresentation {
         return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: .now)
     }
 
-    private static func taskStatus(_ task: HomeTaskDTO, details: [String: JSONValue], icon: String) -> HomeToolDetailPresentation {
-        let outcome = task.terminalEvidence?.outcome
+    private static func taskStatus(_ task: HomeTaskStatusResult, details: [String: JSONValue], icon: String) -> HomeToolDetailPresentation {
+        let outcome = task.terminalEvidence.value?.outcome
         let tone: Tone = switch task.lifecycle {
         case .pending: .pending
         case .active: .success
         case .terminal: outcome == .final ? .success : outcome == .interrupted ? .neutral : .failure
         }
         let stateLabel = task.lifecycle == .active ? "Running" : task.lifecycle == .pending ? "Starting" : outcome == .final ? "Finished" : outcome == .interrupted ? "Stopped" : "Needs attention"
-        let header = Header(icon: icon, title: task.title ?? task.taskId,
-                            subtitle: [task.project, task.taskId].compactMap { $0 }.joined(separator: " · "),
+        let header = Header(icon: icon, title: task.title.isEmpty ? task.taskId : task.title,
+                            subtitle: [task.project.isEmpty ? nil : task.project, task.taskId].compactMap { $0 }.joined(separator: " · "),
                             pill: stateLabel, tone: tone)
         var state: [Row] = []
-        if let terminal = task.terminalEvidence {
+        if let terminal = task.terminalEvidence.value {
             state.append(Row(icon: "flag.checkered", title: "Result", value: "\(terminal.outcome.rawValue.capitalized) · \(terminal.reason)"))
         }
         let duration = max(0, task.updatedAt - task.createdAt)
         state.append(Row(icon: "timer", title: task.lifecycle == .terminal ? "Duration" : "Running for", value: ToolTiming.format(milliseconds: duration)))
         if let queue = details["queuePosition"]?.intValue { state.append(Row(icon: "list.number", title: "Queue position", value: "\(queue)")) }
-        if let operation = task.operationId { state.append(Row(icon: "gearshape.2", title: "Operation", value: operation)) }
+        if let operation = task.operationId.value { state.append(Row(icon: "gearshape.2", title: "Operation", value: operation)) }
         var worker: [Row] = []
-        for checkin in task.checkins ?? [] {
+        for checkin in task.checkins {
             worker.append(Row(icon: "text.bubble", title: "Check-in", value: HomeTaskPresentation.checkinText(checkin)))
         }
-        if let model = task.workerModel { worker.append(Row(icon: "cpu", title: "Model", value: model.displayName)) }
-        if let spend = task.spend {
+        if let model = task.workerModel.value { worker.append(Row(icon: "cpu", title: "Model", value: model.displayName)) }
+        if let spend = task.spend.value {
             worker.append(Row(icon: "gauge.with.dots.needle.33percent", title: "Tokens",
                               value: HomeTaskPresentation.spendText(spend)))
         }
-        if let subagents = task.subagents {
-            let started = "\(subagents.started.formatted()) started"
-            worker.append(Row(icon: "person.2", title: "Subagents",
-                              value: subagents.stoppedAtEnd.map { "\(started) · \($0.formatted()) stopped at end" } ?? started))
-        }
-        if let runs = task.subagentRuns, runs.total > 0 {
+        let started = "\(task.subagents.started.formatted()) started"
+        worker.append(Row(icon: "person.2", title: "Subagents",
+                          value: task.subagents.stoppedAtEnd.value.map { "\(started) · \($0.formatted()) stopped at end" } ?? started))
+        let runs = task.subagentRuns
+        if runs.total > 0 {
             worker.append(Row(icon: "person.crop.circle.badge.clock", title: "Live runs",
-                              value: runs.runs.map { "\($0.agent) (\($0.state))" }.joined(separator: ", ") + (runs.total > runs.runs.count ? " and \(runs.total - runs.runs.count) more" : "")))
+                              value: runs.runs.map { "\($0.agent) (\($0.state.rawValue))" }.joined(separator: ", ") + (runs.total > runs.runs.count ? " and \(runs.total - runs.runs.count) more" : "")))
         }
-        if let session = task.workerSessionId { worker.append(Row(icon: "bubble.left.and.text.bubble.right", title: "Worker session", value: session)) }
+        if let session = task.sessionId.value { worker.append(Row(icon: "bubble.left.and.text.bubble.right", title: "Worker session", value: session)) }
         var sections: [Section] = [.rows(title: "State", detail: nil, rows: state)]
         if !worker.isEmpty { sections.append(.rows(title: "Worker", detail: nil, rows: worker)) }
         sections.append(.text(id: "brief", title: "Brief", text: task.intent.text))

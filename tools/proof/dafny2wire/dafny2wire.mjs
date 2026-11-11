@@ -223,7 +223,8 @@ export function emitSwift(types, source) {
   });
   const holdsNull = (t) => t.kind === "Nullable" || (byName.get(t.kind)?.kind === "bykind" && byName.get(t.kind).ctors.some((c) => !c.fields.length));
   const absent = (t, at) => (holdsNull(t) ? `${at} == nil` : `wAbsent(${at})`);
-  const decArgs = (c) => present(c).map((f) => `${swiftName(f.wire)}: f_${f.wire}`).join(", ");
+  const label = (s) => (["inout", "var", "let"].includes(s) ? `\`${s}\`` : s);
+  const decArgs = (c) => present(c).map((f) => `${label(f.wire)}: f_${f.wire}`).join(", ");
   const encField = (f, pre) => f.type.kind === "Option"
     ? `(${pre}${swiftName(f.wire)} == nil ? "" : ",\\"${f.wire}\\":" + ${enc(f.type.arg, `${pre}${swiftName(f.wire)}!`)})`
     : `",\\"${f.wire}\\":" + ${enc(f.type, `${pre}${swiftName(f.wire)}`)}`;
@@ -232,34 +233,35 @@ export function emitSwift(types, source) {
   const kindPattern = { null: ".null", string: ".string", number: ".number", boolean: ".bool", array: ".array", object: ".object" };
   for (const ty of types) {
     if (ty.kind === "enum") {
-      out.push(`public enum ${ty.name}: Equatable {`, ...ty.ctors.map((c) => `  case ${swiftName(lc(c.name))}`),
-        `  public static func decode(_ v: WireJSON, _ p: String = "$") throws -> ${ty.name} {`, `    switch v {`,
+      const raw = ty.ctors.every((c) => typeof c.wire === "string");
+      out.push(`package enum ${ty.name}: ${raw ? "String, " : ""}CaseIterable, Hashable, Sendable {`, ...ty.ctors.map((c) => `  case ${swiftName(lc(c.name))}${raw ? ` = ${sw(c.wire)}` : ""}`),
+        `  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ${ty.name} {`, `    switch v {`,
         ...ty.ctors.map((c) => `    case ${literalPattern(c.wire)}: return .${swiftName(lc(c.name))}`),
         unknownCase(ty) ? `    default: return .${swiftName(lc(unknownCase(ty).name))}` : `    default: throw WireError(path: p, message: "unknown value")`, `    }`, `  }`,
-        `  public func encode() -> String {`, `    switch self {`, ...ty.ctors.map((c) => `    case .${swiftName(lc(c.name))}: return ${sw(JSON.stringify(c.wire))}`), `    }`, `  }`, `}`);
+        `  package func encode() -> String {`, `    switch self {`, ...ty.ctors.map((c) => `    case .${swiftName(lc(c.name))}: return ${sw(JSON.stringify(c.wire))}`), `    }`, `  }`, `}`);
     } else if (ty.kind === "record") {
       const c = ty.ctors[0];
-      out.push(`public struct ${ty.name}: Equatable {`, ...present(c).map((f) => `  public let ${swiftName(f.wire)}: ${swType(f.type)}`),
-        `  public static func decode(_ v: WireJSON, _ p: String = "$") throws -> ${ty.name} {`, `    let o = try wObj(v, p)`, ...decLets(c, "    "),
+      out.push(`package struct ${ty.name}: Hashable, Sendable {`, ...present(c).map((f) => `  package let ${swiftName(f.wire)}: ${swType(f.type)}`),
+        `  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ${ty.name} {`, `    let o = try wObj(v, p)`, ...decLets(c, "    "),
         `    return ${ty.name}(${decArgs(c)})`, `  }`,
-        present(c).length ? `  public func encode() -> String {\n    var s = ""\n${present(c).map((f) => `    s += ${encField(f, "self.")}`).join("\n")}\n    return "{" + String(s.dropFirst()) + "}"\n  }` : `  public func encode() -> String { "{}" }`, `}`);
+        present(c).length ? `  package func encode() -> String {\n    var s = ""\n${present(c).map((f) => `    s += ${encField(f, "self.")}`).join("\n")}\n    return "{" + String(s.dropFirst()) + "}"\n  }` : `  package func encode() -> String { "{}" }`, `}`);
     } else if (ty.kind === "tagged") {
-      out.push(`public indirect enum ${ty.name}: Equatable {`,
-        ...ty.ctors.map((c) => `  case ${swiftName(lc(c.name))}${present(c).length ? `(${present(c).map((f) => `${swiftName(f.wire)}: ${swType(f.type)}`).join(", ")})` : ""}`),
-        `  public static func decode(_ v: WireJSON, _ p: String = "$") throws -> ${ty.name} {`, `    let o = try wObj(v, p)`,
+      out.push(`package indirect enum ${ty.name}: Hashable, Sendable {`,
+        ...ty.ctors.map((c) => `  case ${swiftName(lc(c.name))}${present(c).length ? `(${present(c).map((f) => `${label(f.wire)}: ${swType(f.type)}`).join(", ")})` : ""}`),
+        `  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ${ty.name} {`, `    let o = try wObj(v, p)`,
         `    switch o.value(${sw(ty.tag)}) {`,
         ...ty.ctors.map((c) => `    case ${literalPattern(c.wire)}?:\n${decLets(c, "      ").map((l) => `${l}\n`).join("")}      return .${swiftName(lc(c.name))}${present(c).length ? `(${decArgs(c)})` : ""}`),
         `    default: throw WireError(path: p + ".${ty.tag}", message: "unknown variant")`, `    }`, `  }`,
-        `  public func encode() -> String {`, `    switch self {`,
+        `  package func encode() -> String {`, `    switch self {`,
         ...ty.ctors.map((c) => `    case .${swiftName(lc(c.name))}${present(c).length ? `(${present(c).map((f) => `let ${swiftName(f.wire)}`).join(", ")})` : ""}:\n      ${present(c).length ? "var" : "let"} s = "{\\"${ty.tag}\\":" + ${typeof c.wire === "string" ? `wEscape(${sw(c.wire)})` : sw(JSON.stringify(c.wire))}\n${present(c).map((f) => `      s += ${encField(f, "")}\n`).join("")}      return s + "}"`),
         `    }`, `  }`, `}`);
     } else {
-      out.push(`public indirect enum ${ty.name}: Equatable {`,
+      out.push(`package indirect enum ${ty.name}: Hashable, Sendable {`,
         ...ty.ctors.map((c) => `  case ${swiftName(lc(c.name))}${c.fields.length ? `(${swType(c.fields[0].type)})` : ""}`),
-        `  public static func decode(_ v: WireJSON, _ p: String = "$") throws -> ${ty.name} {`, `    switch v {`,
+        `  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ${ty.name} {`, `    switch v {`,
         ...ty.ctors.map((c, i) => `    case ${ty.kinds[i].map((k) => kindPattern[k]).join(", ")}: return .${swiftName(lc(c.name))}${c.fields.length ? `(${dec(c.fields[0].type, "v", "p")})` : ""}`),
-        `    default: throw WireError(path: p, message: "unexpected JSON kind")`, `    }`, `  }`,
-        `  public func encode() -> String {`, `    switch self {`,
+        ...(ty.kinds.flat().length === Object.keys(kindPattern).length ? [] : [`    default: throw WireError(path: p, message: "unexpected JSON kind")`]), `    }`, `  }`,
+        `  package func encode() -> String {`, `    switch self {`,
         ...ty.ctors.map((c) => `    case .${swiftName(lc(c.name))}${c.fields.length ? "(let x)" : ""}: return ${c.fields.length ? enc(c.fields[0].type, "x") : '"null"'}`),
         `    }`, `  }`, `}`);
     }
@@ -268,11 +270,11 @@ export function emitSwift(types, source) {
 }
 const SWIFT_PRELUDE = String.raw`import Foundation
 
-public struct WireError: Error, CustomStringConvertible { public let path: String; public let message: String; public var description: String { "\(path): \(message)" } }
+package struct WireError: Error, CustomStringConvertible { package let path: String; package let message: String; package var description: String { "\(path): \(message)" } }
 
 /// A parsed JSON value (decoder input). A number may be non-finite (an overflowing literal such as 1e400,
 /// which JSON.parse reads as Infinity); decoders reject it at its path.
-public indirect enum WireJSON: Equatable {
+package indirect enum WireJSON: Hashable, Sendable {
   case null, bool(Bool), number(Double), string(String), array([WireJSON]), object(WireObject)
 }
 /// Key-value pairs in JavaScript's property order: array-index keys ascending, then insertion order; a
@@ -288,24 +290,29 @@ func wJsOrder<T>(_ pairs: [(String, T)]) -> [(String, T)] {
   }
   return entries
 }
-public struct WireObject: Equatable {
-  public let entries: [(String, WireJSON)]
-  init(_ pairs: [(String, WireJSON)]) { entries = wJsOrder(pairs) }
-  public static func == (a: WireObject, b: WireObject) -> Bool { a.entries.count == b.entries.count && zip(a.entries, b.entries).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 } }
-  public func value(_ key: String) -> WireJSON? { entries.first { $0.0 == key }?.1 }
+package struct WireObject: Hashable, Sendable {
+  package let entries: [(String, WireJSON)]
+  package init(_ pairs: [(String, WireJSON)]) { entries = wJsOrder(pairs) }
+  package static func == (a: WireObject, b: WireObject) -> Bool { a.entries.count == b.entries.count && zip(a.entries, b.entries).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 } }
+  package func hash(into h: inout Hasher) { for (k, v) in entries { h.combine(k); h.combine(v) } }
+  package func value(_ key: String) -> WireJSON? { entries.first { $0.0 == key }?.1 }
 }
 /// A JSON object with values of one type, always in JavaScript's property order (whatever order it is built
 /// in), so it encodes exactly as the TypeScript codec encodes the same object.
-public struct WireMap<T: Equatable>: Equatable {
-  public let entries: [(String, T)]
-  public init(_ entries: [(String, T)]) { self.entries = wJsOrder(entries) }
-  public static func == (a: WireMap, b: WireMap) -> Bool { a.entries.count == b.entries.count && zip(a.entries, b.entries).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 } }
-  public func encode(_ f: (T) -> String) -> String { "{" + entries.map { wEscape($0.0) + ":" + f($0.1) }.joined(separator: ",") + "}" }
+package struct WireMap<T: Hashable>: Hashable {
+  package let entries: [(String, T)]
+  package init(_ entries: [(String, T)]) { self.entries = wJsOrder(entries) }
+  package static func == (a: WireMap, b: WireMap) -> Bool { a.entries.count == b.entries.count && zip(a.entries, b.entries).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 } }
+  package func hash(into h: inout Hasher) { for (k, v) in entries { h.combine(k); h.combine(v) } }
+  package func encode(_ f: (T) -> String) -> String { "{" + entries.map { wEscape($0.0) + ":" + f($0.1) }.joined(separator: ",") + "}" }
 }
-public enum Nullable<T: Equatable>: Equatable {
+extension WireMap: Sendable where T: Sendable {}
+package enum Nullable<T: Hashable>: Hashable {
   case null, nonNull(T)
-  public func encode(_ f: (T) -> String) -> String { if case .nonNull(let v) = self { return f(v) }; return "null" }
+  package var value: T? { if case .nonNull(let v) = self { return v }; return nil }
+  package func encode(_ f: (T) -> String) -> String { if case .nonNull(let v) = self { return f(v) }; return "null" }
 }
+extension Nullable: Sendable where T: Sendable {}
 /// A canonical array index (0 ..< 2^32 - 1, no leading zeros): such keys come first, ascending, in JS objects.
 func wArrayIndex(_ k: String) -> UInt32? {
   guard let n = UInt32(k), n != UInt32.max, String(n) == k else { return nil }
@@ -313,7 +320,7 @@ func wArrayIndex(_ k: String) -> UInt32? {
 }
 
 // JSON parser (RFC 8259), producing WireJSON with JavaScript object order.
-public func wParse(_ text: String) throws -> WireJSON {
+package func wParse(_ text: String) throws -> WireJSON {
   var p = JSONParser(Array(text.utf8))
   p.space()
   let v = try p.value()
@@ -407,7 +414,7 @@ struct JSONParser {
 }
 
 /// JSON.stringify string escaping.
-public func wEscape(_ s: String) -> String {
+package func wEscape(_ s: String) -> String {
   var r = "\""
   for u in s.unicodeScalars {
     switch u {
@@ -424,7 +431,7 @@ public func wEscape(_ s: String) -> String {
   return r + "\""
 }
 /// ECMAScript Number::toString for finite doubles: Swift's shortest round-trip digits, laid out by JS rules.
-public func wFormat(_ d: Double) -> String {
+package func wFormat(_ d: Double) -> String {
   precondition(d.isFinite, "not a finite number")
   if d == 0 { return "0" }
   if d < 0 { return "-" + wFormat(-d) }
@@ -470,23 +477,44 @@ export function generate(input, outDir) {
   return { types: types.map((t) => t.name), tsLines: ts.split("\n").length, swiftLines: swift.split("\n").length };
 }
 
+/// The named datatypes and every datatype their fields reach, in source order.
+export function reachable(types, roots) {
+  const byName = new Map(types.map((t) => [t.name, t]));
+  const seen = new Set();
+  const visit = (name) => {
+    if (seen.has(name)) return;
+    if (!byName.has(name)) throw new Error(`@swift names an unknown datatype ${name}`);
+    seen.add(name);
+    const walk = (t) => (["seq", "Option", "Nullable"].includes(t.kind) ? walk(t.arg) : t.kind === "map" ? (walk(t.key), walk(t.arg)) : byName.has(t.kind) && visit(t.kind));
+    for (const c of byName.get(name).ctors) for (const f of c.fields) walk(f.type);
+  };
+  roots.forEach(visit);
+  return types.filter((t) => seen.has(t.name));
+}
+export const swiftRoots = (src) => [...src.matchAll(/^[ \t]*\/\/ @swift[ \t]+(.+)$/gm)].flatMap((m) => m[1].trim().split(/\s+/));
+
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 export const PROTOCOL_SOURCE = "packages/core/wire/Protocol.dfy";
 export const PROTOCOL_TS = "packages/gateway/src/protocol/types.ts";
-export function protocolTs() {
-  return emitTs(parseWire(readFileSync(join(REPO, PROTOCOL_SOURCE), "utf8")), `${PROTOCOL_SOURCE} (scripts/tron proof wire --protocol)`);
+export const PROTOCOL_SWIFT = "packages/ios-app/Core/Generated/Protocol.swift";
+export function protocolOutputs() {
+  const src = readFileSync(join(REPO, PROTOCOL_SOURCE), "utf8");
+  const types = parseWire(src), source = `${PROTOCOL_SOURCE} (scripts/tron proof wire --protocol)`;
+  return { [PROTOCOL_TS]: emitTs(types, source), [PROTOCOL_SWIFT]: emitSwift(reachable(types, swiftRoots(src)), source) };
 }
+export const protocolTs = () => protocolOutputs()[PROTOCOL_TS];
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [flag, input, outDir] = process.argv.slice(2);
   try {
     if (flag === "--protocol" && (input === undefined || input === "--check")) {
-      const ts = protocolTs();
-      if (input === "--check") {
-        const current = readFileSync(join(REPO, PROTOCOL_TS), "utf8");
-        if (current !== ts) { console.error(`proof wire: ${PROTOCOL_TS} is not what ${PROTOCOL_SOURCE} generates; run scripts/tron proof wire --protocol`); process.exitCode = 1; }
-        else console.log(`proof wire: ${PROTOCOL_TS} is fresh`);
-      } else { writeFileSync(join(REPO, PROTOCOL_TS), ts); console.log(`proof wire: wrote ${PROTOCOL_TS}`); }
+      for (const [path, text] of Object.entries(protocolOutputs())) {
+        if (input !== "--check") { mkdirSync(dirname(join(REPO, path)), { recursive: true }); writeFileSync(join(REPO, path), text); console.log(`proof wire: wrote ${path}`); continue; }
+        let current = null;
+        try { current = readFileSync(join(REPO, path), "utf8"); } catch {}
+        if (current !== text) { console.error(`proof wire: ${path} is not what ${PROTOCOL_SOURCE} generates; run scripts/tron proof wire --protocol`); process.exitCode = 1; }
+        else console.log(`proof wire: ${path} is fresh`);
+      }
     } else if (flag === "--generate" && input && outDir) console.log(JSON.stringify(generate(input, outDir)));
     else { console.error("usage: scripts/tron proof wire --generate <in.dfy> <out-dir> | --protocol [--check]"); process.exitCode = 2; }
   } catch (error) { console.error(`proof wire: ${error.message}`); process.exitCode = 2; }

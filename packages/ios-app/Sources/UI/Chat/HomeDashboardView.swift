@@ -125,7 +125,7 @@ enum HomeButtonIndicatorState: Hashable {
     case working
     case waitingForUser
 
-    init(status: HomeStatusDTO?) {
+    init(status: HomeStatus?) {
         if status?.waitingForUser == true {
             self = .waitingForUser
         } else if status?.phase == .active {

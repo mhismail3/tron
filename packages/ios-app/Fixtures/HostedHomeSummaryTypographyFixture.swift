@@ -30,13 +30,13 @@ struct HostedHomeSummaryTypographyFixture: View {
     }
 
     private static var read: HomeManageDTO {
-        let status = try! JSONDecoder.gateway.decode(HomeStatusDTO.self, from: Data(#"""
+        let status = try! HomeStatus.decode(wParse(#"""
         {"phase":"ready","available":true,"enabled":true,"sessionPresent":true,
          "hostPressure":{"level":"normal"},"workers":{"running":0},
-         "activation":{"available":false},"readiness":{"gaps":[]},"recovery":{},
-         "memory":{"configured":true,"open":true}}
-        """#.utf8))
-        return HomeManageDTO(status: status, context: HomeContextDTO(activation: status.activation, breakdown: nil),
+         "activation":{"available":false},"readiness":{"gaps":[]},"recovery":{"action":"none"},
+         "taskRecovery":{"available":true},"memory":{"configured":true,"open":true}}
+        """#))
+        return HomeManageDTO(status: status, context: status.activation,
                              chapters: nil, tasks: nil, permissions: nil)
     }
 

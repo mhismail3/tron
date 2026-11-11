@@ -37,10 +37,10 @@ struct HomePagedListSheet: View {
     private var canAct: Bool { active && identity != nil && store.identity == identity }
     private var memoryFilter: String? { if case .memory(let sessionID, _) = destination { return sessionID }; return nil }
 
-    private var memoryPages: [HomeMemoryViewDTO] { store.pages.compactMap { if case .memory(let page) = $0.page { page } else { nil } } }
-    private var taskPages: [HomeTaskPageDTO] { store.pages.compactMap { if case .tasks(let page?, _) = $0.page { page } else { nil } } }
-    private var historyPages: [HomeTaskHistoryPageDTO] { store.pages.compactMap { if case .taskHistory(let page) = $0.page { page } else { nil } } }
-    private var taskStatus: HomeStatusDTO? { if case .tasks(_, let status) = store.pages.first?.page { status } else { nil } }
+    private var memoryPages: [HomeMemoryView] { store.pages.compactMap { if case .memory(let page) = $0.page { page } else { nil } } }
+    private var taskPages: [HomeTaskPage] { store.pages.compactMap { if case .tasks(let page?, _) = $0.page { page } else { nil } } }
+    private var historyPages: [HomeTaskHistoryPage] { store.pages.compactMap { if case .taskHistory(let page) = $0.page { page } else { nil } } }
+    private var taskStatus: HomeStatus? { if case .tasks(_, let status) = store.pages.first?.page { status } else { nil } }
 
     private var next: HomeSheetReadQuery? {
         if let memory = memoryPages.last, let cursor = memory.nextCursor {
@@ -61,13 +61,13 @@ struct HomePagedListSheet: View {
         return .end("First task · \(TronListTime.short(milliseconds: first.createdAt))")
     }
 
-    private struct MemoryRow: Identifiable { let line: HomeMemoryViewDTO.Line; let position: Int; var id: String { line.id } }
-    private struct HistoryRow: Identifiable { let item: HomeTaskHistoryPageDTO.Item; let position: Int; var id: String { item.id } }
+    private struct MemoryRow: Identifiable { let line: HomeMemoryViewLine; let position: Int; var id: String { line.id } }
+    private struct HistoryRow: Identifiable { let item: HomeTaskHistoryItem; let position: Int; var id: String { item.id } }
     private var historyRows: [HistoryRow] {
         var seen = Set<String>()
         return historyPages.flatMap(\.items).filter { seen.insert($0.id).inserted }.enumerated().map { HistoryRow(item: $1, position: $0 + 1) }
     }
-    private struct TaskRow: Identifiable { let row: HomeTaskPageDTO.Row; let position: Int; var id: String { row.id } }
+    private struct TaskRow: Identifiable { let row: HomeTaskSummary; let position: Int; var id: String { row.id } }
 
     private var memoryRows: [MemoryRow] {
         var seen = Set<String>()
@@ -186,8 +186,8 @@ struct HomePagedListSheet: View {
     }
 
     @ViewBuilder private var placeholders: some View {
-        if let status = taskStatus, !status.available || status.taskRecovery?.available != true {
-            TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery?.reason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
+        if let status = taskStatus, !status.available || status.taskRecovery != .availableTrue {
+            TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery.refusalReason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
         }
         if isMemory, memoryRows.isEmpty {
             TronPlaceholderState(title: "No memory yet", detail: "Memory appears after Home admits conversation history.", icon: "brain")
@@ -198,7 +198,7 @@ struct HomePagedListSheet: View {
         if isHistory, historyRows.isEmpty { TronPlaceholderState(title: "No check-ins", detail: "No progress history is available for this task.", icon: "clock.arrow.circlepath") }
     }
 
-    private func memoryRow(_ line: HomeMemoryViewDTO.Line) -> some View {
+    private func memoryRow(_ line: HomeMemoryViewLine) -> some View {
         VStack(spacing: TronListMetrics.headerGap) {
         TronFeedCard {
             TronListButton(HomeMemoryPresentation.rowContent(line, showsResolution: store.identity == identity),
@@ -238,7 +238,7 @@ struct HomePagedListSheet: View {
         }
     }
 
-    private func taskRow(_ row: HomeTaskPageDTO.Row) -> some View {
+    private func taskRow(_ row: HomeTaskSummary) -> some View {
         TronFeedCard {
             TronListButton(HomeTaskPresentation.rowContent(row), identifier: "home-task-\(row.taskId)") {
                 guard canAct else { return }; child = .task(row.taskId)
@@ -248,7 +248,7 @@ struct HomePagedListSheet: View {
         .tronListMarkers("home-task-card-\(row.taskId)")
     }
 
-    private func historyRow(_ item: HomeTaskHistoryPageDTO.Item) -> some View {
+    private func historyRow(_ item: HomeTaskHistoryItem) -> some View {
         TronFeedCard {
             if let checkin = item.checkin {
                 let flags = [checkin.needsAttention == true ? "Needs attention" : nil, checkin.blocker != nil ? "Blocked" : nil].compactMap { $0 }
@@ -294,7 +294,7 @@ struct HomePagedListSheet: View {
 }
 
 extension HomeMemoryPresentation {
-    static func kind(_ line: HomeMemoryViewDTO.Line) -> (icon: String, tone: Color, label: String) {
+    static func kind(_ line: HomeMemoryViewLine) -> (icon: String, tone: Color, label: String) {
         guard let item = line.item else { return ("square.stack.3d.up", .tronPrimary, "Summary") }
         if item.isToolActivity {
             let icon = item.display?.toolName.flatMap { ToolDetailPresentation.sheetTitleIcon(for: $0) } ?? "wrench.adjustable"
@@ -308,7 +308,7 @@ extension HomeMemoryPresentation {
         }
     }
 
-    static func rowContent(_ line: HomeMemoryViewDTO.Line, showsResolution: Bool = true, now: Date = .now) -> TronListRowContent {
+    static func rowContent(_ line: HomeMemoryViewLine, showsResolution: Bool = true, now: Date = .now) -> TronListRowContent {
         let kind = kind(line)
         return TronListRowContent(
             leading: .icon(kind.icon, kind.tone), title: line.item?.isToolActivity == true ? text(line) : SessionHistoryPreview.plain(text(line)),
@@ -321,14 +321,14 @@ extension HomeMemoryPresentation {
 }
 
 extension HomeTaskPresentation {
-    static func status(_ row: HomeTaskPageDTO.Row) -> TronListStatus {
+    static func status(_ row: HomeTaskSummary) -> TronListStatus {
         switch row.lifecycle {
         case .pending: return TronListStatus(text: "Pending", tone: .tronSlate)
         case .active:
             return row.attention || row.pendingGrant ? TronListStatus(text: "Needs Input", tone: .tronAmber)
                 : TronListStatus(text: "Running", tone: .tronEmerald, live: true)
         case .terminal:
-            return switch row.outcome {
+            return switch row.outcome.value {
             case .final: TronListStatus(text: "Completed", tone: .tronSuccess)
             case .needsInput: TronListStatus(text: "Needs Input", tone: .tronAmber)
             case .limited: TronListStatus(text: "Limited", tone: .tronAmber)
@@ -338,8 +338,8 @@ extension HomeTaskPresentation {
         }
     }
 
-    static func subtext(_ row: HomeTaskPageDTO.Row) -> String? {
-        if let checkin = row.checkins?.last {
+    static func subtext(_ row: HomeTaskSummary) -> String? {
+        if let checkin = row.checkins.last {
             if let blocker = checkin.blocker, !blocker.isEmpty { return "\(checkin.step) — blocked: \(blocker)" }
             return checkin.next.isEmpty ? checkin.step : "\(checkin.step) — next: \(checkin.next)"
         }
@@ -348,9 +348,9 @@ extension HomeTaskPresentation {
         return nil
     }
 
-    static func rowContent(_ row: HomeTaskPageDTO.Row, now: Date = .now) -> TronListRowContent {
+    static func rowContent(_ row: HomeTaskSummary, now: Date = .now) -> TronListRowContent {
         TronListRowContent(title: title(title: row.title, briefText: nil, project: row.project), status: status(row),
-                           subtext: subtext(row), tags: row.project.map { [TronListTag(text: $0)] } ?? [],
+                           subtext: subtext(row), tags: row.project.isEmpty ? [] : [TronListTag(text: row.project)],
                            timestamp: TronListTime.short(milliseconds: row.updatedAt, now: now))
     }
 }
