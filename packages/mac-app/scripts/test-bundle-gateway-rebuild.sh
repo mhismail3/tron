@@ -88,6 +88,23 @@ print(digest.hexdigest())
 PY
 }
 
+step "help prints only the usage header"
+cat >"$TMP/help-expected" <<'EOF'
+Stage the exact Tron Gateway, its production dependencies, Node runtimes, and
+tiny universal Login Item launcher into the Mac wrapper's resource tree.
+Usage:
+  bundle-gateway.sh                  build and stage everything
+  bundle-gateway.sh --skip-install   reuse an existing gateway node_modules
+  bundle-gateway.sh --skip-download  reuse the published Node and npm runtimes
+  bundle-gateway.sh --clean          remove only generated payloads
+  bundle-gateway.sh --verify-only    verify existing payload without mutation
+  bundle-gateway.sh --allow-unconfigured-push  local development payload only
+EOF
+for option in --help -h; do
+    "$SCRIPT_DIR/bundle-gateway.sh" "$option" >"$TMP/help-actual"
+    cmp "$TMP/help-expected" "$TMP/help-actual" || fail "$option differs from the usage header"
+done
+
 step "manifest template matches the shared payload contract"
 python3 - "$SCRIPT_DIR" <<'PY' || fail "bundle-gateway.sh manifest template diverges from gateway-payload-contract.json"
 import json, re, sys

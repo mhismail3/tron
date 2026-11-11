@@ -1,25 +1,6 @@
 #!/usr/bin/env node
 // mutate: automatic mutation checker for a Dafny proof block (laws + implementation).
-//
-// Every mutant of the implementation must be KILLED by the laws (verification fails, attributed to the
-// law whose lemma failed). A mutant the laws accept survives (the laws are too weak, or it is an equivalent
-// mutant), which fails the gate unless the mutant is listed in mutate.json "accepted" with a reviewed reason
-// (an equivalent mutant, or behaviour outside every law's contract that the block owner accepts).
-// Stillborn mutants (resolution/type errors) are reported and excluded from the score.
-//
-// Block config <root>/blocks/<block>/mutate.json, every file path relative to <root> (packages/core):
-//   { block, tier: "high-stakes"|"leaf", impl: "blocks/<block>/Block.dfy", symbols: [compiled functions to mutate],
-//     verify: [files whose verification checks the laws], laws: { "<law id>": ["<Module.lemma>", ...] }, translate: "...",
-//     accepted: { "<mutant id>": { kind: "equivalent"|"out-of-contract", reason, reviewer, hint? } } }
-//   "equivalent" is checked, not trusted: the tool proves <sym> == mutated <sym> in Dafny (hint = proof
-//   body); "out-of-contract" (behaviour no law constrains, by decision) is allowed only for tier "leaf".
-// Each mutant runs in its own copy of <root>, so relative includes between laws/ and blocks/ hold.
-//
-// Usage: scripts/tron proof mutate <block> [--root <dir>] [--laws <file>] [--config <mutate.json>]
-//        [--jobs N] [--only <id-substr>] [--list] [--equiv <mutant id>] [--out <report.json>] [--recheck <report.json> [--sample N]]
-//   --equiv <id>   print the generated equivalence-proof file for one mutant (for reviewers) and exit
-//   --laws <file>  use this file's content as the block's laws (block.json interface[0]; shows a weakened law)
-// Exit 0 iff the full mutant set ran (no --only) with no survivors or unknowns (after "accepted").
+
 import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, mkdtempSync, statSync } from "node:fs";
 import { dirname, join, resolve, basename } from "node:path";
@@ -39,19 +20,18 @@ const blockDir = join(root, "blocks", argv[0]);
 const cfg = JSON.parse(readFileSync(opt("--config") ?? join(blockDir, "mutate.json"), "utf8"));
 if (cfg.block !== argv[0]) { console.error(`mutate.json block "${cfg.block}" is not ${argv[0]}`); process.exit(2); }
 const lawsOverride = opt("--laws");
-// --laws replaces the block's laws (its first block.json interface file) in every work copy.
+
 const lawFiles = JSON.parse(readFileSync(join(blockDir, "block.json"), "utf8")).interface;
 const lawsTarget = lawFiles[0];
 const verifyFiles = cfg.verify;
-// The pinned toolchain only: the doctor must pass, then every Dafny call goes through its wrapper.
+
 const DAFNY = join(process.env.XDG_CACHE_HOME || join(homedir(), "Library/Caches"), "tron-proof/bin/dafny");
-// Shared Mac: at most MAX_SOLVERS concurrent Z3 processes. Each job runs one dafny command with --cores 1.
+
 const MAX_SOLVERS = 4;
 const jobs = Number(opt("--jobs", 2));
 if (!(jobs >= 1 && jobs <= MAX_SOLVERS)) { console.error(`--jobs must be 1..${MAX_SOLVERS} (solver cap on the shared Mac)`); process.exit(2); }
 const env = { ...process.env, DAFNY_CORES: "1", PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, DOTNET_CLI_TELEMETRY_OPTOUT: "1" };
 
-// ---------------- tokenizer (Dafny subset: enough to find and rewrite expression tokens) ----------
 const OPS = ["<==>", "==>", "<==", "==", "!=", "<=", ">=", "&&", "||", ":=", ":|", "::", "=>", "->", ".."];
 function tokenize(src) {
   const t = []; let i = 0, line = 1, col = 1;
@@ -72,7 +52,6 @@ function tokenize(src) {
   return t;
 }
 
-// Token index ranges [start, end) of the bodies of the configured compiled symbols.
 function bodies(toks, symbols) {
   const out = [];
   for (let k = 0; k < toks.length - 1; k++) {
@@ -89,7 +68,6 @@ function bodies(toks, symbols) {
   return out;
 }
 
-// Nullary-constructor groups from `datatype X = A | B(..) | C` declarations in the impl.
 function ctorGroups(toks) {
   const groups = [];
   for (let k = 0; k < toks.length; k++) {
@@ -107,36 +85,34 @@ function ctorGroups(toks) {
   return groups;
 }
 
-// ---------------- mutation operators ----------------
 const ROR = { "<": ["<=", ">="], "<=": ["<", ">"], ">": [">=", "<="], ">=": [">", "<"], "==": ["!="], "!=": ["=="] };
 const AOR = { "+": ["-"], "-": ["+"], "*": ["+"], "/": ["*"], "%": ["/"] };
 const operandEnd = (t) => t && (t.kind === "id" || t.kind === "num" || t.text === ")" || t.text === "]");
 
-// Constructor groups come from the impl and the block's laws, where a refined block's datatypes live.
 function mutants(src, toks, symbols, lawToks = []) {
   const out = []; const groups = [...ctorGroups(toks), ...ctorGroups(lawToks)];
   const add = (sym, op, a, b, repl, from, note) => {
     const s = src.slice(0, toks[a].pos) + repl + src.slice(toks[b - 1].pos + toks[b - 1].text.length);
     out.push({ sym, op, line: toks[a].line, col: toks[a].col, from: from ?? src.slice(toks[a].pos, toks[b - 1].pos + toks[b - 1].text.length), to: repl, note, src: s });
   };
-  // split [a,b) on top-level commas
+
   const args = (a, b) => { const r = []; let d = 0, s = a; for (let k = a; k < b; k++) { const x = toks[k].text; if ("([{".includes(x)) d++; if (")]}".includes(x)) d--; if (x === "," && d === 0) { r.push([s, k]); s = k + 1; } } r.push([s, b]); return r; };
   const close = (k) => { let d = 0; for (let j = k; j < toks.length; j++) { if (toks[j].text === "(") d++; if (toks[j].text === ")" && --d === 0) return j; } };
   for (const { name: sym, start, end } of bodies(toks, symbols)) {
     for (let k = start; k < end; k++) {
       const t = toks[k], prev = toks[k - 1], next = toks[k + 1];
-      // boundary / relational (skip generic angle brackets: seq<Effect>, Option<nat>)
+
       if (ROR[t.text] && !((t.text === "<" || t.text === ">") && (/^(seq|set|map|multiset|iset|imap|Option)$/.test(prev?.text) || /^[A-Z]/.test(next?.text) && t.text === "<")))
         for (const r of ROR[t.text]) add(sym, ["<", "<=", ">", ">="].includes(t.text) && ["<", "<=", ">", ">="].includes(r) && r[0] === t.text[0] ? "boundary" : "relational", k, k + 1, r);
-      // arithmetic (binary only)
+
       if (AOR[t.text] && operandEnd(prev)) for (const r of AOR[t.text]) add(sym, "arith", k, k + 1, r);
-      // dropped operand (a + b*c -> a): the right operand runs to the next operator of lower or equal precedence
+
       if (AOR[t.text] && operandEnd(prev)) {
         const stop = t.text === "+" || t.text === "-" ? /^(\+|-|<|<=|>|>=|==|!=|&&|\|\||==>|<==>|then|else|,|\)|\]|}|;|:=)$/ : /^(\+|-|\*|\/|%|<|<=|>|>=|==|!=|&&|\|\||==>|<==>|then|else|,|\)|\]|}|;|:=)$/;
         let j = k + 1, d = 0; for (; j < end; j++) { const x = toks[j].text; if (d === 0 && j > k + 1 && stop.test(x) && !(x === "-" && !operandEnd(toks[j - 1]))) break; if ("([{".includes(x)) d++; if (")]}".includes(x)) { if (d === 0) break; d--; } }
         add(sym, "drop-operand", k, j, "", src.slice(toks[k].pos, toks[j - 1].pos + toks[j - 1].text.length), "drop right operand");
       }
-      // off-by-one on a variable used in arithmetic or a comparison: x -> (x + 1), (x - 1)
+
       const arithCtx = (u) => u && (AOR[u.text] || ROR[u.text]);
       if (t.kind === "id" && /^[a-z]/.test(t.text) && prev?.text !== "." && next?.text !== "(" && next?.text !== "." && (arithCtx(prev) || arithCtx(next)) && !["then", "else", "if", "var", "match", "case", "true", "false"].includes(t.text)) {
         add(sym, "off-by-one", k, k + 1, `(${t.text} + 1)`); add(sym, "off-by-one", k, k + 1, `(${t.text} - 1)`);
@@ -144,15 +120,15 @@ function mutants(src, toks, symbols, lawToks = []) {
       if (t.text === "&&") add(sym, "logic", k, k + 1, "||");
       if (t.text === "||") add(sym, "logic", k, k + 1, "&&");
       if (t.text === "!" && next?.text !== "=") add(sym, "logic", k, k + 1, "", "!", "drop negation");
-      // constants
+
       if (t.kind === "num") { const n = Number(t.text); add(sym, "constant", k, k + 1, String(n + 1)); if (n > 0) add(sym, "constant", k, k + 1, String(n - 1)); }
       if (t.text === "true" || t.text === "false") add(sym, "constant", k, k + 1, t.text === "true" ? "false" : "true");
-      // dropped branch: `if C then` -> `if true/false then`
+
       if (t.text === "if") {
         let j = k + 1, d = 0; for (; j < end; j++) { const x = toks[j].text; if ("([{".includes(x)) d++; if (")]}".includes(x)) d--; if (x === "then" && d === 0) break; }
         add(sym, "branch", k + 1, j, "true", undefined, "drop else-branch"); add(sym, "branch", k + 1, j, "false", undefined, "drop then-branch");
       }
-      // constructors: swap nullary siblings; replace a constructor call with a nullary sibling (dropped value)
+
       if (t.kind === "id" && prev?.text !== "." && prev?.text !== "case") {
         const g = groups.find((g) => g.some((c) => c.name === t.text));
         if (g) {
@@ -161,7 +137,7 @@ function mutants(src, toks, symbols, lawToks = []) {
           if (!me.nullary && next?.text === "(") { const e = close(k + 1); for (const c of g) if (c.nullary) add(sym, "constructor", k, e + 1, c.name, undefined, "drop value"); }
         }
       }
-      // swapped arguments of a call / constructor with >= 2 args
+
       if (t.kind === "id" && next?.text === "(" && prev?.text !== "case") {
         const e = close(k + 1); const as = args(k + 2, e);
         for (let a = 0; a + 1 < as.length; a++) {
@@ -172,7 +148,7 @@ function mutants(src, toks, symbols, lawToks = []) {
       }
     }
   }
-  // stable ids: sym/op/from->to#n (n = occurrence among identical keys); dedupe identical sources
+
   const seen = new Map(), count = {}; const res = [];
   for (const m of out) {
     const h = createHash("sha256").update(m.src).digest("hex").slice(0, 12);
@@ -183,13 +159,6 @@ function mutants(src, toks, symbols, lawToks = []) {
   return res;
 }
 
-// ---------------- proving an accepted mutant equivalent ----------------
-// Builds: original impl + the mutated definition renamed <sym>__mutant + a lemma
-//   <sym>__equiv(params) requires <same requires> ensures <sym>(params) == <sym>__mutant(params) { hint }
-// inserted right after the original definition. Verified with the pinned Dafny; no proof, no acceptance.
-// A refining definition inherits its preconditions from the laws (abstract module) and Dafny enforces them at
-// every call, so they are read from the laws' signature of <sym> when the impl states none: equivalence is
-// proven over the function's whole domain, exactly as for a definition that states its own requires.
 function lawRequires(sym) {
   for (const f of lawFiles) {
     const text = readFileSync(lawsOverride && f === lawsTarget ? resolve(lawsOverride) : join(root, f), "utf8");
@@ -204,7 +173,7 @@ function equivSource(origSrc, mutSrc, sym, hint) {
   const header = origSrc.slice(o.from, o.open);
   const params = header.slice(header.indexOf("(") + 1, header.indexOf(")"));
   const names = params.split(",").map((p) => p.split(":")[0].trim()).filter(Boolean);
-  // Every requires clause, including multi-line ones (each runs to the next clause keyword).
+
   const clauses = (text) => (text.match(/requires[\s\S]*?(?=\s(?:requires|ensures|decreases|reads|modifies)\b|$)/g) ?? []).map((r) => r.trim());
   const own = clauses(header);
   const requires = (own.length ? own : clauses(lawRequires(sym))).join("\n    ");
@@ -215,9 +184,6 @@ function equivSource(origSrc, mutSrc, sym, hint) {
   return origSrc.slice(0, o.to) + "\n  " + mutDef + lemma + origSrc.slice(o.to);
 }
 
-// ---------------- running a mutant ----------------
-// Every child runs in its own process group so an interrupted run kills its dafny AND z3 processes
-// (killing only node used to leave orphaned solvers running).
 const children = new Set();
 const killAll = () => { for (const pid of children) { try { process.kill(-pid, "SIGKILL"); } catch {} } };
 for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { killAll(); process.exit(130); });
@@ -233,11 +199,7 @@ function lawOf(symbol) {
   for (const [law, syms] of Object.entries(cfg.laws)) if (syms.includes(symbol)) return law;
   return null;
 }
-// One verifier run per law file; every CSV row is classified:
-//   a mapped law lemma Failed            -> that law kills the mutant
-//   a compiled impl symbol's well-formedness Failed -> the build rejects the mutant (counted as wf, a kill)
-//   a timeout anywhere                   -> unknown (never a kill: the gate fails unless a law also failed)
-//   any other failing lemma (unmapped)   -> unmapped (never a kill: map it to a law or it fails the gate)
+
 const ROW = /^(.*) \((correctness|well-formedness)\),([A-Za-z]+),/;
 async function verify(dir, baseline = false) {
   const failed = new Set(), unmapped = new Set(), passed = new Set(); let stillborn = false, timeouts = 0, wf = false, error = null;
@@ -247,8 +209,7 @@ async function verify(dir, baseline = false) {
     if (/resolution\/type errors|parse errors/.test(r.out)) { stillborn = true; break; }
     let rows = []; try { rows = readFileSync(csv, "utf8").trim().split("\n").slice(1); } catch {}
     if (!rows.length) { error = `no verifier results for ${f} (exit ${r.code})`; continue; }
-    // Dafny's CSV marks a time-out or resource-out as plain "Failed"; only stdout names them. A symbol whose
-    // verification timed out or ran out of resources is unknown, never a kill.
+
     const timedOut = new Set([...r.out.matchAll(/Verification of '([^']+)'[^\n]*?(?:timed out|out of resource)/g), ...r.out.matchAll(/Verification (?:out of resource|inconclusive) \(([^)]+)\)/g)].map((m) => m[1]));
     if (/out of resource|timed out|inconclusive/i.test(r.out) && !timedOut.size) error = "time-out or resource-out not attributable to a symbol";
     let failures = 0;
@@ -266,23 +227,18 @@ async function verify(dir, baseline = false) {
   }
   return { stillborn, failedLaws: [...failed].sort(), wf, unmapped: [...unmapped].sort(), timeouts, error, passedLaws: [...passed] };
 }
-// A copy of <root>'s sources (laws/ and blocks/), so every relative include resolves as in the source tree.
+
 function copyBlock(dst) {
   mkdirSync(dst, { recursive: true });
   cpSync(root, dst, { recursive: true, filter: (src) => statSync(src).isDirectory() ? !["out", "dist", "node_modules"].includes(basename(src)) : /\.(dfy|mjs|ts|json)$/.test(src) });
   if (lawsOverride) cpSync(resolve(lawsOverride), join(dst, lawsTarget));
 }
 
-// ---------------- main ----------------
 const implSrc = readFileSync(join(root, cfg.impl), "utf8");
 const generated = mutants(implSrc, tokenize(implSrc), cfg.symbols, lawFiles.flatMap((f) => tokenize(readFileSync(join(root, f), "utf8"))));
 let all = generated;
 if (opt("--only")) all = all.filter((m) => m.id.includes(opt("--only")));
-// --recheck <report.json> [--sample N]: never trusts a report. (1) Every count and the verdict are recomputed
-// from the per-mutant results, and every acceptance must be one listed in mutate.json. (2) Every mutant the
-// report calls stillborn is re-resolved (no solver) and must really fail to resolve. (3) Every mutant not
-// labelled killed (accepted ones included) is re-run in full. (4) N killed mutants, chosen with a FRESH
-// RANDOM seed, are re-run. Statuses and acceptances must match. packet.mjs --recheck uses this.
+
 const recheck = opt("--recheck") ? JSON.parse(readFileSync(opt("--recheck"), "utf8")) : null;
 let recheckProblems = [];
 if (recheck) {
@@ -295,7 +251,7 @@ if (recheck) {
     unknown: vs.filter((r) => ["unknown-timeout", "unmapped", "verifier-error"].includes(r.status)).length };
   derived.pass = recheck.summary.filter == null && vs.length > 0 && derived.stillborn / rs.length <= 0.4 && derived.survived === 0 && derived.unknown === 0;
   for (const [k, v] of Object.entries(derived)) if (recheck.summary[k] !== v) fail(`summary.${k} ${recheck.summary[k]} but results imply ${v}`);
-  // (2) stillborn claims: resolve each one; it must not resolve.
+
   const sdir = mkdtempSync(join(tmpdir(), "mutate-sb-")); copyBlock(sdir);
   for (const r of rs.filter((x) => x.status === "stillborn")) {
     writeFileSync(join(sdir, cfg.impl), generated.find((m) => m.id === r.id).src);
@@ -315,13 +271,13 @@ const doctor = await sh(["/bin/bash", join(REPO, "tools/proof/bootstrap.sh"), "d
 if (doctor.code !== 0) { console.error(`pinned toolchain unavailable: ${doctor.out.trim()}`); process.exit(2); }
 const work = mkdtempSync(join(tmpdir(), "mutate-"));
 const t0 = Date.now();
-// Baseline: the unmutated block must pass every law, or the run means nothing.
+
 copyBlock(join(work, "base"));
-// Every implementation function the build compiles must be mutated or excluded with a reason.
+
 {
   const t = tokenize(implSrc); const compiled = [];
   for (let k = 0; k < t.length - 1; k++) if (["function", "predicate", "method"].includes(t[k].text) && t[k - 1]?.text !== "ghost" && t[k - 1]?.text !== "lemma"
-    && t[k - 1]?.text !== "by") compiled.push(t[k + 1].text); // `by method` is a function's compiled body, not a declaration
+    && t[k - 1]?.text !== "by") compiled.push(t[k + 1].text);
   const missing = compiled.filter((n) => !cfg.symbols.includes(n) && !(cfg.excludeSymbols ?? {})[n]);
   if (missing.length) { console.error(`compiled impl functions neither mutated nor excluded (mutate.json excludeSymbols {name: reason}): ${missing.join(", ")}`); process.exit(2); }
 }
@@ -331,22 +287,20 @@ if (notCovered.length) { console.error(`BASELINE: laws with no Passed verifier r
 if (bv.stillborn || bv.failedLaws.length || bv.unmapped.length || bv.timeouts || bv.wf || bv.error) { console.error(`BASELINE FAILS: laws ${JSON.stringify(bv)}`); process.exit(2); }
 console.error(`baseline ok; ${all.length} mutants; ${jobs} jobs; work ${work}`);
 
-const results = []; let next = 0, done = 0; // `all` is reassigned for the retry pass
+const results = []; let next = 0, done = 0;
 async function worker() {
   while (next < all.length) {
     const m = all[next++]; const dir = join(work, `m${m.hash}`);
     copyBlock(dir); writeFileSync(join(dir, cfg.impl), m.src);
     const v = await verify(dir);
-    // Only a failing law (or the build rejecting the impl itself) kills; timeouts, unmapped lemmas and
-    // verifier errors never do, so they cannot mask a weak law.
+
     const lawKill = v.failedLaws.length > 0 || v.wf;
     const status = v.stillborn ? "stillborn" : lawKill ? "killed" : v.timeouts ? "unknown-timeout" : v.unmapped.length ? "unmapped" : v.error ? "verifier-error" : "survived";
-    // An acceptance counts only if it holds: "equivalent" needs a verified equivalence lemma; "out-of-contract"
-    // is allowed only for leaf blocks.
+
     let accepted; const acc = cfg.accepted?.[m.id];
     if (acc && status === "survived") {
       if (acc.kind === "equivalent") {
-        // Beside the impl, so its relative includes resolve.
+
         const equiv = join(dirname(cfg.impl), "Equiv.dfy");
         writeFileSync(join(dir, equiv), equivSource(implSrc, m.src, m.sym, acc.hint));
         const r = await sh([DAFNY, "verify", "--verification-time-limit", "30", equiv], { cwd: dir, env });
@@ -361,8 +315,7 @@ async function worker() {
   }
 }
 await Promise.all(Array.from({ length: jobs }, worker));
-// Time limits are wall-clock, so a loaded host can time out a proof that normally fails fast. Retry each
-// timed-out mutant once, alone (one solver); it stays unknown (gate FAIL) if it times out again.
+
 const retry = results.filter((r) => r.status === "unknown-timeout");
 if (retry.length) {
   console.error(`  retrying ${retry.length} timed-out mutant(s) serially`);
@@ -380,7 +333,6 @@ if (recheck) {
   console.log(JSON.stringify(out)); process.exit(bad.length || out.inputsHash !== out.reportHash ? 1 : 0);
 }
 
-// ---------------- report ----------------
 const valid = results.filter((r) => r.status !== "stillborn");
 const n = (s) => valid.filter((r) => r.status === s && !r.accepted).length;
 const laws = Object.keys(cfg.laws);
@@ -390,12 +342,10 @@ const summary = { block: cfg.block, tier: cfg.tier, laws: lawsOverride ?? cfg.ve
 summary.score = valid.length ? +(summary.killed / valid.length).toFixed(3) : 0;
 summary.unknown = valid.filter((r) => ["unknown-timeout", "unmapped", "verifier-error"].includes(r.status)).length;
 summary.stillbornRatio = results.length ? +(summary.stillborn / results.length).toFixed(3) : 0;
-// Zero valid mutants proves nothing; too many stillborn mutants means the generator is not testing the code.
-// A filtered run (--only) is diagnostic: it never passes, so a partial run cannot stand in for the gate.
+
 summary.filter = opt("--only") ?? null; summary.generated = generated.length;
 summary.pass = summary.filter === null && summary.mutants === summary.generated && summary.valid > 0 && summary.stillbornRatio <= 0.4 && summary.survived === 0 && summary.unknown === 0;
-// Binds this report to the exact block inputs (packet.mjs shows it STALE after any edit); a --laws or
-// --config override is recorded and never matches the block's own hash.
+
 summary.inputsHash = lawsOverride || opt("--config") ? `override:${blockHash(root, cfg)}` : blockHash(root, cfg);
 const byOp = {}; for (const r of results) { const o = (byOp[r.op] ??= { valid: 0, killed: 0, survived: 0, unknown: 0, accepted: 0 }); if (r.status === "stillborn") continue; o.valid++; if (r.accepted) o.accepted++; else if (r.status === "killed" || r.status === "survived") o[r.status]++; else o.unknown++; }
 const md = [`# Mutation report: ${cfg.block} (${cfg.tier})`, "", `laws: \`${summary.laws}\`; generated by \`scripts/tron proof mutate\``, "",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -9,6 +9,33 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const FIXTURES = join(ROOT, "tools/proof/tests/fixtures");
 const ALWAYS_HI = "Clamp/branch/hi < x->true#1";
+
+test("checker comments preserve packet freshness but code edits stale it", (t) => {
+  const base = mkdtempSync(join(tmpdir(), "tron-proof-tool-identity-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const toolRoot = join(base, "tools/proof");
+  for (const part of ["mutate", "packet"]) cpSync(join(ROOT, "tools/proof", part), join(toolRoot, part), { recursive: true });
+  mkdirSync(join(base, "packages/gateway"), { recursive: true });
+  symlinkSync(join(ROOT, "packages/gateway/node_modules"), join(base, "packages/gateway/node_modules"), "dir");
+  const packet = () => {
+    const run = spawnSync(process.execPath, [join(toolRoot, "packet/packet.mjs"), "schedule/occurrence",
+      "--root", join(ROOT, "packages/core"), "--no-verify"], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    return run.stdout.split("\n").find((line) => line.startsWith("| Mutation check |"));
+  };
+  const before = packet();
+  assert.match(before, /^\| Mutation check \| PASS: /);
+  for (const file of ["mutate/mutate.mjs", "packet/hash.mjs"]) {
+    const path = join(toolRoot, file);
+    writeFileSync(path, `${readFileSync(path, "utf8")}\n${"/".repeat(2)} fixture commentary\n`);
+    assert.equal(packet(), before, `${file}: commentary changed gate identity`);
+  }
+  const mutate = join(toolRoot, "mutate/mutate.mjs");
+  const source = readFileSync(mutate, "utf8");
+  assert.ok(source.includes("const MAX_SOLVERS = 4;"));
+  writeFileSync(mutate, source.replace("const MAX_SOLVERS = 4;", "const MAX_SOLVERS = 3;"));
+  assert.match(packet(), /^\| Mutation check \| STALE \(older mutation checker\) PASS: /);
+});
 
 test("mutation and packet gates fail for the right reasons", (t) => {
   const base = mkdtempSync(join(tmpdir(), "tron-proof-gates-"));

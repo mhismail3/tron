@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-# Stage the exact Tron Gateway, its production dependencies, Node runtimes, and
-# tiny universal Login Item launcher into the Mac wrapper's resource tree.
-#
-# Usage:
-#   bundle-gateway.sh                  build and stage everything
-#   bundle-gateway.sh --skip-install   reuse an existing gateway node_modules
-#   bundle-gateway.sh --skip-download  reuse the published Node and npm runtimes
-#   bundle-gateway.sh --clean          remove only generated payloads
-#   bundle-gateway.sh --verify-only    verify existing payload without mutation
-#   bundle-gateway.sh --allow-unconfigured-push  local development payload only
-# Filesystem semantics in this Mac-only publication chain are platform-owned:
-# use absolute macOS tools (also in the verifier/hasher), not GNU PATH shadows.
-# Leave PATH intact for the separately pinned Node/npm resolver and user tools.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -28,9 +15,6 @@ NODE_VERSION_FILE="$REPO_ROOT/.node-version"
 source "$REPO_ROOT/config/ci-toolchain.env"
 [[ -f "$NODE_VERSION_FILE" ]] || { echo "missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 3; }
 NODE_VERSION="$(<"$NODE_VERSION_FILE")"
-# Node's official archive is the provenance authority for the bundled npm CLI.
-# Keep the npm package version pinned separately so --skip-download cannot
-# silently publish a stale/replaced npm tree.
 NPM_VERSION="$TRON_NODE_NPM_VERSION"
 NPM_TREE_SHA256="$TRON_NODE_NPM_TREE_SHA256"
 NODE_VERSION_LINES="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
@@ -40,8 +24,6 @@ MIN_PROTOCOL_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.ar
     echo "invalid canonical Node version in $NODE_VERSION_FILE" >&2
     exit 3
 }
-# Pinned binary integrity metadata. The canonical version remains .node-version;
-# these hashes only authorize the exact runtime artifacts staged below.
 if [[ -n "${NVM_DIR:-}" && "$NVM_DIR" != /* ]]; then
     echo "relative NVM_DIR is not allowed" >&2
     exit 127
@@ -59,7 +41,20 @@ while (($#)); do
         --clean) clean=1 ;;
         --verify-only) verify_only=1 ;;
         --allow-unconfigured-push) allow_unconfigured_push=1 ;;
-        --help|-h) grep '^# ' "$0" | sed 's/^# //'; exit 0 ;;
+        --help|-h)
+            cat <<'EOF'
+Stage the exact Tron Gateway, its production dependencies, Node runtimes, and
+tiny universal Login Item launcher into the Mac wrapper's resource tree.
+Usage:
+  bundle-gateway.sh                  build and stage everything
+  bundle-gateway.sh --skip-install   reuse an existing gateway node_modules
+  bundle-gateway.sh --skip-download  reuse the published Node and npm runtimes
+  bundle-gateway.sh --clean          remove only generated payloads
+  bundle-gateway.sh --verify-only    verify existing payload without mutation
+  bundle-gateway.sh --allow-unconfigured-push  local development payload only
+EOF
+            exit 0 ;;
+
         *) echo "unknown argument: $1" >&2; exit 64 ;;
     esac
     shift
@@ -69,9 +64,6 @@ launchers=(
     "$HELPER_DIR/MacOS/tron"
 )
 
-# Generated output is disposable, but its parents are owned source-tree
-# directories. Walk with lstat and unlink symlinks instead of ever allowing a
-# recursive operation to follow an attacker-controlled ancestor.
 assert_owned_ancestors() {
     local path="$1" cursor="$1" info
     while [[ "$cursor" == "$REPO_ROOT"/* || "$cursor" == "$REPO_ROOT" ]]; do
@@ -87,9 +79,6 @@ assert_owned_ancestors() {
     done
 }
 safe_remove_tree() {
-    # Finish and close each directory enumeration before descending. Recursive
-    # shell process substitutions retain ancestor pipes and hide producer
-    # failures; cleanup must not depend on those stream lifetimes.
     python3 - "$1" <<'PY'
 import os, stat, sys
 
@@ -157,8 +146,6 @@ fi
 python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" >/dev/null
 
 if ((verify_only)); then
-    # Validate the immutable artifact before using its Node runtime. Verification
-    # is read-only and must not depend on an unrelated source Node/npm install.
     "$SCRIPT_DIR/verify-gateway-payload.sh" "$PAYLOAD_DIR" "$HELPER_DIR/MacOS/tron" "$payload_channel"
     python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" --gateway-payload "$PAYLOAD_DIR" >/dev/null
     cmp -s "$GATEWAY_DIR/package.json" "$APP_DIR/package.json" && cmp -s "$GATEWAY_DIR/package-lock.json" "$APP_DIR/package-lock.json" || {
@@ -184,10 +171,6 @@ if ((verify_only)); then
     exit 0
 fi
 
-# npm installation mutates the shared source dependency tree, and publication
-# updates one generated projection. Serialize builders before either boundary.
-# A dead owner's directory is recoverable; a live or PID-reused owner fails
-# closed rather than allowing overlapping writers.
 BUNDLE_LOCK="$RESOURCES_DIR/.tron-gateway-bundle.lock"
 BUNDLE_LOCK_OWNED=0
 acquire_bundle_lock() {
@@ -200,9 +183,6 @@ acquire_bundle_lock() {
             echo "another Gateway bundle build is active (pid $owner)" >&2
             exit 75
         fi
-        # mkdir and pid publication are two commands. A contender that lands in
-        # that tiny window must not erase the new owner's lock; only malformed
-        # owner metadata older than the bounded startup grace is recoverable.
         if [[ ! "$owner" =~ ^[1-9][0-9]{0,9}$ ]]; then
             modified="$(/usr/bin/stat -f '%m' "$BUNDLE_LOCK" 2>/dev/null || printf '0')"
             now="$(date +%s)"
@@ -233,15 +213,9 @@ trap cleanup_bundle_lock EXIT
 trap 'exit 130' INT TERM HUP
 acquire_bundle_lock
 
-# Xcode and LaunchAgents may provide a sanitized PATH. The one repository
-# resolver (#242) chooses the exact pinned development Node once, before any
-# install/build work, and npm comes from that same directory.
 NODE_BIN="$("$REPO_ROOT/scripts/tron-node")"
 NPM_BIN="$(dirname "$NODE_BIN")/npm"
-# npm's launcher commonly uses /usr/bin/env node; make only the resolved Node
-# directory first on PATH so all subprocesses use this exact toolchain.
 export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"
-# npm's bundled node-gyp runs Python during native dependency installation.
 export PYTHONDONTWRITEBYTECODE=1
 
 if ((!skip_install)); then
@@ -262,14 +236,8 @@ INPUT_FINGERPRINT="${TRON_GATEWAY_INPUT_FINGERPRINT:-$CURRENT_INPUT_FINGERPRINT}
 }
 (cd "$GATEWAY_DIR" && "$NPM_BIN" run build)
 
-# This is a deterministic, offline check of the already-installed source tree;
-# it intentionally does not perform another install or registry lookup.
 (cd "$GATEWAY_DIR" && "$NODE_BIN" scripts/check-pi-sdk.mjs)
 
-# Build generated resources privately. The previously published projection is
-# not touched until the complete replacement passes the same payload verifier
-# used by Xcode and packaging. The EXIT trap restores all prior generated roots
-# if publication is interrupted between its bounded renames.
 PUBLISHED_PAYLOAD_DIR="$PAYLOAD_DIR"
 PUBLISHED_HELPER_DIR="$HELPER_DIR"
 STAGING_ROOT="$(mktemp -d "$RESOURCES_DIR/.tron-gateway-staging.XXXXXX")"
@@ -348,7 +316,6 @@ validate_node_runtime() {
         echo "Node $arch runtime is not a Mach-O binary" >&2
         exit 3
     }
-    # One architecture-set owner for every Mach-O check in the payload scripts.
     "$SCRIPT_DIR/verify-macho-architectures.sh" "$destination" "$expected_arch" || {
         echo "Node $arch architecture mismatch (expected $expected_arch)" >&2
         exit 3
@@ -431,9 +398,6 @@ stage_xcodegen() {
     fi
 }
 
-# The staging root is private and starts empty, so --skip-download copies the
-# published runtimes in; validation then proves the copies against the pins
-# before anything is republished. Symlinks are refused rather than followed.
 seed_published_runtime() {
     local arch="$1" source="$PUBLISHED_PAYLOAD_DIR/runtime"
     [[ -f "$source/node-$arch" && ! -L "$source/node-$arch" ]] || {
@@ -463,24 +427,15 @@ stage_node() {
     tar -xzf "$temp/$archive" -C "$temp"
     source_root="$temp/node-v${NODE_VERSION}-darwin-${arch}"
     install -m 0755 "$source_root/bin/node" "$destination"
-    # The Gateway's SDK package manager intentionally invokes the public npm
-    # command. Keep the pinned npm CLI from the same official Node archive
-    # beside its matching runtime; relying on launchd's PATH made removal fail
-    # with ENOENT even though the bundled Node binary was present.
     safe_remove_tree "$RUNTIME_DIR/npm-$arch"
     /usr/bin/ditto "$source_root/lib/node_modules/npm" "$RUNTIME_DIR/npm-$arch"
     rm -rf "$temp"
-    # Downloaded binaries receive the same immutable hash/version/architecture
-    # proof as pre-staged binaries before the payload is published.
     validate_node_runtime "$arch" "$expected"
     validate_npm_runtime "$arch"
 }
 
-# The staging root is fresh, so nothing here replaces earlier output.
 mkdir -p "$APP_DIR/scripts" "$RUNTIME_DIR" "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources"
 bash "$SCRIPT_DIR/stage-gateway-app.sh" "$GATEWAY_DIR" "$APP_DIR"
-# npm prune in the source tree would damage developer dependencies. Install an
-# independent production tree directly into the generated app payload.
 (cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
 "$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" check "$APP_DIR" production
 "$NODE_BIN" "$GATEWAY_DIR/scripts/check-pi-sdk.mjs" --runtime-tree "$APP_DIR"
@@ -489,15 +444,8 @@ stage_node arm64 "$TRON_NODE_ARM64_RUNTIME_SHA256"
 stage_node x64 "$TRON_NODE_X64_RUNTIME_SHA256"
 stage_xcodegen
 
-# Provide an immutable architecture-specific command named `node` for hosted
-# extensions whose detached helpers fall back to PATH when the embedded runtime
-# has Tron's `node-<arch>` basename. The links stay inside the fingerprinted
-# payload and never consult Homebrew, NVM, or another mutable toolchain.
 for arch in arm64 x64; do
     alias_dir="$RUNTIME_DIR/bin-$arch"
-    # A previously generated path is disposable but not trusted. Remove an
-    # existing directory or unlink a symlink without ever following it before
-    # recreating the owned alias directory.
     safe_remove_tree "$alias_dir"
     mkdir -p "$alias_dir"
     ln -s "../node-$arch" "$alias_dir/node"
@@ -552,9 +500,6 @@ done
 cp "$RESOURCES_DIR/AppIcon.icns" "$HELPER_DIR/Resources/AppIcon.icns"
 
 GATEWAY_VERSION="$("$NODE_BIN" -p "require('$GATEWAY_DIR/package.json').version")"
-# The manifest cannot carry a placeholder revision: the launcher requires 40
-# lowercase hex characters, so a tree without git metadata fails here instead of
-# being built read-only and discarded.
 SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
 [[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]] || {
     echo "source revision is unavailable: ${SOURCE_REVISION:-none} (expected 40 lowercase hex characters)" >&2
@@ -562,19 +507,11 @@ SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
 }
 RUNTIME_EPOCH="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 "$NODE_BIN" "$REPO_ROOT/scripts/gateway-install-inputs.mjs" write-receipt "$REPO_ROOT" "$APP_DIR" "$SOURCE_REVISION" "$INPUT_FINGERPRINT"
-# Hash the complete staged dependency tree, not merely the compiled entrypoint.
-# The helper is standalone so release validation can exercise the same coverage.
-# The signed launcher hashes the complete tree in-process; the shell helper
-# remains the readable cross-implementation fixture but is intentionally not
-# process-per-file on this large build path.
 PAYLOAD_FINGERPRINT="$("${launchers[0]}" --fingerprint "$PAYLOAD_DIR")"
 printf '{"schema":1,"kind":"tron-gateway-payload","channel":"%s","version":"%s","gatewayVersion":"%s","protocolVersion":"%s","minProtocolVersion":"%s","nodeVersion":"%s","sourceRevision":"%s","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' \
     "$payload_channel" "$GATEWAY_VERSION" "$GATEWAY_VERSION" "$PROTOCOL_VERSION" "$MIN_PROTOCOL_VERSION" "$NODE_VERSION" "$SOURCE_REVISION" "$RUNTIME_EPOCH" "$PAYLOAD_FINGERPRINT" \
     > "$PAYLOAD_DIR/manifest.json"
 python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" --gateway-payload "$PAYLOAD_DIR" >/dev/null
-# Version payloads are immutable after publication; current.json remains the
-# only mutable deployment pointer. The launcher uses this as its bounded
-# anti-tampering check and does not claim to re-hash the tree.
 chmod -R a-w "$PAYLOAD_DIR"
 "$SCRIPT_DIR/verify-gateway-payload.sh" "$PAYLOAD_DIR" "$HELPER_DIR/MacOS/tron" "$payload_channel"
 
@@ -599,9 +536,6 @@ if [[ -e "$PUBLISHED_HELPER_DIR/Resources/AppIcon.icns" || -L "$PUBLISHED_HELPER
     HAD_PUBLISHED_ICON=1
     mv "$PUBLISHED_HELPER_DIR/Resources/AppIcon.icns" "$BACKUP_ROOT/AppIcon.icns"
 fi
-# Darwin rename refuses a non-writable source directory even when both parent
-# directories are writable. Open only the staged root for the rename, then
-# immediately restore the immutable publication mode at its final path.
 chmod u+w "$PAYLOAD_DIR"
 mv "$PAYLOAD_DIR" "$PUBLISHED_PAYLOAD_DIR"
 chmod a-w "$PUBLISHED_PAYLOAD_DIR"

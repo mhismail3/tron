@@ -76,7 +76,11 @@ of the core root (so relative includes hold) with the pinned wrapper after `doct
    function must be in `symbols` or `excludeSymbols` with a reason.
 5. **Binding.** The report's `inputsHash` is the block hash (`packet/hash.mjs`: the whole mutate.json plus the
    block's laws, impl, verify and `lawContext` files); `--laws` (replaces the block's first laws file in the
-   copies) and `--config` runs are marked `override:` and never match. `toolHash` covers mutate.mjs and hash.mjs.
+   copies) and `--config` runs are marked `override:` and never match. `toolHash` covers the parsed JavaScript
+   programs of mutate.mjs and hash.mjs, excluding source positions and comments. The Gateway's lockfile-pinned
+   `rolldown/utils` parser supplies the AST; prepare its development dependencies with
+   `scripts/tron-node exec npm --prefix packages/gateway ci`. Invalid checker syntax refuses hashing.
+   Comment-only tool edits preserve mutation freshness; code edits still stale every report.
 6. **Recheck.** `--recheck <report>` never trusts a report: it recomputes counts and verdict, rejects acceptances
    not in mutate.json, re-resolves every stillborn mutant, re-runs every non-killed one and N killed ones chosen
    with a fresh random seed.
@@ -135,7 +139,8 @@ proven equivalences; a weakened law FAILS with the survivor it no longer catches
 rejected by its failing proof; a mutant only an unmapped helper catches is `unmapped`, not killed; a law proof
 that runs out of resources is `unknown-timeout` after its retry, never killed; the packet renders each law's
 English and statement from the laws file; and an impl or a law edit shows the review and the mutation report
-STALE.
+STALE. A copied real packet also keeps its mutation gate fresh after comments are added to each checker
+file, but a solver-cap code edit still makes that gate STALE.
 
 `scripts/tron test tooling tools/proof/tests/test-core.py` is the gate test of the real blocks, declared by
 `packages/core/package.module.json` and by the generated cores' module (`packages/gateway/src/core`), so any
