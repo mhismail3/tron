@@ -24,8 +24,11 @@ test("the scorecard counts absent tools, partial passes and shell-only reach as 
   assert.equal(summarize(present, "upload").status, "unsupported");
   assert.equal(summarize(absent, "click").status, "absent");
   assert.equal(summarize(present, "permission-prompt").status, "not-measured");
+  const computer = { name: "cua", probe: { ok: true, version: "x" }, tasks: { "native-click": [{ status: "pass", ms: 10 }] } };
+  const homeMarkdown = scorecard({ startedAt: "t", reps: 2, tools: [present, absent, computer], notes: [] });
+  assert.match(homeMarkdown, new RegExp(`\\| home: [^|]+\\| shell \\| none \\| first-class \\| 1/${FUNCTIONS.length} \\|`, "u"));
+  assert.match(homeMarkdown, new RegExp(`\\| home-wake: [^|]+\\| none \\| none \\| none \\| 0/${FUNCTIONS.length} \\|`, "u"));
   const markdown = scorecard({ startedAt: "t", reps: 2, tools: [present, absent], notes: [] });
-  assert.match(markdown, /\| home: [^|]+\| shell \| none \| 0\/\d+ \|/u);
   assert.match(markdown, new RegExp(`\\| worker: [^|]+\\| first-class \\| none \\| 1/${FUNCTIONS.length} \\|`, "u"));
   assert.match(markdown, /\*\*agent-browser click\*\* \(flaky\): missed/u);
 });
