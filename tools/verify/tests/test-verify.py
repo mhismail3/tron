@@ -1327,6 +1327,86 @@ class IosLaneTests(VerifyCase):
         self.assertIn("ios-lanes: 2 file(s)", module.stdout)
         self.assertEqual(calls.read_text().splitlines()[-1],
                          "run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests")
+        r.write(f"{ios}/FixtureJourneyUITests.swift", "class FixtureJourneyUITests {\n    func testPhone() {}\n}\n")
+        r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift", "struct ChatView {}\n"
+                "enum FixtureIdiom: Sendable { case pad }\n"
+                "struct UIDevice: Sendable { static let current = UIDevice(); let userInterfaceIdiom = FixtureIdiom.pad }\n"
+                "func XCTSkipUnless(_ value: Bool, _ reason: String) throws {}\n")
+        r.write(f"{ios}/FixturePadUITests.swift", "class FixturePadUITests {\n    func testPad() throws {\n        try XCTSkipUnless(UIDevice.current.userInterfaceIdiom == .pad, \"iPad\")\n    }\n}\n")
+        script = "harness/test-owner.py"
+        r.write(script, 'import os,sys,unittest\nfrom pathlib import Path\n'
+                'hosted = "--hosted-fixture" in sys.argv\n'
+                f'calls = Path({str(calls)!r})\n'
+                'if hosted:\n'
+                '    with calls.open("a") as handle: handle.write("owner\\n")\n'
+                '    if os.environ.get("FIXTURE_EMPTY_OWNER"): raise SystemExit(0)\n'
+                'class Owner(unittest.TestCase):\n'
+                '    def test_capture(self):\n'
+                '        if hosted and os.environ.get("FIXTURE_SKIP_OWNER"): self.skipTest("missing capture")\n'
+                '        self.assertFalse(hosted and os.environ.get("FIXTURE_DISABLE_CAPTURE"))\n'
+                '    def test_matrix_joined(self):\n'
+                '        if hosted and os.environ.get("FIXTURE_REQUIRE_MATRIX"):\n'
+                '            lines = calls.read_text().splitlines()\n'
+                '            self.assertEqual(lines[-1], "owner")\n'
+                '            self.assertTrue(any("testPhone" in line for line in lines[:-1]))\n'
+                '            self.assertTrue(any("testPad" in line for line in lines[:-1]))\n'
+                'unittest.main(argv=[sys.argv[0]])\n')
+        declaration = {"layer": "L5", "owns": ["**"], "iosLanes": [{
+            "classes": ["TronMobileUITests/TronMacTerminalUITests"], "command": [script, "--hosted-fixture"]}]}
+        r.write("harness/harness.module.json", json.dumps(declaration))
+        r.commit("owner declares a class validator without runner-specific test identities")
+        r.env["FIXTURE_REQUIRE_MATRIX"] = "1"
+        calls.write_text("")
+        owned = r.verify("--module", "ios-app/ui-tests")
+        self.assertEqual(owned.returncode, 0, owned.stdout + owned.stderr)
+        self.assertEqual(calls.read_text().splitlines()[-1], "owner")
+        self.assertFalse(any("TronMacTerminalUITests" in line for line in calls.read_text().splitlines()))
+        planned = r.verify("--all", "--plan")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        plan = json.loads(planned.stdout[planned.stdout.index("{"):])
+        owner_command = next(command for command in plan["commands"] if script in " ".join(command.get("command", [])))
+        self.assertTrue(owner_command["name"].startswith("tests: ios-lanes:"))
+        self.assertGreater(plan["steps"].index(owner_command["name"]), max(index for index, label in enumerate(plan["steps"]) if label == "tests: ios" or label.startswith("tests: ios ")))
+        del r.env["FIXTURE_REQUIRE_MATRIX"]
+        calls.write_text("")
+        all_run = r.verify("--all")
+        self.assertEqual(all_run.returncode, 0, all_run.stdout + all_run.stderr)
+        self.assertIn("owner", calls.read_text().splitlines())
+        r.git("branch", "-f", "base")
+        r.write(f"{ios}/TronMacTerminalUITests.swift", "class TronMacTerminalUITests {\n    func testOwned() {}\n}\n")
+        r.write("mods/alpha/test-alpha.py", "UNRELATED = 1\n" + PASSING)
+        r.commit("an owned class changes alongside an unrelated passing test")
+        calls.write_text("")
+        changed = r.verify("--changed")
+        self.assertEqual(changed.returncode, 0, changed.stdout + changed.stderr)
+        self.assertEqual([line for line in calls.read_text().splitlines() if line.startswith("run ") or line == "owner"], ["owner"])
+        for flag in ("FIXTURE_DISABLE_CAPTURE", "FIXTURE_EMPTY_OWNER", "FIXTURE_SKIP_OWNER"):
+            r.env[flag] = "1"
+            failed = r.verify("--changed")
+            self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+            self.assertEqual(r.report()["verdict"], "failed")
+            self.assertGreaterEqual(r.report()["passingTests"], 1, "an unrelated pass cannot hide a missing owner proof")
+            del r.env[flag]
+        r.git("branch", "-f", "base")
+        r.write(script, "OWNER_VERSION = 2\n" + (r.path / script).read_text())
+        r.commit("the owning validator changes without a UI source edit")
+        r.env["FIXTURE_DISABLE_CAPTURE"] = "1"
+        owner_changed = r.verify("--changed")
+        self.assertEqual(owner_changed.returncode, 1, owner_changed.stdout + owner_changed.stderr)
+        self.assertTrue(any(group.startswith("ios-lanes:") for group in r.report()["groups"]))
+        del r.env["FIXTURE_DISABLE_CAPTURE"]
+        for command in ([], ["harness/absent.py"], ["mods/alpha/test-alpha.py"]):
+            declaration["iosLanes"][0]["command"] = command
+            r.write("harness/harness.module.json", json.dumps(declaration))
+            r.commit("missing or unowned replacement is invalid")
+            calls.write_text("")
+            missing = r.verify("--changed", "--plan")
+            self.assertEqual(missing.returncode, 2, missing.stdout + missing.stderr)
+            self.assertIn("iosLanes command", missing.stderr)
+            self.assertEqual(calls.read_text(), "", "invalid replacement cannot silently exclude an ordinary class")
+        declaration["iosLanes"][0]["command"] = [script, "--hosted-fixture"]
+        r.write("harness/harness.module.json", json.dumps(declaration))
+        r.commit("restore the owner declaration")
         r.write(f"{ios}/StrayUITests.swift", "struct Helper {}\n")
         r.commit("stray")
         refused = r.verify("--module", "ios-app/ui-tests")
