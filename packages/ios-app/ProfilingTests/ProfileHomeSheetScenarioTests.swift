@@ -27,7 +27,8 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
     private var sessions: [SessionSummary]
     private var host: UIHostingController<AnyView>?
     private var cycles = 0
-    private let savedFilter = UserDefaults.standard.data(forKey: DashboardServerFilterPreferences.documentKey)
+    private let savedFilter = AppLocalBehaviorSettings.shared.dashboardFilter
+    private let savedFilterData = UserDefaults.standard.data(forKey: DashboardServerFilterPreferences.documentKey)
 
     private init(fixture: ProfileGatewayFixture) {
         self.fixture = fixture
@@ -62,7 +63,7 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
         ProfileAccessibility.enableAutomation()
         let fixture = try ProfileGatewayFixture()
         let run = ProfileHomeSheetRun(fixture: fixture)
-        DashboardServerFilterPreferences.save(DashboardServerFilterState(sortMode: .home))
+        AppLocalBehaviorSettings.shared.dashboardFilter = DashboardServerFilterState(sortMode: .home)
         do {
             let listed = try JSONValue.encode(run.sessions)
             fixture.handle("session.list") { _ in .object(["sessions": listed, "listRevision": .number(1), "projectionToken": .string("epoch-1:1")]) }
@@ -183,8 +184,9 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
 
     func teardown() async {
         await fixture.teardown()
-        if let savedFilter {
-            UserDefaults.standard.set(savedFilter, forKey: DashboardServerFilterPreferences.documentKey)
+        AppLocalBehaviorSettings.shared.dashboardFilter = savedFilter
+        if let savedFilterData {
+            UserDefaults.standard.set(savedFilterData, forKey: DashboardServerFilterPreferences.documentKey)
         } else {
             UserDefaults.standard.removeObject(forKey: DashboardServerFilterPreferences.documentKey)
         }
