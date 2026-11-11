@@ -6,7 +6,7 @@ import { dirname, join, relative } from "node:path";
 import net from "node:net";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { PackageService } from "../../../admin/package-service.js";
 import { GatewayLogger } from "../../../transport/logger.js";
 import { TrustService } from "../../../kernel/resources/trust-service.js";
@@ -14,6 +14,24 @@ import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "../../../kernel/dele
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "../../../kernel/delegation/delegated-provider.js";
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
 import { waitFor } from "../../../../test-support/wait-for.js";
+
+const closureDecodes = vi.hoisted(() => ({ sizes: [] as number[] }));
+const receiptReads = vi.hoisted(() => ({ paths: [] as string[] }));
+vi.mock("node:fs", async (original) => {
+  const fs = await original<typeof import("node:fs")>();
+  const readFileSync = ((path: Parameters<typeof fs.readFileSync>[0], ...rest: unknown[]) => {
+    if (String(path).endsWith("tron-install-receipt.json")) receiptReads.paths.push(String(path));
+    return (fs.readFileSync as (...args: unknown[]) => unknown)(path, ...rest);
+  }) as typeof fs.readFileSync;
+  return { ...fs, default: { ...fs, readFileSync }, readFileSync };
+});
+vi.mock("node:zlib", async (original) => {
+  const zlib = await original<typeof import("node:zlib")>();
+  return { ...zlib, gunzipSync: (input: Buffer, options?: import("node:zlib").ZlibOptions) => {
+    closureDecodes.sizes.push(input.length);
+    return zlib.gunzipSync(input, options);
+  } };
+});
 
 it.each([
   { conflict: false, bound: true, foreignHome: false },
@@ -132,6 +150,7 @@ it.each([
       facts.passed = true;
       return;
     }
+    const verifiedBeforeLoad = receiptReads.paths.length;
     const slot = await registry.create(cwd);
     await slot.setModel(model.provider, model.id);
     const resources = await slot.resources() as unknown as {
@@ -140,6 +159,10 @@ it.each([
       skills: { skills: Array<{ name: string; path: string; source: string; distribution?: string }> };
       prompts: { prompts: Array<{ name: string; path: string; source: string; distribution?: string }> };
     };
+    const pin = JSON.parse(await readFile(new URL("../../../../pi-subagents-pin.json", import.meta.url), "utf8")) as { closure: { path: string } };
+    const closureBytes = (await stat(new URL(`../../../../${pin.closure.path}`, import.meta.url))).size;
+    expect(closureDecodes.sizes.filter(size => size === closureBytes), "the pinned closure is decoded once per process").toHaveLength(1);
+    expect(receiptReads.paths.slice(verifiedBeforeLoad), "an unchanged verified install is not byte-compared again on session load").toEqual([]);
     if (conflict) {
       expect(resources.subagentDiagnostics).toContain("fallbackModels");
       expect(resources.subagentDiagnostics).toContain("invalid-worker");

@@ -41,8 +41,9 @@ freeze, attribution and verdict. iOS lanes release host slots between lanes; all
 work at admission is deferred, while a slot this batch's own worktree holds frees when its
 lane ends, so the lane is admitted and waits for it. The UI journey lane runs its journeys on
 three owned lanes (`TRON_IOS_E2E_UI_LANES=3`, one host slot each), longest first by the newest
-earlier batch's per-journey seconds (`previous-journey-seconds.json` in the lane directory);
-its attribution probe runs the one failed journey on one lane. **Green** means every lane executed and passed.
+earlier batch's per-journey seconds (`previous-journey-seconds.json` in the lane directory),
+and keeps going after a failure (`TRON_IOS_E2E_UI_KEEP_GOING=1`) so the lane names every failed journey;
+with exactly one failed journey its attribution probe runs that journey on one lane. **Green** means every lane executed and passed.
 Missing owners/reports, empty/skipped/deferred evidence, a non-`passed` verifier verdict,
 failed setup/cleanup or changed source is **uncovered**; any executed failure is **red**.
 Neither advances `green.json`. Immutable `verify/batches/<range>/` keeps commands, logs,

@@ -1,8 +1,8 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { tmpdir, userInfo } from "node:os";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
 import { MacTerminalService } from "./mac-terminal-service.js";
@@ -35,7 +35,7 @@ async function freePort(): Promise<number> {
   return port;
 }
 async function fixture() {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-private-sshd-")));
+  const root = await realpath(await mkdtemp(join(execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim(), "tron-private-sshd-")));
   roots.push(root);
   const service = new MacTerminalService(root, { port: await freePort(), launchAgentDirectory: join(root, "agents") });
   services.push(service);
@@ -55,9 +55,23 @@ async function lanAddress(): Promise<string> {
   throw new Error("Exposure proof needs a real non-Tailnet LAN interface");
 }
 async function listeners(port: number): Promise<string[]> {
-  return (await run("/usr/sbin/netstat", ["-anl", "-p", "tcp"])).split("\n").map(line => line.trim().split(/\s+/u))
+  const kernel = (await run("/usr/sbin/netstat", ["-anl", "-p", "tcp"])).split("\n").map(line => line.trim().split(/\s+/u))
     .filter(fields => fields[5] === "LISTEN" && fields[3]?.split(".").at(-1) === String(port))
     .map(fields => `${fields[0]} ${fields[3]}`);
+  const files = await new Promise<string>((resolve, reject) => {
+    execFile("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Ftn"], (error, stdout, stderr) => {
+      if (error && !(error.code === 1 && !stdout.trim())) reject(new Error(`/usr/sbin/lsof: ${stderr || error.message}`));
+      else resolve(stdout);
+    });
+  });
+  const owned: string[] = [];
+  let family = "";
+  for (const line of files.split("\n")) {
+    if (line.startsWith("p") || line.startsWith("f")) family = "";
+    if (line.startsWith("t")) family = line === "tIPv4" ? "tcp4" : "tcp6";
+    if (line.startsWith("n")) owned.push(`${family} ${line.slice(1, line.lastIndexOf(":")).replace(/^\[|\]$/gu, "")}.${line.slice(line.lastIndexOf(":") + 1)}`);
+  }
+  return [...new Set([...kernel, ...owned])];
 }
 async function client(root: string, service: MacTerminalService) {
   const path = join(root, "client");

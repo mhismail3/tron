@@ -186,7 +186,7 @@ class ExternalVerificationTests(VerifyCase):
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
         selection = json.loads(planned.stdout[planned.stdout.index("{"):])["selection"]["tests"]
         self.assertEqual(selection, ["scripts/test-dependent.py", "scripts/test-direct.py"])
-        for relative, content in (("mods/alpha/README.md", "# Alpha\n"), ("mods/alpha/test-alpha.py", PASSING + "# Test-only edit.\n")):
+        for relative, content in (("mods/alpha/README.md", "# Alpha\n"), ("mods/alpha/test-alpha.py", PASSING + "EDITED = True\n")):
             r.git("branch", "-f", "base")
             r.write(relative, content)
             r.commit("narrow change")
@@ -218,7 +218,7 @@ class ExternalVerificationTests(VerifyCase):
         files = ["src/main.integration.test.ts", "src/nested.integration.test.ts", "src/mac.integration.test.ts",
                  "scripts/contract.test.mjs"]
         for path in files + ["scripts/outside.test.ts"]:
-            r.write(f"packages/gateway/{path}", "// Selection-only fixture: never executed as a Gateway test.\n")
+            r.write(f"packages/gateway/{path}", "export const selectionOnly = true;\n")
         r.write("packages/gateway/consumer.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
         r.write("packages/gateway/vitest.nested.config.ts", 'const nestedTestFiles = ["src/nested.integration.test.ts"];\n')
         r.write("packages/gateway/vitest.mac-terminal.config.ts", 'const macTerminalTestFiles = ["src/mac.integration.test.ts"];\n')
@@ -338,7 +338,7 @@ class GatewayFailureTests(VerifyCase):
     def fixture(self):
         r = self.repo
         path = "packages/gateway/src/sample.integration.test.ts"
-        r.write(path, "// Report-protocol fixture executed by the child below.\n")
+        r.write(path, "export const reportProtocol = true;\n")
         r.write("packages/gateway/src/sample.ts", "export const value = 1;\n")
         r.write("packages/gateway/sample.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
         r.write("packages/gateway/package.json", json.dumps({"devDependencies": {"typescript": "7.0.2"}}))
@@ -493,7 +493,7 @@ class GatewayDependenciesTests(VerifyCase):
         r.write(f"{relay}/package-lock.json", json.dumps(lock))
         r.write(f"{relay}/relay.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
         r.write(f"{relay}/src/registry.ts", "export const value = 1;\n")
-        r.write(f"{relay}/tests/worker.integration.test.ts", "// run by the relay's Vitest\n")
+        r.write(f"{relay}/tests/worker.integration.test.ts", "export const relayVitest = true;\n")
         r.write(".gitignore", f"test-results/\n{relay}/node_modules/\n")
         r.write("scripts/tron-node", '#!/bin/bash\n[[ $# == 0 ]] && { echo /usr/bin/true; exit 0; }\nshift; exec "$@"\n')
         (r.path / "scripts/tron-node").chmod(0o755)
@@ -711,6 +711,42 @@ class FastPathTests(VerifyCase):
         self.assertEqual(leaked.returncode, 1, leaked.stdout)
         self.assertIn("privacy guard FAILED", leaked.stdout)
 
+    def test_a_new_comment_fails_the_run_and_directives_or_strings_do_not(self) -> None:
+        r = self.repo
+        r.write("mods/alpha/alpha.py", "import os  # noqa: F401\nVALUE = '# not a comment'\n")
+        r.write("mods/alpha/tool.sh", "#!/usr/bin/env bash\n# shellcheck disable=SC2034\nx='# quoted'\ncat <<EOF\n# heredoc\nEOF\n")
+        r.write("mods/alpha/View.swift", 'let url = "https://example.test" // view-local: reason\nlet s = #"// raw"#\n')
+        r.write("mods/alpha/view.ts", "// @ts-nocheck\nconst a = `${'//'}` + '/*' + /\\/\\//.source;\n")
+        r.write("tools/fixture/tool.py", "# Fixture tool that a test runs to prove one rule.\nVALUE = 1\n")
+        r.commit("directives and strings")
+        clean = r.verify("--changed")
+        self.assertEqual({step["name"]: step["status"] for step in r.report()["steps"]}["no new comments"], "ok", clean.stdout)
+        r.git("branch", "-f", "base")
+        for path, text, line in (("mods/alpha/alpha.py", "VALUE = 'alpha'  # why\n", 1),
+                                 ("mods/alpha/tool.sh", "#!/usr/bin/env bash\necho hi # why\n", 2),
+                                 ("mods/alpha/View.swift", "let a = 1\n/* why\n */\n", 2),
+                                 ("mods/alpha/view.ts", "export const a = 1 / 2; // why\n", 1),
+                                 ("mods/alpha/after.ts", "let y = 1;\nexport const x = y++ / 2; // why\n", 2),
+                                 ("mods/alpha/here.sh", "cat <<< word\n# why\n", 2),
+                                 ("mods/alpha/page.css", 'a { content: "\\""; }\n/* why */\n', 2),
+                                 ("mods/alpha/alpha.py", "VALUE = 1  # we keep the noqa flag on purpose\n", 1),
+                                 ("tools/fixture/tool.py", "# An opinion added above the purpose line.\n"
+                                                           "# Fixture tool that a test runs to prove one rule.\nVALUE = 1\n", 1),
+                                 ("tools/fixture/new.py", "VALUE = 1\n# An opinion below the code of a new tool.\n", 2)):
+            with self.subTest(path=path):
+                r.git("reset", "-q", "--hard", "base")
+                r.write(path, text)
+                r.commit("a comment")
+                failed = r.verify("--changed")
+                self.assertEqual(failed.returncode, 1, failed.stdout)
+                self.assertIn("no new comments FAILED", failed.stdout)
+                self.assertIn(f"{path}:{line}: new comment", failed.stdout)
+        r.git("reset", "-q", "--hard", "base")
+        r.write("tools/fixture/tool.py", "# Fixture tool that a test runs to prove the comment rule.\nVALUE = 1\n")
+        r.commit("a reworded purpose line")
+        reworded = r.verify("--changed")
+        self.assertEqual({step["name"]: step["status"] for step in r.report()["steps"]}["no new comments"], "ok", reworded.stdout)
+
     def test_a_gateway_golden_change_selects_only_the_lock_that_reads_it(self) -> None:
         r = self.repo
         base = "packages/gateway/src/e2e"
@@ -741,7 +777,7 @@ class FastPathTests(VerifyCase):
         self.assertIn("no lock beside packages/gateway/src/e2e/two/locks/unread.golden.json reads it", refused.stdout + refused.stderr)
         r.git("reset", "-q", "--hard", "base")
         r.git("rm", "-q", f"{base}/one/locks/state.golden.json")
-        r.write(f"{base}/one/one.lock.integration.test.ts", "// inline checks\n")
+        r.write(f"{base}/one/one.lock.integration.test.ts", "export const inlineChecks = true;\n")
         r.commit("one lock converted")
         converted = r.verify("--changed", "--plan")
         self.assertEqual(converted.returncode, 0, converted.stdout + converted.stderr)
@@ -761,7 +797,7 @@ class FastPathTests(VerifyCase):
         r.write("mods/core/locks/state.golden.json", "{}\n")
         r.commit("more core tests")
         r.git("branch", "-f", "base")
-        r.write("mods/core/test-core-other.py", PASSING + "# reworded\n")
+        r.write("mods/core/test-core-other.py", PASSING + "REWORDED = True\n")
         r.commit("core test")
         only = r.verify("--changed")
         self.assertEqual(only.returncode, 0, only.stdout)
@@ -774,7 +810,7 @@ class FastPathTests(VerifyCase):
         self.assertEqual(r.report()["selection"]["tests"], ["mods/core/test-core-other.py", "mods/core/test-core.lock.py"])
         self.assertIn("AssertionError: 1 != 2", failed.stdout)
         r.git("reset", "-q", "--hard", "base")
-        r.write("mods/core/test-core-other.py", PASSING + "# reworded\n")
+        r.write("mods/core/test-core-other.py", PASSING + "REWORDED = True\n")
         r.write("mods/core/core.py", "VALUE = 'kernel change'\n")
         r.commit("core code and test")
         widened = r.verify("--changed", "--plan")
@@ -783,6 +819,17 @@ class FastPathTests(VerifyCase):
 
 
 class ContractTests(VerifyCase):
+    def test_one_run_names_every_red_step_with_the_first_first(self) -> None:
+        r = self.repo
+        r.write("mods/alpha/alpha.py", "VALUE = 'alpha' \n")
+        r.write("mods/alpha/test-alpha.py", FAILING)
+        r.commit("a whitespace red and a test red")
+        failed = r.verify("--changed")
+        self.assertEqual(failed.returncode, 1, failed.stdout)
+        self.assertIn("verify: FAILED — git diff --check failed; tests: python failed", failed.stdout)
+        steps = {step["name"]: step["status"] for step in r.report()["steps"]}
+        self.assertEqual((steps["git diff --check"], steps["tests: python"]), ("failed", "failed"))
+
     def test_a_runner_group_that_runs_zero_tests_fails(self) -> None:
         r = self.repo
         r.write("mods/beta/test-beta.py", "import unittest\nunittest.main()\n")
@@ -945,8 +992,9 @@ class IosLaneTests(VerifyCase):
         policy = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
                                 env={**r.env, "FIXTURE_IOS_POLICY_EXIT": "1"}, capture_output=True, text=True)
         self.assertEqual(policy.returncode, 1, policy.stdout)
-        self.assertIn("ios source policy failed", policy.stdout)
-        self.assertEqual(calls.read_text(), "")
+        self.assertIn("verify: FAILED — ios source policy failed", policy.stdout)
+        self.assertEqual(calls.read_text().splitlines(), ["run --host-slot-wait-seconds 30 --only-testing TronMobileUITests/FixtureLockTests"],
+                         "a static red still runs the selected tests, so one run names every red")
         calls.write_text("")
         module = r.verify("--module", "ios-app/ui-tests")
         self.assertEqual(module.returncode, 1, module.stdout)
@@ -1053,6 +1101,15 @@ class IosLaneTests(VerifyCase):
         self.assertEqual(calls.read_text().splitlines()[-1].rsplit(" ", 1)[-1], "lanes=2")
         skipped = r.verify("--changed", "--skip", "ios")
         self.assertEqual(r.report()["steps"][-1]["status"], "skipped", skipped.stdout)
+        calls.write_text("")
+        r.write(f"{journeys}/RealGatewayHelpersUITests.swift", "extension RealGatewayPairAndChatUITests {\n    func reveal( {}\n}\n")
+        r.commit("a journey helper that does not compile")
+        broken = r.verify("--changed")
+        self.assertEqual(broken.returncode, 1, broken.stdout)
+        self.assertIn("verify: FAILED — ios build failed", broken.stdout)
+        steps = {step["name"]: step for step in r.report()["steps"]}
+        self.assertEqual((steps["tests: ios-journeys"]["status"], steps["tests: ios-journeys"]["reason"]), ("skipped", "ios build failed"))
+        self.assertEqual(calls.read_text(), "", "no journey runs on a source that does not build")
 
     def test_an_extension_file_runs_as_the_class_it_extends(self) -> None:
         """#1522: a file that extends another file's XCTestCase class runs as that class, in that class's lane."""
@@ -1302,7 +1359,7 @@ class MutateTests(VerifyCase):
         (r.path / "packages/gateway/node_modules/.bin/vitest").chmod(0o755)
         r.write("packages/gateway/src/store/store.module.json", json.dumps({"layer": "L3", "owns": ["**"]}))
         r.write("packages/gateway/src/store/store.ts", SOURCE)
-        r.write("packages/gateway/src/store/store.lock.integration.test.ts", "// faked by scripts/tron-node\n")
+        r.write("packages/gateway/src/store/store.lock.integration.test.ts", "export const fakedByTronNode = true;\n")
         r.write(".gitignore", "test-results/\npackages/gateway/hung.pid\npackages/gateway/runs.jsonl\n"
                 "packages/gateway/node_modules/\n")
         manifest = json.loads((r.path / "tooling.module.json").read_text())

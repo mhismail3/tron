@@ -14,6 +14,7 @@ deletes is printed with its restore command (tools/ownership/README.md, "Workspa
 
 from __future__ import annotations
 
+import filecmp
 import json
 import os
 import re
@@ -111,6 +112,20 @@ def ignored_entries(tree: Path, rel: str) -> list[str]:
 def tracked_ignored(tree: Path) -> list[str]:
     """Tracked files the ignore rules also match: `git add` or `git clean -X` would treat them as ignored."""
     return git("ls-files", "-c", "-i", "--exclude-standard", cwd=tree, check=False).splitlines()
+
+
+def uncopied_evidence(tree: Path, primary: Path) -> list[str]:
+    """Unexpired evidence files under the worktree's test-results/ that the primary checkout does not hold."""
+    evidence, kept = tree / EVIDENCE, []
+    if not evidence.is_dir() or evidence.is_symlink() or age_days(evidence) > EVIDENCE_DAYS:
+        return kept
+    for base, _dirs, files in os.walk(evidence):
+        for name in files:
+            path = Path(base) / name
+            copy = primary / EVIDENCE / path.relative_to(evidence)
+            if path.is_symlink() or not copy.is_file() or not filecmp.cmp(path, copy, shallow=False):
+                kept.append(str(path.relative_to(tree)))
+    return kept
 
 
 def worktrees() -> list[dict]:
@@ -235,7 +250,8 @@ def report(prune: bool) -> dict:
         real = os.path.realpath(path)
         live = cwds is None or any(c == real or c.startswith(real + os.sep) for c in cwds)
         out["worktrees"].append({"path": str(path), "branch": branch, "merged": merged(str(w.get("HEAD", ""))),
-                                 "dirty": dirty, "live": live, "idleDays": activity_days(path)})
+                                 "dirty": dirty, "live": live, "idleDays": activity_days(path),
+                                 "evidence": len(uncopied_evidence(path, primary))})
     registered = {os.path.realpath(w["worktree"]) for w in trees}
     sibling = primary.parent / f"{primary.name}-worktrees"
     if sibling.is_dir():
@@ -263,7 +279,11 @@ def report(prune: bool) -> dict:
             if not path.exists() and not path.is_symlink():
                 out["pruned"].append(str(path))
         for w in out["worktrees"]:
-            if w["branch"] and w["merged"] and not w["dirty"] and not w["live"] and w["idleDays"] >= IDLE_DAYS:
+            if w["branch"] and w["merged"] and not w["dirty"] and not w["live"] and w["idleDays"] >= IDLE_DAYS and w["evidence"]:
+                out["notes"].append(f"kept worktree {w['path']}: {w['evidence']} evidence file(s) the primary checkout lacks; "
+                                    f"keep them with: rsync -a --ignore-existing {w['path']}/{EVIDENCE}/ {primary}/{EVIDENCE}/ "
+                                    "(a same-named file with other content stays a decision)")
+            elif w["branch"] and w["merged"] and not w["dirty"] and not w["live"] and w["idleDays"] >= IDLE_DAYS:
                 try:
                     for directory, _, _ in os.walk(w["path"]):
                         os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
@@ -363,7 +383,8 @@ def main(argv: list[str]) -> int:
     result = report("--prune" in argv)
     drift = sum(len(result[key]) for key in FIXES) \
         + sum(1 for b in result["branches"] if not b["merged"] or "--prune" not in argv) \
-        + sum(1 for w in result["worktrees"] if not w["merged"] and not w["live"] and w["idleDays"] > BRANCH_IDLE_DAYS)
+        + sum(1 for w in result["worktrees"] if not w["merged"] and not w["live"] and w["idleDays"] > BRANCH_IDLE_DAYS) \
+        + sum(1 for w in result["worktrees"] if w["merged"] and w["evidence"] and not w["live"] and w["idleDays"] >= IDLE_DAYS)
     if "--json" in argv:
         print(json.dumps({**result, "drift": drift, "seconds": round(time.monotonic() - started, 2)}, indent=1))
         return 1 if drift else 0
@@ -373,7 +394,8 @@ def main(argv: list[str]) -> int:
         for item in result[key]:
             print(f"tidy: {key}: {item}" + (f" — {fix}" if fix else ""))
     for w in result["worktrees"]:
-        state = ("merged" if w["merged"] else "unmerged") + (" dirty" if w["dirty"] else "") + (" live" if w["live"] else "")
+        state = ("merged" if w["merged"] else "unmerged") + (" dirty" if w["dirty"] else "") + (" live" if w["live"] else "") \
+            + (f" {w['evidence']} evidence file(s) not in the primary checkout" if w["evidence"] else "")
         print(f"tidy: worktree {w['path']} [{w['branch']}] {state}, last activity {w['idleDays']}d ago")
     merged_count = sum(1 for b in result["branches"] if b["merged"])
     print(f"tidy: branches: {merged_count} merged into origin/main (--prune deletes them), "

@@ -99,7 +99,9 @@ installed there, a job refuses with the `scripts/tron-node install` or (Python l
 Execution reads committed state: uncommitted or untracked changes are refused
 (exit 2). `--plan` additionally includes staged, working and untracked paths; add new
 files to Git before relying on their ownership. Each step prints `[i/N] name …`, its
-live log, result and wall time. The first failure stops the run and prints its tail.
+live log, result and wall time. A red step prints its tail and the run goes on, so one run names every red;
+the verdict lists them in step order, first red first. Only work a red makes meaningless is skipped: a failed
+`ios build` skips `layers ios`, the iOS shards and the real-UI journeys.
 `test-results/verify/<sha>.json` is atomically updated before/after every step;
 `running` and `interrupted` are not passes. SIGINT/SIGTERM stops and joins the owned
 step process group while retaining partial results. Full logs are in
@@ -123,7 +125,12 @@ cases; a file with no executed passes cannot hide beside a passing neighbour.
    baselines check every block without `--base` (loaded generators need Gateway dependencies).
 4. the privacy guard over `git diff <base>..HEAD`, except the guard's own needle file, which its
    full and staged scans exempt too
-5. `git diff --check`
+5. `git diff --check`, then `tools/verify/comments.py`: a comment that starts on a line the change adds
+   fails the run (charter: code carries no comments), except shebangs, the directives a tool reads and the
+   tooling purpose line: one line at the file's head (after the shebang and directives), and not while the
+   file still holds an earlier purpose line; whether that line states a purpose is review's call. It reads
+   TypeScript/JavaScript (not JSX), Python, shell, Swift and CSS; Dafny (its `///` docs and `// @wire` feed `dafny2wire`), C/Objective-C and
+   generated files are out of its scope
 6. When the selection touches the Gateway: `npm run check` (production and test
    support typecheck), `npm run lint`, and `scripts/tron layers gateway`.
 7. `scripts/tron layers ios` on this commit's Xcode index store (see the iOS lane

@@ -15,7 +15,7 @@ function profileModelChange(sessionId, session) {
   return {
     target: { kind: "session", sessionId },
     fence: { runtimeGeneration: session.runtimeGeneration, model: session.model ?? null },
-    changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: { provider: "tron-profile", id: "profile-model" } }],
+    changes: [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: { provider: "tron-profile", id: "profile-model" } }],
   };
 }
 
@@ -185,6 +185,7 @@ class TranscriptWriter {
     writeSync(this.fd, line);
     digest.update(portable(`${relative(root, path)}\n${line}`));
     this.bytes = line.length;
+    this.pathBytes = line.length - portable(line).length;
     this.chunks = [];
     this.pending = 0;
   }
@@ -236,6 +237,10 @@ class TranscriptWriter {
     this.entry("message", (timestamp) => `"message":{"role":"toolResult","toolCallId":"${callId}","toolName":"bash",`
       + `"content":[{"type":"text","text":${pick(toolPool)}}],"isError":false,"timestamp":${timestamp}}`);
     this.entry("message", (timestamp) => assistant(`{"type":"text","text":${pick(pools.text)}}`, "stop", timestamp));
+  }
+
+  get size() {
+    return this.bytes - this.pathBytes;
   }
 
   close() {
@@ -295,7 +300,7 @@ function generateCatalog() {
   };
   const fillTo = (bytes, turnPools = pools) => (writer) => {
     writer.preamble(null);
-    do writer.turn(turnPools); while (writer.bytes < bytes);
+    do writer.turn(turnPools); while (writer.size < bytes);
   };
   const topLevel = (name, fill) => {
     const project = projects[index % projects.length];
@@ -306,11 +311,11 @@ function generateCatalog() {
   };
 
   const large = plan.largeBytes.map((bytes, position) => topLevel(`Large session ${position + 1}`,
-    (writer) => { do writer.turn(pools); while (writer.bytes < bytes); }));
+    (writer) => { do writer.turn(pools); while (writer.size < bytes); }));
   const runPool = Array.from({ length: config.runSessions }, (_, position) => topLevel(`Running session ${position + 1}`,
     (writer) => { for (let turn = 0; turn < 160; turn += 1) writer.turn(pools.seeded); }));
   const coldPool = Array.from({ length: config.coldSessions }, (_, position) => topLevel(`Cold session ${position + 1}`,
-    (writer) => { do writer.turn(pools); while (writer.bytes < COLD_SESSION_BYTES); }));
+    (writer) => { do writer.turn(pools); while (writer.size < COLD_SESSION_BYTES); }));
 
   const others = [
     ...Array.from({ length: plan.sessions - large.length - runPool.length - coldPool.length }, () => ({ kind: "session", weight: 3 })),
@@ -325,7 +330,7 @@ function generateCatalog() {
   for (const item of others) {
     const bytes = Math.max(MINIMUM_FILE_BYTES, Math.floor(plan.remaining * item.weight / totalWeight));
     if (item.kind === "session") {
-      parents.push(topLevel(`Session ${parents.length + 1}`, (writer) => { do writer.turn(pools); while (writer.bytes < bytes); }));
+      parents.push(topLevel(`Session ${parents.length + 1}`, (writer) => { do writer.turn(pools); while (writer.size < bytes); }));
       continue;
     }
     const parent = parents[Math.floor(layout() * parents.length)];
