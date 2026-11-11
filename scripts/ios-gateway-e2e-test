@@ -156,6 +156,12 @@ e2e_test_filters=(
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools"
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testSharedLinkUploadAndWebSocketLiveness"
 )
+e2e_diagnostic_test_filters=(
+  "TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testBothRawTimeoutNamesProduceTheSameTransportDiagnostic"
+)
+e2e_lan_test_filters=(
+  "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"
+)
 e2e_lan_endpoint="off"
 e2e_scheme="Tron Development"
 e2e_test_plan="GatewayE2E"
@@ -217,6 +223,8 @@ Commands:
             starts it under its own lease and host slot. Not for direct use.
   iterate   Incremental build, then one focused test-without-building run.
   all       Prepare, build, and run. Leaves the fixture running for iteration.
+  check     Build and execute selected boundary methods, including LAN methods;
+            stop the private fixture on every exit. Used by verify.
   status    Print fixture/build status.
   logs      Follow the persistent gateway log.
   stop      Stop and remove the gateway fixture; preserve DerivedData.
@@ -630,7 +638,11 @@ build_tests() {
 }
 
 run_one_test_case() {
-  local test_filter="$1" attempt_id attempt_dir result_bundle status case_started=$SECONDS
+  local test_filter="$1" attempt_id attempt_dir result_bundle status case_started=$SECONDS lan_filter
+  e2e_lan_endpoint="off"
+  for lan_filter in "${e2e_lan_test_filters[@]}"; do
+    [[ "$test_filter" != "$lan_filter" ]] || e2e_lan_endpoint="on"
+  done
   start_fresh_fixture
   load_state
   patch_xctestrun "$xctestrun" "$e2e_test_target"
@@ -1165,6 +1177,7 @@ run_test() {
   for test_filter in "${e2e_test_filters[@]}"; do
     run_one_test_case "$test_filter"
   done
+  if ((stop_fixture_on_exit)); then stop_gateway; fi
   trap - EXIT
   echo "Focused E2E run completed in $((SECONDS - started))s (status 0); artifacts: $run_root/results"
 }
@@ -1263,13 +1276,11 @@ show_status() {
 }
 
 case "$command" in
-  run-lan)
-    e2e_test_filters=("TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes")
-    e2e_lan_endpoint="on"
-    ;;
+  run-lan) e2e_test_filters=("${e2e_lan_test_filters[@]}") ;;
+  check) e2e_test_filters=("${e2e_test_filters[@]}" "${e2e_lan_test_filters[@]}" "${e2e_diagnostic_test_filters[@]}") ;;
 esac
 case "$command" in
-  prepare|build|run|run-lan|run-ui|run-ui-lane|iterate|all|stop|clean) ;;
+  prepare|build|run|run-lan|run-ui|run-ui-lane|iterate|all|check|stop|clean) ;;
   status|logs|-h|--help|help) ;;
   *) usage >&2; die "unknown command: $command" ;;
 esac
@@ -1280,7 +1291,7 @@ if ((${#selectors[@]})); then
         ui_journey_is_owned "$selector" || die "$selector is not a real-UI journey this command owns (see '$0 help')"
       done
       ;;
-    run|run-lan|iterate|all)
+    run|run-lan|iterate|all|check)
       for selector in "${selectors[@]/#-only-testing:/}"; do
         owned=0
         for boundary_case in "${e2e_test_filters[@]}"; do
@@ -1316,7 +1327,7 @@ if [[ "$command" != status && "$command" != logs && "$command" != -h && "$comman
   python3 "$lock_owner" --lock "$test_lock" --verify-inherited "$test_lane" || exit $?
 fi
 case "$command" in
-  prepare|build|run|run-lan|run-ui|run-ui-lane|iterate|all|stop|clean)
+  prepare|build|run|run-lan|run-ui|run-ui-lane|iterate|all|check|stop|clean)
     if [[ "$command" == run-ui-lane ]]; then
       sweep_report="$(python3 "$simulator_owner" sweep \
         --discovery-root "$test_discovery_root" --default-state-dir "$test_default_state_root" \
@@ -1355,6 +1366,13 @@ case "$command" in
   run-ui-lane) run_ui_lane_command ;;
   iterate) build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test"; run_test ;;
   all) install_gateway_if_needed; build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test"; run_test ;;
+  check)
+    stop_fixture_on_exit=1
+    trap finish_e2e_run EXIT
+    install_gateway_if_needed
+    build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test"
+    run_test
+    ;;
   status) show_status ;;
   logs) touch "$log_file"; tail -f "$log_file" ;;
   stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/home" "$run_root/payload" "$state_file" ;;

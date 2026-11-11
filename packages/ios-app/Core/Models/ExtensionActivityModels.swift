@@ -2,6 +2,12 @@ import Foundation
 
 package enum ExtensionActivityLifecycleState: String, Codable, CaseIterable, Sendable {
     case queued, running, paused, completed, failed, stopped, rejected, unknown
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(ExtensionRunLifecycleState.decode)
+        guard let state = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown lifecycle state") }
+        self = state
+    }
+
     var isTerminal: Bool { switch self { case .completed, .failed, .stopped, .rejected: true; default: false } }
     var isCurrent: Bool { switch self { case .queued, .running, .paused: true; default: false } }
     var displayName: String { rawValue == "unknown" ? "Unknown" : rawValue.capitalized }
@@ -9,10 +15,22 @@ package enum ExtensionActivityLifecycleState: String, Codable, CaseIterable, Sen
 
 package enum ExtensionActivityAttention: String, Codable, CaseIterable, Sendable {
     case none, activeLongRunning, needsAttention
+
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(ExtensionRunAttention.decode)
+        guard let attention = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown lifecycle attention") }
+        self = attention
+    }
 }
 
 package enum ExtensionActivityVisibility: String, Codable, CaseIterable, Sendable {
     case current, recent, historical, unknown
+
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(ExtensionRunVisibility.decode)
+        guard let visibility = Self(rawValue: value.rawValue) else { throw WireError(path: "$", message: "unknown lifecycle visibility") }
+        self = visibility
+    }
 }
 
 package struct ExtensionActivityLifecycle: Codable, Hashable, Sendable {
@@ -37,6 +55,28 @@ package struct ExtensionActivityLifecycle: Codable, Hashable, Sendable {
         self.producerUpdatedAt = producerUpdatedAt; self.terminalAt = terminalAt
         self.recentUntil = recentUntil; self.visibility = visibility
         self.remainingMs = remainingMs
+    }
+
+    package init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder).decodeWire(ExtensionRunLifecycle.decode)
+        guard let state = ExtensionActivityLifecycleState(rawValue: value.state.rawValue),
+              let attention = ExtensionActivityAttention(rawValue: value.attention.rawValue),
+              let sequence = Int(exactly: value.sequence) else {
+            throw WireError(path: "$", message: "invalid lifecycle projection")
+        }
+        let visibility = try value.visibility.map { wire in
+            guard let visibility = ExtensionActivityVisibility(rawValue: wire.rawValue) else {
+                throw WireError(path: "$.visibility", message: "unknown lifecycle visibility")
+            }
+            return visibility
+        }
+        let remainingMs = try value.remainingMs.map { wire in
+            guard let remaining = Int(exactly: wire) else { throw WireError(path: "$.remainingMs", message: "expected integer") }
+            return remaining
+        }
+        self.init(state: state, attention: attention, sequence: sequence, observedAt: value.observedAt,
+                  producerUpdatedAt: value.producerUpdatedAt, terminalAt: value.terminalAt,
+                  recentUntil: value.recentUntil, visibility: visibility, remainingMs: remainingMs)
     }
 
     package var isTerminal: Bool { state.isTerminal }
