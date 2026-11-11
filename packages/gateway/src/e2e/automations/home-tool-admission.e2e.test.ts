@@ -38,7 +38,7 @@ const options = { automations: true, home: { memorySummarizer: () => async () =>
 const originalTools = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "session_search",
   "session_read", "delegate", "web_search", "settings", "task", "profile"];
 const wakeTools = [...originalTools, "read", "grep", "find", "ls", "schedule", "obligation", "projects"].sort();
-const userTools = [...wakeTools, "write", "edit", "bash"].sort();
+const userTools = [...wakeTools, "write", "edit", "bash", "computer"].sort();
 
 async function resumedHome(label: string, seedStale = true, initialNotifications = true) {
   let gateway = await startLockGateway(`home-tool-${label}`, { ...options, ...(initialNotifications ? {} : { notifications: undefined }) });
@@ -110,7 +110,7 @@ for (const kind of ["maintainer", "automation"] as const) {
     const runtime = await phone.request("session.context", { sessionId });
     expect(runtime.ok, JSON.stringify(runtime)).toBe(true);
     expect([...runtime.result.activeTools].sort()).toEqual(userTools);
-    expect(resolved.result.keys[0].display).toContain("Home wake turns omit write, edit and bash");
+    expect(resolved.result.keys[0].display).toContain("Home wake turns omit write, edit, bash and computer");
     expect(JSON.stringify(gateway.record().providerRequests)).toContain("tron.home-nonce:");
     expect((await gateway.registry.acquire(sessionId)).runtime.session.settingsManager.getBlockImages()).toBe(false);
     if (kind === "automation") {

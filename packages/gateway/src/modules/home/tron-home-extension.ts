@@ -131,7 +131,7 @@ export function createTronHomeExtension(memoryTools: () => HomeMemoryToolAccess 
   obligations: (callId: string, request: ObligationRequest) => Promise<unknown>): ExtensionFactory {
   return (pi) => {
     pi.on("tool_call", event => homeToolAvailable(event.toolName, activation()) ? undefined
-      : { block: true, reason: "This tool requires the current maintainer turn; wake content cannot grant file or shell mutation authority." });
+      : { block: true, reason: "This tool requires the current maintainer turn; wake content cannot grant file, shell or computer authority." });
     for (const tool of homeMemoryTools(memoryTools)) pi.registerTool(tool);
     pi.registerTool(homeProfileTool(profileChanges, knowledge, requestChange));
     pi.registerTool(obligationTool(obligations));
