@@ -12,6 +12,7 @@
 // @swift HomeMemoryView HomeMemoryEvidencePage HomeChapterList HomeProfileList
 // @swift AdministrativeDrainSnapshot GatewayRestartResponse
 // @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates ModelPage
+// @swift SessionListPage SessionSummaryUpdate
 module Protocol {
   datatype Option<T> = None | Some(v: T)
   datatype Nullable<T> = Null | NonNull(v: T)
@@ -104,7 +105,7 @@ module Protocol {
       id: string,
       name: Option<string>,
       cwd: string,
-      kind: SessionKind,
+      kind: SessionKind := SessionKind.user,
       parentSessionId: Option<string>,
       /// Immutable creation provenance derived from canonical session receipts.
       creationOrigin: Option<SessionCreationOrigin>,
@@ -115,21 +116,21 @@ module Protocol {
       updatedAt: string,
       /// Stable Gateway-observed start of the current active dashboard period.
       activeSince: Option<string>,
-      messageCount: real,
+      messageCount: int,
       firstMessage: string,
       phase: SessionPhase,
       /// Narrow foreground agent phase. When this is settled while `phase` remains
       /// active, detached subagents are the only remaining dashboard work.
       foregroundPhase: Option<SessionPhase>,
       /// True when at least one detached subagent activity remains active.
-      hasActiveSubagents: Option<bool>,
+      hasActiveSubagents: Option<bool> := Some(false),
       /// True while the authoritative runtime is blocked on a semantic user interaction.
-      waitingForUser: Option<bool>,
-      summaryRevision: real,
+      waitingForUser: Option<bool> := Some(false),
+      summaryRevision: int := 0,
       /// Gateway-canonical cross-client attention projection. Missing only during a rolling upgrade.
-      completionRevision: Option<real>,
-      attentionRevision: Option<real>,
-      isUnread: Option<bool>,
+      completionRevision: Option<int> := Some(0),
+      attentionRevision: Option<int> := Some(0),
+      isUnread: Option<bool> := Some(false),
       /// Set only on an archived row. Archiving hides a session from the dashboard
       /// without changing its canonical file.
       archivedAt: Option<string>
@@ -137,6 +138,18 @@ module Protocol {
 
   /// `session.list` archive filter. `exclude` is the dashboard projection; `only`
   /// is the archived container.
+  /// `session.list`: one page of the session catalog. `notModified` answers a first page whose
+  /// projection token is the client's own, with no sessions.
+  // @wire
+  datatype SessionListPage = SessionListPage(
+      sessions: seq<SessionSummary>,
+      listRevision: int,
+      projectionToken: string,
+      nextCursor: Option<string>,
+      archivedCount: Option<int>,
+      notModified: Option<bool>
+    )
+
   // @wire enum
   datatype SessionArchiveFilter = exclude | only
 
@@ -145,23 +158,23 @@ module Protocol {
   // @wire
   datatype SessionSummaryUpdate = SessionSummaryUpdate(
       sessionId: string,
-      summaryRevision: real,
+      summaryRevision: int,
       phase: SessionPhase,
       /// Narrow foreground agent phase; omitted by older Gateway builds.
       foregroundPhase: Option<SessionPhase>,
       /// True when at least one detached subagent activity remains active.
-      hasActiveSubagents: Option<bool>,
+      hasActiveSubagents: Option<bool> := Some(false),
       /// True while the authoritative runtime is blocked on a semantic user interaction.
-      waitingForUser: Option<bool>,
+      waitingForUser: Option<bool> := Some(false),
       name: Option<string>,
       updatedAt: string,
       /// Stable Gateway-observed start of the current active dashboard period.
       activeSince: Option<string>,
-      messageCount: real,
+      messageCount: int,
       firstMessage: string,
-      completionRevision: Option<real>,
-      attentionRevision: Option<real>,
-      isUnread: Option<bool>
+      completionRevision: Option<int> := Some(0),
+      attentionRevision: Option<int> := Some(0),
+      isUnread: Option<bool> := Some(false)
     )
 
   // @wire
@@ -1622,7 +1635,7 @@ module Protocol {
       scope: PackageScope,
       filtered: bool,
       installedPath: Option<string>,
-      provides: Option<PackageProvides>,
+      provides_: Option<PackageProvides>,
       conflict: Option<PackageConflict>,
       nodeRequirement: Option<PackageNodeRequirement>
     )
@@ -2137,7 +2150,7 @@ module Protocol {
       sessionId: string,
       operationId: string,
       at: string,
-      attention: HomeTaskCheckinAttention := none
+      attention: HomeTaskCheckinAttention := HomeTaskCheckinAttention.none
     )
 
   // @wire enum

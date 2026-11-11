@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { PROTOCOL_SWIFT, parseWire, reachable, swiftRoots } from "../dafny2wire/dafny2wire.mjs";
+import { PROTOCOL_SWIFT, parseWire, reachable, swiftFields, swiftRoots } from "../dafny2wire/dafny2wire.mjs";
 import { mulberry32 } from "./random.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -15,6 +15,10 @@ const PROTOCOL = join(ROOT, "packages/core/wire/Protocol.dfy");
 test("protocol: types.ts and the iOS decoders are generated, and the TypeScript and tolerant Swift codecs agree byte for byte", async (t) => {
   const check = spawnSync(join(ROOT, "scripts/tron"), ["proof", "wire", "--protocol", "--check"], { encoding: "utf8" });
   assert.equal(check.status, 0, check.stderr);
+  const doctor = spawnSync("/bin/bash", [join(ROOT, "tools/proof/bootstrap.sh"), "doctor"], { encoding: "utf8" });
+  assert.equal(doctor.status, 0, `pinned Dafny unavailable: ${doctor.stderr || doctor.stdout}`);
+  const resolve = spawnSync(join(process.env.XDG_CACHE_HOME || join(homedir(), "Library/Caches"), "tron-proof/bin/dafny"), ["resolve", PROTOCOL], { encoding: "utf8" });
+  assert.equal(resolve.status, 0, `Protocol.dfy is not valid Dafny under the pinned toolchain:\n${resolve.stdout}${resolve.stderr}`);
   const dir = mkdtempSync(join(tmpdir(), "tron-proof-protocol-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const gen = spawnSync(join(ROOT, "scripts/tron"), ["proof", "wire", "--generate", PROTOCOL, dir], { encoding: "utf8" });
@@ -112,8 +116,32 @@ test("protocol: types.ts and the iOS decoders are generated, and the TypeScript 
   assert.equal(appLines.filter(([, i]) => i < lines.length).length, appTypes.size * 12);
   assert.deepEqual(runSwift("app", join(ROOT, PROTOCOL_SWIFT), [...appTypes], appLines.map(([line]) => line)), appLines.map(([, i]) => swift[i]),
     "the iOS app's checked-in decoders read every value of their datatypes as the generated Swift codec does");
+  const swiftByName = new Map(swiftFields(types).map((ty) => [ty.name, ty]));
+  const literal = (t, text) => (byName.get(t.kind)?.kind === "enum" ? byName.get(t.kind).ctors.find((c) => `${t.kind}.${c.name}` === text).wire : JSON.parse(text));
+  const withDefaults = (t, v) => {
+    if (v === null || v === undefined) return v;
+    if (t.kind === "seq") return v.map((x) => withDefaults(t.arg, x));
+    if (t.kind === "map") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, withDefaults(t.arg, x)]));
+    if (t.kind === "Option" || t.kind === "Nullable") return withDefaults(t.arg, v);
+    const ty = swiftByName.get(t.kind);
+    if (!ty || ty.kind === "enum") return v;
+    if (ty.kind === "bykind") {
+      const kind = v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+      const c = ty.ctors.find((k, i) => ty.kinds[i].includes(kind));
+      return c?.fields.length ? withDefaults(c.fields[0].type, v) : v;
+    }
+    const c = ty.kind === "tagged" ? ty.ctors.find((k) => k.wire === v[ty.tag]) : ty.ctors[0];
+    const out = { ...v };
+    for (const f of c.fields) {
+      if (out[f.wire] === undefined && f.fallback) out[f.wire] = literal(f.type, f.fallback);
+      else if (out[f.wire] !== undefined) out[f.wire] = withDefaults(f.type, out[f.wire]);
+    }
+    return out;
+  };
   const ts = corpus.map(tsOut);
-  const differ = lines.map((line, i) => [line.split("\t")[0], ts[i], swift[i]]).filter(([, a, b]) => a !== b);
+  const expected = lines.map((line) => { const [name, json] = line.split("\t"); return W[`encode${name}`](withDefaults({ kind: name }, W[`decode${name}`](JSON.parse(json)))); });
+  const differ = lines.map((line, i) => [line.split("\t")[0], expected[i], swift[i]]).filter(([, a, b]) => a !== b);
+  assert.ok(expected.some((line, i) => line !== ts[i]), "some seeded values omit a field the Swift codec defaults");
   assert.deepEqual(differ.slice(0, 3), [], `${differ.length} of ${lines.length} values differ between TypeScript and Swift`);
   assert.deepEqual(ts.slice(lines.length), [
     'ERR $.blockerCounts["nope"]', "ERR $.available", "ERR $", "ERR $", "ERR $.id", "ERR $[\"a\"][1][\"b\"]", "ERR $", "ERR $.provider", "ERR $.attention",
