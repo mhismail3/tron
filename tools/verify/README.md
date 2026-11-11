@@ -254,7 +254,7 @@ An explicit module manifest may bind complete UIValidation classes to its Python
 "iosLanes": [
   {
     "classes": ["TronMobileUITests/ExampleDiagnosticUITests"],
-    "command": ["scripts/test-example-evidence.py", "--hosted"]
+    "command": ["<owned-script.py>", "<validation-mode>"]
   }
 ]
 ```

@@ -1387,6 +1387,20 @@ class IosLaneTests(VerifyCase):
             self.assertEqual(r.report()["verdict"], "failed")
             self.assertGreaterEqual(r.report()["passingTests"], 1, "an unrelated pass cannot hide a missing owner proof")
             del r.env[flag]
+        declaration["iosLanes"][0]["classes"] = ["TronMobileUITests/FixtureLockTests"]
+        r.write("harness/harness.module.json", json.dumps(declaration))
+        r.write("scripts/tron-ios-test", IOS_TEST_STUB.replace('echo "$*" >>"$FIXTURE_IOS_CALLS"',
+                'echo "$* record=${TEST_RUNNER_TRON_UPDATE_LOCKS:-}" >>"$FIXTURE_IOS_CALLS"'))
+        r.commit("a registered validator must not replace lock recording")
+        calls.write_text("")
+        recorded = r.verify("--update-locks", "ios-app/ui-tests")
+        self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
+        self.assertNotIn("owner", calls.read_text().splitlines())
+        self.assertTrue(any(line.startswith("run ") and "TronMobileUITests/FixtureLockTests" in line
+                            and "record=ios-app/ui-tests" in line for line in calls.read_text().splitlines()))
+        declaration["iosLanes"][0]["classes"] = ["TronMobileUITests/TronMacTerminalUITests"]
+        r.write("harness/harness.module.json", json.dumps(declaration))
+        r.commit("restore the class validator")
         r.git("branch", "-f", "base")
         r.write(script, "OWNER_VERSION = 2\n" + (r.path / script).read_text())
         r.commit("the owning validator changes without a UI source edit")

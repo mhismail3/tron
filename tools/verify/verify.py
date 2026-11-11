@@ -1185,6 +1185,8 @@ def main(argv: list[str]) -> int:
     groups: dict[str, list[str]] = {}
     try:
         owner_jobs, owner_routes = ios_owner_jobs(modules, result["tracked"])
+        if name == "update-locks":
+            owner_routes = {}
         for path in selection["tests"]:
             groups.setdefault(owner_routes[path] if path in owner_routes else runner_of(path, nested, mac_terminal), []).append(path)
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
