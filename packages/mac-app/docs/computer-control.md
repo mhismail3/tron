@@ -20,9 +20,10 @@ macOS may additionally ask to allow direct screen capture rather than its privat
 window picker. The two ordinary TCC booleans do **not** prove that this separate
 system dialog has been completed. A window-only screenshot can exclude an alert
 covering the window. Before foreground input, the agent must inspect the full
-desktop and ask the user to handle blocking permission/security dialogs. Neither
-a focused window nor first-in-ordinary-window order proves an unobstructed input
-target. Tron never approves OS permission prompts automatically.
+desktop for blocking permission/security dialogs. Neither a focused window nor
+first-in-ordinary-window order proves an unobstructed input target. The agent
+handles a permission prompt itself when the authorized task needs that grant for
+that app, and reports any prompt its tools cannot complete.
 
 `CuaProcessOwner` starts the bundled driver directly from this permission-bearing
 process, with `--embedded`, its exact host bundle ID, standard authorization, and
