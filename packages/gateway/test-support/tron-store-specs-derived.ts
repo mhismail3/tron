@@ -87,7 +87,7 @@ export const DERIVED_STORES: readonly StoreSpec[] = [
     paths: ["gateway/model-queue.json", "gateway/model-queue-sessions"],
     reproducible: true,
     async record(home) {
-      const owner = new ModelQueueOwner({ runtime: queueRuntime, usage: { read: queueUsage }, now: () => CORPUS_EPOCH,
+      const owner = new ModelQueueOwner({ tronHome: home, runtime: queueRuntime, usage: { read: queueUsage }, now: () => CORPUS_EPOCH,
         queue: async () => SUBAGENT_QUEUE, projectionPath: modelQueueProjectionPath(home) });
       owner.recordUsageLimit("subagent", "corpus-limited/corpus-b", "usage limit reached");
       await owner.publishProjection();
