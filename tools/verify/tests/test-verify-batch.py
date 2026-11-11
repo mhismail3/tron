@@ -338,6 +338,9 @@ if sys.argv[1] in ('run', 'checkpoint'):
         self.assertIn('batch runs only in a linked worktree', result.stdout + result.stderr)
         self.assertIn('git worktree add --detach', result.stdout + result.stderr)
         self.assertFalse((self.common / 'verify/batches').exists())
+        plan = subprocess.run(['scripts/tron', 'verify', '--batch', '--base', self.base, '--plan'], cwd=self.primary,
+                              env=self.env, capture_output=True, text=True, timeout=90)
+        self.assertEqual(plan.returncode, 0, plan.stdout + plan.stderr)
 
     def test_green_exact_range_repeat_and_read_only_plan(self):
         self.land('good', 'yes')
