@@ -216,12 +216,15 @@ For ordinary, unmanaged, released worktrees:
    fi
    ```
 
-3. Remove the approved linked worktree with plain `git worktree remove -- "$path"`.
+3. Keep its evidence (first-failure logs are evidence): copy its `test-results/` into the primary
+   checkout without overwriting, and stop if that fails or `scripts/tron tidy` still names the worktree's
+   evidence: `rsync -a --ignore-existing "$path/test-results/" "$primary/test-results/" || exit 1`.
+4. Remove the approved linked worktree with plain `git worktree remove -- "$path"`.
    Never use `--force` or `rm -rf`. Refusal is a blocker to investigate, not bypass.
-4. Recheck that the branch is no longer checked out anywhere. Delete the exact
+5. Recheck that the branch is no longer checked out anywhere. Delete the exact
    local branch with `git branch -d -- "$branch"` only after independent merge
    proof. Git's `-d` can consult an upstream other than the integration target.
-5. If `-d` refuses a reviewed squash/rebase merge, explain why and obtain explicit
+6. If `-d` refuses a reviewed squash/rebase merge, explain why and obtain explicit
    approval for deleting that exact non-ancestor head. Prefer an expected-OID
    deletion (`git update-ref -d "refs/heads/$branch" "$head_oid"`) after rechecking
    attachments, rather than an unconditional `-D`. Never use this to bypass a lock

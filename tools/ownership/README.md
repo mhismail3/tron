@@ -160,7 +160,9 @@ merely into a local main) that no worktree has checked out (printing `git branch
 to restore each), and merged worktrees on a branch (a detached worktree belongs to the tool that
 made it, such as a verify batch lane) with no untracked, modified or
 non-regenerable ignored file (an ignored `.env.local` keeps it), no process whose
-working directory is inside, and no HEAD activity for 3 days. Without `lsof` it
+working directory is inside, no HEAD activity for 3 days, and no `test-results/` file the primary checkout lacks
+byte for byte while that folder is unexpired (such a worktree is kept, counted as a decision, and the
+`rsync --ignore-existing` that keeps its evidence is named; first-failure logs are evidence). It makes the read-only Gateway payload writable first. Without `lsof` it
 prunes no worktree. Unmerged branches, residue and orphan directories are only
 reported. Other stores keep their owners: `scripts/tron-ios-test prune` owns
 `~/Library/Developer/Tron/ios`.
