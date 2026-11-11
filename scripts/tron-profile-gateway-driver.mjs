@@ -15,7 +15,7 @@ function profileModelChange(sessionId, session) {
   return {
     target: { kind: "session", sessionId },
     fence: { runtimeGeneration: session.runtimeGeneration, model: session.model ?? null },
-    changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: { provider: "tron-profile", id: "profile-model" } }],
+    changes: [{ key: "model.ref[role=chat]", layer: "session", op: "set", value: { provider: "tron-profile", id: "profile-model" } }],
   };
 }
 
