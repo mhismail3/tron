@@ -245,19 +245,7 @@ package struct ProviderSummary: Codable, Hashable, Identifiable, Sendable {
     package var isLocalOnly: Bool { localOnly == true }
 }
 
-package struct ContextWindowLimits: Codable, Hashable, Sendable {
-    package let minimum: Int
-    package let maximum: Int
-    package let `default`: Int
-    package let longContextThreshold: Int?
-
-    package init(minimum: Int, maximum: Int, default: Int, longContextThreshold: Int?) {
-        self.minimum = minimum
-        self.maximum = maximum
-        self.default = `default`
-        self.longContextThreshold = longContextThreshold
-    }
-
+extension ContextWindowLimits {
     package func admits(_ value: Int) -> Bool {
         value >= minimum && value <= maximum
     }
@@ -268,26 +256,8 @@ package struct ContextWindowLimits: Codable, Hashable, Sendable {
     }
 }
 
-package struct ModelSummary: Codable, Hashable, Identifiable, Sendable {
-    package let provider: String
-    package let id: String
-    package let name: String
-    let reasoning: Bool
-    package let input: [String]
-    package let contextWindow: Int
-    package let maxTokens: Int
-    package let available: Bool
-    package var contextWindowLimits: ContextWindowLimits? = nil
-    package var releaseDate: String? = nil
-    package var cost: ModelTokenPrice? = nil
-    package var virtual: Bool? = nil
-
+extension ModelSummary: Identifiable {
     package var ref: ModelRef { ModelRef(provider: provider, id: id) }
-}
-
-package struct ModelTokenPrice: Codable, Hashable, Sendable {
-    let input: Double
-    let output: Double
 }
 
 package struct RecentModelRef: Codable, Hashable, Sendable {

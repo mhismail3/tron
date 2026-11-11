@@ -196,7 +196,6 @@ final class ProviderAuthCoordinator {
     private struct ProviderParams: Codable { let sessionId: String? }
     private struct ModelParams: Codable { let sessionId: String?; let cursor: String?; let limit: Int }
     private struct ProviderResponse: Decodable { let providers: [ProviderSummary] }
-    private struct ModelResponse: Decodable { let models: [ModelSummary]; let nextCursor: String? }
     private struct RecentModelsResponse: Decodable { let models: [RecentModelRef] }
     private struct RecentModelsParams: Codable { }
     private struct BeginParams: Codable {
@@ -418,14 +417,13 @@ extension ProviderAuthCoordinator {
             var cursor: String?
             var seenCursors = Set<String>()
             repeat {
-                let response: ModelResponse = try await client.request(
-                    "model.list",
-                    ModelParams(
+                let response = try GatewayResponseDecoding.decode(
+                    try await client.requestValue("model.list", ModelParams(
                         sessionId: target.sessionID,
                         cursor: cursor,
                         limit: ModelCatalogPolicy.requestPageSize
-                    )
-                )
+                    )),
+                    method: "model.list", ModelPage.decode)
                 guard admits(admission) else { return false }
                 try accumulator.append(response.models, hasNextPage: response.nextCursor != nil)
                 cursor = response.nextCursor

@@ -506,6 +506,134 @@ package enum ExtensionRunLifecycleState: String, CaseIterable, Hashable, Sendabl
     }
   }
 }
+package struct ContextWindowLimits: Hashable, Sendable {
+  package let minimum: Int
+  package let maximum: Int
+  package let `default`: Int
+  package let longContextThreshold: Int?
+  package init(minimum: Int, maximum: Int, default: Int, longContextThreshold: Int? = nil) {
+    self.minimum = minimum
+    self.maximum = maximum
+    self.`default` = `default`
+    self.longContextThreshold = longContextThreshold
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ContextWindowLimits {
+    let o = try wObj(v, p)
+    let f_minimum: Int = wAbsent(o.value("minimum")) ? 0 : try wInt(o.value("minimum")!, p + ".minimum", nat: false)
+    let f_maximum: Int = wAbsent(o.value("maximum")) ? 0 : try wInt(o.value("maximum")!, p + ".maximum", nat: false)
+    let f_default: Int = wAbsent(o.value("default")) ? 0 : try wInt(o.value("default")!, p + ".default", nat: false)
+    let f_longContextThreshold: Int? = wAbsent(o.value("longContextThreshold")) ? nil : try wInt(o.value("longContextThreshold")!, p + ".longContextThreshold", nat: false)
+    return ContextWindowLimits(minimum: f_minimum, maximum: f_maximum, default: f_default, longContextThreshold: f_longContextThreshold)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"minimum\":" + String(self.minimum)
+    s += ",\"maximum\":" + String(self.maximum)
+    s += ",\"default\":" + String(self.`default`)
+    s += (self.longContextThreshold == nil ? "" : ",\"longContextThreshold\":" + String(self.longContextThreshold!))
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct ModelTokenPrice: Hashable, Sendable {
+  package let input: Double
+  package let output: Double
+  package init(input: Double, output: Double) {
+    self.input = input
+    self.output = output
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ModelTokenPrice {
+    let o = try wObj(v, p)
+    let f_input: Double = wAbsent(o.value("input")) ? 0 : try wNum(o.value("input")!, p + ".input")
+    let f_output: Double = wAbsent(o.value("output")) ? 0 : try wNum(o.value("output")!, p + ".output")
+    return ModelTokenPrice(input: f_input, output: f_output)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"input\":" + wFormat(self.input)
+    s += ",\"output\":" + wFormat(self.output)
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct ModelSummary: Hashable, Sendable {
+  package let provider: String
+  package let id: String
+  package let name: String
+  package let virtual: Bool
+  package let reasoning: Bool
+  package let input: [String]
+  package let contextWindow: Int
+  package let contextWindowLimits: ContextWindowLimits?
+  package let maxTokens: Int
+  package let available: Bool
+  package let releaseDate: String?
+  package let cost: ModelTokenPrice?
+  package init(provider: String, id: String, name: String, virtual: Bool, reasoning: Bool, input: [String], contextWindow: Int, contextWindowLimits: ContextWindowLimits? = nil, maxTokens: Int, available: Bool, releaseDate: String? = nil, cost: ModelTokenPrice? = nil) {
+    self.provider = provider
+    self.id = id
+    self.name = name
+    self.virtual = virtual
+    self.reasoning = reasoning
+    self.input = input
+    self.contextWindow = contextWindow
+    self.contextWindowLimits = contextWindowLimits
+    self.maxTokens = maxTokens
+    self.available = available
+    self.releaseDate = releaseDate
+    self.cost = cost
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ModelSummary {
+    let o = try wObj(v, p)
+    let f_provider: String = wAbsent(o.value("provider")) ? "" : try wStr(o.value("provider")!, p + ".provider")
+    let f_id: String = wAbsent(o.value("id")) ? "" : try wStr(o.value("id")!, p + ".id")
+    let f_name: String = wAbsent(o.value("name")) ? "" : try wStr(o.value("name")!, p + ".name")
+    let f_virtual: Bool = wAbsent(o.value("virtual")) ? false : try wBool(o.value("virtual")!, p + ".virtual")
+    let f_reasoning: Bool = wAbsent(o.value("reasoning")) ? false : try wBool(o.value("reasoning")!, p + ".reasoning")
+    let f_input: [String] = wAbsent(o.value("input")) ? [] : try wSeq(o.value("input")!, p + ".input") { x, q in try wStr(x, q) }
+    let f_contextWindow: Int = wAbsent(o.value("contextWindow")) ? 0 : try wInt(o.value("contextWindow")!, p + ".contextWindow", nat: false)
+    let f_contextWindowLimits: ContextWindowLimits? = wAbsent(o.value("contextWindowLimits")) ? nil : try ContextWindowLimits.decode(o.value("contextWindowLimits")!, p + ".contextWindowLimits")
+    let f_maxTokens: Int = wAbsent(o.value("maxTokens")) ? 0 : try wInt(o.value("maxTokens")!, p + ".maxTokens", nat: false)
+    let f_available: Bool = wAbsent(o.value("available")) ? false : try wBool(o.value("available")!, p + ".available")
+    let f_releaseDate: String? = wAbsent(o.value("releaseDate")) ? nil : try wStr(o.value("releaseDate")!, p + ".releaseDate")
+    let f_cost: ModelTokenPrice? = wAbsent(o.value("cost")) ? nil : try ModelTokenPrice.decode(o.value("cost")!, p + ".cost")
+    return ModelSummary(provider: f_provider, id: f_id, name: f_name, virtual: f_virtual, reasoning: f_reasoning, input: f_input, contextWindow: f_contextWindow, contextWindowLimits: f_contextWindowLimits, maxTokens: f_maxTokens, available: f_available, releaseDate: f_releaseDate, cost: f_cost)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"provider\":" + wEscape(self.provider)
+    s += ",\"id\":" + wEscape(self.id)
+    s += ",\"name\":" + wEscape(self.name)
+    s += ",\"virtual\":" + (self.virtual ? "true" : "false")
+    s += ",\"reasoning\":" + (self.reasoning ? "true" : "false")
+    s += ",\"input\":" + "[" + self.input.map { wEscape($0) }.joined(separator: ",") + "]"
+    s += ",\"contextWindow\":" + String(self.contextWindow)
+    s += (self.contextWindowLimits == nil ? "" : ",\"contextWindowLimits\":" + self.contextWindowLimits!.encode())
+    s += ",\"maxTokens\":" + String(self.maxTokens)
+    s += ",\"available\":" + (self.available ? "true" : "false")
+    s += (self.releaseDate == nil ? "" : ",\"releaseDate\":" + wEscape(self.releaseDate!))
+    s += (self.cost == nil ? "" : ",\"cost\":" + self.cost!.encode())
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct ModelPage: Hashable, Sendable {
+  package let models: [ModelSummary]
+  package let nextCursor: String?
+  package init(models: [ModelSummary], nextCursor: String? = nil) {
+    self.models = models
+    self.nextCursor = nextCursor
+  }
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> ModelPage {
+    let o = try wObj(v, p)
+    let f_models: [ModelSummary] = wAbsent(o.value("models")) ? [] : try wSeq(o.value("models")!, p + ".models") { x, q in try ModelSummary.decode(x, q) }
+    let f_nextCursor: String? = wAbsent(o.value("nextCursor")) ? nil : try wStr(o.value("nextCursor")!, p + ".nextCursor")
+    return ModelPage(models: f_models, nextCursor: f_nextCursor)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"models\":" + "[" + self.models.map { $0.encode() }.joined(separator: ",") + "]"
+    s += (self.nextCursor == nil ? "" : ",\"nextCursor\":" + wEscape(self.nextCursor!))
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
 package enum CommandInfoSource: String, CaseIterable, Hashable, Sendable {
   case skill = "skill"
   case prompt = "prompt"
