@@ -66,7 +66,7 @@ normal, swap ≤ 4 GiB and the volume can hold the catalog.
 
 - **Catalog:** 3,000 JSONL files / 2 GiB by default, shaped like a real one (7.5%
   sessions, 15% forks, the rest subagent runs, five sessions of 100–200 MiB), one seed
-  per digest, always deleted.
+  per digest wherever it is generated (files are sized without their absolute paths), always deleted.
 - **Windows:** each iteration starts a cold fixture with eight faux tool loops and four
   subagent-like writers. A 30 s no-subscriber window (`no_subscriber.` prefix), then a
   mixed window (`--mixed-seconds`) with lanes on separate devices: cold opens of the
