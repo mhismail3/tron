@@ -8,7 +8,7 @@ import { EXTENSION_UI_OPTIONS, extensionUiScenario, openLockSession, queueContro
 import { compareWithGolden, eventShapePaths, lockPaths, lockUpdateRequested } from "../../../test-support/scenario-lock.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import * as Protocol from "../../protocol/types.js";
-import { frameShape, SHAPED_FRAME_KINDS, type FrameShape } from "../../protocol/frames.js";
+import { encodeFrame, frameShape, SHAPED_FRAME_KINDS, type FrameShape } from "../../protocol/frames.js";
 import { protocolTs } from "../../../../../tools/proof/dafny2wire/dafny2wire.mjs";
 
 const encoded = vi.hoisted(() => [] as Array<{ value: unknown; method: string | undefined; output: string | undefined }>);
@@ -95,6 +95,13 @@ describe("gateway/protocol wire contract locks", () => {
       }
     }
     expect([...shaped].sort()).toEqual([...SHAPED_FRAME_KINDS].sort());
+    const snapshot = (encoded.find(({ value }) => (value as { topic?: string }).topic === "session.snapshot")!.value as { payload: object }).payload;
+    for (const frame of [
+      { type: "event", topic: "session.snapshot", payload: { ...snapshot, toJSON: () => ({ replaced: true }) } },
+      { type: "event", topic: "session.snapshot", payload: Object.assign(Object.create({ inherited: true }), snapshot) },
+      { type: "event", topic: "session.progress", payload: { runtimeGeneration: "g", eventSequence: 1, revision: 1, data: { message: undefined } } },
+      { type: "response", id: "r", ok: true, result: { toJSON: () => [] } },
+    ]) expect(encodeFrame(frame, "session.list")).toBe(JSON.stringify(frame));
   }, 60_000);
 
   it("types.ts is exactly what packages/core/wire/Protocol.dfy generates (never edited by hand)", async () => {

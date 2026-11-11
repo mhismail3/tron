@@ -69,8 +69,10 @@ tooling refuses an iPhone build whose protocol differs from the Stable Mac app.
    `python3 scripts/verify-gateway-protocol-contract.py --mac-app /Applications/Tron.app` prints
    v9; Gateway `system.info` reports `protocolVersion: 9`. The iPhone now shows "This app is older
    than the Mac gateway … Update Tron on this iPhone." and does not retry (expected).
-2. **Debug Gateway (optional).** `scripts/tron dev status`, then `scripts/tron dev restart` from
-   the merge SHA so agents validate on v9.
+2. **Debug Gateway (agents, not a maintainer step).** After step 1 an agent may move Debug
+   (9848) to v9 under the charter: `scripts/tron dev status` first, and only if no other
+   worktree's candidate is still validating, `scripts/tron dev restart` from a worktree at the
+   merge SHA.
 3. **iPhone.** `scripts/tron-ios-device install` (it verifies the iOS build against the Stable Mac
    app first) or the TestFlight build from the merge SHA. Check after: the app connects; a
    historical chat opens with its transcript; a new prompt streams; a tool call shows progress;
@@ -78,10 +80,19 @@ tooling refuses an iPhone build whose protocol differs from the Stable Mac app.
 
 ## Rollback
 
-- Step 1 fails after the swap: `mac replace` restores and verifies the previous app and payloads
-  itself; the iPhone stays on v8 and keeps working. Revert the merge on main.
-- After step 1, before step 3: rename `previous-app-<n>/Tron.app.kept` from the replacement's
-  operation directory back (its journal names it), or run `scripts/tron mac replace` from a
-  revert commit of the merge (`--allow-protocol-change` again). The v8 iPhone reconnects.
-- After step 3: revert the merge on main, then repeat steps 1 and 3 from the revert (a v8 Mac app
-  and a v8 iPhone build). There is no persisted-format change, so no data migration either way.
+Every rollback goes through the same supported tools, never by hand. A revert restores v8 in the
+Mac app, its bundled Gateway and the iPhone build together: v8 and v9 never interoperate (the
+Gateway, the launcher, the Mac app and the iPhone all require one exact version), so a
+half-rolled-back pair stays disconnected until both sides match. No persisted format changes,
+so no data migration either way.
+
+- **Step 1 fails after the swap.** `mac replace` restores and verifies the previous app and
+  payloads itself (`scripts/tron mac replace --status` shows `rolled-back`); the iPhone was never
+  changed and reconnects on v8. Revert the merge on main.
+- **After step 1, before step 3.** Revert the merge on main (agent: `git revert -m 1 <merge>`,
+  reviewed, pushed), then from the Mac terminal `scripts/tron mac replace --plan` (full) and
+  `scripts/tron mac replace --start --allow-protocol-change`, `--status --follow`, and
+  `scripts/tron mac verify --require-bundled`. The untouched v8 iPhone reconnects.
+- **After step 3.** As above, then reinstall the iPhone from the revert commit
+  (`scripts/tron-ios-device install`, which checks it against the v8 Mac app), or the previous
+  TestFlight build.

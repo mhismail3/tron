@@ -22,14 +22,20 @@ const RESPONSE_RESULTS: Readonly<Record<string, FrameShape>> = {
   "session.commands": { commands: [P.encodeCommandInfo] },
 };
 
+function plain(value: unknown, prototype: object | null): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const actual = Object.getPrototypeOf(value) as object | null;
+  return (actual === prototype || (prototype === Object.prototype && actual === null)) && !("toJSON" in value);
+}
+
 function encodeShaped(value: unknown, shape: FrameShape | undefined): string | undefined {
   if (shape === undefined || value === undefined || value === null) return JSON.stringify(value);
-  if (typeof shape === "function") return shape(value as never);
   if (Array.isArray(shape)) {
-    if (!Array.isArray(value)) return JSON.stringify(value);
-    return "[" + value.map((item) => encodeShaped(item, shape[0]) ?? "null").join(",") + "]";
+    if (!plain(value, Array.prototype)) return JSON.stringify(value);
+    return "[" + (value as unknown[]).map((item) => encodeShaped(item, shape[0]) ?? "null").join(",") + "]";
   }
-  if (typeof value !== "object" || Array.isArray(value)) return JSON.stringify(value);
+  if (!plain(value, Object.prototype)) return JSON.stringify(value);
+  if (typeof shape === "function") return shape(value as never);
   const fields = shape as { readonly [key: string]: FrameShape };
   let out = "";
   for (const [key, member] of Object.entries(value)) {
