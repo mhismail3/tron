@@ -128,7 +128,7 @@ private final class SnapshotCacheFixtureDriver {
                 phase = "ready"
                 return
             }
-            if ["v3", "v4", "future", "corrupt", "oversized", "invalid-row", "deep", "flat"].contains(mode) {
+            if ["v3", "v4", "future", "corrupt", "oversized", "invalid-row", "deep", "flat", "above-safe-max"].contains(mode) {
                 await cache.save(profileID: first.id, sessions: [SnapshotCacheFixtureGateway.row()], archivedCount: 7)
                 try prepareEnvelope()
             }
@@ -164,6 +164,12 @@ private final class SnapshotCacheFixtureDriver {
         if mode == "invalid-row", var rows = document["sessions"] as? [[String: Any]] {
             rows[0]["completionRevision"] = -1
             document["sessions"] = rows
+        }
+        if mode == "above-safe-max", var rows = document["sessions"] as? [[String: Any]] {
+            var companion = rows[0]
+            companion["id"] = "cache-companion"
+            rows[0]["messageCount"] = Int64(9_007_199_254_740_992)
+            document["sessions"] = rows + [companion]
         }
         if mode == "future" { document["version"] = 99 }
         if mode == "oversized" {

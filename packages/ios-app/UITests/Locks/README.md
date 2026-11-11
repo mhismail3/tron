@@ -33,13 +33,17 @@ file envelopes/digest names plus public catalog/snapshot values across app proce
 termination/relaunch. Version 4 readability, discard of version 3, future, invalid and oversized envelopes,
 summary-only rows, archived count without archived rows, profile separation,
 generation fencing and removal tombstones are storage contracts, not new formats. Row
-compatibility is proven against 45 version-4 rows captured from the previous app's own writer
-(`SnapshotCacheRowCompat.capturedRows`): they read back in their own and three shuffled key
-orders, and every row the cache writes has the captured members byte for byte, in declaration
-order. The one stored difference is a row without `summaryRevision`, written back with 0, which
-the catalog reads exactly as before. Rows that refuse (a negative revision, nesting beyond the
-document's depth, node or member bounds) discard the file, and a `session.list` page without its sessions keeps the
-catalog and the cache.
+compatibility covers only JS-safe integers a real v8 Gateway can send. It is proven against 45
+version-4 rows captured from the previous app's own writer (`SnapshotCacheRowCompat.capturedRows`):
+they read back in their own and three shuffled key orders, and every row the cache writes has the
+captured members byte for byte, in declaration order. An additional actual old-writer capture at
+the conservative 128 KiB shape boundary retains its absent-revision row through load/save/load,
+independently of presentation-wrapper nesting. Its repeated ASCII data is stored run-length encoded.
+The one stored difference is a row without `summaryRevision`, written back with 0, which the catalog
+reads exactly as before. An above-safe-max row discards its whole file (including a valid companion);
+relaunch online fully refetches the Gateway catalog and archived count into the disposable cache.
+Rows that refuse (a negative revision, nesting beyond the document's depth, node or member bounds)
+discard the file, and a `session.list` page without its sessions keeps the catalog and the cache.
 
 The serialized GatewaySocketConnection peer supplies catalog/snapshot/summary
 input; it does not implement persistence. Existing clock and signpost ports hold

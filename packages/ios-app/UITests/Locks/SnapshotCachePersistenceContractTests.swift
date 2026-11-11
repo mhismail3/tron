@@ -97,6 +97,10 @@ final class SnapshotCachePersistenceContractTests: XCTestCase {
         XCTAssertEqual(report["readMismatches"] as? [String], [], "each read row re-encodes to the captured members")
         XCTAssertEqual(report["writtenRows"] as? Int, 45)
         XCTAssertEqual(report["fullRows"] as? Int, 250, "a full legal cache loads under the document's limits")
+        XCTAssertEqual(report["nearLimitReadIDs"] as? [String], ["near-limit"])
+        XCTAssertEqual(report["nearLimitWrittenIDs"] as? [String], ["near-limit"])
+        XCTAssertEqual(report["nearLimitReadMatches"] as? Bool, true)
+        XCTAssertEqual(report["nearLimitWriteMatches"] as? Bool, true)
         XCTAssertEqual(report["writeMismatches"] as? [String], [], "each written row has the captured members, byte for byte")
         XCTAssertEqual(report["orderMismatches"] as? [Int], [], "written rows keep declaration order")
         XCTAssertEqual(report["absentRevisionRowID"] as? String, "revision-absent")
@@ -105,6 +109,25 @@ final class SnapshotCachePersistenceContractTests: XCTestCase {
         let readers = ["apply 0:stale", "publish 0:kept", "apply 1:updated", "publish 1:updated"]
         XCTAssertEqual(report["revisionReaders"] as? [String: [String]], ["absent": readers, "zero": readers],
                        "the catalog reads a cached row without summaryRevision exactly as one with 0, as its nil ?? 0 did")
+    }
+
+    @MainActor
+    func testCacheOutsideTheV8GatewaySafeIntegerDomainDropsAndFullyRefetches() throws {
+        let app = XCUIApplication(), token = UUID().uuidString
+        defer { cleanup(app) }
+        launch(app, mode: "above-safe-max", token: token)
+        _ = try require(app, "cache.phase", label: "ready")
+        _ = try require(app, "cache.catalog", label: "<none>")
+        XCTAssertEqual(try inspect(app)["firstExists"] as? Bool, false)
+        app.terminate()
+        launch(app, mode: "live", token: token)
+        _ = try require(app, "cache.phase", label: "ready")
+        _ = try require(app, "cache.catalog", label: "Before summary")
+        _ = try require(app, "cache.catalog-archive", label: "7")
+        let stored = try document(inspect(app), profileID: firstID)
+        XCTAssertEqual(stored["ids"] as? [String], ["cache-live"])
+        XCTAssertEqual(stored["archivedCount"] as? Int, 7)
+        XCTAssertEqual(stored["hasTranscript"] as? Bool, false)
     }
 
     @MainActor

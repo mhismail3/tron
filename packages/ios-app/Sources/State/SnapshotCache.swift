@@ -170,7 +170,7 @@ actor SnapshotCache {
         for session in sessions where admitted.count < SnapshotCachePolicy.maximumSessionCount {
             guard !session.isArchived,
                   !session.id.isEmpty,
-                  admitsEncodingShape(session, maximumBytes: SnapshotCachePolicy.maximumEncodedSessionBytes),
+                  admitsEncodingShape(session.summary, maximumBytes: SnapshotCachePolicy.maximumEncodedSessionBytes),
                   case let encoded = Data(session.summary.encode().utf8),
                   encoded.count <= SnapshotCachePolicy.maximumEncodedSessionBytes,
                   estimatedBytes <= budget - encoded.count,

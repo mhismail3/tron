@@ -151,6 +151,9 @@ enum SnapshotCacheRowCompat {
         "eyJraW5kIjoidXNlciIsImZvcmVncm91bmRQaGFzZSI6ImlkbGUiLCJmaXJzdE1lc3NhZ2UiOiJGaXJzdCBtZXNzYWdlIiwiY3JlYXRlZEF0IjoiMjAyNi0wMS0wMVQwMDowMDowMFoiLCJpZCI6ImZsYWdzLXN1YmFnZW50cyIsInN1bW1hcnlSZXZpc2lvbiI6MSwiY3dkIjoiL2ZpeHR1cmUvY2FjaGUiLCJhdHRlbnRpb25SZXZpc2lvbiI6MCwiaXNVbnJlYWQiOmZhbHNlLCJ3YWl0aW5nRm9yVXNlciI6ZmFsc2UsIm5hbWUiOiJSb3ciLCJjb21wbGV0aW9uUmV2aXNpb24iOjAsIm1lc3NhZ2VDb3VudCI6MywicGhhc2UiOiJydW5uaW5nIiwiaGFzQWN0aXZlU3ViYWdlbnRzIjp0cnVlLCJ1cGRhdGVkQXQiOiIyMDI2LTAxLTAxVDAwOjAwOjAxLjI1MFoifQ==",
     ].map { String(decoding: Data(base64Encoded: $0)!, as: UTF8.self) }
 
+    static let nearLimitCapturedRow = #"{"phase":"idle","isUnread":false,"waitingForUser":false,"hasActiveSubagents":false,"messageCount":3,"attentionRevision":0,"completionRevision":0,"updatedAt":"2026-01-01T00:00:01.250Z","createdAt":"2026-01-01T00:00:00Z","cwd":"/fixture/cache","firstMessage":""#
+        + String(repeating: "x", count: 130_077) + #"","name":"Row","id":"near-limit","kind":"user"}"#
+
     static let declarationOrder = ["id", "name", "cwd", "kind", "parentSessionId", "creationOrigin", "homeTaskId", "createdAt",
         "updatedAt", "activeSince", "messageCount", "firstMessage", "phase", "foregroundPhase", "hasActiveSubagents",
         "waitingForUser", "summaryRevision", "completionRevision", "attentionRevision", "isUnread", "archivedAt"]
@@ -204,6 +207,14 @@ enum SnapshotCacheRowCompat {
         await cache.save(profileID: "row-compat-full", sessions: full)
         let fullRows = await cache.load(profileID: "row-compat-full").sessions.count
 
+        let nearProfile = "row-compat-near-limit"
+        try? Data((#"{"version":4,"sessions":["# + nearLimitCapturedRow + "]}").utf8).write(to: file(root, nearProfile))
+        let nearLoaded = await cache.load(profileID: nearProfile).sessions
+        await cache.save(profileID: nearProfile, sessions: nearLoaded)
+        let nearRestored = await cache.load(profileID: nearProfile).sessions
+        let nearLimitReadMatches = nearLoaded.first.map { compare(written: $0.summary.encode(), captured: nearLimitCapturedRow) == .absentRevisionWrittenAsZero } ?? false
+        let nearLimitWriteMatches = nearRestored.first.map { compare(written: $0.summary.encode(), captured: nearLimitCapturedRow) == .absentRevisionWrittenAsZero } ?? false
+
         var revisionReaders: [String: [String]] = [:]
         for (name, index) in [("absent", 36), ("zero", 37)] where source.indices.contains(index) {
             let row = source[index]
@@ -224,10 +235,12 @@ enum SnapshotCacheRowCompat {
                 "shuffledDistinct": shuffledDistinct, "absentRevisionReads": absentRevisionReads, "writtenRows": rows.count,
                 "writeMismatches": writeMismatches, "orderMismatches": orderMismatches,
                 "absentRevisionWrites": absentRevisionWrites, "revisionReaders": revisionReaders,
-                "absentRevisionRowID": source.indices.contains(36) ? source[36].id : "", "fullRows": fullRows]
+                "absentRevisionRowID": source.indices.contains(36) ? source[36].id : "", "fullRows": fullRows,
+                "nearLimitReadIDs": nearLoaded.map(\.id), "nearLimitWrittenIDs": nearRestored.map(\.id),
+                "nearLimitReadMatches": nearLimitReadMatches, "nearLimitWriteMatches": nearLimitWriteMatches]
     }
 
-    private enum Comparison { case same, absentRevisionWrittenAsZero, different }
+    private enum Comparison: Equatable { case same, absentRevisionWrittenAsZero, different }
 
     private static func compare(written: String, captured: String) -> Comparison {
         if RawJSON.normalized(Substring(written)) == RawJSON.normalized(Substring(captured)) { return .same }
