@@ -49,6 +49,70 @@ afterEach(async () => {
 });
 
 describe("Home task subagents: the subagent model queue", () => {
+  it("keeps Anthropic task-worker writes one-hour across cold resume while subagents and ordinary chats stay short", async () => {
+    const requests: Array<{ model: string; marks: Array<{ ttl?: string }> }> = [];
+    let workerCalls = 0;
+    const server = createServer(async (request, response) => {
+      let text = "";
+      for await (const chunk of request) text += chunk;
+      const body = JSON.parse(text) as Record<string, unknown>;
+      const marks: Array<{ ttl?: string }> = [];
+      const visit = (value: unknown) => {
+        if (!value || typeof value !== "object") return;
+        for (const [key, field] of Object.entries(value)) {
+          if (key === "cache_control") marks.push(field as { ttl?: string });
+          else visit(field);
+        }
+      };
+      visit(body);
+      const worker = body.model === "retention-worker";
+      requests.push({ model: String(body.model), marks });
+      const call = worker ? ++workerCalls === 1
+        ? { id: "retention-launch", name: "subagent", input: { agent: "retention-child", task: "Check retention", async: false } }
+        : { id: `retention-report-${workerCalls}`, name: "report", input: { resultId: `retention-${workerCalls}`, outcome: "final", text: "Checked", evidence: ["local fixture"] } }
+        : undefined;
+      const events = [
+        { type: "message_start", message: { id: `retention-${requests.length}`, type: "message", role: "assistant", model: body.model, content: [],
+          stop_reason: null, usage: { input_tokens: 4, output_tokens: 0 } } },
+        { type: "content_block_start", index: 0, content_block: call ? { type: "tool_use", ...call, input: {} } : { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: call ? { type: "input_json_delta", partial_json: JSON.stringify(call.input) } : { type: "text_delta", text: "CHILD-DONE" } },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: call ? "tool_use" : "end_turn" }, usage: { output_tokens: 1 } },
+        { type: "message_stop" },
+      ];
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""));
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    servers.push({ close: async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } });
+    const model = (id: string) => ({ id, name: id, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+    const f = await fixture(false, false, undefined, true, { providers: { anthropic: {
+      baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, api: "anthropic-messages", apiKey: "fixture-only",
+      models: [model("retention-worker"), model("retention-child")] } } });
+    await mkdir(join(f.cwd, ".pi", "agents"), { recursive: true });
+    await writeFile(join(f.cwd, ".pi", "agents", "retention-child.md"),
+      "---\nname: retention-child\ndescription: Local retention witness\nmodel: anthropic/retention-child\ntools: read\n---\nReturn the fixture answer.\n");
+    const run = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "retention", intent: "Check cache retention with a child", target: f.cwd,
+      model: { provider: "anthropic", id: "retention-worker" }, reason: "Local wire witness" });
+    expect((await run.completion).terminalEvidence?.outcome).toBe("final");
+    const cold = await f.restart();
+    const resumed = await homeOwnerOf(cold).taskTool(f.home.sessionId, { action: "resume", taskId: run.taskId }) as { taskId: string; sessionId: string };
+    expect(resumed.sessionId).toBe(run.sessionId);
+    await waitFor(async () => (await homeOwnerOf(cold).taskStatus(resumed.taskId)).lifecycle === "terminal", "cold resumed retention worker settles");
+    expect((await homeOwnerOf(cold).taskResult(resumed.taskId)).terminalEvidence?.outcome).toBe("final");
+    const ordinary = await cold.create(f.cwd);
+    await ordinary.setModel("anthropic", "retention-child");
+    await ordinary.prompt("Ordinary retention control");
+    await waitFor(() => ordinary.snapshot().configurationBlocker === null, "ordinary retention control settles");
+    expect(requests.map(request => request.model)).toEqual(["retention-worker", "retention-child", "retention-worker", "retention-worker", "retention-child"]);
+    for (const request of requests) {
+      expect(request.marks.length).toBeGreaterThan(0);
+      expect(request.marks.map(mark => mark.ttl ?? "5m"), request.model).toEqual(
+        request.marks.map(() => request.model === "retention-worker" ? "1h" : "5m"));
+    }
+  }, 120_000);
+
   it.each([
     { explicit: false, detached: false, blocked: false },
     { explicit: true, detached: false, blocked: false },
