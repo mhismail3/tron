@@ -126,6 +126,12 @@ its hittability and unchanged 44-point bounds immediately, polling only while fa
 must complete within the same monotonic five-second deadline; late success is rejected. A fixture that holds a reply to expose a loading state holds it until the
 test releases it, never for a fixed time.
 
+Hosted foreground captures retain cumulative RPC counts and the latest 64 indexed, timestamped
+method/parameter records in the native probe. Parameter JSON over 1,024 bytes is explicitly omitted; the probe reports
+how many earlier records were dropped. Captures print the ordered before/after interval before any
+fail-fast assertion and attach it with the native state, distinguishing Manage task reads (`limit: 20`)
+from filtered Tasks reads without changing the exact read-count assertions.
+
 ### Simulator lifecycle
 
 The skill's [Simulator lifecycle](../../../.agents/skills/tron-ios/SKILL.md#simulator-lifecycle).
