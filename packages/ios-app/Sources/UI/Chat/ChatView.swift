@@ -2683,7 +2683,7 @@ struct ChatView: View {
         return true
     }
 
-    private var manageHomeContext: (profileID: String, status: HomeStatusDTO)? {
+    private var manageHomeContext: (profileID: String, status: HomeStatus)? {
         guard let profileID = composerScope?.profileID,
               profileID == model.profiles.selected?.id,
               model.homeStatus.capabilityEnabled,

@@ -64,7 +64,7 @@ struct HomeControlsSection: View {
         #endif
     }
 
-    private func controls(_ status: HomeStatusDTO) -> some View {
+    private func controls(_ status: HomeStatus) -> some View {
         let unresolved = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
         let mutating = model.homeMutations.isRunning(profileID: profileID)
         return TronGlassCard(accent: .tronSlate) {

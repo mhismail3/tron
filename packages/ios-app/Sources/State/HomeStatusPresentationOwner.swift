@@ -2,118 +2,35 @@ import Foundation
 import Observation
 import TronMobileCore
 
-struct HomeStatusDTO: Decodable, Equatable, Sendable {
-    enum Phase: String, Decodable, Sendable {
-        case unavailable, undesignated, disabled, missingSession = "missing-session"
-        case rolloverPending = "rollover-pending", blocked, paused, active, ready
+extension HomeStatusTaskRecovery {
+    var refusalReason: String? {
+        guard case .availableFalse(let reason) = self else { return nil }
+        return reason
     }
+}
 
-    struct Activation: Decodable, Equatable, Sendable {
-        let available: Bool
-        let activationStartEntryId: String?
-        let activationOpen: Bool?
-        let viewLines: Int?
-        let viewBytes: Int?
-        let effectiveTokens: Int?
-        let contextWindow: Int?
-        let lastRefusalReason: String?
-        let lastRefusalDetail: String?
+extension HomeStatus {
+    var admitsTaskReads: Bool { available && taskRecovery == .availableTrue }
 
-        private enum CodingKeys: String, CodingKey {
-            case available, activationStartEntryId, activationOpen, viewLines, viewBytes
-            case effectiveTokens, contextWindow, lastRefusalReason, lastRefusalDetail
+    static func validated(_ value: JSONValue) throws -> HomeStatus {
+        let status = try value.decodeWire(HomeStatus.decode)
+        let activationCounts: [Int?]
+        let activationTexts: [String?]
+        let activationStart: String?
+        switch status.activation {
+        case .availableFalse:
+            (activationCounts, activationTexts, activationStart) = ([], [], nil)
+        case .availableTrue(let start, _, let viewLines, let viewBytes, let effectiveTokens, let contextWindow, _, let refusalReason, let refusalDetail):
+            (activationCounts, activationTexts, activationStart) = ([viewLines, viewBytes, effectiveTokens, contextWindow], [refusalReason, refusalDetail], start.value)
         }
-
-        init(from decoder: Decoder) throws {
-            let values = try decoder.container(keyedBy: CodingKeys.self)
-            available = try values.decode(Bool.self, forKey: .available)
-            activationStartEntryId = try values.decodeIfPresent(String.self, forKey: .activationStartEntryId)
-            activationOpen = try values.decodeIfPresent(Bool.self, forKey: .activationOpen)
-            viewLines = try values.decodeIfPresent(Int.self, forKey: .viewLines)
-            viewBytes = try values.decodeIfPresent(Int.self, forKey: .viewBytes)
-            effectiveTokens = try values.decodeIfPresent(Int.self, forKey: .effectiveTokens)
-            contextWindow = try values.decodeIfPresent(Int.self, forKey: .contextWindow)
-            lastRefusalReason = try values.decodeIfPresent(String.self, forKey: .lastRefusalReason)
-            lastRefusalDetail = try values.decodeIfPresent(String.self, forKey: .lastRefusalDetail)
-            if available && activationOpen == nil {
-                throw DecodingError.dataCorruptedError(forKey: .activationOpen, in: values, debugDescription: "Available activation must state whether it is open")
-            }
+        guard HomeContextProjection.statesOpen(value.objectValue?["activation"]) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Available activation must state whether it is open"))
         }
-    }
-
-    struct Readiness: Decodable, Equatable, Sendable {
-        let gaps: [String]
-    }
-
-    struct Recovery: Decodable, Equatable, Sendable {
-        let reason: String?
-    }
-
-    struct Memory: Decodable, Equatable, Sendable {
-        struct Episodic: Decodable, Equatable, Sendable {
-            struct View: Decodable, Equatable, Sendable {
-                let built: Int
-                let unbuilt: Int
-            }
-            let messages: Int
-            let view: View
+        let taskRecoveryValid = switch status.taskRecovery {
+        case .availableTrue: true
+        case .availableFalse(let reason): !reason.isEmpty && reason.utf8.count <= 1024
         }
-        let episodic: Episodic?
-        let configured: Bool
-        let open: Bool
-        let paused: Bool?
-        let blocked: String?
-        let reason: String?
-        let models: [String]?
-        let spentTokens: Int?
-    }
-
-    struct TaskRecovery: Decodable, Equatable, Sendable {
-        let available: Bool
-        let reason: String?
-    }
-
-    struct Chapter: Decodable, Equatable, Sendable {
-        enum RecoveryDecision: String, Decodable, Sendable { case none, reserved, materializing }
-        let count: Int
-        let currentBytes: Int?
-        let currentEntries: Int?
-        let recoveryDecision: RecoveryDecision
-    }
-    struct HostPressure: Decodable, Equatable, Sendable {
-        enum Level: String, Decodable, Sendable { case normal, elevated, critical }
-        let level: Level
-    }
-
-    struct Workers: Decodable, Equatable, Sendable {
-        let running: Int
-    }
-
-    let hostPressure: HostPressure
-    let workers: Workers
-    let taskRecovery: TaskRecovery?
-    let routeGeneration: Int?
-    let phase: Phase
-    let activation: Activation
-    let readiness: Readiness
-    let recovery: Recovery
-    let available: Bool
-    let reason: String?
-    let enabled: Bool
-    let homeId: String?
-    let sessionId: String?
-    let openSessionId: String?
-    let generation: Int?
-    let sessionPresent: Bool
-    let waitingForUser: Bool?
-    let memory: Memory
-    let chapter: Chapter?
-
-    var admitsTaskReads: Bool { available && taskRecovery?.available == true }
-
-    static func decode(_ value: JSONValue) throws -> HomeStatusDTO {
-        let status = try JSONDecoder().decode(HomeStatusDTO.self, from: JSONEncoder().encode(value))
-        guard status.taskRecovery.map({ $0.available || ($0.reason.map { !$0.isEmpty && $0.utf8.count <= 1024 } ?? false) }) ?? true,
+        guard taskRecoveryValid,
               status.routeGeneration.map({ $0 > 0 }) ?? true,
               status.workers.running >= 0,
               status.readiness.gaps.count <= 128,
@@ -124,13 +41,11 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
                   && $0.view.built <= $0.messages && $0.view.unbuilt <= $0.messages - $0.view.built }) ?? true,
               (status.memory.models ?? []).count <= 8 && (status.memory.models ?? []).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 421 }),
               status.chapter.map({ $0.count > 0 && ($0.currentBytes ?? 0) >= 0 && ($0.currentEntries ?? 0) >= 0 }) ?? true,
-              [status.reason, status.recovery.reason, status.memory.blocked, status.memory.reason,
-               status.activation.lastRefusalReason, status.activation.lastRefusalDetail]
+              ([status.reason, status.recovery.reason, status.memory.blocked, status.memory.reason] + activationTexts)
                 .compactMap({ $0 }).allSatisfy({ $0.utf8.count <= 1_024 }),
-              [status.homeId, status.sessionId, status.openSessionId, status.activation.activationStartEntryId]
+              [status.homeId, status.sessionId, status.openSessionId, activationStart]
                 .compactMap({ $0 }).allSatisfy({ $0.utf8.count <= 512 }),
-              [status.activation.viewLines, status.activation.viewBytes, status.activation.effectiveTokens, status.activation.contextWindow]
-                .compactMap({ $0 }).allSatisfy({ $0 >= 0 }) else {
+              activationCounts.compactMap({ $0 }).allSatisfy({ $0 >= 0 }) else {
             throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Home status exceeds protocol bounds"))
         }
         return status
@@ -145,7 +60,7 @@ enum HomeChatRouteKey: Equatable, Sendable {
         isHome ? .home : .ordinary(sessionID: sessionID)
     }
 
-    func matches(_ status: HomeStatusDTO) -> Bool {
+    func matches(_ status: HomeStatus) -> Bool {
         switch self {
         case .home: true
         case .ordinary(let sessionID): status.sessionId == sessionID
@@ -154,16 +69,16 @@ enum HomeChatRouteKey: Equatable, Sendable {
 }
 
 enum HomeStatusLinePresentation {
-    static func workers(_ status: HomeStatusDTO) -> String {
+    static func workers(_ status: HomeStatus) -> String {
         let count = status.workers.running
         return "\(count.formatted()) \(count == 1 ? "worker" : "workers") running"
     }
 
-    static func host(_ status: HomeStatusDTO) -> String {
+    static func host(_ status: HomeStatus) -> String {
         "Host \(status.hostPressure.level.rawValue) · \(workers(status))"
     }
 
-    static func state(_ status: HomeStatusDTO) -> String {
+    static func state(_ status: HomeStatus) -> String {
         switch status.phase {
         case .ready: "Ready"
         case .active: "Working"
@@ -175,7 +90,7 @@ enum HomeStatusLinePresentation {
         }
     }
 
-    static func memory(_ status: HomeStatusDTO, unresolvedCommand: Bool) -> String {
+    static func memory(_ status: HomeStatus, unresolvedCommand: Bool) -> String {
         if unresolvedCommand { return "Home change unresolved" }
         if status.memory.paused == true { return "Paused" }
         if let blocked = status.memory.blocked { return "Blocked · \(blocked)" }
@@ -188,7 +103,7 @@ enum HomeStatusLinePresentation {
 }
 
 enum HomeManageRowPresentation {
-    static func profile(_ list: HomeProfileListDTO?) -> String {
+    static func profile(_ list: HomeProfileList?) -> String {
         guard let list else { return "Unavailable" }
         let active = list.active
         guard !active.isEmpty else { return "Nothing learned yet" }
@@ -197,7 +112,7 @@ enum HomeManageRowPresentation {
         return "\(count) · \(confirmed.formatted()) confirmed · \((active.count - confirmed).formatted()) inferred"
     }
 
-    static func chapters(_ list: HomeChapterListDTO?, fallback: HomeStatusDTO.Chapter?) -> String? {
+    static func chapters(_ list: HomeChapterList?, fallback: HomeStatusChapter?) -> String? {
         guard let list else { return fallback.map(HomeChapterPresentation.manageSubtitle) }
         let count = list.chapters.count == 1 ? "1 chapter" : "\(list.chapters.count.formatted()) chapters"
         guard let active = list.chapters.last(where: { $0.state == .active }),
@@ -205,7 +120,7 @@ enum HomeManageRowPresentation {
         return "\(count) · Active chapter \(percent)% of soft limit"
     }
 
-    static func tasks(_ page: HomeTaskPageDTO?, admitted: Bool) -> String {
+    static func tasks(_ page: HomeTaskPage?, admitted: Bool) -> String {
         guard admitted, let page else { return "Unavailable while task recovery is closed" }
         if page.items.isEmpty { return "No tasks yet" }
         let active = page.items.filter { $0.lifecycle != .terminal }.count
@@ -228,7 +143,7 @@ enum HomePinnedRowAction: Equatable {
 
 enum HomePinnedRowPolicy {
     static func action(
-        for status: HomeStatusDTO?,
+        for status: HomeStatus?,
         hasUnresolvedCommand: Bool = false
     ) -> HomePinnedRowAction {
         if hasUnresolvedCommand { return .checkReceipt }
@@ -258,7 +173,7 @@ struct HomeStatusReadFence: Equatable, Sendable {
 final class HomeStatusPresentationOwner {
     static let fallbackInterval: Duration = .seconds(5)
 
-    private(set) var status: HomeStatusDTO?
+    private(set) var status: HomeStatus?
     private(set) var isStatusUnavailable = false
     @ObservationIgnored private var readGeneration: UInt64 = 0
     @ObservationIgnored private var surfaceGeneration: UInt64 = 0
@@ -269,7 +184,7 @@ final class HomeStatusPresentationOwner {
     @ObservationIgnored private var connectionID: String?
     private(set) var capabilityEnabled = false
     @ObservationIgnored private var suspended = false
-    @ObservationIgnored private var fetch: (@MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO)?
+    @ObservationIgnored private var fetch: (@MainActor (HomeStatusReadFence) async throws -> HomeStatus)?
     @ObservationIgnored private var activeReadTask: Task<Void, Never>?
     @ObservationIgnored private var mountedTask: Task<Void, Never>?
 
@@ -285,7 +200,7 @@ final class HomeStatusPresentationOwner {
         token: PresentationSurfaceToken,
         coordinator: PresentationActivityCoordinator,
         cadence: Cadence = .mounted,
-        fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatusDTO
+        fetch: @escaping @MainActor (HomeStatusReadFence) async throws -> HomeStatus
     ) {
         guard token != surfaceToken || activityCoordinator !== coordinator else { return }
         stopWork(clearStatus: false)
@@ -387,7 +302,7 @@ final class HomeStatusPresentationOwner {
     }
 
     @discardableResult
-    func publish(_ value: HomeStatusDTO, for fence: HomeStatusReadFence) -> Bool {
+    func publish(_ value: HomeStatus, for fence: HomeStatusReadFence) -> Bool {
         guard fence.profileID == profileID,
               fence.connectionID == connectionID,
               fence.surfaceToken == surfaceToken,
@@ -421,7 +336,7 @@ final class HomeStatusPresentationOwner {
         stopWork(clearStatus: true)
     }
 
-    private func resolveClaim(with value: HomeStatusDTO) {
+    private func resolveClaim(with value: HomeStatus) {
         guard case .connectionOnly(let claim) = cadence else { return }
         if claim.matches(value) {
             cadence = .mounted

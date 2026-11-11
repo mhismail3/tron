@@ -2,7 +2,7 @@ import SwiftUI
 import TronMobileCore
 
 extension HomeSheet {
-    static func statusAccent(_ status: HomeStatusDTO) -> Color {
+    static func statusAccent(_ status: HomeStatus) -> Color {
         switch status.phase {
         case .ready, .active: .tronEmerald
         case .paused, .disabled, .undesignated: .tronSlate
@@ -39,7 +39,7 @@ extension HomeSheet {
                     navigationRow(icon: "person.text.rectangle",
                                   subtitle: HomeManageRowPresentation.profile(read.profile),
                                   destination: .profile, id: "home-manage-profile")
-                    if memoryBrowser || (status.chapter != nil && chapterList) || status.taskRecovery != nil { divider() }
+                    divider()
                 }
                 if memoryBrowser {
                     navigationRow(icon: "brain",
@@ -52,17 +52,15 @@ extension HomeSheet {
                                   subtitle: HomeManageRowPresentation.chapters(read.chapters, fallback: chapter),
                                   destination: .chapters, id: "home-manage-chapters")
                 }
-                if status.taskRecovery != nil {
-                    if memoryBrowser || (status.chapter != nil && chapterList) { divider() }
-                    navigationRow(icon: "checklist",
-                                  subtitle: HomeManageRowPresentation.tasks(read.tasks, admitted: status.admitsTaskReads),
-                                  destination: .tasks, id: "home-manage-tasks")
-                }
+                if memoryBrowser || (status.chapter != nil && chapterList) { divider() }
+                navigationRow(icon: "checklist",
+                              subtitle: HomeManageRowPresentation.tasks(read.tasks, admitted: status.admitsTaskReads),
+                              destination: .tasks, id: "home-manage-tasks")
             }
         }
     }
 
-    static func hostPressureAccent(_ level: HomeStatusDTO.HostPressure.Level) -> Color {
+    static func hostPressureAccent(_ level: HomeStatusHostPressureLevel) -> Color {
         switch level {
         case .normal: .tronEmerald
         case .elevated: .tronAmber

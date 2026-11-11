@@ -1,43 +1,21 @@
 import Foundation
 import TronMobileCore
 
-enum HomeTaskLifecycle: String, Decodable, Sendable { case pending, active, terminal }
-enum HomeTaskOutcome: String, Decodable, Sendable { case progress, needsInput = "needs-input", final, limited, interrupted, unknown }
-
-struct HomeTaskSpendDTO: Decodable, Equatable, Sendable {
-    let sourceDigest: String
-    let inputTokens: Int
-    let outputTokens: Int
-    let cacheReadTokens: Int?
-    let cacheWriteTokens: Int?
+extension HomeTaskSummarySpend {
     var valid: Bool {
-        HomeMemoryEvidenceDTO.isDigest(sourceDigest) && safeHomeCount(inputTokens) && safeHomeCount(outputTokens)
+        HomeMemoryEvidence.isDigest(sourceDigest) && safeHomeCount(inputTokens) && safeHomeCount(outputTokens)
             && (cacheReadTokens == nil) == (cacheWriteTokens == nil)
             && [cacheReadTokens, cacheWriteTokens].compactMap { $0 }.allSatisfy(safeHomeCount)
     }
 }
 
-struct HomeTaskCheckinDTO: Decodable, Equatable, Sendable {
-    let id: String
-    let taskId: String
-    let sessionId: String
-    let operationId: String
-    let at: String
-    let step: String
-    let done: String
-    let next: String
-    let blocker: String?
-    let needsAttention: Bool?
-    let attention: String?
-    struct Refs: Decodable, Equatable, Sendable { let branch: String?; let commit: String?; let issue: String? }
-    let refs: Refs?
+extension HomeTaskCheckin {
     var valid: Bool {
         [id, taskId, sessionId, operationId].allSatisfy(homeID)
             && GatewayTimestamp.parse(at) != nil && homeText(step, bytes: 256)
             && homeText(done, bytes: 512) && homeText(next, bytes: 512)
             && (blocker.map { homeText($0, bytes: 512) } ?? true)
             && (needsAttention != true || blocker != nil)
-            && (attention.map { ["none", "requested", "rate-limited", "pending"].contains($0) } ?? true)
             && [refs?.branch, refs?.commit, refs?.issue].compactMap { $0 }.allSatisfy { homeText($0, bytes: 256) }
     }
     static func valid(_ values: [Self]) -> Bool {
@@ -45,40 +23,21 @@ struct HomeTaskCheckinDTO: Decodable, Equatable, Sendable {
     }
 }
 
-struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
-    struct Row: Decodable, Equatable, Sendable, Identifiable {
-        let taskId: String
-        let createdAt: Int
-        let updatedAt: Int
-        let title: String?
-        let project: String?
-        let workerSessionId: String?
-        let target: String
-        let lifecycle: HomeTaskLifecycle
-        let outcome: HomeTaskOutcome?
-        let spend: HomeTaskSpendDTO?
-        let attention: Bool
-        let pendingGrant: Bool
-        let checkins: [HomeTaskCheckinDTO]?
-        var id: String { taskId }
-        private enum CodingKeys: String, CodingKey {
-            case taskId, createdAt, updatedAt, title, project, target, lifecycle, outcome, spend, attention, pendingGrant, checkins
-            case workerSessionId = "sessionId"
-        }
-        var valid: Bool {
-            homeID(taskId) && safeHomeCount(createdAt) && safeHomeCount(updatedAt) && updatedAt >= createdAt
-                && (title.map { $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) } ?? true)
-                && (project.map { homeText($0, bytes: 512) } ?? true)
-                && (workerSessionId.map(homeID) ?? true)
-                && (checkins.map(HomeTaskCheckinDTO.valid) ?? true)
-                && homeText(target, bytes: 4096)
-                && target.hasPrefix("/") && ((lifecycle == .terminal) == (outcome != nil)) && (spend?.valid ?? true)
-        }
+extension HomeTaskSummary: Identifiable {
+    package var id: String { taskId }
+    var valid: Bool {
+        homeID(taskId) && safeHomeCount(createdAt) && safeHomeCount(updatedAt) && updatedAt >= createdAt
+            && homeDisplay(title: title, project: project)
+            && (sessionId.value.map(homeID) ?? true)
+            && HomeTaskCheckin.valid(checkins)
+            && homeText(target, bytes: 4096)
+            && target.hasPrefix("/") && ((lifecycle == .terminal) == (outcome != .null)) && (spend.value?.valid ?? true)
     }
-    let items: [Row]
-    let nextCursor: String?
-    static func decode(_ value: JSONValue) throws -> Self {
-        let page = try value.decode(Self.self)
+}
+
+extension HomeTaskPage {
+    static func validated(_ value: JSONValue) throws -> Self {
+        let page = try value.decodeWire(Self.decode)
         guard page.items.count <= 50, page.items.allSatisfy(\.valid), Set(page.items.map(\.id)).count == page.items.count,
               zip(page.items, page.items.dropFirst()).allSatisfy({ $0.createdAt > $1.createdAt || ($0.createdAt == $1.createdAt && $0.id < $1.id) }),
               page.nextCursor.map({ homeText($0, bytes: 1024) && !page.items.isEmpty }) ?? true else { throw invalidHomeTask() }
@@ -86,84 +45,39 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
     }
 }
 
-struct HomeTaskDTO: Decodable, Equatable, Sendable {
-    struct Intent: Decodable, Equatable, Sendable { let text: String }
-    struct Terminal: Decodable, Equatable, Sendable {
-        let outcome: HomeTaskOutcome
-        let reason: String
+extension HomeTaskWake {
+    var canRedeliver: Bool {
+        delivery == .null && [.pending, .blocked].contains(state)
     }
-    struct Wake: Decodable, Equatable, Sendable {
-        enum State: String, Decodable, Sendable {
-            case pending, claimed, admitted, terminal, acknowledged, blocked, outcomeUnknown = "outcome-unknown"
-        }
-        let state: State
-        let routeGeneration: Int
-        let delivery: JSONValue?
-        var canRedeliver: Bool {
-            delivery == nil && [.pending, .blocked].contains(state)
-        }
-    }
-    let taskId: String
-    let homeId: String
-    let createdAt: Int
-    let updatedAt: Int
-    let intent: Intent
-    let title: String?
-    let project: String?
-    let workerSessionId: String?
-    let target: String
-    let lifecycle: HomeTaskLifecycle
-    let operationId: String?
-    let spend: HomeTaskSpendDTO?
-    let terminalEvidence: Terminal?
-    let wake: Wake?
-    let workerModel: ModelRef?
-    let subagents: Subagents?
-    let subagentRuns: SubagentRuns?
-    let checkins: [HomeTaskCheckinDTO]?
+}
 
-    private enum CodingKeys: String, CodingKey {
-        case taskId, homeId, createdAt, updatedAt, intent, title, project, target, lifecycle, operationId, spend
-        case terminalEvidence, wake, workerModel, subagents, subagentRuns, checkins
-        case workerSessionId = "sessionId"
-    }
-
-    struct Subagents: Decodable, Equatable, Sendable {
-        let started: Int
-        let stoppedAtEnd: Int?
-    }
-    struct SubagentRuns: Decodable, Equatable, Sendable {
-        struct Run: Decodable, Equatable, Sendable, Identifiable {
-            let runId: String
-            let agent: String
-            let state: String
-            let startedAt: String
-            let lastActivityAt: String?
-            var id: String { runId }
-        }
-        let total: Int
-        let runs: [Run]
-    }
-
-    static func decode(_ value: JSONValue, taskID: String) throws -> Self {
-        let task = try value.decode(Self.self)
+extension HomeTaskStatusResult {
+    static func validated(_ value: JSONValue, taskID: String) throws -> Self {
+        let task = try value.decodeWire(Self.decode)
         guard task.taskId == taskID, homeID(task.taskId), homeID(task.homeId),
               safeHomeCount(task.createdAt), safeHomeCount(task.updatedAt), task.updatedAt >= task.createdAt,
               homeText(task.intent.text, bytes: 65536), homeText(task.target, bytes: 4096),
-              task.target.hasPrefix("/"), task.spend?.valid ?? true,
-              task.title.map({ $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) }) ?? true,
-              task.project.map({ homeText($0, bytes: 512) }) ?? true,
-              task.checkins.map(HomeTaskCheckinDTO.valid) ?? true,
-              task.workerSessionId.map(homeID) ?? true,
-              (task.lifecycle == .terminal) == (task.terminalEvidence != nil),
-              (task.lifecycle == .terminal) == (task.wake != nil),
-              task.operationId.map(homeID) ?? true, task.lifecycle != .active || task.operationId != nil,
-              task.wake.map({ $0.routeGeneration > 0 }) ?? true,
-              task.subagents.map({ $0.started >= 0 && ($0.stoppedAtEnd ?? 0) >= 0 }) ?? true,
-              task.subagentRuns.map({ $0.total >= 0 && $0.runs.count <= 20 && $0.runs.count <= $0.total }) ?? true,
-              task.workerModel.map({ !$0.provider.isEmpty && !$0.id.isEmpty }) ?? true else { throw invalidHomeTask() }
+              task.target.hasPrefix("/"), task.spend.value?.valid ?? true,
+              homeDisplay(title: task.title, project: task.project),
+              HomeTaskCheckin.valid(task.checkins),
+              task.sessionId.value.map(homeID) ?? true,
+              (task.lifecycle == .terminal) == (task.terminalEvidence != .null),
+              (task.lifecycle == .terminal) == (task.wake != .null),
+              task.operationId.value.map(homeID) ?? true, task.lifecycle != .active || task.operationId != .null,
+              task.wake.value.map({ $0.routeGeneration > 0 }) ?? true,
+              task.subagents.started >= 0 && (task.subagents.stoppedAtEnd.value ?? 0) >= 0,
+              task.subagentRuns.total >= 0 && task.subagentRuns.runs.count <= 20 && task.subagentRuns.runs.count <= task.subagentRuns.total,
+              task.workerModel.value.map({ !$0.provider.isEmpty && !$0.id.isEmpty }) ?? true else { throw invalidHomeTask() }
         return task
     }
+}
+
+extension HomeTaskWorkerModel {
+    var displayName: String { ModelDisplayFormatting.model(id) }
+}
+
+extension HomeTaskSubagentRun: Identifiable {
+    package var id: String { runId }
 }
 
 struct HomeTaskPermissionsDTO: Equatable, Sendable {
@@ -256,6 +170,10 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
 
 private func safeHomeCount(_ value: Int) -> Bool { value >= 0 && value <= 9_007_199_254_740_991 }
 private func homeText(_ value: String, bytes: Int) -> Bool { !value.isEmpty && !value.contains("\0") && value.utf8.count <= bytes }
+private func homeDisplay(title: String, project: String) -> Bool {
+    (title.isEmpty || (title.unicodeScalars.count <= 160 && homeText(title, bytes: 640)))
+        && (project.isEmpty || homeText(project, bytes: 512))
+}
 private func homeID(_ value: String) -> Bool {
     value.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$", options: .regularExpression) != nil
 }
@@ -264,7 +182,7 @@ private func invalidHomeTask() -> GatewayFailure {
 }
 
 enum HomeTaskPresentation {
-    static func spendText(_ spend: HomeTaskSpendDTO) -> String {
+    static func spendText(_ spend: HomeTaskSummarySpend) -> String {
         func count(_ value: Int) -> String { value.formatted(.number.notation(.compactName)) }
         guard let read = spend.cacheReadTokens, let write = spend.cacheWriteTokens else {
             return "\(count(spend.inputTokens)) in incl. cached · \(count(spend.outputTokens)) out"
@@ -273,17 +191,17 @@ enum HomeTaskPresentation {
             + ["\(count(spend.outputTokens)) out"]).joined(separator: " · ")
     }
 
-    static func checkinText(_ checkin: HomeTaskCheckinDTO) -> String {
+    static func checkinText(_ checkin: HomeTaskCheckin) -> String {
         [HomeSheetTime.relative(checkin.at), checkin.step, "Done: \(checkin.done)", "Next: \(checkin.next)",
          checkin.blocker.map { "Blocker: \($0)" }].compactMap { $0 }.joined(separator: "\n")
     }
 
-    static func title(title: String?, briefText: String?, project: String?) -> String {
-        if let title, !title.isEmpty { return title }
+    static func title(title: String, briefText: String?, project: String) -> String {
+        if !title.isEmpty { return title }
         if let line = briefText?.split(whereSeparator: \.isNewline).map({ $0.trimmingCharacters(in: .whitespaces) }).first(where: { !$0.isEmpty }) {
             return String(line.prefix(80))
         }
-        return project ?? "Untitled task"
+        return project.isEmpty ? "Untitled task" : project
     }
 
     static func stateLabel(lifecycle: HomeTaskLifecycle, outcome: HomeTaskOutcome?) -> String {
