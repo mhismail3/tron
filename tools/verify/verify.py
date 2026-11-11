@@ -1174,7 +1174,8 @@ def main(argv: list[str]) -> int:
         print("  python-here lane: on this Mac (its tests read this Mac's Pi session store)", flush=True)
     if "mac-terminal" in groups and not skipped_group("mac-terminal"):
         print("  mac-terminal lane: on this Mac (it needs this host's tailnet sshd)", flush=True)
-    plan_steps = ["ownership", "worktree residue", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check"] \
+    plan_steps = ["ownership", "worktree residue", "documentation policy", "generated docs", "agent policy", "home layout", "privacy guard", "git diff --check",
+                  "no new comments"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
         + (["ios source policy", "ios build"] if ios_lane else []) + ["layers ios"] \
         + [name for group in sorted(groups) for name in test_step_names(group, shards, skipped_group(group))]
@@ -1194,6 +1195,7 @@ def main(argv: list[str]) -> int:
         ("privacy guard", f"git diff {base}..HEAD -- . ':(exclude,top,literal)scripts/personal-info-guard.sh' "
                           "| scripts/personal-info-guard.sh --stdin", {}),
         ("git diff --check", ["git", "diff", "--check", f"{base}..HEAD"], {}),
+        ("no new comments", ["python3", "tools/verify/comments.py", "--base", base], {}),
     ]
     gateway_checks = [("gateway typecheck", node + ["npm", "run", "check"]),
                       ("gateway lint", node + ["npm", "run", "lint"]),
