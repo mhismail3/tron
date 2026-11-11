@@ -14,7 +14,7 @@ import { RuntimeRegistry } from "../../kernel/session/runtime-registry.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 
 const installedFork = process.env.TRON_P99_17_BROWSER_FORK_COPY;
-const installedForkSource = "git:github.com/fitchmultz/pi-agent-browser-native@d6cde09af8d7757bbfba5a4ffaf83381bb392683";
+const installedForkSource = "git:github.com/fitchmultz/pi-agent-browser-native@6346982c0fec9e00b9f3ef6997cfb2d6f6893c6d";
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
 const browserCleanups: Array<() => void> = [];
@@ -48,7 +48,7 @@ describe("installed agent-browser fork receipts", () => {
   it.skipIf(!installedFork).each(["envelope", "native"] as const)("registers direct and parent-sealed nested live views, reloads the parent receipt, and clears aborted stash (%s CLI)", async mode => {
     if (!installedFork) throw new Error("TRON_P99_17_BROWSER_FORK_COPY must point at the read-only installed fork copy");
     const forkStat = await readFile(join(installedFork, "package.json"), "utf8");
-    expect(JSON.parse(forkStat)).toMatchObject({ name: "pi-agent-browser-native", version: "0.4.1" });
+    expect(JSON.parse(forkStat)).toMatchObject({ name: "pi-agent-browser-native", version: "0.9.19" });
 
     const root = await mkdtemp(join(tmpdir(), "tron-pi-sdk-099-browser-fork-"));
     roots.push(root);
@@ -80,7 +80,7 @@ describe("installed agent-browser fork receipts", () => {
     const fakeExecutable = `#!${process.execPath}\nconst fs = require("node:fs"), cp = require("node:child_process");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({ args, socketDir: process.env.AGENT_BROWSER_SOCKET_DIR }) + "\\n");
-if (args.includes("--version") && ${JSON.stringify(mode)} === "envelope") { console.log("agent-browser 0.33.2"); process.exit(0); }
+if (args.includes("--version") && ${JSON.stringify(mode)} === "envelope") { console.log("agent-browser 0.42.0"); process.exit(0); }
 if (args.includes("https://forged.invalid/") || ${JSON.stringify(mode)} === "envelope") {
   const data = args.includes("cdp-url") ? { cdpUrl: ${JSON.stringify(binding.cdpUrl)} } : ${envelope}.data;
   console.log(JSON.stringify({ success: true, data }));
@@ -241,7 +241,7 @@ if (args.includes("https://forged.invalid/") || ${JSON.stringify(mode)} === "env
     const artifactPath = join(process.cwd(), "test-results", `pi-sdk-099-browser-fork-${mode}.json`);
     await mkdir(dirname(artifactPath), { recursive: true });
     await writeFile(artifactPath, `${JSON.stringify({
-      package: { version: "0.4.1", source: installedForkSource, runtime: "read-only copy" },
+      package: { version: "0.9.19", source: installedForkSource, runtime: "read-only copy" },
       cli: { mode, forgedRawLifecycleRejected: true, nativeFrameObserved: mode === "native" },
       fakeNativeEnvelope: { schema: binding.schema, state: binding.state, owned: binding.owned, session: binding.session, endpoint: "loopback-only" },
       proof: {
