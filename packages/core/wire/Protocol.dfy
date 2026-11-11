@@ -13,6 +13,7 @@
 // @swift AdministrativeDrainSnapshot GatewayRestartResponse
 // @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates ModelPage
 // @swift SessionPhase SessionSummaryUpdate
+// @swift ExtensionRunLifecycle
 // @swift-codable SessionPhase
 module Protocol {
   datatype Option<T> = None | Some(v: T)
