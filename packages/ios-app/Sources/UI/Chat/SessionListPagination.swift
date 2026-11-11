@@ -6,7 +6,7 @@ struct SessionListWorkspaceGroup: Identifiable, Equatable {
     let name: String
     let profileID: String?
     let profileLabel: String?
-    let sessions: [SessionSummary]
+    let sessions: [CatalogSession]
 
     var id: String {
         let workspaceID = path.isEmpty ? "__default_workspace__" : path
@@ -18,9 +18,9 @@ struct SessionListWorkspaceGroup: Identifiable, Equatable {
         return "\(profileLabel) · \(name)"
     }
 
-    static func groups(from sessions: [SessionSummary]) -> [SessionListWorkspaceGroup] {
+    static func groups(from sessions: [CatalogSession]) -> [SessionListWorkspaceGroup] {
         var orderedKeys: [String] = []
-        var sessionsByKey: [String: [SessionSummary]] = [:]
+        var sessionsByKey: [String: [CatalogSession]] = [:]
 
         for session in sessions {
             let key = "\(session.gatewayProfileID ?? "__unqualified__")|\(session.cwd)"
@@ -95,7 +95,7 @@ struct SessionListSessionExpansion: Equatable {
         min(max(totalCount, 0), visibleCountsByGroupID[groupID] ?? pageSize)
     }
 
-    func visibleSessions(in group: SessionListWorkspaceGroup) -> [SessionSummary] {
+    func visibleSessions(in group: SessionListWorkspaceGroup) -> [CatalogSession] {
         Array(group.sessions.prefix(visibleCount(for: group.id, totalCount: group.sessions.count)))
     }
 
