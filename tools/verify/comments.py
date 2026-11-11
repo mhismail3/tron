@@ -288,7 +288,7 @@ def at_head(kind_: str, text: str, start: int) -> bool:
     return True
 
 
-def new_purpose(base: str, path: str, mode: str, text: str) -> str:
+def new_purpose(base: str, path: str, mode: str, text: str, spans: list[tuple[int, int]]) -> str:
     if not layout.is_tooling(path, mode):
         return ""
     purpose = layout.purpose(text.encode())
@@ -296,7 +296,7 @@ def new_purpose(base: str, path: str, mode: str, text: str) -> str:
     old = layout.purpose(before) if before else ""
     if not purpose or not old or old == purpose:
         return purpose
-    rest = [line for line in text.split("\n") if purpose not in line]
+    rest = [line for start, end in spans for line in text[start:end].split("\n") if purpose not in line]
     return "" if any(old in line for line in rest) else purpose
 
 
@@ -327,8 +327,9 @@ def check(base: str) -> list[str]:
     problems = []
     for path, (found, text) in sorted(files.items()):
         added = added_lines(base, path)
-        purpose = new_purpose(base, path, modes.get(path, ""), text)
-        for start, end in scanners[found](text):
+        spans = scanners[found](text)
+        purpose = new_purpose(base, path, modes.get(path, ""), text, spans)
+        for start, end in spans:
             line = text.count("\n", 0, start) + 1
             if line in added and not allowed(found, text, start, end, purpose):
                 problems.append(f"{path}:{line}: new comment `{text[start:end].splitlines()[0][:80]}`")
