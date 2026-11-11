@@ -36,7 +36,8 @@ generation fencing and removal tombstones are storage contracts, not new formats
 compatibility covers only JS-safe integers a real v8 Gateway can send. It is proven against 45
 version-4 rows captured from the previous app's own writer (`SnapshotCacheRowCompat.capturedRows`):
 they read back in their own and three shuffled key orders, and every row the cache writes has the
-captured members byte for byte, in declaration order. An additional actual old-writer capture at
+captured members byte for byte, in declaration order; canonically equivalent Unicode encodings
+remain byte-distinct in both comparison branches. An additional actual old-writer capture at
 the conservative 128 KiB shape boundary retains its absent-revision row through load/save/load,
 independently of presentation-wrapper nesting. Its repeated ASCII data is stored run-length encoded.
 The one stored difference is a row without `summaryRevision`, written back with 0, which the catalog

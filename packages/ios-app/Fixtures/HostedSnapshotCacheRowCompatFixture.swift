@@ -162,6 +162,21 @@ enum SnapshotCacheRowCompat {
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         var readRows = 0, readMismatches: [String] = [], shuffledDistinct = 0
         var absentRevisionReads: [Int] = []
+        let unicodeCaptured = capturedRows[2]
+        let decomposed = unicodeCaptured.decomposedStringWithCanonicalMapping
+        if unicodeCaptured != decomposed || unicodeCaptured.utf8.elementsEqual(decomposed.utf8) {
+            readMismatches.append("unicode-byte-stimulus")
+        }
+        if compare(written: decomposed, captured: unicodeCaptured) != .different {
+            readMismatches.append("unicode-byte-distinction")
+        }
+        let unicodeAbsentRevision = "{" + (RawJSON.members(Substring(unicodeCaptured)) ?? [])
+            .filter { $0.key != #""summaryRevision""# }.map { "\($0.key):\($0.value)" }.joined(separator: ",") + "}"
+        let decomposedZeroRevision = "{" + (RawJSON.members(Substring(decomposed)) ?? [])
+            .map { $0.key == #""summaryRevision""# ? "\($0.key):0" : "\($0.key):\($0.value)" }.joined(separator: ",") + "}"
+        if compare(written: decomposedZeroRevision, captured: unicodeAbsentRevision) != .different {
+            readMismatches.append("unicode-byte-distinction-absent-revision")
+        }
         for permutation in 0...3 {
             var seed = UInt64(permutation + 1)
             let rows = capturedRows.map { permutation == 0 ? $0 : RawJSON.shuffled(Substring($0), seed: &seed) }
@@ -243,13 +258,13 @@ enum SnapshotCacheRowCompat {
     private enum Comparison: Equatable { case same, absentRevisionWrittenAsZero, different }
 
     private static func compare(written: String, captured: String) -> Comparison {
-        if RawJSON.normalized(Substring(written)) == RawJSON.normalized(Substring(captured)) { return .same }
+        if RawJSON.normalized(Substring(written)).utf8.elementsEqual(RawJSON.normalized(Substring(captured)).utf8) { return .same }
         let members = RawJSON.members(Substring(written)) ?? []
         let capturedKeys = (RawJSON.members(Substring(captured)) ?? []).map(\.key)
         guard !capturedKeys.contains(#""summaryRevision""#),
               members.first(where: { $0.key == #""summaryRevision""# })?.value == "0" else { return .different }
         let without = "{" + members.filter { $0.key != #""summaryRevision""# }.map { "\($0.key):\($0.value)" }.joined(separator: ",") + "}"
-        return RawJSON.normalized(Substring(without)) == RawJSON.normalized(Substring(captured)) ? .absentRevisionWrittenAsZero : .different
+        return RawJSON.normalized(Substring(without)).utf8.elementsEqual(RawJSON.normalized(Substring(captured)).utf8) ? .absentRevisionWrittenAsZero : .different
     }
 
     private static func file(_ root: URL, _ profileID: String) -> URL {
