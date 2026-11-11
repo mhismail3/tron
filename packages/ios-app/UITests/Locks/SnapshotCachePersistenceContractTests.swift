@@ -84,6 +84,20 @@ final class SnapshotCachePersistenceContractTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionPhaseFramesKeepTheirRawValueBytesAndRefuseAnUnknownPhase() throws {
+        let app = XCUIApplication()
+        defer { cleanup(app) }
+        launch(app, mode: "phase-frames", token: UUID().uuidString)
+        _ = try require(app, "cache.phase", label: "ready")
+        let label = app.staticTexts["cache.file-report"].label
+        let report = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(label.utf8)) as? [String: Any])
+        let phases = ["idle", "running", "compacting", "retrying", "interrupted"]
+        XCTAssertEqual(report["members"] as? [String], phases.map { "\"\($0)\"" })
+        XCTAssertEqual(report["decoded"] as? [String], phases)
+        XCTAssertEqual(report["unknownRefused"] as? Bool, true)
+    }
+
+    @MainActor
     func testReadableVersionsAndInvalidOrOversizedEnvelopesFailClosed() throws {
         for mode in ["v3", "v4", "future", "corrupt", "oversized"] {
             let app = XCUIApplication()

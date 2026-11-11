@@ -7,12 +7,14 @@
 // `real` is a JSON float64 number and `int` a JSON integer in the safe range. Frames are still encoded by
 // the Gateway's own JSON.stringify of the values it builds, so this file changes no frame bytes; a change
 // here is a wire change (AGENTS.md "Architecture invariants": iOS, Gateway and Mac ship in lockstep). The
-// iOS app decodes the datatypes `@swift` names and every datatype they reach.
+// iOS app decodes the datatypes `@swift` names and every datatype they reach; an enum `@swift-codable` names is
+// also Codable while a hand Codable container still holds it (each is owed back when that container is generated).
 // @swift HomeStatus HomeContextProjection HomeTaskPage HomeTaskStatusResult HomeTaskHistoryPage
 // @swift HomeMemoryView HomeMemoryEvidencePage HomeChapterList HomeProfileList
 // @swift AdministrativeDrainSnapshot GatewayRestartResponse
 // @swift SessionCommands CommandDetail TronModuleList PackageInventory PackageUpdates ModelPage
-// @swift SessionListPage SessionSummaryUpdate
+// @swift SessionPhase
+// @swift-codable SessionPhase
 module Protocol {
   datatype Option<T> = None | Some(v: T)
   datatype Nullable<T> = Null | NonNull(v: T)

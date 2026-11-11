@@ -227,7 +227,7 @@ package indirect enum JsonValue: Hashable, Sendable {
     }
   }
 }
-package enum SessionPhase: String, CaseIterable, Hashable, Sendable {
+package enum SessionPhase: String, CaseIterable, Codable, Hashable, Sendable {
   case idle = "idle"
   case running = "running"
   case compacting = "compacting"
@@ -253,23 +253,6 @@ package enum SessionPhase: String, CaseIterable, Hashable, Sendable {
     }
   }
 }
-package enum SessionKind: String, CaseIterable, Hashable, Sendable {
-  case user = "user"
-  case subagent = "subagent"
-  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionKind {
-    switch v {
-    case .string("user"): return .user
-    case .string("subagent"): return .subagent
-    default: throw WireError(path: p, message: "unknown value")
-    }
-  }
-  package func encode() -> String {
-    switch self {
-    case .user: return "\"user\""
-    case .subagent: return "\"subagent\""
-    }
-  }
-}
 package enum ResourceDistribution: String, CaseIterable, Hashable, Sendable {
   case external = "external"
   case module_ = "module"
@@ -288,40 +271,6 @@ package enum ResourceDistribution: String, CaseIterable, Hashable, Sendable {
     case .module_: return "\"module\""
     case .local: return "\"local\""
     }
-  }
-}
-package enum SessionCreationOriginKind: String, CaseIterable, Hashable, Sendable {
-  case automation = "automation"
-  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionCreationOriginKind {
-    switch v {
-    case .string("automation"): return .automation
-    default: throw WireError(path: p, message: "unknown value")
-    }
-  }
-  package func encode() -> String {
-    switch self {
-    case .automation: return "\"automation\""
-    }
-  }
-}
-package struct SessionCreationOrigin: Hashable, Sendable {
-  package let kind: SessionCreationOriginKind
-  package let automationId: String
-  package init(kind: SessionCreationOriginKind, automationId: String) {
-    self.kind = kind
-    self.automationId = automationId
-  }
-  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionCreationOrigin {
-    let o = try wObj(v, p)
-    let f_kind: SessionCreationOriginKind = wAbsent(o.value("kind")) ? .automation : try SessionCreationOriginKind.decode(o.value("kind")!, p + ".kind")
-    let f_automationId: String = wAbsent(o.value("automationId")) ? "" : try wStr(o.value("automationId")!, p + ".automationId")
-    return SessionCreationOrigin(kind: f_kind, automationId: f_automationId)
-  }
-  package func encode() -> String {
-    var s = ""
-    s += ",\"kind\":" + self.kind.encode()
-    s += ",\"automationId\":" + wEscape(self.automationId)
-    return "{" + String(s.dropFirst()) + "}"
   }
 }
 package enum AdministrativeDrainPhase: String, CaseIterable, Hashable, Sendable {
@@ -545,206 +494,6 @@ package struct GatewayRestartResponse: Hashable, Sendable {
     s += (self.drainId == nil ? "" : ",\"drainId\":" + wEscape(self.drainId!))
     s += (self.drainRevision == nil ? "" : ",\"drainRevision\":" + String(self.drainRevision!))
     s += ",\"drain\":" + self.drain.encode()
-    return "{" + String(s.dropFirst()) + "}"
-  }
-}
-package struct SessionSummary: Hashable, Sendable {
-  package let id: String
-  package let name: String?
-  package let cwd: String
-  package let kind: SessionKind
-  package let parentSessionId: String?
-  package let creationOrigin: SessionCreationOrigin?
-  package let homeTaskId: String?
-  package let createdAt: String
-  package let updatedAt: String
-  package let activeSince: String?
-  package let messageCount: Int
-  package let firstMessage: String
-  package let phase: SessionPhase
-  package let foregroundPhase: SessionPhase?
-  package let hasActiveSubagents: Bool
-  package let waitingForUser: Bool
-  package let summaryRevision: Int
-  package let completionRevision: Int
-  package let attentionRevision: Int
-  package let isUnread: Bool
-  package let archivedAt: String?
-  package init(id: String, name: String? = nil, cwd: String, kind: SessionKind = .user, parentSessionId: String? = nil, creationOrigin: SessionCreationOrigin? = nil, homeTaskId: String? = nil, createdAt: String, updatedAt: String, activeSince: String? = nil, messageCount: Int, firstMessage: String, phase: SessionPhase, foregroundPhase: SessionPhase? = nil, hasActiveSubagents: Bool = false, waitingForUser: Bool = false, summaryRevision: Int = 0, completionRevision: Int = 0, attentionRevision: Int = 0, isUnread: Bool = false, archivedAt: String? = nil) {
-    self.id = id
-    self.name = name
-    self.cwd = cwd
-    self.kind = kind
-    self.parentSessionId = parentSessionId
-    self.creationOrigin = creationOrigin
-    self.homeTaskId = homeTaskId
-    self.createdAt = createdAt
-    self.updatedAt = updatedAt
-    self.activeSince = activeSince
-    self.messageCount = messageCount
-    self.firstMessage = firstMessage
-    self.phase = phase
-    self.foregroundPhase = foregroundPhase
-    self.hasActiveSubagents = hasActiveSubagents
-    self.waitingForUser = waitingForUser
-    self.summaryRevision = summaryRevision
-    self.completionRevision = completionRevision
-    self.attentionRevision = attentionRevision
-    self.isUnread = isUnread
-    self.archivedAt = archivedAt
-  }
-  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionSummary {
-    let o = try wObj(v, p)
-    let f_id: String = wAbsent(o.value("id")) ? "" : try wStr(o.value("id")!, p + ".id")
-    let f_name: String? = wAbsent(o.value("name")) ? nil : try wStr(o.value("name")!, p + ".name")
-    let f_cwd: String = wAbsent(o.value("cwd")) ? "" : try wStr(o.value("cwd")!, p + ".cwd")
-    let f_kind: SessionKind = wAbsent(o.value("kind")) ? .user : try SessionKind.decode(o.value("kind")!, p + ".kind")
-    let f_parentSessionId: String? = wAbsent(o.value("parentSessionId")) ? nil : try wStr(o.value("parentSessionId")!, p + ".parentSessionId")
-    let f_creationOrigin: SessionCreationOrigin? = wAbsent(o.value("creationOrigin")) ? nil : try SessionCreationOrigin.decode(o.value("creationOrigin")!, p + ".creationOrigin")
-    let f_homeTaskId: String? = wAbsent(o.value("homeTaskId")) ? nil : try wStr(o.value("homeTaskId")!, p + ".homeTaskId")
-    let f_createdAt: String = wAbsent(o.value("createdAt")) ? "" : try wStr(o.value("createdAt")!, p + ".createdAt")
-    let f_updatedAt: String = wAbsent(o.value("updatedAt")) ? "" : try wStr(o.value("updatedAt")!, p + ".updatedAt")
-    let f_activeSince: String? = wAbsent(o.value("activeSince")) ? nil : try wStr(o.value("activeSince")!, p + ".activeSince")
-    let f_messageCount: Int = wAbsent(o.value("messageCount")) ? 0 : try wInt(o.value("messageCount")!, p + ".messageCount", nat: false)
-    let f_firstMessage: String = wAbsent(o.value("firstMessage")) ? "" : try wStr(o.value("firstMessage")!, p + ".firstMessage")
-    let f_phase: SessionPhase = wAbsent(o.value("phase")) ? try wMissing(p + ".phase") : try SessionPhase.decode(o.value("phase")!, p + ".phase")
-    let f_foregroundPhase: SessionPhase? = wAbsent(o.value("foregroundPhase")) ? nil : try SessionPhase.decode(o.value("foregroundPhase")!, p + ".foregroundPhase")
-    let f_hasActiveSubagents: Bool = wAbsent(o.value("hasActiveSubagents")) ? false : try wBool(o.value("hasActiveSubagents")!, p + ".hasActiveSubagents")
-    let f_waitingForUser: Bool = wAbsent(o.value("waitingForUser")) ? false : try wBool(o.value("waitingForUser")!, p + ".waitingForUser")
-    let f_summaryRevision: Int = wAbsent(o.value("summaryRevision")) ? 0 : try wInt(o.value("summaryRevision")!, p + ".summaryRevision", nat: false)
-    let f_completionRevision: Int = wAbsent(o.value("completionRevision")) ? 0 : try wInt(o.value("completionRevision")!, p + ".completionRevision", nat: false)
-    let f_attentionRevision: Int = wAbsent(o.value("attentionRevision")) ? 0 : try wInt(o.value("attentionRevision")!, p + ".attentionRevision", nat: false)
-    let f_isUnread: Bool = wAbsent(o.value("isUnread")) ? false : try wBool(o.value("isUnread")!, p + ".isUnread")
-    let f_archivedAt: String? = wAbsent(o.value("archivedAt")) ? nil : try wStr(o.value("archivedAt")!, p + ".archivedAt")
-    return SessionSummary(id: f_id, name: f_name, cwd: f_cwd, kind: f_kind, parentSessionId: f_parentSessionId, creationOrigin: f_creationOrigin, homeTaskId: f_homeTaskId, createdAt: f_createdAt, updatedAt: f_updatedAt, activeSince: f_activeSince, messageCount: f_messageCount, firstMessage: f_firstMessage, phase: f_phase, foregroundPhase: f_foregroundPhase, hasActiveSubagents: f_hasActiveSubagents, waitingForUser: f_waitingForUser, summaryRevision: f_summaryRevision, completionRevision: f_completionRevision, attentionRevision: f_attentionRevision, isUnread: f_isUnread, archivedAt: f_archivedAt)
-  }
-  package func encode() -> String {
-    var s = ""
-    s += ",\"id\":" + wEscape(self.id)
-    s += (self.name == nil ? "" : ",\"name\":" + wEscape(self.name!))
-    s += ",\"cwd\":" + wEscape(self.cwd)
-    s += ",\"kind\":" + self.kind.encode()
-    s += (self.parentSessionId == nil ? "" : ",\"parentSessionId\":" + wEscape(self.parentSessionId!))
-    s += (self.creationOrigin == nil ? "" : ",\"creationOrigin\":" + self.creationOrigin!.encode())
-    s += (self.homeTaskId == nil ? "" : ",\"homeTaskId\":" + wEscape(self.homeTaskId!))
-    s += ",\"createdAt\":" + wEscape(self.createdAt)
-    s += ",\"updatedAt\":" + wEscape(self.updatedAt)
-    s += (self.activeSince == nil ? "" : ",\"activeSince\":" + wEscape(self.activeSince!))
-    s += ",\"messageCount\":" + String(self.messageCount)
-    s += ",\"firstMessage\":" + wEscape(self.firstMessage)
-    s += ",\"phase\":" + self.phase.encode()
-    s += (self.foregroundPhase == nil ? "" : ",\"foregroundPhase\":" + self.foregroundPhase!.encode())
-    s += ",\"hasActiveSubagents\":" + (self.hasActiveSubagents ? "true" : "false")
-    s += ",\"waitingForUser\":" + (self.waitingForUser ? "true" : "false")
-    s += ",\"summaryRevision\":" + String(self.summaryRevision)
-    s += ",\"completionRevision\":" + String(self.completionRevision)
-    s += ",\"attentionRevision\":" + String(self.attentionRevision)
-    s += ",\"isUnread\":" + (self.isUnread ? "true" : "false")
-    s += (self.archivedAt == nil ? "" : ",\"archivedAt\":" + wEscape(self.archivedAt!))
-    return "{" + String(s.dropFirst()) + "}"
-  }
-}
-package struct SessionListPage: Hashable, Sendable {
-  package let sessions: [SessionSummary]
-  package let listRevision: Int
-  package let projectionToken: String
-  package let nextCursor: String?
-  package let archivedCount: Int?
-  package let notModified: Bool?
-  package init(sessions: [SessionSummary], listRevision: Int, projectionToken: String, nextCursor: String? = nil, archivedCount: Int? = nil, notModified: Bool? = nil) {
-    self.sessions = sessions
-    self.listRevision = listRevision
-    self.projectionToken = projectionToken
-    self.nextCursor = nextCursor
-    self.archivedCount = archivedCount
-    self.notModified = notModified
-  }
-  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionListPage {
-    let o = try wObj(v, p)
-    let f_sessions: [SessionSummary] = wAbsent(o.value("sessions")) ? [] : try wSeq(o.value("sessions")!, p + ".sessions") { x, q in try SessionSummary.decode(x, q) }
-    let f_listRevision: Int = wAbsent(o.value("listRevision")) ? 0 : try wInt(o.value("listRevision")!, p + ".listRevision", nat: false)
-    let f_projectionToken: String = wAbsent(o.value("projectionToken")) ? "" : try wStr(o.value("projectionToken")!, p + ".projectionToken")
-    let f_nextCursor: String? = wAbsent(o.value("nextCursor")) ? nil : try wStr(o.value("nextCursor")!, p + ".nextCursor")
-    let f_archivedCount: Int? = wAbsent(o.value("archivedCount")) ? nil : try wInt(o.value("archivedCount")!, p + ".archivedCount", nat: false)
-    let f_notModified: Bool? = wAbsent(o.value("notModified")) ? nil : try wBool(o.value("notModified")!, p + ".notModified")
-    return SessionListPage(sessions: f_sessions, listRevision: f_listRevision, projectionToken: f_projectionToken, nextCursor: f_nextCursor, archivedCount: f_archivedCount, notModified: f_notModified)
-  }
-  package func encode() -> String {
-    var s = ""
-    s += ",\"sessions\":" + "[" + self.sessions.map { $0.encode() }.joined(separator: ",") + "]"
-    s += ",\"listRevision\":" + String(self.listRevision)
-    s += ",\"projectionToken\":" + wEscape(self.projectionToken)
-    s += (self.nextCursor == nil ? "" : ",\"nextCursor\":" + wEscape(self.nextCursor!))
-    s += (self.archivedCount == nil ? "" : ",\"archivedCount\":" + String(self.archivedCount!))
-    s += (self.notModified == nil ? "" : ",\"notModified\":" + (self.notModified! ? "true" : "false"))
-    return "{" + String(s.dropFirst()) + "}"
-  }
-}
-package struct SessionSummaryUpdate: Hashable, Sendable {
-  package let sessionId: String
-  package let summaryRevision: Int
-  package let phase: SessionPhase
-  package let foregroundPhase: SessionPhase?
-  package let hasActiveSubagents: Bool
-  package let waitingForUser: Bool
-  package let name: String?
-  package let updatedAt: String
-  package let activeSince: String?
-  package let messageCount: Int
-  package let firstMessage: String
-  package let completionRevision: Int
-  package let attentionRevision: Int
-  package let isUnread: Bool
-  package init(sessionId: String, summaryRevision: Int, phase: SessionPhase, foregroundPhase: SessionPhase? = nil, hasActiveSubagents: Bool = false, waitingForUser: Bool = false, name: String? = nil, updatedAt: String, activeSince: String? = nil, messageCount: Int, firstMessage: String, completionRevision: Int = 0, attentionRevision: Int = 0, isUnread: Bool = false) {
-    self.sessionId = sessionId
-    self.summaryRevision = summaryRevision
-    self.phase = phase
-    self.foregroundPhase = foregroundPhase
-    self.hasActiveSubagents = hasActiveSubagents
-    self.waitingForUser = waitingForUser
-    self.name = name
-    self.updatedAt = updatedAt
-    self.activeSince = activeSince
-    self.messageCount = messageCount
-    self.firstMessage = firstMessage
-    self.completionRevision = completionRevision
-    self.attentionRevision = attentionRevision
-    self.isUnread = isUnread
-  }
-  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> SessionSummaryUpdate {
-    let o = try wObj(v, p)
-    let f_sessionId: String = wAbsent(o.value("sessionId")) ? "" : try wStr(o.value("sessionId")!, p + ".sessionId")
-    let f_summaryRevision: Int = wAbsent(o.value("summaryRevision")) ? 0 : try wInt(o.value("summaryRevision")!, p + ".summaryRevision", nat: false)
-    let f_phase: SessionPhase = wAbsent(o.value("phase")) ? try wMissing(p + ".phase") : try SessionPhase.decode(o.value("phase")!, p + ".phase")
-    let f_foregroundPhase: SessionPhase? = wAbsent(o.value("foregroundPhase")) ? nil : try SessionPhase.decode(o.value("foregroundPhase")!, p + ".foregroundPhase")
-    let f_hasActiveSubagents: Bool = wAbsent(o.value("hasActiveSubagents")) ? false : try wBool(o.value("hasActiveSubagents")!, p + ".hasActiveSubagents")
-    let f_waitingForUser: Bool = wAbsent(o.value("waitingForUser")) ? false : try wBool(o.value("waitingForUser")!, p + ".waitingForUser")
-    let f_name: String? = wAbsent(o.value("name")) ? nil : try wStr(o.value("name")!, p + ".name")
-    let f_updatedAt: String = wAbsent(o.value("updatedAt")) ? "" : try wStr(o.value("updatedAt")!, p + ".updatedAt")
-    let f_activeSince: String? = wAbsent(o.value("activeSince")) ? nil : try wStr(o.value("activeSince")!, p + ".activeSince")
-    let f_messageCount: Int = wAbsent(o.value("messageCount")) ? 0 : try wInt(o.value("messageCount")!, p + ".messageCount", nat: false)
-    let f_firstMessage: String = wAbsent(o.value("firstMessage")) ? "" : try wStr(o.value("firstMessage")!, p + ".firstMessage")
-    let f_completionRevision: Int = wAbsent(o.value("completionRevision")) ? 0 : try wInt(o.value("completionRevision")!, p + ".completionRevision", nat: false)
-    let f_attentionRevision: Int = wAbsent(o.value("attentionRevision")) ? 0 : try wInt(o.value("attentionRevision")!, p + ".attentionRevision", nat: false)
-    let f_isUnread: Bool = wAbsent(o.value("isUnread")) ? false : try wBool(o.value("isUnread")!, p + ".isUnread")
-    return SessionSummaryUpdate(sessionId: f_sessionId, summaryRevision: f_summaryRevision, phase: f_phase, foregroundPhase: f_foregroundPhase, hasActiveSubagents: f_hasActiveSubagents, waitingForUser: f_waitingForUser, name: f_name, updatedAt: f_updatedAt, activeSince: f_activeSince, messageCount: f_messageCount, firstMessage: f_firstMessage, completionRevision: f_completionRevision, attentionRevision: f_attentionRevision, isUnread: f_isUnread)
-  }
-  package func encode() -> String {
-    var s = ""
-    s += ",\"sessionId\":" + wEscape(self.sessionId)
-    s += ",\"summaryRevision\":" + String(self.summaryRevision)
-    s += ",\"phase\":" + self.phase.encode()
-    s += (self.foregroundPhase == nil ? "" : ",\"foregroundPhase\":" + self.foregroundPhase!.encode())
-    s += ",\"hasActiveSubagents\":" + (self.hasActiveSubagents ? "true" : "false")
-    s += ",\"waitingForUser\":" + (self.waitingForUser ? "true" : "false")
-    s += (self.name == nil ? "" : ",\"name\":" + wEscape(self.name!))
-    s += ",\"updatedAt\":" + wEscape(self.updatedAt)
-    s += (self.activeSince == nil ? "" : ",\"activeSince\":" + wEscape(self.activeSince!))
-    s += ",\"messageCount\":" + String(self.messageCount)
-    s += ",\"firstMessage\":" + wEscape(self.firstMessage)
-    s += ",\"completionRevision\":" + String(self.completionRevision)
-    s += ",\"attentionRevision\":" + String(self.attentionRevision)
-    s += ",\"isUnread\":" + (self.isUnread ? "true" : "false")
     return "{" + String(s.dropFirst()) + "}"
   }
 }

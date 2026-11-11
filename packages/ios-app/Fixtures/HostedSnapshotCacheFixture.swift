@@ -96,6 +96,10 @@ private final class SnapshotCacheFixtureDriver {
         guard !started else { return }
         started = true
         do {
+            if mode == "phase-frames" {
+                phaseFrames(); phase = "ready"
+                return
+            }
             if mode == "generations" {
                 await cache.save(profileID: first.id, generation: 20,
                     sessions: [SnapshotCacheFixtureGateway.row(name: "Generation winner"), SnapshotCacheFixtureGateway.row(archived: true)], archivedCount: 7)
@@ -140,6 +144,22 @@ private final class SnapshotCacheFixtureDriver {
             document["padding"] = String(repeating: "x", count: SnapshotCachePolicy.maximumEncodedBytes + 1 - overhead)
         }
         try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys]).write(to: url, options: .atomic)
+    }
+
+    private func phaseFrames() {
+        var members: [String] = [], decoded: [String] = []
+        for raw in ["idle", "running", "compacting", "retrying", "interrupted"] {
+            guard let phase = SessionPhase(rawValue: raw),
+                  let frame = try? JSONEncoder.gateway.encode(SnapshotCacheFixtureGateway.snapshot(phase: phase)) else { continue }
+            let text = String(decoding: frame, as: UTF8.self)
+            members += text.components(separatedBy: "\"phase\":").dropFirst().map { String($0.prefix(while: { $0 != "," && $0 != "}" })) }
+            decoded.append((try? JSONDecoder.gateway.decode(SessionSnapshot.self, from: frame).phase.rawValue) ?? "<refused>")
+        }
+        let idle = (try? JSONEncoder.gateway.encode(SnapshotCacheFixtureGateway.snapshot())).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        let unknown = Data(idle.replacingOccurrences(of: "\"phase\":\"idle\"", with: "\"phase\":\"brandNew\"").utf8)
+        let object: [String: Any] = ["members": members, "decoded": decoded,
+            "unknownRefused": (try? JSONDecoder.gateway.decode(SessionSnapshot.self, from: unknown)) == nil && idle.contains("\"phase\":\"idle\"")]
+        if let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) { report = String(decoding: data, as: UTF8.self) }
     }
 
     func inspectFiles() {

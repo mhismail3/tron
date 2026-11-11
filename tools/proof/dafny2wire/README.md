@@ -41,7 +41,9 @@ call of a compiled predicate on parameters; anything else is refused. `bind(comp
 The Gateway protocol's value types have one source, `packages/core/wire/Protocol.dfy`: `proof wire --protocol`
 writes `packages/gateway/src/protocol/types.ts` (types, decoders and encoders, generated; never edited) and the
 iOS app's decoders `packages/ios-app/Core/Generated/Protocol.swift` (the datatypes the source's `// @swift`
-lines name and every datatype they reach), and `--check` exits 1 when either file is not what the source generates. The Gateway still writes frames with
+lines name and every datatype they reach; an enum a `// @swift-codable` line names, which must have only string
+wire values, also takes the standard library's `Codable`, for as long as a hand Codable container holds it: today
+`SessionPhase`, inside `SessionSnapshot`, owed back by #2380's slice 7), and `--check` exits 1 when either file is not what the source generates. The Gateway still writes frames with
 `JSON.stringify` of the values it builds, so the generated encoders serve the codec tests only and the
 decoders are the protocol's validators. A type another module owns (the display contract, the upstream error)
 is marked `import=<path>`: types.ts imports it and fails to compile unless it equals the stated shape. The
