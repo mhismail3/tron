@@ -14,14 +14,14 @@ struct HostedSessionArchiveFixture: View {
     private static let revealArchivedRowCount = 20
     private static let branchActivity = PresentationSurfaceActivity.covered
 
-    @State private var live: [SessionSummary] = HostedSessionArchiveFixture.initialLive
-    @State private var archived: [SessionSummary] = []
+    @State private var live: [CatalogSession] = HostedSessionArchiveFixture.initialLive
+    @State private var archived: [CatalogSession] = []
     @State private var projectionRevision = 0
     @State private var gatedReadsStarted = 0
     @State private var archiveConfirmation: SessionArchiveConfirmation?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private static var initialLive: [SessionSummary] {
+    private static var initialLive: [CatalogSession] {
         guard revealFixture else {
             return [session(id: "live-session", title: "Live session", archivedAt: nil)]
         }
@@ -30,7 +30,7 @@ struct HostedSessionArchiveFixture: View {
         }
     }
 
-    private static var initialArchived: [SessionSummary] {
+    private static var initialArchived: [CatalogSession] {
         if revealFixture {
             return (0..<revealArchivedRowCount).map { index in
                 session(
@@ -48,8 +48,8 @@ struct HostedSessionArchiveFixture: View {
         _archived = State(initialValue: Self.initialArchived)
     }
 
-    private static func session(id: String, title: String, archivedAt: String?) -> SessionSummary {
-        SessionSummary(
+    private static func session(id: String, title: String, archivedAt: String?) -> CatalogSession {
+        CatalogSession(SessionSummary(
             id: id,
             name: title,
             cwd: "/workspace/fixture-project",
@@ -59,10 +59,8 @@ struct HostedSessionArchiveFixture: View {
             messageCount: 4,
             firstMessage: title,
             phase: .idle,
-            archivedAt: archivedAt,
-            gatewayProfileID: profileID,
-            gatewayProfileLabel: "Fixture Mac"
-        )
+            archivedAt: archivedAt
+        ), gatewayProfileID: profileID, gatewayProfileLabel: "Fixture Mac")
     }
 
     private var sources: [ArchivedSessionsProfileSource] {
@@ -127,7 +125,7 @@ struct HostedSessionArchiveFixture: View {
     }
 
     private static func page(
-        archived: [SessionSummary],
+        archived: [CatalogSession],
         cursor: String?
     ) async throws -> ArchivedSessionsLoadResult {
         if cursor != nil, pagesOneArchivedSessionPerRead {
@@ -138,10 +136,15 @@ struct HostedSessionArchiveFixture: View {
                 details: nil
             )
         }
-        let response = pagesOneArchivedSessionPerRead
-            ? ArchivedSessionsLoader.PageResponse(sessions: Array(archived.prefix(1)), nextCursor: "fixture-next")
-            : ArchivedSessionsLoader.PageResponse(sessions: archived, nextCursor: nil)
-        return await ArchivedSessionsLoader.admit(response, requestedCursor: cursor) { true }
+        let rows = pagesOneArchivedSessionPerRead ? Array(archived.prefix(1)) : archived
+        let response = SessionListPage(sessions: rows.map(\.summary), listRevision: 1, projectionToken: "fixture",
+                                       nextCursor: pagesOneArchivedSessionPerRead ? "fixture-next" : nil)
+        let admitted = await ArchivedSessionsLoader.admit(response, requestedCursor: cursor) { true }
+        guard case let .loaded(page) = admitted else { return admitted }
+        return .loaded(page: ArchivedSessionsPage(
+            sessions: page.sessions.map { $0.withGatewaySource(id: Self.profileID, label: "Fixture Mac") },
+            nextCursor: page.nextCursor
+        ))
     }
 
     private func gateRead() async {
@@ -154,7 +157,7 @@ struct HostedSessionArchiveFixture: View {
         try? await Task.sleep(for: .seconds(3_600))
     }
 
-    private func archive(_ session: SessionSummary) {
+    private func archive(_ session: CatalogSession) {
         guard let index = live.firstIndex(where: { $0.dashboardID == session.dashboardID }) else { return }
         live.remove(at: index)
         archived.insert(
@@ -164,7 +167,7 @@ struct HostedSessionArchiveFixture: View {
         projectionRevision &+= 1
     }
 
-    private func unarchive(_ session: SessionSummary) {
+    private func unarchive(_ session: CatalogSession) {
         archived.removeAll { $0.dashboardID == session.dashboardID }
         live.append(Self.session(id: session.id, title: session.title, archivedAt: nil))
         projectionRevision &+= 1

@@ -4,36 +4,16 @@ extension SessionPhase {
     package var isActive: Bool { self == .running || self == .compacting || self == .retrying }
 }
 
-package struct SessionCreationOrigin: Codable, Hashable, Sendable {
-    package enum Kind: String, Codable, Hashable, Sendable { case automation }
-
-    package let kind: Kind
-    package let automationId: String
-
-    package init(kind: Kind, automationId: String) {
-        self.kind = kind
-        self.automationId = automationId
-    }
-
-    private enum CodingKeys: String, CodingKey { case kind, automationId }
-
-    package init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        kind = try container.decode(Kind.self, forKey: .kind)
-        automationId = try container.decode(String.self, forKey: .automationId)
+extension SessionCreationOrigin {
+    package var valid: Bool {
         let normalized = automationId.lowercased()
         let versionIndex = normalized.index(normalized.startIndex, offsetBy: 14, limitedBy: normalized.endIndex)
         let variantIndex = normalized.index(normalized.startIndex, offsetBy: 19, limitedBy: normalized.endIndex)
         guard let uuid = UUID(uuidString: automationId),
               uuid.uuidString.lowercased() == normalized,
               let versionIndex, "12345".contains(normalized[versionIndex]),
-              let variantIndex, "89ab".contains(normalized[variantIndex]) else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .automationId,
-                in: container,
-                debugDescription: "Session creation Automation identity is invalid"
-            )
-        }
+              let variantIndex, "89ab".contains(normalized[variantIndex]) else { return false }
+        return true
     }
 }
 
@@ -46,141 +26,13 @@ package struct SessionArchiveState: Codable, Sendable {
     package let archivedAt: String?
 }
 
-package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
-    package enum Kind: String, Codable, Hashable, Sendable { case user, subagent }
-
-    package let id: String
-    package let name: String?
-    package let cwd: String
-    package let kind: Kind
-    package let parentSessionId: String?
-    package let creationOrigin: SessionCreationOrigin?
-    package let homeTaskId: String?
-    package let createdAt: String
-    package let updatedAt: String
-    package let activeSince: String?
-    package let messageCount: Int
-    package let firstMessage: String
-    package let phase: SessionPhase
-    package let foregroundPhase: SessionPhase?
-    package let hasActiveSubagents: Bool
-    package let waitingForUser: Bool
-    package let summaryRevision: Int?
-    package let completionRevision: Int
-    package let attentionRevision: Int
-    package let isUnread: Bool
-    package let archivedAt: String?
-    package let gatewayProfileID: String?
-    package let gatewayProfileLabel: String?
-
-    package init(
-        id: String, name: String?, cwd: String, kind: Kind = .user, parentSessionId: String?,
-        creationOrigin: SessionCreationOrigin? = nil, homeTaskId: String? = nil,
-        createdAt: String, updatedAt: String, activeSince: String? = nil, messageCount: Int,
-        firstMessage: String, phase: SessionPhase, foregroundPhase: SessionPhase? = nil,
-        hasActiveSubagents: Bool = false, waitingForUser: Bool = false,
-        summaryRevision: Int? = nil, completionRevision: Int = 0,
-        attentionRevision: Int = 0, isUnread: Bool = false, archivedAt: String? = nil,
-        gatewayProfileID: String? = nil, gatewayProfileLabel: String? = nil
-    ) {
-        self.id = id
-        self.name = name
-        self.cwd = cwd
-        self.kind = kind
-        self.parentSessionId = parentSessionId
-        self.creationOrigin = creationOrigin
-        self.homeTaskId = homeTaskId
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.activeSince = activeSince
-        self.messageCount = messageCount
-        self.firstMessage = firstMessage
-        self.phase = phase
-        self.foregroundPhase = foregroundPhase
-        self.hasActiveSubagents = hasActiveSubagents
-        self.waitingForUser = waitingForUser
-        self.summaryRevision = summaryRevision
-        self.completionRevision = completionRevision
-        self.attentionRevision = attentionRevision
-        self.isUnread = isUnread
-        self.archivedAt = archivedAt
-        self.gatewayProfileID = gatewayProfileID
-        self.gatewayProfileLabel = gatewayProfileLabel
+extension SessionSummary {
+    package var admitted: Bool {
+        !id.isEmpty && completionRevision >= 0 && attentionRevision >= 0 && (creationOrigin?.valid ?? true)
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case id, name, cwd, kind, parentSessionId, creationOrigin, homeTaskId, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, foregroundPhase, hasActiveSubagents, waitingForUser, summaryRevision
-        case completionRevision, attentionRevision, isUnread, archivedAt
-    }
-
-    package init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        name = try container.decodeIfPresent(String.self, forKey: .name)
-        cwd = try container.decode(String.self, forKey: .cwd)
-        kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .user
-        parentSessionId = try container.decodeIfPresent(String.self, forKey: .parentSessionId)
-        creationOrigin = try container.decodeIfPresent(SessionCreationOrigin.self, forKey: .creationOrigin)
-        homeTaskId = try container.decodeIfPresent(String.self, forKey: .homeTaskId)
-        createdAt = try container.decode(String.self, forKey: .createdAt)
-        updatedAt = try container.decode(String.self, forKey: .updatedAt)
-        activeSince = try container.decodeIfPresent(String.self, forKey: .activeSince)
-        messageCount = try container.decode(Int.self, forKey: .messageCount)
-        firstMessage = try container.decode(String.self, forKey: .firstMessage)
-        phase = try container.decode(SessionPhase.self, forKey: .phase)
-        foregroundPhase = try container.decodeIfPresent(SessionPhase.self, forKey: .foregroundPhase)
-        hasActiveSubagents = try container.decodeIfPresent(Bool.self, forKey: .hasActiveSubagents) ?? false
-        waitingForUser = try container.decodeIfPresent(Bool.self, forKey: .waitingForUser) ?? false
-        summaryRevision = try container.decodeIfPresent(Int.self, forKey: .summaryRevision)
-        let decodedCompletionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0
-        let decodedAttentionRevision = try container.decodeIfPresent(Int.self, forKey: .attentionRevision) ?? 0
-        guard decodedCompletionRevision >= 0 else {
-            throw DecodingError.dataCorruptedError(forKey: .completionRevision, in: container, debugDescription: "Invalid completion revision")
-        }
-        guard decodedAttentionRevision >= 0 else {
-            throw DecodingError.dataCorruptedError(forKey: .attentionRevision, in: container, debugDescription: "Invalid attention revision")
-        }
-        completionRevision = decodedCompletionRevision
-        attentionRevision = decodedAttentionRevision
-        isUnread = try container.decodeIfPresent(Bool.self, forKey: .isUnread) ?? false
-        archivedAt = try container.decodeIfPresent(String.self, forKey: .archivedAt)
-        gatewayProfileID = nil
-        gatewayProfileLabel = nil
-    }
-
-    package func withGatewaySource(id profileID: String, label: String) -> SessionSummary {
-        SessionSummary(
-            id: id,
-            name: name,
-            cwd: cwd,
-            kind: kind,
-            parentSessionId: parentSessionId,
-            creationOrigin: creationOrigin,
-            homeTaskId: homeTaskId,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            activeSince: activeSince,
-            messageCount: messageCount,
-            firstMessage: firstMessage,
-            phase: phase,
-            foregroundPhase: foregroundPhase,
-            hasActiveSubagents: hasActiveSubagents,
-            waitingForUser: waitingForUser,
-            summaryRevision: summaryRevision,
-            completionRevision: completionRevision,
-            attentionRevision: attentionRevision,
-            isUnread: isUnread,
-            archivedAt: archivedAt,
-            gatewayProfileID: profileID,
-            gatewayProfileLabel: label
-        )
-    }
 
     package var isArchived: Bool { archivedAt != nil }
-
-    package var dashboardID: String {
-        gatewayProfileID.map { "\($0):\(id)" } ?? id
-    }
 
     package var hasOnlyActiveSubagents: Bool {
         phase.isActive && hasActiveSubagents && foregroundPhase == .idle
@@ -200,11 +52,52 @@ package struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         URL(fileURLWithPath: cwd).lastPathComponent.isEmpty ? cwd : URL(fileURLWithPath: cwd).lastPathComponent
     }
 
-    package static func dashboardSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
+}
+
+extension SessionListPage {
+    package static func validated(_ value: WireJSON, _ path: String) throws -> SessionListPage {
+        guard case .object(let object) = value, case .array? = object.value("sessions") else {
+            throw WireError(path: "\(path).sessions", message: "a session list page without its sessions")
+        }
+        let page = try decode(value, path)
+        for (index, session) in page.sessions.enumerated() where !session.admitted {
+            throw WireError(path: "\(path).sessions[\(index)]", message: "an empty id, a negative revision or an invalid creation Automation identity")
+        }
+        return page
+    }
+}
+
+@dynamicMemberLookup
+package struct CatalogSession: Hashable, Identifiable, Sendable {
+    package let summary: SessionSummary
+    package let gatewayProfileID: String?
+    package let gatewayProfileLabel: String?
+
+    package init(_ summary: SessionSummary, gatewayProfileID: String? = nil, gatewayProfileLabel: String? = nil) {
+        self.summary = summary
+        self.gatewayProfileID = gatewayProfileID
+        self.gatewayProfileLabel = gatewayProfileLabel
+    }
+
+    package subscript<Value>(dynamicMember keyPath: KeyPath<SessionSummary, Value>) -> Value {
+        summary[keyPath: keyPath]
+    }
+
+    package var id: String { summary.id }
+
+    package func withGatewaySource(id profileID: String, label: String) -> CatalogSession {
+        CatalogSession(summary, gatewayProfileID: profileID, gatewayProfileLabel: label)
+    }
+
+    package var dashboardID: String {
+        gatewayProfileID.map { "\($0):\(id)" } ?? id
+    }
+
+    package static func dashboardSessions(_ sessions: [CatalogSession]) -> [CatalogSession] {
         sessions.filter { $0.kind == .user }
     }
 
-    package static func orderedForDashboard(_ sessions: [SessionSummary]) -> [SessionSummary] {
+    package static func orderedForDashboard(_ sessions: [CatalogSession]) -> [CatalogSession] {
         sessions
             .map { summary in
                 let orderingTimestamp = summary.phase.isActive ? summary.activeSince : summary.updatedAt

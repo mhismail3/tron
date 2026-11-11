@@ -75,7 +75,8 @@ private final class SnapshotCacheFixtureDriver {
         let delay = SnapshotCacheFixtureDelay(); self.delay = delay
         let clock = MonotonicClock(now: MonotonicClock.continuous.now,
             sleep: { try await delay.sleep($0) }, gridOrigin: ContinuousClock.now)
-        let gateway = SnapshotCacheFixtureGateway(offline: mode != "live")
+        let gateway = SnapshotCacheFixtureGateway(offline: mode != "live" && mode != "page-without-sessions",
+                                                  pageWithoutSessions: mode == "page-without-sessions")
         self.gateway = gateway
         let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in SnapshotCacheFixtureSocket(gateway: gateway) })
         self.client = client
@@ -96,6 +97,12 @@ private final class SnapshotCacheFixtureDriver {
         guard !started else { return }
         started = true
         do {
+            if mode == "row-compat" {
+                let object = await SnapshotCacheRowCompat.report(cache: cache, root: cacheRoot)
+                if let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) { report = String(decoding: data, as: UTF8.self) }
+                phase = "ready"
+                return
+            }
             if mode == "phase-frames" {
                 phaseFrames(); phase = "ready"
                 return
@@ -113,7 +120,15 @@ private final class SnapshotCacheFixtureDriver {
                 inspectFiles(); phase = "generation-ready"
                 return
             }
-            if ["v3", "v4", "future", "corrupt", "oversized"].contains(mode) {
+            if mode == "page-without-sessions" {
+                await cache.save(profileID: first.id, sessions: [SnapshotCacheFixtureGateway.row()], archivedCount: 7)
+                await model.start()
+                _ = await model.refreshSessions()
+                inspectFiles()
+                phase = "ready"
+                return
+            }
+            if ["v3", "v4", "future", "corrupt", "oversized", "invalid-row", "deep", "flat"].contains(mode) {
                 await cache.save(profileID: first.id, sessions: [SnapshotCacheFixtureGateway.row()], archivedCount: 7)
                 try prepareEnvelope()
             }
@@ -135,8 +150,21 @@ private final class SnapshotCacheFixtureDriver {
     private func prepareEnvelope() throws {
         let url = file(first.id)
         if mode == "corrupt" { try Data("{invalid-json".utf8).write(to: url); return }
+        if mode == "flat" {
+            let rows = (0..<60_000).map { #"{"id":"r\#($0)","name":"n","cwd":"/x","createdAt":"a","updatedAt":"b","messageCount":0,"firstMessage":"","phase":"idle"}"# }
+            try Data((#"{"version":4,"sessions":["# + rows.joined(separator: ",") + "]}").utf8).write(to: url)
+            return
+        }
+        if mode == "deep" {
+            try Data(("{\"version\":4,\"sessions\":" + String(repeating: "[", count: 100_000) + String(repeating: "]", count: 100_000) + "}").utf8).write(to: url)
+            return
+        }
         var document = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
         if mode == "v3" { document["version"] = 3; document["archivedCount"] = nil }
+        if mode == "invalid-row", var rows = document["sessions"] as? [[String: Any]] {
+            rows[0]["completionRevision"] = -1
+            document["sessions"] = rows
+        }
         if mode == "future" { document["version"] = 99 }
         if mode == "oversized" {
             document["padding"] = ""

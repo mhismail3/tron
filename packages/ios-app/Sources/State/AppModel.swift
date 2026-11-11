@@ -156,7 +156,7 @@ final class AppModel {
     private struct CacheCheckpoint: Sendable {
         let profileID: String
         let generation: Int
-        let sessions: [SessionSummary]
+        let sessions: [CatalogSession]
         let archivedCount: Int?
     }
 
@@ -217,14 +217,14 @@ final class AppModel {
     let homeStatus = HomeStatusPresentationOwner()
     let macTerminal = MacTerminalController()
     let homeMutations: HomeMutationCoordinator
-    private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
+    private var dashboardSessionsByProfile: [String: [CatalogSession]] = [:]
     private var dashboardStatesByProfile: [String: DashboardServerConnectionState] = [:]
     private var dashboardArchivedCountsByProfile: [String: Int] = [:]
     private var dashboardStopReasonsByProfile: [String: String] = [:]
     private(set) var archiveProjectionRevision = 0
     private var archivedSessionsReadGenerations: [SessionArchiveReadKey: Int] = [:]
     private var dashboardCacheLoadGeneration = 0
-    var sessions: [SessionSummary] {
+    var sessions: [CatalogSession] {
         get { sessionCatalog.sessions }
         set {
             sessionCatalog.replaceForFacade(newValue)
@@ -1025,7 +1025,7 @@ extension AppModel {
         }
     }
 
-    var visibleSessions: [SessionSummary] {
+    var visibleSessions: [CatalogSession] {
         _ = profileRevision
         let selectedProfile = profiles.selected
         let values = Self.dashboardProjection(
@@ -1034,7 +1034,7 @@ extension AppModel {
             selectedSessions: sessions,
             buckets: dashboardSessionsByProfile
         )
-        return SessionSummary.orderedForDashboard(SessionSummary.dashboardSessions(values))
+        return CatalogSession.orderedForDashboard(CatalogSession.dashboardSessions(values))
     }
 
     var archivedSessionCount: Int? {
@@ -1091,21 +1091,14 @@ extension AppModel {
             scope: "user",
             archived: "only"
         )
-        let response: ArchivedSessionsLoader.PageResponse
-        if isSelectedProfile {
-            response = try await client.request("session.list", request)
-        } else {
-            let value = try await dashboardConnections.request(
+        let value = isSelectedProfile
+            ? try await client.requestValue("session.list", request)
+            : try await dashboardConnections.request(
                 profileID: profileID,
                 method: "session.list",
                 params: try JSONValue.encode(request)
             )
-            response = try GatewayResponseDecoding.decode(
-                value,
-                as: ArchivedSessionsLoader.PageResponse.self,
-                method: "session.list"
-            )
-        }
+        let response = try GatewayResponseDecoding.decode(value, method: "session.list", SessionListPage.validated)
         let admitted = await ArchivedSessionsLoader.admit(response, requestedCursor: cursor) { [weak self] in
             guard let self, presentationActive() else { return false }
             guard self.admitsArchivedSessionsRead(profileID: profileID, purpose: purpose, generation: generation) else {
@@ -1126,7 +1119,7 @@ extension AppModel {
         profileID: String,
         sessionID: String,
         presentationActive: @escaping @MainActor () -> Bool
-    ) async throws -> SessionSummary? {
+    ) async throws -> CatalogSession? {
         guard supportsSessionArchive(profileID: profileID) else { return nil }
         var cursor: String?
         for _ in 0..<SessionArchiveTargetLookup.maximumPages {
@@ -1176,13 +1169,13 @@ extension AppModel {
     nonisolated static func dashboardProjection(
         selectedProfileID: String?,
         selectedProfileLabel: String?,
-        selectedSessions: [SessionSummary],
-        buckets: [String: [SessionSummary]]
-    ) -> [SessionSummary] {
+        selectedSessions: [CatalogSession],
+        buckets: [String: [CatalogSession]]
+    ) -> [CatalogSession] {
         guard let selectedProfileID, buckets[selectedProfileID] == nil else {
             return buckets.values.flatMap { $0 }.isEmpty ? selectedSessions : buckets.values.flatMap { $0 }
         }
-        var merged = buckets.values.flatMap { $0 }.reduce(into: [String: SessionSummary]()) { result, session in
+        var merged = buckets.values.flatMap { $0 }.reduce(into: [String: CatalogSession]()) { result, session in
             result[session.dashboardID] = session
         }
         for session in selectedSessions {
@@ -1199,7 +1192,7 @@ extension AppModel {
         sessionCatalog.activity(for: sessionID)
     }
 
-    func dashboardActivity(for session: SessionSummary) -> DashboardSessionActivity {
+    func dashboardActivity(for session: CatalogSession) -> DashboardSessionActivity {
         guard let profileID = session.gatewayProfileID,
               profileID != profiles.selected?.id else {
             return sessionCatalog.activity(for: session.id)
@@ -2820,7 +2813,7 @@ extension AppModel {
         }
     }
 
-    func navigationRoute(for session: SessionSummary) async throws -> SessionNavigationRoute {
+    func navigationRoute(for session: CatalogSession) async throws -> SessionNavigationRoute {
         let owner = try await activateDashboardProfile(session.gatewayProfileID ?? profiles.selected?.id)
         return SessionNavigationRoute(
             sessionID: session.id,
@@ -2889,7 +2882,7 @@ extension AppModel {
     }
 
     func performOnOwningGateway<Value>(
-        _ session: SessionSummary,
+        _ session: CatalogSession,
         operation: @escaping @MainActor () async throws -> Value
     ) async throws -> Value {
         let owner = try await activateDashboardProfile(session.gatewayProfileID ?? profiles.selected?.id)
@@ -3228,7 +3221,7 @@ extension AppModel {
         try await sessionMutations.rename(sessionID, name: name)
     }
 
-    func setSessionUnread(_ session: SessionSummary, unread: Bool) async throws {
+    func setSessionUnread(_ session: CatalogSession, unread: Bool) async throws {
         let projection = try await performOnOwningGateway(session) {
             try await self.sessionMutations.setAttention(
                 sessionID: session.id,
@@ -3242,7 +3235,7 @@ extension AppModel {
         }
     }
 
-    func setSessionArchived(_ session: SessionSummary, archived: Bool) async throws {
+    func setSessionArchived(_ session: CatalogSession, archived: Bool) async throws {
         let state = try await performOnOwningGateway(session) {
             try await self.sessionMutations.setArchived(sessionID: session.id, archived: archived)
         }
@@ -4619,7 +4612,7 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
 
     func dashboardPoolDidUpdate(
         profileID: String,
-        sessions: [SessionSummary],
+        sessions: [CatalogSession],
         state: DashboardServerConnectionState,
         stopReason: String?
     ) {

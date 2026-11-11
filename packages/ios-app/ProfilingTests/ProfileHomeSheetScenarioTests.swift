@@ -64,7 +64,7 @@ final class ProfileHomeSheetRun: ProfileScenarioRun {
         let run = ProfileHomeSheetRun(fixture: fixture)
         DashboardServerFilterPreferences.save(DashboardServerFilterState(sortMode: .home))
         do {
-            let listed = try JSONValue.encode(run.sessions)
+            let listed = JSONValue.array(try run.sessions.map { try JSONValue.wire($0.encode()) })
             fixture.handle("session.list") { _ in .object(["sessions": listed, "listRevision": .number(1), "projectionToken": .string("epoch-1:1")]) }
             try await fixture.connect()
             guard await fixture.model.refreshSessions() == .published else {
