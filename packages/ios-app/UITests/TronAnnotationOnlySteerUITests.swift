@@ -53,6 +53,13 @@ import XCTest
                 XCTAssertTrue(arrow.waitForExistence(timeout: 5))
                 XCTAssertGreaterThan(content.frame.minY, arrow.frame.maxY, "Attachment content belongs beneath the card header")
                 keep(app, "\(home ? "home" : "session")-\(kind)-only-steer")
+                if kind == "file" {
+                    content.tap()
+                    XCTAssertTrue(app.staticTexts["queued-note.txt"].waitForExistence(timeout: 5), app.debugDescription)
+                    keep(app, "\(home ? "home" : "session")-queued-file-preview")
+                    app.buttons["Done"].firstMatch.tap()
+                    XCTAssertTrue(arrow.waitForExistence(timeout: 5), app.debugDescription)
+                }
                 arrow.tap()
                 let editor = app.textViews["Queued message"]
                 guard editor.waitForExistence(timeout: 8) else { XCTFail(app.debugDescription); return }
