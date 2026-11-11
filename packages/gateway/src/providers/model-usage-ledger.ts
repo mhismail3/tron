@@ -66,8 +66,8 @@ function validRecord(value: unknown): value is Record {
 }
 
 function usageRecord(identity: ModelUsageIdentity, timestamp: number, status: Status, usage?: Usage): Record {
-  const known = status !== "threw" && (!(status === "error" || status === "aborted")
-    || [usage?.input, usage?.output, usage?.cacheRead, usage?.cacheWrite].some(value => counter(value) && value > 0));
+  const known = status !== "threw"
+    && [usage?.input, usage?.output, usage?.cacheRead, usage?.cacheWrite].some(value => counter(value) && value > 0);
   const token = (value: unknown) => known && counter(value) ? value : null;
   const cacheWrite = token(usage?.cacheWrite);
   const longWrite = token(usage?.cacheWrite1h);

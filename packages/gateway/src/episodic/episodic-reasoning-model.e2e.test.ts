@@ -16,7 +16,7 @@ import { EpisodicStore } from "./episodic-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 import { singleChapterSource } from "../../test-support/episodic-chapter-source.js";
-type Reply = "line" | "reasoning-only" | "copy-example" | "limit" | "cache-line" | "cache-error";
+type Reply = "line" | "reasoning-only" | "copy-example" | "limit" | "cache-line" | "cache-error" | "cache-unknown";
 
 async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
   const bodies: Array<Record<string, unknown>> = [];
@@ -28,15 +28,15 @@ async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
       const body = JSON.parse(raw) as Record<string, unknown>;
       bodies.push(body);
       const selected = reply(body);
-      if (selected === "cache-line" || selected === "cache-error") {
+      if (selected === "cache-line" || selected === "cache-error" || selected === "cache-unknown") {
         const events = [
           { type: "message_start", message: { id: "summary-usage", type: "message", role: "assistant", model: body.model, content: [],
-            stop_reason: null, usage: { input_tokens: 7, output_tokens: 0, cache_read_input_tokens: 90, cache_creation_input_tokens: 30,
+            stop_reason: null, usage: selected === "cache-unknown" ? {} : { input_tokens: 7, output_tokens: 0, cache_read_input_tokens: 90, cache_creation_input_tokens: 30,
               cache_creation: { ephemeral_1h_input_tokens: 20, ephemeral_5m_input_tokens: 10 } } } },
           ...(selected === "cache-error" ? [{ type: "error", error: { type: "invalid_request_error", message: "private provider failure text" } }]
             : [{ type: "content_block_start", index: 0, content_block: { type: "text", text: "summary content must not persist" } },
               { type: "content_block_stop", index: 0 },
-              { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 11 } }, { type: "message_stop" }]),
+              { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: selected === "cache-unknown" ? {} : { output_tokens: 11 } }, { type: "message_stop" }]),
         ];
         response.writeHead(200, { "content-type": "text/event-stream" });
         response.end(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""));
@@ -181,21 +181,23 @@ describe("the episodic summarizer on a reasoning model", () => {
     expect((await summarize(request)).stopReason).toBe("stop");
     reply = "cache-error";
     expect((await summarize(request)).stopReason).toBe("error");
+    reply = "cache-unknown";
+    expect((await summarize(request)).stopReason).toBe("stop");
     const aborted = new AbortController();
     aborted.abort();
     expect((await summarize({ ...request, signal: aborted.signal })).stopReason).toBe("aborted");
     await expect(queue.complete("background", () => ({ context: null as never }),
       { kind: "background", caller: { taskId: "owning-task" } })).rejects.toBeInstanceOf(Error);
     const ledger = JSON.parse(await readFile(path, "utf8"));
-    expect(ledger.records.map((record: { status: string }) => record.status)).toEqual(["stop", "error", "aborted", "threw"]);
+    expect(ledger.records.map((record: { status: string }) => record.status)).toEqual(["stop", "error", "stop", "aborted", "threw"]);
     expect(ledger.records[0]).toMatchObject({ provider: "local-anthropic", model: "cache-model", kind: "summarizer",
       caller: { sessionId: "source-session" }, input: 7, output: 11, cacheRead: 90, cacheWrite: 30, cacheWrite1h: 20, cacheWrite5m: 10 });
     expect(ledger.records[1]).toMatchObject({ input: 7, output: 0, cacheRead: 90, cacheWrite: 30, cacheWrite1h: 20, cacheWrite5m: 10 });
     for (const record of ledger.records.slice(2)) {
       expect(record).toMatchObject({ input: null, output: null, cacheRead: null, cacheWrite: null, cacheWrite1h: null, cacheWrite5m: null });
     }
-    expect(ledger.records[3]).toMatchObject({ kind: "background", caller: { taskId: "owning-task" } });
-    expect(f.bodies).toHaveLength(2);
+    expect(ledger.records[4]).toMatchObject({ kind: "background", caller: { taskId: "owning-task" } });
+    expect(f.bodies).toHaveLength(3);
     expect(await readFile(path, "utf8")).not.toMatch(/private|summary content|local-anthropic-test-key/);
   });
 

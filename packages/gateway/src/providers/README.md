@@ -107,8 +107,8 @@ and before worker controls, reading canonical fixed settings and the worker fact
   The allowlist is provider/model, queue role, call kind, completion timestamp (Unix ms),
   owning session or task ID, fixed outcome and fresh input/output/cache-read/cache-write
   counters. Known `cacheWrite1h` is split from total writes to derive 5m writes; absent or
-  invalid counters stay null. Error/abort replies containing only SDK-initialized zeros
-  have unknown counters, as do thrown calls. No prompts, responses, credentials, headers,
+  invalid counters stay null. Replies containing only zeros are conservatively unknown:
+  the SDK also initializes omitted usage to zero. Thrown calls have unknown counters. No prompts, responses, credentials, headers,
   arbitrary provider error text or cost estimates are stored. No ledger data is exported,
   sent to providers or exposed through wire/UI. Home supplies the source session as the
   caller and marks `summarizer`; other direct queue callers supply their explicit owner.
