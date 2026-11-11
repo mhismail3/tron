@@ -217,7 +217,7 @@ def profile_jobs(modules: dict, tracked: list[str]) -> tuple[dict, dict]:
             sources.setdefault(name, []).append(path)
     jobs, routes = {}, {}
     for key, module in declared.items():
-        unowned = [path for path in (PROFILE_HARNESS, PROFILE_TABLE) if path not in module["owned"]]
+        unowned = [path for path in (PROFILE_HARNESS, PROFILE_TABLE, PROFILE_RECEIPTS) if path not in module["owned"]]
         if unowned:
             raise VerifyError(f"{key}: iosScenarios runs a profiler this module does not own: {', '.join(unowned)}")
         classes = module["iosScenarios"]
@@ -229,20 +229,25 @@ def profile_jobs(modules: dict, tracked: list[str]) -> tuple[dict, dict]:
         for name in classes:
             if not sources.get(name):
                 raise VerifyError(f"{key}: iosScenarios class {name} has no tracked ProfilingTests source")
-            read = xctest_class(PROFILE_SOURCES, name)
-            if read is None:
-                raise VerifyError(f"{key}: the XCTest methods of {name} cannot be read, so its scenarios cannot be proven registered")
-            registered = {test.split("/")[1] for test in table.values() if test.split("/")[0] == name}
-            unregistered = [method for method in read[1] if method not in registered]
-            absent = sorted(registered - set(read[1]))
-            if unregistered or absent:
-                raise VerifyError(f"{key}: {name} disagrees with {PROFILE_TABLE} (XCTest methods without a scenario: "
-                                  f"{unregistered}; scenarios without a method: {absent})")
             files.extend(sources[name])
         group = f"ios-scenarios:{key}"
         jobs[group] = {"owner": key, "classes": list(classes)}
         routes.update({path: group for path in files})
     return jobs, routes
+
+
+def validate_profile_methods(files: list[str]) -> None:
+    table, _ = profile_table()
+    for name in sorted({ios_class(path) for path in files} - {None}):
+        read = xctest_class(PROFILE_SOURCES, name)
+        if read is None:
+            raise VerifyError(f"the XCTest methods of {name} cannot be read, so its scenarios cannot be proven registered")
+        registered = {test.split("/")[1] for test in table.values() if test.split("/")[0] == name}
+        unregistered = [method for method in read[1] if method not in registered]
+        absent = sorted(registered - set(read[1]))
+        if unregistered or absent:
+            raise VerifyError(f"{name} disagrees with {PROFILE_TABLE} (XCTest methods without a scenario: "
+                              f"{unregistered}; scenarios without a method: {absent})")
 
 
 def profile_scenario_names(files: list[str]) -> list[str]:
@@ -1310,6 +1315,10 @@ def main(argv: list[str]) -> int:
             owner_routes = {}
         for path in selection["tests"]:
             groups.setdefault(owner_routes[path] if path in owner_routes else runner_of(path, nested, mac_terminal), []).append(path)
+        if "ios" not in skip:
+            for group, files in groups.items():
+                if group.startswith("ios-scenarios:"):
+                    validate_profile_methods(files)
         selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
         shards = ios_shards(selectors, ios_method_seconds() if selectors else {})
         journey_paths = groups.get("ios-journeys", [])

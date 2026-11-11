@@ -1621,6 +1621,18 @@ class IosLaneTests(VerifyCase):
                 self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
                 self.assertIn("ProfileDashboardScenarioTests disagrees", refused.stderr)
                 self.assertIn(fragment, refused.stderr)
+        r.write(path, self.profile_class("ProfileDashboardScenarioTests", lines="#if DEBUG\n    func conditionalHelper() {}\n#endif"))
+        r.commit("a profiling class cannot be read unconditionally")
+        r.git("branch", "-f", "base")
+        r.write("README.md", "# Fixture\n\nUnrelated documentation.\n")
+        r.commit("documentation does not need a profiling compiler read")
+        documentation = r.verify("--changed", "--plan")
+        self.assertEqual(documentation.returncode, 0, documentation.stdout + documentation.stderr)
+        unrelated = r.verify("--module", "repo/alpha", "--plan")
+        self.assertEqual(unrelated.returncode, 0, unrelated.stdout + unrelated.stderr)
+        selected = r.verify("--module", "repo/profile", "--plan")
+        self.assertEqual(selected.returncode, 2, selected.stdout + selected.stderr)
+        self.assertIn("XCTest methods of ProfileDashboardScenarioTests cannot be read", selected.stderr)
 
     def test_a_profiling_declaration_must_match_the_profiler_table_and_its_owned_files(self) -> None:
         r = self.repo
@@ -1642,13 +1654,15 @@ class IosLaneTests(VerifyCase):
                 manifest.update(iosScenarios=list(self.PROFILE_CLASSES), owns=owned)
                 r.write("scripts/profile.module.json", json.dumps(manifest))
                 r.commit("restore the profiling declaration")
-        r.write("scripts/elsewhere.module.json", json.dumps({"layer": "L5", "owns": ["tron-profile-ios"]}))
-        manifest.update(owns=[name for name in owned if name != "tron-profile-ios"])
-        r.write("scripts/profile.module.json", json.dumps(manifest))
-        r.commit("the profiler moves to another module while this one declares it")
-        moved = r.verify("--changed", "--plan")
-        self.assertEqual(moved.returncode, 2, moved.stdout + moved.stderr)
-        self.assertIn("iosScenarios", moved.stderr)
+        for moved_path in ("tron-profile-ios", "tron_profile_report.py"):
+            with self.subTest(moved_path=moved_path):
+                r.write("scripts/elsewhere.module.json", json.dumps({"layer": "L5", "owns": [moved_path]}))
+                manifest.update(owns=[name for name in owned if name != moved_path])
+                r.write("scripts/profile.module.json", json.dumps(manifest))
+                r.commit("a profiler owner input moves to another module")
+                moved = r.verify("--changed", "--plan")
+                self.assertEqual(moved.returncode, 2, moved.stdout + moved.stderr)
+                self.assertIn("iosScenarios", moved.stderr)
 
     def test_ipad_only_methods_run_in_their_own_shards_on_the_worktrees_ipad_lane(self) -> None:
         """#2331: a test that skips unless on an iPad (in itself, its class's setUp or a helper it
