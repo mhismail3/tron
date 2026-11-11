@@ -6,7 +6,7 @@ import {
   type ResolvedPaths,
 } from "../kernel/pi/coding-agent.js";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
-import type { JsonValue } from "../protocol/types.js";
+import type { JsonValue, PackageInventory, PackageUpdates } from "../protocol/types.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { loadPackageProvides, type InstalledPackage } from "./package-provides.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -154,7 +154,7 @@ export class PackageService {
         packages: provides.entries,
         resources: provides.resources,
         ...(provides.diagnostic !== undefined ? { providesDiagnostic: provides.diagnostic } : {}),
-      };
+      } satisfies Omit<PackageInventory, "resources"> & { resources: ResolvedPaths };
     }));
   }
 
@@ -163,7 +163,7 @@ export class PackageService {
       const { manager } = await this.manager(cwd, false);
       const updates = await manager.checkForAvailableUpdates();
       validatePackageUpdates(updates);
-      return { updates };
+      return { updates } satisfies PackageUpdates;
     }));
   }
 
