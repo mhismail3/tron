@@ -140,10 +140,31 @@ export interface AdministrativeDrainSnapshot {
 export function decodeAdministrativeDrainSnapshot(v: unknown, p = "$"): AdministrativeDrainSnapshot {
   const o = obj(v, p);
   only(o, p, ["drainId","revision","phase","blockerCount","blockerCounts","blockers","omittedCount","suspectProjectionCount"]);
-  return { drainId: str(own(o, "drainId"), p + ".drainId"), revision: num(own(o, "revision"), p + ".revision"), phase: decodeAdministrativeDrainPhase(own(o, "phase"), p + ".phase"), blockerCount: num(own(o, "blockerCount"), p + ".blockerCount"), blockerCounts: dict(own(o, "blockerCounts"), p + ".blockerCounts", (x, q) => num(x, q), decodeAdministrativeDrainBlockerCategory), blockers: seq(own(o, "blockers"), p + ".blockers", (x, q) => decodeAdministrativeDrainBlockerSummary(x, q)), omittedCount: num(own(o, "omittedCount"), p + ".omittedCount"), suspectProjectionCount: num(own(o, "suspectProjectionCount"), p + ".suspectProjectionCount") };
+  return { drainId: str(own(o, "drainId"), p + ".drainId"), revision: int(own(o, "revision"), p + ".revision"), phase: decodeAdministrativeDrainPhase(own(o, "phase"), p + ".phase"), blockerCount: int(own(o, "blockerCount"), p + ".blockerCount"), blockerCounts: dict(own(o, "blockerCounts"), p + ".blockerCounts", (x, q) => int(x, q), decodeAdministrativeDrainBlockerCategory), blockers: seq(own(o, "blockers"), p + ".blockers", (x, q) => decodeAdministrativeDrainBlockerSummary(x, q)), omittedCount: int(own(o, "omittedCount"), p + ".omittedCount"), suspectProjectionCount: int(own(o, "suspectProjectionCount"), p + ".suspectProjectionCount") };
 }
 export function encodeAdministrativeDrainSnapshot(v: AdministrativeDrainSnapshot): string {
   return "{" + (',"drainId":' + JSON.stringify(v.drainId) + ',"revision":' + encNum(v.revision) + ',"phase":' + encodeAdministrativeDrainPhase(v.phase) + ',"blockerCount":' + encNum(v.blockerCount) + ',"blockerCounts":' + encDict(v.blockerCounts, (x) => encNum(x)) + ',"blockers":' + "[" + v.blockers.map((x) => encodeAdministrativeDrainBlockerSummary(x)).join(",") + "]" + ',"omittedCount":' + encNum(v.omittedCount) + ',"suspectProjectionCount":' + encNum(v.suspectProjectionCount)).slice(1) + "}";
+}
+/**
+ * `gateway.restart`: whether the Gateway restarts now or after its administrative drain settles.
+ * A restart-now request while a drain is in progress answers only the flags and the drain.
+ */
+export interface GatewayRestartResponse {
+  restarting: boolean;
+  scheduled: boolean;
+  restartNow?: boolean;
+  activeSessionIds?: string[];
+  drainId?: string;
+  drainRevision?: number;
+  drain: AdministrativeDrainSnapshot;
+}
+export function decodeGatewayRestartResponse(v: unknown, p = "$"): GatewayRestartResponse {
+  const o = obj(v, p);
+  only(o, p, ["restarting","scheduled","restartNow","activeSessionIds","drainId","drainRevision","drain"]);
+  return { restarting: bool(own(o, "restarting"), p + ".restarting"), scheduled: bool(own(o, "scheduled"), p + ".scheduled"), ...(own(o, "restartNow") === undefined ? {} : { restartNow: bool(own(o, "restartNow"), p + ".restartNow") }), ...(own(o, "activeSessionIds") === undefined ? {} : { activeSessionIds: seq(own(o, "activeSessionIds"), p + ".activeSessionIds", (x, q) => str(x, q)) }), ...(own(o, "drainId") === undefined ? {} : { drainId: str(own(o, "drainId"), p + ".drainId") }), ...(own(o, "drainRevision") === undefined ? {} : { drainRevision: int(own(o, "drainRevision"), p + ".drainRevision") }), drain: decodeAdministrativeDrainSnapshot(own(o, "drain"), p + ".drain") };
+}
+export function encodeGatewayRestartResponse(v: GatewayRestartResponse): string {
+  return "{" + (',"restarting":' + JSON.stringify(v.restarting) + ',"scheduled":' + JSON.stringify(v.scheduled) + (v.restartNow === undefined ? "" : ',"restartNow":' + JSON.stringify(v.restartNow)) + (v.activeSessionIds === undefined ? "" : ',"activeSessionIds":' + "[" + v.activeSessionIds.map((x) => JSON.stringify(x)).join(",") + "]") + (v.drainId === undefined ? "" : ',"drainId":' + JSON.stringify(v.drainId)) + (v.drainRevision === undefined ? "" : ',"drainRevision":' + encNum(v.drainRevision)) + ',"drain":' + encodeAdministrativeDrainSnapshot(v.drain)).slice(1) + "}";
 }
 export interface SessionSummary {
   id: string;

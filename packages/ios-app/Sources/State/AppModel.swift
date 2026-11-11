@@ -2125,10 +2125,9 @@ extension AppModel {
               let admission = lifecycle.generationAdmission else { return nil }
         try requireLifecycle(admission)
         do {
-            let snapshot: AdministrativeDrainSnapshot = try await client.request(
-                "gateway.drain.status",
-                EmptyParams()
-            )
+            let snapshot = try GatewayResponseDecoding.decode(
+                try await client.requestValue("gateway.drain.status", EmptyParams()),
+                method: "gateway.drain.status", AdministrativeDrainSnapshot.decode)
             try requireLifecycle(admission)
             return snapshot
         } catch let failure as GatewayFailure where failure.code == "not_found" || failure.code == "unsupported" {
@@ -3792,9 +3791,10 @@ extension AppModel {
         let commandID = uuidSource.next().uuidString
         let response: GatewayRestartResponse
         do {
-            response = try await mutationExecutor.perform(method: "gateway.restart", commandID: commandID) {
-                try await client.request("gateway.restart", Params(commandId: commandID, restartNow: restartNow ? true : nil))
-            }
+            response = try GatewayResponseDecoding.decode(
+                try await mutationExecutor.performValue(method: "gateway.restart", commandID: commandID) {
+                    try await client.requestValue("gateway.restart", Params(commandId: commandID, restartNow: restartNow ? true : nil))
+                }, method: "gateway.restart", GatewayRestartResponse.decode)
         } catch {
             guard admitsLifecycle(admission) else { throw CancellationError() }
             throw error
@@ -3802,10 +3802,8 @@ extension AppModel {
         try requireLifecycle(admission)
         if response.restarting && !response.scheduled { lifecycle.beginRestarting() }
         if response.scheduled {
-            let blockerCount = response.drain?.blockerCount
-            let detail = blockerCount.map {
-                " after \($0) accepted operation\($0 == 1 ? " finishes" : "s finish")"
-            } ?? " after accepted operations finish"
+            let blockerCount = response.drain.blockerCount
+            let detail = " after \(blockerCount) accepted operation\(blockerCount == 1 ? " finishes" : "s finish")"
             postNotice(
                 "Gateway restart scheduled\(detail).",
                 replacing: .gatewayRestart,

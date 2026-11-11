@@ -35,6 +35,7 @@ package struct WireMap<T: Hashable>: Hashable {
   package init(_ entries: [(String, T)]) { self.entries = wJsOrder(entries) }
   package static func == (a: WireMap, b: WireMap) -> Bool { a.entries.count == b.entries.count && zip(a.entries, b.entries).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 } }
   package func hash(into h: inout Hasher) { for (k, v) in entries { h.combine(k); h.combine(v) } }
+  package subscript(key: String) -> T? { entries.first { $0.0 == key }?.1 }
   package func encode(_ f: (T) -> String) -> String { "{" + entries.map { wEscape($0.0) + ":" + f($0.1) }.joined(separator: ",") + "}" }
 }
 extension WireMap: Sendable where T: Sendable {}
@@ -224,6 +225,201 @@ package indirect enum JsonValue: Hashable, Sendable {
     case .array(let x): return "[" + x.map { $0.encode() }.joined(separator: ",") + "]"
     case .object(let x): return x.encode { $0.encode() }
     }
+  }
+}
+package enum AdministrativeDrainPhase: String, CaseIterable, Hashable, Sendable {
+  case idle = "idle"
+  case preparing = "preparing"
+  case waiting = "waiting"
+  case complete = "complete"
+  case failed = "failed"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> AdministrativeDrainPhase {
+    switch v {
+    case .string("idle"): return .idle
+    case .string("preparing"): return .preparing
+    case .string("waiting"): return .waiting
+    case .string("complete"): return .complete
+    case .string("failed"): return .failed
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .idle: return "\"idle\""
+    case .preparing: return "\"preparing\""
+    case .waiting: return "\"waiting\""
+    case .complete: return "\"complete\""
+    case .failed: return "\"failed\""
+    }
+  }
+}
+package enum AdministrativeDrainBlockerCategory: String, CaseIterable, Hashable, Sendable {
+  case slotAdmission = "slot-admission"
+  case promptPreflight = "prompt-preflight"
+  case foregroundAgentOperation = "foreground-agent-operation"
+  case queuedMutation = "queued-mutation"
+  case compactionExport = "compaction-export"
+  case detachedExtensionRun = "detached-extension-run"
+  case terminalReceiptPersistence = "terminal-receipt-persistence"
+  case rpcMutation = "rpc-mutation"
+  case extensionCommandPromptUi = "extension-command-prompt-ui"
+  case administrativeProviderPackageOperation = "administrative-provider-package-operation"
+  case providerLogin = "provider-login"
+  case automationDispatch = "automation-dispatch"
+  case automationTerminalPersistence = "automation-terminal-persistence"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> AdministrativeDrainBlockerCategory {
+    switch v {
+    case .string("slot-admission"): return .slotAdmission
+    case .string("prompt-preflight"): return .promptPreflight
+    case .string("foreground-agent-operation"): return .foregroundAgentOperation
+    case .string("queued-mutation"): return .queuedMutation
+    case .string("compaction-export"): return .compactionExport
+    case .string("detached-extension-run"): return .detachedExtensionRun
+    case .string("terminal-receipt-persistence"): return .terminalReceiptPersistence
+    case .string("rpc-mutation"): return .rpcMutation
+    case .string("extension-command-prompt-ui"): return .extensionCommandPromptUi
+    case .string("administrative-provider-package-operation"): return .administrativeProviderPackageOperation
+    case .string("provider-login"): return .providerLogin
+    case .string("automation-dispatch"): return .automationDispatch
+    case .string("automation-terminal-persistence"): return .automationTerminalPersistence
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .slotAdmission: return "\"slot-admission\""
+    case .promptPreflight: return "\"prompt-preflight\""
+    case .foregroundAgentOperation: return "\"foreground-agent-operation\""
+    case .queuedMutation: return "\"queued-mutation\""
+    case .compactionExport: return "\"compaction-export\""
+    case .detachedExtensionRun: return "\"detached-extension-run\""
+    case .terminalReceiptPersistence: return "\"terminal-receipt-persistence\""
+    case .rpcMutation: return "\"rpc-mutation\""
+    case .extensionCommandPromptUi: return "\"extension-command-prompt-ui\""
+    case .administrativeProviderPackageOperation: return "\"administrative-provider-package-operation\""
+    case .providerLogin: return "\"provider-login\""
+    case .automationDispatch: return "\"automation-dispatch\""
+    case .automationTerminalPersistence: return "\"automation-terminal-persistence\""
+    }
+  }
+}
+package enum AdministrativeDrainBlockerSummaryState: String, CaseIterable, Hashable, Sendable {
+  case active = "active"
+  case settling = "settling"
+  case suspect = "suspect"
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> AdministrativeDrainBlockerSummaryState {
+    switch v {
+    case .string("active"): return .active
+    case .string("settling"): return .settling
+    case .string("suspect"): return .suspect
+    default: throw WireError(path: p, message: "unknown value")
+    }
+  }
+  package func encode() -> String {
+    switch self {
+    case .active: return "\"active\""
+    case .settling: return "\"settling\""
+    case .suspect: return "\"suspect\""
+    }
+  }
+}
+package struct AdministrativeDrainBlockerSummary: Hashable, Sendable {
+  package let id: String
+  package let category: AdministrativeDrainBlockerCategory
+  package let sessionId: String?
+  package let method: String?
+  package let state: AdministrativeDrainBlockerSummaryState
+  package let admittedAt: String?
+  package let progressAt: String?
+  package let ageMs: Double?
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> AdministrativeDrainBlockerSummary {
+    let o = try wObj(v, p)
+    let f_id: String = wAbsent(o.value("id")) ? "" : try wStr(o.value("id")!, p + ".id")
+    let f_category: AdministrativeDrainBlockerCategory = wAbsent(o.value("category")) ? try wMissing(p + ".category") : try AdministrativeDrainBlockerCategory.decode(o.value("category")!, p + ".category")
+    let f_sessionId: String? = wAbsent(o.value("sessionId")) ? nil : try wStr(o.value("sessionId")!, p + ".sessionId")
+    let f_method: String? = wAbsent(o.value("method")) ? nil : try wStr(o.value("method")!, p + ".method")
+    let f_state: AdministrativeDrainBlockerSummaryState = wAbsent(o.value("state")) ? try wMissing(p + ".state") : try AdministrativeDrainBlockerSummaryState.decode(o.value("state")!, p + ".state")
+    let f_admittedAt: String? = wAbsent(o.value("admittedAt")) ? nil : try wStr(o.value("admittedAt")!, p + ".admittedAt")
+    let f_progressAt: String? = wAbsent(o.value("progressAt")) ? nil : try wStr(o.value("progressAt")!, p + ".progressAt")
+    let f_ageMs: Double? = wAbsent(o.value("ageMs")) ? nil : try wNum(o.value("ageMs")!, p + ".ageMs")
+    return AdministrativeDrainBlockerSummary(id: f_id, category: f_category, sessionId: f_sessionId, method: f_method, state: f_state, admittedAt: f_admittedAt, progressAt: f_progressAt, ageMs: f_ageMs)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"id\":" + wEscape(self.id)
+    s += ",\"category\":" + self.category.encode()
+    s += (self.sessionId == nil ? "" : ",\"sessionId\":" + wEscape(self.sessionId!))
+    s += (self.method == nil ? "" : ",\"method\":" + wEscape(self.method!))
+    s += ",\"state\":" + self.state.encode()
+    s += (self.admittedAt == nil ? "" : ",\"admittedAt\":" + wEscape(self.admittedAt!))
+    s += (self.progressAt == nil ? "" : ",\"progressAt\":" + wEscape(self.progressAt!))
+    s += (self.ageMs == nil ? "" : ",\"ageMs\":" + wFormat(self.ageMs!))
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct AdministrativeDrainSnapshot: Hashable, Sendable {
+  package let drainId: String
+  package let revision: Int
+  package let phase: AdministrativeDrainPhase
+  package let blockerCount: Int
+  package let blockerCounts: WireMap<Int>
+  package let blockers: [AdministrativeDrainBlockerSummary]
+  package let omittedCount: Int
+  package let suspectProjectionCount: Int
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> AdministrativeDrainSnapshot {
+    let o = try wObj(v, p)
+    let f_drainId: String = wAbsent(o.value("drainId")) ? "" : try wStr(o.value("drainId")!, p + ".drainId")
+    let f_revision: Int = wAbsent(o.value("revision")) ? 0 : try wInt(o.value("revision")!, p + ".revision", nat: false)
+    let f_phase: AdministrativeDrainPhase = wAbsent(o.value("phase")) ? try wMissing(p + ".phase") : try AdministrativeDrainPhase.decode(o.value("phase")!, p + ".phase")
+    let f_blockerCount: Int = wAbsent(o.value("blockerCount")) ? 0 : try wInt(o.value("blockerCount")!, p + ".blockerCount", nat: false)
+    let f_blockerCounts: WireMap<Int> = wAbsent(o.value("blockerCounts")) ? WireMap([]) : try wDict(o.value("blockerCounts")!, p + ".blockerCounts", key: { k, q in _ = try AdministrativeDrainBlockerCategory.decode(.string(k), q) }) { x, q in try wInt(x, q, nat: false) }
+    let f_blockers: [AdministrativeDrainBlockerSummary] = wAbsent(o.value("blockers")) ? [] : try wSeq(o.value("blockers")!, p + ".blockers") { x, q in try AdministrativeDrainBlockerSummary.decode(x, q) }
+    let f_omittedCount: Int = wAbsent(o.value("omittedCount")) ? 0 : try wInt(o.value("omittedCount")!, p + ".omittedCount", nat: false)
+    let f_suspectProjectionCount: Int = wAbsent(o.value("suspectProjectionCount")) ? 0 : try wInt(o.value("suspectProjectionCount")!, p + ".suspectProjectionCount", nat: false)
+    return AdministrativeDrainSnapshot(drainId: f_drainId, revision: f_revision, phase: f_phase, blockerCount: f_blockerCount, blockerCounts: f_blockerCounts, blockers: f_blockers, omittedCount: f_omittedCount, suspectProjectionCount: f_suspectProjectionCount)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"drainId\":" + wEscape(self.drainId)
+    s += ",\"revision\":" + String(self.revision)
+    s += ",\"phase\":" + self.phase.encode()
+    s += ",\"blockerCount\":" + String(self.blockerCount)
+    s += ",\"blockerCounts\":" + self.blockerCounts.encode { String($0) }
+    s += ",\"blockers\":" + "[" + self.blockers.map { $0.encode() }.joined(separator: ",") + "]"
+    s += ",\"omittedCount\":" + String(self.omittedCount)
+    s += ",\"suspectProjectionCount\":" + String(self.suspectProjectionCount)
+    return "{" + String(s.dropFirst()) + "}"
+  }
+}
+package struct GatewayRestartResponse: Hashable, Sendable {
+  package let restarting: Bool
+  package let scheduled: Bool
+  package let restartNow: Bool?
+  package let activeSessionIds: [String]?
+  package let drainId: String?
+  package let drainRevision: Int?
+  package let drain: AdministrativeDrainSnapshot
+  package static func decode(_ v: WireJSON, _ p: String = "$") throws -> GatewayRestartResponse {
+    let o = try wObj(v, p)
+    let f_restarting: Bool = wAbsent(o.value("restarting")) ? false : try wBool(o.value("restarting")!, p + ".restarting")
+    let f_scheduled: Bool = wAbsent(o.value("scheduled")) ? false : try wBool(o.value("scheduled")!, p + ".scheduled")
+    let f_restartNow: Bool? = wAbsent(o.value("restartNow")) ? nil : try wBool(o.value("restartNow")!, p + ".restartNow")
+    let f_activeSessionIds: [String]? = wAbsent(o.value("activeSessionIds")) ? nil : try wSeq(o.value("activeSessionIds")!, p + ".activeSessionIds") { x, q in try wStr(x, q) }
+    let f_drainId: String? = wAbsent(o.value("drainId")) ? nil : try wStr(o.value("drainId")!, p + ".drainId")
+    let f_drainRevision: Int? = wAbsent(o.value("drainRevision")) ? nil : try wInt(o.value("drainRevision")!, p + ".drainRevision", nat: false)
+    let f_drain: AdministrativeDrainSnapshot = wAbsent(o.value("drain")) ? try wMissing(p + ".drain") : try AdministrativeDrainSnapshot.decode(o.value("drain")!, p + ".drain")
+    return GatewayRestartResponse(restarting: f_restarting, scheduled: f_scheduled, restartNow: f_restartNow, activeSessionIds: f_activeSessionIds, drainId: f_drainId, drainRevision: f_drainRevision, drain: f_drain)
+  }
+  package func encode() -> String {
+    var s = ""
+    s += ",\"restarting\":" + (self.restarting ? "true" : "false")
+    s += ",\"scheduled\":" + (self.scheduled ? "true" : "false")
+    s += (self.restartNow == nil ? "" : ",\"restartNow\":" + (self.restartNow! ? "true" : "false"))
+    s += (self.activeSessionIds == nil ? "" : ",\"activeSessionIds\":" + "[" + self.activeSessionIds!.map { wEscape($0) }.joined(separator: ",") + "]")
+    s += (self.drainId == nil ? "" : ",\"drainId\":" + wEscape(self.drainId!))
+    s += (self.drainRevision == nil ? "" : ",\"drainRevision\":" + String(self.drainRevision!))
+    s += ",\"drain\":" + self.drain.encode()
+    return "{" + String(s.dropFirst()) + "}"
   }
 }
 package enum ExtensionRunLifecycleState: String, CaseIterable, Hashable, Sendable {

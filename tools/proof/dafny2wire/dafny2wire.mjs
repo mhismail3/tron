@@ -308,6 +308,7 @@ package struct WireMap<T: Hashable>: Hashable {
   package init(_ entries: [(String, T)]) { self.entries = wJsOrder(entries) }
   package static func == (a: WireMap, b: WireMap) -> Bool { a.entries.count == b.entries.count && zip(a.entries, b.entries).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 } }
   package func hash(into h: inout Hasher) { for (k, v) in entries { h.combine(k); h.combine(v) } }
+  package subscript(key: String) -> T? { entries.first { $0.0 == key }?.1 }
   package func encode(_ f: (T) -> String) -> String { "{" + entries.map { wEscape($0.0) + ":" + f($0.1) }.joined(separator: ",") + "}" }
 }
 extension WireMap: Sendable where T: Sendable {}
