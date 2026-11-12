@@ -10,7 +10,7 @@ struct ProcessHistorySheet: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @PresentationState private var store: SessionProcessHistoryStore?
     @PresentationState private var generation = 0
-    @PresentationState private var selectedProcess: SessionProcessActivity?
+    @PresentationState private var selectedProcess: PresentedProcessActivity?
     @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
@@ -63,14 +63,14 @@ struct ProcessHistorySheet: View {
         }
     }
 
-    private var mountedProcesses: [SessionProcessActivity] {
+    private var mountedProcesses: [PresentedProcessActivity] {
         SessionProcessAdmissionPolicy.admitted(
             model.sessionProcessPresentation(for: sessionID)?.activities ?? []
         )
     }
 
     private struct HistoryRow: Identifiable {
-        let process: SessionProcessActivity
+        let process: PresentedProcessActivity
         let position: Int
         var id: String { process.id }
     }
@@ -190,7 +190,7 @@ enum SessionProcessRowTone: Equatable, Sendable {
 }
 
 enum SessionProcessRowPresentation {
-    @MainActor static func listContent(_ process: SessionProcessActivity, now: Date = .now,
+    @MainActor static func listContent(_ process: PresentedProcessActivity, now: Date = .now,
                                        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TronListRowContent {
         let output = (outputPreview(process.outputTail)?.text ?? "")
             .split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
@@ -215,7 +215,7 @@ enum SessionProcessRowPresentation {
             accessibilityValueHoldsDetails: true)
     }
 
-    @MainActor static func activityContent(_ process: SessionProcessActivity, now: Date = .now,
+    @MainActor static func activityContent(_ process: PresentedProcessActivity, now: Date = .now,
                                            uptime: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TronListRowContent {
         var content = listContent(process, now: now, uptime: uptime)
         if let status = content.status {
@@ -236,7 +236,7 @@ enum SessionProcessRowPresentation {
         return content
     }
 
-    private static func metadataLine(for process: SessionProcessActivity, relativeTo now: Date? = nil) -> String? {
+    private static func metadataLine(for process: PresentedProcessActivity, relativeTo now: Date? = nil) -> String? {
         let parts = [
             process.model.map { ModelDisplayFormatting.model($0.split(separator: "/").last.map(String.init) ?? $0) },
             process.thinking.map { "\($0.capitalized) thinking" },
@@ -245,7 +245,7 @@ enum SessionProcessRowPresentation {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private static func countsLine(for process: SessionProcessActivity) -> String? {
+    private static func countsLine(for process: PresentedProcessActivity) -> String? {
         let parts = [
             process.toolCount.map { countLabel($0, singular: "tool") },
             process.turnCount.map { countLabel($0, singular: "turn") },
@@ -293,7 +293,7 @@ enum SessionProcessRowPresentation {
     }
 
     static func startedText(
-        for process: SessionProcessActivity,
+        for process: PresentedProcessActivity,
         relativeTo now: Date = .now,
         locale: Locale = .current,
         timeZone: TimeZone = .current
@@ -303,7 +303,7 @@ enum SessionProcessRowPresentation {
     }
 
     static func elapsedMilliseconds(
-        for process: SessionProcessActivity,
+        for process: PresentedProcessActivity,
         at now: Date = .now,
         uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) -> Int? {
@@ -327,7 +327,7 @@ enum SessionProcessRowPresentation {
         "\(count) \(count == 1 ? singular : "\(singular)s")"
     }
 
-    static func latestAction(for process: SessionProcessActivity) -> String? {
+    static func latestAction(for process: PresentedProcessActivity) -> String? {
         let tool = normalized(process.currentTool)
         let path = normalized(process.currentPathBasename)
         switch (tool, path) {
@@ -380,7 +380,7 @@ private struct ReadOnlySubagentOpenIdentity: Hashable {
 
 struct ReadOnlySubagentSessionSheet: View {
     let parentSessionID: String
-    let process: SessionProcessActivity
+    let process: PresentedProcessActivity
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -474,14 +474,14 @@ struct ReadOnlySubagentSessionSheet: View {
         )
     }
 
-    private var mountedActivity: SessionProcessActivity? {
+    private var mountedActivity: PresentedProcessActivity? {
         SessionProcessProjection.mountedActivity(
             selected: process,
             activities: model.sessionProcessPresentation(for: parentSessionID)?.activities ?? []
         )
     }
 
-    private var currentActivity: SessionProcessActivity {
+    private var currentActivity: PresentedProcessActivity {
         mountedActivity ?? store?.liveActivity ?? process
     }
 

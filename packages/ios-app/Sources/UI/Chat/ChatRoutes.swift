@@ -41,7 +41,7 @@ struct ChatRoutes: ViewModifier {
     @Binding var activityPresented: Bool
     let extensionContent: ExtensionRetainedContent
     let omittedExtensionContentCount: Int
-    let processActivities: [SessionProcessActivity]
+    let processActivities: [PresentedProcessActivity]
     @Binding var interaction: ExtensionInteraction?
     let onInteractionClosed: (ExtensionInteraction) -> Void
     @Binding var filesPresented: Bool

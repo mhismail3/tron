@@ -3,7 +3,7 @@ import Observation
 import TronMobileCore
 
 struct SessionProcessHistoryPage: Codable, Hashable, Sendable {
-    let activities: [SessionProcessActivity]
+    let activities: [PresentedProcessActivity]
     let historyRevision: String
     let nextCursor: String?
     let omissions: SessionProcessOmissions?
@@ -15,7 +15,7 @@ struct SessionProcessHistoryPage: Codable, Hashable, Sendable {
         guard raw.count <= 50 else {
             throw DecodingError.dataCorruptedError(forKey: .activities, in: values, debugDescription: "Process history page exceeds 50 rows")
         }
-        let decoded = raw.compactMap { try? $0.decode(SessionProcessActivity.self) }
+        let decoded = raw.compactMap { try? $0.decode(PresentedProcessActivity.self) }
         guard decoded.count == raw.count else {
             throw DecodingError.dataCorruptedError(forKey: .activities, in: values, debugDescription: "Malformed process history row")
         }
@@ -60,15 +60,15 @@ struct SessionProcessHistoryPage: Codable, Hashable, Sendable {
 }
 
 struct SessionProcessHistoryDetail: Codable, Hashable, Sendable {
-    let activity: SessionProcessActivity
+    let activity: PresentedProcessActivity
 }
 
 enum SessionProcessHistoryProjection {
     static func appending(
-        _ existing: [SessionProcessActivity],
-        _ incoming: [SessionProcessActivity],
+        _ existing: [PresentedProcessActivity],
+        _ incoming: [PresentedProcessActivity],
         limit: Int
-    ) -> [SessionProcessActivity] {
+    ) -> [PresentedProcessActivity] {
         guard limit > 0 else { return [] }
         var result = Array(existing.prefix(limit))
         var seen = Set(result.map(\.processId))
@@ -103,9 +103,9 @@ final class SessionProcessHistoryStore {
     private(set) var sessionID: String?
     private(set) var presentationGeneration: Int?
     private(set) var historyRevision: String?
-    private(set) var processes: [SessionProcessActivity] = []
+    private(set) var processes: [PresentedProcessActivity] = []
     private var retainedPageCount = 0
-    private(set) var detail: SessionProcessActivity?
+    private(set) var detail: PresentedProcessActivity?
     private(set) var detailGeneration: Int?
     private(set) var detailRouteID: String?
     private(set) var nextCursor: String?
