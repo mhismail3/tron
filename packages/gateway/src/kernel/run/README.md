@@ -229,7 +229,10 @@ slots, including Home. Registry admission captures their initial inputs; retirem
 removes their state and unused project watches; disposal closes watches and joins
 in-flight refreshes. Global agent resources, `agent/npm`, `~/.agents/skills`, each
 live project's `.pi`, SDK-selected context files (including new ancestor files),
-and resolved external resource paths and symlink targets are watched. Events settle for 150 ms; busy slots wait for their next idle edge.
+and resolved external resource paths and symlink targets are watched. Only `.pi`
+and enabled resource directories use recursive watches; context files use exact-name
+parent watches. Discovery never broadens an ancestor or project root into a recursive
+whole-tree watch. Events settle for 150 ms; busy slots wait for their next idle edge.
 
 The SDK package resolver runs read-only with missing sources explicitly skipped;
 watching never installs a package. It supplies the same enabled resource paths as

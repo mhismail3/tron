@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { DefaultPackageManager, loadProjectContextFiles, loadSkills, SettingsManager } from "../pi/coding-agent.js";
 import { GatewayError } from "../../errors.js";
 import { requestLayers } from "./request-record.js";
@@ -18,7 +18,7 @@ interface PendingResource {
   applied: number;
   idles: number;
   lastAttemptIdle: number;
-  paths: Set<string>;
+  paths: Map<string, "file" | "directory">;
   ready: boolean;
   draining?: Promise<void> | undefined;
 }
@@ -42,7 +42,7 @@ export class ResourceFreshness {
 
   async attach(slot: RuntimeSlot): Promise<void> {
     if (this.closed) return;
-    const state: PendingResource = { digest: "", wanted: 0, applied: 0, idles: 0, lastAttemptIdle: 0, paths: new Set(), ready: false };
+    const state: PendingResource = { digest: "", wanted: 0, applied: 0, idles: 0, lastAttemptIdle: 0, paths: new Map(), ready: false };
     this.states.set(slot, state);
     this.arm();
     try { state.digest = await this.digest(slot, state); this.arm(); }
@@ -91,11 +91,17 @@ export class ResourceFreshness {
     add(this.options.agentDir, name => AGENT_INPUTS.has(name.split(/[\\/]/)[0]!) || (!name.includes("/") && /\.md$/i.test(name)));
     add(join(homedir(), ".agents"), name => name.split(/[\\/]/)[0] === "skills");
     for (const [slot, state] of this.states) {
-      add(slot.projectDir, name => name.split(/[\\/]/)[0] === ".pi" || (!name.includes("/") && /\.md$/i.test(name)));
-      if (!slot.liveProfile().resources.noContextFiles) for (const directory of ancestors(slot.cwd)) add(directory, name => /\.md$/i.test(name), false);
-      for (const path of state.paths) {
-        if ([...roots].some(([root, { relevant }]) => path.startsWith(`${root}/`) && relevant(path.slice(root.length + 1)))) continue;
-        add(path, () => true);
+      const profile = slot.liveProfile();
+      if (profile.projectSettings) {
+        add(slot.projectDir, name => name === ".pi", false);
+        add(join(slot.projectDir, ".pi"), () => true);
+      }
+      if (!profile.resources.noContextFiles) for (const directory of ancestors(slot.cwd)) add(directory, name => !name.includes("/") && /\.md$/i.test(name), false);
+      for (const [path, kind] of state.paths) {
+        if ([...roots].some(([root, { relevant, recursive }]) => path.startsWith(`${root}/`)
+          && (recursive || !path.slice(root.length + 1).includes("/")) && relevant(path.slice(root.length + 1)))) continue;
+        if (kind === "directory") add(path, () => true);
+        else add(dirname(path), name => name === basename(path), false);
       }
     }
     this.watchInputs = roots;
@@ -173,13 +179,13 @@ export class ResourceFreshness {
       { projectTrusted: slot.runtime.session.settingsManager.isProjectTrusted() });
     const manager = new DefaultPackageManager({ cwd: slot.cwd, projectDir: slot.projectDir, agentDir, settingsManager: settings });
     const resolved = await manager.resolve(async () => "skip");
-    const paths = new Set<string>();
+    const paths = new Map<string, "file" | "directory">();
     const packages = new Set<string>();
     const watchPath = async (path: string): Promise<void> => {
       if (path.startsWith("builtin:")) return;
       for (const candidate of new Set([path, await realpath(path).catch(() => path)])) {
         const directory = await stat(candidate).then(info => info.isDirectory(), () => false);
-        paths.add(directory ? candidate : dirname(candidate));
+        paths.set(candidate, directory ? "directory" : "file");
       }
     };
     for (const kind of ["skills", "prompts", "extensions"] as const) {
@@ -224,7 +230,7 @@ async function file(path: string, inputs: Array<[string, unknown]>): Promise<voi
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 }
 
-async function files(root: string, inputs: Array<[string, unknown]>, watched: Set<string>, seen = new Set<string>()): Promise<void> {
+async function files(root: string, inputs: Array<[string, unknown]>, watched: Map<string, "file" | "directory">, seen = new Set<string>()): Promise<void> {
   const canonical = await realpath(root).catch(() => root);
   if (seen.has(canonical)) return;
   seen.add(canonical);
@@ -242,7 +248,7 @@ async function files(root: string, inputs: Array<[string, unknown]>, watched: Se
     if (!target) continue;
     const info = entry.isSymbolicLink() ? await stat(target).catch(() => undefined) : entry;
     if (!info) continue;
-    if (entry.isSymbolicLink()) watched.add(info.isDirectory() ? target : dirname(target));
+    if (entry.isSymbolicLink()) watched.set(target, info.isDirectory() ? "directory" : "file");
     if (info.isDirectory()) await files(path, inputs, watched, seen);
     else if (info.isFile()) await file(path, inputs);
   }

@@ -161,6 +161,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
   it("refreshes Home and ordinary sessions, skips unchanged rendered inputs, and watches project resources", async () => {
     const { f, home, commands } = await liveHome();
     const chat = await f.registry.create(f.cwd);
+    await mkdir(join(f.cwd, "unrelated"));
     const reloads = () => f.events.filter(event => event.topic === "session.resourcesChanged").length;
     await writeSkill(f.agentDir, "shared-skill", "Shared live skill", "FIRST BODY");
     await waitFor(async () => (await commands(home.id)).some(command => command.name === "skill:shared-skill")
@@ -206,6 +207,11 @@ describe("Home's global skills and prompt templates follow the agent directory l
       await writeFile(join(f.root, "AGENTS.override.md"), "FRESH_ANCESTOR_RULE\n");
       await waitFor(() => chat.runtime.session.systemPrompt.includes("FRESH_ANCESTOR_RULE"), "new ancestor context refreshes");
     } finally { releaseLease(); }
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const beforeUnrelated = f.signals.filter(record => record.outcome === "resources-reload").length;
+    await writeFile(join(f.cwd, "unrelated", "activity.json"), "{}");
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(f.signals.filter(record => record.outcome === "resources-reload")).toHaveLength(beforeUnrelated);
     await mkdir(join(f.agentDir, "prompts"), { recursive: true });
     await symlink(join(f.root, "missing-prompt"), join(f.agentDir, "prompts", "broken.md"));
     await writePrompt(f.agentDir, "after-link", "Survives dangling resource link", "BODY");
