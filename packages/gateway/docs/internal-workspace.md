@@ -42,7 +42,7 @@ never repaired automatically. A safe existing root is adopted without scanning o
 changing its contents; child folders are created only when needed by their owner.
 
 The service holds the refreshed cooperative `proper-lockfile` lock on
-`gateway/workspace-state` until disposal; crashed locks expire through that protocol.
+`state/workspace-state` until disposal; crashed locks expire through that protocol.
 Initialization evidence is exactly `{version:1}` in `initialized.json`; each feature
 uses its own strict `<feature>-initialized.json`. Secure bounded reads and durable
 atomic publication protect these Gateway records, not arbitrary skill files.
@@ -83,6 +83,6 @@ a presentation snapshot is not an editable canonical document.
 The delegated provider's `PI_SUBAGENTS_TEMP_ROOT` remains
 `<tronHome>/state/subagents`, set before extension loading. Its run lifecycle,
 retention and cleanup remain provider-owned; workspace tmp is not a replacement.
-`internal/machine-group-id` remains opaque physical-machine identity;
-`internal/mac/wizard-state.json` remains wrapper-owned progress, with `.onboarded`
+`state/machine-group-id` remains opaque physical-machine identity;
+`state/mac/wizard-state.json` remains wrapper-owned progress, with `.onboarded`
 the sole completion authority.

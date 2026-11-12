@@ -182,25 +182,25 @@ Knowledge lock.
 
 | Store (under the Tron home) | Owner | Lock |
 |---|---|---|
-| `agent/settings.json`, `gateway/settings/` (typed values and permanent change record) | settings model and change path | `gateway/admin` store-settings |
-| `gateway/devices.json`, `local-auth.json`, `enrollment.json` | `DeviceStore` | `gateway/security` store-devices |
-| `gateway/command-receipts/` | `CommandReceiptStore` | `gateway/transport` store-command-receipts |
-| `gateway/session-archive.json`, `session-attention.json` | archive and attention stores | `gateway/session-catalog` |
-| `gateway/runtime-markers/` | `RunMarkerStore` | `gateway/run` store-run-markers |
-| `gateway/notifications.json` (grants, inbox, policy) | `NotificationGrantStore` | `gateway/notifications` |
-| `gateway/model-recents.json` | `RecentModelStore` | `gateway/providers` |
-| `gateway/automations/` | `AutomationStore` | `gateway/automations` |
-| `gateway/uploads/`, `upload-objects/`, `upload-bodies/` | `UploadStore` | `gateway/machine` (live) |
+| `agent/settings.json`, `state/settings/` (typed values and permanent change record) | settings model and change path | `gateway/admin` store-settings |
+| `state/devices.json`, `state/local-auth.json`, `state/enrollment.json` | `DeviceStore` | `gateway/security` store-devices |
+| `state/command-receipts/` | `CommandReceiptStore` | `gateway/transport` store-command-receipts |
+| `state/session-archive.json`, `state/session-attention.json` | archive and attention stores | `gateway/session-catalog` |
+| `state/runtime-markers/` | `RunMarkerStore` | `gateway/run` store-run-markers |
+| `state/notifications.json` (grants, inbox, policy) | `NotificationGrantStore` | `gateway/notifications` |
+| `state/model-recents.json` | `RecentModelStore` | `gateway/providers` |
+| `state/automations/` | `AutomationStore` | `gateway/automations` |
+| `state/uploads/`, `state/upload-objects/`, `state/upload-bodies/` | `UploadStore` | `gateway/machine` (live) |
 | `workspace/files/Profile.json` (current hierarchy, linked claim anchors, body-free controls) | `ProfileStore` | `gateway/home` |
-| `gateway/home/tasks/`, workspace-state markers | `HomeTaskStore` | `gateway/home` store-home-tasks |
-| `gateway/home/home.json`, `home/workspace/` (designation) | `HomeOwner` | `gateway/home` store-home-designation |
+| `state/home/tasks/`, workspace-state markers | `HomeTaskStore` | `gateway/home` store-home-tasks |
+| `state/home/home.json`, `state/home/workspace/` (designation) | `HomeOwner` | `gateway/home` store-home-designation |
 | Learned profile (tagged Knowledge notes, their record entries) | profile change path | `gateway/home` store-home-profile (live) |
 | `workspace/state/episodic/<session>/` | `EpisodicStore` | `gateway/episodic` |
-| `gateway/display-artifacts/` | `DisplayArtifactStore` | `gateway/display` (live) |
+| `state/display-artifacts/` | `DisplayArtifactStore` | `gateway/display` (live) |
 | `workspace/state/apps/` (manifest, source, SQLite state) | `SwiftAppStore` | `gateway/apps` |
-| `gateway/session-search.sqlite` (contentless postings, reuse stamps) | `SessionSearchIndex` | `gateway/session-search` |
-| `gateway/model-queue.json`, `model-queue-sessions/` (children's projection) | `ModelQueueOwner`, read by `projectionSource` | `gateway/providers` store-model-queue |
-| `gateway/model-release-dates.json` (models.dev cache) | `ModelReleaseDateCatalog` | `gateway/providers` store-model-release-dates |
+| `cache/session-search.sqlite` (contentless postings, reuse stamps) | `SessionSearchIndex` | `gateway/session-search` |
+| `state/model-queue.json`, `state/model-queue-sessions/` (children's projection) | `ModelQueueOwner`, read by `projectionSource` | `gateway/providers` store-model-queue |
+| `cache/model-release-dates.json` (models.dev cache) | `ModelReleaseDateCatalog` | `gateway/providers` store-model-release-dates |
 | Pi session JSONL, `agent/` auth, MCP and settings | Pi SDK | Pi persisted-state corpus (`gateway/pi-sdk`) |
 
 The catalog metadata index test reads each file's device and inode identity from
@@ -216,9 +216,9 @@ while a replaying duplicate holds its lane) through the mutex's call order and a
 route callback, with no production hook. `scripts/tron mutate` measures what they catch.
 
 Not yet locked:
-- **Operational:** `gateway.json`, `update-config.json`, `lan-endpoint/`,
-  `mac-terminal/`, `ios-device-installs/`, `payloads/`, logs,
-  `stop-completed.json`.
+- **Operational:** `state/gateway.json`, `state/update-config.json`, `state/lan-endpoint/`,
+  `state/mac-terminal/`, `state/ios-device-installs/`, `state/payloads/`, logs,
+  `state/stop-completed.json`.
 
 These are follow-ups, not exemptions.
 

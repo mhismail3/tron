@@ -1,4 +1,4 @@
-import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -45,7 +45,7 @@ it("the Gateway update configuration is synchronized before configure returns, a
   expect((await stat(path)).mode & 0o777).toBe(0o600);
 });
 
-it("records an actual updater spawn failure under the canonical channel root", async () => {
+it.each([false, true])("records an actual updater spawn failure without following a linked state root (%s)", async (linkedState) => {
   const { root, tronHome } = await fixture();
   const payload = join(root, "payload");
   const helper = join(payload, "helper.mjs");
@@ -53,29 +53,32 @@ it("records an actual updater spawn failure under the canonical channel root", a
   const script = join(root, "spawn-failure.mjs");
   await mkdir(payload, { recursive: true });
   await mkdir(tronHome);
+  const outside = join(root, "outside");
+  await mkdir(outside);
+  if (linkedState) await symlink(outside, join(tronHome, "state"));
   await writeFile(helper, 'throw new Error("fixture helper must never execute");');
   await copyFile(process.execPath, node);
   await chmod(node, 0o700);
   const module = pathToFileURL(resolve(import.meta.dirname, "../../admin/gateway-update-service.ts")).href;
-  await writeFile(script, `import { unlink, readFile } from "node:fs/promises";
+  await writeFile(script, `import { unlink } from "node:fs/promises";
 import { GatewayUpdateService } from ${JSON.stringify(module)};
 const service = new GatewayUpdateService({ tronHome: ${JSON.stringify(tronHome)}, runtimeChannel: "dev", environment: {
   TRON_GATEWAY_SUPERVISED: "1", TRON_GATEWAY_UPDATE_HELPER: ${JSON.stringify(helper)}, TRON_GATEWAY_PAYLOAD_ROOT: ${JSON.stringify(payload)}
 } });
 await unlink(process.execPath);
 await service.update({ channel: "dev", mode: "auto", commandId: "fixture-spawn-failure" });
-const deadline = Date.now() + 5_000;
-for (;;) {
-  try { await readFile(${JSON.stringify(join(tronHome, "state/payloads/dev/update-progress.json"))}); break; }
-  catch (error) { if (error.code !== "ENOENT" || Date.now() >= deadline) throw error; }
-  await new Promise(resolve => setTimeout(resolve, 10));
-}
-process.stdout.write(JSON.stringify(await service.status("dev")));\n`);
+process.once("beforeExit", async () => { process.stdout.write(JSON.stringify(await service.status("dev"))); });\n`);
   const { stdout } = await promisify(execFile)(node, ["--experimental-transform-types", "--no-warnings", "--import",
-    resolve(import.meta.dirname, "../../../test-support/home-ledger-crash-preload.mjs"), script],
+    resolve(import.meta.dirname, "../../../test-support/source-ts-resolver-preload.mjs"), script],
   { timeout: 15_000, env: { PATH: process.env.PATH, HOME: tronHome, TMPDIR: root } });
-  expect(JSON.parse(stdout)).toMatchObject({ state: "failure", channel: "dev", commandId: "fixture-spawn-failure", error: expect.stringContaining("ENOENT") });
-  expect((await stat(join(tronHome, "state/payloads/dev/update-progress.json"))).mode & 0o777).toBe(0o600);
+  if (linkedState) {
+    expect(JSON.parse(stdout)).toMatchObject({ state: "unknown", channel: "dev", commandId: null, error: null });
+    expect(await readdir(outside)).toEqual([]);
+    await expect(stat(join(tronHome, "state/payloads/dev/update-progress.json"))).rejects.toThrow(/ENOENT/u);
+  } else {
+    expect(JSON.parse(stdout)).toMatchObject({ state: "failure", channel: "dev", commandId: "fixture-spawn-failure", error: expect.stringContaining("ENOENT") });
+    expect((await stat(join(tronHome, "state/payloads/dev/update-progress.json"))).mode & 0o777).toBe(0o600);
+  }
   await expect(stat(join(tronHome, "gateway"))).rejects.toThrow(/ENOENT/u);
 });
 

@@ -2400,7 +2400,7 @@ describe("Tron Home activations end to end", () => {
     f.server = server;
     await server.listen();
     const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
-    const preload = pathToFileURL(join(process.cwd(), "test-support/home-ledger-crash-preload.mjs")).href;
+    const preload = pathToFileURL(join(process.cwd(), "test-support/source-ts-resolver-preload.mjs")).href;
     const terminal = spawn(process.execPath, ["--experimental-transform-types", "--import", preload,
       join(process.cwd(), "src/client/terminal-chat.ts"), ...(mode === "handled-input" ? ["--session", initial.id] : [])], {
       cwd: process.cwd(), env: { ...process.env, TRON_DATA_DIR: f.tronHome,
@@ -2612,7 +2612,7 @@ describe("Tron Home activations end to end", () => {
     };
     await server.listen();
     const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
-    const preload = pathToFileURL(join(process.cwd(), "test-support/home-ledger-crash-preload.mjs")).href;
+    const preload = pathToFileURL(join(process.cwd(), "test-support/source-ts-resolver-preload.mjs")).href;
     const terminal = spawn(process.execPath, ["--experimental-transform-types", "--import", preload,
       join(process.cwd(), "src/client/terminal-chat.ts"), "--session", slot.id], {
       cwd: process.cwd(),

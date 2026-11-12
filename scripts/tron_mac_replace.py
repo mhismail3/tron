@@ -475,7 +475,7 @@ class Runner:
                 return self.wait_healthy('rebuild', self.platform.start_timeout)
             if status['state'] in ('failure', 'failed', 'rolled-back'):
                 raise Failure(f'Gateway source update {status["state"]}: {status.get("error") or "no error recorded"} '
-                              f'(log: {self.platform.tron_home}/gateway/payloads/stable/update-progress.json)')
+                              f'(log: {self.platform.tron_home}/state/payloads/stable/update-progress.json)')
         raise Failure('the Gateway source update did not settle within 30 minutes')
 
     def step_finish(self):

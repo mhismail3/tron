@@ -178,7 +178,7 @@ class VerifierJourney(unittest.TestCase):
             shutil.copytree(payload, selection / "versions/fixture", symlinks=True)
             debug_payload = selection / "versions/fixture"
             for channel in (".tron", ".tron-dev"):
-                document(home / channel / "gateway/local-auth.json", {"bearerToken": "fixture-token"})
+                document(home / channel / "state/local-auth.json", {"bearerToken": "fixture-token"})
             mode, events, state, ports, cut = (root / name for name in ("mode", "events", "state.json", "ports.json", "cut"))
             mode.write_text("tls-first")
             events.write_text("")

@@ -189,9 +189,9 @@ async function recordUpdaterFailure(tronHome: string, channel: GatewayUpdateChan
     const uid = process.getuid?.();
     if (cursor === home && uid !== undefined && info.uid !== uid) return;
   }
-  await mkdir(directory, { recursive: true, mode: 0o700 });
   for (const component of relative(home, directory).split(/[\\/]+/u).filter(Boolean)) {
     cursor = join(cursor, component);
+    await mkdir(cursor, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
     const info = await lstat(cursor).catch(() => undefined);
     const uid = process.getuid?.();
     if (!info?.isDirectory() || info.isSymbolicLink() || uid !== undefined && info.uid !== uid) return;

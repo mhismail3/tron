@@ -9,7 +9,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 
 const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
-const resolverPreload = join(gatewayRoot, "test-support", "home-ledger-crash-preload.mjs");
+const resolverPreload = join(gatewayRoot, "test-support", "source-ts-resolver-preload.mjs");
 const deployModule = pathToFileURL(join(gatewayRoot, "..", "..", "scripts", "gateway-payload-deploy.mjs")).href;
 const reportPath = process.env.TRON_EXIT_AFTER_SHUTDOWN_REPORT
   ?? join(gatewayRoot, "test-results", "exit-after-shutdown.e2e.json");

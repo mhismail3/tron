@@ -13,7 +13,7 @@ import { PROTOCOL_VERSION } from "../src/version.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
 
 const gatewayRoot = fileURLToPath(new URL("..", import.meta.url));
-const preloads = ["home-ledger-crash-preload.mjs", "attention-recovery-hold-preload.mjs"]
+const preloads = ["source-ts-resolver-preload.mjs", "attention-recovery-hold-preload.mjs"]
   .map((name) => join(gatewayRoot, "test-support", name));
 
 export const SCRIPTED_PROVIDER = "scripted";

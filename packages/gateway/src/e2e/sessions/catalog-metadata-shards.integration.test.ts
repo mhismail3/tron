@@ -256,7 +256,7 @@ describe("catalog metadata store (#2164)", () => {
     const { root, gateway, base } = await storeFixture("sigkill");
     const count = 1_500;
     const cuts = [sortedCatalogRows(realisticCatalogRows(root, count, 1)), sortedCatalogRows(realisticCatalogRows(root, count, 2))];
-    const preload = pathToFileURL(fileURLToPath(new URL("../../../test-support/home-ledger-crash-preload.mjs", import.meta.url))).href;
+    const preload = pathToFileURL(fileURLToPath(new URL("../../../test-support/source-ts-resolver-preload.mjs", import.meta.url))).href;
     const program = fileURLToPath(new URL("../../../test-support/catalog-metadata-crash-child.ts", import.meta.url));
     const outcomes = { whole: 0, none: 0 };
     for (let kill = 0; kill < 12; kill += 1) {

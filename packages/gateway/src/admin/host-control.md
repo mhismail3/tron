@@ -19,7 +19,7 @@ development](../../../mac-app/docs/development.md).
   with build/staging/draining/promotion/rollback/failure progress, active command and
   rollback availability. A runtime acts only on its own `TRON_GATEWAY_CHANNEL`.
   `gateway.update.config` stores only a trusted absolute non-symlinked `sourceRoot`
-  and optional `artifactRoot` in `gateway/update-config.json`; `gateway-update.v1`
+  and optional `artifactRoot` in `state/update-config.json`; `gateway-update.v1`
   is advertised when the update helper is available (a source need not yet be configured).
 - Quick Rebuild uses one repository-identity admission in `document-admission.ts` for
   Gateway and device source roots; Mac replacement reads the Gateway root through
@@ -97,7 +97,7 @@ not the worker session being resumed.
   dev` for 9848; `--host` only `tailscale` or `127.0.0.1`). `device.install.config`
   binds a device to a validated checkout; the local-only `device.install.target.bind`
   verifies the target is connected with Developer Mode (requesting device details
-  first opens the CoreDevice tunnel). Bindings: `gateway/ios-device-installs/` (0600);
+  first opens the CoreDevice tunnel). Bindings: `state/ios-device-installs/` (0600);
   physical identifiers never leave the Mac.
 - `device.install` (`fast-debug` or `optimized`) runs one Mac-wide install through a
   detached bundled helper that revalidates and runs only `scripts/tron-ios-device

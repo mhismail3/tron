@@ -20,7 +20,7 @@ about the same few days again and again). A calendar time that is not a finite i
 calling proof blocks `schedule/occurrence` (once and interval triggers) and `schedule/calendar` (calendar triggers)
 ([`gateway/core`](../core/schedule), generated from `packages/core`): it converts timestamps to milliseconds and
 back and holds no copy of that arithmetic (`schedule.test.ts` pins the text and shape of what its callers get
-back). Store: `gateway/automations/`, strict schema-version-2
+back). Store: `state/automations/`, strict schema-version-2
 owner-only documents, each with one definition, one ordinary nonterminal run or a
 Home message outbox (`currentRun` plus `pendingHomeRuns`), and 64 retained terminal runs. Older shapes are not admitted, migrated or projected. Writes
 sync the file and its directory before acknowledgement.

@@ -225,7 +225,7 @@ describe("typed changes and exact native acceptance", () => {
     const f = await fixture(), root = join(f.root, `native-crash-${cut}`);
     await mkdir(root);
     const args = ["--experimental-transform-types", "--import",
-      pathToFileURL(fileURLToPath(new URL("../../../test-support/home-ledger-crash-preload.mjs", import.meta.url))).href,
+      pathToFileURL(fileURLToPath(new URL("../../../test-support/source-ts-resolver-preload.mjs", import.meta.url))).href,
       fileURLToPath(new URL("../../../test-support/native-change-crash-child.ts", import.meta.url)), root, cut];
     const child = spawn(process.execPath, [...args, "kill"], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PI_OFFLINE: "1" } });
     let output = "";

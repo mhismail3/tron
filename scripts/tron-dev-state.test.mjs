@@ -452,7 +452,7 @@ esac
     execFileSync("/bin/chmod", ["+x", fakeNode]);
     writeFileSync(fakeNpm, "#!/bin/sh\nexit 0\n");
     execFileSync("/bin/chmod", ["+x", fakeNpm]);
-    const stateDir = join(home, ".tron-dev", "gateway");
+    const stateDir = join(home, ".tron-dev", "state");
     mkdirSync(stateDir, { recursive: true });
     writeFileSync(join(stateDir, "lifecycle.json"), JSON.stringify({ lifecycle: "ready", childPid: child, childStartIdentity: identity }));
     execFileSync("bash", [new URL("./tron-dev", import.meta.url).pathname, "stop"], {
@@ -502,14 +502,14 @@ test("Debug stop reports a stopping transition it cannot record and still signal
   const childProcess = spawn("/bin/sleep", ["30"], { detached: true, stdio: "ignore" });
   const exited = once(childProcess, "exit");
   try {
-    mkdirSync(join(home, ".tron-dev", "gateway"), { recursive: true });
+    mkdirSync(join(home, ".tron-dev", "state"), { recursive: true });
     mkdirSync(fakeBin, { recursive: true });
     writeFileSync(fakeNode, `#!/bin/sh\nif [ "${"$"}{1:-}" = "--version" ]; then echo v${PINNED_NODE}; exit 0; fi\nexec ${process.execPath} "$@"\n`);
     execFileSync("/bin/chmod", ["+x", fakeNode]);
     writeFileSync(join(fakeBin, "npm"), "#!/bin/sh\nexit 0\n");
     execFileSync("/bin/chmod", ["+x", join(fakeBin, "npm")]);
     const identity = execFileSync("ps", ["-o", "lstart=", "-p", String(childProcess.pid)], { encoding: "utf8" }).trim();
-    const state = join(home, ".tron-dev", "gateway", "lifecycle.json");
+    const state = join(home, ".tron-dev", "state", "lifecycle.json");
     writeFileSync(state, `${JSON.stringify({ lifecycle: "bogus", childPid: childProcess.pid, childStartIdentity: identity })}\n`);
     const stop = await new Promise((resolveStop) => execFile("bash", [new URL("./tron-dev", import.meta.url).pathname, "stop"], {
       env: { PATH: process.env.PATH, HOME: home, TRON_NODE_BIN: fakeNode },
@@ -534,7 +534,7 @@ test("Debug lifecycle commands never see the caller's Stable Gateway environment
   const fakeNode = join(fakeBin, "node");
   const seen = join(root, "seen.env");
   try {
-    mkdirSync(join(home, ".tron-dev", "gateway"), { recursive: true });
+    mkdirSync(join(home, ".tron-dev", "state"), { recursive: true });
     mkdirSync(fakeBin, { recursive: true });
     writeFileSync(fakeNode, `#!/bin/sh
 if [ "${"$"}{1:-}" = "--version" ]; then echo v${PINNED_NODE}; exit 0; fi

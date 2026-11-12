@@ -35,11 +35,11 @@ modules stay separate, so read-only consumers do not gain a lockfile dependency.
   invitation: ten minutes, one use), `notifications.json`
   ([notifications](notifications/README.md)). Malformed credentials fail closed.
 - The physical-machine group ID lives at the one shared path
-  `~/.tron/internal/machine-group-id` for both Stable and Debug, used only for
+  `~/.tron/state/machine-group-id` for both Stable and Debug, used only for
   connection grouping.
 - The internal workspace is the sibling `<tronHome>/workspace`
   ([workspace](workspace/README.md)). Delegated provider artifacts live under
-  `<tronHome>/internal/subagents/` ([internal-workspace.md](../docs/internal-workspace.md#agent-context-and-display)).
+  `<tronHome>/state/subagents/` ([internal-workspace.md](../docs/internal-workspace.md#agent-context-and-display)).
 - Uploads are transient and bounded; prompt attachments stay session-owned until
   canonical deletion. Upload expiry, Automation timestamps and catalog windows use the
   host wall clock; upload and Automation IDs use the platform cryptographic UUID.

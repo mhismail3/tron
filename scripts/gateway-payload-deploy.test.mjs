@@ -361,7 +361,7 @@ test("a crash inside the rollback keeps a startable selection (#2316 F8)", async
   for (const marker of [false, true]) for (const crashAt of ["current.json", "previous.json"]) {
     const root = await mkdtemp(join(tmpdir(), "tron-rollback-crash-"));
     try {
-      const channelRoot = join(root, "gateway", "payloads", "dev");
+      const channelRoot = join(root, "state", "payloads", "dev");
       await mkdir(channelRoot, { recursive: true });
       const pointer = (version, digit) => ({ schema: 1, kind: "tron-gateway-selection", channel: "dev", version, payloadFingerprint: digit.repeat(64) });
       const paths = { channel: "dev", channelRoot, current: join(channelRoot, "current.json"), previous: join(channelRoot, "previous.json"),

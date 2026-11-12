@@ -8,7 +8,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
 
 const childProgram = fileURLToPath(new URL("../../../test-support/home-ledger-crash-child.ts", import.meta.url));
-const preload = fileURLToPath(new URL("../../../test-support/home-ledger-crash-preload.mjs", import.meta.url));
+const preload = fileURLToPath(new URL("../../../test-support/source-ts-resolver-preload.mjs", import.meta.url));
 const roots: string[] = [];
 const children: Array<ReturnType<typeof spawn>> = [];
 const report: Array<{ barrier: string; observed: string; signal: string }> = [];

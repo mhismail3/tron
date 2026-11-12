@@ -15,7 +15,7 @@ managed subagent provider and the iOS task surfaces. Signals: [home module](READ
 following symlinks).
 
 - The first dispatch publishes an empty `authorization.json`, then
-  `gateway/workspace-state/home-tasks-initialized.json` (`{ "version": 1 }`), then enables the
+  `state/workspace-state/home-tasks-initialized.json` (`{ "version": 1 }`), then enables the
   initial trusted-project scope; startup never initializes. A partial setup is refused; later a
   missing namespace, marker or authorization file is lost state.
 - A task is `tasks/<13-digit-createdAt>-<taskId>.json` (≤ 256 KiB), strict v1: `version`,
