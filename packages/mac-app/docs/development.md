@@ -180,9 +180,10 @@ apps and teams and records the candidate's code and resource seals
 (`scripts/verify-mac-install.sh --artifact-only` plus the signed Pi smoke test). Offline means
 `com.tron.server` and `com.tron.mac.native-host` registered with `state = not running` and no
 PID, and no loaded Debug job (`service-loaded`). Private
-`~/.tron-maintenance/<operation-id>/` receipts hold revision, phase, identities, backups (agent
-home, every other `~/.tron` entry, the old app, machine-group file, browser config; never
-Keychain or browser profiles) and SHA-256 manifests with modes, ACLs, xattrs and link text; only
+`~/.tron-maintenance/<operation-id>/` receipts hold revision, phase, identities, backups (the
+agent home and every other `~/.tron` entry as the [home registry](../../../docs/tron-home.md#backups)
+selects them, the old app, machine-group file, browser config; never Keychain or browser
+profiles) and SHA-256 manifests with modes, ACLs, xattrs and link text; only
 `com.apple.provenance`/`quarantine` copy values may differ. `--select-bundled-offline` renames
 the whole `gateway/payloads/stable` into `retired-stable-payloads` and must finish before
 `--confirm-offline`; `--verify` then requires the bundled runtime (`scripts/tron mac verify
@@ -229,7 +230,8 @@ scripts/tron mac replace --status --follow
   `gateway.drain.status` and waits up to 5 minutes for accepted work to settle. Any blocker left
   fails the step naming its category, session and age; Tron is not quit and nothing is swapped.
   Workers it already stopped stay resumable.
-- **Swap** clones `~/.tron` (`state-snapshot`), moves the Stable payload channel and old app into
+- **Swap** clones what the [home registry](../../../docs/tron-home.md#backups) backs up, and every
+  `~/.tron` path it does not know (`state-snapshot`), moves the Stable payload channel and old app into
   the operation directory and installs the verified build. A failure after the swap restores and
   verifies the previous app and payloads; the snapshot is never restored over newer data.
   Kept apps (`previous-app-<n>/Tron.app.kept`, `failed-app-<n>/Tron.app.kept`) are not `.app`
@@ -241,14 +243,14 @@ scripts/tron mac replace --status --follow
   git and builds run with Homebrew's bin on `PATH` for git-lfs.
 - **Retention.** A finished full replacement keeps only its own operation (journal and rollback
   set) and the build it installed. It deletes every other build and every older operation's journal
-  and rollback set (`previous-app-<n>`, `retired-stable-payloads-<n>`, `state-snapshot-<n>`,
+  and rollback set (`previous-app-<n>`, `retired-stable-payloads-<n>`, `state-snapshot-<n>`, an interrupted `partial-state-snapshot-<n>`,
   `failed-*`): those are superseded, because rollback restores only this operation's set and a
   snapshot is never restored over newer data. Other entries in an operation directory (a
   migration's archive) stay until the maintainer retires them. A path it cannot delete is
   named in `journal.log` and the finish step; it never rolls back a verified install.
 - E2E: `python3 scripts/test-tron-mac-replace.py` (fixture app and job, never Stable;
   `--rpc-only` (includes the drain-blocker runner), `--launch-services-only`, `--quit-only`,
-  `--checkout-only`, `--retention-only` for single boundaries; artifacts under
+  `--checkout-only`, `--retention-only`, `--snapshot-only` for single boundaries; artifacts under
   `test-results/mac-replace-*.json`).
 
 ## Debug Gateway

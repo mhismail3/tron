@@ -26,6 +26,8 @@ AppKit handoff only: --quit-only (writes test-results/mac-replace-quit-e2e.json;
 compiles a standalone app using the production termination/handoff owners).
 Retention only: --retention-only (writes test-results/mac-replace-retention-e2e.json; a finished full
 replacement keeps only its operation and installed build, through real git and read-only payloads).
+Snapshot only: --snapshot-only (writes test-results/mac-replace-snapshot-e2e.json; the staged runner
+clones a fixture home: what the Tron-home registry backs up and every unknown path, nothing else).
 The full command runs every journey.
 """
 import json
@@ -922,6 +924,7 @@ def retention_journey():
                 sealed(operation / 'retired-stable-payloads-1')
                 (operation / 'state-snapshot-1').mkdir()
                 (operation / 'previous-app-1/Tron.app.kept').mkdir(parents=True)
+            (older / 'partial-state-snapshot-2').mkdir()
             (foreign / 'knowledge-cutover-1').mkdir()
             locked = foreign / 'failed-app-2'
             locked.mkdir()
@@ -970,6 +973,98 @@ def retention_journey():
     return 0 if passed else 1
 
 
+SNAPSHOT_CHILD = '''
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+sys.path.insert(0, sys.argv[1])
+import tron_mac_replace as replace
+journal = replace.Journal(sys.argv[2]).load()
+journal.data['attempt'] = int(sys.argv[4])
+try:
+    print(replace.Runner(SimpleNamespace(tron_home=Path(sys.argv[3])), journal).snapshot_state())
+except replace.Failure as failure:
+    sys.exit(f'Failure: {failure}')
+'''
+SNAPSHOT_KEPT = ('agent/sessions/project/session.jsonl', 'agent/settings.json', 'agent/missions/index/mission.json',
+                 'gateway/devices.json', 'gateway/home/home.json', 'gateway/settings/observed.json',
+                 'gateway/unregistered/only-copy', 'internal/machine-group-id', 'internal/mac/wizard-state.json',
+                 'internal/run/.onboarded', 'internal/unregistered-file', 'workspace/files/report/REPORT.md',
+                 'workspace/state/episodic/memory.json', 'backup-20200101/only-copy', 'mac-terminal/ssh_host_ed25519_key')
+SNAPSHOT_SKIPPED = ('agent/auth.json', 'agent/npm/node_modules/package/index.js', 'agent/run-history.jsonl',
+                    'gateway/local-auth.json', 'gateway/session-search.sqlite', 'gateway/payloads/stable/current.json',
+                    'gateway/command-receipts/receipt.json', 'internal/subagents/run/status.json',
+                    'internal/pi-subagents/1/extension.js', 'internal/run/ios-simulator.lease.lock',
+                    'internal/ios-test-lane/lease.lock', 'logs/gateway.jsonl', 'ios-builds/builds/1/TronMobile.ipa',
+                    'workspace/tmp/task/scratch.txt')
+
+
+def snapshot_journey():
+    """The swap's rollback point holds what the Tron-home registry backs up and every unknown path; the
+    staged runner makes it alone, from its private copy of the registry and its reader."""
+    evidence, started, passed = [], time.time(), False
+    report = REPO / 'test-results/mac-replace-snapshot-e2e.json'
+    try:
+        with tempfile.TemporaryDirectory(prefix='tron-mac-replace-snapshot-') as directory:
+            root = Path(directory).resolve()
+            home, operation = root / 'home/.tron', root / 'store/operation'
+            for relative in (*SNAPSHOT_KEPT, *SNAPSHOT_SKIPPED):
+                path = home / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(relative)
+                path.chmod(0o600)
+            for directory_path in (home, *(path for path in home.rglob('*') if path.is_dir())):
+                directory_path.chmod(0o700)
+            journal = replace.Journal.create(operation, 'operation', 'full', 'fixture', {'revision': 'b' * 40})
+            runtime = replace.stage_runner(SimpleNamespace(runner_files=lambda: ()), journal, HERE)
+
+            def record(condition, message):
+                evidence.append({'check': message, 'pass': bool(condition)})
+
+            def snapshot(attempt):
+                return subprocess.run(['/usr/bin/python3', '-c', SNAPSHOT_CHILD, runtime, operation, home, str(attempt)], cwd='/',
+                                      env={'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(root / 'home')},
+                                      capture_output=True, text=True, timeout=120)
+
+            result = snapshot(1)
+            first = operation / 'state-snapshot-1'
+            record(result.returncode == 0 and result.stdout.strip() == str(first),
+                   f'the staged runner snapshots the home without the checkout: {result.stderr.strip()}')
+            missing = [relative for relative in SNAPSHOT_KEPT if not (first / relative).is_file()
+                       or (first / relative).read_text() != relative or (first / relative).stat().st_mode & 0o777 != 0o600]
+            record(not missing, f'backed-up and unregistered paths are cloned with their bytes and modes; missing: {missing}')
+            present = [relative for relative in SNAPSHOT_SKIPPED if (first / relative).exists()]
+            record(not present, f'credentials to re-issue, caches, runtimes, scratch, logs and builds are not cloned; present: {present}')
+            record(first.stat().st_mode & 0o777 == 0o700 and (first / 'gateway').stat().st_mode & 0o777 == 0o700
+                   and (first / 'internal').stat().st_mode & 0o777 == 0o700, 'the snapshot and its partly cloned folders stay private')
+            record(json.loads((operation / 'journal.json').read_text())['swap'].get('snapshot') == str(first),
+                   'the journal records the snapshot')
+            result = snapshot(1)
+            record(result.returncode != 0 and 'raw snapshot already exists' in result.stderr and (first / SNAPSHOT_KEPT[0]).is_file(),
+                   f'an existing snapshot is preserved, not overwritten: {result.stderr.strip()}')
+            interrupted = operation / 'partial-state-snapshot-2'
+            (interrupted / 'gateway').mkdir(parents=True)
+            (interrupted / 'gateway/stale').write_text('from an interrupted attempt')
+            result = snapshot(2)
+            second = operation / 'state-snapshot-2'
+            record(result.returncode == 0 and (second / SNAPSHOT_KEPT[0]).is_file() and not (second / 'gateway/stale').exists()
+                   and not interrupted.exists(), f'an interrupted snapshot is rebuilt whole: {result.stderr.strip()}')
+            (runtime / 'tron-home-layout.json').write_text(json.dumps({'version': 1, 'paths': {}}))
+            result = snapshot(3)
+            record(result.returncode != 0 and 'Tron-home registry' in result.stderr
+                   and not any(path.name.endswith('-3') for path in operation.iterdir()),
+                   f'an unreadable registry stops before any clone: {result.stderr.strip()}')
+            passed = all(item['pass'] for item in evidence)
+    except Exception as error:  # noqa: BLE001 - retain RED evidence as well as GREEN.
+        evidence.append({'check': 'error', 'pass': False, 'detail': f'{type(error).__name__}: {error}'})
+    report.parent.mkdir(exist_ok=True)
+    report.write_text(json.dumps({'passed': passed, 'seconds': round(time.time() - started, 1), 'checks': evidence}, indent=1) + '\n')
+    for item in evidence:
+        print(f'{"PASS" if item["pass"] else "FAIL"}  {item["check"]}{" - " + item["detail"] if "detail" in item else ""}')
+    print(f'report: {report}')
+    return 0 if passed else 1
+
+
 def fixture_main():
     """`--fixture <config> ...`: the orchestrator CLI/runner against the fixture platform."""
     arguments = sys.argv[1:]
@@ -986,9 +1081,13 @@ if __name__ == '__main__':
         sys.exit(quit_journey())
     if '--launch-services-only' in sys.argv:
         sys.exit(launch_services_journey())
+    if '--snapshot-only' in sys.argv:
+        sys.exit(snapshot_journey())
     retention_result = retention_journey()
     if retention_result or '--retention-only' in sys.argv:
         sys.exit(retention_result)
+    if snapshot_journey():
+        sys.exit(1)
     checkout_result = checkout_journey()
     if checkout_result or '--checkout-only' in sys.argv:
         sys.exit(checkout_result)

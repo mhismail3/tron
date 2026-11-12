@@ -32,14 +32,16 @@ confirmation; Finder replacement and launch remain operator actions.
 `python3 scripts/test-tron-mac-reinstall.py` runs the real parser/workflow in fresh
 children over private fixture files and OS locks. Its platform boundary substitutes
 identity documents for signed apps and a held OS lock for a host writer. It proves
-backup/refusal/resume/evidence behavior, not signing, service detection or launch.
+backup/refusal/resume/evidence behavior and the home registry's backup selection, not
+signing, service detection or launch.
 Production `main()` admission/error mapping is outside this lock; the fixture enters the parser and workflow, not the live-host entry point.
 Results, including failures, go to `test-results/mac-reinstall/report.json`.
 
 `python3 scripts/test-tron-mac-replace.py --checkout-only` exercises real Git/LFS
 under the launchd PATH; `--quit-only` compiles a standalone AppKit fixture using the
 production nonce-bound handoff and termination owners; `--rpc-only` also runs the
-runner loop against a Gateway reporting a drain blocker; `--launch-services-only`
+runner loop against a Gateway reporting a drain blocker; `--snapshot-only` has the
+staged runner clone a fixture home and checks the home registry's selection; `--launch-services-only`
 swaps a uniquely identified fixture app under `~/Library/Caches` (Launch Services
 ignores temporary directories) and checks the kept copy is unlaunchable. The full replacement suite
 also builds a private Gateway and swaps a fixture app under its own launchd jobs;
