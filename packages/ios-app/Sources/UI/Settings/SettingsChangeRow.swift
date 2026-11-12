@@ -45,7 +45,7 @@ struct SettingsChangeRow: Identifiable, Equatable, Sendable {
         }
     }
 
-    static func workerTitles(_ sessions: [SessionSummary]) -> [String: String] {
+    static func workerTitles(_ sessions: [CatalogSession]) -> [String: String] {
         var titles: [String: String] = [:]
         for session in sessions {
             guard let task = session.homeTaskId, let name = session.name?.trimmingCharacters(in: .whitespacesAndNewlines),

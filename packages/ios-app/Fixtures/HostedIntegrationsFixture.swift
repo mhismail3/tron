@@ -473,7 +473,7 @@ private final class HostedSecondaryRecoveryOwner: DashboardGatewayConnectionPool
         transport.setOnline(false)
         Task { await transport.lose() }
     }
-    func dashboardPoolDidUpdate(profileID: String, sessions: [SessionSummary], state: DashboardServerConnectionState, stopReason: String?) {
+    func dashboardPoolDidUpdate(profileID: String, sessions: [CatalogSession], state: DashboardServerConnectionState, stopReason: String?) {
         self.state = String(describing: state)
         lastConnected = pool.lastConnectedAt(for: secondary.id).map { "last connected \($0.timeIntervalSince1970)" } ?? "never connected"
         Task {

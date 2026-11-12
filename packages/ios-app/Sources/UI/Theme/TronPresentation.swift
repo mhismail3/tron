@@ -2189,6 +2189,9 @@ struct TronDashboardSectionReveal: ViewModifier {
     }
 
     private func reveal() {
+        #if HOSTED_TEST
+        if shown { TronDashboardRevealProbe.shared.shownOrders.insert(order) }
+        #endif
         guard !shown, let revealStart else { return }
         let elapsed = max(0, Date().timeIntervalSince(revealStart))
         let animation = reduceMotion
@@ -2197,6 +2200,7 @@ struct TronDashboardSectionReveal: ViewModifier {
                 .delay(max(0, Double(order) * TronDashboardContentMotion.sectionStaggerStep - elapsed))
         withAnimation(animation) { shown = true }
         #if HOSTED_TEST
+        TronDashboardRevealProbe.shared.shownOrders.insert(order)
         TronDashboardRevealProbe.shared.reveals.append(order)
         #endif
     }
@@ -2207,9 +2211,10 @@ struct TronDashboardSectionReveal: ViewModifier {
 final class TronDashboardRevealProbe {
     static let shared = TronDashboardRevealProbe()
     var reveals: [Int] = []
+    var shownOrders: Set<Int> = []
 
     var summary: String {
-        "orders:\(Set(reveals).sorted().map(String.init).joined(separator: ",")) reveals:\(reveals.count)"
+        "orders:\(shownOrders.sorted().map(String.init).joined(separator: ",")) reveals:\(reveals.count)"
     }
 }
 #endif

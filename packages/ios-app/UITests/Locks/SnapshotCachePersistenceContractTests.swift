@@ -84,6 +84,63 @@ final class SnapshotCachePersistenceContractTests: XCTestCase {
     }
 
     @MainActor
+    func testRowsTodaysEncoderWroteReadBackInAnyKeyOrderAndNewRowsAreBytesItCouldHaveWritten() throws {
+        let app = XCUIApplication()
+        defer { cleanup(app) }
+        launch(app, mode: "row-compat", token: UUID().uuidString)
+        _ = try require(app, "cache.phase", label: "ready")
+        let label = app.staticTexts["cache.file-report"].label
+        let report = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(label.utf8)) as? [String: Any])
+        XCTAssertEqual(report["capturedRows"] as? Int, 45)
+        XCTAssertEqual(report["readRows"] as? Int, 180, "every captured row in its own and three shuffled key orders")
+        XCTAssertEqual(report["shuffledDistinct"] as? Int, 135, "every shuffled row differs from the captured order")
+        XCTAssertEqual(report["readMismatches"] as? [String], [], "each read row re-encodes to the captured members")
+        XCTAssertEqual(report["writtenRows"] as? Int, 45)
+        XCTAssertEqual(report["fullRows"] as? Int, 250, "a full legal cache loads under the document's limits")
+        XCTAssertEqual(report["nearLimitReadIDs"] as? [String], ["near-limit"])
+        XCTAssertEqual(report["nearLimitWrittenIDs"] as? [String], ["near-limit"])
+        XCTAssertEqual(report["nearLimitReadMatches"] as? Bool, true)
+        XCTAssertEqual(report["nearLimitWriteMatches"] as? Bool, true)
+        XCTAssertEqual(report["writeMismatches"] as? [String], [], "each written row has the captured members, byte for byte")
+        XCTAssertEqual(report["orderMismatches"] as? [Int], [], "written rows keep declaration order")
+        XCTAssertEqual(report["absentRevisionRowID"] as? String, "revision-absent")
+        XCTAssertEqual(report["absentRevisionReads"] as? [Int], [36], "a row without summaryRevision reads as 0")
+        XCTAssertEqual(report["absentRevisionWrites"] as? [Int], [36], "and is written back with 0")
+        let readers = ["apply 0:stale", "publish 0:kept", "apply 1:updated", "publish 1:updated"]
+        XCTAssertEqual(report["revisionReaders"] as? [String: [String]], ["absent": readers, "zero": readers],
+                       "the catalog reads a cached row without summaryRevision exactly as one with 0, as its nil ?? 0 did")
+    }
+
+    @MainActor
+    func testCacheOutsideTheV8GatewaySafeIntegerDomainDropsAndFullyRefetches() throws {
+        let app = XCUIApplication(), token = UUID().uuidString
+        defer { cleanup(app) }
+        launch(app, mode: "above-safe-max", token: token)
+        _ = try require(app, "cache.phase", label: "ready")
+        _ = try require(app, "cache.catalog", label: "<none>")
+        XCTAssertEqual(try inspect(app)["firstExists"] as? Bool, false)
+        app.terminate()
+        launch(app, mode: "live", token: token)
+        _ = try require(app, "cache.phase", label: "ready")
+        _ = try require(app, "cache.catalog", label: "Before summary")
+        _ = try require(app, "cache.catalog-archive", label: "7")
+        let stored = try document(inspect(app), profileID: firstID)
+        XCTAssertEqual(stored["ids"] as? [String], ["cache-live"])
+        XCTAssertEqual(stored["archivedCount"] as? Int, 7)
+        XCTAssertEqual(stored["hasTranscript"] as? Bool, false)
+    }
+
+    @MainActor
+    func testSessionListPageWithoutSessionsKeepsTheCatalogAndTheCache() throws {
+        let app = XCUIApplication(), token = UUID().uuidString
+        defer { cleanup(app) }
+        launch(app, mode: "page-without-sessions", token: token)
+        _ = try require(app, "cache.phase", label: "ready")
+        _ = try require(app, "cache.catalog", label: "Before summary")
+        XCTAssertEqual(try document(inspect(app), profileID: firstID)["ids"] as? [String], ["cache-live"])
+    }
+
+    @MainActor
     func testSessionPhaseFramesKeepTheirRawValueBytesAndRefuseAnUnknownPhase() throws {
         let app = XCUIApplication()
         defer { cleanup(app) }
@@ -99,7 +156,7 @@ final class SnapshotCachePersistenceContractTests: XCTestCase {
 
     @MainActor
     func testReadableVersionsAndInvalidOrOversizedEnvelopesFailClosed() throws {
-        for mode in ["v3", "v4", "future", "corrupt", "oversized"] {
+        for mode in ["v3", "v4", "future", "corrupt", "oversized", "invalid-row", "deep", "flat"] {
             let app = XCUIApplication()
             defer { cleanup(app) }
             launch(app, mode: mode, token: UUID().uuidString)

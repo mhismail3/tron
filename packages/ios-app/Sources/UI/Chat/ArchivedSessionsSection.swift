@@ -9,9 +9,9 @@ struct ArchivedSessionsContainerSection: View {
     let presentationActive: Bool
     let loadPage: (String, String?) async throws -> ArchivedSessionsLoadResult
     let onRevealRows: () -> Void
-    let onOpen: (SessionSummary) -> Void
-    let onUnarchive: (SessionSummary) -> Void
-    let onDelete: (SessionSummary) -> Void
+    let onOpen: (CatalogSession) -> Void
+    let onUnarchive: (CatalogSession) -> Void
+    let onDelete: (CatalogSession) -> Void
 
     @State private var container = ArchivedSessionsContainerState()
     @State private var loadTask: Task<Void, Never>?
@@ -237,13 +237,13 @@ extension ScrollViewProxy {
 }
 
 struct ArchivedSessionsSectionRows: View {
-    let sessions: [SessionSummary]
+    let sessions: [CatalogSession]
     let unavailableServerNames: [String]
     let isLoading: Bool
     let hasMore: Bool
-    let onOpen: (SessionSummary) -> Void
-    let onUnarchive: (SessionSummary) -> Void
-    let onDelete: (SessionSummary) -> Void
+    let onOpen: (CatalogSession) -> Void
+    let onUnarchive: (CatalogSession) -> Void
+    let onDelete: (CatalogSession) -> Void
     let onShowMore: () -> Void
 
     var body: some View {
@@ -268,7 +268,7 @@ struct ArchivedSessionsSectionRows: View {
         }
     }
 
-    private func archivedRow(_ session: SessionSummary) -> some View {
+    private func archivedRow(_ session: CatalogSession) -> some View {
         Button {
             onOpen(session)
         } label: {
