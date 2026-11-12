@@ -127,6 +127,14 @@ actual K3 host; native frames do not select product modules or keep another list
   SDK execution, automatic adoption and exact cancellation/settlement lifetime.
 - `prompt-admission.ts` and `prompt-input.ts`: serialized ordinary admission,
   exact SDK disposition, resource/intent preparation and opaque caller fences.
+  Provenance-rendered owned inputs carry `originalText` for literal-command recognition;
+  unrendered inputs use their submitted text. Automation, Home briefs, worker steering,
+  Interrupt text and settings notices supply that original before enveloping. It is
+  admission input, not display readback or an authority grant. Scheduled extension
+  commands remain refused before prompt effects or retained operation ownership.
+  Home briefs retain their earlier binding order: `HOME_TASK_MARKER` is written before
+  command refusal and remains as task evidence; no user message or SDK prompt is admitted.
+  That binding marker is not an automation invocation or retained operation.
 - `prompt-attempt.ts`: each SDK prompt/command promise, admission finalization and
   no-agent/command settlement, preserving live successor ownership across receipt I/O.
 - `request-pipeline.ts`: per-runtime request settings scope and provider-option

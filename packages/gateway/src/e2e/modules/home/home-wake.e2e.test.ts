@@ -246,7 +246,7 @@ describe("Home wakes on its own task results (#749)", () => {
     const delivered = results(entries)[0] as Entry & { content?: string; details: { taskTitle?: string } };
     expect(delivered.details.taskTitle).toBe("Review chip labels");
     expect((await homeOwnerOf(f.registry).taskStatus("task-wake")).title).toBe(delivered.details.taskTitle);
-    expect(delivered.content).toMatch(/^Home task: Finite work \| outcome: final \| subagents: 0 started, 0 stopped at end \| duration: \d+ms\n\nVerified result\n\nEvidence:\n- focused check passed$/);
+    expect(delivered.content).toMatch(/^\[from: worker; kind: task-result; authority: none\]\nHome task: Finite work \| outcome: final \| subagents: 0 started, 0 stopped at end \| duration: \d+ms\n\nVerified result\n\nEvidence:\n- focused check passed$/);
     expect(delivered.content).not.toContain("task-wake");
     expect(delivered.content).not.toContain('"taskId"');
     expect(entries.some(entry => entry.type === "message" && entry.message?.role === "assistant"

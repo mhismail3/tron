@@ -569,8 +569,9 @@ export class HomeTaskDispatcher {
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
       work.transition("foreground-agent-operation", slot.id);
-      const admitted = slot.prompt(injectedText(`${task.intent.text}${appliedChoice}`, "tron-home", "brief", "task"), launch.resume?.images ?? [], undefined, undefined, undefined,
-        { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
+      const originalText = `${task.intent.text}${appliedChoice}`;
+      const admitted = slot.prompt(injectedText(originalText, "tron-home", "brief", "task"), launch.resume?.images ?? [], undefined, undefined, undefined,
+        { operationId, originalText, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {
         await cancellation("admission-refused").catch(() => {});
         if (slot.snapshot().operation?.id !== operationId) resolve({ lifecycle: "outcomeUnknown", operationId, invocationId: "admission-unknown", errorCode: "admission-refused" });

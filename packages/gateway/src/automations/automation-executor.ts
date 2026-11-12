@@ -160,6 +160,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
           undefined,
           {
             operationId,
+            originalText: run.actionSnapshot.text,
             ...(signal ? { signal } : {}),
             origin: { kind: "gateway", ownerId: record.id, title: "Automation", confidence: "boundary" },
             onAdmitted: (invocationId) => { admittedInvocationId = invocationId; },

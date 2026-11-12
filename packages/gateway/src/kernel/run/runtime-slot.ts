@@ -738,7 +738,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     try {
       const control = { taskId, operationId: worker.identity.operationId };
       const { operationId } = await this.prompt(injectedText(text, "gateway", "settings", "none"), [], "steer", undefined, undefined, {
-        operationId: randomUUID(), taskFence: control,
+        operationId: randomUUID(), originalText: text, taskFence: control,
         origin: { kind: "gateway", ownerId: taskId, title: "Settings changed", confidence: "boundary" }, onTerminal: () => {},
       });
       return { status: "queued", taskId, operationId, appliesFrom: "next-request" };
