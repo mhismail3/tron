@@ -1,5 +1,7 @@
 export const VIEW_BLOCK_LINES = 4;
 
+export const VIEW_SETTLED_SPAN = 64;
+
 export const ANTHROPIC_MAX_CACHE_BREAKPOINTS = 4;
 
 type Json = Record<string, unknown>;
@@ -22,9 +24,11 @@ export function markAnthropicBlocks(payload: unknown, messageIndex: number, bloc
     if (!isObject(content[index])) return payload;
     content[index]!.cache_control = structuredClone(control);
   }
+  const system = Array.isArray(next.system) ? (next.system as unknown[]).filter(isObject) : [];
   const optional: Json[] = [
     ...(Array.isArray(next.tools) ? (next.tools as unknown[]).filter(isObject).reverse() : []),
-    ...(Array.isArray(next.system) ? (next.system as unknown[]).filter(isObject).reverse() : []),
+    ...system.slice(0, -1),
+    ...system.slice(-1),
   ].filter((item) => item.cache_control !== undefined);
   let total = countMarks(next);
   for (const item of optional) {
