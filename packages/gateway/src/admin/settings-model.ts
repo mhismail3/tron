@@ -17,6 +17,8 @@ import { gitHeadState, projectGitState, readProjectDocument } from "./project-se
 import { observedInstance, projectStores, type ObservedReaders, type OutsideChanges } from "./settings-outside.js";
 import type { McpAdminService } from "./mcp-admin-service.js";
 import type { McpServerValue } from "../kernel/settings/mcp-server-value.js";
+import type { ModelProviderValue } from "../kernel/settings/model-provider-value.js";
+import type { ModelConfigService } from "./model-config-service.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
@@ -32,6 +34,7 @@ interface SettingsModelDependencies {
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
   macTerminalKeys?: Pick<MacTerminalService, "read" | "set" | "enabled" | "setEnabled">;
   mcpAdmin?: McpAdminService;
+  modelConfig?: ModelConfigService;
 }
 
 export interface ToolCatalogEntry { name: string; description?: string; resource: Record<string, unknown> }
@@ -47,8 +50,17 @@ export class SettingsStoreAdapter {
     return this.dependencies.mcpAdmin;
   }
 
-  mcpServer(server: string): Promise<McpServerValue | undefined> {
-    return this.mcp().server(server);
+  private modelConfig(): ModelConfigService {
+    if (!this.dependencies.modelConfig) throw new GatewayError("unsupported", "This Gateway has no custom model configuration owner");
+    return this.dependencies.modelConfig;
+  }
+
+  recordValue(subject: string, instance: string): Promise<unknown> {
+    switch (subject) {
+      case "tools.mcp.server": return this.mcp().server(instance);
+      case "accounts.models.provider": return this.modelConfig().provider(instance);
+      default: throw new GatewayError("unsupported", `${subject} has no record owner`);
+    }
   }
 
   async projectRoot(path: string): Promise<string> {
@@ -268,6 +280,9 @@ export class SettingsStoreAdapter {
       }
       case "mcp":
         await this.mcp().setServer(qualifiers.server!, unset ? undefined : value as McpServerValue);
+        return {};
+      case "models":
+        await this.modelConfig().setProvider(qualifiers.provider!, unset ? undefined : value as ModelProviderValue);
         return {};
       case "trust":
         return { result: await writers.setTrust(qualifiers.project!, unset ? null : value as boolean) };

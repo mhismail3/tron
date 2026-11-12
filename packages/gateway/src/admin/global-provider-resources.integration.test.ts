@@ -7,6 +7,7 @@ import type { JsonValue } from "../protocol/types.js";
 import { AuthBroker } from "./auth-broker.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { GlobalProviderResources } from "./global-provider-resources.js";
+import { ModelConfigService } from "./model-config-service.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 
 const roots: string[] = [];
@@ -423,5 +424,18 @@ describe("global provider resources", () => {
     expect(f.runtime.getProvider("valid-provider")).toBeDefined();
     expect(f.runtime.getProvider("retained-provider")).toBeDefined();
     expect(f.log).toHaveBeenCalledWith("error", expect.stringContaining("formerly-valid.ts"));
+  });
+
+  it("lists a custom provider written through the model config owner once the shared runtime refreshes, without a restart", async () => {
+    const f = await fixture();
+    const runtime = await ModelRuntime.create({ authPath: join(f.agentDir, "auth.json"), modelsPath: join(f.agentDir, "models.json"), refreshOnCreate: false });
+    const resources = await GlobalProviderResources.create({ cwd: homedir(), agentDir: f.agentDir, modelRuntime: runtime, auth: f.broker, log: f.log, broadcast: f.broadcast });
+    expect(runtime.getModel("tron-provider", "local-model")).toBeUndefined();
+    await new ModelConfigService(f.agentDir).setProvider("tron-provider", { baseUrl: "http://127.0.0.1:9/v1", api: "openai-completions", models: [{ id: "local-model" }] });
+    f.broadcast.mockClear();
+    await resources.refreshModels();
+    expect(runtime.getProviders().map(provider => provider.id)).toContain("tron-provider");
+    expect(runtime.getModel("tron-provider", "local-model")).toBeDefined();
+    expect(f.broadcast).toHaveBeenCalledTimes(1);
   });
 });
