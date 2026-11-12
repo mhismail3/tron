@@ -197,11 +197,11 @@ class Fixture:
                         'commit', '--quiet', '--allow-empty', '-m', 'unpublished worker change'], check=True)
         (self.source / 'README.md').write_text('uncommitted caller bytes, not the build source\n')
         self.old_revision = capture(['git', '-C', self.source, 'rev-parse', f'{self.revision}~1'])[1].strip()
-        (self.home / '.tron/gateway').mkdir(parents=True)
-        (self.home / '.tron/gateway/gateway.json').write_text(json.dumps({'version': 1, 'machineId': 'tron-mac-replace-e2e', 'machineName': 'Replace E2E'}))
-        for path in (self.home, self.home / '.tron', self.home / '.tron/gateway'):
+        (self.home / '.tron/state').mkdir(parents=True)
+        (self.home / '.tron/state/gateway.json').write_text(json.dumps({'version': 1, 'machineId': 'tron-mac-replace-e2e', 'machineName': 'Replace E2E'}))
+        for path in (self.home, self.home / '.tron', self.home / '.tron/state'):
             path.chmod(0o700)
-        (self.home / '.tron/gateway/gateway.json').chmod(0o600)
+        (self.home / '.tron/state/gateway.json').chmod(0o600)
         self.installed = self.home / 'Applications/Tron.app'
         self.config_path = self.root / 'fixture.json'
         self.config = {'root': str(self.root), 'home': str(self.home), 'installed': str(self.installed), 'label': self.label,
@@ -216,7 +216,7 @@ class Fixture:
                            'EnvironmentVariables': {
                                'PATH': f'{self.node.parent}:/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(self.home),
                                'TRON_DATA_DIR': str(self.home / '.tron'), 'PI_CODING_AGENT_DIR': str(self.home / '.tron/agent'),
-                               'PI_SUBAGENTS_TEMP_ROOT': str(self.home / '.tron/internal/subagents'),
+                               'PI_SUBAGENTS_TEMP_ROOT': str(self.home / '.tron/state/subagents'),
                                'TRON_MACHINE_GROUP_ID': 'tron-mac-replace-e2e', 'TRON_GATEWAY_HOST': self.host,
                                'TRON_GATEWAY_PORT': str(self.port), 'TRON_GATEWAY_SUPERVISED': '1', 'TRON_GATEWAY_CHANNEL': 'stable',
                                'FIXTURE_ROOT': str(self.root), 'FIXTURE_NODE': str(self.node),

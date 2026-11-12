@@ -6,7 +6,7 @@ import { tronHomePath } from "../foundation/tron-home-layout.js";
 const LOCAL_CREDENTIAL_MAX_BYTES = 64 * 1_024;
 
 export async function readLocalCredential(tronHome: string): Promise<string> {
-  const path = tronHomePath(tronHome, "gateway/local-auth.json");
+  const path = tronHomePath(tronHome, "state/local-auth.json");
   try {
     const result = await readSecureJson<Record<string, unknown>>(path, LOCAL_CREDENTIAL_MAX_BYTES);
     if (result.present && isLocalAuthDocument(result.value)) return result.value.bearerToken;

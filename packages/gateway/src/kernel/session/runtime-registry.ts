@@ -542,7 +542,7 @@ export class RuntimeRegistry implements SessionOperations {
     this.delegation = new DelegationOperations(this,
       (slot, by, before) => interruptToolCalls(slot.runtime.session, new ToolCallInterrupt(by), before), options);
     this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);
-    this.blobs = new BlobStore(undefined, Date.now, tronHomePath(options.tronHome, "gateway/blobs"));
+    this.blobs = new BlobStore(undefined, Date.now, tronHomePath(options.tronHome, "state/blobs"));
     const workspace = options.modules.policy("resourceRoot")?.();
     if (!workspace) throw new Error("Kernel resource root is not installed");
     this.workspace = workspace;
@@ -553,11 +553,11 @@ export class RuntimeRegistry implements SessionOperations {
       maximumReaders: SESSION_EXPORT_MAX_READERS,
       maximumFileProductions: SESSION_EXPORT_MAX_PRODUCTIONS,
       minimumFreeBytes: SESSION_EXPORT_MINIMUM_FREE_BYTES,
-    }, Date.now, tronHomePath(options.tronHome, "gateway/exports"));
+    }, Date.now, tronHomePath(options.tronHome, "state/exports"));
     this.markers = new RunMarkerStore(options.tronHome);
     this.attention = new SessionAttentionStore(options.tronHome);
     this.archive = new SessionArchiveStore(options.tronHome);
-    this.catalogMetadataIndex = new CatalogMetadataIndex(tronHomePath(options.tronHome, "gateway"), options.catalogIndexFailure, options.catalogIndexPressure);
+    this.catalogMetadataIndex = new CatalogMetadataIndex(tronHomePath(options.tronHome, "cache"), options.catalogIndexFailure, options.catalogIndexPressure);
     this.sessionCatalog = new SessionCatalog({
       catalogRoot: () => this.catalogDirectory(),
       index: this.catalogMetadataIndex,

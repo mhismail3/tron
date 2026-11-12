@@ -20,7 +20,7 @@ afterAll(async () => { if (process.env.HOME_WAKE_REPORT) await writeFile(process
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "tron-wake-cut-")); roots.push(root);
   const home = join(root, "tron");
-  await mkdir(join(home, "gateway"), { recursive: true, mode: 0o700 });
+  await mkdir(join(home, "state"), { recursive: true, mode: 0o700 });
   const workspace = new TronWorkspace(home); workspaces.push(workspace); await workspace.initialize();
   const store = new HomeTaskStore(home, workspace); await store.initialize();
   const intent = { text: "finite" };
@@ -186,7 +186,7 @@ describe("Wake inbox quiet proof", () => {
   async function inbox() {
     const root = await mkdtemp(join(tmpdir(), "tron-wake-proof-")); roots.push(root);
     const home = join(root, "tron");
-    await mkdir(join(home, "gateway"), { recursive: true, mode: 0o700 });
+    await mkdir(join(home, "state"), { recursive: true, mode: 0o700 });
     const workspace = new TronWorkspace(home); workspaces.push(workspace); await workspace.initialize();
     const store = new HomeTaskStore(home, workspace); await store.initialize();
     const { WakeInboxOwner } = await import("./home-wake-inbox.js");

@@ -5074,7 +5074,7 @@ exec "$FAKE_SYSTEM_PYTHON" "$@"
             "TRON_GATEWAY_RUNTIME_EPOCH": "stable-epoch-sentinel",
             "TRON_GATEWAY_CHANNEL": "stable",
             "TRON_GATEWAY_SUPERVISED": "1",
-            "TRON_GATEWAY_PAYLOAD_ROOT": "/Users/someone/.tron/gateway/payloads/stable",
+            "TRON_GATEWAY_PAYLOAD_ROOT": "/Users/someone/.tron/state/payloads/stable",
             "PI_SESSION_ID": "stable-session-sentinel",
         })
 

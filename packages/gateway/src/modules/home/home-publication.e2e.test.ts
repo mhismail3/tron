@@ -87,7 +87,7 @@ describe("Home durable publication reconciliation", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-home-publication-"));
     roots.push(root);
     const tronHome = join(root, "tron");
-    const homeDirectory = join(tronHome, "gateway", "home");
+    const homeDirectory = join(tronHome, "state", "home");
     await mkdir(homeDirectory, { recursive: true });
     const workspace = new TronWorkspace(join(root, "workspace"));
     const owner = new HomeOwner({

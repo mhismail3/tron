@@ -542,7 +542,7 @@ class Reinstall:
 
     @property
     def stable_channel(self):
-        return safe_path(self.home / '.tron/gateway/payloads/stable')
+        return safe_path(self.home / '.tron/state/payloads/stable')
 
     def selection_evidence(self):
         selection = self.receipt.get('bundledSelection')
@@ -645,7 +645,7 @@ class Reinstall:
     def sources(self):
         sources = {'agent': self.source_agent(), 'old-app': self.platform.installed,
                    'browser-config': self.home / '.pi/config/pi-agent-browser-native/config.json',
-                   'machine-group': self.home / '.tron/internal/machine-group-id'}
+                   'machine-group': self.home / '.tron/state/machine-group-id'}
         for path in sorted((self.home / '.tron').iterdir()):
             if path.name not in self.excluded_state_entries() \
                     and self.share(path)(path, path.is_dir() and not path.is_symlink()) != 'none':

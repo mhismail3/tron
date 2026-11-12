@@ -766,7 +766,7 @@ class MountedChat {
 
 function readEnrollmentCode() {
   try {
-    return JSON.parse(readFileSync(join(config.tronHome, "gateway", "enrollment.json"), "utf8")).code ?? null;
+    return JSON.parse(readFileSync(join(config.tronHome, "state", "enrollment.json"), "utf8")).code ?? null;
   } catch {
     return null;
   }

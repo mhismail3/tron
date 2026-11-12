@@ -49,7 +49,7 @@ async function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.help) { console.log(USAGE); return; }
   const host = resolveDeploymentHost(options.host);
-  const token = await readLocalCredential(join(options.tronHome, "gateway", "local-auth.json"));
+  const token = await readLocalCredential(join(options.tronHome, "state", "local-auth.json"));
   const result = await authenticatedRequest({
     host, port: options.port, token, timeoutMs: 30_000,
     method: options.list ? "device.list" : "device.install.target.bind",

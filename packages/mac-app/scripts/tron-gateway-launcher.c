@@ -928,12 +928,12 @@ static int recover_pending_attempt(const char *channelRoot, const char *channel,
 /* Return 1 only when the external store/channel is genuinely absent. Any
  * existing but symlinked or malformed root is unsafe and must not fall back. */
 static int admit_channel_root(const char *home, const char *channel, char *admittedRoot) {
-    char gatewayPath[PATH_MAX], payloadsPath[PATH_MAX], payloadsRoot[PATH_MAX], channelPath[PATH_MAX];
+    char statePath[PATH_MAX], payloadsPath[PATH_MAX], payloadsRoot[PATH_MAX], channelPath[PATH_MAX];
     if (!valid_component(channel, 64) ||
-        snprintf(gatewayPath, sizeof(gatewayPath), "%s/gateway", home) >= (int)sizeof(gatewayPath) ||
-        snprintf(payloadsPath, sizeof(payloadsPath), "%s/payloads", gatewayPath) >= (int)sizeof(payloadsPath)) return -1;
+        snprintf(statePath, sizeof(statePath), "%s/state", home) >= (int)sizeof(statePath) ||
+        snprintf(payloadsPath, sizeof(payloadsPath), "%s/payloads", statePath) >= (int)sizeof(payloadsPath)) return -1;
     struct stat info;
-    if (lstat(gatewayPath, &info) != 0) return errno == ENOENT ? 1 : -1;
+    if (lstat(statePath, &info) != 0) return errno == ENOENT ? 1 : -1;
     if (!S_ISDIR(info.st_mode) || S_ISLNK(info.st_mode)) return -1;
     if (lstat(payloadsPath, &info) != 0) return errno == ENOENT ? 1 : -1;
     if (!S_ISDIR(info.st_mode) || S_ISLNK(info.st_mode) || realpath(payloadsPath, payloadsRoot) == NULL) return -1;
@@ -985,6 +985,35 @@ static int external_payload(const char *channelRoot, const char *channel, char *
     return 0;
 }
 
+static int home_layout_admitted(const char *home) {
+    char path[PATH_MAX], stamp[128];
+    struct stat info;
+    if (snprintf(path, sizeof(path), "%s/state", home) >= (int)sizeof(path)) return 0;
+    if (lstat(path, &info) == 0) {
+        if (!S_ISDIR(info.st_mode) || S_ISLNK(info.st_mode)) return 0;
+    } else if (errno != ENOENT) return 0;
+    if (snprintf(path, sizeof(path), "%s/state/layout.json", home) >= (int)sizeof(path)) return 0;
+    int stamped = 0;
+    if (lstat(path, &info) == 0) {
+        int consumed = 0;
+        if (bounded_file(path, stamp, sizeof(stamp)) != 0) return 0;
+        sscanf(stamp, " { \"version\" : 2 } %n", &consumed);
+        if (consumed == 0 || stamp[consumed] != '\0') return 0;
+        stamped = 1;
+    } else if (errno != ENOENT) return 0;
+    const char *roots[] = { "gateway", "mac-terminal", "ios-builds" };
+    for (size_t index = 0; index < sizeof(roots) / sizeof(roots[0]); index++) {
+        if (snprintf(path, sizeof(path), "%s/%s", home, roots[index]) >= (int)sizeof(path)) return 0;
+        if (lstat(path, &info) != 0) {
+            if (errno == ENOENT) continue;
+            return 0;
+        }
+        char marker[64];
+        if (!stamped || bounded_file(path, marker, sizeof(marker)) != 0 || strcmp(marker, "retired by layout 2; merge main\n") != 0) return 0;
+    }
+    return 1;
+}
+
 int main(int argc, char **argv) {
     // Build verification compiles this source afresh and uses this mode rather
     // than trusting the staged helper. It validates the bounded manifest,
@@ -1022,6 +1051,10 @@ int main(int argc, char **argv) {
     int versionMode = argc > 1 && strcmp(argv[1], "--version") == 0;
     char home[PATH_MAX];
     int homeResolved = selected_home(home, sizeof(home)) == 0;
+    if (homeResolved && !versionMode && !home_layout_admitted(home)) {
+        fputs("Tron home requires the offline layout migration: scripts/tron home-layout migrate --home <selected-home> --apply\n", stderr);
+        return 78;
+    }
     if (supervised && !versionMode && homeResolved) redirect_supervised_stderr(home);
 
     char executable[PATH_MAX];

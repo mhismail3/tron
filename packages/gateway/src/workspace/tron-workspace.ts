@@ -74,9 +74,9 @@ export class TronWorkspace {
       await this.directory(this.home, true);
       this.home = await realpath(this.home);
       this.root = tronHomePath(this.home, "workspace");
-      const gateway = tronHomePath(this.home, "gateway");
+      const gateway = tronHomePath(this.home, "state");
       await this.directory(gateway, true);
-      const state = tronHomePath(this.home, "gateway/workspace-state");
+      const state = tronHomePath(this.home, "state/workspace-state");
       await this.directory(state, true);
       try {
         this.release = await lockfile.lock(state, {
@@ -136,7 +136,7 @@ export class TronWorkspace {
   }
 
   static async featureInitializedExisting(home: string, feature: TronWorkspaceFeature): Promise<boolean> {
-    const marker = tronHomePath(home, "gateway/workspace-state", `${feature}-initialized.json`);
+    const marker = tronHomePath(home, "state/workspace-state", `${feature}-initialized.json`);
     try {
       const read = await readSecureJson<unknown>(marker, 128);
       if (!read.present) return false;
@@ -148,7 +148,7 @@ export class TronWorkspace {
   }
 
   private featureMarker(feature: TronWorkspaceFeature): string {
-    return tronHomePath(this.home, "gateway/workspace-state", `${feature}-initialized.json`);
+    return tronHomePath(this.home, "state/workspace-state", `${feature}-initialized.json`);
   }
 
   async markFeatureInitialized(feature: TronWorkspaceFeature): Promise<void> {

@@ -89,14 +89,9 @@ done < <(/usr/bin/find "$ROOT/app" "$ROOT/runtime" -print)
 /usr/bin/find "$ROOT/app" "$ROOT/runtime" ! -type f ! -type d ! -type l -print -quit | grep -q . && {
     echo "payload contains an unsupported entry" >&2; exit 2;
 }
-(
-    cd "$ROOT"
-    /usr/bin/find app runtime \( -type f -o -type l \) -print | LC_ALL=C /usr/bin/sort | while IFS= read -r file; do
-        if [[ -L "$file" ]]; then
-            targetDigest="$(/usr/bin/readlink "$file" | shasum -a 256 | awk '{print $1}')"
-            printf 'symlink:%s  %s\n' "$targetDigest" "$file"
-        else
-            shasum -a 256 "$file"
-        fi
-    done
-) | shasum -a 256 | awk '{print $1}'
+exec "$REPO_ROOT/scripts/tron-node" exec node --input-type=module - "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$ROOT" <<'JS'
+import { pathToFileURL } from "node:url";
+const { payloadTreeFingerprint } = await import(pathToFileURL(process.argv[2]).href);
+try { console.log(await payloadTreeFingerprint(process.argv[3])); }
+catch (error) { console.error(error.message); process.exitCode = 2; }
+JS

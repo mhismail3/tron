@@ -88,6 +88,7 @@ Also the rows of `src/` modules that have no README yet: process lifecycle
 | `background.slice` | debug; warning on failure | One background slice ran: `step` (the job), `outcome`, `durationMs`, `counts.waitedMs` past its due time, `error`; a failure is retried only by the next slice |
 | `background.backlog` | warning | A job starved past `BACKGROUND_BACKLOG_WARNING_MS` (5 min) while the scheduler was paused: `step`, `reason` (`requests-in-flight`, `event-loop-p99`), `counts`; once per spell |
 | `gateway.fatal-startup` | error | Loading the module graph or startup threw before the logger existed (`index.ts`): `error`, `runtimeEpoch`, `payloadVersion` |
+| `mac-terminal.startup-failed` | warning | Restoring an enabled private SSH service failed: `error`; its owned plist retains enabled intent, host keys never rotate automatically, and Gateway startup continues |
 | `gateway.started` | info | The first record of a process: `durationMs` since process start; pid, Node version and revision in the message |
 | `gateway.startup-step` | info | Each startup checkpoint: `step`, `durationMs` |
 | `gateway.startup-budget` | info; warning past `STARTUP_LISTEN_BUDGET_MS` (5,000 ms, `lifecycle/startup-budget.ts`) | Once, when serving: `durationMs` from process start to listening, the dominant `step`, budget and overrun in the message. A restarting client measures from its own socket close, not this |

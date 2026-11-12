@@ -38,7 +38,7 @@ promotion: `scripts/gateway-payload-deploy.mjs` ([host control](../../gateway/sr
   `sourceRevision`, package files and the build-input digest. One mismatch triggers one rebuild
   and a second verification.
 - **Selection.** Each launcher validates `TRON_GATEWAY_CHANNEL` (`stable` or `dev`) as one
-  bounded path component, then reads `~/.tron/gateway/payloads/<channel>/current.json` (schema 1,
+  bounded path component, then reads `~/.tron/state/payloads/<channel>/current.json` (schema 1,
   kind `tron-gateway-selection`, `channel`, `version`, `payloadFingerprint`) and
   `versions/<version>/manifest.json`, recomputes the complete fingerprint, rejects escaping,
   dangling or special links and writable entries, resolves paths with `realpath` and exports

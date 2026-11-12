@@ -228,7 +228,7 @@ if (args.includes("worktree")) {
     vi.stubEnv("PATH", `${bin}:${process.env.PATH}`);
     const devices = new DeviceStore(f.tronHome, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(f.tronHome, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await readFile(join(f.tronHome, "state", "local-auth.json"), "utf8")).bearerToken;
     const probe = createServer();
     await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));
     const port = (probe.address() as { port: number }).port;
@@ -308,7 +308,7 @@ exec ${JSON.stringify(realGit)} "$@"
     } finally { vi.unstubAllEnvs(); }
     expect((await f.trust.inspect(f.path("uncertain-init"))).effectiveDecision).toBe(false);
     await rm(audit); await rename(retained, audit);
-    const directory = join(f.tronHome, "gateway", "command-receipts");
+    const directory = join(f.tronHome, "state", "command-receipts");
     const receipts = await Promise.all((await readdir(directory)).filter(name => name.endsWith(".json")).map(async name =>
       JSON.parse(await readFile(join(directory, name), "utf8"))));
     const pending = receipts.filter(receipt => receipt.method === "extension.respond" && receipt.status === "pending");
@@ -360,7 +360,7 @@ exec ${JSON.stringify(realGit)} "$@"
     await store.put({ version: 1, taskId: "history-0", revision: 1, homeId: "home", generation: 1, routeGeneration: 1, intent,
       intentDigest: createHash("sha256").update(intent.text).digest("hex"), target: f.root, grantRef: null, scopeRef: null,
       lifecycle: "pending", sessionId: null, operationId: null, stopIntent: null, spend: null, reportRef: null, terminalEvidence: null, wake: null }, null);
-    const directory = join(f.tronHome, "gateway", "home", "tasks");
+    const directory = join(f.tronHome, "state", "home", "tasks");
     const templateName = (await readdir(directory)).find(name => name.endsWith("-history-0.json"))!;
     const template = JSON.parse(await readFile(join(directory, templateName), "utf8"));
     const publications = await Promise.allSettled(Array.from({ length: 299 }, async (_, offset) => {

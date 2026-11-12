@@ -178,7 +178,7 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
 
 async function recordUpdaterFailure(tronHome: string, channel: GatewayUpdateChannel, commandId: string, error: unknown): Promise<void> {
   if (!isAbsolute(tronHome)) return;
-  const directory = tronHomePath(tronHome, "gateway/payloads", channel);
+  const directory = tronHomePath(tronHome, "state/payloads", channel);
   const root = parse(tronHome).root;
   let cursor = root;
   for (const component of tronHome.slice(root.length).split(/[\\/]+/u).filter(Boolean)) {
@@ -348,7 +348,7 @@ export class GatewayUpdateService {
   get isUsable(): boolean { return this.updater !== undefined; }
   get channel(): GatewayUpdateChannel { return this.runtimeChannel; }
 
-  private configPath(): string { return tronHomePath(this.options.tronHome, "gateway/update-config.json"); }
+  private configPath(): string { return tronHomePath(this.options.tronHome, "state/update-config.json"); }
 
   async configStatus(): Promise<GatewayUpdateConfig | null> {
     const path = this.configPath();
@@ -377,7 +377,7 @@ export class GatewayUpdateService {
   async status(channel: GatewayUpdateChannel = this.runtimeChannel): Promise<GatewayUpdateStatus> {
     if (channel !== "stable" && channel !== "dev") throw new GatewayError("invalid_request", "Gateway update channel is invalid");
     if (channel !== this.runtimeChannel) throw new GatewayError("invalid_request", `Gateway ${this.runtimeChannel} runtime cannot inspect ${channel} updates`);
-    const root = tronHomePath(this.options.tronHome, "gateway/payloads", channel);
+    const root = tronHomePath(this.options.tronHome, "state/payloads", channel);
     const stateValue = await readBounded(join(root, "deployment-state.json"));
     const progressValue = await readBounded(join(root, "update-progress.json"));
     const currentSelectionValue = await readBounded(join(root, "current.json"));

@@ -70,7 +70,7 @@ enum HostedManageSessionReview {
                     scope: "user", source: "auto", distribution: "local"),
                 row("repo-notes", "This repository's own conventions.", path: "/workspace/.agents/skills/repo-notes/SKILL.md",
                     scope: "project", source: "auto", distribution: "local"),
-                row("pi-subagents", "Delegation guidance from the managed package.", path: "/Users/fixture/.tron/internal/pi-subagents/skills/pi-subagents/SKILL.md",
+                row("pi-subagents", "Delegation guidance from the managed package.", path: "/Users/fixture/.tron/cache/pi-subagents/skills/pi-subagents/SKILL.md",
                     scope: "user", source: "npm:pi-subagents", distribution: "external"),
             ]), "diagnostics": .array([])]),
             "prompts": .object(["prompts": .array([

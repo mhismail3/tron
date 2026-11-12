@@ -23,7 +23,7 @@ export async function fileDigests(root: string): Promise<Record<string, string>>
 }
 
 export async function prepareHome(home: string): Promise<void> {
-  await mkdir(join(home, "gateway"), { recursive: true, mode: 0o700 });
+  await mkdir(join(home, "state"), { recursive: true, mode: 0o700 });
   await chmod(home, 0o700);
 }
 

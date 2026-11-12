@@ -273,7 +273,7 @@ test("Debug source record is dirty when the tree changed while the candidate bui
 
 const selectDevPayload = (home, epoch) => {
   const version = `debug-${epoch.slice(-12)}`;
-  const root = join(home, "gateway", "payloads", "dev");
+  const root = join(home, "state", "payloads", "dev");
   mkdirSync(join(root, "versions", version), { recursive: true });
   writeFileSync(join(root, "current.json"), `${JSON.stringify({ schema: 1, kind: "tron-gateway-selection", channel: "dev", version, payloadFingerprint: sharedFingerprint })}\n`);
   writeFileSync(join(root, "versions", version, "manifest.json"), `${JSON.stringify({
@@ -363,8 +363,8 @@ exec "${process.execPath}" "${"$"}@"
     execFileSync("/bin/chmod", ["+x", join(fakeBin, "npm")]);
     const devHome = join(home, ".tron-dev");
     const version = selectDevPayload(devHome, epochFor(1));
-    mkdirSync(join(devHome, "gateway"), { recursive: true });
-    writeFileSync(join(devHome, "gateway", "lifecycle.json"), `${JSON.stringify({
+    mkdirSync(join(devHome, "state"), { recursive: true });
+    writeFileSync(join(devHome, "state", "lifecycle.json"), `${JSON.stringify({
       lifecycle: "ready", expectedHost: "tailscale", epoch: epochFor(1),
       ...(supervisorPid ? { supervisorPid, supervisorStartIdentity: supervisorIdentity } : {}),
       candidateSources: [{ runtimeEpoch: epochFor(1), worktree: root, branch: "feat/source", dirty }],

@@ -235,7 +235,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       writeLocked(record: HomeRecord): Promise<void>;
       claimReservedChapter(sessionId: string, attemptId: string): Promise<unknown>;
     };
-    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const current = JSON.parse(await readFile(join(item.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     const reservedId = "reserved-successor";
     await owner.writeLocked({
       ...current,
@@ -265,7 +265,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const [firstSlot, secondSlot] = await Promise.all([first, second]);
     expect(claims).toBe(1);
     expect(secondSlot).toBe(firstSlot);
-    const stored = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const stored = JSON.parse(await readFile(join(item.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     expect(stored.chapters[1]).toMatchObject({
       sessionId: reservedId, state: "materializing", attemptId: expect.any(String),
       expectedPath: firstSlot.sessionFile,
@@ -275,7 +275,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     expect(item.faux.state.callCount).toBe(0);
 
     const afterReturn = await homeOwnerOf(item.registry).materializer.materialize(reservedId);
-    const afterReturnRecord = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const afterReturnRecord = JSON.parse(await readFile(join(item.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     expect(afterReturn).toBe(firstSlot);
     expect(afterReturn.sessionFile).toBe(firstSlot.sessionFile);
     expect(afterReturnRecord.chapters[1]).toMatchObject({
@@ -283,7 +283,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       expectedPath: stored.chapters[1]!.expectedPath,
     });
     const home = homeOwnerOf(item.registry) as unknown as { writeLocked(record: HomeRecord): Promise<void> };
-    const authoritative = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const authoritative = JSON.parse(await readFile(join(item.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     for (const mismatch of [
       { attemptId: "different-attempt", expectedPath: stored.chapters[1]!.expectedPath },
       { attemptId: stored.chapters[1]!.attemptId, expectedPath: `${stored.chapters[1]!.expectedPath}.other` },
@@ -309,7 +309,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
   it("blocks Registry materialization on uncertain scan evidence without creating a runtime", async () => {
     const item = await open("reserved-materialization-scan-block", { home: true });
     const owner = homeOwnerOf(item.registry) as unknown as { writeLocked(record: HomeRecord): Promise<void> };
-    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const current = JSON.parse(await readFile(join(item.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     const reservedId = "reserved-scan-block";
     await owner.writeLocked({
       ...current,
@@ -334,7 +334,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       writeLocked(record: HomeRecord): Promise<void>;
       recordReservedChapterPath(sessionId: string, attemptId: string, path: string): Promise<void>;
     };
-    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const current = JSON.parse(await readFile(join(item.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     const reservedId = "reserved-path-failure";
     await owner.writeLocked({
       ...current,
@@ -359,7 +359,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
     await homeOwnerOf(item.registry).disable();
     const owner = homeOwnerOf(item.registry) as unknown as { writeLocked(record: HomeRecord): Promise<void> };
-    const current = JSON.parse(await readFile(join(item.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
+    const current = JSON.parse(await readFile(join(item.tronHome, "state", "home", "home.json"), "utf8")) as HomeRecord;
     await owner.writeLocked({
       ...current,
       chapters: [
