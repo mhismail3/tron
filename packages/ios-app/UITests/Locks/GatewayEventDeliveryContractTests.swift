@@ -67,6 +67,41 @@ final class GatewayEventDeliveryContractTests: XCTestCase {
         }
     }
 
+    func testProcessActivityIntegerProjectionPreservesInvalidResponseFailure() async throws {
+        try await withClient(policy: .init(maximumEvents: 3, maximumBytes: 4096)) { client, peer in
+            let method = "fixture.processActivity"
+            let activity: [String: Any] = [
+                "version": 1, "processId": "worker", "kind": "subagent", "executionMode": "asynchronous",
+                "source": "delegatedAgent", "visibility": "active", "title": "Worker",
+                "lifecycle": ["version": 1, "state": "running", "sequence": 1, "observedAt": "2026-01-01T00:00:00Z", "attention": "none"],
+                "outputTruncated": false, "durationMs": 42, "toolCount": 2, "turnCount": 1, "childCount": 0,
+                "toolCallId": "launch", "runId": "run-worker", "childSessionRef": "child-worker"
+            ]
+            await peer.respond(to: method, with: try JSONSerialization.data(withJSONObject: activity))
+            let decoded: PresentedProcessActivity = try await client.request(method, EmptyParams())
+            XCTAssertEqual(decoded.durationMs, 42)
+            XCTAssertEqual(decoded.toolCount, 2)
+            XCTAssertEqual(decoded.turnCount, 1)
+            XCTAssertEqual(decoded.childCount, 0)
+            for field in ["durationMs", "toolCount", "turnCount", "childCount"] {
+                for invalid in [0.5, 1e30] {
+                    var malformed = activity
+                    malformed[field] = invalid
+                    await peer.respond(to: method, with: try JSONSerialization.data(withJSONObject: malformed))
+                    do {
+                        let _: PresentedProcessActivity = try await client.request(method, EmptyParams())
+                        XCTFail("Accepted invalid integer for \(field): \(invalid)")
+                    } catch let failure as GatewayFailure {
+                        XCTAssertEqual(failure.code, "invalid_response")
+                        XCTAssertEqual(failure.details?.objectValue?["method"]?.stringValue, method)
+                        XCTAssertEqual(failure.details?.objectValue?["category"]?.stringValue, "invalid_data")
+                        XCTAssertFalse(failure.retryable)
+                    }
+                }
+            }
+        }
+    }
+
     func testCountPressureRetiresConnectionAndDeliversDisconnect() async throws {
         try await withClient(policy: .init(maximumEvents: 3, maximumBytes: 4096)) { client, peer in
             try await self.fence(client, peer: peer, frames: try (0..<3).map { try self.frame("lock.\($0)") })
@@ -325,6 +360,9 @@ private actor EventLockPeer: GatewaySocketConnection {
     private var closing = false
     private var closeRelease: CheckedContinuation<Void, Never>?
     private var onClose: (@Sendable () -> Void)?
+    private var results: [String: Data] = [:]
+
+    func respond(to method: String, with result: Data) { results[method] = result }
 
     init(holdsClose: Bool = false) { self.holdsClose = holdsClose }
 
@@ -332,9 +370,10 @@ private actor EventLockPeer: GatewaySocketConnection {
 
     func send(_ data: Data) async throws {
         let value = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let id = value?["id"] as? String else { return }
+        guard let id = value?["id"] as? String, let method = value?["method"] as? String else { return }
+        let result = try results[method].map { try JSONSerialization.jsonObject(with: $0) } ?? [:] as [String: String]
         let response = try JSONSerialization.data(withJSONObject: ["type": "response", "id": id,
-                                                                  "ok": true, "result": [:] as [String: String]])
+                                                                  "ok": true, "result": result])
         enqueue([response])
     }
 

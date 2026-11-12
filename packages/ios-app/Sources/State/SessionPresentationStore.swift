@@ -2233,7 +2233,7 @@ extension SessionPresentationStore {
 
     private static func installingProcessActivities(
         _ snapshot: SessionSnapshot,
-        preserving previous: [SessionProcessActivity],
+        preserving previous: [PresentedProcessActivity],
         previousOverview: SessionProcessOverview?
     ) -> SessionSnapshot {
         var result = snapshot
@@ -2261,9 +2261,9 @@ extension SessionPresentationStore {
     }
 
     private static func upsertingProcessActivity(
-        _ activity: SessionProcessActivity,
-        into activities: [SessionProcessActivity]
-    ) -> ([SessionProcessActivity], Bool) {
+        _ activity: PresentedProcessActivity,
+        into activities: [PresentedProcessActivity]
+    ) -> ([PresentedProcessActivity], Bool) {
         var result = activities
         guard let index = result.firstIndex(where: { $0.processId == activity.processId }) else {
             result.append(activity)

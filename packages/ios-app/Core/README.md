@@ -77,7 +77,9 @@ the hosted test targets link.
   `PresentedProcessLifecycle`, `PresentedProcessAttention` and `SessionProcessLifecycleState`
   delegate decoding to generated SessionProcess values while keeping their existing encoders.
   These adapters are S7 deletion debt tracked in #2380;
-  generated records have no Encodable bridge. The four nested surface enums (`Kind`, `Placement`,
+  generated records have no Encodable bridge. `PresentedProcessActivity` and its kind, execution
+  mode, source and visibility enums follow that split; the local duration sample anchor remains
+  on the presentation record and is excluded from its unchanged wire encoder. The four nested surface enums (`Kind`, `Placement`,
   `Lifecycle`, `InputMode`) use the same temporary split: generated surface enum decoding,
   unchanged hand raw-value encoding, and deletion with the final handwritten surface container.
 

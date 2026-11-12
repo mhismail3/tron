@@ -183,7 +183,7 @@ final class ReadOnlySubagentSessionStore {
     private(set) var nextEntryID: String?
     private(set) var leafEntryID: String?
     private(set) var forkBoundary: TranscriptForkBoundary?
-    private(set) var liveActivity: SessionProcessActivity?
+    private(set) var liveActivity: PresentedProcessActivity?
 
     init(client: GatewayClient) { self.client = client }
 
@@ -227,7 +227,7 @@ final class ReadOnlySubagentSessionStore {
         processID: String,
         presentationGeneration: Int,
         parentSubscriptionToken: String,
-        activity: SessionProcessActivity? = nil
+        activity: PresentedProcessActivity? = nil
     ) {
         recoveryAttempts = 0
         selectedToolCallID = activity?.processId == processID ? activity?.toolCallId : nil
@@ -246,7 +246,7 @@ final class ReadOnlySubagentSessionStore {
         processID: String,
         presentationGeneration: Int,
         parentSubscriptionToken: String,
-        activity: SessionProcessActivity?
+        activity: PresentedProcessActivity?
     ) {
         let retainTranscript = self.parentSessionID == parentSessionID && self.processID == processID
             && self.presentationGeneration == presentationGeneration
@@ -600,7 +600,7 @@ final class ReadOnlySubagentSessionStore {
              activity: liveActivity)
     }
 
-    func updateLiveActivity(_ activity: SessionProcessActivity?) {
+    func updateLiveActivity(_ activity: PresentedProcessActivity?) {
         guard let processID else { return }
         let wasActive = liveActivity?.lifecycle.isActiveWork == true
         let hadChildBinding = liveActivity?.childSessionRef != nil

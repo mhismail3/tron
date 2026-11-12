@@ -37,7 +37,7 @@ struct HostedSubagentParityFixture: View {
             working: .init(visible: false), widgets: [.init(key: "provider", lines: ["PI_SUBAGENT_ASYNC_JSON: PRIVATE"], placement: .aboveEditor, owner: owner)],
             toolsExpanded: false, editorRevision: 0, editorText: "")
         let startedAt = ISO8601DateFormatter().string(from: Date.now.addingTimeInterval(-10))
-        let process = SessionProcessActivity(processId: "worker", kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
+        let process = PresentedProcessActivity(processId: "worker", kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
             lifecycle: .init(state: .running, sequence: 1, observedAt: startedAt), visibility: .active,
             startedAt: startedAt, title: "Worker", currentTool: "read", currentPathBasename: "parity.txt",
             model: "anthropic/claude-fable-5-2", thinking: "medium", outputTail: "PARITY_CHILD_COMPLETE", toolCount: 2, turnCount: 1, toolCallId: "launch", runId: "run-worker")
@@ -127,14 +127,14 @@ struct HostedSubagentParityFixture: View {
 
     nonisolated static func historyProcesses(sequence: Int, stage: Int,
                                          outcome: SessionProcessLifecycleState = .completed,
-                                         resumed: Bool = true) -> [SessionProcessActivity] {
+                                         resumed: Bool = true) -> [PresentedProcessActivity] {
         let now = Date.now
         func row(_ id: String, _ title: String, _ state: SessionProcessLifecycleState,
-                 settled: Bool = false) -> SessionProcessActivity {
+                 settled: Bool = false) -> PresentedProcessActivity {
             let terminal = state.isTerminal || settled
             let age = id == "completed" ? 1 : (Int(id.replacingOccurrences(of: "earlier-", with: "")).map { $0 + 1 } ?? 0)
             let observedAt = now.addingTimeInterval(-Double(age))
-            return SessionProcessActivity(
+            return PresentedProcessActivity(
                 processId: id, kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
                 lifecycle: .init(state: state, sequence: sequence,
                     observedAt: observedAt.ISO8601Format(), terminalAt: terminal ? observedAt.ISO8601Format() : nil,

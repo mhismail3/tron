@@ -7,7 +7,8 @@ serialized hello/event/response envelopes, the production GatewayClient decoder
 and receive loop, admission, epoch retirement and AsyncSequence. Only the named
 byte peer is synthetic: these are real Core kernel contracts, not isolated Hub
 tests or real-network/TLS coverage. They observe delivered frames, connection
-outcomes and bounded transport diagnostics, never private Hub state.
+outcomes, typed process-activity response values and invalid_response diagnostics
+for refused fractional/out-of-range integers, never private Hub state.
 
 The ordinary `TronMobileUITests` runner embeds its own Core framework image,
 separate from the app process's image. A peer response after events fences
