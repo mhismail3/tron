@@ -24,7 +24,6 @@ struct SettingsRendererRow: View {
 
     private var presentation: SettingsKeyPresentation { setting.presentation }
     private var title: String {
-        if modelConfiguration && setting.key == "model.thinking[role=chat]" { return "Effort" }
         if modelConfiguration && setting.key == "model.contextWindow" { return "Context Window" }
         return instanced ? (Self.instanceName(setting) ?? baseInstanceTitle ?? presentation.label)
             : (presentation.label)
