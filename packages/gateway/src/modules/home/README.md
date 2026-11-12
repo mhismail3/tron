@@ -75,8 +75,11 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   canonical path reads; cold measurement fences the finite file cut by size,
   time and identity, and publication requires an untorn conversation branch.
 - **Workspace.** `<tronHome>/gateway/home/workspace` (`0700`, empty) is recorded **untrusted**.
-  Global skills and prompt templates feed the composer only (the model sees one when inserted);
-  `home-global-resources.ts` reloads them live as their agent-directory inputs change.
+  Global skills appear in the system prompt; prompt templates feed the composer.
+  `home-global-resources.ts` watches settings, skills, prompts and `agent/npm`,
+  reloading at idle. Failed reloads remain pending for the next idle edge; only a
+  successful reload advances the applied revision and logs `home.resources-reload`
+  with reason `completed`.
 - **Identity.** Every chapter is titled **Home** (no JSONL rewrite) and omitted from
   `session.list` (`scope: "user"`); search and `session.open` are unfiltered.
 - **Rollover.** At a quiescent boundary, the soft limit (24 MiB or 50,000 entries) seals the
@@ -107,7 +110,7 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   work; only canonical maintainer turns admit general writes, edits, shell execution or `computer`.
   Home's current recipe owns model, thinking and tools on creation/reconstruction and every request; chapter choices are records, never overrides.
   Rollover carries only directional authorization ceilings (e.g. images blocked until approved) and the explicit chapter window.
-  Settings counts enabled tools; every producer-owned input is a wake and withholds `write`, `edit`, `bash` and `computer`.
+  Settings counts enabled tools; every producer-owned input is a wake, on which `write`, `edit`, `bash` and `computer` stay declared and every call to them is refused.
   Agent `SYSTEM.md`/`APPEND_SYSTEM.md` are dropped; only `HOME_TOOL_NAMES`; no MCP or subagent discovery
   (empty `session.resources` catalog), no compaction (`session.compact` refuses). Fixed physical
   model on its Gateway-runtime view; the profile owns explicit model admission and physical
@@ -124,11 +127,11 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
 - **Delivery headroom** reserves the replacement request head, including the learned
   profile at its bound, over the same frozen memory cut. Framing, admission and final
   overflow checks share one head constructor: recorded text/sections are replaced,
-  declared tools are origin-filtered and charged with `instructions`, and profile is counted
-  separately. The head constructor requires activation kind, so wake estimates cannot charge
-  withheld write/edit/bash/computer schemas. `home-task-dispatch.e2e.test.ts` proves a full report
+  declared tools are charged with `instructions`, and profile is counted
+  separately. Every activation declares the same tools, so the one head constructor charges the
+  same schemas for user turns and wakes. `home-task-dispatch.e2e.test.ts` proves a full report
   fits the wake's inline headroom; `home-tool-admission.e2e.test.ts` compares pre-usage instruction
-  accounting with the actual origin-filtered provider frame. Historical system deltas are not
+  accounting with the actual provider frame. Historical system deltas are not
   additional heads. Output reserve remains.
 - **Token counts** follow the provider's usage. Before a request is sent its sections are Pi's
   character estimates multiplied by factors learned per model from the provider's usage, held in
@@ -145,7 +148,9 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   provider's prompt count (input, cache read and cache write) and its sections are rescaled to
   sum to it.
 - `home.context` breaks the last request into `instructions`, `profile`, `memory`, `chapter`,
-  `results`, `input`. For caching, system prompt and tools are stable within an origin kind; the view only grows between rebalances,
+  `results`, `input` (`profile` is the static areas section plus the turn state). For caching, tools and system text are byte-identical for user turns
+  and wakes: everything that varies by activation (chat model and thinking, profile counts, versions, sorting offer and diagnostics) is the
+  `<turn-state>` block that follows the view's footer and precedes the nonce, after the last one-hour mark. The view only grows between rebalances,
   goes in four-line blocks with one Anthropic mark on the last whole block and, when the view starts with whole blocks of settled lines
   (each line covers at least `VIEW_SETTLED_SPAN`, 64, messages), one on the last of those, so a merge among recent lines re-reads the settled
   prefix. Within Anthropic's four marks the last-tool mark yields first, then system marks before the last system block; if both view marks
@@ -203,8 +208,8 @@ changes keep its store, cursors and spend.
 - **Shared tools:** Pi owns `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`,
   including paging, truncation and errors. Resource trust is not a file sandbox. Global
   skills are discoverable through the shared loader; project executable resources remain
-  excluded. Wake requests omit write/edit/bash/computer declarations and reject forged calls at
-  execution against the canonical current activation. Existing task, Profile, settings and
+  excluded. Wake requests declare write/edit/bash/computer like every other request, so one cached prefix serves
+  both kinds, and reject their calls at execution against the canonical current activation. Existing task, Profile, settings and
   automation authority is unchanged; fetched text never promotes a wake to a user turn.
 - **Settings tool:** Home changes settings through the one change path as `home`,
   using the shared exact native card when consent is needed. With `taskId` it reads
@@ -220,8 +225,8 @@ changes keep its store, cursors and spend.
   prepares the original facts in shared Changes before effects, then publishes applied
   facts only after proving the atomic current-file commit. Retry repairs only a committed audit or explicitly resumes its
   precommit intent; existing Changes Undo restores exact labels without rewriting content.
-  `## Learned profile` carries bounded seven-area/count/revision metadata and diagnostic
-  references, never note text. Home explicitly reads v2 paths or Prior organization and
+  `## Learned profile` in the system text is static: the rules for reading Profile and one `profile read` pointer per area.
+  The turn state carries the bounded count/revision metadata, sorting state and diagnostic references. Neither carries note text. Home explicitly reads v2 paths or Prior organization and
   chooses relevance and worker-brief content; unavailable Profile says so. Placement
   never weaken confirmed standing authority. See [profile contract](profile.md).
   Storage is one hierarchical `workspace/files/Profile.json`, current heads and exact
@@ -285,14 +290,14 @@ and the [built-in improvement-loop design](improvement-loop.md).
 
 | Signal | Level | Meaning |
 |---|---|---|
-| `home.<outcome>`; `home.client-control`; `home.route-bound`; `home.resources-reload` | info; `unavailable`, `refused`, failed controls and `resources-reload` warn | Designation outcomes (`designated`, `enabled`, `disabled`, `unavailable` or `refused` with a coded `reason`), pause/resume-memory owner outcome (`operation`, `reason`), route binding `category` (`fresh`, `replay`, `open`), a live global-resource reload or watch that failed (`watch-failed` or a coded `reason`). Never IDs, paths, models or memory text |
+| `home.<outcome>`; `home.client-control`; `home.route-bound`; `home.resources-reload` | info; `unavailable`, `refused`, failed controls and failed `resources-reload` warn | Designation outcomes (`designated`, `enabled`, `disabled`, `unavailable` or `refused` with a coded `reason`), pause/resume-memory owner outcome (`operation`, `reason`), route binding `category` (`fresh`, `replay`, `open`), a successful live global-resource reload (`completed`) or a failed reload/watch (`watch-failed` or a coded `reason`). Never IDs, paths, models or memory text |
 | `home.chapter-rollover`; `home.chapter-recovery`; `home.chapter-refused`; `home.chapter-limit-stop`; `home-chapter-limit-stop-failed` code on `session.diagnostic` | info; refusals, limit stops and the failure warn; the `session.diagnostic` code is a session event, not a log record | Rollover `reason` (soft or hard byte/entry limit) and `chapterOrdinal`; recovery `reason` (`absent`, `adopt`, `conversation-published`, `settings-from-live`, `settings-from-cold`); refusal `reason` (`hard-bytes`, `sealed-write`, `ownership-changed`, …); a running activation stopped at the hard limit with crossing and settled bytes/entries; a chapter-limit Stop that did not settle keeps its admission fence |
 | `home.activation-usage` | info | Once per activation, for its first response with a plausible usage: `estimatedTokens` (that request's figure before sending; `home.activation`'s when it is the activation's first request) and `providerTokens` (the provider's prompt count). Their ratio is the estimate's error; a ratio that stays outside 0.95–1.05 means the factors are not converging for that model. |
 | `home.activation`; `home.activation-refused`; `home.memory-ingest`; `home-memory-revision-changed` / `home-memory-source-unavailable` reason on `rpc.error` | info; refusals and failures warn | An activation's first provider request (`effectiveTokens`, `contextWindow`, view lines/bytes, `excludedMessages`, `durationMs` readiness wait); a request refused before any provider call (`reason`, bounded `detail`; `memory-usage-limit` re-arms once the limit lapses); a memory-ingest failure `reason`; a memory-browser read that lost its revision fence or could not prove its sources (coded `cause`) |
 | `home.task.store-refused`; `home.task.authorization`; `home.task.transition`; `home.task.checkin`; `home.task.spend`; `home.task.dispatch-stage`; `home.task.producer-refused`; `home.task.report-reminder` | info; refusals and slow, timed-out, cancelled or abandoned-cleanup-failed dispatch stages warn | Keyed by `taskHash`/`operationHash`, never intent, report or path ([tasks.md](tasks.md)): task-store refusal `reason` (fenced until the next start, in `home.status.taskRecovery`); scope, grant and decision transitions; durable `pending`/`active`/`terminal` transitions with `reason`, `failureCause`, `errorCode`; check-in `attention`; deduplicated token spend; a `delegate` admission `stage` slow (≥ 5 s), timed out (60 s), cancelled or `abandon-failed` (the late resource cleanup rejected); a refused detached-capable producer (`reason: unverified-provider` diagnoses a reviewed-version/pin mismatch before launch); the single report-only continuation |
 | `home.task.control`; `home.task.runaway-stop`; `home.task.detached-work`; `home.task.subagents`; `home.taskStatus.subagentRuns`; `home.taskStatus.ownerSettlement` | info; runaway stop and detached work warn; `home.taskStatus.*` are read-only status fields | Steer, interrupt and Stop `disposition` (`accepted`, `persisted`, `refused` with a finite `reason`; interrupt `calls`); the deadline cancel-and-join outcome; detached work outliving settlement (outcome unknown); subagent `started`, `stoppedAtEnd`, `noticesUndelivered`; the exact live runs that report and Stop select; the owner-settlement proof (`null` is unproven) |
 | `home.task.inbox`; `home.wake`; `home.inbox.admission-slow`; `home-inbox-settlement-failed` code on `session.diagnostic`; `home-worker-attention-failed` | info; refused wakes, slow admission (≥ 2 s) and failures warn | Wake-inbox transitions (`eventHash`, `state`, coded `reason`); each wake decision (`admitted`, `deferred`, `refused` with `reason`); result delivery into an activation (`delivery`, `durationMs`); a durable terminal whose inbox settlement rejected (session event); a failed acknowledgement of a new worker's earlier completion |
-| `session.context.activeTools` versus Home `settings.resolve` → `tools.active` | read-only RPC fields | Both describe the enabled recipe after runtime construction. A mismatch diagnoses stale selection; `home.context.breakdown.activation.kind` explains why wake requests omit `write`, `edit`, `bash` and `computer` without changing that recipe |
+| `session.context.activeTools` versus Home `settings.resolve` → `tools.active` | read-only RPC fields | Both describe the enabled recipe after runtime construction. A mismatch diagnoses stale selection; `home.context.breakdown.activation.kind` explains why a wake refuses calls to `write`, `edit`, `bash` and `computer`, which it still declares, without changing that recipe |
 | `TRON_SETTINGS_OUTCOME_PROOF_DEFERRED` | warning | A settings delivery's canonical proof failed; its outbox remains retained for later proof, without exposing request IDs or paths |
 | `home.response-timing`; `home.task.history-summary` | info | Content-free accepted-input→visible/terminal scalar sample with queue/model/tool durations and completeness; authoritative admitted operation/resume counts with root hash and root-created time for page deduplication. A crash loses live timing correlation; a bounded log export is partial coverage |
 | `home.task.command-reap`; `home.task.command-scope-refused`; `host.load.non-task` | info at settle; sweep reaps, refused reaps, `bind-failed` and `host.load.non-task` warn | A settled task's commands reaped (`action` `settle` or `sweep`, `outcome`, `reason`, `counts.processes`/`survivors`); a scope bind that failed (`bind-failed`, commands run unscoped) or a scope the sweep leaves alone, once per scope (`unbound-scope`, `unknown-task`); busy CPU ≥ 90 % mostly outside task scopes, at most every 10 min (`counts` busy/task/non-task/`ppid=1` CPU, `stages` the top five as `name pid ppid cpu`) |

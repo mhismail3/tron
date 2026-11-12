@@ -10,7 +10,7 @@ interface HomeResourceSlot {
   reload(): Promise<void>;
 }
 
-const AGENT_DIR_INPUTS = new Set(["settings.json", "prompts", "skills"]);
+const AGENT_DIR_INPUTS = new Set(["settings.json", "prompts", "skills", "npm"]);
 const SETTLE_MS = 150;
 
 export class HomeGlobalResources {
@@ -103,8 +103,10 @@ export class HomeGlobalResources {
           continue;
         }
         this.options.diagnostic?.({ outcome: "resources-reload", reason: error instanceof GatewayError ? error.code : "failed" });
+        return;
       }
       this.applied = target;
+      this.options.diagnostic?.({ outcome: "resources-reload", reason: "completed" });
     }
   }
 }

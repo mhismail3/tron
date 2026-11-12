@@ -70,9 +70,11 @@ function homeBeforeProviderRequest(): (payload: unknown, model: Model) => unknow
   return (payload, model) => hook({ payload }, { model });
 }
 
+const TURN_STATE = "<turn-state>\nCurrent Home chat model: anthropic/claude-opus-5-5\n</turn-state>";
+
 function memoryMessage(): Message {
   const group = (first: number) => Array.from({ length: VIEW_BLOCK_LINES }, (_, line) => `${first + line}+0|fact ${first + line}\n`).join("");
-  const blocks = ["<memory>", group(1), group(1 + VIEW_BLOCK_LINES), "</memory>", `${HOME_NONCE_MARKER}wire`];
+  const blocks = ["<memory>", group(1), group(1 + VIEW_BLOCK_LINES), "</memory>", TURN_STATE, `${HOME_NONCE_MARKER}wire`];
   return { role: "user", content: blocks.map((text) => ({ type: "text", text })), timestamp: 1 };
 }
 
@@ -81,7 +83,7 @@ function viewMessage(spans: readonly number[]): Message {
   const lines = spans.map((span) => { const line = `${id}+${span}|fact ${id}\n`; id += span; return line; });
   const groups: string[] = [];
   for (let at = 0; at < lines.length; at += VIEW_BLOCK_LINES) groups.push(lines.slice(at, at + VIEW_BLOCK_LINES).join(""));
-  return { role: "user", content: ["<memory>", ...groups, "</memory>", `${HOME_NONCE_MARKER}wire`].map((text) => ({ type: "text", text })), timestamp: 1 };
+  return { role: "user", content: ["<memory>", ...groups, "</memory>", TURN_STATE, `${HOME_NONCE_MARKER}wire`].map((text) => ({ type: "text", text })), timestamp: 1 };
 }
 
 async function oauthHome(prefix: string) {

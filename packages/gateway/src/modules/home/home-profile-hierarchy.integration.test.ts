@@ -4,7 +4,7 @@ import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.j
 import { answerChangeCard } from "../../../test-support/native-change.js";
 import { expect, it, vi } from "vitest";
 import * as durability from "../../foundation/durable-json.js";
-import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, recordCase, say, command, history, undo, maintainer } from "../../../test-support/home-profile-fixture.js";
+import { fixture, homeActivation, profileCall, profileNotes, profileReportFile, recordCase, say, command, history, undo, maintainer, homeHead } from "../../../test-support/home-profile-fixture.js";
 
 profileReportFile("test-results/home-profile/hierarchy.json");
 
@@ -24,7 +24,7 @@ it("an unknown kind leaves valid discovery/read intact and discloses its exact r
   expect(result.unclassified).toBe(1);
   expect(result.index).toContain(seeded[2]!.id); expect(result.index).toContain(seeded[2]!.revisionId);
   expect(result.index).not.toContain(seeded[1]!.id);
-  for (const note of seeded) expect(turn.first.systemPrompt).not.toContain(note.kind === "note" ? note.content.title : "unexpected");
+  for (const note of seeded) expect(homeHead(turn.first)).not.toContain(note.kind === "note" ? note.content.title : "unexpected");
   const read = await homeActivation(f, "Read only Communication, not malformed Prior organization.", [profileCall({ action: "read", path: "communication" }, "malformed-core"), say("read")]);
   const core = read.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "malformed-core")?.details as { items: Array<{ id: string }> };
   expect(core.items.map(item => item.id)).toEqual([seeded[0]!.id]);
@@ -190,8 +190,10 @@ it("new profile content is discoverable but never automatically inserted into Ho
   expect(notes).toHaveLength(1);
   expect(notes[0]!.content.confirmed).toBe(false);
   const next = await homeActivation(f, "Plan unrelated work.", [say("ready")]);
-  expect(next.first.systemPrompt).not.toContain("the fixture service is named Cedar");
-  expect(next.first.systemPrompt).toContain("Unsorted (inferred): 1 active / 1 total");
+  expect(homeHead(next.first)).not.toContain("the fixture service is named Cedar");
+  expect(next.first.systemPrompt).toContain("- Unsorted (inferred): profile read path=inferred");
+  expect(next.first.systemPrompt).not.toContain("1 active / 1 total");
+  expect(JSON.stringify(next.first.messages)).toContain("- inferred: 1 active / 1 total");
   const read = await homeActivation(f, "Read Unsorted.", [profileCall({ action: "read", path: "inferred" }, "hierarchy-read"), say("read")]);
   expect(JSON.stringify(read.last.messages)).toContain("Context only: the fixture service is named Cedar.");
   expect((await profileNotes(f))[0]!.revisionId).toBe(notes[0]!.revisionId);
@@ -225,8 +227,8 @@ it("explicit reads preserve exact standing-rule status/provenance and isolate na
     seeded.push((await f.store.createNote({ commandId: command("hierarchy-seed"), record: { kind: "note", scope: "personal", provenance: { actor: "user", source: "hierarchy-fixture", evidence: [], reason: "Explicit standing instruction or contextual reference." }, relations: [], content: { title, role, confirmed, tags: ["home-profile", role === "decision" ? "kind-standing-decision" : `kind-${role}`], profile: { version: 2, path: file.split("/") } } } })).record);
   }
   const turn = await homeActivation(f, "Read UI context.", [profileCall({ action: "read", path: "projects/ui" }, "hierarchy-ui"), say("read")]);
-  expect(turn.first.systemPrompt).not.toContain("UI context: Cedar controls.");
-  expect(turn.first.systemPrompt).not.toContain("Release context: Maple signing.");
+  expect(homeHead(turn.first)).not.toContain("UI context: Cedar controls.");
+  expect(homeHead(turn.first)).not.toContain("Release context: Maple signing.");
   const result = turn.last.messages.filter(message => message.role === "toolResult" && message.toolCallId === "hierarchy-ui");
   expect(JSON.stringify(result)).toContain("UI context: Cedar controls.");
   expect(JSON.stringify(result)).not.toContain("Release context: Maple signing.");

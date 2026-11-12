@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, getSystemMessageText } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setHomeMemoryModels } from "../../../../test-support/settings-dependencies.js";
 import { disposeFixtures, fixture } from "../../../../test-support/home-task-fixture.js";
@@ -158,6 +158,23 @@ describe("Home's global skills and prompt templates follow the agent directory l
     await waitFor(() => f.events.slice(before).some(event => event.topic === "session.resourcesChanged"), "Home reloads for a write after its watchers started");
   }, 60_000);
 
+  it("retries a failed reload at the next idle edge and reports successful package reloads", async () => {
+    const { f, home, commands } = await liveHome();
+    const reload = vi.spyOn(home, "reload").mockRejectedValueOnce(new Error("reload failure"));
+    await writePrompt(f.agentDir, "retry", "Retry reload", "BODY");
+    await waitFor(() => f.signals.some(record => record.outcome === "resources-reload" && record.reason === "failed"), "failed reload diagnostic");
+    expect(reload).toHaveBeenCalledTimes(1);
+    f.faux.setResponses([fauxAssistantMessage("idle")]);
+    await home.prompt("reach idle");
+    await waitFor(async () => globalResources(await commands(home.id)).includes("retry|Retry reload"), "failed reload retried at idle");
+    expect(reload).toHaveBeenCalledTimes(2);
+    await waitFor(() => f.signals.some(record => record.outcome === "resources-reload" && record.reason === "completed"), "successful reload diagnostic");
+    const before = reload.mock.calls.length;
+    await mkdir(join(f.agentDir, "npm", "fixture-package"), { recursive: true });
+    await writeFile(join(f.agentDir, "npm", "fixture-package", "package.json"), JSON.stringify({ name: "fixture-package", version: "1.0.0" }));
+    await waitFor(() => reload.mock.calls.length > before, "package manifest reload");
+  }, 60_000);
+
   it("applies a change made during a Home run once that run settles", async () => {
     const { f, home, commands, service, client } = await liveHome();
     let release!: () => void;
@@ -167,9 +184,15 @@ describe("Home's global skills and prompt templates follow the agent directory l
     await service.invoke(client, "home.prompt", { commandId: "resources-busy-0001", text: "long work" });
     await waitFor(() => started, "Home run started");
     await writePrompt(f.agentDir, "during-run", "Written mid-run", "MID RUN BODY");
+    await writeSkill(f.agentDir, "during-skill", "Skill written mid-run", "SKILL BODY");
     await new Promise(resolve => setTimeout(resolve, 1_000));
     expect(home.snapshot().operation).toBeDefined();
     release();
     await waitFor(async () => globalResources(await commands(home.id)).includes("during-run|Written mid-run"), "Home lists the mid-run prompt");
+    let system = "";
+    f.faux.setResponses([context => { system = context.messages.filter(message => message.role === "system").map(getSystemMessageText).join("\n"); return fauxAssistantMessage("next activation"); }]);
+    await home.prompt("next");
+    await waitFor(() => system.length > 0, "next activation provider request");
+    expect(system).toContain("Skill written mid-run");
   }, 60_000);
 });

@@ -1,5 +1,5 @@
 import type { ProfilePartitionRequest } from "./profile-notes.js";
-import { profileIndex, PROFILE_SECTION_HEADING } from "./home-profile-hierarchy.js";
+import { profileTurnState } from "./home-profile-hierarchy.js";
 import { randomUUID } from "node:crypto";
 import { profilePath, type ProfileMetadata } from "./profile-placement.js";
 import { changeReview } from "../../kernel/settings/settings-types.js";
@@ -112,19 +112,19 @@ function kindTag(kind: HomeProfileKind): string {
   return `kind-${kind}`;
 }
 
-export async function homeProfileSection(knowledge: () => ProfileStore | undefined, activation: "user" | "wake"): Promise<{ text: string; notes: number }> {
+export async function homeProfileTurnState(knowledge: () => ProfileStore | undefined, activation: "user" | "wake"): Promise<{ text: string; notes: number }> {
   const owner = knowledge();
-  if (!owner) return { text: unavailableSection("Profile is not available on this Gateway"), notes: 0 };
+  if (!owner) return { text: unavailable("Profile is not available on this Gateway"), notes: 0 };
   try {
     const read = await readHomeProfileIndex(owner);
-    return { text: profileIndex(read, 0, activation), notes: read.items.filter((item) => item.status === "active").length };
+    return { text: profileTurnState(read, activation), notes: read.items.filter((item) => item.status === "active").length };
   } catch (error) {
-    return { text: unavailableSection(`reading Profile failed (${error instanceof Error ? error.message.slice(0, 200) : "unknown error"})`), notes: 0 };
+    return { text: unavailable(`reading Profile failed (${error instanceof Error ? error.message.slice(0, 200) : "unknown error"})`), notes: 0 };
   }
 }
 
-function unavailableSection(reason: string): string {
-  return [PROFILE_SECTION_HEADING, `Unavailable: ${reason}. No item is applied in this instruction, and the profile is not known to be empty.`].join("\n");
+function unavailable(reason: string): string {
+  return `Profile unavailable: ${reason}. No item is applied in this instruction, and the profile is not known to be empty.`;
 }
 
 export const HOME_PROFILE_ACTIONS = ["learn", "refine", "supersede", "retire"] as const;

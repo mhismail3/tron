@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { legacyProfileFixture } from "../../../test-support/profile-v1-fixture.js";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { answerChangeCard } from "../../../test-support/native-change.js";
-import { fixture, homeActivation, profileCall, say, command, history, undo, profileReportFile, recordCase, maintainer } from "../../../test-support/home-profile-fixture.js";
+import { fixture, homeActivation, profileCall, say, command, history, undo, profileReportFile, recordCase, maintainer, homeHead } from "../../../test-support/home-profile-fixture.js";
 import type { ProfileNoteRecord } from "./profile-note-contract.js";
 
 profileReportFile("test-results/home-profile/you-centred.json");
@@ -69,7 +69,7 @@ it("exposes eight unsorted notes at a maintainer turn without bodies, and refuse
   const index = turn.last.messages.find(message => message.role === "toolResult" && message.toolCallId === "triage-index")?.details as { index: string };
   expect(index.index).toContain("Unsorted active: 8");
   expect(Buffer.byteLength(index.index)).toBeLessThanOrEqual(8192);
-  for (const note of originals) if (note.kind === "note") { expect(turn.first.systemPrompt).not.toContain(note.content.title); expect(index.index).not.toContain(note.content.title); }
+  for (const note of originals) if (note.kind === "note") { expect(homeHead(turn.first)).not.toContain(note.content.title); expect(index.index).not.toContain(note.content.title); }
   const suppressed = await homeActivation(f, "Not now. Do not suggest sorting again until a new note arrives.", [say("Understood.")]);
   for (const note of originals) expect(await f.store.read(note.id)).toEqual(note);
   expect(JSON.stringify(suppressed.first.messages)).toContain("Not now");
