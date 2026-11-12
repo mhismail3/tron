@@ -27,7 +27,9 @@ text envelope. Producers label notices at canonical admission; the request pipel
 projects at most 8,192 UTF-8 body bytes per message across text parts, including a
 full-text reference when bounded. Home result and trigger producers reference their
 native task-report/status or automation readers; other notices reference the canonical
-session file. Non-text parts remain intact, and the full text stays with its source. These labels convey provenance and
+session file. Trigger references travel in custom-message details so admission charges the
+same bounded projection without cutting canonical trigger text. Non-text parts remain
+intact, and the full text stays with its source. These labels convey provenance and
 scope, not approval or a grant; native attribution and refusal checks stay authoritative.
 `session-profile.ts` owns the neutral immutable runtime recipe and ordinary defaults.
 `session-lineage.ts` also owns `LineageRuntimePort<Runtime>`: single-flight runtime

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { GatewayError } from "../errors.js";
-import { injectedText } from "../kernel/host/injected-text.js";
+import { injectedText, projectInjectedMessages } from "../kernel/host/injected-text.js";
 import type { InputDelivery, InputEnvelope, InputMessage, InputTrigger, InputTriggerInbox, InputTriggerRoute } from "../kernel/host/input-admission.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../kernel/receipts/delivery-tags.js";
 import { inputMessageOrigin } from "../kernel/host/input-admission.js";
@@ -47,9 +47,9 @@ export class AutomationHomeTrigger implements InputTriggerInbox {
     if (run.actionSnapshot.kind !== "sessionPrompt") throw new GatewayError("conflict", "Home trigger has no message");
     const title = `Automation · ${run.homeName}`;
     return { customType: INPUT_TRIGGER_MESSAGE, display: true,
-      content: injectedText(`${title}\n\n${run.actionSnapshot.text}`, "automation", "trigger", "task",
-          `schedule ${JSON.stringify({ action: "show", automationId: run.automationId })}`),
-      details: { eventId: `automation:${run.runId}`, trigger: { kind: "automation", sourceId: record.id, eventId: run.runId, title: run.homeName! } } };
+      content: injectedText(`${title}\n\n${run.actionSnapshot.text}`, "automation", "trigger", "task"),
+      details: { eventId: `automation:${run.runId}`,
+        fullTextReference: `schedule ${JSON.stringify({ action: "show", automationId: record.id })}; runId ${JSON.stringify(run.runId)} actionSnapshot.text`, trigger: { kind: "automation", sourceId: record.id, eventId: run.runId, title: run.homeName! } } };
   }
 
   private resumeMessage(message: InputMessage, operationId: string): InputMessage {
@@ -85,7 +85,7 @@ export class AutomationHomeTrigger implements InputTriggerInbox {
       for (const item of candidates) {
         envelope.signal.throwIfAborted();
         const input = item.persisted ? this.resumeMessage(item.message, operationId) : item.message;
-        const cost = estimateTokens({ role: "custom", ...input, timestamp: Date.now() });
+        const cost = estimateTokens(projectInjectedMessages([{ role: "custom", ...input, timestamp: Date.now() }], undefined)[0]!);
         const size = Buffer.byteLength(JSON.stringify(input)) + Buffer.byteLength(JSON.stringify(inputMessageOrigin(input))) + 4096;
         const count = item.persisted ? 3 : 2;
         if (tokens < cost || bytes < size || entries < count) continue;

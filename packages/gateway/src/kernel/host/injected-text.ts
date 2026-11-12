@@ -44,7 +44,10 @@ function boundedContent<T extends Content>(value: T, fullTextReference: () => st
 export function projectInjectedMessages(messages: AgentMessage[], sessionFile: string | undefined): AgentMessage[] {
   return messages.map(message => {
     if (message.role !== "user" && message.role !== "custom") return message;
+    const details = message.role === "custom" ? message.details : undefined;
+    const reference = details && typeof details === "object" && "fullTextReference" in details ? details.fullTextReference : undefined;
     const content = boundedContent(message.content, () => {
+      if (typeof reference === "string") return reference;
       if (!sessionFile) throw new Error("Injected text has no canonical full-text reference");
       return `read ${JSON.stringify(sessionFile)}; message timestamp ${message.timestamp} (${new Date(message.timestamp).toISOString()})`;
     });
