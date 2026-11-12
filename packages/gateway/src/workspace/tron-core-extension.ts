@@ -60,9 +60,9 @@ export function createTronCoreExtension(workspace: Pick<ResourceRoot, "describe"
         },
       });
     }
-    pi.on("before_agent_start", async (event, ctx) => ({
-      systemPrompt: `${event.systemPrompt}\n\n${tronContext(await workspace.describe(), ctx.cwd, pi.getActiveTools())}`,
-    }));
+    pi.on("before_agent_start", async (event, ctx) => {
+      event.systemPromptOptions.sections.tron = tronContext(await workspace.describe(), ctx.cwd, pi.getActiveTools());
+    });
     pi.on("tool_call", async (event) => {
       if (event.toolName !== "subagent") return;
       const input = event.input;
