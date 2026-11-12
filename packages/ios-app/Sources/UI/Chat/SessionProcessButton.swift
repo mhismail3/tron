@@ -15,7 +15,7 @@ enum SessionProcessButtonPolicy {
 
     static func preferredRecentExpiry(
         overview: SessionProcessOverview?,
-        activities: [SessionProcessActivity]?,
+        activities: [PresentedProcessActivity]?,
         retentionMinutes: Int
     ) -> String? {
         guard overview?.visibility == .recent else { return nil }
@@ -25,7 +25,7 @@ enum SessionProcessButtonPolicy {
         return GatewayTimestamp.preciseString(from: expiry)
     }
 
-    static func recentExpiry(for activity: SessionProcessActivity, retentionMinutes: Int) -> Date? {
+    static func recentExpiry(for activity: PresentedProcessActivity, retentionMinutes: Int) -> Date? {
         guard retentionMinutes > 0, activity.kind == .subagent,
               activity.visibility == .recent, SessionProcessAdmissionPolicy.admits(activity),
               let terminal = activity.lifecycle.terminalAt.flatMap(GatewayTimestamp.parse) else { return nil }
@@ -34,8 +34,8 @@ enum SessionProcessButtonPolicy {
     }
 
     static func visibleActivities(
-        _ activities: [SessionProcessActivity], retentionMinutes: Int, now: Date
-    ) -> [SessionProcessActivity] {
+        _ activities: [PresentedProcessActivity], retentionMinutes: Int, now: Date
+    ) -> [PresentedProcessActivity] {
         activities.filter { activity in
             guard activity.kind == .subagent, SessionProcessAdmissionPolicy.admits(activity) else { return false }
             if activity.visibility == .active { return true }

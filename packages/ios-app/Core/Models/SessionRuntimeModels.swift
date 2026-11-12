@@ -611,7 +611,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
     package var liveActivityRevision: Int? = nil
     package var extensionActivityAsOf: String? = nil
     package var processOverview: SessionProcessOverview? = nil
-    package var processActivities: [SessionProcessActivity]? = nil
+    package var processActivities: [PresentedProcessActivity]? = nil
     package var extensionPresentation: ExtensionPresentationState
     var diagnostics: [RuntimeDiagnostic]
     package var isCachedProjection: Bool? = nil
@@ -631,7 +631,7 @@ package struct SessionSnapshot: Codable, Hashable, Sendable {
         toolExecutions: [ToolExecutionState], extensionActivities: [ExtensionRunActivity]? = nil,
         extensionActivityOmissions: ExtensionActivityOmissions? = nil, liveActivityRevision: Int? = nil,
         extensionActivityAsOf: String? = nil, processOverview: SessionProcessOverview? = nil,
-        processActivities: [SessionProcessActivity]? = nil, extensionPresentation: ExtensionPresentationState,
+        processActivities: [PresentedProcessActivity]? = nil, extensionPresentation: ExtensionPresentationState,
         diagnostics: [RuntimeDiagnostic], isCachedProjection: Bool? = nil,
         contextWindowPolicy: ContextWindowPolicy? = nil, compactionPolicy: CompactionPolicyProjection? = nil,
         archivedAt: String? = nil
