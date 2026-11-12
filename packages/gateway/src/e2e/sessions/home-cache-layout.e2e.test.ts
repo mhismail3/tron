@@ -51,8 +51,17 @@ afterAll(async () => {
 });
 
 const HELD_REQUEST = "hold this request open";
+const METERED_WINDOW = 120_000;
 
-async function endpoint(responses = false): Promise<{ server: Server; port: number; requests: Captured[]; toolCalls: Array<{ name: string; input: unknown }>; held: ServerResponse[] }> {
+function providerCount(body: Record<string, unknown>): number {
+  const messages = body.messages as WireMessage[];
+  const view = blocks(messages[0]!).map((block) => block.text ?? "").join("");
+  const memory = view.startsWith(HOME_MEMORY_VIEW_MARKER);
+  const rest = JSON.stringify([body.tools, body.system, memory ? messages.slice(1) : messages]);
+  return Math.ceil((memory ? Buffer.byteLength(view) : 0) / 2 + Buffer.byteLength(rest) / 2.8);
+}
+
+async function endpoint(responses = false, metered = false): Promise<{ server: Server; port: number; requests: Captured[]; toolCalls: Array<{ name: string; input: unknown }>; held: ServerResponse[] }> {
   const requests: Captured[] = [];
   const toolCalls: Array<{ name: string; input: unknown }> = [];
   const held: ServerResponse[] = [];
@@ -71,8 +80,8 @@ async function endpoint(responses = false): Promise<{ server: Server; port: numb
       const tool = kind === "home" ? toolCalls.shift() : undefined;
       const text = kind === "summarizer" ? SUMMARY(++summaries) : `reply ${requests.length} ${"r".repeat(900)}`;
       const event = (type: string, data: Record<string, unknown>) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
-      const usage = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: kind === "summarizer" ? CACHE_READ : 0,
-        cache_creation_input_tokens: kind === "home" ? CACHE_WRITE : 0 };
+      const usage = { input_tokens: metered && kind === "home" ? providerCount(body) : 10, output_tokens: 5, cache_read_input_tokens: kind === "summarizer" ? CACHE_READ : 0,
+        cache_creation_input_tokens: kind === "home" && !metered ? CACHE_WRITE : 0 };
       if (responses) {
         const output = tool
           ? { type: "function_call", id: `fc_${requests.length}`, call_id: `call_${requests.length}`, name: tool.name, arguments: JSON.stringify(tool.input), status: "completed" }
@@ -105,9 +114,9 @@ async function endpoint(responses = false): Promise<{ server: Server; port: numb
   return { server, port: (server.address() as AddressInfo).port, requests, toolCalls, held };
 }
 
-async function fixture(responses = false) {
+async function fixture(responses = false, metered = false) {
   const root = await mkdtemp(join(tmpdir(), "tron-home-cache-"));
-  const local = await endpoint(responses);
+  const local = await endpoint(responses, metered);
   disposals.push(async () => {
     for (const response of local.held) response.destroy();
     await new Promise<void>((resolve) => local.server.close(() => resolve()));
@@ -121,7 +130,7 @@ async function fixture(responses = false) {
     baseUrl: `http://127.0.0.1:${local.port}`, api: responses ? "openai-responses" : "anthropic-messages", apiKey: "local-test-key",
     compat: { sendSessionAffinityHeaders: true },
     models: [
-      { id: MODEL_ID, name: "Opus (local)", reasoning: false, input: ["text"], contextWindow: 1_000_000, maxTokens: 4_096 },
+      { id: MODEL_ID, name: "Opus (local)", reasoning: false, input: ["text"], contextWindow: metered ? METERED_WINDOW : 1_000_000, maxTokens: 4_096 },
       { id: SMALL_MODEL_ID, name: "Small (local)", reasoning: false, input: ["text"], contextWindow: 4_096, maxTokens: 1_024 },
     ],
   } } }));
@@ -420,6 +429,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(new Set(lifetimes(sample))).toEqual(new Set(["1h"]));
     expect(new Set(summarizer.map((request) => request.headers["x-session-affinity"]))).toEqual(new Set([`tron-episodic:${status.homeId}`]));
     expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
+    expect(f.records.filter((record) => record.event === "usage"), "a usage of 21 tokens is not a plausible count of these requests").toEqual([]);
     const statusOf = async () => (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).memory.episodic!;
     await waitFor(async () => (await statusOf()).view.unbuilt === 0, "the memory view to complete");
     await f.service.invoke(client, "home.pauseMemory", { commandId: "cache-freeze-usage" });
@@ -518,6 +528,61 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
       lastViewBytes: Buffer.byteLength(viewBlocksOf(turns.at(-1)!).join("")),
     });
   }, 900_000);
+
+  it("counts Home requests by the provider's usage: calibrated before sending, exact after, and refuses a real overflow", async () => {
+    const f = await fixture(false, true);
+    await f.service.invoke(client, "home.designate", { commandId: "count-designate", model: MODEL });
+    await f.service.invoke(client, "settings.change", homeMemoryChange({ commandId: "count-memory", model: MODEL }));
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const home = await f.registry.acquire(status.sessionId!);
+    const TURNS = 130;
+    for (let turn = 0; turn < TURNS; turn += 1) {
+      if (turn % 40 === 1) f.toolCalls.push({ name: "memory_search", input: { query: "reply" } });
+      await settledTurn(f, home, `input ${turn} ${"i".repeat(900)}`, `Home turn ${turn}`);
+    }
+    const requests = f.requests.filter((request) => request.kind === "home");
+    const activations = f.records.flatMap((record) => record.event === "activation" ? [record] : []);
+    const usages = f.records.flatMap((record) => record.event === "usage" ? [record] : []);
+    expect(activations).toHaveLength(TURNS);
+    expect(usages).toHaveLength(TURNS);
+    const firstOf = (turn: number) => requests.find((request) => JSON.stringify(messagesOf(request).at(-1)).includes(`input ${turn} `))!;
+    const error = (turn: number) => activations[turn]!.effectiveTokens / providerCount(firstOf(turn).body) - 1;
+
+    expect(error(0)).toBeLessThan(-0.25);
+    for (const turn of [TURNS - 3, TURNS - 2, TURNS - 1]) {
+      expect(Math.abs(error(turn)), `turn ${turn}`).toBeLessThan(0.02);
+      expect(usages[turn]).toEqual({ event: "usage", estimatedTokens: activations[turn]!.effectiveTokens, providerTokens: providerCount(firstOf(turn).body) });
+    }
+    const last = requests.at(-1)!;
+    expect(Buffer.byteLength(viewBlocksOf(last).join(""))).toBeGreaterThan(100_000);
+    const counted = providerCount(last.body);
+    const context = await f.service.invoke(client, "home.context", {}) as unknown as { effectiveTokens: number; breakdown: { effectiveTokens: number; sections: Array<{ id: string; tokens: number }> } };
+    expect(context.effectiveTokens).toBe(counted);
+    expect(context.breakdown.effectiveTokens).toBe(counted);
+    expect(context.breakdown.sections.reduce((total, section) => total + section.tokens, 0)).toBe(counted);
+    const memoryCounted = Math.ceil(Buffer.byteLength(blocks(messagesOf(last)[0]!).map((block) => block.text ?? "").join("")) / 2);
+    expect(Math.abs(context.breakdown.sections.find((section) => section.id === "memory")!.tokens / memoryCounted - 1)).toBeLessThan(0.05);
+
+    const sized = (share: number, from: number) => "i".repeat(Math.ceil((share * (METERED_WINDOW - 1_024) - from) * 2.8));
+    const under = sized(0.92, counted);
+    expect(under.length).toBeGreaterThan(0);
+    await settledTurn(f, home, `input under ${under}`, "the under-window turn");
+    const admitted = f.requests.filter((request) => request.kind === "home").at(-1)!;
+    expect(JSON.stringify(messagesOf(admitted).at(-1))).toContain("input under ");
+    expect(providerCount(admitted.body)).toBeGreaterThan(0.91 * (METERED_WINDOW - 1_024));
+    expect(providerCount(admitted.body)).toBeLessThan(METERED_WINDOW - 1_024);
+    expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
+
+    const over = sized(1.1, providerCount(admitted.body) - under.length / 2.8);
+    expect(over.length).toBeGreaterThan(under.length);
+    const sent = f.requests.length;
+    await home.prompt(`input over ${over}`);
+    await waitFor(() => home.snapshot().configurationBlocker === null, "Home configuration after the over-window turn");
+    expect(f.records.flatMap((record) => record.event === "refused" ? [record] : []).map((record) => ({ reason: record.reason, contextWindow: record.contextWindow })))
+      .toEqual([{ reason: "context-overflow", contextWindow: METERED_WINDOW }]);
+    expect(f.requests.slice(sent).filter((request) => request.kind === "home")).toEqual([]);
+    report.cases.push({ case: "provider-count", turns: TURNS, firstError: error(0), lastErrors: [TURNS - 3, TURNS - 2, TURNS - 1].map(error), counted, underChars: under.length, overChars: over.length });
+  }, 600_000);
 
   it("keeps the cached view's end across an activation refused before dispatch", async () => {
     const f = await fixture();
