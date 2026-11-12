@@ -496,13 +496,13 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
     expect((await phone.request("home.resumeMemory", { commandId: gateway.commandId() })).ok).toBe(true);
     await waitFor(async () => (await phone.request("automation.get", { automationId: automation.id })).result.history.filter((run: { runId: string; state: string }) => survivingIds.includes(run.runId) && run.state === "succeeded").length === 3, "every surviving firing is durably delivered");
     await gateway.settled(sessionId);
-    await waitFor(async () => relayRequests.length === 1 && (JSON.parse(await readFile(`${gateway.tronHome}/gateway/notifications.json`, "utf8"))).pending.length === 0, "the single batch push has durable relay acceptance");
+    await waitFor(async () => relayRequests.length === 1 && (JSON.parse(await readFile(`${gateway.tronHome}/state/notifications.json`, "utf8"))).pending.length === 0, "the single batch push has durable relay acceptance");
     const messagesBefore = (await gateway.registry.acquire(sessionId)).canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-trigger.v1");
     expect(messagesBefore).toHaveLength(3);
     expect(messagesBefore.map(entry => entry.details?.trigger?.eventId).sort()).toEqual([...survivingIds].sort());
     expect(messagesBefore.every(entry => entry.content.startsWith("[from: automation; kind: trigger; authority: task]\nAutomation · Crash-proof batch\n"))).toBe(true);
     expect(gateway.record().providerRequests).toHaveLength(1);
-    const notificationBefore = JSON.parse(await readFile(`${gateway.tronHome}/gateway/notifications.json`, "utf8"));
+    const notificationBefore = JSON.parse(await readFile(`${gateway.tronHome}/state/notifications.json`, "utf8"));
     await gateway.dispose({ keepRoot: true }); owned.pop(); notifications.at(-1)!.dispose(); live = undefined;
     gateway = live = await startLockGateway("automation-home-gates", { ...pushOptions, root }); owned.push(gateway);
     phone = await gateway.connect("ack-restarted-phone");
@@ -514,7 +514,7 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
     expect(gateway.record().providerRequests).toHaveLength(0);
     expect(relayRequests).toHaveLength(1);
     expect(relayRequests[0].path).toBe("/v3/notifications");
-    const notificationAfter = JSON.parse(await readFile(`${gateway.tronHome}/gateway/notifications.json`, "utf8"));
+    const notificationAfter = JSON.parse(await readFile(`${gateway.tronHome}/state/notifications.json`, "utf8"));
     expect(notificationAfter.receipts).toEqual(notificationBefore.receipts);
     await writeFile("test-results/2094/push-crash-restart-trace.json", JSON.stringify({ survivingIds, messagesBefore, messagesAfter, recovered, relayRequests, receipts: notificationAfter.receipts }, null, 2));
   } finally { for (const owner of notifications) owner.dispose(); }
@@ -566,7 +566,7 @@ it("real Gateway: a singleton partial input resumes with one model turn and push
     await waitFor(async () => (await phone.request("automation.run.get", { automationId: automation.id, runId })).result.state === "succeeded", "singleton canonical delivery");
     await gateway.settled(sessionId);
     expect(gateway.record().providerRequests).toHaveLength(1);
-    await waitFor(async () => pushes.length === 1 && JSON.parse(await readFile(`${gateway.tronHome}/gateway/notifications.json`, "utf8")).pending.length === 0, "singleton push is durably accepted");
+    await waitFor(async () => pushes.length === 1 && JSON.parse(await readFile(`${gateway.tronHome}/state/notifications.json`, "utf8")).pending.length === 0, "singleton push is durably accepted");
     const messages = (await gateway.registry.acquire(sessionId)).canonicalSessionEntries().filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-trigger.v1");
     expect(messages).toHaveLength(1);
     expect(messages[0].details.trigger.eventId).toBe(runId);

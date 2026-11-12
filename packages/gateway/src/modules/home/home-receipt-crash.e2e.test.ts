@@ -27,7 +27,7 @@ describe("Home receipts at real-process crash cuts", () => {
     try {
       const marker = join(root, "barrier");
       const ledgerPath = join(root, "home.json");
-      const receiptDirectory = join(root, "gateway", "command-receipts");
+      const receiptDirectory = join(root, "state", "command-receipts");
       await writeFile(ledgerPath, JSON.stringify({ enabled: true, binding }));
       const child = spawn(process.execPath, ["--experimental-transform-types", "--import", pathToFileURL(preload).href,
         childProgram, root, cut, marker], { stdio: ["pipe", "pipe", "pipe"] });

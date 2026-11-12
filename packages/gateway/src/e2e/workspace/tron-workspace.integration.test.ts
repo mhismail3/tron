@@ -197,7 +197,7 @@ describe("Tron workspace ownership across a separate process", () => {
     const { root } = await first.describe();
     await writeFile(join(root, "kept.txt"), "durable");
     await first.dispose();
-    const state = join(home, "gateway/workspace-state");
+    const state = join(home, "state/workspace-state");
     const lockModule = createRequire(import.meta.url).resolve("proper-lockfile");
     const child = spawn(process.execPath, ["-e", `require(${JSON.stringify(lockModule)}).lock(${JSON.stringify(state)}, {stale:60000, update:10000}).then(() => { process.stdout.write('ready'); setInterval(() => {}, 1000); });`], { stdio: ["ignore", "pipe", "pipe"] });
     const exited = once(child, "exit");

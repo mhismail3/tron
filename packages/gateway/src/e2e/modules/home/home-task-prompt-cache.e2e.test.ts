@@ -89,7 +89,7 @@ describe("Home task worker prompt cache on the wire", { concurrent: false }, () 
     expect(cacheRead).toBeGreaterThan(fresh);
     const expected = { inputTokens: fresh, cacheReadTokens: cacheRead, cacheWriteTokens: 0, outputTokens: output };
     expect(final.spend).toMatchObject(expected);
-    const tasks = join(f.tronHome, "gateway/home/tasks");
+    const tasks = join(f.tronHome, "state/home/tasks");
     const file = (await readdir(tasks)).find(name => name.endsWith("cache-worker.json"))!;
     expect(JSON.parse(await readFile(join(tasks, file), "utf8")).spend).toMatchObject(expected);
     expect(f.signals.filter(signal => signal.event === "home.task.spend").at(-1)).toMatchObject(expected);

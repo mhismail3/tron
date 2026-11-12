@@ -17,7 +17,7 @@ describe("two-phase session synchronization protocol", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-sync-race-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const probe = createServer();
     await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
     const address = probe.address();
@@ -259,7 +259,7 @@ describe("synchronization catch-up overflow recovery", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-sync-overflow-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const probe = createServer();
     await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
     const address = probe.address();
@@ -436,7 +436,7 @@ describe("connection-wide synchronization ownership", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-sync-ownership-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const probe = createServer();
     await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
     const address = probe.address();
@@ -595,7 +595,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-sync-coalesce-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const probe = createServer();
     await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
     const address = probe.address();
@@ -720,7 +720,7 @@ describe("disposable read cancellation", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-sync-cancel-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const probe = createServer();
     await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
     const address = probe.address();
@@ -918,7 +918,7 @@ describe("mobile presentation slot", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-sync-slot-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "state", "local-auth.json"), "utf8")).bearerToken;
     const probe = createServer();
     await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
     const address = probe.address();

@@ -140,7 +140,7 @@ it("disk and mutateState use the same generic validator, including provenance ex
   await expect(store.mutateState(definition.id, current => ({ ...current, provenance: { kind: "local", expiresAt } }))).resolves.toMatchObject({ provenance: { expiresAt } });
   await expect(store.mutateState(definition.id, current => ({ ...current, trigger: { kind: "interval", everySeconds: 1, anchorAt: new Date().toISOString() } }))).rejects.toThrow("canonical contract");
   await expect(store.mutateState(definition.id, current => ({ ...current, provenance: { kind: "local", expiresAt: "invalid" } }))).rejects.toThrow("canonical contract");
-  const disk = join(root, "gateway", "automations", `${definition.id}.json`);
+  const disk = join(root, "state", "automations", `${definition.id}.json`);
   const reopened = new AutomationStore(root); await reopened.initialize();
   expect(reopened.get(definition.id).provenance).toEqual({ kind: "local", expiresAt });
   const valid = await readFile(disk, "utf8");
@@ -162,7 +162,7 @@ it("resolving an uncertain run and internal state mutation cannot silently resum
 });
 it("expired persisted definitions do not consume the generic definition-count cap", async () => {
   const { root, definition } = await storeFixture();
-  const directory = join(root, "gateway", "automations");
+  const directory = join(root, "state", "automations");
   const homeId = randomUUID();
   const expired = { ...definition, createdAt: new Date(Date.now() - 120_000).toISOString(), provenance: { kind: "home", homeId, expiresAt: new Date(Date.now() - 60_000).toISOString() }, target: { kind: "home", homeId, routeGeneration: 1 } };
   await Promise.all(Array.from({ length: MAXIMUM_AUTOMATIONS }, (_, index) => {

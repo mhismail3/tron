@@ -135,7 +135,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     const sessionId = value.slot.id;
     const devices = new DeviceStore(value.root, "machine-terminal-test");
     await devices.initialize();
-    const localToken = JSON.parse(await readFile(join(value.root, "gateway", "local-auth.json"), "utf8")).bearerToken as string;
+    const localToken = JSON.parse(await readFile(join(value.root, "state", "local-auth.json"), "utf8")).bearerToken as string;
     const enrollment = await devices.ensureEnrollment();
     const paired = await devices.pair(enrollment.code, "phone");
     const probe = createServer();

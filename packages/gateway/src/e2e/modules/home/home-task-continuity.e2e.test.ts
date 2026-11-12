@@ -348,7 +348,7 @@ describe("resuming a stopped Home worker in place", () => {
     f.faux.setResponses([fauxAssistantMessage([reportCall("valid-lineage-result")], { stopReason: "toolUse" })]);
     const task = await homeOwnerOf(f.registry).dispatchTask(f.home.sessionId, { taskId: "invalid-lineage", intent: "Finite work", target: f.cwd });
     await task.completion;
-    const directory = join(f.tronHome, "gateway/home/tasks");
+    const directory = join(f.tronHome, "state/home/tasks");
     const file = join(directory, (await readdir(directory)).find(name => name.endsWith(`-${task.taskId}.json`))!);
     const record = JSON.parse(await readFile(file, "utf8"));
     record.resumes = { taskId: "missing-parent", operationId: "missing-operation" };

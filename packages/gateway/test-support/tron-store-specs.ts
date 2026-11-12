@@ -107,7 +107,7 @@ function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
 export const STORES: readonly StoreSpec[] = [
   {
     module: "gateway/admin", name: "store-settings",
-    paths: ["agent/settings.json", "gateway/settings"],
+    paths: ["agent/settings.json", "state/settings"],
     reproducible: true,
     async record(home) {
       const { path } = await settingsPath(home);
@@ -126,8 +126,8 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/security", name: "store-devices",
-    paths: ["gateway/devices.json", "gateway/local-auth.json"],
-    renewed: ["gateway/enrollment.json"],
+    paths: ["state/devices.json", "state/local-auth.json"],
+    renewed: ["state/enrollment.json"],
     async record(home) {
       const devices = new DeviceStore(home, MACHINE);
       await devices.initialize();
@@ -143,7 +143,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/transport", name: "store-command-receipts",
-    paths: ["gateway/command-receipts"],
+    paths: ["state/command-receipts"],
     async record(home) {
       const receipts = new CommandReceiptStore(home);
       await receipts.execute(IDENTITY, "session.rename", "corpus-rename-0001", async () => ({ updated: true }));
@@ -165,7 +165,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/session-catalog", name: "store-session-archive-attention",
-    paths: ["gateway/session-archive.json", "gateway/session-attention.json"],
+    paths: ["state/session-archive.json", "state/session-attention.json"],
     async record(home) {
       const archive = new SessionArchiveStore(home);
       await archive.initialize();
@@ -190,7 +190,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/run", name: "store-run-markers",
-    paths: ["gateway/runtime-markers"],
+    paths: ["state/runtime-markers"],
     async record(home) {
       const markers = new RunMarkerStore(home);
       await markers.mark(CORPUS_IDS.session, "corpus-operation-1");
@@ -202,7 +202,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/notifications", name: "store-notifications",
-    paths: ["gateway/notifications.json"],
+    paths: ["state/notifications.json"],
     async record(home) {
       const grants = new NotificationGrantStore(home);
       await grants.initialize();
@@ -216,7 +216,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/providers", name: "store-model-recents",
-    paths: ["gateway/model-recents.json"],
+    paths: ["state/model-recents.json"],
     async record(home) {
       const recents = new RecentModelStore(home);
       await recents.initialize();
@@ -232,7 +232,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/automations", name: "store-automations",
-    paths: ["gateway/automations"],
+    paths: ["state/automations"],
     async record(home) {
       const automations = new AutomationStore(home);
       await automations.initialize();
@@ -252,7 +252,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/machine", name: "store-uploads",
-    paths: ["gateway/uploads", "gateway/upload-bodies", "gateway/upload-objects", "gateway/upload-imports"],
+    paths: ["state/uploads", "state/upload-bodies", "state/upload-objects", "state/upload-imports"],
     live: "absolute body paths and hard-linked objects",
     async record(home) {
       const uploads = new UploadStore(home, 1_048_576);
@@ -277,7 +277,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/home", name: "store-home-tasks",
-    paths: ["gateway/home/tasks", "workspace/state/home"],
+    paths: ["state/home/tasks", "workspace/state/home"],
     record: (home) => withWorkspace(home, async (workspace) => {
       const tasks = new HomeTaskStore(home, workspace);
       await tasks.initialize();
@@ -311,7 +311,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/home", name: "store-home-designation",
-    paths: ["gateway/home/home.json", "gateway/home/workspace"],
+    paths: ["state/home/home.json", "state/home/workspace"],
     record: (home) => withWorkspace(home, async (workspace) => {
       const owner = homeOwner(home, workspace);
       await owner.initialize();
@@ -331,7 +331,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/episodic", name: "store-episodic",
-    paths: ["workspace/state/episodic", "gateway/workspace-state/episodic-initialized.json"],
+    paths: ["workspace/state/episodic", "state/workspace-state/episodic-initialized.json"],
     reproducible: episodicHostAssigned,
     record: (home) => withWorkspace(home, async (workspace) => {
       const root = await mkdtemp(join(tmpdir(), "tron-corpus-episodic-"));
@@ -368,7 +368,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/home", name: "store-home-profile",
-    paths: ["workspace/files/Profile.json", "gateway/settings"],
+    paths: ["workspace/files/Profile.json", "state/settings"],
     live: "current-format Profile notes and their Changes entries recorded by their owning stores",
     record: (home) => withWorkspace(home, async (workspace) => {
       const knowledge = new ProfileStore(workspace);
@@ -394,7 +394,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/display", name: "store-display-artifacts",
-    paths: ["gateway/display-artifacts"],
+    paths: ["state/display-artifacts"],
     live: "hard-linked content objects",
     async record(home) {
       const workspace = join(home, "..", "display-workspace");

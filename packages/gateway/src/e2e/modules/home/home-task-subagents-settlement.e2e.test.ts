@@ -92,7 +92,7 @@ describe("Home task subagents: settlement and stop", () => {
     } finally { await writeFile(path, original); }
     expect((await homeOwnerOf(f.registry).taskStatus(run.taskId)).ownerSettlement).toEqual(status.ownerSettlement);
 
-    const taskDir = join(f.tronHome, "gateway/home/tasks");
+    const taskDir = join(f.tronHome, "state/home/tasks");
     const taskPath = join(taskDir, (await readdir(taskDir)).find(name => name.endsWith(`-${run.taskId}.json`))!);
     const taskBytes = await readFile(taskPath, "utf8");
     const read = f.registry.readTaskEvidence.bind(f.registry);

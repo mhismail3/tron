@@ -19,7 +19,7 @@
         "id": "<id>",
         "mimeType": "text/plain",
         "name": "corpus-note.txt",
-        "path": "<tmp>/home/gateway/uploads/<id>/content.txt",
+        "path": "<tmp>/home/state/uploads/<id>/content.txt",
         "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
         "size": 19,
         "version": 2
