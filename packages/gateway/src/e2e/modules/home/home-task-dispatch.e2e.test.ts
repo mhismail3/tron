@@ -1176,7 +1176,8 @@ describe("Home task production dispatch", () => {
     const f = await fixture();
     const globalRules = join(f.agentDir, "AGENTS.md");
     await writeFile(globalRules, "GLOBAL_HOME_FRESHNESS_START\n");
-    const home = await f.registry.acquire(f.home.sessionId);
+    const registry = await f.restart();
+    const home = await registry.acquire(f.home.sessionId);
     expect(home.runtime.session.systemPrompt).toContain("GLOBAL_HOME_FRESHNESS_START");
     const before = f.signals.length;
     for (const path of [join(home.cwd, "AGENTS.md"), join(f.agentDir, "SYSTEM.md"), join(f.agentDir, "APPEND_SYSTEM.md")]) {
