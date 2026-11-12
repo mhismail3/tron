@@ -1,13 +1,17 @@
 #if HOSTED_TEST
 import SwiftUI
 import TronMobileCore
+import WebKit
 
 enum HostedDisplayDocumentThemeFixture {
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-theme") }
     static var home: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-home") }
     static var images: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-images") }
     static let imageID = "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc41"
-    static var authoredHTML: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-html") }
+    static var scriptProbe: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-html-probe") }
+    static var scriptProbeControl: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-html-control") }
+    static var floating: Bool { ProcessInfo.processInfo.arguments.contains("-display-document-html-floating") }
+    static var authoredHTML: Bool { scriptProbe || ProcessInfo.processInfo.arguments.contains("-display-document-html") }
     static let markdown = """
     # Home audit report
 
@@ -35,8 +39,74 @@ enum HostedDisplayDocumentThemeFixture {
     <p class="warning">Semantic warning</p><p class="error">Semantic error</p>
     <p id="details">This HTML owns its styling; a local artifact is not a Tron theme contract.</p></body></html>
     """
+    static var scriptProbeHTML: String {
+        let defaults = UserDefaults.standard
+        let http = "http://127.0.0.1:\(defaults.integer(forKey: "display-html-probe-http"))"
+        let idle = "http://127.0.0.1:\(defaults.integer(forKey: "display-html-probe-idle"))"
+        let stun = "127.0.0.1:\(defaults.integer(forKey: "display-html-probe-stun"))"
+        return """
+        <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+        <link rel="preconnect" href="\(idle)/"><link rel="stylesheet" href="\(http)/stylesheet">
+        <style>body{margin:0;font:18px system-ui;background:#fff;color:#222;background-image:url("\(http)/css-image")}
+        p{margin:0;padding:6px 16px}.pinned{position:sticky;top:0;background:#fff}.tall{height:1600px}</style></head>
+        <body><p>First content line</p><p class="pinned">Pinned line</p><p id="state">Script idle</p>
+        <div id="log"></div><img src="\(http)/image" alt=""><div class="tall"></div>
+        <script>
+        const say = text => { const p = document.createElement("p"); p.textContent = text; document.getElementById("log").appendChild(p); };
+        const attempt = async run => { try { await run(); } catch (error) {} };
+        document.getElementById("state").textContent = "Script ran";
+        (async () => {
+          await attempt(async () => {
+            const source = new Blob(["export const value = 42;"], { type: "text/javascript" });
+            say("Module import " + (await import(URL.createObjectURL(source))).value);
+          });
+          await attempt(async () => {
+            const canvas = document.createElement("canvas");
+            say("WebGL " + Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl")));
+          });
+          await attempt(() => fetch("\(http)/fetch", { mode: "no-cors" }));
+          await attempt(() => new Promise(done => {
+            const request = new XMLHttpRequest();
+            request.onloadend = done; request.open("GET", "\(http)/xhr"); request.send();
+          }));
+          await attempt(() => navigator.sendBeacon("\(http)/beacon", "x"));
+          await attempt(() => new WebSocket("ws://127.0.0.1:\(defaults.integer(forKey: "display-html-probe-http"))/socket"));
+          await attempt(() => new EventSource("\(http)/events"));
+          await attempt(() => { new Image().src = "\(http)/script-image"; });
+          await attempt(() => {
+            const script = document.createElement("script"); script.src = "\(http)/script"; document.head.appendChild(script);
+          });
+          await attempt(() => {
+            const link = document.createElement("link"); link.rel = "preconnect"; link.href = "\(idle)/"; document.head.appendChild(link);
+          });
+          await attempt(() => {
+            const frame = document.createElement("iframe"); frame.src = "\(http)/frame"; document.body.appendChild(frame);
+          });
+          await attempt(() => {
+            const frame = document.createElement("iframe"); document.body.appendChild(frame);
+            return frame.contentWindow.fetch("\(http)/frame-fetch", { mode: "no-cors" });
+          });
+          await attempt(() => {
+            const body = "fetch('\(http)/worker', { mode: 'no-cors' })";
+            new Worker(URL.createObjectURL(new Blob([body], { type: "text/javascript" })));
+          });
+          for (const scope of [window, document.body.appendChild(document.createElement("iframe")).contentWindow]) {
+            await attempt(async () => {
+              const peer = new scope.RTCPeerConnection({ iceServers: [{ urls: "stun:\(stun)" }] });
+              peer.createDataChannel("x");
+              await peer.setLocalDescription(await peer.createOffer());
+              await new Promise(done => setTimeout(done, 4000));
+            });
+          }
+          await attempt(() => window.open("\(http)/window"));
+          say("Navigation attempted");
+          location.href = "\(http)/navigate";
+        })();
+        </script></body></html>
+        """
+    }
     static var payload: ChatMediaPayload {
-        ChatMediaPayload(data: Data((authoredHTML ? html : images ? "# Review images\n\n![Preview](preview.png)\n\n![Missing](missing.png)\n\n![Outside](../outside.png)" : markdown).utf8),
+        ChatMediaPayload(data: Data((scriptProbe ? scriptProbeHTML : authoredHTML ? html : images ? "# Review images\n\n![Preview](preview.png)\n\n![Missing](missing.png)\n\n![Outside](../outside.png)" : markdown).utf8),
                          mimeType: authoredHTML ? "text/html" : "text/markdown")
     }
     @MainActor static var transcript: [TranscriptItem] {
@@ -47,7 +117,7 @@ enum HostedDisplayDocumentThemeFixture {
         display["title"] = home ? "Home audit report" : "Session summary"
         display["altText"] = "Displayed report"
         display["eligibleSurfaces"] = authoredHTML ? ["sheet", "floating"] : ["sheet", "inline"]
-        display["presentation"] = ["requestedSurface": "sheet", "inlineTapAction": "sheet"]
+        display["presentation"] = ["requestedSurface": floating ? "floating" : "sheet", "inlineTapAction": "sheet"]
         display["artifact"] = ["id": "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc40",
                                "name": authoredHTML ? "report.html" : "report.md",
                                "mimeType": authoredHTML ? "text/html" : "text/markdown",
@@ -60,6 +130,16 @@ enum HostedDisplayDocumentThemeFixture {
         rows[1]["display"] = display
         return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONSerialization.data(withJSONObject: rows))
     }
+}
+
+struct HostedDisplayHTMLProbeControl: UIViewRepresentable {
+    func makeUIView(context: Context) -> WKWebView {
+        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        view.loadHTMLString(HostedDisplayDocumentThemeFixture.scriptProbeHTML, baseURL: nil)
+        return view
+    }
+
+    func updateUIView(_ view: WKWebView, context: Context) {}
 }
 
 struct HostedDisplayDocumentThemeChanges: View {

@@ -135,6 +135,8 @@ struct HostedChatDisplayFixture: View {
         NavigationStack {
             if ProcessInfo.processInfo.arguments.contains("-display-document-updates") {
                 HostedDisplayDocumentThemeChanges()
+            } else if HostedDisplayDocumentThemeFixture.scriptProbeControl {
+                HostedDisplayHTMLProbeControl()
             } else if ready {
                 ChatView(sessionID: snapshot.sessionId,
                          isHomeRoute: HostedDisplayDocumentThemeFixture.enabled && HostedDisplayDocumentThemeFixture.home,
