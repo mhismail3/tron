@@ -687,7 +687,6 @@ final class PushNotificationCoordinator {
             throw PushRegistrationError.invalidConfiguration
         }
         var mode: ProofMode = document.appAttestKeyID == nil ? .attestation : .assertion
-        var recoveredInvalidKey = false
         var retryIndex = 0
 
         while true {
@@ -732,12 +731,15 @@ final class PushNotificationCoordinator {
                         ? try await appAttest.attest(keyID, clientDataHash)
                         : try await appAttest.assert(keyID, clientDataHash)
                 } catch {
-                    guard mode == .assertion, Self.isInvalidAppAttestKey(error), !recoveredInvalidKey else {
+                    guard mode == .assertion, Self.isInvalidAppAttestKey(error) else {
                         if Self.isInvalidAppAttestKey(error) { throw PushRegistrationError.invalidAppAttestKey }
                         throw error
                     }
+                    guard automaticRetryAvailable else {
+                        try markCurrentKeyRejected()
+                        throw PushRegistrationError.invalidAppAttestKey
+                    }
                     try rotateInvalidKey()
-                    recoveredInvalidKey = true
                     mode = .attestation
                     continue
                 }
@@ -804,12 +806,11 @@ final class PushNotificationCoordinator {
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch PushRegistrationError.rejected(401) {
-                    guard mode == .assertion, !recoveredInvalidKey else {
-                        if mode == .attestation { try markCurrentKeyRejected() }
+                    guard mode == .assertion, automaticRetryAvailable else {
+                        try markCurrentKeyRejected()
                         throw PushRegistrationError.rejected(401)
                     }
                     try rotateInvalidKey()
-                    recoveredInvalidKey = true
                     mode = .attestation
                     continue
                 } catch PushRegistrationError.persistence {

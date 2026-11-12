@@ -22,11 +22,12 @@ notification inbox.
   lost response may mean the Gateway already removed the grant; a re-allowed permission re-registers.
 - **Retries.** One bounded, profile-generation-owned operation: a fresh challenge and proof per
   attempt, two backoffs for timeouts and retryable 5xx, no commit across a profile or token change.
-  Every key rotation goes through `rotateInvalidKey`, which spends the launch's one automatic budget:
-  an assertion 401 or the typed `DCError.invalidKey` on a stored key that was not yet flagged rotates in the
-  registration loop; a 401 on a key already flagged rejected rotates once from the outer handler; the card
-  rotates once. After any of these the next 401 stops (`stoppedRejected`), so one launch rotates at most
-  one key. The budget returns only after a successful registration or a relaunch. Other rejections stop without
+  Every key rotation goes through `rotateInvalidKey`, which spends the one automatic budget. Inside the
+  registration loop an assertion 401 or the typed `DCError.invalidKey` rotates only while the budget is unspent;
+  once it is spent, the current key is marked rejected and the attempt stops (`stoppedRejected`), so the
+  agent-requested card can offer a fresh key. The outer handler rotates a flagged key only while the budget is
+  unspent, and the card rotates once; both spend the budget. The budget returns only after a successful
+  registration or a relaunch, so one failure streak rotates at most one key. Other rejections stop without
   credential churn; APNs tokens are preserved. Registration reconciles on connection, foreground, profile,
   permission and token changes; Worker failure leaves it pending.
 - **Agent-requested retry.** A `push-registration-retry` card (`ChangeReview.intent`, shared native change
