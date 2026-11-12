@@ -7,7 +7,7 @@ import {
   type ModelRuntime,
   type SessionProjection,
 } from "../../kernel/pi/coding-agent.js";
-import { markAnthropicBlocks, VIEW_BLOCK_LINES } from "../../episodic/cache-layout.js";
+import { markAnthropicBlocks, shortenLastMessageMark, VIEW_BLOCK_LINES } from "../../episodic/cache-layout.js";
 import { INPUT_TRIGGER_MESSAGE, INPUT_TRIGGER_RESUME_MESSAGE } from "../../kernel/receipts/delivery-tags.js";
 import { HOME_TASK_RESULT_MESSAGE } from "../../kernel/receipts/invocation-receipts.js";
 import type { HomeContextSection } from "../../protocol/types.js";
@@ -650,7 +650,7 @@ export function markHomeMemoryCache(payload: unknown): unknown {
   if (mark < 0) return payload;
   const lines = viewGroupLines(blocks[mark]);
   if (lines !== undefined && lines < VIEW_BLOCK_LINES) mark -= 1;
-  return markAnthropicBlocks(payload, index, [mark]);
+  return shortenLastMessageMark(markAnthropicBlocks(payload, index, [mark]), index);
 }
 
 function viewGroupLines(block: unknown): number | undefined {

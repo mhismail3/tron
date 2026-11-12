@@ -90,7 +90,7 @@ function cacheMarks(body: Record<string, unknown>): Array<{ path: string; ttl?: 
 }
 
 describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
-  it("sends Home's one-hour view mark, Claude Code identity and tool casing, and maps the reply back", async () => {
+  it("sends Home's one-hour prefix marks and five-minute last-message mark, Claude Code identity and tool casing, and maps the reply back", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-anthropic-oauth-wire-"));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
     const agentDir = join(root, "agent");
@@ -137,7 +137,12 @@ describe("Claude subscription on Pi's built-in Anthropic OAuth", () => {
       const marks = cacheMarks(body);
       expect(marks.map((mark) => mark.path)).toContain(`.messages[${memory}].content[2]`);
       expect(marks.length).toBeLessThanOrEqual(4);
-      expect(new Set(marks.map((mark) => mark.ttl))).toEqual(new Set(["1h"]));
+      const wireOrder = (path: string) => [".tools", ".system", ".messages"].findIndex((key) => path.startsWith(key));
+      const ordered = marks.toSorted((left, right) => wireOrder(left.path) - wireOrder(right.path) || left.path.localeCompare(right.path, undefined, { numeric: true }));
+      expect(ordered.map((mark) => mark.ttl)).toEqual(["1h", "1h", "1h", undefined]);
+      const wire = body.messages as Array<WireMessage & { output_config?: unknown }>;
+      expect(wire.at(-1)).toMatchObject({ role: "system", content: [], output_config: { effort: expect.any(String) } });
+      expect(ordered.at(-1)!.path.startsWith(`.messages[${wire.length - 2}].`)).toBe(true);
     }
     const toolUse = (endpoint.requests[1]!.body.messages as WireMessage[]).flatMap((message) => Array.isArray(message.content) ? message.content : [])
       .find((block) => block.type === "tool_use");
