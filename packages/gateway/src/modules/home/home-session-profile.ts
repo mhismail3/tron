@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { ProfileModelRuntime, SessionProfile } from "../../kernel/host/session-profile.js";
 import { HOME_TOOL_NAMES } from "./home-runtime-policy.js";
 import { GatewayError } from "../../errors.js";
@@ -8,6 +9,7 @@ const HOME_MODULE_NAMES: readonly string[] = [
   "tron-context-window", "tron-compaction-policy", "tron-settings", "tron-projects", "tron-ask-user", "tron-display", "tron-notify", "tron-schedule", "tron-computer",
 ];
 export interface HomeSessionProfileServices {
+  globalRulesPath: string;
   decision(sessionId: string, cwd: string): "home" | "ordinary" | "unnamed";
   runtime(): Promise<ProfileModelRuntime>;
 }
@@ -17,7 +19,13 @@ export function homeSessionProfile(services: () => HomeSessionProfileServices): 
     name: HOME_SESSION_PROFILE_NAME,
     extensions: [...HOME_MODULE_NAMES, "tron-home", "tron-home-research", "tron-web-research"],
     resources: {
-      noExtensions: true, noContextFiles: true,
+      noExtensions: true,
+      noContextFiles: true,
+      agentsFilesOverride: () => {
+        const path = services().globalRulesPath;
+        try { return { agentsFiles: [{ path, content: readFileSync(path, "utf8") }] }; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { agentsFiles: [] }; throw error; }
+      },
       systemPromptOverride: () => undefined,
       appendSystemPromptOverride: () => [],
     },
