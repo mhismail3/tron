@@ -15,6 +15,9 @@ import { isVirtualModel } from "../providers/virtual-model.js";
 import { updateJsonLocked } from "../foundation/json.js";
 import { gitHeadState, projectGitState, readProjectDocument } from "./project-settings-writer.js";
 import { observedInstance, projectStores, type ObservedReaders, type OutsideChanges } from "./settings-outside.js";
+import { McpAdminService } from "./mcp-admin-service.js";
+import { piCliBundle } from "../kernel/pi/packages.js";
+import type { McpServerValue } from "../kernel/settings/mcp-server-value.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
 import type { SettingsSchema } from "../kernel/settings/settings-schema.js";
@@ -36,8 +39,15 @@ export interface ToolCatalogEntry { name: string; description?: string; resource
 export class SettingsStoreAdapter {
   readonly admitModelChoice = assertNewModelChoice;
   private outside: OutsideChanges | undefined;
+  private readonly mcp: McpAdminService;
 
-  constructor(private readonly dependencies: SettingsModelDependencies) {}
+  constructor(private readonly dependencies: SettingsModelDependencies) {
+    this.mcp = new McpAdminService(dependencies.agentDir, piCliBundle());
+  }
+
+  mcpServer(server: string): Promise<McpServerValue | undefined> {
+    return this.mcp.server(server);
+  }
 
   async projectRoot(path: string): Promise<string> {
     return (await this.dependencies.trust.inspect(path)).projectDir;
@@ -254,6 +264,9 @@ export class SettingsStoreAdapter {
         await keys.set(qualifiers.device!, unset ? null : value as string);
         return {};
       }
+      case "mcp":
+        await this.mcp.setServer(qualifiers.server!, unset ? undefined : value as McpServerValue);
+        return {};
       case "trust":
         return { result: await writers.setTrust(qualifiers.project!, unset ? null : value as boolean) };
       case "gateway":
