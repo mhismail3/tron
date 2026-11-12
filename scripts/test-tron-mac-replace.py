@@ -987,12 +987,13 @@ try:
 except replace.Failure as failure:
     sys.exit(f'Failure: {failure}')
 '''
-SNAPSHOT_KEPT = ('agent/sessions/project/session.jsonl', 'agent/settings.json', 'agent/missions/index/mission.json',
+SNAPSHOT_KEPT = ('agent/sessions/project/session.jsonl', 'agent/settings.json', 'agent/missions/index/mission.json', 'agent/auth.json',
+                 'logs/unregistered.txt', 'ios-builds/unregistered/only-copy', 'internal/run/unregistered.lock',
                  'gateway/devices.json', 'gateway/home/home.json', 'gateway/settings/observed.json',
                  'gateway/unregistered/only-copy', 'internal/machine-group-id', 'internal/mac/wizard-state.json',
                  'internal/run/.onboarded', 'internal/unregistered-file', 'workspace/files/report/REPORT.md',
                  'workspace/state/episodic/memory.json', 'backup-20200101/only-copy', 'mac-terminal/ssh_host_ed25519_key')
-SNAPSHOT_SKIPPED = ('agent/auth.json', 'agent/npm/node_modules/package/index.js', 'agent/run-history.jsonl',
+SNAPSHOT_SKIPPED = ('agent/npm/node_modules/package/index.js', 'agent/run-history.jsonl', 'agent/.tron-gateway-runtime.lock.lock/stale',
                     'gateway/local-auth.json', 'gateway/session-search.sqlite', 'gateway/payloads/stable/current.json',
                     'gateway/command-receipts/receipt.json', 'internal/subagents/run/status.json',
                     'internal/pi-subagents/1/extension.js', 'internal/run/ios-simulator.lease.lock',
@@ -1036,7 +1037,7 @@ def snapshot_journey():
                        or (first / relative).read_text() != relative or (first / relative).stat().st_mode & 0o777 != 0o600]
             record(not missing, f'backed-up and unregistered paths are cloned with their bytes and modes; missing: {missing}')
             present = [relative for relative in SNAPSHOT_SKIPPED if (first / relative).exists()]
-            record(not present, f'credentials to re-issue, caches, runtimes, scratch, logs and builds are not cloned; present: {present}')
+            record(not present, f'regenerated credentials, caches, runtimes, scratch, locks, logs and builds are not cloned; present: {present}')
             record((first / 'gateway/unregistered-link').is_symlink()
                    and os.readlink(first / 'gateway/unregistered-link') == 'devices.json', 'a symlink is cloned as a link, never followed')
             record(first.stat().st_mode & 0o777 == 0o700 and (first / 'gateway').stat().st_mode & 0o777 == 0o700

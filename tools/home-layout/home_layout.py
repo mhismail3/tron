@@ -96,7 +96,7 @@ def backup_decision(paths: dict, relative: str, directory: bool) -> str:
         depth = relative.count("/") + 1
         below = (candidate for candidate in paths
                  if candidate.count("/") >= depth and matches("/".join(candidate.split("/")[:depth]), relative))
-        if any(backed_up(paths, candidate) != own for candidate in below):
+        if any(backed_up(paths, candidate) != own for candidate in below) or not own and not paths[key].get("subtree"):
             return "mixed"
     return "all" if own else "none"
 
@@ -179,14 +179,14 @@ def shape(registry: object) -> list[str]:
     for key, entry in paths.items():
         if entry.get("subtree") and "prune" not in entry and class_of(paths, key) in PRUNED_CLASSES:
             problems.append(f"{key}: a {class_of(paths, key)} subtree states its prune rule")
-    sources = set()
+    seen = set()
     for move in retired:
         if not isinstance(move, dict) or move.keys() != {"from", "to"} or not location(move["from"]) or not location(move["to"]):
             problems.append(f"retired: {json.dumps(move)} must be {{from, to}} with home-relative or ~/ paths")
-        elif move["from"] == move["to"] or move["from"] in sources:
-            problems.append(f"retired: {move['from']} moves once, to another place")
+        elif move["from"] == move["to"] or {("from", move["from"]), ("to", move["to"])} & seen:
+            problems.append(f"retired: {move['from']} moves once, to a place nothing else moves to")
         else:
-            sources.add(move["from"])
+            seen |= {("from", move["from"]), ("to", move["to"])}
     return problems
 
 
@@ -211,15 +211,15 @@ HOME_NAME = r"\.tron(?:-dev)?"
 LITERALS = [
     re.compile(HOME_NAME + r"/([\w.-]+)(?:/([\w.*-]+))?"),
     re.compile(r"""["']""" + HOME_NAME + r"""["']\s*[,/]\s*["']([\w.-]+)["'](?:\s*[,/]\s*["']([\w.*-]+)["'])?"""),
-    re.compile(r"""\b(?:join|resolve)\(\s*(?:(?:resolve|realpathSync|normalize)\(\s*)?[\w.]*(?:tronHome|tron_home|TRON_HOME|\bhome)\b[^,()]*\)?\s*,\s*["']([\w.-]+)["'](?:\s*,\s*["']([\w.*-]+)["'])?"""),
+    re.compile(r"""\b(?:join|resolve)\(\s*(?:(?:path\.)?(?:resolve|realpathSync|normalize)\(\s*)?[\w.]*(?:tronHome|tron_home|TRON_HOME|\bhome)\b[^,()]*\)?\s*,\s*["']([\w.-]+)["'](?:\s*,\s*["']([\w.*-]+)["'])?"""),
 ]
 GATEWAY_JOIN = LITERALS[2]
 SWIFT_CHAIN = re.compile(r'\b\w*[hH]ome\b[^\n]*?((?:\s*\.?appendingPathComponent\(\s*"[^"\n]*"[^()\n]*\))+)')
 SWIFT_COMPONENT = re.compile(r'appendingPathComponent\(\s*"([^"\n]*)"')
 SHELL_ASSIGNMENT = re.compile(r"""^\s*(?:export\s+|local\s+|readonly\s+)?([A-Za-z_]\w*)=["']?(\S*?)["']?\s*$""")
-SHELL_HOME_VALUE = re.compile(HOME_NAME + r"/([\w./-]+)\}?$")
+SHELL_HOME_VALUE = re.compile(HOME_NAME + r"((?:/[\w.-]+)*)\}?((?:/[\w.-]+)*)/?$")
 SHELL_VARIABLE_VALUE = re.compile(r"\$\{?([A-Za-z_]\w*)\}?/([\w./-]+)$")
-SHELL_USE = re.compile(r"\$\{?([A-Za-z_]\w*)\}?/([\w.-]+)")
+SHELL_USE = re.compile(r"\$\{?([A-Za-z_]\w*)\}?/([\w.-]+)(?:/([\w.-]+))?")
 DYNAMIC = re.compile(r"[*$]|\\\(")
 SKIPPED_SEGMENT = re.compile(r"[*$]|^\.tron")
 TRON_RECEIVER = re.compile(r"tronHome|tron_home|TRON_HOME|TronHome")
@@ -252,12 +252,21 @@ def literal_paths(path: str, text: str, roots: set[str]):
         value = assignment.group(2) if assignment else ""
         home_value, variable_value = SHELL_HOME_VALUE.search(value), SHELL_VARIABLE_VALUE.fullmatch(value)
         if home_value:
-            bound[assignment.group(1)] = home_value.group(1).rstrip("/")
+            bound[assignment.group(1)] = (home_value.group(1) + home_value.group(2)).strip("/")
+            if home_value.group(2):
+                yield number, bound[assignment.group(1)]
         elif variable_value and variable_value.group(1) in bound:
-            bound[assignment.group(1)] = f"{bound[variable_value.group(1)]}/{variable_value.group(2).rstrip('/')}"
+            bound[assignment.group(1)] = f"{bound[variable_value.group(1)]}/{variable_value.group(2)}".strip("/")
+        elif assignment:
+            bound.pop(assignment.group(1), None)
         for use in SHELL_USE.finditer(line):
-            if use.group(1) in bound and line[use.end():use.end() + 1] not in ("*", "$", "{"):
-                yield number, f"{bound[use.group(1)]}/{use.group(2).rstrip('.')}"
+            if use.group(1) not in bound:
+                continue
+            segments = [segment for segment in use.groups()[1:] if segment]
+            if line[use.end():use.end() + 1] in ("*", "$", "{"):
+                segments.pop()
+            if segments:
+                yield number, "/".join([bound[use.group(1)], *segments]).strip("/").rstrip(".")
     for chain in SWIFT_CHAIN.finditer(text):
         if "deletingLastPathComponent" in chain.group(0):
             continue
@@ -418,7 +427,7 @@ def audit(home: str, max_entries: int, root: Path = ROOT) -> tuple[int, dict]:
 def observed(path: str) -> os.stat_result | None:
     try:
         return os.lstat(path)
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
         return None
 
 
@@ -432,29 +441,29 @@ def linked_component(path: str, stop: str) -> bool:
     return False
 
 
-def nearest_device(path: str) -> int:
+def nearest_parent(path: str) -> os.stat_result:
     parent = os.path.dirname(path)
     while True:
         info = observed(parent)
         if info is not None:
-            return info.st_dev
+            return info
         parent = os.path.dirname(parent)
 
 
 def migration(home: str, root: Path = ROOT) -> dict:
-    report = {"home": os.path.abspath(home), "source": {}, "state": None, "moves": [], "blockers": [], "errors": []}
+    report = {"home": os.path.abspath(home), "user_home": os.path.abspath(os.path.expanduser("~")), "source": {},
+              "state": None, "moves": [], "blockers": [], "errors": []}
     try:
         registry = load(root)
         if shape(registry):
             raise LayoutError("invalid_registry")
         report["source"] = source_identity(registry, root)
         os.close(open_home(report["home"]))
-        user_home = os.path.abspath(os.path.expanduser("~"))
         lock = observed(os.path.join(report["home"], RUNTIME_LOCK))
         if lock is not None and time.time() - lock.st_mtime < RUNTIME_LOCK_STALE_SECONDS:
             report["blockers"].append("gateway_running")
         for move in registry.get("retired", []):
-            source, destination = (os.path.join(user_home, value[2:]) if value.startswith("~/") else os.path.join(report["home"], value)
+            source, destination = (os.path.join(report["user_home"], value[2:]) if value.startswith("~/") else os.path.join(report["home"], value)
                                    for value in (move["from"], move["to"]))
             before, after = observed(source), observed(destination)
             row = {"from": move["from"], "to": move["to"], "source": source, "destination": destination,
@@ -467,7 +476,10 @@ def migration(home: str, root: Path = ROOT) -> dict:
                     row["refusals"].append("unsafe_type")
                 if linked_component(source, "/") or linked_component(destination, "/"):
                     row["refusals"].append("symlink_component")
-                if nearest_device(destination) != before.st_dev:
+                parent = nearest_parent(destination)
+                if not stat.S_ISDIR(parent.st_mode) and not stat.S_ISLNK(parent.st_mode):
+                    row["refusals"].append("parent_not_directory")
+                if parent.st_dev != before.st_dev:
                     row["refusals"].append("cross_volume")
             report["moves"].append(row)
         states = {row["state"] for row in report["moves"]}

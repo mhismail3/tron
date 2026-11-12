@@ -24,6 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / 'tools/home-layout'))
 import home_layout  # noqa: E402
 
+STAGED_REGISTRY = Path(home_layout.REGISTRY).name
 MAX_ENTRIES = 1_000_000
 MAX_JSON = 256 * 1024 * 1024
 LIBC = ctypes.CDLL(None, use_errno=True)
@@ -476,6 +477,7 @@ class Reinstall:
         self.store = self.home / '.tron-maintenance'
         self.receipt = None
         self.layout_paths = None
+        self.operation = None
 
     def source_agent(self):
         return self.home / '.tron/agent'
@@ -501,7 +503,15 @@ class Reinstall:
         identifier = str(uuid.uuid4())
         revision = command(['/usr/bin/git', '-C', REPO, 'rev-parse', 'HEAD'], 'source-revision', timeout=15).decode().strip()
         require(re.fullmatch(r'[0-9a-f]{40,64}', revision), 'source-revision: expected immutable commit identity')
+        try:
+            registry = home_layout.load(REPO)
+        except home_layout.LayoutError:
+            registry = None
+        require(registry is not None and not home_layout.shape(registry),
+                'layout-registry: the Tron-home registry is unreadable or invalid; run scripts/tron home-layout check')
         self.operation = private_dir(self.store / identifier, create=True)
+        write_json(self.operation / STAGED_REGISTRY, registry)
+        self.layout_paths = None
         self.receipt = {'schema': 1, 'id': identifier, 'kind': self.kind, 'home': str(self.home),
                         'app': str(app), 'candidate': candidate, 'original': original,
                         'sourceRevision': revision,
@@ -617,11 +627,11 @@ class Reinstall:
             return None
         if self.layout_paths is None:
             try:
-                registry = home_layout.load(REPO)
-            except home_layout.LayoutError:
+                registry = read_json(self.operation / STAGED_REGISTRY)
+            except (OSError, ValueError, Stop):
                 registry = None
             require(registry is not None and not home_layout.shape(registry),
-                    'layout-registry: the Tron-home registry is unreadable or invalid; run scripts/tron home-layout check')
+                    'layout-registry: this operation has no valid staged Tron-home registry; begin again with --restart')
             self.layout_paths = registry['paths']
         return lambda path, directory: home_layout.backup_decision(self.layout_paths, str(path.relative_to(tron)), directory)
 

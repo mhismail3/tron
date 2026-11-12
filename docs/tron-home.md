@@ -15,8 +15,8 @@ Every field has a consumer; an unknown field fails `check`.
 |---|---|---|
 | `owner` | The module (or `pi-sdk`, `pi-subagents`, `extension …`) that may write, migrate or prune the path | `check`: must be a module |
 | `class` | What is lost if the path is deleted: `keep` (irreplaceable), `rebuild` (its owner rebuilds it), `scratch` (working state, locks, in-flight work) or `log`. Stated on every top-level entry and wherever a child differs; otherwise inherited from the nearest ancestor | backup selection, `check`, `audit` |
-| `backup` | Overrides the default, which is: `keep` is backed up, the other classes are not. Used for a credential that is re-issued instead of restored and for the selected Gateway payloads | Mac replace snapshot, Mac reinstall backup, `audit` |
-| `credential` | `true` when the path holds a key or token | `audit`: group or other access is a `credential_mode` finding |
+| `backup` | Overrides the default, which is: `keep` is backed up, the other classes are not. Used for the two credentials the Gateway regenerates at start and for the selected Gateway payloads | Mac replace snapshot, Mac reinstall backup, `audit` |
+| `credential` | `true` when the path holds a key or token | `audit`: group or other access to the registered entry (a file, or the folder that holds the keys) is a `credential_mode` finding |
 | `container` | An aggregate whose registered children carry their own contracts; it does not admit unknown children | `audit` |
 | `subtree` | Undeclared descendants belong to this boundary's owner; explicit children still take precedence | `check`, `audit`, backup selection |
 | `prune` | The release rule its owner enforces: `maxAge` (`30m`, `24h`, `14d`), `maxEntries`, `maxBytes`, `keepNewest`, or `when` for an event; `by` names the enforcer when it is not the owner. Required on every `rebuild` or `scratch` subtree | `check` |
@@ -27,10 +27,13 @@ home-relative or starts with `~/`. It is empty when no layout change is pending.
 Class and backup describe today's addresses, so a root can be mixed: `internal` is
 `scratch` yet holds the `keep` machine identity and Mac onboarding evidence, and
 `gateway` is `keep` yet holds receipts, staging and rebuildable indexes. A `prune.when`
-of "not pruned" records a known gap, not a rule. Export limits (30 minutes, eight items,
-4 GiB) are the export store's, not the blob store's. Provider run retention is 30-day
-eligibility with terminal, reference and resumability protection, not unconditional
-expiry. Installed Pi resources can contain user source and state.
+of "not pruned" records a known gap, not a rule. Exports use the export store's limits (30
+minutes, 2 GiB per item, eight items, four GiB total, four readers and one production),
+not the blob store's. Provider run retention is 30-day eligibility with terminal,
+reference and resumability protection, not unconditional expiry. Installed Pi resources
+can contain user source and state. `gateway/settings/observed.json` is `keep` because it
+is the baseline that outside-change detection compares against, and
+`gateway/model-recents.json` because nothing rebuilds the user's recent models.
 
 ## Roots
 
@@ -64,19 +67,27 @@ as subject `home.profile.item` for history and Undo; it is not the Profile.
 ## Backups
 
 Two tools copy a home and both select by the registry: a path is copied when its class or
-`backup` flag says so, and **every path the registry does not know is copied too**.
-Nothing is skipped because of its name or age.
+`backup` flag says so, and **every path the registry does not know is copied too**,
+wherever it sits (an unregistered file in `logs/` is copied; the registered log files
+beside it are not). A path under a `subtree` entry is known: it belongs to that entry and
+follows it. Nothing is skipped because of its name or age.
 
 - `scripts/tron mac replace` clones the selection into the operation's `state-snapshot-<n>`
-  before the swap. The runner works from a private copy of the registry and of `home_layout.py`,
-  staged and validated when the operation starts.
-- `scripts/tron mac reinstall` inventories and copies the selection, and its frozen-source
-  check covers the same paths. A path outside the selection may change during the offline
+  before the swap, building it as `partial-state-snapshot-<n>` first so an interrupted
+  clone is rebuilt whole. Symlinks are cloned as links. Folders that are only partly
+  selected are created owner-only. The runner works from a private copy of the registry
+  and of `home_layout.py`, staged and validated when the operation starts.
+- `scripts/tron mac reinstall` stages the registry in its operation directory when the
+  operation begins, then inventories and copies the selection; its frozen-source check
+  covers the same paths. A path outside the selection may change during the offline
   window.
 
-Both skip logs, rebuildable indexes and runtimes, scratch, the selected Gateway payloads
-(the tools keep those separately), and `agent/auth.json`, `gateway/local-auth.json` and
-`gateway/enrollment.json`, which are re-issued, never restored.
+Both skip logs, rebuildable indexes and runtimes, scratch and locks, and
+`gateway/local-auth.json` and `gateway/enrollment.json`, which the Gateway regenerates at
+start. Provider credentials (`agent/auth.json`) are copied. The selected Gateway payloads
+(`gateway/payloads`) are not copied: replace, and reinstall's `--select-bundled-offline`,
+move the Stable channel into the operation instead, and a channel left in place is restored
+by redeploying.
 
 ## Read-only audit
 
@@ -124,7 +135,8 @@ Both print JSON and change nothing; there is no apply or rollback mode. `--dry-r
 each `retired` move with its source and destination, the source's identity (type, device,
 inode, mode), its state (`pending`, `done`, `conflict`, `absent`) and what an apply would
 refuse: `destination_exists`, `unsafe_type` (a symlink or special file), `symlink_component`
-(a symlinked parent on either side) and `cross_volume`. `blockers` holds `gateway_running`
+(a symlinked parent on either side), `parent_not_directory` and `cross_volume`. `~/` paths
+resolve against `$HOME`, printed as `user_home`. `blockers` holds `gateway_running`
 when the home's agent-runtime lock was refreshed in the last 60 seconds. `--status` prints
 the overall state (`nothing_declared`, `nothing_to_move`, `not_started`, `partly_applied`,
 `applied`, `conflict`) and each move's state. Exit **0** means nothing would be refused
@@ -137,9 +149,11 @@ walked and no file body is read.
 - A new path is a registry entry first; `scripts/tron home-layout check` (a verify step)
   fails on an unregistered Tron-home literal in Gateway, Mac, script or tool source, and
   on any Gateway `join(tronHome, "...")` outside the registry module. It reads `~/.tron`
-  and `~/.tron-dev` literals, shell variables bound to one (`STATE_DIR="$HOME/.tron-dev/gateway"`,
-  then `"$STATE_DIR/dev.pid"`), joins wrapped in `resolve()`, and chained Swift
-  `appendingPathComponent` calls. A Swift path built from a named constant is not read.
+  and `~/.tron-dev` literals, shell variables bound to a home or a path in one
+  (`STATE_DIR="$HOME/.tron-dev/gateway"`, then `"$STATE_DIR/dev.pid"`; also
+  `"${OVERRIDE:-$HOME/.tron/x}/child"`), joins wrapped in `resolve()`, and chained Swift
+  `appendingPathComponent` calls. It does not read a call split across lines or a Swift
+  path built from a named constant.
 - Moving a path is a persisted-layout migration: a one-shot, backed-up, maintainer-approved
   change (AGENTS.md), never a second reader of the old location.
 - `prune` states the rule an owner enforces. The registry does not implement cleanup or

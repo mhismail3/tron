@@ -98,7 +98,9 @@ class HomeLayoutTests(unittest.TestCase):
         source = (ROOT / "packages/gateway/src/sessions/session-export.ts").read_text()
         self.assertIn("SESSION_EXPORT_MAX_ITEMS = 8;", source)
         self.assertIn("SESSION_EXPORT_MAX_TOTAL_BYTES = 4 * 1_024 * 1_024 * 1_024;", source)
-        self.assertEqual(paths["gateway/exports"]["prune"], {"maxAge": "30m", "maxEntries": 8, "maxBytes": 4 * 1024 ** 3})
+        self.assertIn("SESSION_EXPORT_MAX_ITEM_BYTES = 2 * 1_024 * 1_024 * 1_024;", source)
+        self.assertEqual(paths["gateway/exports"]["prune"], {"maxAge": "30m", "maxEntries": 8, "maxBytes": 4 * 1024 ** 3,
+                                                             "when": "2 GiB per item; 4 readers, 1 production"})
 
     def test_check_refuses_unregistered_literals_outside_tests(self) -> None:
         fixture = Fixture(self.base)
@@ -124,9 +126,13 @@ class HomeLayoutTests(unittest.TestCase):
         fixture = Fixture(self.base)
         fixture.write("scripts/dev", '#!/bin/bash\nSTATE_DIR="$HOME/.tron-dev/gateway"\nPID_FILE="$STATE_DIR/bogus.pid"\n'
                       'DEVICES="$STATE_DIR/devices.json"\nLEASE="$STATE_DIR/lease-$id.lock"\n'
-                      'NESTED="$PID_FILE/child"\nrm -f "${STATE_DIR}/gate"\n')
+                      'NESTED="$PID_FILE/child"\nrm -f "${STATE_DIR}/gate"\n'
+                      'ROOT_HOME="$HOME/.tron-dev"\ncat "$ROOT_HOME/bogus/root.json" "$ROOT_HOME/gateway/devices.json"\n'
+                      'UDID="${OVERRIDE:-$HOME/.tron/gateway}/bogus-default"\n'
+                      'STATE_DIR=/tmp/elsewhere\ntouch "$STATE_DIR/not-a-home-path"\n')
         fixture.write("scripts/inspect.sh", 'cat "$HOME/.tron-dev/bogus/state.json" "$HOME/.tron-dev/gateway/devices.json"\n')
         fixture.write("packages/gateway/src/worktrees.ts", 'this.root = join(resolve(tronHome), "gateway", "worktrees");\n'
+                      'const other = path.join(path.resolve(options.tronHome), "gateway", "devices.json");\n'
                       'const config = join(installRoot(tronHome), "configs");\n'
                       'const store = join(dirname(tronHome), ".tron-maintenance", "replace");\n')
         fixture.write("packages/mac-app/Sources/Paths.swift",
@@ -143,10 +149,14 @@ class HomeLayoutTests(unittest.TestCase):
         self.assertIn("scripts/dev:3: gateway/bogus.pid is not in", result.stdout)
         self.assertIn("scripts/dev:6: gateway/bogus.pid/child is not in", result.stdout)
         self.assertIn("scripts/dev:7: gateway/gate is not in", result.stdout)
+        self.assertIn("scripts/dev:9: bogus/root.json is not in", result.stdout)
+        self.assertIn("scripts/dev:10: gateway/bogus-default is not in", result.stdout)
+        self.assertNotIn("not-a-home-path", result.stdout)
+        self.assertIn("packages/gateway/src/worktrees.ts:2: resolve Tron-home paths with tronHomePath()", result.stdout)
         self.assertIn("scripts/inspect.sh:1: bogus/state.json is not in", result.stdout)
         self.assertIn("packages/gateway/src/worktrees.ts:1: resolve Tron-home paths with tronHomePath()", result.stdout)
         self.assertIn("packages/mac-app/Sources/Paths.swift:2: gateway/bogus.json is not in", result.stdout)
-        self.assertEqual(len(result.stdout.strip().splitlines()), 7, result.stdout)
+        self.assertEqual(len(result.stdout.strip().splitlines()), 10, result.stdout)
 
     def test_check_refuses_the_version_1_shape_and_rebuildable_subtrees_without_a_prune_rule(self) -> None:
         fixture = Fixture(self.base)
@@ -175,7 +185,8 @@ class HomeLayoutTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stdout)
                 self.assertIn(message, result.stdout)
         for retired in ([{"from": "gateway"}], [{"from": "gateway", "to": "../state"}], [{"from": "gateway", "to": "gateway"}],
-                        [{"from": "gateway", "to": "state"}, {"from": "gateway", "to": "other"}], [{"from": "/gateway", "to": "state"}]):
+                        [{"from": "gateway", "to": "state"}, {"from": "gateway", "to": "other"}], [{"from": "/gateway", "to": "state"}],
+                        [{"from": "gateway", "to": "state"}, {"from": "internal", "to": "state"}]):
             with self.subTest(retired=retired):
                 fixture.write(REGISTRY, registry(PATHS, retired))
                 result = fixture.run("check")
@@ -447,6 +458,7 @@ class MigrateTests(unittest.TestCase):
         code, report = self.migrate("--dry-run")
         self.assertEqual(code, 0, report)
         self.assertEqual((report["state"], report["blockers"], report["errors"]), ("not_started", [], []))
+        self.assertEqual(report["user_home"], str(self.user))
         self.assertEqual(len(report["source"]["manifest_sha256"]), 64)
         gateway, backup, terminal = report["moves"]
         self.assertEqual((gateway["state"], gateway["refusals"]), ("pending", []))
@@ -468,7 +480,10 @@ class MigrateTests(unittest.TestCase):
         (self.user / ".tron-maintenance").symlink_to(self.base / "elsewhere", target_is_directory=True)
         lock = self.home / "agent/.tron-gateway-runtime.lock.lock"
         lock.mkdir(parents=True)
-        self.fixture.write(REGISTRY, registry(PATHS, [*self.RETIRED, {"from": "moved", "to": "~/.tron-maintenance/backups/moved"}]))
+        (self.home / "blocked").write_text("x")
+        (self.home / "occupied").write_text("a file where a folder is needed")
+        self.fixture.write(REGISTRY, registry(PATHS, [*self.RETIRED, {"from": "moved", "to": "~/.tron-maintenance/backups/moved"},
+                                                      {"from": "blocked", "to": "occupied/blocked"}]))
         before = snapshot(self.user)
         code, report = self.migrate("--dry-run")
         self.assertEqual(code, 1)
@@ -477,7 +492,8 @@ class MigrateTests(unittest.TestCase):
             "gateway": ("conflict", ["destination_exists"]),
             "backup-1": ("pending", ["unsafe_type", "symlink_component"]),
             "mac-terminal": ("pending", []),
-            "moved": ("pending", ["symlink_component"])})
+            "moved": ("pending", ["symlink_component"]),
+            "blocked": ("pending", ["parent_not_directory"])})
         self.assertEqual(report["state"], "conflict")
         self.assertEqual(snapshot(self.user, contents_first=False), before)
         stale = time.time() - 600
