@@ -60,7 +60,7 @@ defines scoped permissions and runtime admission.
 In short:
 
 - **One key, declared once on the Gateway** (F1). The schema holds type,
-  group, allowed layers, timing, effect point, native-tap classification, writers, redaction and
+  group, allowed layers, timing, effect point, native-tap classification, writers and
   display. iOS renders keys generically; a new key needs no iOS release.
 - **Three scopes** (F4): **Project > Session/Home override > Global**, gated by
   registry grants. Home has no Project or separate chapter override. Private store

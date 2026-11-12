@@ -53,7 +53,6 @@ export interface KeyDeclaration {
   tap?: "trust" | "privacy" | "spend" | "install" | "irreversible";
   direction?: (before: unknown, after: unknown) => Direction;
   writers: readonly Writer[];
-  redacted?: boolean;
   label: string;
   help: string;
   order: number;

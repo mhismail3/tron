@@ -28,7 +28,6 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
     let valueKind: String?
     let options: [SettingsChoice]?
     let optionsSource: SettingsOptionsSource?
-    let redacted: Bool?
     let entry: SettingsEntryGuidance?
     let sessionOverridable: Bool
     let editable: Bool
