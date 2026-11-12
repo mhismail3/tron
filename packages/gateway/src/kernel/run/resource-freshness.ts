@@ -74,11 +74,13 @@ export class ResourceFreshness {
     const state = this.states.get(slot);
     if (!state) return;
     state.idles += 1;
+    console.error("FRESH idle", slot.id);
     this.apply(slot, state);
   }
 
   stale(scope: { projectDir?: string; sessionId?: string } = {}): void {
     if (this.closed) return;
+    console.error("FRESH stale", scope);
     for (const [slot, state] of this.states) {
       if (scope.projectDir !== undefined && slot.projectDir !== scope.projectDir) continue;
       if (scope.sessionId !== undefined && slot.id !== scope.sessionId) continue;
@@ -149,6 +151,7 @@ export class ResourceFreshness {
   }
 
   private apply(slot: RuntimeSlot, state: PendingResource): void {
+    console.error("FRESH apply", slot.id, state.applied, state.wanted, Boolean(state.draining), state.ready, state.paused);
     if (state.applied >= state.wanted || state.draining || !state.ready || state.paused || this.closed || slot.isDisposed) return;
     state.draining = this.drain(slot, state).finally(() => {
       state.draining = undefined;
@@ -173,6 +176,7 @@ export class ResourceFreshness {
         } else this.record(slot, "unchanged");
         state.applied = target;
       } catch (error) {
+        console.error("FRESH drain error", slot.id, error);
         if (error instanceof GatewayError && error.code === "busy") {
           if (idles !== state.idles) continue;
         } else this.record(slot, "failed");
