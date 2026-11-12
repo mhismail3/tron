@@ -1098,8 +1098,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             return retry?["maxRetries"] == nil
         }, "Reset removes the explicit value through the real settings change path")
         XCTAssertTrue(waitForNonExistence(row, timeout: 30), app.debugDescription)
-        XCTAssertTrue(app.buttons["HTTP proxy"].waitForExistence(timeout: 15),
-                      "Connection keeps its safety proxy editor: \(app.debugDescription)")
+        XCTAssertFalse(app.buttons["HTTP proxy"].exists, "The inert proxy editor is removed")
         keepScreenshot(app, name: "1975-inherited-routine-row-gone")
     }
 

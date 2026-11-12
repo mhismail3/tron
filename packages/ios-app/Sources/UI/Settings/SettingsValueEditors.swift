@@ -1,40 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-struct SettingsSecretEditor: View {
-    let title: String
-    let help: String
-    let onChange: (JSONValue?) -> Void
-    @State private var draft = ""
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ScrollView {
-            TronSettingsSections(alignment: .leading, spacing: 16, hidesLoneHeading: true) {
-                SecureField("New value", text: $draft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .tronField(monospaced: true, compact: true)
-                    .tronTextEntryDone()
-                    .accessibilityLabel("New value")
-                    .tronSettingsCaption(help)
-                TronGlassCard(accent: .tronPrimary) {
-                    Button { draft = ""; onChange(nil); dismiss() } label: {
-                        TronSettingsRow(icon: "arrow.uturn.backward", title: "Follow the default")
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(18)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle(title)
-        .tronSaveToolbar(enabled: !draft.isEmpty) { let value = draft; draft = ""; onChange(.string(value)); dismiss() }
-        .onDisappear { draft = "" }
-    }
-}
-
 struct SettingsListEditor: View {
     private struct Item: Identifiable { let id = UUID(); var text: String }
     let title: String
