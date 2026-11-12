@@ -144,7 +144,7 @@ actual K3 host; native frames do not select product modules or keep another list
   unit per array item; then the conversation (`messages`, `input`, `contents`), where an item
   with a `content` array is its other fields followed by each content block and any other
   item is one unit. A unit is serialized without `cache_control`. Each recorded prefix is the
-  byte size and the first 16 hex digits of an HMAC-SHA-256 over all units up to and including one point: the end
+  byte size and the first 16 hex digits of an HMAC-SHA-256 of the SHA-256 of all units up to and including one point: the end
   of tools, each system unit, each cache mark (with its lifetime) and the whole request.
   `params` is the same pair over every other top-level field, keys sorted. System text that
   an API carries inside the conversation (OpenAI completions and Responses) is part of

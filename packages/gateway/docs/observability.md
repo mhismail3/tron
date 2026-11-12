@@ -80,7 +80,7 @@ would remove. Test-tooling signals are rows of the
 | Stream | Cap | Expected history |
 | --- | --- | --- |
 | `gateway.jsonl` | 40 MB (8 × 5 MB; the user's chosen cap) | Months |
-| `requests.jsonl` | 80 MB (16 × 5 MB) | At least 14 days at the request volume and line size measured when the cap was set |
+| `requests.jsonl` | 80 MB (16 × 5 MB) | **Not yet measured:** the build that writes this stream is not installed on this Mac |
 | `deploy.jsonl` | 1 MB + one 1 MB segment | Hundreds of deployments; a source rebuild writes about a dozen records (about 3 KB) |
 | `gateway-stderr.log` | 1 MiB, emptied | Rare launcher and Node abort text; a day's output is normally zero bytes |
 | `mac.jsonl` | 4 MB (4 × 1 MiB) | Several days of lifecycle transitions. **Not yet measured:** the build that writes this stream is not installed on this Mac |
