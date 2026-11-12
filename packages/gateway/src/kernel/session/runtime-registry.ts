@@ -1271,6 +1271,7 @@ export class RuntimeRegistry implements SessionOperations {
         const target = await this.taskLedger().settingsTarget(sessionId, taskId, purpose);
         return { ...target, slot: await this.acquire(target.sessionId) };
       },
+      settingsTargetSlot: (sessionId: string) => this.acquire(sessionId),
       validateTaskMarker: (sessionId: string, marker: unknown) => this.taskLedger().validateMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),

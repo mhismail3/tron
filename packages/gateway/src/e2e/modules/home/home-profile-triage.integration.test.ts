@@ -142,7 +142,7 @@ it("keeps explicitly stated sensitive data unsorted, refuses inferred sensitive 
   expect(move.result).toMatchObject({ status: "organized" });
   const moved = await knowledge!.read(note.id) as Note;
   expect({ ...moved, revisionId: note.revisionId, content: { ...moved.content, profile: note.content.profile } }).toEqual(note);
-  const changes = (await p.f.settings.settingsChanges.history({ key: "home.profile.item" })).entries;
+  const changes = (await p.f.settings.settingsChanges.history({ key: "home.profile.item" }, { kind: "ui", id: "maintainer" })).entries;
   const placement = changes.find(entry => entry.commandId === move.result.commandId)!;
   await p.f.settings.settingsChanges.undo(placement.changeId, { actor: { kind: "ui", id: "maintainer" }, commandId: "undo-sensitive-placement" });
   const restored = await knowledge!.read(note.id) as Note;

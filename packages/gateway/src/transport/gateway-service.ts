@@ -1881,7 +1881,7 @@ export class GatewayService {
           ...(params.limit === undefined ? {} : { limit: integer(params.limit, "limit", 1, 200) }),
           ...(params.key === undefined ? {} : { key: string(params.key, "key", { max: 200 }) }),
           ...(params.status === undefined ? {} : { status: string(params.status, "status", { max: 40 }) }),
-        });
+        }, { kind: "ui", id: client.identity });
         return safeJson({ ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
           entries: page.entries.map(entry => presentHistoryEntry(this.dependencies.settingsModel.schema, entry)) });
       }

@@ -88,7 +88,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
         }
         if (input.action === "history") {
           const { action: _action, ...query } = input;
-          const result = await owner.history(query);
+          const result = await owner.history(query, toolCallId);
           return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
         }
         const confirm = nativeChangeConfirmer(context, requestChange, signal);

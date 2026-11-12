@@ -97,6 +97,12 @@ const STORE_ORDER: Record<Binding["store"], number> = {
 
 type StoreApplyResult = { revision?: number; git?: GitResult; result?: unknown };
 
+export function historyVisible(viewer: Actor, entry: ChangeEntry): boolean {
+  if (viewer.kind === "home" || viewer.kind === "ui") return true;
+  return entry.target.kind === "session" && entry.target.sessionId === viewer.sessionId
+    || viewer.sessionId !== undefined && entry.actor.sessionId === viewer.sessionId;
+}
+
 export class SettingsChangePath {
   private readonly stripes = Array.from({ length: 32 }, () => new RequestSpanLane("settings.target-stripe"));
   private observer: SettingsObserver | undefined;
@@ -311,9 +317,8 @@ export class SettingsChangePath {
   async undo(changeId: string, context: Omit<ChangeContext, "undoOf">, session?: ChangeContext["session"]): Promise<ChangeResult> {
     const found = await this.record.entry(changeId);
     if (!found) throw new GatewayError("not_found", "No such settings change");
-    if (context.actor.kind !== "ui" && found.entry.target.kind === "session"
-      && found.entry.target.sessionId !== context.actor.sessionId) {
-      throw new GatewayError("invalid_request", "An agent cannot undo another session’s settings change");
+    if (!historyVisible(context.actor, found.entry)) {
+      throw new GatewayError("invalid_request", "An agent can undo only settings changes made by or in its own session");
     }
     if (found.entry.key === HOME_PROFILE_SUBJECT.id) {
       if (!this.writers.undoSubject) throw new GatewayError("unsupported", "Knowledge is not available on this Gateway");
@@ -348,10 +353,10 @@ export class SettingsChangePath {
     }], { ...context, applyAgainOf: changeId, ...(session ? { session } : {}) });
   }
 
-  history(input: { cursor?: string; limit?: number; key?: string; status?: string; actor?: ActorKind | "agents"; layer?: LayerId; section?: string }) {
+  history(input: { cursor?: string; limit?: number; key?: string; status?: string; actor?: ActorKind | "agents"; layer?: LayerId; section?: string }, viewer: Actor) {
     return this.record.page({
       ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {}),
-      filter: entry => (!input.key || entry.key === input.key) && (!input.status || entry.status === input.status)
+      filter: entry => historyVisible(viewer, entry) && (!input.key || entry.key === input.key) && (!input.status || entry.status === input.status)
         && (!input.actor || (input.actor === "agents" ? entry.actor.kind !== "ui" : entry.actor.kind === input.actor))
         && (!input.layer || entry.layer === input.layer)
         && (!input.section || this.model.schema.auditSubject(entry.key)?.group === input.section),

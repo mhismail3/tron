@@ -152,7 +152,10 @@ refused. **Record:** `<tronHome>/state/settings/changes/`, append-only 500-entry
 listed in `index.json`, kept forever, paged by `settings.history` (the maintainer's full view) or the tool's `history`
 action (optional key filter, cursor and limit 1–200; a page may be empty with a
 `nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials), reason,
-status, git result and `undoOf`/`applyAgainOf`. Existing persisted facts remain readable;
+status, git result and `undoOf`/`applyAgainOf`. Scope: an agent's history and Undo cover only its own
+chat's changes, meaning those targeting its session and those its session initiated (including its Global
+changes); foreign rows are absent from its pages and its Undo of them is refused. Tron Home sees and undoes every
+change, applied to the target session's own store. Existing persisted facts remain readable;
 there is no pending-request folding or tier basis in new facts. **Undo** (`settings.undo`) writes
 `before` back, refused with `conflict` when the store moved; redacted entries are **Not
 undoable**. Consumption is derived from permanent history, checked with the current-after
