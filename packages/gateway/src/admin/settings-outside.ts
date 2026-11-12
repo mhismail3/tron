@@ -37,6 +37,7 @@ interface ObservedDocument { version: 1; stores: Record<string, StoreState> }
 
 interface OutsideObserver {
   outside(entries: readonly ChangeEntry[]): void | Promise<void>;
+  providerFilesChanged?(): void;
 }
 
 export interface ObservedReaders {
@@ -211,6 +212,7 @@ export class OutsideChanges {
     this.watching = true;
     this.failed = failed;
     this.watchDirectory("agent", this.agentDir, () => true, [{ kind: "global" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }]);
+    this.watchDirectory("auth", this.agentDir, name => name === "auth.json", [], () => this.observer?.providerFilesChanged?.());
   }
 
   dispose(): Promise<void> {
@@ -243,7 +245,7 @@ export class OutsideChanges {
     this.watchDirectory(`project-parent:${root}`, root, name => name === ".pi", projectStores(root));
   }
 
-  private watchDirectory(id: string, directory: string, relevant: (name: string) => boolean, stores: ObservedStore[]): boolean {
+  private watchDirectory(id: string, directory: string, relevant: (name: string) => boolean, stores: ObservedStore[], changed?: () => void): boolean {
     try {
       const watcher = watch(directory, { persistent: false }, (_event, name) => {
         if (!this.watching || (name !== null && !relevant(String(name)))) return;
@@ -251,6 +253,7 @@ export class OutsideChanges {
         this.timers.set(id, setTimeout(() => {
           this.timers.delete(id);
           if (!this.watching) return;
+          changed?.();
           void this.reconcile(stores).catch(error => this.failed?.(error));
         }, 250));
       });

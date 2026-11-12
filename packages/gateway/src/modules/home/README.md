@@ -76,10 +76,9 @@ Composition supplies the same late K6 settings, Profile and raw model owners.
   time and identity, and publication requires an untorn conversation branch.
 - **Workspace.** `<tronHome>/gateway/home/workspace` (`0700`, empty) is recorded **untrusted**.
   Global skills appear in the system prompt; prompt templates feed the composer.
-  `home-global-resources.ts` watches settings, skills, prompts and `agent/npm`,
-  reloading at idle. Failed reloads remain pending for the next idle edge; only a
-  successful reload advances the applied revision and logs `home.resources-reload`
-  with reason `completed`.
+  The kernel [resource freshness owner](../../kernel/run/README.md#resource-freshness)
+  watches global and project resources for every live session, including Home.
+  It reloads changed inputs at idle, skips unchanged inputs and retains failed work.
 - **Identity.** Every chapter is titled **Home** (no JSONL rewrite) and omitted from
   `session.list` (`scope: "user"`); search and `session.open` are unfiltered.
 - **Rollover.** At a quiescent boundary, the soft limit (24 MiB or 50,000 entries) seals the
@@ -292,7 +291,7 @@ and the [built-in improvement-loop design](improvement-loop.md).
 
 | Signal | Level | Meaning |
 |---|---|---|
-| `home.<outcome>`; `home.client-control`; `home.route-bound`; `home.resources-reload` | info; `unavailable`, `refused`, failed controls and failed `resources-reload` warn | Designation outcomes (`designated`, `enabled`, `disabled`, `unavailable` or `refused` with a coded `reason`), pause/resume-memory owner outcome (`operation`, `reason`), route binding `category` (`fresh`, `replay`, `open`), a successful live global-resource reload (`completed`) or a failed reload/watch (`watch-failed` or a coded `reason`). Never IDs, paths, models or memory text |
+| `home.<outcome>`; `home.client-control`; `home.route-bound` | info; `unavailable`, `refused`, failed controls warn | Designation outcomes (`designated`, `enabled`, `disabled`, `unavailable` or `refused` with a coded `reason`), pause/resume-memory owner outcome (`operation`, `reason`), route binding `category` (`fresh`, `replay`, `open`). Never IDs, paths, models or memory text |
 | `home.chapter-rollover`; `home.chapter-recovery`; `home.chapter-refused`; `home.chapter-limit-stop`; `home-chapter-limit-stop-failed` code on `session.diagnostic` | info; refusals, limit stops and the failure warn; the `session.diagnostic` code is a session event, not a log record | Rollover `reason` (soft or hard byte/entry limit) and `chapterOrdinal`; recovery `reason` (`absent`, `adopt`, `conversation-published`, `settings-from-live`, `settings-from-cold`); refusal `reason` (`hard-bytes`, `sealed-write`, `ownership-changed`, …); a running activation stopped at the hard limit with crossing and settled bytes/entries; a chapter-limit Stop that did not settle keeps its admission fence |
 | `home.activation-usage` | info | Once per activation, for its first response with a plausible usage: `estimatedTokens` (that request's figure before sending; `home.activation`'s when it is the activation's first request) and `providerTokens` (the provider's prompt count). Their ratio is the estimate's error; a ratio that stays outside 0.95–1.05 means the factors are not converging for that model. |
 | `home.activation`; `home.activation-refused`; `home.memory-ingest`; `home-memory-revision-changed` / `home-memory-source-unavailable` reason on `rpc.error` | info; refusals and failures warn | An activation's first provider request (`effectiveTokens`, `contextWindow`, view lines/bytes, `excludedMessages`, `durationMs` readiness wait); a request refused before any provider call (`reason`, bounded `detail`; `memory-usage-limit` re-arms once the limit lapses); a memory-ingest failure `reason`; a memory-browser read that lost its revision fence or could not prove its sources (coded `cause`) |

@@ -347,6 +347,8 @@ const sessions: RuntimeRegistry = new RuntimeRegistry({
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
+  resourceFreshnessDiagnostic: record => logger.log(record.reason === "failed" || record.reason === "watch-failed" ? "warning" : "info",
+    `Session resource refresh ${record.reason}`, { event: "session.resources-reload", source: "sessions", ...record }),
   runtimeLifecycleRecord: (record) => logger.log("info",
     `Session runtime ${record.event === "runtime.loaded" ? "loaded" : "evicted"} (${record.reason})`, {
       event: record.event,

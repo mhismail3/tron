@@ -25,6 +25,7 @@
     "kernel/run/README.md",
     "kernel/run/request-pipeline.ts",
     "kernel/run/request-record.ts",
+    "kernel/run/resource-freshness.ts",
     "kernel/run/run-operations.ts",
     "kernel/run/run-events.ts",
     "kernel/run/run-runtime.ts",

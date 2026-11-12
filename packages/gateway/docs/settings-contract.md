@@ -65,13 +65,13 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `context.compaction.keepRecentTokens` | model | context | project, session, global | none | live | next-compaction | — |
 | `context.compaction.instructions` | — | context | project, session, global | none | live | next-compaction | — |
 | `context.branchSummary.reserveTokens` | — | context | project, global | none | live | next-compaction | — |
-| `context.images.autoResize` | — | tools | project, session, global | as allowed | fixed | new-chat | — |
+| `context.images.autoResize` | — | tools | project, session, global | as allowed | fixed | reload | — |
 | `context.images.block` | — | tools | project, session, global | as allowed | narrow live, widen fixed | next-request | privacy |
 | `tools.active` | — | tools | project, session, global, home | session, home | fixed | next-turn | — |
-| `tools.codemode.mode` | — | tools | project, global | none | fixed | new-chat | — |
-| `tools.codemode.inlineBudget` | — | tools | project, global | none | fixed | new-chat | — |
-| `tools.shell.path` | — | tools | project, global | none | fixed | new-chat | trust |
-| `tools.shell.commandPrefix` | — | tools | project, global | none | fixed | new-chat | trust |
+| `tools.codemode.mode` | — | tools | project, global | none | fixed | reload | — |
+| `tools.codemode.inlineBudget` | — | tools | project, global | none | fixed | reload | — |
+| `tools.shell.path` | — | tools | project, global | none | fixed | reload | trust |
+| `tools.shell.commandPrefix` | — | tools | project, global | none | fixed | reload | trust |
 | `permissions.projectTrust` | project | trust | global | as allowed | live | reload | trust |
 | `permissions.macTerminalKey` | device | connections | global | as allowed | live | next-change | trust |
 | `permissions.macTerminalServer` | — | connections | global | as allowed | live | next-change | trust |
@@ -89,7 +89,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `run.httpIdleTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.websocketConnectTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.httpProxy` | — | run | global | as allowed | live | restart | — |
-| `run.cacheWarming` | — | run | global | none | fixed | new-chat | spend |
+| `run.cacheWarming` | — | run | global | none | fixed | reload | spend |
 | `sources.extensions` | — | sources | project, global | none | fixed | reload | trust |
 | `sources.skills` | — | sources | project, global | none | fixed | reload | trust |
 | `sources.prompts` | — | sources | project, global | none | fixed | reload | — |

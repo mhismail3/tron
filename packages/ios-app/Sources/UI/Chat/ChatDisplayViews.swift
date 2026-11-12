@@ -656,7 +656,7 @@ struct DisplayArtifactContent: View {
             case .document:
                 DisplayDocumentSummary(display: display)
             case .html:
-                DisplayHTMLArtifactView(sessionID: sessionID, display: display)
+                DisplayHTMLArtifactView(sessionID: sessionID, display: display, context: context)
             case .video, .audio:
                 DisplayVideoArtifactView(sessionID: sessionID, display: display, context: context)
             case .browserLive, .nativeLive:
@@ -887,16 +887,22 @@ struct PreparedDisplayHTML: Sendable, ChatInlineArtifact {
 private struct DisplayHTMLArtifactView: View {
     let sessionID: String?
     let display: DisplayProjection
+    let context: DisplayRenderContext
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var loadedIdentity: ChatMediaIdentity?
     @State private var loadedHTML: String?
+    @State private var networkBlock: WKContentRuleList?
     @State private var failed = false
 
     var body: some View {
         Group {
-            if let html {
-                StaticDisplayWebView(html: html)
+            if let html, let networkBlock = networkBlock ?? DisplayHTMLSandbox.compiledNetworkBlock {
+                DisplayHTMLWebView(
+                    html: html,
+                    networkBlock: networkBlock,
+                    allowsScripts: context == .sheet && DisplayHTMLSandbox.admitsScripts
+                )
             } else if failed {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
@@ -927,9 +933,14 @@ private struct DisplayHTMLArtifactView: View {
             failed = true
             return
         }
-        if html != nil { return }
         failed = false
         do {
+            let rules = try await DisplayHTMLSandbox.networkBlock()
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  mediaIdentity == identity else { return }
+            networkBlock = rules
+            if html != nil { return }
             let source = try await model.chatMedia.inlineArtifact(for: identity) { payload in
                 guard let source = String(data: payload.data, encoding: .utf8) else {
                     throw CocoaError(.fileReadCorruptFile)
@@ -951,18 +962,30 @@ private struct DisplayHTMLArtifactView: View {
     }
 }
 
-struct StaticDisplayWebView: UIViewRepresentable {
+struct DisplayHTMLWebView: UIViewRepresentable {
     let html: String
+    let networkBlock: WKContentRuleList
+    let allowsScripts: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.userContentController.add(networkBlock)
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         configuration.mediaTypesRequiringUserActionForPlayback = .all
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let peerConnectionsDisabled = DisplayHTMLSandbox.disablePeerConnections(configuration.preferences)
+        context.coordinator.runsScripts = allowsScripts && peerConnectionsDisabled
+        if allowsScripts, !peerConnectionsDisabled {
+            Task {
+                await AppLog.shared.recordCausal(
+                    name: "display.html", outcome: "failure", details: "scripts=off peerConnectionsDisabled=false"
+                )
+            }
+        }
+        let view = DisplayHTMLHostView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         view.allowsLinkPreview = false
@@ -970,30 +993,41 @@ struct StaticDisplayWebView: UIViewRepresentable {
         view.backgroundColor = UIColor(Color.tronBackground)
         view.scrollView.backgroundColor = UIColor(Color.tronBackground)
         view.scrollView.topEdgeEffect.isHidden = true
+        view.scrollView.contentInsetAdjustmentBehavior = .always
         return view
     }
 
     func updateUIView(_ view: WKWebView, context: Context) {
         guard context.coordinator.loadedHTML != html else { return }
         context.coordinator.loadedHTML = html
-        let policy = "default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:; form-action 'none'; frame-src 'none'; connect-src 'none'"
-        let prefix = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy)\">"
-        view.loadHTMLString(prefix + html, baseURL: nil)
+        context.coordinator.awaitsRequestedLoad = true
+        let policy = DisplayHTMLSandbox.contentSecurityPolicy(runsScripts: context.coordinator.runsScripts)
+        view.loadHTMLString("<meta http-equiv=\"Content-Security-Policy\" content=\"\(policy)\">" + html, baseURL: nil)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var loadedHTML: String?
+        var runsScripts = false
+        var awaitsRequestedLoad = false
 
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
-            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+            preferences: WKWebpagePreferences,
+            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
         ) {
-            guard let scheme = navigationAction.request.url?.scheme?.lowercased() else {
-                decisionHandler(.allow)
-                return
+            preferences.allowsContentJavaScript = runsScripts
+            decisionHandler(admits(navigationAction) ? .allow : .cancel, preferences)
+        }
+
+        private func admits(_ action: WKNavigationAction) -> Bool {
+            guard let url = action.request.url, url.scheme?.lowercased() == "about" else { return false }
+            if action.targetFrame?.isMainFrame == false { return true }
+            if awaitsRequestedLoad {
+                awaitsRequestedLoad = false
+                return true
             }
-            decisionHandler(scheme == "about" ? .allow : .cancel)
+            return url.absoluteString.hasPrefix("about:blank#")
         }
 
         func webView(
@@ -1002,6 +1036,72 @@ struct StaticDisplayWebView: UIViewRepresentable {
             for navigationAction: WKNavigationAction,
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? { nil }
+
+        func webView(
+            _ webView: WKWebView,
+            requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+            initiatedByFrame frame: WKFrameInfo,
+            type: WKMediaCaptureType,
+            decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void
+        ) { decisionHandler(.deny) }
+
+        func webView(
+            _ webView: WKWebView,
+            requestDeviceOrientationAndMotionPermissionFor origin: WKSecurityOrigin,
+            initiatedByFrame frame: WKFrameInfo,
+            decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void
+        ) { decisionHandler(.deny) }
+    }
+}
+
+@MainActor
+enum DisplayHTMLSandbox {
+    private(set) static var compiledNetworkBlock: WKContentRuleList?
+
+    static func contentSecurityPolicy(runsScripts: Bool) -> String {
+        let inert = "default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:; form-action 'none'; frame-src 'none'; connect-src 'none'; base-uri 'none'"
+        return runsScripts ? inert + "; script-src 'unsafe-inline' blob:; worker-src 'none'" : inert
+    }
+
+    static func networkBlock() async throws -> WKContentRuleList {
+        if let compiledNetworkBlock { return compiledNetworkBlock }
+        do {
+            guard let rules = try await WKContentRuleListStore.default().compileContentRuleList(
+                forIdentifier: "display-html-network-block",
+                encodedContentRuleList: """
+                [{"trigger":{"url-filter":".*"},"action":{"type":"block"}},
+                 {"trigger":{"url-filter":"^blob:"},"action":{"type":"ignore-previous-rules"}},
+                 {"trigger":{"url-filter":"^data:"},"action":{"type":"ignore-previous-rules"}}]
+                """
+            ) else { throw CocoaError(.featureUnsupported) }
+            compiledNetworkBlock = rules
+            return rules
+        } catch {
+            await AppLog.shared.recordCausal(name: "display.html", outcome: "failure", details: "networkRules=false")
+            throw error
+        }
+    }
+
+    #if TRON_PRIVATE_VARIABLE_BLUR || (DEBUG && HOSTED_TEST)
+    static let admitsScripts = true
+
+    static func disablePeerConnections(_ preferences: WKPreferences) -> Bool {
+        guard preferences.responds(to: NSSelectorFromString("_setPeerConnectionEnabled:")),
+              preferences.responds(to: NSSelectorFromString("_peerConnectionEnabled")) else { return false }
+        preferences.setValue(false, forKey: "peerConnectionEnabled")
+        return preferences.value(forKey: "peerConnectionEnabled") as? Bool == false
+    }
+    #else
+    static let admitsScripts = false
+
+    static func disablePeerConnections(_ preferences: WKPreferences) -> Bool { false }
+    #endif
+}
+
+private final class DisplayHTMLHostView: WKWebView {
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        obscuredContentInsets = safeAreaInsets
     }
 }
 

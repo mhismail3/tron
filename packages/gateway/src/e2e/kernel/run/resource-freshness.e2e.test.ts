@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, getSystemMessageText } from "@earendil-works/pi-ai";
@@ -62,8 +62,8 @@ async function liveHome() {
   return { f, home, commands, turn, service, client, userHome };
 }
 
-async function watchersDeliver(f: { agentDir: string; events: Array<{ topic: string }> }, userHome: string): Promise<void> {
-  const reloads = () => f.events.filter(event => event.topic === "session.resourcesChanged").length;
+async function watchersDeliver(f: { agentDir: string; signals: Array<Record<string, unknown>> }, userHome: string): Promise<void> {
+  const reloads = () => f.signals.filter(event => event.outcome === "resources-reload" && event.reason === "unchanged").length;
   for (const [input, label] of [[join(f.agentDir, "settings.json"), "agent directory"], [join(userHome, ".agents", "skills", "probe.txt"), "~/.agents/skills"]] as const) {
     const bytes = await readFile(input).catch(() => Buffer.from("probe\n"));
     const before = reloads();
@@ -158,6 +158,67 @@ describe("Home's global skills and prompt templates follow the agent directory l
     await waitFor(() => f.events.slice(before).some(event => event.topic === "session.resourcesChanged"), "Home reloads for a write after its watchers started");
   }, 60_000);
 
+  it("refreshes Home and ordinary sessions, skips unchanged rendered inputs, and watches project resources", async () => {
+    const { f, home, commands } = await liveHome();
+    const chat = await f.registry.create(f.cwd);
+    await mkdir(join(f.cwd, "unrelated"));
+    const reloads = () => f.events.filter(event => event.topic === "session.resourcesChanged").length;
+    await writeSkill(f.agentDir, "shared-skill", "Shared live skill", "FIRST BODY");
+    await waitFor(async () => (await commands(home.id)).some(command => command.name === "skill:shared-skill")
+      && (await commands(chat.id)).some(command => command.name === "skill:shared-skill"), "both live slots adopt global skill");
+    const systems: string[] = [];
+    const capture = () => f.faux.setResponses([context => { systems.push(context.messages.filter(message => message.role === "system").map(getSystemMessageText).join("\n")); return fauxAssistantMessage("ok"); }]);
+    capture();
+    await home.prompt("before body edit");
+    await waitFor(() => systems.length === 1 && home.snapshot().operation === undefined, "first activation settled");
+    const before = reloads();
+    let observations = f.signals.filter(record => record.reason === "unchanged").length;
+    await writeSkill(f.agentDir, "shared-skill", "Shared live skill", "SECOND BODY");
+    await waitFor(() => f.signals.filter(record => record.reason === "unchanged").length >= observations + 2, "body-only edit compared by both slots");
+    expect(reloads()).toBe(before);
+    capture();
+    await home.prompt("after body edit");
+    await waitFor(() => systems.length === 2 && home.snapshot().operation === undefined, "second activation settled");
+    expect(systems[1]).toBe(systems[0]);
+    observations = f.signals.filter(record => record.reason === "unchanged").length;
+    await writeSkill(f.agentDir, "shared-skill", "Shared live skill", "SECOND BODY");
+    await waitFor(() => f.signals.filter(record => record.reason === "unchanged").length >= observations + 2, "no-op write compared by both slots");
+    expect(reloads()).toBe(before);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let running = false;
+    f.faux.setResponses([async () => { running = true; await gate; return fauxAssistantMessage("done"); }]);
+    const run = chat.prompt("hold ordinary session");
+    await waitFor(() => running, "ordinary run started");
+    const beforeProject = reloads();
+    const unchangedHome = f.signals.filter(record => record.sessionId === home.id && record.reason === "unchanged").length;
+    try {
+      await writeSkill(join(f.cwd, ".pi"), "project-skill", "Project live skill", "PROJECT BODY");
+      await waitFor(() => f.signals.filter(record => record.sessionId === home.id && record.reason === "unchanged").length > unchangedHome, "Home remains unchanged");
+      expect(reloads()).toBe(beforeProject);
+    } finally { release(); }
+    await run;
+    await waitFor(async () => (await commands(chat.id)).some(command => command.name === "skill:project-skill"), "ordinary slot adopts project skill");
+    expect((await commands(home.id)).some(command => command.name === "skill:project-skill")).toBe(false);
+    const releaseLease = chat.retainLease();
+    try {
+      await writeFile(join(f.cwd, "CLAUDE.md"), "FRESH_PROJECT_RULE\n");
+      await waitFor(() => chat.runtime.session.systemPrompt.includes("FRESH_PROJECT_RULE"), "context alias creation refreshes despite retention lease");
+      await writeFile(join(f.root, "AGENTS.override.md"), "FRESH_ANCESTOR_RULE\n");
+      await waitFor(() => chat.runtime.session.systemPrompt.includes("FRESH_ANCESTOR_RULE"), "new ancestor context refreshes");
+    } finally { releaseLease(); }
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const beforeUnrelated = f.signals.filter(record => record.outcome === "resources-reload").length;
+    await writeFile(join(f.cwd, "unrelated", "activity.json"), "{}");
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(f.signals.filter(record => record.outcome === "resources-reload")).toHaveLength(beforeUnrelated);
+    await mkdir(join(f.agentDir, "prompts"), { recursive: true });
+    await symlink(join(f.root, "missing-prompt"), join(f.agentDir, "prompts", "broken.md"));
+    await writePrompt(f.agentDir, "after-link", "Survives dangling resource link", "BODY");
+    await waitFor(async () => (await commands(home.id)).some(command => command.name === "after-link")
+      && (await commands(chat.id)).some(command => command.name === "after-link"), "dangling link does not prevent either slot refreshing");
+  }, 60_000);
+
   it("retries a failed reload at the next idle edge and reports successful package reloads", async () => {
     const { f, home, commands } = await liveHome();
     const reload = vi.spyOn(home, "reload").mockRejectedValueOnce(new Error("reload failure"));
@@ -169,10 +230,16 @@ describe("Home's global skills and prompt templates follow the agent directory l
     await waitFor(async () => globalResources(await commands(home.id)).includes("retry|Retry reload"), "failed reload retried at idle");
     expect(reload).toHaveBeenCalledTimes(2);
     await waitFor(() => f.signals.some(record => record.outcome === "resources-reload" && record.reason === "completed"), "successful reload diagnostic");
+    const packageRoot = join(f.agentDir, "npm", "fixture-package");
+    await writeSkill(packageRoot, "package-skill", "Installed package skill", "BODY");
+    const manifest = join(packageRoot, "package.json");
+    await writeFile(manifest, JSON.stringify({ name: "fixture-package", version: "1.0.0", pi: { skills: ["skills"] } }));
+    const settings = JSON.parse(await readFile(join(f.agentDir, "settings.json"), "utf8"));
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...settings, packages: [packageRoot] }));
+    await waitFor(async () => globalResources(await commands(home.id)).includes("skill:package-skill|Installed package skill"), "installed package contributes skill");
     const before = reload.mock.calls.length;
-    await mkdir(join(f.agentDir, "npm", "fixture-package"), { recursive: true });
-    await writeFile(join(f.agentDir, "npm", "fixture-package", "package.json"), JSON.stringify({ name: "fixture-package", version: "1.0.0" }));
-    await waitFor(() => reload.mock.calls.length > before, "package manifest reload");
+    await writeFile(manifest, JSON.stringify({ name: "fixture-package", version: "1.0.0", pi: { skills: [] } }));
+    await waitFor(async () => reload.mock.calls.length > before && !globalResources(await commands(home.id)).includes("skill:package-skill|Installed package skill"), "package manifest changes loaded resources");
   }, 60_000);
 
   it("applies a change made during a Home run once that run settles", async () => {
@@ -189,6 +256,7 @@ describe("Home's global skills and prompt templates follow the agent directory l
     expect(home.snapshot().operation).toBeDefined();
     release();
     await waitFor(async () => globalResources(await commands(home.id)).includes("during-run|Written mid-run"), "Home lists the mid-run prompt");
+    await waitFor(() => home.snapshot().configurationBlocker === null && home.snapshot().operation === undefined, "mid-run activation settled");
     let system = "";
     f.faux.setResponses([context => { system = context.messages.filter(message => message.role === "system").map(getSystemMessageText).join("\n"); return fauxAssistantMessage("next activation"); }]);
     await home.prompt("next");

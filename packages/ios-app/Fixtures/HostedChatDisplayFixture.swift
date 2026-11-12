@@ -72,6 +72,14 @@ struct HostedChatDisplayFixture: View {
         inlineGroupLive || ProcessInfo.processInfo.arguments.contains("-chat-display-inline-group")
     }
 
+    #if DEBUG
+    private static var htmlProbeControl: HostedDisplayHTMLProbeControl? {
+        HostedDisplayDocumentThemeFixture.scriptProbeControl ? HostedDisplayHTMLProbeControl() : nil
+    }
+    #else
+    private static var htmlProbeControl: EmptyView? { nil }
+    #endif
+
     init() {
         let defaults = UserDefaults(suiteName: "chat-display-fixture")!
         defaults.removePersistentDomain(forName: "chat-display-fixture")
@@ -135,6 +143,8 @@ struct HostedChatDisplayFixture: View {
         NavigationStack {
             if ProcessInfo.processInfo.arguments.contains("-display-document-updates") {
                 HostedDisplayDocumentThemeChanges()
+            } else if let control = Self.htmlProbeControl {
+                control
             } else if ready {
                 ChatView(sessionID: snapshot.sessionId,
                          isHomeRoute: HostedDisplayDocumentThemeFixture.enabled && HostedDisplayDocumentThemeFixture.home,
