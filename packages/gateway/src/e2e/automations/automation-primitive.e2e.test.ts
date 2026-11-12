@@ -39,9 +39,11 @@ async function fixture() {
 const create = { action: "create", name: "Authorized work", target: "home", at: "2099-01-01T00:00:00.000Z", activate: true, prompt: "Inspect authorized work; no approval authority." };
 it("real Home uses the standard schedule lifecycle without confirmation and retains a maintainer pause", async () => {
   const { gateway, phone, call } = await fixture();
-  const created = await call({ ...create, expiresAt: new Date(Date.now() + 3_600_000).toISOString() });
+  const expiresAt = new Date(Date.now() + 3_600_000).toISOString();
+  const created = await call({ ...create, expiresAt });
   expect(created.isError, JSON.stringify(created)).not.toBe(true);
   const automation = created.details;
+  expect(automation.provenance.expiresAt).toBe(expiresAt);
   expect(gateway.record().providerRequests[0].tools).toContain("schedule");
   expect(gateway.record().providerRequests[0].tools).not.toContain("monitor");
   const paused = await phone.request("automation.pause", { commandId: gateway.commandId(), automationId: automation.id, expectedRevision: automation.revision });
@@ -57,6 +59,13 @@ it("real Home uses the standard schedule lifecycle without confirmation and reta
   const stale = await call({ action: "update", automationId: automation.id, expectedRevision: paused.result.revision, name: "Stale overwrite" });
   expect(stale.isError).toBe(true);
   expect((await phone.request("automation.get", { automationId: automation.id })).result).toMatchObject({ name: "Updated authorized work", revision: updated.details.revision });
+  for (const forbidden of [{ activate: true }, { expiresAt: new Date(Date.now() + 7_200_000).toISOString() }]) {
+    const refused = await call({ action: "update", automationId: automation.id, expectedRevision: updated.details.revision, ...forbidden });
+    expect(refused.isError, JSON.stringify(refused)).toBe(true);
+    expect(JSON.stringify(refused.content)).toContain("Update preserves activation and expiry");
+    expect((await phone.request("automation.get", { automationId: automation.id })).result)
+      .toMatchObject({ revision: updated.details.revision, activation: "paused", provenance: automation.provenance });
+  }
   const resumed = await call({ action: "enable", automationId: automation.id, expectedRevision: updated.details.revision });
   expect(resumed.isError).not.toBe(true);
   expect((await call({ action: "delete", automationId: automation.id, expectedRevision: resumed.details.revision })).isError).not.toBe(true);
@@ -81,13 +90,12 @@ it("real Home automation-triggered turns cannot mutate automations", async () =>
 it("real delegated workers cannot mutate standard automations", async () => {
   const { gateway, phone, sessionId } = await fixture();
   let homeCalls = 0; let workerCalls = 0;
+  let workerRefusal: { isError?: boolean; content?: unknown } | undefined;
   const step = (context: any) => {
     if (context.messages.some((message: any) => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"))) {
       if (workerCalls++ === 0) return fauxAssistantMessage([fauxToolCall("schedule", create)], { stopReason: "toolUse" });
-      const refusal = context.messages.findLast((message: any) => message.role === "toolResult" && message.toolName === "schedule");
-      expect(refusal?.isError).toBe(true);
-      expect(JSON.stringify(refusal?.content)).toContain("Delegated workers and their subagents cannot mutate automations");
-      return fauxAssistantMessage([fauxToolCall("report", { resultId: "worker-authority", outcome: "final", text: "Mutation was refused.", evidence: ["Observed schedule refusal"] })], { stopReason: "toolUse" });
+      workerRefusal = context.messages.findLast((message: any) => message.role === "toolResult" && message.toolName === "schedule");
+      return fauxAssistantMessage([fauxToolCall("report", { resultId: "worker-authority", outcome: "final", text: "Observed the schedule tool response.", evidence: ["Observed schedule tool response"] })], { stopReason: "toolUse" });
     }
     return homeCalls++ === 0
       ? fauxAssistantMessage([fauxToolCall("delegate", { taskId: "worker-authority", title: "Worker authority", intent: "Attempt schedule once, then report.", target: gateway.cwd })], { stopReason: "toolUse" })
@@ -98,6 +106,8 @@ it("real delegated workers cannot mutate standard automations", async () => {
   await waitFor(async () => (await homeOwnerOf(gateway.registry).taskResult("worker-authority").catch(() => undefined))?.wake?.state === "acknowledged", "worker report");
   await gateway.settled(sessionId);
   expect(workerCalls).toBeGreaterThanOrEqual(2);
+  expect(workerRefusal?.isError).toBe(true);
+  expect(JSON.stringify(workerRefusal?.content)).toContain("Delegated workers and their subagents cannot mutate automations");
   expect((await phone.request("automation.list", {})).result.items).toHaveLength(0);
 });
 it("real interactive schedule mutations still require and obey confirmation", async () => {
