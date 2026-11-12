@@ -181,6 +181,7 @@ const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   trust,
   modelRuntime,
   inventory: (cwd, moduleSummaries, limit) => settingsInventory.read(cwd, moduleSummaries, limit),
+  updatePackage: (request, requester, confirm) => packages.updatePackage(request, requester, confirm),
   toolCatalog: async (target) => target.kind === "session"
     ? sessions.liveToolCatalog(target.sessionId)
     : target.kind === "home" ? homeToolCatalog(sessions.runtimeEntries(), id => sessions.isLineageMember(id))
@@ -733,6 +734,7 @@ settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, {
 });
 sessions.setSettings(settingsModel, settingsChanges);
 projects.register(settingsChanges);
+packages.register(settingsChanges, () => globalProviderResources.requestReload());
 
 const service = new GatewayService({
   config,
