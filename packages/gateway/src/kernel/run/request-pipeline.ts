@@ -4,6 +4,7 @@ import type { StreamFn } from "../pi/agent-core.js";
 import { installAgentPipeline, wrapModelRuntimeStream, type AgentPipelineStages } from "../pi/adapters.js";
 import { lazyStream, type AssistantMessageEvent, type AssistantMessageEventStream } from "../pi/ai.js";
 import { recordingStream, type RequestOutcome } from "./request-record.js";
+import { projectInjectedMessages } from "../host/injected-text.js";
 
 async function* abortAwareEvents(
   source: AssistantMessageEventStream,
@@ -72,7 +73,7 @@ export class RunRequestPipeline {
     installAgentPipeline(session.agent, {
       convertToLlm: (convertToLlm) => async messages => {
         await options.applySettings();
-        return convertToLlm(messages);
+        return convertToLlm(projectInjectedMessages(messages, session.sessionFile));
       },
       prepareRequest: (prepareRequest) => async (request, signal) => {
         if (signal?.aborted) throw new Error("Request cancelled before settings resolution");

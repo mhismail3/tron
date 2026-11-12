@@ -261,6 +261,7 @@ it("real Gateway: a settled task result wakes Home with every tool listed and ma
     await gateway.settled(sessionId);
     const task = await phone.request("home.taskStatus", { taskId: "tool-admission-task" });
     expect(task.ok, JSON.stringify(task)).toBe(true);
+    await gateway.settled(task.result.sessionId);
     expect(task.result).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
     evidence.push({ case: "result-wake", actual: homeTools });
     expect(homeTools).toEqual([userTools, userTools, userTools, userTools]);

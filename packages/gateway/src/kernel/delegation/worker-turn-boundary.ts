@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { injectedText } from "../host/injected-text.js";
 import type { AgentSession, FileEntry } from "../pi/coding-agent.js";
 import type { AgentMessage, AgentTurnDecision } from "../pi/agent-core.js";
 import type { AgentPipelineStages } from "../pi/adapters.js";
@@ -23,7 +24,7 @@ export function workerFinishTurn(worker: WorkerTurnRuntime, created: { readonly 
         && !created.session.agent.hasQueuedMessages() && !worker.hasDetachedDashboardWork()
         && taskWorker.takeReportReminder()) {
         await created.session.sendCustomMessage({ customType: "tron.home-task-report-reminder.v1",
-          content: "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report.",
+          content: injectedText("Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report.", "gateway", "reminder", "task"),
           display: false }, { triggerTurn: true });
         worker.dependencies.homeTaskDiagnostic?.({ event: "home.task.report-reminder",
           taskHash: createHash("sha256").update(taskWorker.identity.taskId).digest("hex").slice(0, 16),

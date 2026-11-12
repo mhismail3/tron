@@ -436,6 +436,7 @@ wait
       (context: Context) => {
         const result = context.messages.findLast(message => message.role === "toolResult");
         results.push(JSON.stringify(result?.content ?? null));
+        seen.push(lastUser(context));
         return fauxAssistantMessage([reportCall("after-interrupt", "Interrupted and continued")], { stopReason: "toolUse" });
       },
     ]);
@@ -460,7 +461,7 @@ wait
     const stubborn = await pid("stubborn.pid");
     const operationId = (await homeOwnerOf(f.registry).taskStatus("lander")).operationId!;
     const escalation = Date.now();
-    expect(await homeOwnerOf(f.registry).interruptTask({ taskId: "lander", operationId })).toEqual({ interrupted: ["bash"] });
+    expect(await homeOwnerOf(f.registry).interruptTask({ taskId: "lander", operationId, text: "MAINTAINER-INTERRUPT finish" })).toEqual({ interrupted: ["bash"] });
     await waitFor(() => !alive(stubborn), "the stubborn command to be killed", { boundMs: 20_000 });
     const escalationMs = Date.now() - escalation;
     expect(escalationMs).toBeGreaterThanOrEqual(9_000);
@@ -469,7 +470,8 @@ wait
     expect(settled.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report", sessionId: run.sessionId });
     expect(results[0]).toMatch(/Interrupted by Home: this bash call was cancelled before it finished/u);
     expect(results[0]).toMatch(/Command aborted/u);
-    expect(seen[0]).toMatch(/INTERRUPT-STEER skip the land/u);
+    expect(seen).toEqual(["[from: tron-home; kind: steer; authority: task]\nINTERRUPT-STEER skip the land",
+      "[from: maintainer; kind: steer; authority: task]\nMAINTAINER-INTERRUPT finish"]);
     expect(order[0]).toBe("toolResult,user");
     expect(results[1]).toMatch(/Interrupted by the maintainer: this bash call was cancelled/u);
     evidence.push({ case: "interrupt-in-flight-command", pids, killMs, escalationMs, results: results.map(text => text.slice(0, 400)), steer: seen[0] });

@@ -1,4 +1,5 @@
 import { GatewayError, isUncertainOutcome } from "../errors.js";
+import { injectedText } from "../kernel/host/injected-text.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../kernel/run/gateway-work-registry.js";
 import { canonicalResourceName } from "../kernel/resources/resource-invocation.js";
@@ -147,7 +148,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
       signal?.addEventListener("abort", cancelAdmission, { once: true });
       try {
         admission = await slot.prompt(
-          run.actionSnapshot.text,
+          injectedText(run.actionSnapshot.text, "automation", "automation", "task"),
           [],
           undefined,
           {
