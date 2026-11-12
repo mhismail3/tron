@@ -1,7 +1,10 @@
 import { MANAGED_SUBAGENTS_SOURCE, managedProviderSettingsView, type ManagedSubagents } from "../kernel/delegation/managed-subagents.js";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   DefaultPackageManager,
   SettingsManager,
@@ -27,11 +30,43 @@ const MAXIMUM_PACKAGE_UPDATES = 256;
 const MAXIMUM_PACKAGE_STRING_BYTES = 8_192;
 const MAXIMUM_PACKAGE_RESPONSE_BYTES = 768 * 1_024;
 const PACKAGE_UPDATE_ACTION = "package.update";
+const execFileAsync = promisify(execFile);
 const EXACT_NPM_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 export interface PackageUpdateRequest { cwd: string; source: string; version: string; reason: string }
 
-interface PackageUpdatePlan { source: string; name: string; from: string; version: string; review: ChangeReview }
+type UpdateKind = "npm" | "git";
+
+type ConfiguredPackages = Parameters<SettingsManager["setPackages"]>[0];
+
+interface PackageUpdatePlan {
+  kind: UpdateKind; source: string; target: string; name: string; from: string; version: string; reason: string;
+  installedPath: string | undefined; packages: ConfiguredPackages; review: ChangeReview;
+}
+
+function sourceKind(source: string): UpdateKind | "local" {
+  if (source.startsWith("npm:")) return "npm";
+  return /^(git:|https?:\/\/|ssh:\/\/|git@)/.test(source) ? "git" : "local";
+}
+
+function gitRepository(source: string): string {
+  const at = source.lastIndexOf("@");
+  return at > Math.max(source.lastIndexOf("/"), source.lastIndexOf(":")) ? source.slice(0, at) : source;
+}
+
+function normalizedGitLocator(locator: string): string {
+  return locator.replace(/^git:/, "").replace(/^https:\/\//, "").replace(/\.git$/, "");
+}
+
+async function gitRead(cwd: string, args: string[]): Promise<string> {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
+  for (const key of Object.keys(env)) if (key.startsWith("GIT_") && key !== "GIT_TERMINAL_PROMPT") delete env[key];
+  try {
+    return (await execFileAsync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", ...args], { cwd, env, timeout: 30_000, maxBuffer: 1024 * 1024 })).stdout.trim();
+  } catch {
+    throw new GatewayError("conflict", "Git could not inspect the installed checkout; inspect it before retrying");
+  }
+}
 
 async function installedVersion(installedPath: string | undefined): Promise<string | undefined> {
   if (!installedPath) return undefined;
@@ -211,13 +246,12 @@ export class PackageService {
     if (request.source === MANAGED_SUBAGENTS_SOURCE) {
       throw new GatewayError("conflict", "Tron manages pi-subagents; package commands cannot change its bundled payload");
     }
-    if (!request.source.startsWith("npm:")) {
-      const git = /^(git:|https?:\/\/|ssh:\/\/|git@)/.test(request.source);
-      throw new GatewayError("invalid_request", git
-        ? "Git packages cannot be updated to an exact version yet; the update action covers npm packages"
-        : "Local package sources have no update source; edit or replace the path yourself");
+    const kind = sourceKind(request.source);
+    if (kind === "local") throw new GatewayError("invalid_request", "Local package sources have no update source; edit or replace the path yourself");
+    if (/^[a-z][a-z0-9+.-]*:\/\/[^/@]*@/i.test(request.source)) {
+      throw new GatewayError("invalid_request", "Package sources with credentials in their URL are refused; keep credentials in their owned store");
     }
-    const { manager } = await this.manager(request.cwd, false);
+    const { manager, settings } = await this.manager(request.cwd, false);
     const configured = manager.listConfiguredPackages();
     if (!configured.some(entry => entry.scope === "user" && entry.source === request.source)) {
       if (configured.some(entry => entry.source === request.source)) {
@@ -225,28 +259,62 @@ export class PackageService {
       }
       throw new GatewayError("not_found", "The requested package is not configured in that scope");
     }
-    const spec = request.source.slice("npm:".length);
-    if (spec.lastIndexOf("@") > 0) {
-      throw new GatewayError("invalid_request", "This npm source is pinned or ranged to a version; the update action covers only unpinned sources");
+    const installedPath = manager.getInstalledPath(request.source, "user");
+    const packagesAfter = (target: string): ConfiguredPackages => (settings.getGlobalSettings().packages ?? []).map(entry => {
+      if (typeof entry === "string") return entry === request.source ? target : entry;
+      return entry.source === request.source ? { ...entry, source: target } : entry;
+    });
+    if (kind === "npm") {
+      const spec = request.source.slice("npm:".length);
+      const at = spec.lastIndexOf("@");
+      const name = at > 0 ? spec.slice(0, at) : spec;
+      if (!/^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/.test(name)) {
+        throw new GatewayError("invalid_request", "The npm package name is not valid");
+      }
+      if (!EXACT_NPM_VERSION.test(request.version) || request.version.length > 64) {
+        throw new GatewayError("invalid_request", "A package update requires an exact npm version such as 1.2.3; tags and ranges are refused");
+      }
+      const from = await installedVersion(installedPath);
+      if (!from) throw new GatewayError("conflict", "The package is not installed; install it before updating");
+      if (from === request.version) throw new GatewayError("conflict", `${name} is already at ${from}; nothing to update`);
+      const target = `npm:${name}@${request.version}`;
+      return this.planned({ kind, source: request.source, target, name, from, version: request.version, reason: request.reason, installedPath, packages: packagesAfter(target) });
     }
-    if (!/^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/.test(spec)) {
-      throw new GatewayError("invalid_request", "The npm package name is not valid");
+    if (!/^[0-9a-f]{40}$/.test(request.version)) {
+      throw new GatewayError("invalid_request", "A git package update requires a full 40-character commit SHA");
     }
-    if (!EXACT_NPM_VERSION.test(request.version) || request.version.length > 64) {
-      throw new GatewayError("invalid_request", "A package update requires an exact npm version such as 1.2.3; tags and ranges are refused");
+    if (!installedPath || !existsSync(join(installedPath, ".git"))) {
+      throw new GatewayError("conflict", "The package is not installed as a git checkout; install it before updating");
     }
-    const from = await installedVersion(manager.getInstalledPath(request.source, "user"));
-    if (!from) throw new GatewayError("conflict", "The package is not installed; install it before updating");
-    if (from === request.version) throw new GatewayError("conflict", `${spec} is already at ${from}; nothing to update`);
-    const identity = { operation: PACKAGE_UPDATE_ACTION, source: request.source, name: spec, from, version: request.version };
-    const review = changeReview(identity, { title: `Update ${spec} to exactly ${request.version}`, requiresTap: true, reason: request.reason,
-      items: [{ label: `Package ${spec}`, before: from, after: request.version, detail: `${request.source}\nUser package (global)`, exact: JSON.stringify(identity) }] });
-    return { source: request.source, name: spec, from, version: request.version, review };
+    const repo = gitRepository(request.source);
+    const origin = await gitRead(installedPath, ["remote", "get-url", "origin"]);
+    if (normalizedGitLocator(origin) !== normalizedGitLocator(repo)) {
+      throw new GatewayError("conflict", "The installed checkout's origin does not match the configured repository; refusing to replace it");
+    }
+    if (await gitRead(installedPath, ["status", "--porcelain", "--untracked-files=no"]) !== "") {
+      throw new GatewayError("conflict", "The installed checkout has local edits to tracked files; refusing to replace them");
+    }
+    const from = await gitRead(installedPath, ["rev-parse", "HEAD"]);
+    if (from === request.version) throw new GatewayError("conflict", `${repo} is already at ${from}; nothing to update`);
+    const target = `${repo}@${request.version}`;
+    return this.planned({ kind, source: request.source, target, name: repo, from, version: request.version, reason: request.reason, installedPath, packages: packagesAfter(target) });
+  }
+
+  private planned(input: Omit<PackageUpdatePlan, "review">): PackageUpdatePlan {
+    const identity = { operation: PACKAGE_UPDATE_ACTION, kind: input.kind, source: input.source, target: input.target, name: input.name, from: input.from, version: input.version };
+    const items = [{ label: `Package ${input.name}`, before: input.from, after: input.version, detail: `${input.source}\nUser package (global)`, exact: JSON.stringify(identity) }];
+    if (input.target !== input.source) {
+      items.push({ label: "Configured source", before: input.source, after: input.target, detail: "sources.packages (global) pin", exact: JSON.stringify({ source: input.source, target: input.target }) });
+    }
+    const review = changeReview(identity, { title: input.kind === "npm"
+      ? `Update ${input.name} to exactly ${input.version}`
+      : `Update ${input.name} to commit ${input.version}`, requiresTap: true, reason: input.reason, items });
+    return { ...input, review };
   }
 
   private applyUpdate(request: PackageUpdateRequest, digest: string, requester: Actor, accepted: NativeChangeAcceptance): Promise<ChangeResult> {
     const changes = this.changes!;
-    return changes.withTarget({ kind: "global" }, () => this.trackAdministrative(() => this.mutex.run(async () => {
+    return changes.withTarget({ kind: "global" }, () => this.trackAdministrative(work => this.mutex.run(async () => {
       const plan = await this.planUpdate(request, requester);
       if (plan.review.digest !== digest) throw new GatewayError("conflict", "The package changed since review; nothing was applied");
       await changes.record.recover();
@@ -255,27 +323,34 @@ export class PackageService {
         layer: "global" as const, key: PACKAGE_UPDATE_ACTION, op: "set" as const,
         after: { ...plan.review, requester: { kind: requester.kind, id: requester.id } }, reason: request.reason, action: true as const };
       await changes.record.append([{ ...entry, changeId, at: new Date().toISOString(), status: "started" }]);
-      const { manager } = await this.manager(request.cwd, false);
-      manager.setProgressCallback(event => this.broadcast("packages.progress", { operationId: changeId, event } as unknown as JsonValue));
+      const { manager, settings } = await this.manager(request.cwd, false);
+      const writes: PlannedWrite[] = [{ store: { kind: "global" }, instance: instanceId("sources.packages", {}), changeId, value: plan.packages }];
+      await this.outside?.begin(writes);
+      manager.setProgressCallback(event => { work?.progress(); this.broadcast("packages.progress", { operationId: changeId, event } as unknown as JsonValue); });
       try {
-        await manager.install(`npm:${plan.name}@${plan.version}`, { local: false });
-        const after = await installedVersion(manager.getInstalledPath(plan.source, "user"));
-        if (after !== plan.version) throw new Error(`Installed ${after ?? "no version"} instead of exact ${plan.version}`);
+        settings.setPackages(plan.packages);
+        await this.flushSettings(settings);
+        await manager.install(plan.target, { local: false });
+        const after = plan.kind === "npm"
+          ? await installedVersion(manager.getInstalledPath(plan.source, "user"))
+          : await gitRead(plan.installedPath!, ["rev-parse", "HEAD"]);
+        if (after !== plan.version) throw new Error(`Installed ${after ?? "nothing"} instead of exact ${plan.version}`);
       } catch (error) {
         this.reload?.();
         await changes.record.append([{ ...entry, changeId: randomUUID(), refersTo: changeId, at: new Date().toISOString(), status: "failed",
-          failure: "Package update did not complete cleanly; inspect the installed package before retrying" }])
+          failure: "Package update did not complete cleanly; inspect the configured source and installed package before retrying" }])
           .catch(publication => { throw asUncertainOutcome(publication, "Package update failed and its audit could not be published; inspect before retrying"); });
-        throw asUncertainOutcome(error, "Package update may have occurred; inspect the installed package before retrying");
+        throw asUncertainOutcome(error, "Package update may have occurred; inspect the configured source and installed package before retrying");
       } finally {
         manager.setProgressCallback(undefined);
+        await this.outside?.end(writes, new Map([[changeId, { changeId }]]));
       }
       await changes.record.append([{ ...entry, changeId: randomUUID(), refersTo: changeId, at: new Date().toISOString(), status: "applied" }])
         .catch(error => { throw asUncertainOutcome(error, "Package applied but history publication failed"); });
       this.broadcast("packages.changed", { cwd: request.cwd });
       this.reload?.();
       return { status: "applied", review: plan.review, changes: [{ changeId, key: PACKAGE_UPDATE_ACTION, layer: "global",
-        status: "applied", undoable: false, result: { source: plan.source, name: plan.name, from: plan.from, version: plan.version } }] };
+        status: "applied", undoable: false, result: { source: plan.source, target: plan.target, from: plan.from, version: plan.version } }] };
     })));
   }
 

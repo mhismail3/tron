@@ -4,6 +4,7 @@ import { createQueueSummarizer } from "../src/episodic/episodic-compactor.js";
 import { ModelQueueOwner } from "../src/providers/model-queue.js";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { SettingsStoreAdapter } from "../src/admin/settings-model.js";
+import type { PackageService } from "../src/admin/package-service.js";
 import { SettingsChangePath } from "../src/kernel/settings/settings-change.js";
 import { SettingsModel } from "../src/kernel/settings/settings-model.js";
 import { SettingsChangeRecord } from "../src/kernel/settings/settings-record.js";
@@ -25,10 +26,12 @@ export function settingsDependencies(input: {
   registry?: { setSettings(model: SettingsModel, changes: SettingsChangePath): void };
   now?: () => Date;
   toolCatalog?: ConstructorParameters<typeof SettingsStoreAdapter>[0]["toolCatalog"];
+  packages?: PackageService;
 }): { settingsModel: SettingsModel<SettingsStoreAdapter>; settingsChanges: SettingsChangePath } {
   const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA,
     agentDir: input.agentDir, tronHome: input.tronHome, trust: input.trust, modelRuntime: input.modelRuntime,
     ...(input.toolCatalog ? { toolCatalog: input.toolCatalog } : {}),
+    ...(input.packages ? { updatePackage: (request, requester, confirm) => input.packages!.updatePackage(request, requester, confirm) } : {}),
   }));
   const settingsChanges: SettingsChangePath = new SettingsChangePath(settingsModel, new SettingsChangeRecord(input.tronHome), {
     setTrust: async (project, decision) => {
@@ -39,6 +42,7 @@ export function settingsDependencies(input: {
     },
     ...(input.knowledge ? { undoSubject: (entry, context) => new HomeProfileItems(() => input.knowledge?.()).undo(settingsChanges, entry, context) } : {}),
   }, input.now);
+  input.packages?.register(settingsChanges, () => {});
   input.registry?.setSettings(settingsModel, settingsChanges);
   if (input.registry) projectsOwnerOf(input.registry)?.register(settingsChanges);
   return { settingsModel, settingsChanges };
