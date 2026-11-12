@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import type { ObligationRequest } from "./home-obligations.js";
 import { lstat, stat } from "node:fs/promises";
 import { readCanonicalSession } from "../../kernel/session/canonical-reader.js";
@@ -225,6 +226,7 @@ function homeModuleServices(owner: HomeOwner, platform: HomeComposition, session
       publicationUncertain: () => owner.publicationUncertain,
     },
     profile: {
+      globalRulesPath: join(platform.agentDir, "AGENTS.md"),
       decision: (sessionId, cwd) => owner.profileFor(sessionId, cwd), runtime: platform.runtime,
     },
     appendGuard: {

@@ -474,7 +474,13 @@ export class HomeTaskDispatcher {
   }
 
   private async admit(launch: HomeTaskLaunch, work: GatewayWorkHandle, signal: AbortSignal | undefined): Promise<HomeTaskHandle> {
-    this.running.add(launch.task.taskId);
+    try {
+      await this.stage("budget", launch.task.taskId, signal, () => this.setup.run(async () => {
+        const limit = await this.policy.workerLimit();
+        if (this.running.size >= limit) throw new GatewayError("conflict", `Home worker limit ${limit} reached; wait for a running task to settle`);
+        this.running.add(launch.task.taskId);
+      }), () => { this.releaseSlot(launch.task.taskId); });
+    } catch (error) { await this.admissionFailed(launch.task, error); throw error; }
     return this.launch(launch, work, signal);
   }
 

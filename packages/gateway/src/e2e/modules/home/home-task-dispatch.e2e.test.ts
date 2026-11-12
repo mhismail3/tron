@@ -1174,6 +1174,53 @@ describe("Home task list RPC", () => {
 });
 
 describe("Home task production dispatch", () => {
+  it("reloads Home for global rules but not excluded workspace or system context", async () => {
+    const f = await fixture();
+    const globalRules = join(f.agentDir, "AGENTS.md");
+    const home = await f.registry.acquire(f.home.sessionId);
+    const before = f.signals.length;
+    for (const path of [join(home.cwd, "AGENTS.md"), join(f.agentDir, "SYSTEM.md"), join(f.agentDir, "APPEND_SYSTEM.md")]) {
+      await writeFile(path, "IGNORED_HOME_CONTEXT_MARKER\n");
+    }
+    const settingsPath = join(f.agentDir, "settings.json");
+    await writeFile(settingsPath, await readFile(settingsPath));
+    await waitFor(() => f.signals.slice(before).some(event => event.outcome === "resources-reload" && event.sessionId === home.id), "Home freshness observes the edit batch");
+    expect(f.signals.slice(before).filter(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "completed")).toHaveLength(0);
+    expect(home.runtime.session.resourceLoader.getAgentsFiles().agentsFiles).toEqual([]);
+    const afterIgnored = f.signals.length;
+    await writeFile(globalRules, "GLOBAL_HOME_FRESHNESS_UPDATED\n");
+    await waitFor(() => f.signals.slice(afterIgnored).some(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "completed"), "global rules reload Home through the existing freshness owner");
+    expect(home.runtime.session.resourceLoader.getAgentsFiles().agentsFiles).toEqual([{ path: globalRules, content: "GLOBAL_HOME_FRESHNESS_UPDATED\n" }]);
+  });
+
+  it("reserves a typed worker limit atomically and releases it after settlement", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const owner = homeOwnerOf(f.registry);
+    await owner.pauseMemory();
+    const current = await f.settings.settingsModel.resolve({ kind: "home" }, undefined, ["run.workers.maxConcurrent"]);
+    expect(current.keys[0]!.value).toBe(4);
+    await f.settings.settingsChanges.change({ kind: "home" }, [{ key: "run.workers.maxConcurrent", layer: "global", op: "set", value: 1 }],
+      { actor: { kind: "ui", id: "fixture" }, commandId: "worker-limit-one" });
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const respond: FauxResponseFactory = async () => { await held; return fauxAssistantMessage([reportCall("bounded-worker")], { stopReason: "toolUse" }); };
+    f.faux.setResponses([respond, respond]);
+    const outcomes = await Promise.allSettled([dispatch(f, "cap-first"), dispatch(f, "cap-second")]);
+    try {
+      expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+      const refused = outcomes.find(result => result.status === "rejected") as PromiseRejectedResult;
+      expect(refused.reason).toMatchObject({ code: "conflict", message: expect.stringContaining("Home worker limit 1") });
+    } finally {
+      release();
+      await Promise.all(outcomes.flatMap(result => result.status === "fulfilled" ? [result.value.completion] : []));
+    }
+    f.faux.setResponses([fauxAssistantMessage([reportCall("released-worker")], { stopReason: "toolUse" })]);
+    const after = await (await dispatch(f, "cap-after")).completion;
+    expect(after.terminalEvidence?.outcome).toBe("final");
+    evidence.push({ case: "typed-worker-limit", limit: 1, admitted: outcomes.filter(result => result.status === "fulfilled").length, after: after.taskId });
+  }, 30_000);
+
   it.each(["file", "directory"] as const)("settles unknown without replay when the live canonical %s sync is refused", async target => {
     const f = await fixture();
     let release!: () => void;
