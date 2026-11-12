@@ -78,10 +78,10 @@ user's settings or profile. Test input and output must not depend on live stores
 
 ## Gateway and Python lanes on the test-host pool
 
-The Gateway Vitest and Gateway `node --test` lanes (`gateway`, `gateway-nested`, `node-gateway`) of `verify` and `scripts/tron test gateway`, and verify's Python group (not `python-here`), run on the pool {the Mac mini, this Mac}:
+The Gateway Vitest lanes (`gateway`, `gateway-nested`) of `verify` and `scripts/tron test gateway`, and verify's Python group (not `python-here`), run on the pool {the Mac mini, this Mac}:
 `mini.py`'s `choose_host` picks the mini when it is configured, the tree is committed and an ssh probe (5 s to
 connect, 30 s in all) finds it set up with its job lock free, and otherwise this Mac. Each run prints which host
-ran its lanes and why; verify records it (`gatewayHostReason`). `--gateway-host local|mini` (for both kinds of lane; `test gateway --local|--mini`) overrides the pool; `--update-locks` always runs here, and the pool runs a lane here when its arguments name a path outside the checkout (a relative one resolved against `packages/gateway`).
+ran its lanes and why; verify records it (`gatewayHostReason`). `--gateway-host local|mini` (for both kinds of lane; `test gateway --local|--mini`) overrides the pool; `--update-locks` always runs here, and the pool runs a lane here when its arguments name a path outside the checkout (a relative one resolved against `packages/gateway`). The Gateway `node-gateway` lane (`node --test` files) runs on this Mac under the pool and under `--gateway-host local`, and on the mini only when `--gateway-host mini` names it explicitly; the pool never probes the mini for a node-only selection. Verify's node-gateway lane is not part of `scripts/tron test gateway`, which forwards Vitest arguments only.
 On the mini, `mini.py` refuses a dirty tree, or a HEAD other than the commit verify records, and pushes HEAD to the mini's `~/tron-ci/tron.git` as the one shared `refs/tron-jobs/incoming`, which each push
 overwrites, so a push whose job never starts leaves nothing that grows. One job at a time
 (`~/tron-ci/jobs/gateway.lock`) checks out exactly that commit in `~/tron-ci/jobs/gateway`, cleaned except for the
