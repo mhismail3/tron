@@ -364,7 +364,7 @@ export class SettingsChangePath {
         const key = this.model.schema.schemaKey(change.key);
         const shown = (value: unknown) => value === null || value === undefined ? "the default" : formatStoredSetting(key.type, value);
         return { changeId: change.changeId, label: key.label, effect: key.effect,
-          ...(change.redacted ? {} : { before: shown(change.before), after: shown(change.after) }) };
+          before: shown(change.before), after: shown(change.after) };
       }),
     });
   }

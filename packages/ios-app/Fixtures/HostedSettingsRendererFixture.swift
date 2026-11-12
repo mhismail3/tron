@@ -511,7 +511,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                         "range": .object(["min": .number(0), "max": .number(100), "step": .number(1)])])),
             key("lab.secretToken", group: "lab", value: nil, display: "Set",
                 presentation: presentation("Token", "A secret this app cannot edit yet.", 30, "advanced", "readOnly",
-                    extra: ["note": .string("Update Tron to edit"), "redacted": .bool(true)])),
+                    extra: ["note": .string("Update Tron to edit")])),
         ]
         let sections: [JSONValue] = [
             section("model", "Model", 10, "Models, thinking, and context window"),
