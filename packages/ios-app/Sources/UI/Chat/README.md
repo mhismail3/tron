@@ -247,6 +247,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
 | Signal | Level | Meaning |
 |---|---|---|
 | `display.media` | error | A current artifact download failed or its AVPlayerItem failed, once per preparation (`DisplayVideoPlayback.swift`): `requestID`, `stage`, player `status`, allowlisted error `domain`/`code` and one underlying pair; never names, paths or URLs |
+| `display.html` | error | A display sheet could not arm its script sandbox and rendered the page script-free (`ChatDisplayViews.swift`): `networkRules` (content rule list installed) and `peerConnectionsDisabled` (WebRTC confirmed off) name the missing guard |
 | `opening.failed` | warning | The conversation layout did not settle and the open failed (`ChatView.swift`); settlement reasons in `details`. Chat's trace records: [Core](../../../Core/README.md#signals) |
 
 ## Verify
