@@ -326,7 +326,7 @@ it("drives managed subagents through single, workflow, question and steering che
     await slot.prompt("Queued maintainer input", [], "steer");
     await waitFor(() => slot.snapshot().queuedItems.length === 2, "racing internal and maintainer steering inputs");
     const queued = slot.snapshot().queuedItems;
-    expect(queued.find(item => item.text === "PARITY_QUEUED_WAKE")?.semantic).toMatchObject({ kind: "prompt", origin: { kind: "subagent" }, direction: "hiddenInternal", visibility: "hidden" });
+    expect(queued.find(item => item.text === "[from: pi-subagents; kind: subagent-notice; authority: none]\nPARITY_QUEUED_WAKE")?.semantic).toMatchObject({ kind: "prompt", origin: { kind: "subagent" }, direction: "hiddenInternal", visibility: "hidden" });
     report.queuedWakeAuthority = queued;
     (report.inputPresentation as Record<string, unknown>).queued = queued.filter(item => item.semantic?.direction !== "hiddenInternal").map(item => ({ ...item, id: "<input>" }));
     gates.busy.release();
