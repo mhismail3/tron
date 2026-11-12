@@ -25,7 +25,7 @@ export interface InputMessage {
   customType: string;
   content: string;
   display: boolean;
-  details: { eventId: string; taskId?: string; trigger?: InputTriggerAttribution };
+  details: { eventId: string; taskId?: string; fullTextReference?: string; trigger?: InputTriggerAttribution };
 }
 export interface InputTrigger {
   taskId?: string; message: InputMessage;

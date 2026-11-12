@@ -142,7 +142,7 @@
           },
           {
             "role": "user",
-            "text": "Home task: Summarize notes.txt in the lock project. | outcome: final | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nThe notes say: lock notes.\n\nEvidence:\n- read notes.txt"
+            "text": "[from: worker; kind: task-result; authority: none]\nHome task: Summarize notes.txt in the lock project. | outcome: final | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nThe notes say: lock notes.\n\nEvidence:\n- read notes.txt"
           }
         ]
       }
@@ -177,7 +177,7 @@
         "messages": [
           {
             "role": "user",
-            "text": "Summarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-activation-wake/faux-1 (same as Home); thinking off (same as Home).\n\nWorker at start: tron-lock-home-activation-wake/faux-1; thinking off."
+            "text": "[from: tron-home; kind: brief; authority: task]\nSummarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-activation-wake/faux-1 (same as Home); thinking off (same as Home).\n\nWorker at start: tron-lock-home-activation-wake/faux-1; thinking off."
           }
         ]
       }

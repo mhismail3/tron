@@ -114,7 +114,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     child.releaseHeld();
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
-    expect(turns).toEqual(["Home between turns", "Maintainer between turns"]);
+    expect(turns).toEqual(["[from: tron-home; kind: steer; authority: task]\nHome between turns", "Maintainer between turns"]);
   }, 60_000);
 
   it("stops the turn a provider wake starts when the task is stopped during that turn", async () => {

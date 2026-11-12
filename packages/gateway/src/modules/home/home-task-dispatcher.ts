@@ -12,6 +12,7 @@ import type { OwnedOperationDeadline } from "../../kernel/delegation/delegation-
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/receipts/invocation-receipts.js";
 import { GatewayError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
+import { injectedText } from "../../kernel/host/injected-text.js";
 import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
 import { changeReview } from "../../kernel/settings/settings-types.js";
 import type { ConfirmChange } from "../../kernel/settings/tool-contract.js";
@@ -574,7 +575,7 @@ export class HomeTaskDispatcher {
       deadline = dispatch.armDeadline();
       const bounded = dispatch.enforceDeadline({ operationId, completion: terminal, cancel: cancellation }, deadline);
       work.transition("foreground-agent-operation", slot.id);
-      const admitted = slot.prompt(`${task.intent.text}${appliedChoice}`, launch.resume?.images ?? [], undefined, undefined, undefined,
+      const admitted = slot.prompt(injectedText(`${task.intent.text}${appliedChoice}`, "tron-home", "brief", "task"), launch.resume?.images ?? [], undefined, undefined, undefined,
         { operationId, signal: reports.signal, origin: { kind: "gateway", ownerId: task.taskId, title: "Home task", confidence: "boundary" }, onTerminal: resolve });
       void admitted.catch(async () => {
         await cancellation("admission-refused").catch(() => {});
@@ -724,23 +725,23 @@ export class HomeTaskDispatcher {
     });
   }
 
-  async steer(control: TaskWorkerControl & { text: string }): Promise<void> {
+  async steer(control: TaskWorkerControl & { text: string }, from: "tron-home" | "maintainer"): Promise<void> {
     await this.refusingControl("steer", control, async () => {
       const task = await this.activeControl(control);
       if (!this.running.has(task.taskId)) throw new GatewayError("conflict", "Task has no live worker; stop settles it");
       if (typeof control.text !== "string" || !control.text.trim() || Buffer.byteLength(control.text) > 65536) throw new GatewayError("invalid_request", "Invalid task steering text");
-      await this.sessions.delegation.steerWorker(task.sessionId!, control, control.text);
+      await this.sessions.delegation.steerWorker(task.sessionId!, control, control.text, from);
     });
   }
 
-  async interrupt(control: TaskWorkerControl & { text?: string }, by: string): Promise<{ interrupted: string[] }> {
+  async interrupt(control: TaskWorkerControl & { text?: string }, from: "tron-home" | "maintainer"): Promise<{ interrupted: string[] }> {
     const interrupted = await this.refusingControl("interrupt", control, async () => {
       const task = await this.activeControl(control);
       if (!this.running.has(task.taskId)) throw new GatewayError("conflict", "Task has no live worker; stop settles it");
       if (control.text !== undefined && (typeof control.text !== "string" || !control.text.trim() || Buffer.byteLength(control.text) > 65536)) {
         throw new GatewayError("invalid_request", "Invalid task steering text");
       }
-      return { taskId: task.taskId, interrupted: await this.sessions.delegation.interruptWorker(task.sessionId!, control, by, control.text) };
+      return { taskId: task.taskId, interrupted: await this.sessions.delegation.interruptWorker(task.sessionId!, control, from, control.text) };
     });
     this.diagnostic?.({ event: "home.task.control", taskHash: hash(interrupted.taskId), operationHash: hash(control.operationId), action: "interrupt", disposition: "accepted", calls: interrupted.interrupted.length });
     return { interrupted: interrupted.interrupted };
