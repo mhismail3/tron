@@ -106,9 +106,10 @@ struct ProductionSceneRoot: View {
         )
             .environment(owner.model)
             .environment(owner.pushNotifications)
-            .environment(\.pushRegistrationRetryApproval, PushRegistrationRetryApproval { profileID, deviceID in
-                try owner.pushNotifications.retryAfterApprovedCard(profileID: profileID, deviceID: deviceID)
-            })
+            .environment(\.pushRegistrationRetryApproval, PushRegistrationRetryApproval(
+                fence: { review in owner.pushNotifications.retryFence(for: review) },
+                perform: { fence in try owner.pushNotifications.retryAfterApprovedCard(fence) }
+            ))
             .tronPresentation()
             .preferredColorScheme(owner.appearance.mode.colorScheme)
             .task {
