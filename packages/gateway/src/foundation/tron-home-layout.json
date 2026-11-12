@@ -26,8 +26,8 @@
 
     "gateway": {"owner": "gateway/foundation", "class": "keep", "container": true},
     "gateway/gateway.json": {"owner": "gateway/foundation"},
-    "gateway/local-auth.json": {"owner": "gateway/security", "backup": false, "credential": true},
-    "gateway/enrollment.json": {"owner": "gateway/security", "backup": false, "credential": true},
+    "gateway/local-auth.json": {"owner": "gateway/security", "class": "rebuild", "credential": true},
+    "gateway/enrollment.json": {"owner": "gateway/security", "class": "rebuild", "credential": true},
     "gateway/devices.json": {"owner": "gateway/security", "credential": true},
     "gateway/notifications.json": {"owner": "gateway/notifications", "prune": {"maxBytes": 1048576, "when": "grant-store caps: 64 grants, 512 receipts"}},
     "gateway/lan-endpoint": {"owner": "gateway/transport", "credential": true, "subtree": true},
@@ -75,7 +75,7 @@
     "gateway/dev.log": {"owner": "repo/dev", "class": "log", "prune": {"when": "truncated at each Debug start"}},
     "gateway/workspace-state.lock": {"owner": "gateway/workspace", "class": "scratch", "subtree": true, "prune": {"when": "released when its holder exits; stale after 60 s"}},
     "gateway/worktrees": {"owner": "gateway/machine", "subtree": true},
-    "gateway/child-start.gate": {"owner": "repo/dev", "class": "scratch"},
+    "gateway/child-start.gate": {"owner": "repo/dev", "class": "scratch", "type": "fifo"},
 
     "workspace": {"owner": "gateway/workspace", "class": "keep", "container": true},
     "workspace/tmp": {"owner": "gateway/workspace", "class": "scratch", "subtree": true, "prune": {"by": "the owning task", "maxAge": "14d", "when": "its task ends; after 14 days only when not in use"}},
@@ -84,6 +84,7 @@
     "workspace/state": {"owner": "gateway/workspace", "container": true},
     "workspace/state/episodic": {"owner": "gateway/episodic", "subtree": true},
     "workspace/state/apps": {"owner": "gateway/apps", "subtree": true},
+    "workspace/state/x-library": {"owner": "extension x-library", "subtree": true},
 
     "internal": {"owner": "gateway/foundation", "class": "scratch", "container": true},
     "internal/machine-group-id": {"owner": "gateway/foundation", "class": "keep"},
@@ -112,11 +113,27 @@
 
     "ios-builds": {"owner": "repo/ios", "class": "rebuild", "container": true},
     "ios-builds/builds": {"owner": "repo/ios", "subtree": true, "prune": {"keepNewest": 5}},
+    "ios-builds/iphone-install": {"owner": "extension ios-device-install", "class": "keep", "subtree": true},
     "ios-builds/index.html": {"owner": "repo/ios"},
     "ios-builds/latest.plist": {"owner": "repo/ios"},
     "ios-builds/.publish.lock": {"owner": "repo/ios", "class": "scratch"},
 
     "mac-terminal": {"owner": "gateway/security", "class": "keep", "credential": true, "subtree": true}
   },
-  "retired": []
+  "retired": [
+    {"from": "gateway/layout-migration", "to": "~/.tron-maintenance/backups/2026-11-07-2313-layout-connections"},
+    {"from": "gateway/home/chapter-reseals.jsonl", "to": "~/.tron-maintenance/backups/2026-11-12-2500-retired-residue/stable/chapter-reseals.jsonl"},
+    {"from": "backup-418-chapter-format-20261007T170608Z", "to": "~/.tron-maintenance/backups/2026-10-07-418-chapter-format-debug"},
+    {"from": "backup-421-auth-failed-pretrial-20261009T093708Z", "to": "~/.tron-maintenance/backups/2026-10-09-421-auth-failed-pretrial-debug"},
+    {"from": "backup-461-final-20261009T203551Z", "to": "~/.tron-maintenance/backups/2026-10-09-461-final-debug"},
+    {"from": "backup-695-home-reset-20261010T052559Z", "to": "~/.tron-maintenance/backups/2026-10-10-695-home-reset-debug"},
+    {"from": "backup-cortexkit-20261102T125446", "to": "~/.tron-maintenance/backups/2026-11-02-cortexkit-debug"},
+    {"from": "backup-stock-pi-20261109T140357", "to": "~/.tron-maintenance/backups/2026-11-09-stock-pi-debug"},
+    {"from": "gateway/catalog-metadata-v2.json", "to": "~/.tron-maintenance/backups/2026-11-12-2500-retired-residue/debug/catalog-metadata-v2.json"},
+    {"from": "gateway/session-search-jev-allowance.sqlite", "to": "~/.tron-maintenance/backups/2026-11-12-2500-retired-residue/debug/session-search-jev-allowance.sqlite"},
+    {"from": "gateway/workspace-state-initialized.backup-507-20261007T094447Z.json", "to": "~/.tron-maintenance/backups/2026-11-12-2500-retired-residue/debug/workspace-state-initialized.backup-507-20261007T094447Z.json"},
+    {"from": "gateway/proof-traffic", "to": "~/.tron-maintenance/backups/2026-11-12-2500-retired-residue/debug/proof-traffic"},
+    {"from": "workspace/proof-mirror", "to": "~/.tron-maintenance/backups/2026-11-12-2500-retired-residue/debug/proof-mirror"},
+    {"from": "~/Workspace/workspace-backups/x-library-20261111T1425", "to": "~/.tron-maintenance/backups/2026-11-11-x-library"}
+  ]
 }

@@ -195,6 +195,8 @@ class ReinstallWindow(unittest.TestCase):
                                                            label('logs'), label('ios-builds')})
         staged = json.loads((operation / 'tron-home-layout.json').read_text())
         self.assertEqual(staged, json.loads((REPO / 'packages/gateway/src/foundation/tron-home-layout.json').read_text()))
+        staged_path = operation / 'tron-home-layout.json'
+        self.assertEqual(self.receipt()['layoutRegistrySha256'], hashlib.sha256(staged_path.read_bytes()).hexdigest())
         for relative in ('logs/gateway.jsonl', 'gateway/session-search.sqlite', 'gateway/local-auth.json'):
             (tron / relative).write_text('changed after the inventory froze')
         (tron / 'logs/gateway.jsonl.1').write_text('a new log segment')
@@ -207,7 +209,10 @@ class ReinstallWindow(unittest.TestCase):
         (tron / 'gateway/devices.json').write_text('late writer changed a backed-up record')
         self.cli('--confirm-offline', error='source-changed')
         (tron / 'gateway/devices.json').write_text('gateway/devices.json')
-        (operation / 'tron-home-layout.json').write_text(json.dumps({'version': 1, 'paths': {}}))
+        staged['paths']['gateway/devices.json']['backup'] = False
+        staged_path.write_text(json.dumps(staged))
+        self.cli('--confirm-offline', error='layout-registry-digest')
+        staged_path.write_text(json.dumps({'version': 1, 'paths': {}}))
         self.cli('--confirm-offline', error='layout-registry')
 
     def test_finish_requires_verified_candidate_and_keeps_recovery_bytes(self):

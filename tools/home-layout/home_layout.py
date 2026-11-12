@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Checks source against the Tron-home registry, audits a home and plans its retired moves, all without mutations."""
+"""Checks the Tron-home registry, audits ownership and migrates retired paths offline."""
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import ctypes
 import fnmatch
 import hashlib
 import json
@@ -12,6 +14,7 @@ import re
 import stat
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -21,7 +24,7 @@ VERSION = 2
 CLASSES = {"keep", "rebuild", "scratch", "log"}
 PRUNED_CLASSES = {"rebuild", "scratch"}
 REGISTRY_FIELDS = {"version", "paths", "retired"}
-ENTRY_FIELDS = {"owner", "class", "backup", "credential", "container", "subtree", "prune"}
+ENTRY_FIELDS = {"owner", "class", "backup", "credential", "container", "subtree", "prune", "type"}
 PRUNE_BOUNDS = {"when": str, "maxAge": str, "maxEntries": int, "maxBytes": int, "keepNewest": int}
 PRUNE_FIELDS = {"by": str, **PRUNE_BOUNDS}
 AGE = re.compile(r"[1-9]\d*[mhd]")
@@ -166,6 +169,8 @@ def shape(registry: object) -> list[str]:
         for flag in ("backup", "container", "subtree"):
             if flag in entry and not isinstance(entry[flag], bool):
                 problems.append(f"{key}: {flag} must be true or false")
+        if "type" in entry and entry["type"] != "fifo":
+            problems.append(f"{key}: type must be fifo or absent")
         if "credential" in entry and entry["credential"] is not True:
             problems.append(f"{key}: credential is true or absent")
         if "/" in key and key.rsplit("/", 1)[0] not in paths:
@@ -183,7 +188,7 @@ def shape(registry: object) -> list[str]:
     for move in retired:
         if not isinstance(move, dict) or move.keys() != {"from", "to"} or not location(move["from"]) or not location(move["to"]):
             problems.append(f"retired: {json.dumps(move)} must be {{from, to}} with home-relative or ~/ paths")
-        elif move["from"] == move["to"] or {("from", move["from"]), ("to", move["to"])} & seen:
+        elif move["from"] == move["to"] or move["to"].startswith(move["from"] + "/") or {("from", move["from"]), ("to", move["to"])} & seen:
             problems.append(f"retired: {move['from']} moves once, to a place nothing else moves to")
         else:
             seen |= {("from", move["from"]), ("to", move["to"])}
@@ -330,7 +335,7 @@ def source_identity(registry: dict, root: Path) -> dict:
             "tool_sha256": hashlib.sha256((root / "tools/home-layout/home_layout.py").read_bytes()).hexdigest()}
 
 
-def audit(home: str, max_entries: int, root: Path = ROOT) -> tuple[int, dict]:
+def audit(home: str, max_entries: int, root: Path = ROOT, maintenance: str | None = None) -> tuple[int, dict]:
     report = {"home": os.path.abspath(home), "source": {}, "root": None,
               "entries": [], "findings": [], "errors": [], "truncated": False, "complete": False}
 
@@ -357,7 +362,10 @@ def audit(home: str, max_entries: int, root: Path = ROOT) -> tuple[int, dict]:
                         reasons = []
                         if key is None:
                             reasons.append("unknown")
-                        if row["type"] in ("symlink", "special"):
+                        if contract.get("type") == "fifo":
+                            if not stat.S_ISFIFO(observed.st_mode):
+                                reasons.append("expected_fifo")
+                        elif row["type"] in ("symlink", "special"):
                             reasons.append("unsafe_type")
                         elif classification != "delegated" and row["type"] != "directory" and (contract.get("container") or contract.get("subtree")):
                             reasons.append("expected_directory")
@@ -418,10 +426,61 @@ def audit(home: str, max_entries: int, root: Path = ROOT) -> tuple[int, dict]:
         error(REGISTRY, "invalid_registry" if str(failure) == "invalid_registry" else "registry_unavailable")
     except (OSError, KeyError, TypeError, ValueError) as failure:
         error(".", "audit_failed", failure if isinstance(failure, OSError) else None)
+    if maintenance is not None:
+        try:
+            report["findings"].extend(maintenance_index(maintenance))
+        except (OSError, ValueError) as failure:
+            error("maintenance", "index_unavailable", failure if isinstance(failure, OSError) else None)
     report["entries"].sort(key=lambda row: row["path"])
     report["findings"].sort(key=lambda row: row["path"])
     report["complete"] = not report["errors"] and not report["truncated"]
     return (2 if not report["complete"] else 1 if report["findings"] else 0), report
+
+
+def maintenance_index(directory: str) -> list[dict]:
+    fd = open_home(os.path.abspath(directory))
+    try:
+        rows = {}
+        try:
+            readme = os.open("README.md", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        except FileNotFoundError:
+            readme = None
+        if readme is not None:
+            with os.fdopen(readme) as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
+                    raise ValueError("unsafe_readme")
+                columns = None
+                for line in stream:
+                    if not line.lstrip().startswith("|"):
+                        columns = None
+                        continue
+                    cells = [cell.strip().strip("`") for cell in line.strip().strip("|").split("|")]
+                    labels = [cell.lower() for cell in cells]
+                    if "entry" in labels and "owner" in labels and any("rule" in cell for cell in labels):
+                        columns = (labels.index("entry"), labels.index("owner"), next(i for i, cell in enumerate(labels) if "rule" in cell))
+                    elif columns and len(cells) > max(columns):
+                        name, owner, rule = (cells[index] for index in columns)
+                        if name in rows:
+                            rows[name] = False
+                        else:
+                            rows[name] = bool(owner.strip("- ") and rule.strip("- "))
+        names = []
+        with os.scandir(fd) as children:
+            for child in children:
+                if child.name == "README.md":
+                    continue
+                names.append(child.name)
+                if child.name == "backups" and child.is_dir(follow_symlinks=False):
+                    backup_fd = os.open(child.name, DIRECTORY_FLAGS, dir_fd=fd)
+                    try:
+                        with os.scandir(backup_fd) as backups:
+                            names.extend("backups/" + backup.name for backup in backups)
+                    finally:
+                        os.close(backup_fd)
+        return [{"path": "maintenance/" + name, "reasons": ["maintenance_index"]} for name in sorted(names) if not rows.get(name)]
+    finally:
+        os.close(fd)
 
 
 def observed(path: str) -> os.stat_result | None:
@@ -462,6 +521,9 @@ def migration(home: str, root: Path = ROOT) -> dict:
         lock = observed(os.path.join(report["home"], RUNTIME_LOCK))
         if lock is not None and time.time() - lock.st_mtime < RUNTIME_LOCK_STALE_SECONDS:
             report["blockers"].append("gateway_running")
+        debug_lock = observed(os.path.join(report["user_home"], ".tron-dev", RUNTIME_LOCK))
+        if debug_lock is not None and time.time() - debug_lock.st_mtime < RUNTIME_LOCK_STALE_SECONDS and report["home"] != os.path.join(report["user_home"], ".tron-dev"):
+            report["blockers"].append("debug_gateway_running")
         for move in registry.get("retired", []):
             source, destination = (os.path.join(report["user_home"], value[2:]) if value.startswith("~/") else os.path.join(report["home"], value)
                                    for value in (move["from"], move["to"]))
@@ -501,8 +563,242 @@ def migrate(home: str, status: bool, root: Path = ROOT) -> tuple[int, dict]:
         summary = {key: report[key] for key in ("home", "source", "state", "blockers", "errors")}
         summary["moves"] = [{key: row[key] for key in ("from", "to", "state")} for row in report["moves"]]
         return (1 if report["state"] in ("not_started", "partly_applied", "conflict") else 0), summary
+    try:
+        journal_context(report)
+    except (OSError, ValueError, KeyError, TypeError, LayoutError) as failure:
+        report["blockers"].append(str(failure) if isinstance(failure, LayoutError) else "journal_unavailable")
     refused = report["blockers"] or any(row["refusals"] for row in report["moves"])
     return (1 if refused else 0), report
+
+
+def private_directory(path: Path) -> None:
+    missing = []
+    parent = path
+    while observed(str(parent)) is None:
+        missing.append(parent)
+        parent = parent.parent
+    os.close(open_home(str(parent)))
+    for directory in reversed(missing):
+        directory.mkdir(mode=0o700)
+    os.close(open_home(str(path)))
+
+
+def write_journal(path: Path, journal: dict) -> None:
+    temporary = path.with_suffix(".partial")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        json.dump(journal, stream, indent=2)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+    fd = open_home(str(path.parent))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def rename_exclusive(source: str, destination: str) -> None:
+    source_fd, destination_fd = open_home(os.path.dirname(source)), open_home(os.path.dirname(destination))
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        if sys.platform == "darwin":
+            result = libc.renameatx_np(source_fd, os.fsencode(os.path.basename(source)), destination_fd,
+                                      os.fsencode(os.path.basename(destination)), 4)
+        else:
+            result = libc.renameat2(source_fd, os.fsencode(os.path.basename(source)), destination_fd,
+                                    os.fsencode(os.path.basename(destination)), 1)
+        if result:
+            raise OSError(ctypes.get_errno(), os.strerror(ctypes.get_errno()))
+        os.fsync(source_fd)
+        os.fsync(destination_fd)
+    finally:
+        os.close(source_fd)
+        os.close(destination_fd)
+
+
+@contextlib.contextmanager
+def runtime_lock(path: Path):
+    private_directory(path.parent)
+    path.mkdir(mode=0o700)
+    fd = open_home(str(path))
+    identity = os.fstat(fd)
+    stop = threading.Event()
+    errors = []
+
+    def refresh():
+        while not stop.wait(10):
+            try:
+                os.utime(fd, None)
+            except OSError as failure:
+                errors.append(failure)
+                return
+
+    def check():
+        current = observed(str(path))
+        if errors or current is None or (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
+            raise LayoutError("runtime_lock_lost")
+
+    heartbeat = threading.Thread(target=refresh, daemon=True)
+    heartbeat.start()
+    try:
+        yield check
+    finally:
+        stop.set()
+        heartbeat.join()
+        os.close(fd)
+        current = observed(str(path))
+        if current is not None and (current.st_dev, current.st_ino) == (identity.st_dev, identity.st_ino):
+            path.rmdir()
+
+
+def move_position(row: dict) -> str:
+    before, after = observed(row["source"]), observed(row["destination"])
+    current = before or after
+    if (before is not None and after is not None or current is None
+            or (current.st_dev, current.st_ino) != (row["identity"]["device"], row["identity"]["inode"])
+            or linked_component(row["source"], "/") or linked_component(row["destination"], "/")):
+        raise LayoutError("move_identity_changed")
+    return "pending" if before is not None else "done"
+
+
+def read_journal(path: Path, report: dict) -> dict | None:
+    if observed(str(path)) is None:
+        return None
+    parent = open_home(str(path.parent))
+    try:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    finally:
+        os.close(parent)
+    with os.fdopen(fd) as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024 or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            raise LayoutError("unsafe_journal")
+        contents = stream.read(1024 * 1024 + 1)
+        if len(contents) > 1024 * 1024:
+            raise LayoutError("unsafe_journal")
+        journal = json.loads(contents)
+    if not isinstance(journal, dict) or journal.keys() != {"registry", "moves"} or not isinstance(journal["moves"], list):
+        raise LayoutError("invalid_journal")
+    if journal["registry"] != report["source"]["manifest_sha256"]:
+        raise LayoutError("journal_contract_changed")
+    expected = {(row["from"], row["to"]) for row in report["moves"]}
+    destinations = set()
+    for row in journal["moves"]:
+        if (not isinstance(row, dict) or (row.get("from"), row.get("to")) not in expected
+                or not isinstance(row.get("home"), str) or not os.path.isabs(row["home"])):
+            raise LayoutError("invalid_journal")
+        locations = [os.path.join(report["user_home"], value[2:]) if value.startswith("~/") else os.path.join(row["home"], value) for value in (row["from"], row["to"])]
+        identity = row.get("identity")
+        if ([row.get("source"), row.get("destination")] != locations or row["destination"] in destinations or not isinstance(identity, dict)
+                or any(type(identity.get(key)) is not int or identity[key] < 0 for key in ("device", "inode"))):
+            raise LayoutError("invalid_journal")
+        destinations.add(row["destination"])
+    return journal
+
+
+def journal_context(report: dict, rollback: bool = False) -> tuple[Path, dict | None]:
+    path = Path(report["user_home"]) / ".tron-maintenance/layout-v2" / (report["source"]["manifest_sha256"] + ".json")
+    journal = read_journal(path, report)
+    claims = {row["destination"]: row for row in journal["moves"]} if journal else {}
+    for claim in claims.values():
+        move_position(claim)
+    for row in report["moves"]:
+        claim = claims.get(row["destination"])
+        if row["state"] == "done" and claim is None:
+            raise LayoutError("unowned_destination")
+        if claim is not None and (claim["from"], claim["to"]) != (row["from"], row["to"]):
+            raise LayoutError("destination_claim_conflict")
+        if not rollback and row["state"] == "pending" and claim is not None and claim["home"] != report["home"]:
+            raise LayoutError("move_owned_by_other_home")
+    return path, journal
+
+
+def execute_migration(home: str, rollback: bool, root: Path = ROOT) -> tuple[int, dict]:
+    report = migration(home, root)
+    if report["errors"]:
+        return 2, report
+    if report["blockers"] or any(row["refusals"] for row in report["moves"]):
+        return 1, report
+    try:
+        journal_path, journal = journal_context(report, rollback)
+    except (OSError, ValueError, KeyError, TypeError, LayoutError) as failure:
+        report["blockers"].append(str(failure) if isinstance(failure, LayoutError) else "journal_unavailable")
+        return 1, report
+    report["journal"] = str(journal_path)
+    with contextlib.ExitStack() as locks:
+        try:
+            lock_paths = sorted({Path(report["home"]) / RUNTIME_LOCK,
+                                 Path(report["user_home"]) / ".tron-dev" / RUNTIME_LOCK})
+            for lock in lock_paths:
+                if observed(str(lock)) is not None:
+                    report["blockers"].append("runtime_lock_present")
+                    return 1, report
+            if rollback and journal is None:
+                report["blockers"].append("no_journal")
+                return 1, report
+            if rollback and not any(row["home"] == report["home"] for row in journal["moves"]):
+                report["state"] = "nothing_to_rollback"
+                return 0, report
+            guards = [locks.enter_context(runtime_lock(lock)) for lock in lock_paths]
+            current = migration(home, root)
+            if current["errors"] or any(row["refusals"] for row in current["moves"]):
+                report["blockers"].append("plan_changed")
+                return 1, report
+            if rollback and read_journal(journal_path, current) is None:
+                raise LayoutError("no_journal")
+            _, journal = journal_context(current, rollback)
+            if rollback and journal is None:
+                raise LayoutError("no_journal")
+            def identities(plan):
+                return [(row["state"], tuple(row["identity"][key] for key in ("type", "device", "inode")) if row["identity"] else None) for row in plan["moves"]]
+            if identities(current) != identities(report):
+                raise LayoutError("plan_changed")
+            if journal is None:
+                journal = {"registry": report["source"]["manifest_sha256"], "moves": []}
+            if not rollback:
+                claims = {row["destination"] for row in journal["moves"]}
+                for row in current["moves"]:
+                    if row["state"] == "pending" and row["destination"] not in claims:
+                        journal["moves"].append({**row, "home": report["home"]})
+                        claims.add(row["destination"])
+            moves = [row for row in journal["moves"] if row["home"] == report["home"]]
+            if rollback:
+                moves.reverse()
+            private_directory(journal_path.parent)
+            for row in moves:
+                move_position(row)
+                source, destination = (row["destination"], row["source"]) if rollback else (row["source"], row["destination"])
+                if source == destination or destination.startswith(source + "/"):
+                    raise LayoutError("destination_inside_source")
+            for guard in guards:
+                guard()
+            write_journal(journal_path, journal)
+            for row in moves:
+                source, destination = (row["destination"], row["source"]) if rollback else (row["source"], row["destination"])
+                for guard in guards:
+                    guard()
+                if move_position(row) == ("done" if rollback else "pending"):
+                    private_directory(Path(destination).parent)
+                    rename_exclusive(source, destination)
+                if move_position(row) != ("pending" if rollback else "done"):
+                    raise LayoutError("move_identity_changed")
+                if rollback:
+                    journal["moves"].remove(row)
+                    write_journal(journal_path, journal)
+            for guard in guards:
+                guard()
+            completed = migration(home, root)
+            if completed["errors"] or any(row["refusals"] for row in completed["moves"]):
+                raise LayoutError("plan_changed")
+            if not rollback and any(row["state"] == "pending" for row in completed["moves"]):
+                raise LayoutError("plan_changed")
+            report["state"] = "rolled_back" if rollback else "applied"
+            return 0, report
+        except (OSError, ValueError, KeyError, TypeError, LayoutError) as failure:
+            report["errors"].append({"path": str(journal_path), "reason": str(failure) if isinstance(failure, LayoutError) else type(failure).__name__,
+                                     "errno": failure.errno if isinstance(failure, OSError) else None})
+            return 1, report
 
 
 def positive(value: str) -> int:
@@ -519,19 +815,23 @@ def main(argv: list[str]) -> int:
     audit_parser = commands.add_parser("audit", help="read-only, no-follow ownership-boundary metadata scan")
     audit_parser.add_argument("--home", required=True, help="installation root; no default or implicit other-home access")
     audit_parser.add_argument("--json", action="store_true", required=True, help="emit metadata report to stdout")
+    audit_parser.add_argument("--maintenance", help="also check this maintenance root's README index and backup-set rows")
     audit_parser.add_argument("--max-entries", type=positive, default=10000, help="scan budget; exhaustion exits 2 (default: 10000)")
-    migrate_parser = commands.add_parser("migrate", help="read-only plan or status of the registry's retired moves, as JSON")
+    migrate_parser = commands.add_parser("migrate", help="offline retired-path plan, status, apply or inverse rollback, as JSON")
     migrate_parser.add_argument("--home", required=True, help="installation root; no default or implicit other-home access")
     mode = migrate_parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="every move with its identity, destination and refusals")
     mode.add_argument("--status", action="store_true", help="which moves are pending, done or in conflict")
+    mode.add_argument("--apply", action="store_true", help="journal and rename offline; never start a Gateway")
+    mode.add_argument("--rollback", action="store_true", help="invert journaled renames; carry newer data back")
+    migrate_parser.add_argument("--json", action="store_true", help="JSON is always emitted")
     args = parser.parse_args(argv)
     if args.command == "audit":
-        code, report = audit(args.home, args.max_entries)
+        code, report = audit(args.home, args.max_entries, maintenance=args.maintenance)
         print(json.dumps(report, indent=2))
         return code
     if args.command == "migrate":
-        code, report = migrate(args.home, args.status)
+        code, report = execute_migration(args.home, args.rollback) if args.apply or args.rollback else migrate(args.home, args.status)
         print(json.dumps(report, indent=2))
         return code
     try:
