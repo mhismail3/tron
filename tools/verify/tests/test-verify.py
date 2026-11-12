@@ -73,7 +73,7 @@ class Repo:
         host_lock = self.path / "tools/verify/host_lock.py"
         host_lock.write_text(host_lock.read_text().replace("'/tmp/tron-full-gateway.lock'", repr(str(self.lock))))
         self.write(".gitignore", "test-results/\n")
-        self.write("packages/gateway/src/foundation/tron-home-layout.json", '{"version": 1, "paths": {}}\n')
+        self.write("packages/gateway/src/foundation/tron-home-layout.json", '{"version": 2, "paths": {}}\n')
         self.write("README.md", "# Fixture\n")
         self.write("AGENTS.md", AGENTS)
         self.write(".agents/README.md", "# Guidance\n\n[tron-ios](skills/tron-ios/SKILL.md)\n")

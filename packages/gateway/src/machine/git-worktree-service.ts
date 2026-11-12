@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { asUncertainOutcome, GatewayError, isUncertainOutcome } from "../errors.js";
+import { tronHomePath } from "../foundation/tron-home-layout.js";
 import { containedWithin } from "./path-containment.js";
 import { workspaceGitEnvironment } from "../util/workspace-git-environment.js";
 
@@ -120,7 +121,7 @@ export class GitWorktreeService {
   private readonly worktreeRoot: string;
 
   constructor(tronHome: string) {
-    this.worktreeRoot = join(resolve(tronHome), "gateway", "worktrees");
+    this.worktreeRoot = tronHomePath(resolve(tronHome), "gateway/worktrees");
   }
 
   async prepare(

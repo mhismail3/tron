@@ -21,6 +21,10 @@ import tempfile
 import uuid
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / 'tools/home-layout'))
+import home_layout  # noqa: E402
+
+STAGED_REGISTRY = Path(home_layout.REGISTRY).name
 MAX_ENTRIES = 1_000_000
 MAX_JSON = 256 * 1024 * 1024
 LIBC = ctypes.CDLL(None, use_errno=True)
@@ -197,14 +201,20 @@ def xattr_digests(path):
     return result
 
 
-def tree_manifest(root):
-    """No file contents in evidence; no symlink traversal, devices or sockets."""
+def tree_manifest(root, share=None):
+    """No file contents in evidence; no symlink traversal, devices or sockets.
+
+    `share(path, is_directory)` narrows the inventory: 'none' leaves the path out, 'mixed' asks again
+    for each child, 'all' takes the whole subtree."""
     safe_path(root)
     result = {}
-    def visit(path, depth):
+    def visit(path, depth, whole):
         require(depth <= 128 and len(result) < MAX_ENTRIES,
                 'inventory-limit: tree exceeds supported traversal bounds')
         info = path.lstat()
+        held = 'all' if whole else share(path, stat.S_ISDIR(info.st_mode))
+        if held == 'none':
+            return
         require(stat.S_ISLNK(info.st_mode) or stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode),
                 'special-file: sockets/devices/FIFOs need an owner decision before backup')
         require(info.st_uid in (os.getuid(), 0), 'foreign-owner: review tree ownership')
@@ -224,8 +234,8 @@ def tree_manifest(root):
         result[str(path.relative_to(root))] = item
         if item['type'] == 'dir':
             for child in sorted(path.iterdir()):
-                visit(child, depth + 1)
-    visit(root, 0)
+                visit(child, depth + 1, held == 'all')
+    visit(root, 0, share is None)
     return result
 
 
@@ -295,7 +305,7 @@ def copy_metadata(source, destination, data=False):
         shutil.copystat(source, destination, follow_symlinks=False)
 
 
-def copy_tree(source, destination, expected, scratch):
+def copy_tree(source, destination, expected, scratch, share=None):
     """Resume only the recorded copy, publishing each leaf after its data is synced."""
     if exists(destination):
         actual = tree_manifest(destination)
@@ -335,7 +345,7 @@ def copy_tree(source, destination, expected, scratch):
     for name, item in reversed(list(expected.items())):
         if item['type'] == 'dir':
             copy_metadata(source / name, destination / name)
-    require(tree_manifest(source) == expected, 'source-changed: backup source changed; do not proceed')
+    require(tree_manifest(source, share) == expected, 'source-changed: backup source changed; do not proceed')
     require(copied_tree_matches(tree_manifest(destination), expected),
             'backup-mismatch: copied bytes or metadata differ')
     sync_tree(destination, expected)
@@ -466,6 +476,8 @@ class Reinstall:
         self.home, self.platform = safe_path(home), platform
         self.store = self.home / '.tron-maintenance'
         self.receipt = None
+        self.layout_paths = None
+        self.operation = None
 
     def source_agent(self):
         return self.home / '.tron/agent'
@@ -491,7 +503,15 @@ class Reinstall:
         identifier = str(uuid.uuid4())
         revision = command(['/usr/bin/git', '-C', REPO, 'rev-parse', 'HEAD'], 'source-revision', timeout=15).decode().strip()
         require(re.fullmatch(r'[0-9a-f]{40,64}', revision), 'source-revision: expected immutable commit identity')
+        try:
+            registry = home_layout.load(REPO)
+        except home_layout.LayoutError:
+            registry = None
+        require(registry is not None and not home_layout.shape(registry),
+                'layout-registry: the Tron-home registry is unreadable or invalid; run scripts/tron home-layout check')
         self.operation = private_dir(self.store / identifier, create=True)
+        write_json(self.operation / STAGED_REGISTRY, registry)
+        self.layout_paths = None
         self.receipt = {'schema': 1, 'id': identifier, 'kind': self.kind, 'home': str(self.home),
                         'app': str(app), 'candidate': candidate, 'original': original,
                         'sourceRevision': revision,
@@ -600,12 +620,31 @@ class Reinstall:
         print('Bundled Gateway selected for the next installed-app launch. Retired channel retained; no process started.\n'
               'Finish every offline migration, then run --confirm-offline. Never resume the old app against migrated state.')
 
+    def share(self, source):
+        """The Tron-home registry's verdict for a `~/.tron` source: what it does not back up stays out of the inventory."""
+        tron = self.home / '.tron'
+        if tron not in source.parents:
+            return None
+        if self.layout_paths is None:
+            try:
+                registry = read_json(self.operation / STAGED_REGISTRY)
+            except (OSError, ValueError, Stop):
+                registry = None
+            require(registry is not None and not home_layout.shape(registry),
+                    'layout-registry: this operation has no valid staged Tron-home registry; begin again with --restart')
+            self.layout_paths = registry['paths']
+        return lambda path, directory: home_layout.backup_decision(self.layout_paths, str(path.relative_to(tron)), directory)
+
+    def inventory(self, source):
+        return tree_manifest(source, self.share(source)) if exists(source) else None
+
     def sources(self):
         sources = {'agent': self.source_agent(), 'old-app': self.platform.installed,
                    'browser-config': self.home / '.pi/config/pi-agent-browser-native/config.json',
                    'machine-group': self.home / '.tron/internal/machine-group-id'}
         for path in sorted((self.home / '.tron').iterdir()):
-            if path.name not in self.excluded_state_entries():
+            if path.name not in self.excluded_state_entries() \
+                    and self.share(path)(path, path.is_dir() and not path.is_symlink()) != 'none':
                 name = 'tron-' + hashlib.sha256(os.fsencode(path.name)).hexdigest()[:16]
                 require(name not in sources, 'inventory-collision: state component labels collide')
                 sources[name] = path
@@ -679,7 +718,7 @@ class Reinstall:
             self.receipt['sourcePaths'] = {name: str(path) for name, path in sources.items()}
             for name, source in sources.items():
                 print(f'Inventorying {name}…', flush=True)
-                manifest = tree_manifest(source) if exists(source) else None
+                manifest = self.inventory(source)
                 require(manifest is not None or name not in ('agent', 'old-app'),
                         f'missing-source: required {name} is absent')
                 write_json(self.operation / f'{name}.json', manifest)
@@ -692,12 +731,12 @@ class Reinstall:
         for name, source in sources.items():
             expected = read_json(self.operation / f'{name}.json')
             require(manifest_digest(expected) == components[name], 'manifest-corrupt: backup evidence changed')
-            require((tree_manifest(source) if exists(source) else None) == expected,
+            require(self.inventory(source) == expected,
                     f'source-changed: {name} differs from the frozen backup inventory')
             if expected is None:
                 continue
             print(f'Checking/copying {name} backup…', flush=True)
-            copy_tree(source, backups / name, expected, scratch)
+            copy_tree(source, backups / name, expected, scratch, self.share(source))
         self.platform.offline()
 
     def required_copy_bytes(self, sizes):
@@ -717,7 +756,7 @@ class Reinstall:
                 continue
             expected = read_json(self.operation / f'{name}.json')
             require(manifest_digest(expected) == self.receipt['components'][name], 'manifest-corrupt: evidence changed')
-            require((tree_manifest(source) if exists(source) else None) == expected,
+            require(self.inventory(source) == expected,
                     f'source-changed: {name}; do not replace from an outdated backup')
 
     def verify(self):
