@@ -77,7 +77,8 @@ root metadata, per-entry classification and matched contract, findings, errors, 
 and truncation state. Exit **0** means complete with no findings, **1** complete with
 findings, **2** incomplete/error even when findings were also observed. Absent lazy paths
 are not errors. Paths are component-matched; explicit child contracts override delegated
-parents. Aggregate directories are enumerated; external/owner-delegated subtrees and
+parents. A delegated document does not inherit its ancestor boundary's directory type.
+Aggregate directories are enumerated; external/owner-delegated subtrees and
 unknown directories are opaque unless declared child boundaries require enumeration.
 `opaque` means descendants were not assessed, not that their contents are known safe.
 The result is an ownership-boundary audit, not an inventory of every payload byte.

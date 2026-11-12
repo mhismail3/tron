@@ -177,6 +177,21 @@ class AuditTests(unittest.TestCase):
         self.assertNotIn("workspace/files/topic/not-registry-owned", entries)
         self.assertEqual([item["path"] for item in report["findings"]], ["workspace/state/unknown-owner"])
 
+    def test_delegated_documents_do_not_inherit_the_boundary_directory_type(self) -> None:
+        (self.home / "workspace/files").mkdir(parents=True)
+        (self.home / "workspace/files/INDEX.md").write_text("document index")
+        (self.home / "workspace/files/report.json").write_text("SECRET_SENTINEL_DO_NOT_DISCLOSE")
+        before = snapshot(self.home)
+        code, report = self.audit()
+        self.assertEqual(code, 0)
+        self.assertTrue(report["complete"])
+        self.assertEqual(report["findings"], [])
+        documents = [item for item in report["entries"] if item["type"] == "file"]
+        self.assertEqual(len(documents), 2)
+        self.assertTrue(all(item["classification"] == "delegated" for item in documents))
+        self.assertNotIn("SECRET_SENTINEL", json.dumps(report))
+        self.assertEqual(snapshot(self.home, contents_first=False), before)
+
     def test_child_override_fences_the_parent_delegation(self) -> None:
         (self.home / "workspace/files/Profile.json").mkdir(parents=True)
         (self.home / "workspace/files/Profile.json/not-a-profile").touch()
