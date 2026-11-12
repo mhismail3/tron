@@ -490,7 +490,7 @@ class FixtureGateway:
             "HOME": str(self.home),
             "TRON_DATA_DIR": str(self.tron_home),
             "PI_CODING_AGENT_DIR": str(self.agent_dir),
-            "PI_SUBAGENTS_TEMP_ROOT": str(self.home / "internal/subagents"),
+            "PI_SUBAGENTS_TEMP_ROOT": str(self.tron_home / "state/subagents"),
             "TRON_MACHINE_GROUP_ID": "tron-profile",
             "TRON_GATEWAY_HOST": "127.0.0.1",
             "TRON_GATEWAY_PORT": str(self.port),

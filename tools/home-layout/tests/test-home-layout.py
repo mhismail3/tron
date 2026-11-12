@@ -947,7 +947,9 @@ class MigrateTests(unittest.TestCase):
     def test_unreadable_homes_and_ambiguous_modes_are_errors(self) -> None:
         link = self.base / "linked-home"
         link.symlink_to(self.home, target_is_directory=True)
-        for home in (self.base / "missing", link):
+        ancestor = self.base / "linked-user"
+        ancestor.symlink_to(self.user, target_is_directory=True)
+        for home in (self.base / "missing", link, ancestor / self.home.name):
             with self.subTest(home=home):
                 code, report = self.migrate("--dry-run", home=home)
                 self.assertEqual(code, 2)

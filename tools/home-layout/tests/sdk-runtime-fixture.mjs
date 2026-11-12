@@ -63,9 +63,29 @@ if (action.startsWith("handoff-")) {
   const resultPath = join(home, "internal/subagents/async-subagent-results", runId + ".json");
   const config = { id: runId, asyncDir, resultPath, cwd, placeholder: "fixture", sessionDir: dirname(session), runnerProcessInstanceId, launchBarrierToken: randomUUID(), runFanoutBudget, steps: [{ agent: "fixture", task: cwd, inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false, cwd, sessionFile: session, outputFile, outputPath: outputFile, launchBindingTask: cwd, extensionBindings, ...binding }] };
   writePrivateAtomicJson(join(asyncDir, "recovery-descriptor.json"), { version: 1, sourceRunId: runId, agent: "fixture", sessionFile: session, cwd, systemPromptMode: "replace", systemPrompt: cwd, outputMode: "inline", inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false, share: false, maxSubagentDepth: 0, outputPath: outputFile, artifactsDir: asyncDir, agentFilePath, memory: { scope: "user", path: agentFilePath }, sessionDir: dirname(session), runFanoutBudget, extensionBindings, launchContractDigest: binding.launchContractDigest });
+  const controlInbox = join(asyncDir, "control.jsonl");
+  const eventSink = join(asyncDir, "nested-events.jsonl");
+  writeFileSync(controlInbox, "");
+  writeFileSync(eventSink, "");
+  config.nestedRoute = { rootRunId: runId, controlInbox, eventSink, capabilityToken: "fixture" };
+  config.revivalLease = { sessionFile: session, runId, sourceRunId: runId };
+  const schema = { type: "object", description: cwd };
+  const schemaPath = join(asyncDir, "schema.json");
+  const structuredPath = join(asyncDir, "structured-result.json");
+  const acceptanceReportPath = join(asyncDir, "acceptance-report.json");
+  for (const [path, value] of [[schemaPath, schema], [structuredPath, { path: cwd }], [acceptanceReportPath, { accepted: true }]]) writeFileSync(path, JSON.stringify(value));
+  config.steps[0].structuredOutput = { schema, schemaPath, outputPath: structuredPath, acceptanceReportPath };
+  config.steps[0].outputClaimPath = join(asyncDir, "output.claim");
+  config.steps[0].importAsyncRoot = { runId, asyncDir, resultPath, index: 0 };
+  config.steps.push({ parallel: [{ ...config.steps[0] }] });
+  config.steps.push({ expand: { from: { output: "fixture", path: "items" } }, parallel: { ...config.steps[0] }, collect: { as: "fixture" }, sessionFiles: [session] });
   validateSubagentRunConfig(config);
   writePrivateAtomicJson(configPath, config);
-  writePrivateAtomicJson(join(asyncDir, "status.json"), statusWithLifecycleProjection({ runId, sessionId: manager.getSessionId(), state: "complete", mode: "single", cwd, sessionRoot: dirname(session), sessionDir: dirname(session), sessionFile: session, outputFile, startedAt: Date.now(), steps: [{ index: 0, agent: "fixture", status: "complete", sessionFile: session, artifactPaths: { outputPath: outputFile } }] }));
+  const nestedId = randomUUID();
+  const nested = { id: nestedId, parentRunId: runId, depth: 1, path: [{ runId }, { runId: nestedId }], state: "complete", asyncDir, sessionFile: session, currentPath: cwd, controlInbox, steps: [{ agent: "fixture", status: "complete", sessionFile: session, transcriptPath: outputFile, currentPath: cwd }], description: cwd };
+  const grandchildId = randomUUID();
+  nested.children = [{ ...nested, id: grandchildId, parentRunId: nestedId, depth: 2, path: [...nested.path, { runId: grandchildId }] }];
+  writePrivateAtomicJson(join(asyncDir, "status.json"), statusWithLifecycleProjection({ runId, sessionId: manager.getSessionId(), state: "complete", mode: "single", cwd, sessionRoot: dirname(session), sessionDir: dirname(session), sessionFile: session, outputFile, runFanoutBudgetDescriptor: runFanoutBudget, parallelGroups: [{ start: 0, count: 1, stepIndex: 0 }], startedAt: Date.now(), steps: [{ index: 0, agent: "fixture", status: "complete", sessionFile: session, artifactPaths: { outputPath: outputFile }, children: [nested] }] }));
   initializeProcessTerminal(asyncDir, runId, runnerProcessInstanceId);
   writeProcessTerminalCandidate(asyncDir, { version: 1, runId, runnerProcessInstanceId, writers: { "0": [] }, expectedWriters: { "0": 0 }, sessionFile: session });
   const manifest = { binding, session: relative(home, session), sessionId: manager.getSessionId(), runId, asyncDir: relative(home, asyncDir), config: relative(home, configPath), originalCwd: cwd };
@@ -134,6 +154,34 @@ if (action.startsWith("handoff-")) {
   assert.equal(config.asyncDir, asyncDir);
   assert.equal(config.resultPath, location.resultPath);
   assert.equal(config.steps[0].task, manifest.originalCwd);
+  assert.equal(config.steps[1].parallel[0].sessionFile, manager.getSessionFile());
+  assert.equal(config.steps[2].parallel.sessionFile, manager.getSessionFile());
+  assert.deepEqual(config.steps[2].sessionFiles, [manager.getSessionFile()]);
+  assert.equal(config.revivalLease.sessionFile, manager.getSessionFile());
+  for (const step of [config.steps[0], config.steps[1].parallel[0], config.steps[2].parallel]) {
+    assert.equal(step.outputClaimPath, join(asyncDir, "output.claim"));
+    assert.equal(step.importAsyncRoot.asyncDir, asyncDir);
+    assert.equal(step.importAsyncRoot.resultPath, location.resultPath);
+    assert.equal(step.structuredOutput.schemaPath, join(asyncDir, "schema.json"));
+    assert.equal(step.structuredOutput.outputPath, join(asyncDir, "structured-result.json"));
+    assert.equal(step.structuredOutput.acceptanceReportPath, join(asyncDir, "acceptance-report.json"));
+    assert.deepEqual(step.structuredOutput.schema, { type: "object", description: manifest.originalCwd });
+    assert.deepEqual(JSON.parse(readFileSync(step.structuredOutput.outputPath, "utf8")), { path: manifest.originalCwd });
+  }
+  assert.equal(config.nestedRoute.controlInbox, join(asyncDir, "control.jsonl"));
+  assert.equal(config.nestedRoute.eventSink, join(asyncDir, "nested-events.jsonl"));
+  assert.equal(status.runFanoutBudgetDescriptor.directory, config.runFanoutBudget.directory);
+  assert.deepEqual(status.parallelGroups, [{ start: 0, count: 1, stepIndex: 0 }]);
+  for (const nested of [status.steps[0].children[0], status.steps[0].children[0].children[0]]) {
+    assert.equal(nested.asyncDir, asyncDir);
+    assert.equal(nested.sessionFile, manager.getSessionFile());
+    assert.equal(nested.currentPath, cwd);
+    assert.equal(nested.controlInbox, config.nestedRoute.controlInbox);
+    assert.equal(nested.steps[0].sessionFile, manager.getSessionFile());
+    assert.equal(nested.steps[0].transcriptPath, status.outputFile);
+    assert.equal(nested.steps[0].currentPath, cwd);
+    assert.equal(nested.description, manifest.originalCwd);
+  }
   if (["probe", "race", "serve"].includes(action)) {
     const { waitFor, awaitsWithin } = await import(pathToFileURL(join(gateway, "test-support/wait-for.ts")).href);
     const socket = createServer();

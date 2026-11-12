@@ -223,7 +223,7 @@ def rewrites(l, report, registry, reverse=False, layout=None):
             selections.append((path, "candidate"))
         elif (path.name in {"status.json", "recovery-descriptor.json"} or re.fullmatch(r"async-cfg-.*\.json", path.name)
               or path.suffix == ".json" and path.is_relative_to(subagents / "async-subagent-results")):
-            selections.append((path, "subagent"))
+            selections.append((path, "subagent_config" if re.fullmatch(r"async-cfg-.*\.json", path.name) else "subagent"))
     selections.append((terminal / "sshd_config", "terminal"))
     trust_digest = None
     for path, kind in selections:
@@ -366,7 +366,7 @@ def validate_journal(l, journal, registry, report):
         for relative, record in [*layout["rewrites"].items(), *layout["inverse"].items()]:
             if (not l.relative_parts(relative) or not isinstance(record, dict)
                     or record.keys() != {"kind", "before", "after", "source_sha256"}
-                    or record["kind"] not in {"session", "trust", "observed", "upload", "target", "mission", "subagent", "terminal", "budget", "candidate"}
+                    or record["kind"] not in {"session", "trust", "observed", "upload", "target", "mission", "subagent", "subagent_config", "terminal", "budget", "candidate"}
                     or any(not isinstance(record[key], str) or re.fullmatch(r"[a-f0-9]{64}", record[key]) is None for key in ("before", "after", "source_sha256"))):
                 raise l.LayoutError("invalid_layout_journal")
 

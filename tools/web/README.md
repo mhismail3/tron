@@ -137,7 +137,7 @@ Do not manually edit `~/.tron/workspace/builds/ios-ota/index.html` or other gene
 
 Existing runtime paths remain as documented in the
 [OTA runbook](../../packages/ios-app/docs/development.md#over-the-air-development-install):
-`~/.tron/ios-builds` holds index/latest and the publisher's newest-five build
+`~/.tron/workspace/builds/ios-ota` holds index/latest and the publisher's newest-five build
 releases; `127.0.0.1:8444` / Tailscale HTTPS :8443 and `com.tron.ios-builds` remain
 host-owned. Preserve `/`, `/latest.plist`, `/builds/<id>/…`, manifest URLs, escaped
 notes and install links. No publishing/host authority comes from this guide.

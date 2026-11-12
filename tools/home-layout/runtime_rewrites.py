@@ -4,7 +4,7 @@ import json
 import re
 
 TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"')
-PATH_FIELDS = {"cwd", "sessionRoot", "sessionDir", "sessionFile", "outputFile", "asyncDir", "currentPath", "workflowReceiptPath", "transcriptPath", "structuredOutputPath", "structuredOutputSchemaPath", "outputPath", "outputDir", "worktreePath", "stdoutPath", "stderrPath", "finalOutputPath", "resultArtifactPath", "path", "resultPath", "configPath", "artifactsDir", "tempRoot", "workflowStateDir", "savedOutputPath", "agentFilePath", "piPackageRoot", "worktreeBaseDir"}
+PATH_FIELDS = {"cwd", "sessionRoot", "sessionDir", "sessionFile", "outputFile", "asyncDir", "currentPath", "workflowReceiptPath", "transcriptPath", "structuredOutputPath", "structuredOutputSchemaPath", "outputPath", "outputDir", "worktreePath", "stdoutPath", "stderrPath", "finalOutputPath", "resultArtifactPath", "path", "resultPath", "configPath", "artifactsDir", "tempRoot", "workflowStateDir", "savedOutputPath", "agentFilePath", "piPackageRoot", "worktreeBaseDir", "controlInbox", "eventSink", "outputClaimPath", "schemaPath", "acceptanceReportPath", "childSessionFactoryModule"}
 HISTORY = {"task", "prompt", "systemPrompt", "description", "structuredOutput", "recentOutput", "recentTools", "currentToolArgs", "error", "text", "notes", "message", "errors", "extensionBindings", "requiredExtensions", "structuredOutputSchema", "outputSchema", "args", "parameters", "launchBindingTask", "messages", "input", "output"}
 
 
@@ -60,9 +60,13 @@ def selected(kind, path, key):
         return not key and path == ("directory",)
     if kind == "candidate":
         return not key and path == ("sessionFile",)
-    if kind == "subagent":
-        containers = {"steps", "results", "artifactPaths", "outputPaths", "runFanoutBudget", "preloads", "skillPath", "extensions", "subagentOnlyExtensions", "parallelHandoff", "piOptions", "memory"}
-        return not key and not any(part in HISTORY for part in path[:-1]) and all(isinstance(part, int) or part in containers for part in path[:-1]) and (path[-1] in PATH_FIELDS or path[-2:] == ("runFanoutBudget", "directory") or "artifactPaths" in path or path[-2:-1] in (("outputPaths",), ("preloads",), ("skillPath",), ("extensions",), ("subagentOnlyExtensions",)))
+    if kind in {"subagent", "subagent_config"}:
+        containers = {"steps", "results", "artifactPaths", "outputPaths", "runFanoutBudget", "preloads", "skillPath", "extensions", "subagentOnlyExtensions", "parallelHandoff", "piOptions", "memory", "children", "nestedChildren", "parallel", "nestedRoute", "runFanoutBudgetDescriptor", "importAsyncRoot", "revivalLease", "sessionFiles"}
+        history = HISTORY
+        if kind == "subagent_config":
+            containers = containers | {"structuredOutput"}
+            history = HISTORY - {"structuredOutput"}
+        return not key and not any(part in history for part in path[:-1]) and all(isinstance(part, int) or part in containers for part in path[:-1]) and (path[-1] in PATH_FIELDS or path[-2:] in (("runFanoutBudget", "directory"), ("runFanoutBudgetDescriptor", "directory")) or "artifactPaths" in path or path[-2:-1] in (("outputPaths",), ("preloads",), ("skillPath",), ("extensions",), ("subagentOnlyExtensions",), ("sessionFiles",)))
     return False
 
 

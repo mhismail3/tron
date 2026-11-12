@@ -2,7 +2,7 @@ import { lstat, readFile, mkdir, rename, rm, writeFile } from "node:fs/promises"
 import { lstatSync, realpathSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { isAbsolute, join, parse } from "node:path";
+import { isAbsolute, join, parse, relative, resolve } from "node:path";
 import { GatewayError } from "../errors.js";
 import { durableAtomicWriteText } from "../foundation/durable-json.js";
 import type { JsonValue } from "../protocol/types.js";
@@ -179,17 +179,18 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
 async function recordUpdaterFailure(tronHome: string, channel: GatewayUpdateChannel, commandId: string, error: unknown): Promise<void> {
   if (!isAbsolute(tronHome)) return;
   const directory = tronHomePath(tronHome, "state/payloads", channel);
-  const root = parse(tronHome).root;
+  const home = resolve(tronHome);
+  const root = parse(home).root;
   let cursor = root;
-  for (const component of tronHome.slice(root.length).split(/[\\/]+/u).filter(Boolean)) {
+  for (const component of home.slice(root.length).split(/[\\/]+/u).filter(Boolean)) {
     cursor = join(cursor, component);
     const info = await lstat(cursor).catch(() => undefined);
-    if (info?.isSymbolicLink() || info && !info.isDirectory()) return;
+    if (!info?.isDirectory() || info.isSymbolicLink()) return;
     const uid = process.getuid?.();
-    if (info && cursor !== root && uid !== undefined && info.uid !== uid) return;
+    if (cursor === home && uid !== undefined && info.uid !== uid) return;
   }
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  for (const component of ["gateway", "payloads", channel]) {
+  for (const component of relative(home, directory).split(/[\\/]+/u).filter(Boolean)) {
     cursor = join(cursor, component);
     const info = await lstat(cursor).catch(() => undefined);
     const uid = process.getuid?.();

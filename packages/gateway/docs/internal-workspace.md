@@ -81,7 +81,7 @@ bounds, immutable authenticated copies, cancellation and retention still apply;
 a presentation snapshot is not an editable canonical document.
 
 The delegated provider's `PI_SUBAGENTS_TEMP_ROOT` remains
-`<tronHome>/internal/subagents`, set before extension loading. Its run lifecycle,
+`<tronHome>/state/subagents`, set before extension loading. Its run lifecycle,
 retention and cleanup remain provider-owned; workspace tmp is not a replacement.
 `internal/machine-group-id` remains opaque physical-machine identity;
 `internal/mac/wizard-state.json` remains wrapper-owned progress, with `.onboarded`

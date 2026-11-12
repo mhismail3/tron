@@ -118,7 +118,7 @@ not the worker session being resumed.
   `execve`s `/bin/sh -c 'exit <code>'` after Node's `exit` listeners, avoiding the
   libuv threadpool join that Darwin can wedge (libuv#5280, #1120); a non-zero exit is
   backed by a watcher that SIGKILLs the exact PID after `EXIT_STALL_GRACE_MS` (5 s,
-  `gateway.exit-stalled`). A settled stop writes `gateway/stop-completed.json`
+  `gateway.exit-stalled`). A settled stop writes `state/stop-completed.json`
   (`{version:1,pid,drainId}`); Mac Quit waits five seconds after it and may boot out
   the exact job only after a proven post-completion stall.
 - Shutdown closes runtime admission, drains entered creations, cancels unstarted

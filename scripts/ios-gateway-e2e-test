@@ -496,7 +496,7 @@ PY
   local spawned_pid
   detach nohup /usr/bin/env -i "${fixture_environment[@]}" \
     "HOME=$gateway_home" "TRON_DATA_DIR=$tron_home" "PI_CODING_AGENT_DIR=$agent_dir" \
-    "PI_SUBAGENTS_TEMP_ROOT=$gateway_home/internal/subagents" \
+    "PI_SUBAGENTS_TEMP_ROOT=$tron_home/state/subagents" \
     "TRON_MACHINE_GROUP_ID=tron-ios-e2e" \
     "TRON_GATEWAY_HOST=127.0.0.1" "TRON_GATEWAY_PORT=$port" \
     "TRON_GATEWAY_LAN_ENDPOINT=$e2e_lan_endpoint" "$@" \

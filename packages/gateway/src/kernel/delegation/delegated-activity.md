@@ -213,7 +213,7 @@ releases its claims.
   `ExtensionRunActivity`; the explicit pi-subagents `status.json` contract projects detached
   runs. Everything provider-specific lives in `delegated-provider.ts`; recognition needs the
   receipt-verified reserved closure, so look-alikes never become the provider.
-  `<tronHome>/internal/subagents/` is scanned under one work budget; a synthetic
+  `<tronHome>/state/subagents/` is scanned under one work budget; a synthetic
   `subagent:<runId>` identity is rekeyed when the tool call arrives; terminal status is
   authoritative; historical artifacts settle only with an exact tool-call/`asyncDir` binding.
   Liveness (drain blocker, dashboard phase, task runs) requires one of three things: the

@@ -64,7 +64,7 @@ unregistered path**, wherever it appears. Subtree descendants are known and foll
 boundary; explicit children override it. Nothing is skipped merely because it is old
 or large. Logs, reconstructible indexes/runtimes, scratch/locks, and regenerated
 `state/{local-auth,enrollment}.json` are excluded. Provider credentials are copied.
-Prepared `cache/gateway/payloads` are not copied: replace and bundled-offline reinstall
+Prepared `state/payloads` are not copied: replace and bundled-offline reinstall
 move the Stable channel into the operation, or restore it by redeploying.
 
 - Replace builds `partial-state-snapshot-<n>` before publishing `state-snapshot-<n>`;
@@ -149,7 +149,12 @@ growth. Changed sources or damaged snapshots refuse. Session bodies are streamed
 hash-checked during atomic header replacement. Rewrites select schema-owned trust keys,
 observed settings instances, Home targets, uploads, mission runtime locators, provider
 recovery/results/fanout locators and private SSH config paths; unknown containers and
-opaque history are not interpreted recursively as addresses.
+opaque history are not interpreted recursively as addresses. Pinned nested-child,
+parallel-child and import/resume locators are owned fields. Runner configurations
+rewrite structured-output file locators, never their schema or model result bodies;
+status/result `structuredOutput` values remain opaque. Parallel-group counters have
+no path fields. Symlinked homes and ancestors refuse before cwd encoding or SSH
+label selection; the admitted home address must be physical.
 
 Inverse carries current files and appended bodies back. Before/after provenance avoids
 restoring old whole files or blindly reversing every new-prefix string. Values already
