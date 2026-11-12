@@ -1,4 +1,5 @@
 import { GatewayError } from "../../errors.js";
+import { redactCredentials } from "../../util/credential-redaction.js";
 import { arrayOfStrings, boolean, object, oneOf, string } from "../../util/validation.js";
 import type { Direction } from "./tool-contract.js";
 import type { ValueType } from "./settings-types.js";
@@ -21,14 +22,21 @@ function refuse(label: string, reason: string): never {
   throw new GatewayError("invalid_request", `${label} ${reason}`);
 }
 
-function secretFreeArgument(argument: string, label: string): string {
-  const name = argument.replace(/^-{1,2}/u, "").split("=", 1)[0]!;
-  if (SECRET_NAME.test(name)) refuse(label, "names a secret; MCP secrets are set in mcp.json or the app, never through settings");
-  if (/[\u0000\r\n]/u.test(argument)) refuse(label, "has a control character");
-  return argument;
+function secretFreeText(text: string, label: string, what: string): string {
+  if (redactCredentials(text) !== text) refuse(label, `${what} carries a credential; MCP secrets are set in mcp.json or the app, never through settings`);
+  if (/[\u0000\r\n]/u.test(text)) refuse(label, `${what} has a control character`);
+  return text;
+}
+
+function secretFreeToken(token: string, label: string, what: string): string {
+  secretFreeText(token, label, what);
+  const name = token.replace(/^-{1,2}/u, "").split("=", 1)[0]!;
+  if (SECRET_NAME.test(name)) refuse(label, `${what} names a secret; MCP secrets are set in mcp.json or the app, never through settings`);
+  return token;
 }
 
 function secretFreeUrl(value: string, label: string): string {
+  secretFreeText(value, label, "url");
   let parsed: URL;
   try { parsed = new URL(value); } catch { refuse(label, "must be an absolute URL"); }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") refuse(label, "must use HTTP or HTTPS");
@@ -51,10 +59,10 @@ export function validateMcpServerValue(value: unknown, label: string): McpServer
   if (hasCommand === hasUrl) refuse(label, "needs exactly one of command (stdio) or url (HTTP)");
   const result: McpServerValue = {};
   if (hasCommand) {
-    const command = string(raw.command, `${label}.command`, { min: 1, max: 1_024 });
-    if (/[\u0000\r\n]/u.test(command)) refuse(label, "command has a control character");
+    const command = secretFreeText(string(raw.command, `${label}.command`, { min: 1, max: 1_024 }), label, "command");
+    for (const token of command.split(/\s+/u)) secretFreeToken(token, label, "command");
     result.command = command;
-    if (raw.args !== undefined) result.args = arrayOfStrings(raw.args, `${label}.args`, 64).map(argument => secretFreeArgument(argument, label));
+    if (raw.args !== undefined) result.args = arrayOfStrings(raw.args, `${label}.args`, 64).map(argument => secretFreeToken(argument, label, "argument"));
   } else {
     if (raw.args !== undefined) refuse(label, "args apply only to a command");
     result.url = secretFreeUrl(string(raw.url, `${label}.url`, { min: 1, max: 4_096 }), label);
@@ -73,8 +81,10 @@ export function mcpServerOnDisk(server: string, raw: unknown): McpServerValue {
   }
 }
 
-function runs(value: McpServerValue | undefined): boolean {
-  return value !== undefined && value.enabled !== false;
+const VISIBILITY: Record<McpExposure | "codemode-deferred", number> = { hidden: 0, codemode: 1, "codemode-deferred": 1, deferred: 1, direct: 2 };
+
+function visibility(value: McpServerValue | undefined): number {
+  return value === undefined || value.enabled === false ? 0 : VISIBILITY[value.exposure ?? "codemode"];
 }
 
 export function mcpServerDirection(before: unknown, after: unknown): Direction {
@@ -82,9 +92,8 @@ export function mcpServerDirection(before: unknown, after: unknown): Direction {
   if (before === undefined) return "widen";
   const was = before as McpServerValue;
   const now = after as McpServerValue;
-  if (!runs(was) && runs(now)) return "widen";
   if (JSON.stringify([was.command, was.args ?? [], was.url]) !== JSON.stringify([now.command, now.args ?? [], now.url])) return "widen";
-  return "narrow";
+  return visibility(now) > visibility(was) ? "widen" : "narrow";
 }
 
 export const mcpServerType: ValueType = {

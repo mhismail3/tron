@@ -166,9 +166,16 @@ const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 const display = new DisplayOwner(displayArtifacts, browserLiveViews, () => sessions);
 const macTerminalKeys = new MacTerminalService(config.tronHome);
 const settingsSchema = createGatewaySettingsSchema();
+const mcpAdmin = new McpAdminService(
+  config.agentDir,
+  piCliBundle(),
+  new MacKeychainMcpCredentialOwner(),
+  (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
+);
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
   schema: settingsSchema,
   macTerminalKeys,
+  mcpAdmin,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   trust,
@@ -752,12 +759,7 @@ const service = new GatewayService({
   automations,
   knowledge,
   home: home(),
-  mcpAdmin: new McpAdminService(
-    config.agentDir,
-    piCliBundle(),
-    new MacKeychainMcpCredentialOwner(),
-    (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
-  ),
+  mcpAdmin,
 });
 outsideSettings.startWatching(error => logger.log("warning", "Outside settings comparison failed", {
   event: "settings.outside.failed", source: "settings", error: error instanceof Error ? error.message : String(error),
