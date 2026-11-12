@@ -2642,11 +2642,14 @@ export class RuntimeRegistry implements SessionOperations {
     const transactional = !publish;
     const { slots, alreadyReloading } = await this.mutex.run(() => {
       const alreadyReloading = this.trustReloadProjects.has(projectDir);
+      if (!transactional && alreadyReloading) {
+        throw new GatewayError("busy", "Project trust is being reconfigured", true);
+      }
       if (transactional) this.trustReloadProjects.add(projectDir);
       return { slots: [...this.slots.values()].filter(slot => slot.projectDir === projectDir), alreadyReloading };
     });
-    await Promise.all(slots.map(slot => this.freshness.pause(slot)));
     try {
+      await Promise.all(slots.map(slot => this.freshness.pause(slot)));
       await this.mutex.run(() => {
         if (slots.some(slot => slot.isBusy)) {
           throw new GatewayError("busy", "Stop active sessions before changing project trust", true);
