@@ -18,10 +18,10 @@ function requireField<T>(value: T | undefined, name: string): T {
   return value;
 }
 
-function createTrigger(request: ScheduleToolRequest, now: number): AutomationTrigger {
+function automationTrigger(request: ScheduleToolRequest, now: number): AutomationTrigger {
   const kinds = [request.at !== undefined, request.everyMinutes !== undefined,
     request.timezone !== undefined || request.localTime !== undefined || request.weekdays !== undefined].filter(Boolean).length;
-  if (kinds !== 1) throw new GatewayError("invalid_request", "Create requires exactly one trigger form");
+  if (kinds !== 1) throw new GatewayError("invalid_request", `${request.action} requires exactly one trigger form`);
   if (request.at !== undefined) return { kind: "once", at: request.at };
   if (request.everyMinutes !== undefined) {
     return { kind: "interval", everySeconds: request.everyMinutes * 60, anchorAt: new Date(now).toISOString() };
@@ -34,9 +34,9 @@ function createTrigger(request: ScheduleToolRequest, now: number): AutomationTri
   };
 }
 
-function createAction(request: ScheduleToolRequest): AutomationAction {
+function automationAction(request: ScheduleToolRequest): AutomationAction {
   if ((request.prompt === undefined) === (request.notificationMessage === undefined)) {
-    throw new GatewayError("invalid_request", "Create requires exactly one of prompt or notificationMessage");
+    throw new GatewayError("invalid_request", `${request.action} requires exactly one of prompt or notificationMessage`);
   }
   return request.prompt !== undefined
     ? { kind: "sessionPrompt", text: request.prompt }
@@ -92,20 +92,26 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
     return { message, details: object.details ?? null };
   }
 
+  private async target(sessionId: string, target: ScheduleToolRequest["target"]): Promise<AutomationRecord["target"]> {
+    if (target === "home") {
+      const route = this.service.homeRoute();
+      return { kind: "home", homeId: route.homeId, routeGeneration: route.routeGeneration };
+    }
+    return target === "newSessionInWorkspace"
+      ? { kind: "workspace", cwd: await this.service.workspaceForSession(sessionId), sessionPolicy: "newPerRun" }
+      : { kind: "existingSession", sessionId };
+  }
+
   private async mutate(sessionId: string, toolCallId: string, request: ScheduleToolRequest): Promise<JsonValue> {
     if (request.action === "create") {
-      const route = request.target === "home" ? this.service.homeRoute() : undefined;
       const created = await this.service.create({
         name: requireField(request.name, "name"),
         activation: request.activate === true ? "enabled" : "draft",
-        target: route ? { kind: "home", homeId: route.homeId, routeGeneration: route.routeGeneration }
-          : request.target === "newSessionInWorkspace"
-            ? { kind: "workspace", cwd: await this.service.workspaceForSession(sessionId), sessionPolicy: "newPerRun" }
-            : { kind: "existingSession", sessionId },
-        trigger: createTrigger(request, this.now()),
+        target: await this.target(sessionId, request.target),
+        trigger: automationTrigger(request, this.now()),
         misfirePolicy: "latest",
         overlapPolicy: "skip",
-        action: createAction(request),
+        action: automationAction(request),
       }, { kind: "assistant", sessionId, sourceId: toolCallId, ...(request.expiresAt === undefined ? {} : { expiresAt: request.expiresAt }) });
       return { message: `Created ${created.activation} automation “${created.name}”.`, details: created as unknown as JsonValue };
     }
@@ -113,6 +119,19 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
     const id = requireField(request.automationId, "automationId");
     const current = this.service.get(id);
     if (!this.belongsToSession(current, sessionId)) throw new GatewayError("not_found", "Automation does not belong to this session");
+    if (request.action === "update") {
+      if (request.activate !== undefined || request.expiresAt !== undefined) throw new GatewayError("invalid_request", "Update preserves activation and expiry; use enable or pause to change activation");
+      const hasTrigger = [request.at, request.everyMinutes, request.timezone, request.localTime, request.weekdays].some(value => value !== undefined);
+      const hasAction = request.prompt !== undefined || request.notificationMessage !== undefined;
+      const updated = await this.service.update(id, requireField(request.expectedRevision, "expectedRevision"), {
+        name: request.name ?? current.name, ...(current.description === undefined ? {} : { description: current.description }),
+        target: request.target === undefined ? current.target : await this.target(sessionId, request.target),
+        trigger: hasTrigger ? automationTrigger(request, this.now()) : current.trigger,
+        action: hasAction ? automationAction(request) : current.action,
+        misfirePolicy: current.misfirePolicy, overlapPolicy: current.overlapPolicy, executionDeadlineSeconds: current.executionDeadlineSeconds,
+      });
+      return { message: `Updated automation “${updated.name}”.`, details: updated as unknown as JsonValue };
+    }
     if (request.action === "enable" || request.action === "pause" || request.action === "delete") {
       const revision = requireField(request.expectedRevision, "expectedRevision");
       if (request.action === "delete") {
