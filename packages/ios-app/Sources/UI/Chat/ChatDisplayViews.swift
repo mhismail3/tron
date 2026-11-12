@@ -1017,21 +1017,17 @@ struct DisplayHTMLWebView: UIViewRepresentable {
             decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
         ) {
             preferences.allowsContentJavaScript = runsScripts
-            decisionHandler(admits(navigationAction, in: webView) ? .allow : .cancel, preferences)
+            decisionHandler(admits(navigationAction) ? .allow : .cancel, preferences)
         }
 
-        private func admits(_ action: WKNavigationAction, in webView: WKWebView) -> Bool {
+        private func admits(_ action: WKNavigationAction) -> Bool {
             guard let url = action.request.url, url.scheme?.lowercased() == "about" else { return false }
             if action.targetFrame?.isMainFrame == false { return true }
             if awaitsRequestedLoad {
                 awaitsRequestedLoad = false
                 return true
             }
-            return url.fragment != nil && Self.document(url) == Self.document(webView.url)
-        }
-
-        private static func document(_ url: URL?) -> String? {
-            url?.absoluteString.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init)
+            return url.absoluteString.hasPrefix("about:blank#")
         }
 
         func webView(

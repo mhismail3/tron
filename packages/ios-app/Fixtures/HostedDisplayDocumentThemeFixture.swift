@@ -49,8 +49,8 @@ enum HostedDisplayDocumentThemeFixture {
         <link rel="preconnect" href="\(idle)/"><link rel="stylesheet" href="\(http)/stylesheet">
         <style>body{margin:0;font:18px system-ui;background:#fff;color:#222;background-image:url("\(http)/css-image")}
         p{margin:0;padding:6px 16px}.pinned{position:sticky;top:0;background:#fff}.tall{height:1600px}</style></head>
-        <body><p>First content line</p><p class="pinned">Pinned line</p><p id="state">Script idle</p>
-        <div id="log"></div><img src="\(http)/image" alt=""><div class="tall"></div>
+        <body><p>First content line</p><p class="pinned">Pinned line</p><p><a href="#end">Jump to end</a></p><p id="state">Script idle</p>
+        <div id="log"></div><img src="\(http)/image" alt=""><div class="tall"></div><p id="end">End of page</p>
         <script>
         const say = text => { const p = document.createElement("p"); p.textContent = text; document.getElementById("log").appendChild(p); };
         const attempt = async run => { try { await run(); } catch (error) {} };
@@ -64,12 +64,6 @@ enum HostedDisplayDocumentThemeFixture {
             const canvas = document.createElement("canvas");
             say("WebGL " + Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl")));
           });
-          await attempt(() => new Promise(done => {
-            addEventListener("hashchange", done, { once: true });
-            setTimeout(done, 3000);
-            location.hash = "probe";
-          }));
-          say("Fragment " + location.hash);
           await attempt(() => { say(eval("'Eval ran'")); });
           await attempt(() => {
             const worker = new Worker(URL.createObjectURL(new Blob(["postMessage(1)"], { type: "text/javascript" })));

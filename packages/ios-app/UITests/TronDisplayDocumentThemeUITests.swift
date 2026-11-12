@@ -149,14 +149,17 @@ import UIKit
                       "A blob: module import runs: \(app.debugDescription)")
         XCTAssertTrue(app.staticTexts["WebGL true"].firstMatch.waitForExistence(timeout: 10),
                       "A WebGL canvas is available: \(app.debugDescription)")
-        XCTAssertTrue(app.staticTexts["Fragment #probe"].firstMatch.waitForExistence(timeout: 10),
-                      "Links inside the page still work: \(app.debugDescription)")
         XCTAssertTrue(app.staticTexts["Navigation attempted"].firstMatch.waitForExistence(timeout: 30), app.debugDescription)
         Thread.sleep(forTimeInterval: 3)
         XCTAssertEqual(probe.summary, "requests=[] idle=0 datagrams=0", "The sandboxed page reached the network")
         XCTAssertTrue(app.staticTexts["First content line"].firstMatch.exists, "Navigation away is cancelled")
         XCTAssertFalse(app.staticTexts["Eval ran"].firstMatch.exists, "The policy admits no eval")
         XCTAssertFalse(app.staticTexts["Worker ran"].firstMatch.exists, "The policy admits no workers")
+        let first = app.staticTexts["First content line"].firstMatch
+        let resting = first.frame.minY
+        app.links["Jump to end"].firstMatch.tap()
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertLessThan(first.frame.minY, resting - 200, "A link inside the page still scrolls to its target")
         capture(app, "html-sheet-sandboxed-script")
         app.terminate()
 
