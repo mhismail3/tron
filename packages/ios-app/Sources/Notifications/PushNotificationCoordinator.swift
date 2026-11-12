@@ -585,7 +585,6 @@ final class PushNotificationCoordinator {
               document.appAttestKeyRejected == true,
               registrationTask == nil else { throw PushRetryRefusal.changedBeforeRetry }
         registrationGeneration &+= 1
-        automaticRetryAvailable = false
         try rotateInvalidKey()
         diagnostic = .idle
         scheduleRegistration()
@@ -616,7 +615,6 @@ final class PushNotificationCoordinator {
             catch let error as PushRegistrationError {
                 guard self.registrationIsValid(generation: generation) else { return }
                 if case .rejected(401) = error, self.automaticRetryAvailable, self.document.appAttestKeyRejected == true {
-                    self.automaticRetryAvailable = false
                     do { try self.rotateInvalidKey() }
                     catch { self.readiness = .pending; self.diagnostic = .stoppedPersistence; return }
                     self.diagnostic = .idle
@@ -812,7 +810,6 @@ final class PushNotificationCoordinator {
                     }
                     try rotateInvalidKey()
                     recoveredInvalidKey = true
-                    automaticRetryAvailable = false
                     mode = .attestation
                     continue
                 } catch PushRegistrationError.persistence {
@@ -869,8 +866,11 @@ final class PushNotificationCoordinator {
         registrationTask = nil
     }
 
+    /// Every key rotation spends this launch's one automatic budget: the card, the in-loop
+    /// assertion recovery and the rejected-key retry all share it, so no path rotates twice.
     private func rotateInvalidKey() throws {
         try persistAppAttestKeyID(nil, rejected: false)
+        automaticRetryAvailable = false
     }
 
     private func markCurrentKeyRejected() throws {
