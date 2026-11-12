@@ -19,7 +19,7 @@ Every field has a consumer; an unknown field fails `check`.
 | `credential` | `true` when the path holds a key or token | `audit`: group or other access to the registered entry (a file, or the folder that holds the keys) is a `credential_mode` finding |
 | `container` | An aggregate whose registered children carry their own contracts; it does not admit unknown children | `audit` |
 | `subtree` | Undeclared descendants belong to this boundary's owner; explicit children still take precedence | `check`, `audit`, backup selection |
-| `prune` | The release rule its owner enforces: `maxAge` (`30m`, `24h`, `14d`), `maxEntries`, `maxBytes`, `keepNewest`, or `when` for an event; `by` names the enforcer when it is not the owner. Required on every `rebuild` or `scratch` subtree | `check` |
+| `prune` | The release rule its owner enforces: `maxAge` (`30m`, `24h`, `14d`), `maxEntries`, `maxBytes`, `keepNewest`, or `when` for an event; `by` names the enforcer when it is not the owner. Required on every `rebuild` or `scratch` subtree. A bound covers everything the entry matches together: a subtree's contents, or all files a pattern matches (`logs/deploy.jsonl*` is two 1 MiB files, so 2 MiB) | `check` |
 
 The registry's `retired` list holds `{from, to}` moves for `migrate`; a path is
 home-relative or starts with `~/`. It is empty when no layout change is pending.
@@ -33,7 +33,10 @@ not the blob store's. Provider run retention is 30-day eligibility with terminal
 reference and resumability protection, not unconditional expiry. Installed Pi resources
 can contain user source and state. `gateway/settings/observed.json` is `keep` because it
 is the baseline that outside-change detection compares against, and
-`gateway/model-recents.json` because nothing rebuilds the user's recent models.
+`gateway/model-recents.json` because nothing rebuilds the user's recent models. Mission
+records (`agent/missions`), unread state (`gateway/session-attention.json`), Mac setup
+progress (`internal/mac`) and the onboarding marker (`internal/run/.onboarded`) are
+`keep` for the same reason: losing one is visible and nothing regenerates it.
 
 ## Roots
 
@@ -70,13 +73,15 @@ Two tools copy a home and both select by the registry: a path is copied when its
 `backup` flag says so, and **every path the registry does not know is copied too**,
 wherever it sits (an unregistered file in `logs/` is copied; the registered log files
 beside it are not). A path under a `subtree` entry is known: it belongs to that entry and
-follows it. Nothing is skipped because of its name or age.
+follows it; so does a name that an entry's pattern matches (`logs/mac.jsonl.bak` matches
+`logs/mac.jsonl*`). Nothing is skipped because of its age or size.
 
 - `scripts/tron mac replace` clones the selection into the operation's `state-snapshot-<n>`
   before the swap, building it as `partial-state-snapshot-<n>` first so an interrupted
   clone is rebuilt whole. Symlinks are cloned as links. Folders that are only partly
   selected are created owner-only. The runner works from a private copy of the registry
-  and of `home_layout.py`, staged and validated when the operation starts.
+  and of `home_layout.py`, staged and validated with the runner's scripts each time the
+  runner is launched (a resumed operation takes them from the checkout that resumes it).
 - `scripts/tron mac reinstall` stages the registry in its operation directory when the
   operation begins, then inventories and copies the selection; its frozen-source check
   covers the same paths. A path outside the selection may change during the offline
@@ -139,9 +144,10 @@ refuse: `destination_exists`, `unsafe_type` (a symlink or special file), `symlin
 resolve against `$HOME`, printed as `user_home`. `blockers` holds `gateway_running`
 when the home's agent-runtime lock was refreshed in the last 60 seconds. `--status` prints
 the overall state (`nothing_declared`, `nothing_to_move`, `not_started`, `partly_applied`,
-`applied`, `conflict`) and each move's state. Exit **0** means nothing would be refused
-(dry run) or nothing is pending (status), **1** means refusals, blockers or pending moves,
-**2** an unreadable home or registry. Sizes are the entry's own metadata; no tree is
+`applied`, `conflict`) and each move's state. For `--dry-run`, exit **0** means nothing
+would be refused and **1** a refusal or a blocker. For `--status`, exit **0** means no move
+is pending and **1** a pending move or a conflict; blockers are printed but do not change
+it. Exit **2** is an unreadable home or registry. Sizes are the entry's own metadata; no tree is
 walked and no file body is read.
 
 ## Rules

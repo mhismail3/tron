@@ -1050,6 +1050,7 @@ def snapshot_journey():
             interrupted = operation / 'partial-state-snapshot-2'
             (interrupted / 'gateway').mkdir(parents=True)
             (interrupted / 'gateway/stale').write_text('from an interrupted attempt')
+            (interrupted / '.git').write_text('gitdir: /nonexistent/worktrees/home\n')
             result = snapshot(2)
             second = operation / 'state-snapshot-2'
             record(result.returncode == 0 and (second / SNAPSHOT_KEPT[0]).is_file() and not (second / 'gateway/stale').exists()

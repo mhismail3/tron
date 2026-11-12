@@ -393,7 +393,7 @@ class Runner:
         if snapshot.exists():
             raise Failure(f'raw snapshot already exists; preserving it rather than overwriting: {snapshot}')
         paths = staged_registry(operation / 'runner')
-        failures = remove_tree(partial) if partial.exists() else []
+        failures = remove_tree(partial, worktree=False) if partial.exists() else []
         if failures:
             raise Failure(f'could not clear an interrupted snapshot: {failures[0]}')
         private_mkdir(partial)
@@ -604,14 +604,16 @@ def prune_store(platform, operation, revision):
     return failures
 
 
-def remove_tree(path):
-    """Delete `path`, including Gateway payloads bundle-gateway.sh sealed read-only (`chmod -R a-w`)."""
+def remove_tree(path, worktree=True):
+    """Delete `path`, including Gateway payloads bundle-gateway.sh sealed read-only (`chmod -R a-w`).
+
+    A build is a git worktree and is unregistered first; `worktree=False` is for a tree that only holds copies."""
     try:
         if path.is_dir() and not path.is_symlink():
             for directory, _, _ in os.walk(path):
                 os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
-            registration_dropped = not (path / '.git').is_file() or git_succeeds(path, 'worktree', 'remove', '--force', path,
-                                                                         timeout=600)
+            registration_dropped = not worktree or not (path / '.git').is_file() or git_succeeds(
+                path, 'worktree', 'remove', '--force', path, timeout=600)
             if path.exists():
                 shutil.rmtree(path)
             if not registration_dropped:
