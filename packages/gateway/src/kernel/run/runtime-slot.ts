@@ -3696,6 +3696,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     const appendTexts = loader.getAppendSystemPrompt();
     const appendPaths = loader.getAppendSystemPromptSources().map((source) => source.path);
     return projectAgentInstructions({
+      preview: session.isIdle,
       prompt: session.systemPrompt,
       tronContext: turnContext,
       ...(customPrompt ? { customPrompt: { text: customPrompt, ...(loader.getSystemPromptSource() ? { path: loader.getSystemPromptSource()!.path } : {}) } } : {}),

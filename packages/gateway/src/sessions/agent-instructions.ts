@@ -32,6 +32,7 @@ export interface AgentInstructions {
 interface SourceInfoLike { path: string; source: string; scope: string; origin: string }
 
 interface AgentInstructionsInput {
+  preview: boolean;
   prompt: string;
   tronContext: string;
   customPrompt?: { text: string; path?: string };
@@ -46,7 +47,14 @@ const TRON_HEADING = "## Tron operating context\n";
 const OPEN_TAG = /\n\n<([a-z][a-z0-9_-]*)>\n/y;
 
 export function projectAgentInstructions(input: AgentInstructionsInput): AgentInstructions {
-  const parsed = splitPrompt(input);
+  let parsed = splitPrompt(input);
+  const tron = parsed?.blocks.find(block => block.name === "tron");
+  if (input.preview && tron && tron.body !== input.tronContext) {
+    const previous = `<tron>\n${tron.body}\n</tron>`;
+    const at = input.prompt.lastIndexOf(previous);
+    input = { ...input, prompt: input.prompt.slice(0, at) + `<tron>\n${input.tronContext}\n</tron>` + input.prompt.slice(at + previous.length) };
+    parsed = splitPrompt(input);
+  }
   if (!parsed) return { text: input.prompt, sections: [{ id: "prompt", timing: "turn", text: input.prompt }] };
 
   const tools = new Map(input.tools.map((tool) => [tool.name, tool]));
@@ -60,12 +68,14 @@ export function projectAgentInstructions(input: AgentInstructionsInput): AgentIn
     const section: InstructionSection = { id: block.name, timing: SESSION_SECTIONS.has(block.name) ? "session" : "turn", text: block.body };
     const entries = sectionEntries(block.name, block.body, input, tools);
     if (entries) section.entries = entries;
-    else section.source = SESSION_SECTIONS.has(block.name) ? { kind: "pi" } : { kind: "unknown" };
+    else section.source = block.name === "tron" ? { kind: "module", name: "tron-core" } : SESSION_SECTIONS.has(block.name) ? { kind: "pi" } : { kind: "unknown" };
     sections.push(section);
   }
 
+  if (parsed.blocks.some(block => block.name === "tron")) return { text: input.prompt, sections };
+
   const appended = parsed.rest === "" ? input.tronContext : parsed.rest.slice(2);
-  const text = parsed.rest === "" ? `${input.prompt}\n\n${input.tronContext}` : input.prompt;
+  const text = parsed.rest === "" ? `${input.prompt}\n\n<tron>\n${input.tronContext}\n</tron>` : input.prompt;
   sections.push(appended.startsWith(TRON_HEADING)
     ? { id: "tron", timing: "turn", text: appended, source: { kind: "module", name: "tron-core" } }
     : { id: "appended", timing: "turn", text: appended, source: { kind: "unknown" } });
