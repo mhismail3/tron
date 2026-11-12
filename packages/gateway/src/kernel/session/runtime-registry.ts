@@ -515,6 +515,7 @@ export class RuntimeRegistry implements SessionOperations {
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
       stopSteeringDiagnostic?: RuntimeSlotDependencies["stopSteeringDiagnostic"];
       manualCompactionAdopted?: RuntimeSlotDependencies["manualCompactionAdopted"];
+      requestRecord?: RuntimeSlotDependencies["requestRecord"];
       capabilityDiagnostic?: RuntimeSlotDependencies["capabilityDiagnostic"];
       codemodeDiagnostic?: RuntimeSlotDependencies["codemodeDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
@@ -1246,6 +1247,7 @@ export class RuntimeRegistry implements SessionOperations {
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
       ...(this.options.stopSteeringDiagnostic ? { stopSteeringDiagnostic: this.options.stopSteeringDiagnostic } : {}),
       ...(this.options.manualCompactionAdopted ? { manualCompactionAdopted: this.options.manualCompactionAdopted } : {}),
+      ...(this.options.requestRecord ? { requestRecord: this.options.requestRecord } : {}),
       ...(this.options.capabilityDiagnostic ? { capabilityDiagnostic: this.options.capabilityDiagnostic } : {}),
       ...(this.options.codemodeDiagnostic ? { codemodeDiagnostic: this.options.codemodeDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),

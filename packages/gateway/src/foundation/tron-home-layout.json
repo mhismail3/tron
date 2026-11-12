@@ -104,6 +104,7 @@
 
     "logs": {"owner": "gateway/transport", "class": "log", "container": true},
     "logs/gateway.jsonl*": {"owner": "gateway/transport", "prune": {"keepNewest": 8, "maxBytes": 41943040}},
+    "logs/requests.jsonl*": {"owner": "gateway/run", "prune": {"keepNewest": 16, "maxBytes": 83886080}},
     "logs/gateway-stderr.log": {"owner": "mac-app/gateway-payload", "prune": {"maxBytes": 1048576, "when": "truncated on Mac launch"}},
     "logs/mac.jsonl*": {"owner": "mac-app/support", "prune": {"keepNewest": 4, "maxBytes": 4194304}},
     "logs/deploy.jsonl*": {"owner": "repo/dev", "prune": {"keepNewest": 2, "maxBytes": 2097152}},

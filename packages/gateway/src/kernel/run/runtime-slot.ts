@@ -45,6 +45,7 @@ import { type CommandReplacement } from "./run-invocations.js";
 import { RunOperations } from "./run-operations.js";
 import { successfulAssistantCompletion, type CanonicalAssistantCompletion, type SessionAttentionRebindDisposition } from "./completion-facts.js";
 import { RunRequestPipeline } from "./request-pipeline.js";
+import type { RequestRecord } from "./request-record.js";
 import { boundToolCancellation } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "./compaction-policy.js";
 import type { RequestPolicy } from "../host/request-policy.js";
@@ -237,6 +238,7 @@ export interface RuntimeSlotDependencies {
   compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
   stopSteeringDiagnostic?: (diagnostic: { sessionId: string; queuedSteerCount: number; outcome: "started" | "completed" | "stopped" | "failed" | "unknown" }) => void;
   manualCompactionAdopted?: NonNullable<RunOperations<FixedSetting>["dependencies"]["manualCompactionAdopted"]>;
+  requestRecord?: (record: RequestRecord) => void;
   capabilityDiagnostic?: (aggregate: { name: string; count: 1; status: "ok" | "error" | "refused" | "unknown"; latencyBucket: "lt100ms" | "lt1s" | "lt10s" | "gte10s" | "unknown" }) => void;
   codemodeDiagnostic?: (diagnostic: { sessionId: string; outcome: "completed" | "failed" | "aborted" | "timeout"; durationMs: number; nestedCallCount: number; complete: boolean }) => void;
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
@@ -1302,6 +1304,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
           }
         },
         compactionStream: compactionPolicy.wrap.bind(compactionPolicy),
+        ...(this.dependencies.requestRecord ? { record: outcome => this.dependencies.requestRecord?.({ sessionId: this.id, kind: taskWorker ? "worker" : profile.name, ...outcome }) } : {}),
         ...(homeRequestPolicy ? {
           policyStream: baseStream => homeRequestPolicy.wrapStreamFunction(baseStream),
           outer: {

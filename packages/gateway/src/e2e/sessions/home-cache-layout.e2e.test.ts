@@ -1,5 +1,5 @@
 import { displayOwnerOf, createTestRegistry, homeOwnerOf } from "../../../test-support/gateway-registry.js";
-import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import { createServer, type IncomingHttpHeaders, type Server, type ServerResponse } from "node:http";
 import { settingsDependencies } from "../../../test-support/settings-dependencies.js";
 import { homeMemoryChange } from "../../../test-support/session-settings-change.js";
 import { createHash } from "node:crypto";
@@ -17,6 +17,7 @@ import { EPISODIC_DEFAULTS } from "../../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../../modules/home/home-memory.js";
 import { HOME_NONCE_MARKER, markHomeMemoryCache, type HomeRequestRecord } from "../../modules/home/home-request-policy.js";
 import type { HomeStatus } from "../../protocol/types.js";
+import type { RequestRecord } from "../../kernel/run/request-record.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { awaitsWithin, waitFor } from "../../../test-support/wait-for.js";
@@ -28,6 +29,7 @@ const SMALL_MODEL_ID = "small-local";
 const SUMMARY = (n: number) => `summary ${n} ${"s".repeat(470)}`.slice(0, 490);
 const REPORT_PATH = "test-results/home-cache-layout/report.json";
 const CACHE_READ = 7;
+const CACHE_WRITE = 11;
 const client = { id: "terminal", identity: "device:home-cache", isLocal: false, unsubscribe: () => {} } as unknown as ClientContext;
 
 interface Captured {
@@ -48,9 +50,12 @@ afterAll(async () => {
   process.stdout.write(`home-cache-layout e2e: ${report.cases.length} cases -> ${REPORT_PATH}\n`);
 });
 
-async function endpoint(responses = false): Promise<{ server: Server; port: number; requests: Captured[]; toolCalls: Array<{ name: string; input: unknown }> }> {
+const HELD_REQUEST = "hold this request open";
+
+async function endpoint(responses = false): Promise<{ server: Server; port: number; requests: Captured[]; toolCalls: Array<{ name: string; input: unknown }>; held: ServerResponse[] }> {
   const requests: Captured[] = [];
   const toolCalls: Array<{ name: string; input: unknown }> = [];
+  const held: ServerResponse[] = [];
   let summaries = 0;
   const server = createServer((request, response) => {
     let raw = "";
@@ -62,11 +67,12 @@ async function endpoint(responses = false): Promise<{ server: Server; port: numb
       const kind: Captured["kind"] = system.includes(EPISODIC_COMPACT_PROMPT.slice(0, 40)) ? "summarizer"
         : system.includes("## Tron Home") ? "home" : "ordinary";
       requests.push({ kind, body, headers: request.headers });
+      if (raw.includes(HELD_REQUEST)) return void held.push(response);
       const tool = kind === "home" ? toolCalls.shift() : undefined;
       const text = kind === "summarizer" ? SUMMARY(++summaries) : `reply ${requests.length} ${"r".repeat(900)}`;
       const event = (type: string, data: Record<string, unknown>) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
       const usage = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: kind === "summarizer" ? CACHE_READ : 0,
-        cache_creation_input_tokens: 0 };
+        cache_creation_input_tokens: kind === "home" ? CACHE_WRITE : 0 };
       if (responses) {
         const output = tool
           ? { type: "function_call", id: `fc_${requests.length}`, call_id: `call_${requests.length}`, name: tool.name, arguments: JSON.stringify(tool.input), status: "completed" }
@@ -96,13 +102,14 @@ async function endpoint(responses = false): Promise<{ server: Server; port: numb
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { server, port: (server.address() as AddressInfo).port, requests, toolCalls };
+  return { server, port: (server.address() as AddressInfo).port, requests, toolCalls, held };
 }
 
 async function fixture(responses = false) {
   const root = await mkdtemp(join(tmpdir(), "tron-home-cache-"));
   const local = await endpoint(responses);
   disposals.push(async () => {
+    for (const response of local.held) response.destroy();
     await new Promise<void>((resolve) => local.server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   });
@@ -120,6 +127,7 @@ async function fixture(responses = false) {
   } } }));
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
   const records: HomeRequestRecord[] = [];
+  const requestRecords: RequestRecord[] = [];
   const configurations: Array<{ sessionId: string; blocker: unknown }> = [];
   let settings: ReturnType<typeof settingsDependencies> | undefined;
   const registry = await createTestRegistry({ agentDir, tronHome, idleRuntimeMs: 60_000,
@@ -132,6 +140,7 @@ async function fixture(responses = false) {
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     gatewayModelRuntime: runtime,
     homeRequestDiagnostic: (record) => records.push(record),
+    requestRecord: (record) => requestRecords.push(record),
   });
   disposals.push(async () => { await registry.dispose(); });
   const service = new GatewayService({ display: displayOwnerOf(registry),
@@ -143,7 +152,7 @@ async function fixture(responses = false) {
   } as unknown as GatewayServiceDependencies);
   await settings.settingsChanges.start();
   await registry.initialize();
-  return { ...local, registry, service, records, root, configurations };
+  return { ...local, registry, service, records, requestRecords, root, configurations };
 }
 
 async function settledTurn(f: { configurations: Array<{ sessionId: string; blocker: unknown }> },
@@ -239,6 +248,45 @@ function reread(previous: Captured, next: Captured): string | undefined {
     }
   });
   return deepest < 0 ? undefined : after[deepest]!.path;
+}
+
+const recordedIdentity = new Map<string, string>();
+const wireIdentity = new Map<string, string>();
+
+function expectRecordOfWire(record: RequestRecord, captured: Captured): void {
+  const units: Array<{ path: string; json: string; ttl?: string }> = [];
+  const add = (path: string, unit: unknown) => {
+    const { cache_control: control, ...rest } = unit as Record<string, unknown>;
+    units.push({ path, json: JSON.stringify(rest), ...(control === undefined ? {} : { ttl: String((control as { ttl?: unknown }).ttl ?? "5m") }) });
+  };
+  for (const key of ["tools", "system"] as const) (captured.body[key] as unknown[]).forEach((unit, index) => add(`.${key}[${index}]`, unit));
+  (captured.body.messages as Array<Record<string, unknown>>).forEach((message, index) => {
+    if (!Array.isArray(message.content)) return add(`.messages[${index}]`, message);
+    const { content, ...envelope } = message;
+    add(`.messages[${index}]`, envelope);
+    (content as unknown[]).forEach((block, at) => add(`.messages[${index}].content[${at}]`, block));
+  });
+  const hashes = prefixHashes(units);
+  const sizes = units.map((_unit, index) => units.slice(0, index + 1).reduce((bytes, unit) => bytes + Buffer.byteLength(unit.json), 0));
+  const same = (recorded: { bytes: number; hash: string } | undefined, at: number) => {
+    expect(recorded?.bytes).toBe(sizes[at]);
+    expect(recorded!.hash).toMatch(/^[0-9a-f]{16}$/u);
+    expect(recordedIdentity.get(hashes[at]!) ?? recorded!.hash, "one sent prefix has one recorded hash").toBe(recorded!.hash);
+    expect(wireIdentity.get(recorded!.hash) ?? hashes[at], "one recorded hash names one sent prefix").toBe(hashes[at]);
+    recordedIdentity.set(hashes[at]!, recorded!.hash);
+    wireIdentity.set(recorded!.hash, hashes[at]!);
+  };
+  const end = (prefix: string) => units.reduce((last, unit, index) => unit.path.startsWith(prefix) ? index : last, -1);
+  const marked = units.flatMap((unit, index) => unit.ttl === undefined ? [] : [{ at: unit.path, ttl: unit.ttl, index }]);
+  expect(marked.length).toBeGreaterThan(0);
+  expect(record.marks.map(({ at, ttl }) => ({ at, ttl }))).toEqual(marked.map(({ at, ttl }) => ({ at, ttl })));
+  marked.forEach((mark, index) => same(record.marks[index], mark.index));
+  same(record.tools, end(".tools"));
+  expect(record.system).toHaveLength((captured.body.system as unknown[]).length);
+  same(record.system.at(-1), end(".system"));
+  same(record.request, units.length - 1);
+  const { tools: _tools, system: _system, messages: _messages, ...params } = captured.body;
+  expect(record.params.bytes).toBe(Buffer.byteLength(JSON.stringify(Object.fromEntries(Object.entries(params).sort(([left], [right]) => left < right ? -1 : 1)))));
 }
 
 function viewMarks(captured: Captured): string[] {
@@ -399,6 +447,34 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
       || path.startsWith(`.messages[${messagesOf(plain).length - 1}]`))).toBe(true);
     expect(JSON.stringify(plain.body)).not.toContain(HOME_MEMORY_VIEW_MARKER);
     expect(markTtls(plain)).toEqual(new Set(["5m"]));
+
+    const homeRecords = f.requestRecords.filter((record) => record.sessionId === home.id);
+    expect(homeRecords).toHaveLength(homeRequests.length);
+    const [previousRecord, lastRecord, stepRecord] = homeRecords.slice(-3);
+    expectRecordOfWire(previousRecord!, previous!);
+    expectRecordOfWire(lastRecord!, last!);
+    expectRecordOfWire(stepRecord!, toolStep!);
+    expect(lastRecord).toMatchObject({ kind: "home", provider: PROVIDER, model: MODEL_ID, api: "anthropic-messages", stop: "toolUse",
+      usage: { input: 10, cacheRead: 0, cacheWrite: CACHE_WRITE, output: 5 } });
+    expect(stepRecord!.stop).toBe("stop");
+    expect([lastRecord!.tools, lastRecord!.system, lastRecord!.params, lastRecord!.hashKey]).toEqual([previousRecord!.tools, previousRecord!.system, previousRecord!.params, previousRecord!.hashKey]);
+    expect(JSON.stringify(f.requestRecords)).not.toMatch(/input \d|reply \d|summary \d|Tron Home/u);
+    expect(lastRecord!.request.hash).not.toBe(previousRecord!.request.hash);
+    const viewMark = (record: RequestRecord) => record.marks.find((mark) => mark.at.startsWith(".messages[0]."));
+    expect(viewMark(stepRecord!)).toEqual(viewMark(lastRecord!));
+    expect(stepRecord!.request.bytes).toBeGreaterThan(lastRecord!.request.bytes);
+    const plainRecords = f.requestRecords.filter((record) => record.sessionId === ordinary.id);
+    expect(plainRecords).toHaveLength(1);
+    expectRecordOfWire(plainRecords[0]!, plain);
+    expect(plainRecords[0]).toMatchObject({ kind: "ordinary", usage: { input: 10, cacheRead: 0, cacheWrite: 0, output: 5 } });
+    expect(plainRecords[0]!.tools.hash).not.toBe(lastRecord!.tools.hash);
+    void ordinary.prompt(HELD_REQUEST).catch(() => {});
+    await waitFor(() => f.held.length === 1, "the provider to hold the request");
+    await ordinary.abort("agent");
+    await waitFor(() => f.requestRecords.filter((record) => record.sessionId === ordinary.id).length === 2, "the aborted request's record");
+    const abortedRecord = f.requestRecords.filter((record) => record.sessionId === ordinary.id)[1]!;
+    expect(abortedRecord.stop).toBe("aborted");
+    expectRecordOfWire(abortedRecord, f.requests.at(-1)!);
 
     report.cases.push({
       case: "wire-layout", homeTurns: homeRequests.length, summarizerCalls: summarizer.length,
