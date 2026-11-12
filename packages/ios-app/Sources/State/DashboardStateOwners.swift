@@ -96,10 +96,10 @@ enum DashboardSessionActivity: Equatable, Sendable {
 }
 
 struct DashboardPresentationSnapshot: Equatable {
-    var sessions: [SessionSummary] = []
+    var sessions: [CatalogSession] = []
     var activityByDashboardID: [String: DashboardSessionActivity] = [:]
 
-    func activity(for session: SessionSummary) -> DashboardSessionActivity {
+    func activity(for session: CatalogSession) -> DashboardSessionActivity {
         activityByDashboardID[session.dashboardID] ?? .idle
     }
 }
@@ -431,7 +431,7 @@ enum SessionCatalogLoadBounds {
 }
 
 enum SessionCatalogLoadResult: Sendable {
-    case loaded(rows: [SessionSummary], pageCount: Int, revision: Int, projectionToken: String, archivedCount: Int?)
+    case loaded(rows: [CatalogSession], pageCount: Int, revision: Int, projectionToken: String, archivedCount: Int?)
     case unchanged(revision: Int)
     case revisionMoved(pageCount: Int, revision: Int?)
     case retired
@@ -445,14 +445,6 @@ enum SessionCatalogLoader {
         let scope: String
         let projectionToken: String?
     }
-    private struct Response: Decodable {
-        let sessions: [SessionSummary]
-        let nextCursor: String?
-        let listRevision: Int
-        let projectionToken: String
-        let notModified: Bool?
-        let archivedCount: Int?
-    }
 
     static func load(
         client: GatewayClient,
@@ -461,7 +453,7 @@ enum SessionCatalogLoader {
         admitsPublication: @MainActor () -> Bool
     ) async throws -> SessionCatalogLoadResult {
         for revisionAttempt in 0..<2 {
-            var all: [SessionSummary] = []
+            var all: [CatalogSession] = []
             var cursor: String?
             var seenCursors = Set<String>()
             var seenSessionIDs = Set<String>()
@@ -475,18 +467,20 @@ enum SessionCatalogLoader {
                     return .invalid(code: "limit_exceeded", reason: "page-budget", pageCount: pageCount, revision: latestRevision)
                 }
                 let requestedCursor = cursor
-                let response: Response
+                let response: SessionListPage
                 do {
-                    response = try await client.request(
-                        "session.list",
-                        Params(
-                            cursor: cursor,
-                            limit: SessionCatalogLoadBounds.pageSize,
-                            scope: scope,
-                            projectionToken: cursor == nil ? sinceToken : nil
+                    response = try GatewayResponseDecoding.decode(
+                        try await client.requestValue(
+                            "session.list",
+                            Params(
+                                cursor: cursor,
+                                limit: SessionCatalogLoadBounds.pageSize,
+                                scope: scope,
+                                projectionToken: cursor == nil ? sinceToken : nil
+                            ),
+                            correlation: SessionListCorrelation.dashboardCatalog
                         ),
-                        correlation: SessionListCorrelation.dashboardCatalog
-                    )
+                        method: "session.list", SessionListPage.validated)
                 } catch let failure as GatewayFailure
                     where requestedCursor != nil && failure.code == "invalid_request" && revisionAttempt == 0 {
                     guard await admitsPublication() else { return .retired }
@@ -520,7 +514,7 @@ enum SessionCatalogLoader {
                     return .invalid(code: "invalid_response", reason: "session-list-page", pageCount: pageCount, revision: latestRevision)
                 }
                 if archivedCount == nil { archivedCount = response.archivedCount }
-                all.append(contentsOf: response.sessions)
+                all.append(contentsOf: response.sessions.map { CatalogSession($0) })
                 cursor = response.nextCursor
                 if let cursor, !seenCursors.insert(cursor).inserted {
                     return .invalid(code: "invalid_response", reason: "repeated-cursor", pageCount: pageCount, revision: latestRevision)
@@ -551,7 +545,7 @@ enum ArchivedSessionsLoadResult: Sendable {
 }
 
 struct ArchivedSessionsPage: Equatable, Sendable {
-    let sessions: [SessionSummary]
+    let sessions: [CatalogSession]
     let nextCursor: String?
 }
 
@@ -563,15 +557,10 @@ enum ArchivedSessionsLoader {
         let archived: String
     }
 
-    struct PageResponse: Decodable {
-        let sessions: [SessionSummary]
-        let nextCursor: String?
-    }
-
     static let pageSize = 200
 
     static func admit(
-        _ response: PageResponse,
+        _ response: SessionListPage,
         requestedCursor: String?,
         admitsPublication: @MainActor () -> Bool
     ) async -> ArchivedSessionsLoadResult {
@@ -585,7 +574,7 @@ enum ArchivedSessionsLoader {
                 return .invalid(code: "invalid_response", reason: "repeated-cursor")
             }
         }
-        return .loaded(page: ArchivedSessionsPage(sessions: response.sessions, nextCursor: response.nextCursor))
+        return .loaded(page: ArchivedSessionsPage(sessions: response.sessions.map { CatalogSession($0) }, nextCursor: response.nextCursor))
     }
 }
 
@@ -627,12 +616,12 @@ enum SessionListCorrelation {
 struct ArchivedSessionsContainerState: Equatable {
     private(set) var isExpanded = false
     private(set) var isLoading = false
-    private(set) var rowsByProfile: [String: [SessionSummary]] = [:]
+    private(set) var rowsByProfile: [String: [CatalogSession]] = [:]
     private(set) var nextCursorByProfile: [String: String] = [:]
     private(set) var unavailableProfileIDs: Set<String> = []
     private var generation = 0
 
-    var rows: [SessionSummary] {
+    var rows: [CatalogSession] {
         rowsByProfile.values.flatMap { $0 }.sorted { left, right in
             let leftInstant = left.archivedAt.flatMap(GatewayTimestamp.parse)
             let rightInstant = right.archivedAt.flatMap(GatewayTimestamp.parse)
@@ -739,9 +728,9 @@ struct ArchivedSessionsContainerState: Equatable {
     }
 
     private static func extending(
-        _ rows: [SessionSummary],
-        with page: [SessionSummary]
-    ) -> [SessionSummary] {
+        _ rows: [CatalogSession],
+        with page: [CatalogSession]
+    ) -> [CatalogSession] {
         var seen = Set(rows.map(\.id))
         return rows + page.filter { seen.insert($0.id).inserted }
     }
@@ -759,7 +748,7 @@ struct SessionCatalogCoordinator: Equatable {
         case updated
     }
 
-    private(set) var sessions: [SessionSummary] = []
+    private(set) var sessions: [CatalogSession] = []
     private(set) var freshness: SessionCatalogFreshness = .stale
     private(set) var archivedCount: Int?
     private var indicesByID: [String: Int] = [:]
@@ -808,7 +797,7 @@ struct SessionCatalogCoordinator: Equatable {
 
     @discardableResult
     mutating func publishAuthoritative(
-        _ authoritative: [SessionSummary],
+        _ authoritative: [CatalogSession],
         admission: LoadAdmission,
         projectionToken: String,
         archivedCount: Int? = nil
@@ -818,7 +807,7 @@ struct SessionCatalogCoordinator: Equatable {
         liveUpdates = liveUpdates.filter { ids.contains($0.key) }
         sessions = authoritative.map { summary in
             guard let update = liveUpdates[summary.id],
-                  update.summaryRevision > (summary.summaryRevision ?? 0) else { return summary }
+                  update.summaryRevision > summary.summaryRevision else { return summary }
             return applying(update, to: summary)
         }
         rebuildIndex()
@@ -841,7 +830,7 @@ struct SessionCatalogCoordinator: Equatable {
             return .stale
         }
         if let index = indicesByID[update.sessionId], sessions.indices.contains(index),
-           update.summaryRevision <= (sessions[index].summaryRevision ?? 0) {
+           update.summaryRevision <= sessions[index].summaryRevision {
             return .stale
         }
         let retained = liveUpdates[update.sessionId]
@@ -884,7 +873,7 @@ struct SessionCatalogCoordinator: Equatable {
                 isUnread: projection.isUnread
             )
         }
-        sessions[index] = SessionSummary(
+        sessions[index] = CatalogSession(SessionSummary(
             id: current.id,
             name: current.name,
             cwd: current.cwd,
@@ -905,15 +894,13 @@ struct SessionCatalogCoordinator: Equatable {
             completionRevision: projection.completionRevision,
             attentionRevision: projection.attentionRevision,
             isUnread: projection.isUnread,
-            archivedAt: current.archivedAt,
-            gatewayProfileID: current.gatewayProfileID,
-            gatewayProfileLabel: current.gatewayProfileLabel
-        )
+            archivedAt: current.archivedAt
+        ), gatewayProfileID: current.gatewayProfileID, gatewayProfileLabel: current.gatewayProfileLabel)
         liveSessionIDs.insert(sessionID)
         return true
     }
 
-    mutating func installCached(_ cached: [SessionSummary], archivedCount: Int? = nil) {
+    mutating func installCached(_ cached: [CatalogSession], archivedCount: Int? = nil) {
         invalidateLoads()
         liveUpdates.removeAll()
         liveSessionIDs.removeAll()
@@ -949,7 +936,7 @@ struct SessionCatalogCoordinator: Equatable {
         }
     }
 
-    mutating func replaceForFacade(_ replacement: [SessionSummary]) {
+    mutating func replaceForFacade(_ replacement: [CatalogSession]) {
         invalidateLoads()
         liveUpdates.removeAll()
         sessions = replacement
@@ -998,11 +985,11 @@ struct SessionCatalogCoordinator: Equatable {
 
     private func applying(
         _ update: SessionSummaryUpdate,
-        to summary: SessionSummary
-    ) -> SessionSummary {
+        to summary: CatalogSession
+    ) -> CatalogSession {
         let preserve = update.completionRevision < summary.completionRevision
             || update.attentionRevision < summary.attentionRevision
-        return SessionSummary(
+        return CatalogSession(SessionSummary(
             id: summary.id,
             name: update.name,
             cwd: summary.cwd,
@@ -1023,9 +1010,7 @@ struct SessionCatalogCoordinator: Equatable {
             completionRevision: preserve ? summary.completionRevision : update.completionRevision,
             attentionRevision: preserve ? summary.attentionRevision : update.attentionRevision,
             isUnread: preserve ? summary.isUnread : update.isUnread,
-            archivedAt: summary.archivedAt,
-            gatewayProfileID: summary.gatewayProfileID,
-            gatewayProfileLabel: summary.gatewayProfileLabel
-        )
+            archivedAt: summary.archivedAt
+        ), gatewayProfileID: summary.gatewayProfileID, gatewayProfileLabel: summary.gatewayProfileLabel)
     }
 }

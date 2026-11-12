@@ -6,12 +6,12 @@ enum HomeDashboardLayout {
 }
 
 struct HomeDashboardSections: Equatable {
-    let inProgress: [SessionSummary]
-    let completed: [SessionSummary]
-    let otherSessions: [SessionSummary]
+    let inProgress: [CatalogSession]
+    let completed: [CatalogSession]
+    let otherSessions: [CatalogSession]
 
-    init(sessions: [SessionSummary]) {
-        let settled = { (session: SessionSummary) in !(session.phase.isActive || session.waitingForUser) }
+    init(sessions: [CatalogSession]) {
+        let settled = { (session: CatalogSession) in !(session.phase.isActive || session.waitingForUser) }
         inProgress = sessions.filter { $0.isHomeWorker && !settled($0) }
         completed = sessions.filter { $0.isHomeWorker && settled($0) }
         otherSessions = sessions.filter { $0.kind == .user && !$0.isHomeWorker }
@@ -29,7 +29,7 @@ struct HomeDashboardSections: Equatable {
         }
     }
 
-    func sheetRows(_ section: Section) -> [SessionSummary] {
+    func sheetRows(_ section: Section) -> [CatalogSession] {
         switch section {
         case .inProgress: inProgress
         case .completed: completed
@@ -49,13 +49,13 @@ struct HomeDashboardSections: Equatable {
 
 struct HomeSectionRowsSheet: View, Equatable {
     struct Row: Equatable {
-        let session: SessionSummary
+        let session: CatalogSession
         let activity: DashboardSessionActivity
     }
 
     let section: HomeDashboardSections.Section
     let rows: [Row]
-    let onOpen: (SessionSummary) -> Void
+    let onOpen: (CatalogSession) -> Void
     let onDone: () -> Void
     @State private var query = ""
     @State private var showingSearch = false

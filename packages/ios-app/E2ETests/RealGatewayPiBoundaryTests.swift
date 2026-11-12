@@ -47,7 +47,6 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
 
     private struct SessionParams: Encodable { let sessionId: String }
     private struct SessionListParams: Encodable { let cursor: String?; let limit: Int; let scope: String }
-    private struct SessionListResponse: Decodable { let sessions: [SessionSummary] }
     private struct SyncParams: Encodable { let sessionId: String; let syncToken: String }
     private struct CloseParams: Encodable { let sessionId: String; let subscriptionToken: String }
 
@@ -1294,9 +1293,9 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             XCTAssertEqual(restored.session.sessionId, sessionID)
             XCTAssertTrue(Self.text(in: restored.session).contains("Tool response complete after all three tools."))
             XCTAssertEqual(Self.userMessageCount(in: restored.session), promptCountBeforeRestart)
-            let catalog: SessionListResponse = try await client.request(
+            let catalog = try await client.requestValue(
                 "session.list", SessionListParams(cursor: nil, limit: 500, scope: "user")
-            )
+            ).decodeWire(SessionListPage.validated)
             let catalogSession = catalog.sessions.filter { $0.id == sessionID }
             XCTAssertEqual(catalogSession.count, 1)
             XCTAssertEqual(catalogSession.first?.phase, .idle)

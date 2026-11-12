@@ -100,7 +100,14 @@ folder, [`Kernel`](../Kernel/) and [`Chat State`](../Features/Chat/State/) throu
 - **Cache.** `SnapshotCache` persists only ≤ 250 unique bounded summaries (128 KiB each, file
   < 8 MiB, backup-excluded, complete-until-first-authentication). It never stores transcripts or
   archived rows. Only catalog changes write it; live summaries coalesce into one trailing save;
-  backgrounding writes inside the draft checkpoint's assertion.
+  backgrounding writes inside the draft checkpoint's assertion. A version-4 row is the generated
+  `SessionSummary`'s canonical encoding (declaration order), which is one of the byte strings the
+  previous `Codable` writer produced. Compatibility covers JS-safe integers from a v8 Gateway,
+  in any key order; an absent `summaryRevision` writes back as 0. Out-of-domain or corrupt files
+  are discarded and the catalog fully refetches through `session.list`. The file holds only
+  Gateway-owned summaries and archived count, not device-only data; drafts and profile credentials
+  have separate stores. Row preflight examines the generated summary, not the presentation wrapper.
+  Client-only Gateway profile fields live in `CatalogSession` and are never stored.
 
 - **Static UI locks.** Only `HOSTED_TEST` with `TRON_UI_LOCK_RENDERING=1` disables
   animation at each `TronPresentationSurface` content root. Native sheets create

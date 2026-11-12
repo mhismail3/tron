@@ -7,14 +7,18 @@ actor SnapshotCacheFixtureGateway {
     static let time = "2026-01-01T00:00:00Z"
     private weak var socket: SnapshotCacheFixtureSocket?
     let offline: Bool
-    init(offline: Bool) { self.offline = offline }
+    let pageWithoutSessions: Bool
+    init(offline: Bool, pageWithoutSessions: Bool = false) {
+        self.offline = offline
+        self.pageWithoutSessions = pageWithoutSessions
+    }
     func attach(_ socket: SnapshotCacheFixtureSocket) { self.socket = socket }
 
-    static func row(name: String = "Before summary", archived: Bool = false) -> SessionSummary {
-        SessionSummary(id: archived ? "cache-archived" : "cache-live", name: name, cwd: "/fixture/cache",
+    static func row(name: String = "Before summary", archived: Bool = false) -> CatalogSession {
+        CatalogSession(SessionSummary(id: archived ? "cache-archived" : "cache-live", name: name, cwd: "/fixture/cache",
             parentSessionId: nil, createdAt: time, updatedAt: time, messageCount: 1,
             firstMessage: "A summary, not a transcript", phase: .idle, summaryRevision: 1,
-            archivedAt: archived ? time : nil)
+            archivedAt: archived ? time : nil))
     }
 
     func summary() async throws {
@@ -30,7 +34,8 @@ actor SnapshotCacheFixtureGateway {
         switch method {
         case "session.list":
             if offline { return nil }
-            return .object(["sessions": try JSONValue.encode([Self.row()]), "nextCursor": .null,
+            if pageWithoutSessions { return .object(["listRevision": .number(2), "projectionToken": .string("cache:2")]) }
+            return .object(["sessions": .array([try JSONValue.wire(Self.row().summary.encode())]), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("cache:1"), "archivedCount": .number(7)])
         case "session.open":
             return .object(["session": try JSONValue.encode(Self.snapshot()), "syncToken": .string("cache-sync"),

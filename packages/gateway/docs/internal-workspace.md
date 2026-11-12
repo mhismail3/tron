@@ -1,142 +1,88 @@
 # Tron internal workspace
 
-`<tronHome>/workspace` is Tron's durable internal home, not a session's working
-directory or a project registry. Stable normally uses `~/.tron/workspace`;
-Debug/custom installations use their own resolved `tronHome`. The root is never
-inferred from pairing identity, browser preferences, or the current project.
+`<tronHome>/workspace` is private cross-session storage, normally
+`~/.tron/workspace`; Debug/custom installations use their resolved `tronHome`.
+It is not a project, session cwd, trust grant or sandbox. Never copy projects,
+sessions, settings, credentials or installed resources here, automatically collect
+its contents, or load it as global instructions. Secrets stay in their owned stores.
 
-## Ownership and layout
+## Maintain files by lifetime
 
-- `files/`: deliberately retained documents; subdirectories are lazy. Ordinary
-  documents use existing filesystem tools and the resolved absolute root. The
-  canonical `Profile.json` is the exception: only `ProfileStore` publishes its
-  current hierarchy, exact Correction anchors and body-free controls. Use Profile
-  actions, not arbitrary edits; archives are never runtime read inputs.
-- `state/<owner>/`: reserved for a real capability's managed data. Research
-  exports are ordinary files, not managed state.
-  Other namespaces have no
-  generic state API. Use the capability's owning interface when one exists.
-  Installed Swift apps are owned by `SwiftAppStore` under `state/apps/`
-  ([swift-apps.md](swift-apps.md)); agents use the `swift_app` tool.
-- `internal/machine-group-id`: one shared Stable/Debug physical-machine
-  identity. The value is opaque identity bytes, not a credential.
-- `internal/subagents/`: the installed delegated provider's existing
-  `PI_SUBAGENTS_TEMP_ROOT` root; its `async-subagent-runs/` child is the only
-  lifecycle subtree admitted by Gateway. Provider project/session artifacts,
-  retention, cancellation and cleanup remain provider-owned.
-- `internal/mac/wizard-state.json`: the Mac wrapper's versioned owner-only wizard
-  progress record. `.onboarded` remains the only completion authority.
-- Pi's `agentDir` remains authoritative for canonical JSONL, settings,
-  credentials, installed packages/resources, retries, and compaction. Gateway
-  state remains under `<tronHome>/gateway`; existing extension stores stay with
-  their current owners. There are no mirrored sessions or relocated stores.
+- `tmp/<taskId>/`: scratch for the task in hand. Create directories lazily. Before
+  finishing, retain useful results in files or state and delete remaining task-owned
+  scratch. Scratch untouched for over 14 days may be removed without asking after
+  checking it is not in use; age never overrides a running task's ownership.
+- `files/<topic>-<date>/`: finished things someone will open again: reports, plans,
+  review screenshots and exports. Add one line per deliverable to `files/INDEX.md`
+  with a relative link and its purpose. Never put scratch here.
+- `state/<name>/`: living data read and refreshed over time, such as libraries,
+  bookmarks or memory. One skill or capability owns each folder; its short README
+  names the owner and explains how to read and refresh it. A skill needs no Gateway
+  code owner or generic storage framework. Use its existing reader/writer; choose
+  serialization and safe publication appropriate to its actual mutation risks.
 
-The generic filesystem browser still browses supported Mac directories, including
-hidden folders, and still supports folder creation. Session directory selection,
-recent directories, project trust, worktrees, and Automation cwd capture are
-unchanged. Merely using this root never changes a session cwd or grants trust.
-No workspace document is automatically collected or loaded as global instructions.
-Secrets belong in existing credential stores, not workspace documents.
+Never delete from files or state without maintainer approval. Issue closure and
+old timestamps alone are not deletion permission. Read-only tasks stay read-only.
+A downloaded snapshot is a finished export; a collection refreshed and queried over
+time is state. To present living data, publish only the requested finished view in
+files, not a second canonical collection.
 
-## Initialization, failure and recovery
+Gateway-managed stores retain their owners: `files/Profile.json` is edited only
+through Profile actions; episodic memory, Home tasks and `state/apps/` use their
+owning interfaces (`swift_app` for installed apps). A skill cannot take over these
+namespaces. Pi's agent directory, Gateway state and existing extension stores stay
+canonical where they are. A folder's name grants no new mutation authority.
 
-`TronWorkspace`, owned by `RuntimeRegistry`, creates only an owner-only root and
-minimal lifecycle evidence at `gateway/workspace-state/initialized.json` (version
-1). This record accepts exactly `{version:1}`; retired Knowledge flags are not
-accepted or converted on startup. Each feature, including Profile, stores setup
-in its own strict version-1 record at
-`gateway/workspace-state/<feature>-initialized.json`; malformed or unsafe records
-are preserved and refuse only their owning feature. It reuses bounded secure
-reads and durable atomic JSON publication. It holds
-a cooperative, refreshed `proper-lockfile` lock on `gateway/workspace-state` for
-its lifetime; another owner cannot initialize/use this workspace through this
-service. It releases that lock on disposal; crashed-owner locks expire under the
-existing lock protocol. Canonical session ownership is still independently
-protected by the agent-runtime lock.
+## Runtime safety and recovery
 
-An existing safe directory is adopted without scanning or changing its contents.
-The installation home, Gateway state directory and workspace root must be real,
-current-user-owned directories with mode `0700`. A file, symlink, wrong owner,
-missing owner access, or group/world permissions is preserved and rejected,
-not automatically repaired. Invalid, oversized, or unknown-version lifecycle
-evidence is likewise preserved. Initialization/ownership failures make the
-workspace unavailable but do not disable unrelated project sessions.
+`TronWorkspace` owns root availability. The installation home, Gateway state and
+workspace root must be real current-user-owned `0700` directories. Unsafe paths,
+symlinks, wrong ownership and invalid lifecycle evidence are preserved and refused,
+never repaired automatically. A safe existing root is adopted without scanning or
+changing its contents; child folders are created only when needed by their owner.
 
-Once initialization evidence exists, a missing root is **not recreated**. During
-one owner lifetime, disappearance or device/inode replacement also makes it
-unavailable. There are no fallback writes into `$HOME`, `.pi`, or the project.
-The current runtime stays unavailable after such a failure; recovery is a manual
-operator action, followed by a user-initiated Gateway lifecycle transition. Restore
-the original workspace (or deliberately select a restored safe directory at that
-exact root), retain valid lifecycle evidence, and investigate corruption before
-changing either. Never delete unknown/newer metadata to force acceptance.
+The service holds the refreshed cooperative `proper-lockfile` lock on
+`gateway/workspace-state` until disposal; crashed locks expire through that protocol.
+Initialization evidence is exactly `{version:1}` in `initialized.json`; each feature
+uses its own strict `<feature>-initialized.json`. Secure bounded reads and durable
+atomic publication protect these Gateway records, not arbitrary skill files.
+Canonical session ownership has its separate agent-runtime lock.
 
-Backups should preserve the workspace and its lifecycle evidence together, and
-preserve the separate Pi/Gateway owners needed for a complete installation restore.
-Mac application update/uninstall cleanup and local settings/credential reset do
-not remove workspace documents, managed namespaces, or lifecycle evidence. This
-is not an automatic backup mechanism. Advisory locks and path validation are not
-a same-user sandbox: shells/editors can bypass them, and deliberate concurrent
-same-user filesystem replacement is not transactionally fenced.
+Once initialized, a missing root is not recreated. Disappearance or inode replacement
+during a runtime makes it unavailable; unrelated project sessions can continue.
+There are no fallback writes into HOME or projects. Restore the original safe root
+and valid lifecycle evidence, investigate the cause, then request the maintainer's
+Gateway lifecycle transition. Never delete unknown metadata to force acceptance.
+Back up the workspace with lifecycle evidence and the separate canonical owners
+needed for a full restore. App updates, uninstall cleanup and credential resets do
+not remove this data. There is no automatic backup or garbage collector, and
+advisory locks are not a same-user filesystem sandbox.
 
-## Operating context and presentation
+## Agent context and display
 
-The first-party `tron-core` extension additively supplies Tron identity, mobile-
-first guidance, the exact execution cwd, resolved root/availability, ownership,
-and active-tool guidance on every agent start. It neither replaces the SDK/project
-prompt nor appends context messages to JSONL. Gateway new, continued, resumed,
-reloaded, forked, post-compaction, and Automation turns use this same runtime path.
-Compaction remains SDK-owned; its summary is not a new workspace store.
+The `tron-core` extension supplies root, availability and the same lifecycle guidance
+to every Gateway-owned agent start: Home, ordinary chats, task workers, reloads,
+resumes, forks, post-compaction turns and Automations. It does not change cwd or
+append workspace context to JSONL.
 
-Use the existing `display` tool with:
+Direct model `subagent` task/resume calls receive that guidance in the bounded
+advisory handoff. Inline Gateway extensions do not propagate to children. For
+workflow, slash/RPC and further delegation, the parent must explicitly pass root,
+availability, lifecycle and owner rules in every child brief, including resumes;
+read-only tasks remain read-only. The [workspace module](../src/workspace/README.md)
+owns the handoff and pinned provider limits.
 
-```json
-{
-  "title": "Report",
-  "altText": "The retained report",
-  "source": { "kind": "internal_file", "path": "reports/summary.md" }
-}
-```
+`display` with `source: {kind: "internal_file", path: "topic-date/report.md"}` reads
+only beneath files, independently of cwd. The root must be available and files an
+existing safe real directory. State and tmp are not display roots. Absolute paths,
+traversal, hidden components, symlinks, directories and escaping paths are rejected.
+Session-relative `path` sources and public URLs are unchanged. Existing artifact
+bounds, immutable authenticated copies, cancellation and retention still apply;
+a presentation snapshot is not an editable canonical document.
 
-`internal_file` resolves only beneath `workspace/files`, independent of cwd.
-The root must be available and `files` must already be a safe real directory.
-Existing `path` sources remain session-relative; public URLs are unchanged.
-Absolute paths, traversal, hidden components, symlinks, directories, and escaping
-paths are rejected using the existing artifact ingestion policy. `state/` is not
-an internal display root. Existing size/type/disk bounds, immutable authenticated
-artifact copies, cancellation, retention, iOS renderers, and result schema remain
-unchanged. An artifact is a presentation snapshot, not another editable document.
-
-Gateway inline extensions do not propagate to delegated children; the
-[workspace module](../src/workspace/README.md) owns the `subagent` handoff and the
-pinned provider limits.
-
-## Contract for future managed-state consumers
-
-Implement storage only alongside its production capability and focused tests.
-The [Profile contract](../src/modules/home/profile.md) owns current-format personal
-notes. Nothing reads old Knowledge. Constructing a
-capability service alone must not create real namespace state.
-
-- One explicit owner per namespace; bounded reads, schema version, revision and
-  validation before mutation. Reject and preserve malformed or newer data.
-- Serialize the full read-modify-write across supported processes, check expected
-  revision to reject stale updates, and use bounded retries/backoff where safe.
-  Advisory locks do not constrain manual shell/editor writes.
-- Reuse secure reads and unique temporary files, sync, atomic replacement and
-  directory sync. Keep the prior valid value on pre-publication failure; distinguish
-  post-publication uncertainty rather than blindly replaying a non-idempotent write.
-- Define cancellation before admission, during work and after commit; make accepted
-  retries idempotent using the capability's existing command/receipt owner.
-- Give migrations an explicit version/owner, recovery/backup policy and failure
-  tests. No silent schema downgrades, wholesale reset, or speculative framework.
-
-These are requirements for future owning adapters, not guarantees supplied by an
-unimplemented namespace API or by arbitrary filesystem tools today.
-
-## Delegated provider root
-
-The pinned `pi-subagents` provider reads `PI_SUBAGENTS_TEMP_ROOT` before its
-module initializes and derives its provider-owned trees from that root. Gateway
-startup sets `<tronHome>/internal/subagents` before Pi loads any extension.
-Project/session artifact history remains at its configured location.
+The delegated provider's `PI_SUBAGENTS_TEMP_ROOT` remains
+`<tronHome>/internal/subagents`, set before extension loading. Its run lifecycle,
+retention and cleanup remain provider-owned; workspace tmp is not a replacement.
+`internal/machine-group-id` remains opaque physical-machine identity;
+`internal/mac/wizard-state.json` remains wrapper-owned progress, with `.onboarded`
+the sole completion authority.

@@ -16,7 +16,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home",
-                               "-home-dashboard-usage-delay", "-home-dashboard-new-worker", "-home-dashboard-new-worker-late"]
+                               "-home-dashboard-usage-delay", "-home-dashboard-held-worker"]
         app.launch(); defer { app.terminate() }
 
         let card = element(app, "home-usage-card")
@@ -39,6 +39,8 @@ final class TronHomeDashboardUITests: XCTestCase {
 
         let newWorker = app.buttons["session-row-home-shell-fixture:worker-new"]
         XCTAssertFalse(newWorker.exists)
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(rawValue: "com.tron.mobile.fixture.home.release-worker" as CFString), nil, nil, true)
         XCTAssertTrue(newWorker.waitForExistence(timeout: 10), app.debugDescription)
         RunLoop.current.run(until: Date().addingTimeInterval(1))
         XCTAssertEqual(reveals.label, settled, "Refreshes never re-fade existing content")

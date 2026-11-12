@@ -175,17 +175,20 @@ struct HostedChatDisplayFixture: View {
 }
 
 @MainActor
-enum HostedHomeTaskListRelease {
-    private static var permits = 0
-    private static var waiters: [CheckedContinuation<Void, Never>] = []
+final class HostedHomeFixtureRelease {
+    static let taskList = HostedHomeFixtureRelease(notification: "com.tron.mobile.fixture.home.release-task-list")
+    static let newWorker = HostedHomeFixtureRelease(notification: "com.tron.mobile.fixture.home.release-worker")
+    private var permits = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    static func observe() {
-        DarwinTrigger.observe("com.tron.mobile.fixture.home.release-task-list") {
-            if waiters.isEmpty { permits += 1 } else { waiters.removeFirst().resume() }
+    private init(notification: String) {
+        DarwinTrigger.observe(notification) { [weak self] in
+            guard let self else { return }
+            if self.waiters.isEmpty { self.permits += 1 } else { self.waiters.removeFirst().resume() }
         }
     }
 
-    static func wait() async {
+    func wait() async {
         if permits > 0 { permits -= 1; return }
         await withCheckedContinuation { waiters.append($0) }
     }
@@ -242,7 +245,8 @@ struct HostedHomeDashboardFixture: View {
             emptyContext: arguments.contains("-home-context-empty"),
             sheetState: arguments.first(where: { $0.hasPrefix("-home-sheet-") })?.replacingOccurrences(of: "-home-sheet-", with: ""))
         self.gateway = gateway
-        if arguments.contains("-home-sheet-presentation-loading") { HostedHomeTaskListRelease.observe() }
+        if arguments.contains("-home-sheet-presentation-loading") { _ = HostedHomeFixtureRelease.taskList }
+        if arguments.contains("-home-dashboard-held-worker") { _ = HostedHomeFixtureRelease.newWorker }
         let store = AutomationFixtureProfileStore()
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture"), token: "fixture-token")
@@ -350,9 +354,9 @@ struct HostedHomeDashboardFixture: View {
                 if arguments.contains("-home-dashboard-behavior") {
                     await model.refreshSessions()
                 } else {
-                model.sessions = [SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace",
+                model.sessions = [CatalogSession(SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace",
                     parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
-                    messageCount: 0, firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1,
+                    messageCount: 0, firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1),
                     gatewayProfileID: profile.id, gatewayProfileLabel: profile.label)]
                     + (arguments.contains("-home-sheet-dashboard-workers")
                         ? HostedHomeDashboardWorkers.sessions.map { $0.withGatewaySource(id: profile.id, label: profile.label) } : [])
@@ -366,6 +370,13 @@ struct HostedHomeDashboardFixture: View {
                 }
                 ready = true
             } catch { self.error = error.localizedDescription }
+        }
+        .task(id: ready) {
+            guard ready, arguments.contains("-home-dashboard-held-worker") else { return }
+            await HostedHomeFixtureRelease.newWorker.wait()
+            guard !Task.isCancelled, !newWorkerAdded else { return }
+            newWorkerAdded = true
+            model.sessions.append(HostedHomeDashboardWorkers.newWorker.withGatewaySource(id: profile.id, label: profile.label))
         }
         .task(id: ready) {
             guard ready else { return }
@@ -387,9 +398,7 @@ struct HostedHomeDashboardFixture: View {
                     await model.refreshSessions()
                 }
                 if firstRevealAt == nil, !TronDashboardRevealProbe.shared.reveals.isEmpty { firstRevealAt = Date() }
-                let newWorkerDue = !arguments.contains("-home-dashboard-new-worker-late")
-                    || firstRevealAt.map { Date().timeIntervalSince($0) > 9 } == true
-                if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded, newWorkerDue,
+                if arguments.contains("-home-dashboard-new-worker"), !newWorkerAdded,
                    model.sessions.contains(where: \.isHomeWorker) {
                     newWorkerAdded = true
                     model.sessions = model.sessions + [HostedHomeDashboardWorkers.newWorker.withGatewaySource(id: profile.id, label: profile.label)]
@@ -466,7 +475,7 @@ private actor HostedHomeShellGateway {
         let empty = arguments.contains("-home-dashboard-empty")
             || (dashboardRevision > 1 && arguments.contains("-home-dashboard-live-empty"))
         let rows = HostedHomeDashboardWorkers.sessions.filter { !empty || $0.isHomeWorker }.map { row -> JSONValue in
-            var value = try! JSONValue.encode(row).objectValue!
+            var value = try! JSONValue.wire(row.summary.encode()).objectValue!
             if dashboardRevision > 1 && row.id == "chat-read" { value["name"] = .string("Renamed ordinary chat") }
             if dashboardReadSessions.contains(row.id) {
                 value["isUnread"] = .bool(false)
@@ -665,7 +674,7 @@ private actor HostedHomeShellGateway {
                 createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,
                 firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1)
             let workers = sheetState == "dashboard-workers" ? HostedHomeDashboardWorkers.sessions : []
-            return (.object(["sessions": .array(([row] + workers).map { try! JSONValue.encode($0) }), "nextCursor": .null,
+            return (.object(["sessions": .array(([row] + workers.map(\.summary)).map { try! JSONValue.wire($0.encode()) }), "nextCursor": .null,
                 "listRevision": .number(1), "projectionToken": .string("home-shell-fixture:1"), "archivedCount": .number(0)]), nil)
         case "device.list":
             return (foreground.devices, nil)
@@ -711,7 +720,7 @@ private actor HostedHomeShellGateway {
                 let active = HostedHomeTaskHistoryFixture.row(taskSummary("active"))
                 return (.object(["items": .array(params["filter"]?.stringValue == "finished" ? [] : [active])]), nil)
             }
-            if sheetState == "presentation-loading" { await HostedHomeTaskListRelease.wait() }
+            if sheetState == "presentation-loading" { await HostedHomeFixtureRelease.taskList.wait() }
             if sheetState == "tasks-error", taskListReads == 2 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Task list unavailable"), "retryable": .bool(true)]))
             }
@@ -1451,17 +1460,17 @@ enum HostedHomeDashboardWorkers {
     }
 
     private static func worker(_ id: String, _ name: String, cwd: String, ago: TimeInterval, phase: SessionPhase = .idle,
-                               waiting: Bool = false, unread: Bool = false, isWorker: Bool = true) -> SessionSummary {
-        SessionSummary(id: id, name: name, cwd: cwd, parentSessionId: nil,
+                               waiting: Bool = false, unread: Bool = false, isWorker: Bool = true) -> CatalogSession {
+        CatalogSession(SessionSummary(id: id, name: name, cwd: cwd, parentSessionId: nil,
             homeTaskId: isWorker ? "task-\(id)" : nil, createdAt: iso(ago + 600), updatedAt: iso(ago),
             activeSince: phase.isActive ? iso(ago) : nil, messageCount: 4, firstMessage: name, phase: phase,
             foregroundPhase: phase.isActive ? .running : nil, waitingForUser: waiting, summaryRevision: 1,
-            completionRevision: unread ? 1 : 0, isUnread: unread)
+            completionRevision: unread ? 1 : 0, isUnread: unread))
     }
 
-    static var sessions: [SessionSummary] { workersAndChats + (ProcessInfo.processInfo.arguments.contains("-home-dashboard-other-sessions") ? otherSessions : []) }
+    static var sessions: [CatalogSession] { workersAndChats + (ProcessInfo.processInfo.arguments.contains("-home-dashboard-other-sessions") ? otherSessions : []) }
 
-    private static let workersAndChats: [SessionSummary] = [
+    private static let workersAndChats: [CatalogSession] = [
         worker("worker-running", "Home dashboard view prototype", cwd: "/work/tron", ago: 120, phase: .running),
         worker("worker-waiting", "Lisbon fare watch", cwd: "/work/travel", ago: 300, phase: .running, waiting: true),
         worker("worker-done-1", "Settings model epic report", cwd: "/work/tron", ago: 1_800),
@@ -1479,7 +1488,7 @@ enum HostedHomeDashboardWorkers {
         worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true, isWorker: false),
     ]
 
-    private static let otherSessions: [SessionSummary] = [
+    private static let otherSessions: [CatalogSession] = [
         worker("chat-active", "Trip planning", cwd: "/work/travel", ago: 60, phase: .running, isWorker: false),
         worker("chat-read", "Home", cwd: "/work/home", ago: 600, isWorker: false),
         worker("chat-recent-unread", "Reading list", cwd: "/work/knowledge", ago: 900, unread: true, isWorker: false),
