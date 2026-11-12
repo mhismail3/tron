@@ -329,8 +329,18 @@ struct PushWorkerClient: Sendable {
     }
 }
 
+struct PushRetryFence: Equatable, Sendable {
+    let profileID: String
+    let deviceID: String
+    let runtimeIdentity: String?
+    let client: ObjectIdentifier
+    let generation: Int
+    let cardDigest: String
+}
+
 struct PushRegistrationRetryApproval {
-    let perform: @MainActor (_ profileID: String, _ deviceID: String) throws -> Void
+    let fence: @MainActor (ChangeReview) -> PushRetryFence?
+    let perform: @MainActor (PushRetryFence) throws -> Void
 }
 
 private struct PushRegistrationRetryApprovalKey: EnvironmentKey {
@@ -526,17 +536,34 @@ final class PushNotificationCoordinator {
         diagnostic = .stoppedUnavailable
     }
 
-    func retryAfterApprovedCard(profileID: String, deviceID: String) throws {
+    func retryFence(for review: ChangeReview) -> PushRetryFence? {
+        guard review.intent == .pushRegistrationRetry, review.requiresTap,
+              let context, let deviceID = context.profile.deviceId, !deviceID.isEmpty else { return nil }
+        return PushRetryFence(
+            profileID: context.profile.id,
+            deviceID: deviceID,
+            runtimeIdentity: context.runtimeIdentity,
+            client: ObjectIdentifier(context.client),
+            generation: registrationGeneration,
+            cardDigest: review.digest
+        )
+    }
+
+    func retryAfterApprovedCard(_ fence: PushRetryFence) throws {
         guard !credentialLoadFailed,
               let context,
-              context.profile.id == profileID,
-              context.profile.deviceId == deviceID,
               registrationAdmitted,
+              context.profile.id == fence.profileID,
+              context.profile.deviceId == fence.deviceID,
+              context.runtimeIdentity == fence.runtimeIdentity,
+              ObjectIdentifier(context.client) == fence.client,
+              registrationGeneration == fence.generation,
+              document.appAttestKeyID != nil,
               document.appAttestKeyRejected == true,
               registrationTask == nil else { throw PushRegistrationError.unavailable }
         registrationGeneration &+= 1
+        automaticRetryAvailable = false
         try rotateInvalidKey()
-        automaticRetryAvailable = true
         diagnostic = .idle
         scheduleRegistration()
     }

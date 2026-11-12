@@ -158,6 +158,10 @@ e2e_test_filters=(
 )
 e2e_diagnostic_test_filters=(
   "TronMobileE2ETests/GatewayTimeoutDiagnosticTests/testBothRawTimeoutNamesProduceTheSameTransportDiagnostic"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testRetryCardRotatesOnceAfterAcceptedTapAndDuplicateApprovalDoesNot"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testStaleProfileCannotRotateTheCurrentKey"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testStaleConnectionCannotRotateTheCurrentKey"
+  "TronMobileE2ETests/PushRegistrationRetryTests/testOnlyAPushRetryCardWithATapYieldsAFence"
 )
 e2e_lan_test_filters=(
   "TronMobileE2ETests/RealGatewayPiBoundaryTests/testRacesLanAndTailscaleLanes"

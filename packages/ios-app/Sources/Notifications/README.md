@@ -27,8 +27,10 @@ notification inbox.
   automatic retry is available again only after a successful registration or a relaunch. Other
   rejections stop without credential churn; APNs tokens are preserved. An agent-requested
   `push-registration-retry` card (`ChangeReview.intent`) makes the approving iPhone rotate the rejected
-  key and register again through `retryAfterApprovedCard`, after the Gateway accepts the approval.
-  Nothing rotates before that tap. Registration reconciles on
+  key and register again. `ExtensionInteractionSheet` takes a `PushRetryFence` (profile, device, runtime
+  identity, client, registration generation and card digest) at tap time through `retryFence(for:)`;
+  `retryAfterApprovedCard(_:)` runs only after the Gateway accepts, refuses any stale or duplicate fence,
+  and never chains the automatic retry. Nothing rotates before that tap. Registration reconciles on
   connection, foreground, profile, permission and token changes; Worker failure leaves it pending.
 - **Secrets.** App Attest keys, token bytes and grants use a Keychain namespace separate from Gateway
   credentials; an unreadable Keychain document is never overwritten with an empty one (push fails

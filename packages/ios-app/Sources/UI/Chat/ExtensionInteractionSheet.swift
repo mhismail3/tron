@@ -42,7 +42,7 @@ struct ExtensionInteractionSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if interaction.method == .change, let review = interaction.review {
                         ChangeReviewCard(review: review, submitting: submitting,
-                            approve: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(true)]), pushRetry: pushRetryFence(for: review)) },
+                            approve: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(true)]), pushRetry: pushRetryApproval?.fence(review)) },
                             cancel: { respond(value: .object(["digest": .string(review.digest), "approved": .bool(false)])) })
                     } else {
                         promptCard
@@ -279,12 +279,7 @@ struct ExtensionInteractionSheet: View {
         )
     }
 
-    private func pushRetryFence(for review: ChangeReview) -> (profileID: String, deviceID: String)? {
-        guard review.intent == .pushRegistrationRetry, let profile = model.profiles.selected, let deviceID = profile.deviceId else { return nil }
-        return (profile.id, deviceID)
-    }
-
-    private func respond(value: JSONValue?, pushRetry: (profileID: String, deviceID: String)? = nil) {
+    private func respond(value: JSONValue?, pushRetry: PushRetryFence? = nil) {
         textFocused = false
         submitting = true
         submissionError = nil
@@ -293,7 +288,7 @@ struct ExtensionInteractionSheet: View {
             do {
                 try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false)
                 if let pushRetry, let pushRetryApproval {
-                    do { try pushRetryApproval.perform(pushRetry.profileID, pushRetry.deviceID) }
+                    do { try pushRetryApproval.perform(pushRetry) }
                     catch { model.presentError(error) }
                 }
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
