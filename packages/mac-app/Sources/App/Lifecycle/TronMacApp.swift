@@ -15,7 +15,6 @@ struct TronMacApp: App {
             Group {
                 switch EnvironmentSetup.live.resolvedStartupMode() {
                 case .testHost: TestHostView()
-                case .command: CommandModeHostView()
                 default: RootView()
                 }
             }
@@ -88,7 +87,6 @@ struct RootView: View {
             case .loading:
                 switch startupMode {
                 case .testHost: mode = .companion
-                case .command: mode = .companion
                 case .debugReadOnly: mode = .companion
                 case .wizard: mode = .wizard
                 case .onboarded: mode = .menuBarOnly
@@ -149,19 +147,6 @@ struct CompanionHostView: View {
     }
 }
 
-struct CommandModeHostView: View {
-    var body: some View {
-        Color.clear
-            .frame(width: 1, height: 1)
-            .onAppear {
-                NSApp.setActivationPolicy(.accessory)
-                for window in NSApp.windows {
-                    window.orderOut(nil)
-                }
-            }
-    }
-}
-
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let startupMode = EnvironmentSetup.live.resolvedStartupMode()
@@ -179,12 +164,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             TronLog.shared.record(.info, event: "app.started", source: "lifecycle", message: "Mac app started", appVersion: version, build: build)
         }
         switch startupMode {
-        case .command(.startServerAndQuit):
-            startServerAndQuit()
-            return
-        case .command(.uninstallAndQuit):
-            uninstallAndQuit()
-            return
         case .testHost:
             return
         default:
@@ -240,51 +219,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 for window in NSApp.windows {
                     window.orderOut(nil)
                 }
-            }
-        }
-    }
-
-    private func startServerAndQuit() {
-        NSApp.setActivationPolicy(.accessory)
-        Task { @MainActor in
-            var exitCode: Int32 = 1
-            defer {
-                if exitCode == 0 {
-                    ApplicationTermination.request()
-                } else {
-                    Darwin.exit(exitCode)
-                }
-            }
-            let result = await MacCommandModeServerStarter.start(setup: EnvironmentSetup.live)
-            switch result {
-            case .ok:
-                exitCode = 0
-            case .invalidApplicationLocation(let problem):
-                TronLog.shared.record(.error, event: "launch-agent.command-start", source: "launch-agent", message: "Command-mode start rejected: \(problem)", outcome: "failed")
-            case .invalidBundledHelper(let problem):
-                TronLog.shared.record(.error, event: "launch-agent.command-start", source: "launch-agent", message: "Command-mode start rejected: \(problem)", outcome: "failed")
-            case .unmanagedWrapper:
-                TronLog.shared.record(.warning, event: "launch-agent.command-start", source: "launch-agent", message: "Debug companion cannot manage the production agent", outcome: "refused")
-            case .launchAgentFailed(let outcome):
-                TronLog.shared.record(.error, event: "launch-agent.command-start", source: "launch-agent", message: "Command-mode start failed", outcome: String(describing: outcome))
-            case .unhealthy(let health):
-                TronLog.shared.record(.error, event: "launch-agent.command-start", source: "launch-agent", message: "Login Item loaded but health check failed", outcome: String(describing: health))
-            }
-        }
-    }
-
-    private func uninstallAndQuit() {
-        NSApp.setActivationPolicy(.accessory)
-        Task { @MainActor in
-            defer { ApplicationTermination.request() }
-            let outcome = await TronUninstaller.unregisterAndClean(setup: EnvironmentSetup.live).outcome
-            switch outcome {
-            case .ok, .alreadyLoaded:
-                TronLog.shared.record(.info, event: "launch-agent.unregister", source: "launch-agent", message: "Tron Agent unregistered", outcome: "success")
-            case .requiresApproval(let message), .launchdRefused(let message), .unknown(let message):
-                TronLog.shared.record(.error, event: "launch-agent.unregister", source: "launch-agent", message: "Command-mode unregister failed: \(message)", outcome: "failed")
-            case .binaryMissing(let path):
-                TronLog.shared.record(.error, event: "launch-agent.unregister", source: "launch-agent", message: "Command-mode unregister helper missing: \(path)", outcome: "failed")
             }
         }
     }

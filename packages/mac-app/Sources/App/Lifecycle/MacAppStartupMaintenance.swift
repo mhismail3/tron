@@ -75,7 +75,6 @@ enum MacAppStartupMaintenance {
         truncateGatewayStderr(at: setup.tronHome)
         let currentVersion = setup.currentAppVersion()
         let startupMode = setup.resolvedStartupMode(
-            command: .normal,
             underTests: false,
             onboardedOverride: context == .wizardCompletion ? false : nil
         )

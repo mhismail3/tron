@@ -128,7 +128,6 @@ record per decision, so a healthy launch of a committed selection records nothin
 | `launch-agent.register` | info; warning when macOS needs approval; error otherwise | Each registration attempt (`Server/LaunchAgent/LiveLaunchAgentManager.swift`): `outcome` (`success`, `requires-approval`, `missing`, `not-registered`, `unknown`, `failed`) |
 | `launch-agent.unregister` | info on success or already unregistered; error on failure | Each unregister request: `outcome` |
 | `launch-agent.kickstart` | info when the command exits 0; error otherwise | Each kickstart attempt: `outcome`, `unknown` when unconfirmed |
-| `launch-agent.command-start` | warning when the Debug companion refuses the production agent; error otherwise | A command-mode start was rejected or failed: `outcome` (`refused`, `failed`) |
 | `update.ui-state` | info; warning when it settles after a request failure | The update flow entered or left a UI state (`MenuBar/Actions/MenuBarActionHandler.swift`): `commandId`, `old`, `new`, `outcome` |
 | `wizard.step` | info | The onboarding wizard changed its in-memory step (`Wizard/Flow/WizardState.swift`): `old`, `new`, `outcome` |
 | `wizard.progress-write` | info on success; error on failure | Atomic progress publication: `new`, `outcome`, bounded `why`; inspect this, not `wizard.step`, for persistence |
