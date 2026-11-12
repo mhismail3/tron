@@ -148,7 +148,7 @@ final class PushRegistrationRetryTests: XCTestCase {
     }
 
     func testRetryCardRotatesOnceAfterAcceptedTapAndDuplicateApprovalDoesNot() async throws {
-        let harness = try stoppedAfterAutomaticRetry()
+        let harness = try await stoppedAfterAutomaticRetry()
         let fence = try XCTUnwrap(harness.coordinator.retryFence(for: try retryCardReview()))
         try await settle()
         XCTAssertEqual(harness.ledger.keysGenerated, 1, "presenting the card rotates nothing")
@@ -174,7 +174,7 @@ final class PushRegistrationRetryTests: XCTestCase {
     }
 
     func testStaleProfileCannotRotateTheCurrentKey() async throws {
-        let harness = try stoppedAfterAutomaticRetry()
+        let harness = try await stoppedAfterAutomaticRetry()
         let fence = try XCTUnwrap(harness.coordinator.retryFence(for: try retryCardReview()))
         let other = GatewayProfile(
             id: "profile-b", label: "Mac B", host: "push-test.example.com", port: 9848,
@@ -188,7 +188,7 @@ final class PushRegistrationRetryTests: XCTestCase {
     }
 
     func testStaleConnectionCannotRotateTheCurrentKey() async throws {
-        let harness = try stoppedAfterAutomaticRetry()
+        let harness = try await stoppedAfterAutomaticRetry()
         let fence = try XCTUnwrap(harness.coordinator.retryFence(for: try retryCardReview()))
         await reconcile(harness, epoch: "epoch-2")
         try await settle()
@@ -198,7 +198,7 @@ final class PushRegistrationRetryTests: XCTestCase {
     }
 
     func testOnlyAPushRetryCardWithATapYieldsAFence() async throws {
-        let harness = try stoppedAfterAutomaticRetry()
+        let harness = try await stoppedAfterAutomaticRetry()
         let withoutIntent = try JSONDecoder().decode(ChangeReview.self, from: Data(
             Self.retryCard.replacingOccurrences(of: #","intent":"push-registration-retry""#, with: "").utf8))
         XCTAssertNil(harness.coordinator.retryFence(for: withoutIntent))
