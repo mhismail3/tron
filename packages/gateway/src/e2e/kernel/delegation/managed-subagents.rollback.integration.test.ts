@@ -84,10 +84,10 @@ it("executes previous → candidate → previous with detached resume through th
       }
     }
     for (const selection of [pin, pin.previous]) {
-      const receipt = JSON.parse(await readFile(join(root, "tron", "internal", "pi-subagents", selection.version, "tron-install-receipt.json"), "utf8"));
+      const receipt = JSON.parse(await readFile(join(root, "tron", "cache", "pi-subagents", selection.version, "tron-install-receipt.json"), "utf8"));
       expect(receipt).toEqual({ version: selection.version, sha512: selection.closure.sha512, forkCommit: selection.fork?.commit ?? null });
     }
-    expect((await readdir(join(root, "tron", "internal", "pi-subagents"))).sort()).toEqual([pin.previous.version, pin.version].sort());
+    expect((await readdir(join(root, "tron", "cache", "pi-subagents"))).sort()).toEqual([pin.previous.version, pin.version].sort());
     report.passed = true;
   } catch (error) {
     report.error = error instanceof Error ? error.message : String(error);
@@ -106,7 +106,7 @@ async function runLeg(): Promise<void> {
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");
   const tronHome = join(root, "tron");
-  const overrides = { PI_CODING_AGENT_DIR: agentDir, PI_SUBAGENTS_TEMP_ROOT: join(tronHome, "internal", "subagents"),
+  const overrides = { PI_CODING_AGENT_DIR: agentDir, PI_SUBAGENTS_TEMP_ROOT: join(tronHome, "state", "subagents"),
     PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: join(root, "unavailable-inherited-host"),
     npm_config_cache: join(root, "npm-cache"), npm_config_offline: "true", npm_config_registry: "http://registry.invalid" };
   const previous = Object.fromEntries(Object.keys(overrides).map((name) => [name, process.env[name]]));
@@ -124,7 +124,7 @@ async function runLeg(): Promise<void> {
     const pin = JSON.parse(await readFile(join(gatewayRoot, "pi-subagents-pin.json"), "utf8"));
     const receipt = JSON.parse(await readFile(join(installedRoot, "tron-install-receipt.json"), "utf8"));
     expect(receipt).toMatchObject({ version: pin.version, sha512: pin.closure.sha512, forkCommit: pin.fork.commit });
-    expect(installedRoot).toBe(join(await realpath(tronHome), "internal", "pi-subagents", pin.version));
+    expect(installedRoot).toBe(join(await realpath(tronHome), "cache", "pi-subagents", pin.version));
     facts.receipt = receipt;
     const model = { provider: "tron-rollback-subagents", id: "rollback-model" };
     server = createServer(async (request, response) => {

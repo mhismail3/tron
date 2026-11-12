@@ -12029,7 +12029,7 @@ export default function (pi) {
     const slot = await registry.acquire(manager.getSessionId());
     const names = ["PI_SUBAGENTS_TEMP_ROOT", "PI_CODING_AGENT_DIR", "PI_SESSION_FILE", "PI_SUBAGENT_PARENT_SESSION", "TRON_GATEWAY_SUPERVISED", "TRON_GATEWAY_PAYLOAD_ROOT"] as const;
     const previous = new Map(names.map(name => [name, process.env[name]]));
-    process.env.PI_SUBAGENTS_TEMP_ROOT = join(homedir(), ".tron", "internal", "subagents");
+    process.env.PI_SUBAGENTS_TEMP_ROOT = join(homedir(), ".tron", "state", "subagents");
     process.env.PI_CODING_AGENT_DIR = join(homedir(), ".tron", "agent");
     process.env.PI_SESSION_FILE = join(homedir(), ".tron", "sessions", "private.jsonl");
     process.env.PI_SUBAGENT_PARENT_SESSION = "supervision-parent";

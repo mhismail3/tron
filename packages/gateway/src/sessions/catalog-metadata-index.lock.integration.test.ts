@@ -91,7 +91,7 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
   expect(await persisted(), "publishes a complete cut again").toEqual(saved);
   expect(await manifestDigests(), "over the same shard bytes").toEqual(savedDigests);
   await writeFile(join(home, "blocked"), "");
-  await expect(new CatalogMetadataIndex(join(home, "blocked", "gateway")).save(root, [row]), "a save into a state directory that is a file")
+  await expect(new CatalogMetadataIndex(join(home, "blocked", "cache")).save(root, [row]), "a save into a state directory that is a file")
     .rejects.toThrow(expect.objectContaining({ message: `ENOTDIR: not a directory, mkdir '${join(home, "blocked", "cache", "catalog-metadata-v3")}'` }));
   expect(await persisted(), "the refused save leaves this store unchanged").toEqual(saved);
   expect(await index.append(row), "an unchanged row appends nothing").toEqual(row);

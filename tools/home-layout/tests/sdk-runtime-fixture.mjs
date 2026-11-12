@@ -188,7 +188,7 @@ if (action.startsWith("handoff-")) {
     await new Promise(resolve => socket.listen(0, "127.0.0.1", resolve));
     const port = socket.address().port;
     await new Promise(resolve => socket.close(resolve));
-    const preloads = ["--import", pathToFileURL(join(gateway, "test-support/home-ledger-crash-preload.mjs")).href];
+    const preloads = ["--import", pathToFileURL(join(gateway, "test-support/source-ts-resolver-preload.mjs")).href];
     if (action === "race") {
       const gate = join(temporary, "before-agent-lock.mjs");
       writeFileSync(gate, `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const original = fs.promises.mkdir; let held = false; fs.promises.mkdir = async (path, ...args) => { if (!held && String(path) === ${JSON.stringify(join(home, "agent"))}) { held = true; process.stdout.write("fixture-before-agent-lock\\n"); await new Promise(resolve => process.stdin.once("data", resolve)); process.stdin.pause(); } return original(path, ...args); }; syncBuiltinESMExports();`);

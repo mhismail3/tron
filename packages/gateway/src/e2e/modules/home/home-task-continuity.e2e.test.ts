@@ -547,7 +547,7 @@ class Fixture(MacPlatform):
     # This test process hosts the fixture Gateway; without this the platform
     # asks launchd for the live com.tron.server job and probes Stable (#1072).
     def gateway_pid(self): return int(sys.argv[9])
-    def token(self): return json.loads((Path(sys.argv[4]) / 'gateway/local-auth.json').read_text())['bearerToken']
+    def token(self): return json.loads((Path(sys.argv[4]) / 'state/local-auth.json').read_text())['bearerToken']
     def node(self): return Path(sys.argv[5]), Path(sys.argv[6])
     def protocol(self): return int(sys.argv[7])
     # The Gateway is this test process, not the installed launchd job: endpoint discovery

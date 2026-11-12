@@ -45,7 +45,7 @@ it("the Gateway update configuration is synchronized before configure returns, a
   expect((await stat(path)).mode & 0o777).toBe(0o600);
 });
 
-it.each([false, true])("records an actual updater spawn failure without following a linked state root (%s)", async (linkedState) => {
+it.each([{ layout: "normal", linkedState: false }, { layout: "linked", linkedState: true }])("records an actual updater spawn failure for $layout state", async ({ linkedState }) => {
   const { root, tronHome } = await fixture();
   const payload = join(root, "payload");
   const helper = join(payload, "helper.mjs");

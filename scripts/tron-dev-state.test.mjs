@@ -547,7 +547,7 @@ echo '{"lifecycle":"stopped"}'
     execFileSync("bash", [new URL("./tron-dev", import.meta.url).pathname, "status"], {
       env: {
         PATH: process.env.PATH, HOME: home, TRON_NODE_BIN: fakeNode, TRON_CI_TOOLS_DIR: join(root, "tools"),
-        PI_SUBAGENTS_TEMP_ROOT: join(root, "stable", "internal", "subagents"), PI_SESSION_ID: "stable-session",
+        PI_SUBAGENTS_TEMP_ROOT: join(root, "stable", "state", "subagents"), PI_SESSION_ID: "stable-session",
         PI_CODING_AGENT_DIR: join(root, "stable", "agent"), TRON_GATEWAY_CHANNEL: "stable", TRON_GATEWAY_SUPERVISED: "1",
         TRON_GATEWAY_PAYLOAD_ROOT: join(root, "stable", "payload"), TRON_DATA_DIR: join(root, "stable"),
       },
