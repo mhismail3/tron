@@ -15,8 +15,7 @@ import { isVirtualModel } from "../providers/virtual-model.js";
 import { updateJsonLocked } from "../foundation/json.js";
 import { gitHeadState, projectGitState, readProjectDocument } from "./project-settings-writer.js";
 import { observedInstance, projectStores, type ObservedReaders, type OutsideChanges } from "./settings-outside.js";
-import { McpAdminService } from "./mcp-admin-service.js";
-import { piCliBundle } from "../kernel/pi/packages.js";
+import type { McpAdminService } from "./mcp-admin-service.js";
 import type { McpServerValue } from "../kernel/settings/mcp-server-value.js";
 import type { TrustService } from "../kernel/resources/trust-service.js";
 import { targetLayers } from "../kernel/settings/settings-resolver.js";
@@ -32,6 +31,7 @@ interface SettingsModelDependencies {
   modelRuntime: ModelRuntime;
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
   macTerminalKeys?: Pick<MacTerminalService, "read" | "set" | "enabled" | "setEnabled">;
+  mcpAdmin?: McpAdminService;
 }
 
 export interface ToolCatalogEntry { name: string; description?: string; resource: Record<string, unknown> }
@@ -39,14 +39,16 @@ export interface ToolCatalogEntry { name: string; description?: string; resource
 export class SettingsStoreAdapter {
   readonly admitModelChoice = assertNewModelChoice;
   private outside: OutsideChanges | undefined;
-  private readonly mcp: McpAdminService;
 
-  constructor(private readonly dependencies: SettingsModelDependencies) {
-    this.mcp = new McpAdminService(dependencies.agentDir, piCliBundle());
+  constructor(private readonly dependencies: SettingsModelDependencies) {}
+
+  private mcp(): McpAdminService {
+    if (!this.dependencies.mcpAdmin) throw new GatewayError("unsupported", "This Gateway has no MCP configuration owner");
+    return this.dependencies.mcpAdmin;
   }
 
   mcpServer(server: string): Promise<McpServerValue | undefined> {
-    return this.mcp.server(server);
+    return this.mcp().server(server);
   }
 
   async projectRoot(path: string): Promise<string> {
@@ -265,7 +267,7 @@ export class SettingsStoreAdapter {
         return {};
       }
       case "mcp":
-        await this.mcp.setServer(qualifiers.server!, unset ? undefined : value as McpServerValue);
+        await this.mcp().setServer(qualifiers.server!, unset ? undefined : value as McpServerValue);
         return {};
       case "trust":
         return { result: await writers.setTrust(qualifiers.project!, unset ? null : value as boolean) };

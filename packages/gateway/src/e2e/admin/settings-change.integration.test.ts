@@ -374,7 +374,8 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
   await registry.initialize();
   const privateService = new MacTerminalService(tronHome, { launchAgentDirectory: join(root, "agents") });
   const macTerminalKeys = new MacTerminalKeys(privateService.root);
-  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService }));
+  const mcpAdmin = new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js"));
+  const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust, modelRuntime, macTerminalKeys: privateService, mcpAdmin }));
   const record = new SettingsChangeRecord(tronHome, options.segmentEntries);
   const outside = new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders);
   settingsModel.owner.observeOutside(outside);
@@ -396,7 +397,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number } = 
     modelRuntime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome), notifications,
     broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
-    mcpAdmin: new McpAdminService(agentDir, join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "bundle/cli.js")),
+    mcpAdmin,
     modelConfig: new ModelConfigService(agentDir),
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
@@ -955,6 +956,21 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(aroundTron.some(entry => entry.qualifiers?.server === "tron-second")).toBe(false);
     expect((await f.history({ section: "tools" })).some(entry => entry.key === "tools.mcp.server")).toBe(true);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
+  });
+
+  caseIt("broadcasts one mcp.changed when a Home-proposed MCP server is approved on the native card", async owner => {
+    const f = await stagedFixture(owner);
+    const requests = [{ key: "tools.mcp.server", qualifiers: { server: "home-docs" }, layer: "global" as const, op: "set" as const,
+      value: { command: "npx", args: ["-y", "@acme/docs-mcp"] } }];
+    const home = { actor: { kind: "home" as const, id: "home-session", sessionId: "home-session", toolCallId: "call-mcp" }, reason: "Maintainer asked for the docs server" };
+    const review = await f.settingsChanges.change({ kind: "global" }, requests, home);
+    expect(review).toMatchObject({ status: "review" });
+    expect(f.broadcasts.filter(event => event.topic === "mcp.changed")).toEqual([]);
+    const applied = await f.settingsChanges.change({ kind: "global" }, requests, { actor: { kind: "ui", id: "device:phone" }, reason: home.reason, confirmationDigest: review.review!.digest });
+    expect(applied).toMatchObject({ status: "applied" });
+    expect(f.broadcasts.filter(event => event.topic === "mcp.changed")).toEqual([{ topic: "mcp.changed", payload: { scope: "global" } }]);
+    expect(JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8")).mcpServers["home-docs"]).toEqual({ command: "npx", args: ["-y", "@acme/docs-mcp"] });
+    expect(await f.history({ key: "tools.mcp.server" })).toEqual([expect.objectContaining({ status: "applied", qualifiers: { server: "home-docs" } })]);
   });
 
   caseIt("records Project mcp.json edits from a late .pi watch, a Git pull, and the Project MCP owner under the Project root", async owner => {
