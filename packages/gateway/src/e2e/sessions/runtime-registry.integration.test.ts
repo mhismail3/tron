@@ -10153,9 +10153,8 @@ export default function (pi) {
   it("connects Pi MCP stdio and streamable HTTP fixtures and exposes resources through composed built-ins", async () => {
     const root = await temporaryRoot("tron-pi-mcp-fixture-e2e-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
     const fixtureScript = resolve(process.cwd(), "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
     const stdioState = join(root, "stdio-state.json");
     const stdioPidFile = join(root, "stdio.pid");
@@ -10279,14 +10278,13 @@ export default function (pi) {
   it("reaps a slow-starting MCP stdio process and its child when the runtime is disposed", async () => {
     const root = await temporaryRoot("tron-pi-mcp-startup-dispose-");
     const agentDir = join(root, "agent");
-    const sessionDir = join(root, "sessions");
     const cwd = join(root, "workspace");
     const fixtureScript = resolve(process.cwd(), "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
     const statePath = join(root, "state.json");
     const pidFile = join(root, "server.pid");
     const childPidFile = join(root, "child.pid");
     const readyPath = join(root, "ready");
-    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(sessionDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
     await writeFile(statePath, JSON.stringify({ tools: [{ name: "echo", description: "Fixture", inputSchema: { type: "object", properties: {} } }] }));
     await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
       slow: { command: process.execPath, args: [fixtureScript, "stdio", statePath, pidFile, childPidFile, "30000", readyPath], exposure: "direct" },
