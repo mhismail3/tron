@@ -1,3 +1,4 @@
+import { APPROVAL_RULE } from "../../../workspace/tron-core-extension.js";
 import { createTestRegistry } from "../../../../test-support/gateway-registry.js";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
@@ -252,6 +253,7 @@ it.each([
       results: Array<{ index: number; exitCode: number; finalOutput: string; sessionFile: string; sessionOwnerId: string }>;
     };
     expect(childSystem).toContain("GLOBAL_CHILD_RULES_MARKER");
+    expect(childSystem.split(APPROVAL_RULE)).toHaveLength(2);
     expect(childSystem).not.toContain("PROJECT_CHILD_RULES_MARKER");
     expect(details.results).toHaveLength(1);
     const result = details.results[0]!;
