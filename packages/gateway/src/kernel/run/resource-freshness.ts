@@ -62,10 +62,11 @@ export class ResourceFreshness {
     this.apply(slot, state);
   }
 
-  stale(projectDir?: string): void {
+  stale(scope: { projectDir?: string; sessionId?: string } = {}): void {
     if (this.closed) return;
     for (const [slot, state] of this.states) {
-      if (projectDir !== undefined && slot.projectDir !== projectDir) continue;
+      if (scope.projectDir !== undefined && slot.projectDir !== scope.projectDir) continue;
+      if (scope.sessionId !== undefined && slot.id !== scope.sessionId) continue;
       state.wanted += 1;
       this.apply(slot, state);
     }
@@ -170,7 +171,7 @@ export class ResourceFreshness {
   }
 
   private async digest(slot: RuntimeSlot, state: PendingResource): Promise<string> {
-    const inputs: Array<[string, unknown]> = [];
+    const inputs: Array<[string, unknown]> = [["settings", await slot.reloadSettingInputs()]];
     const { agentDir } = this.options;
     const profile = slot.liveProfile();
     const global = await json(join(agentDir, "settings.json"));

@@ -63,6 +63,36 @@ async function setup() {
 const retryValue = (resolution: Resolution) => resolution.keys.find(row => row.key === "run.retry.maxRetries")?.value;
 
 describe("approved three-layer settings at real Gateway boundaries", () => {
+  it("reloads snapshot settings and uses a changed shell prefix in the same idle chat", async () => {
+    const f = await setup();
+    const slot = await f.create();
+    await slot.setTools(["bash"]);
+    const before = f.signals.length;
+    const paired = { ...f.client, isLocal: false } as ClientContext;
+    const request = { target: { kind: "global" }, changes: [{ key: "tools.shell.commandPrefix", layer: "global", op: "set", value: "export TRON_PREFIX_PROOF=adopted" }] };
+    const planned = await f.service.invoke(paired, "settings.change", { ...request, commandId: randomUUID(), dryRun: true }) as unknown as ChangeResult;
+    expect(planned.review).toBeDefined();
+    await f.service.invoke(paired, "settings.change", { ...request, commandId: randomUUID(), confirmationDigest: planned.review!.digest });
+    await waitFor(() => f.signals.slice(before).some(event => event.outcome === "resources-reload" && event.reason === "completed" && event.sessionId === slot.id), "same idle chat reloads snapshot settings");
+    let output = "";
+    f.faux.setResponses([fauxAssistantMessage([fauxToolCall("bash", { command: "printf '%s' \"$TRON_PREFIX_PROOF\"" })], { stopReason: "toolUse" }),
+      context => { const result = context.messages.findLast(message => message.role === "toolResult" && message.toolName === "bash"); output = JSON.stringify(result?.content); return fauxAssistantMessage("done"); }]);
+    await slot.prompt("Exercise updated shell prefix");
+    await waitFor(() => output.length > 0, "bash tool result reaches provider");
+    expect(output).toContain("adopted");
+    expect(f.settings.settingsModel.schema.schemaKey("tools.shell.commandPrefix").effect).toBe("reload");
+    expect(f.settings.settingsModel.schema.schemaKey("model.thinkingBudgets").effect).toBe("new-chat");
+    await f.service.invoke(paired, "settings.change", { commandId: randomUUID(), target: { kind: "global" },
+      changes: [{ key: "context.images.autoResize", layer: "global", op: "set", value: false }] });
+    await waitFor(() => slot.runtime.session.settingsManager.getImageAutoResize() === false && slot.snapshot().configurationBlocker === null, "inherited snapshot default refreshed");
+    expect((await f.resolve(slot, ["context.images.autoResize"])).keys[0]!.value).toBe(false);
+    await f.service.invoke(paired, "settings.change", { commandId: randomUUID(), target: { kind: "session", sessionId: slot.id },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: slot.snapshot().model },
+      changes: [{ key: "context.images.autoResize", layer: "session", op: "set", value: true }] });
+    await waitFor(() => slot.runtime.session.settingsManager.getImageAutoResize() === true, "explicit Session snapshot reapplied during SDK reload");
+    expect((await f.resolve(slot, ["context.images.autoResize"])).keys[0]!.value).toBe(true);
+    evidence.push({ case: "snapshot-reload-shell-prefix", sessionId: slot.id, output });
+  });
   it("applies, logs and undoes through receipts, refusing a second command and allowing Undo of Undo", async () => {
     const f = await setup();
     const slot = await f.create();

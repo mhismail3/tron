@@ -2115,7 +2115,11 @@ export class GatewayService {
     for (const change of changes) {
       const key = this.dependencies.settingsModel.schema.KEYS.find(candidate => candidate.id === change.key);
       if (!key) continue;
-      if (key.effect === "reload" && change.layer === "global" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
+      if (key.effect === "reload") {
+        this.dependencies.sessions.freshness.stale(change.layer === "session" && target.kind === "session" ? { sessionId: target.sessionId }
+          : change.layer === "project" && projectDir ? { projectDir } : {});
+        if (change.layer === "global" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
+      }
       if (key.effect === "next-compaction" && (change.layer === "global" || projectDir)) {
         this.dependencies.sessions.refreshCompactionPolicies(change.layer === "global" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);
       }
