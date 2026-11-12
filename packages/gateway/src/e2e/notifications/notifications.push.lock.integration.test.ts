@@ -11,7 +11,7 @@ describe("gateway/notifications push lock", () => {
     const RELAY_ORIGIN = PUSH_RELAY_ORIGIN;
     const answer = (frame: { ok: boolean; result?: unknown; error?: unknown }) => ({ ok: frame.ok, result: frame.result ?? null, error: frame.error ?? null });
     expect(answer(responses.registered!), "the registration").toEqual({ ok: true, error: null, result: { available: true, deviceRegistered: true, enabledDeviceCount: 1,
-      notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true, pendingCount: 0, registered: true, relayOrigin: RELAY_ORIGIN,
+      pendingCount: 0, registered: true, relayOrigin: RELAY_ORIGIN,
       requiresGrantRotation: false } });
     expect(answer(responses.hiddenAnswer!), "the hidden answer").toEqual({ ok: true, result: { answered: true }, error: null });
     expect(answer(responses.presenting!), "presenting the chat").toEqual({ ok: true, result: { revision: 1, visible: true }, error: null });

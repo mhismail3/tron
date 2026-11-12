@@ -27,6 +27,23 @@ const SESSION_ROUTE_ID = /^[A-Za-z0-9_:-]{1,160}$/u;
 const INBOX_CHANGED_DEBOUNCE_MS = 250;
 const INBOX_CURSOR = /^(-?\d{1,16})\.([A-Za-z0-9_-]{8,160})$/u;
 
+export interface NotificationPolicy { inputNeeded: boolean; finished: boolean; waiting: boolean }
+export const NOTIFICATION_POLICY_KEYS = ["notifications.push.inputNeeded", "notifications.push.finished", "notifications.push.waiting"] as const;
+export async function readNotificationPolicy(
+  read: (keys: readonly string[]) => Promise<Readonly<Record<string, unknown>>>,
+): Promise<NotificationPolicy> {
+  const values = await read(NOTIFICATION_POLICY_KEYS);
+  const flag = (key: string): boolean => {
+    const value = values[key];
+    if (typeof value !== "boolean") throw new GatewayError("conflict", `${key} did not resolve to a boolean`);
+    return value;
+  };
+  return {
+    inputNeeded: flag("notifications.push.inputNeeded"),
+    finished: flag("notifications.push.finished"),
+    waiting: flag("notifications.push.waiting"),
+  };
+}
 export type NotificationAdmissionStatus = "queued" | "suppressed" | "rate_limited" | "unavailable";
 interface NotificationStatus {
   available: boolean;
@@ -34,9 +51,6 @@ interface NotificationStatus {
   deviceRegistered: boolean;
   enabledDeviceCount: number;
   pendingCount: number;
-  notifyWhenAskPresented: boolean;
-  notifyWhenFinished: boolean;
-  notifyWhenWaiting: boolean;
   relayOrigin?: string;
   requiresGrantRotation: boolean;
 }
@@ -181,9 +195,6 @@ interface PushRegistrationInput {
   secret: string;
   previewsEnabled: boolean;
   relayOrigin: string;
-  notifyWhenAskPresented?: boolean;
-  notifyWhenFinished?: boolean;
-  notifyWhenWaiting?: boolean;
 }
 
 function isUnchangedRegistration(
@@ -199,9 +210,6 @@ function isUnchangedRegistration(
     && previous.relayOrigin === input.relayOrigin
     && previous.previewsEnabled === input.previewsEnabled
     && previous.active && previous.disabledReason === undefined
-    && (input.notifyWhenAskPresented === undefined || document.policy.notifyWhenAskPresented === input.notifyWhenAskPresented)
-    && (input.notifyWhenFinished === undefined || document.policy.notifyWhenFinished === input.notifyWhenFinished)
-    && (input.notifyWhenWaiting === undefined || document.policy.notifyWhenWaiting === input.notifyWhenWaiting)
     && before === JSON.stringify(document);
 }
 
@@ -229,6 +237,7 @@ export class NotificationService {
   constructor(
     private readonly store: NotificationGrantStore,
     private readonly relay: PushRelayClient,
+    private readonly policy: () => Promise<NotificationPolicy>,
     private readonly now: () => number = Date.now,
     private readonly inboxChanged: (payload: NotificationInboxChanged) => void = () => {},
     private readonly inboxReadFailed: () => void = () => {},
@@ -338,9 +347,6 @@ export class NotificationService {
       };
       document.grants = [...document.grants.filter((grant) => grant.deviceId !== input.deviceId && grant.grantId !== input.grantId), next];
       if (document.grants.length > MAXIMUM_PUSH_GRANTS) throw new GatewayError("busy", "Too many notification-enabled devices are registered", true);
-      if (input.notifyWhenAskPresented !== undefined) document.policy.notifyWhenAskPresented = input.notifyWhenAskPresented;
-      if (input.notifyWhenFinished !== undefined) document.policy.notifyWhenFinished = input.notifyWhenFinished;
-      if (input.notifyWhenWaiting !== undefined) document.policy.notifyWhenWaiting = input.notifyWhenWaiting;
       return document;
     });
     if (rotated) void this.drain();
@@ -417,9 +423,6 @@ export class NotificationService {
       deviceRegistered: deviceId === undefined ? false : active.some((grant) => grant.deviceId === deviceId),
       enabledDeviceCount: active.length,
       pendingCount: document.pending.length,
-      notifyWhenAskPresented: document.policy.notifyWhenAskPresented,
-      notifyWhenFinished: document.policy.notifyWhenFinished,
-      notifyWhenWaiting: document.policy.notifyWhenWaiting,
       ...(relayOrigin ? { relayOrigin } : {}),
       requiresGrantRotation: deviceGrant !== undefined && (deviceGrant.relayOrigin !== relayOrigin
         || !deviceGrant.active || deviceGrant.disabledReason === "invalid_token"),
@@ -611,12 +614,13 @@ export class NotificationService {
     const now = this.now();
     const dedupeKey = notificationHash(`${input.kind}\0${input.sessionId}\0${input.sourceId}`);
     const sessionKey = notificationHash(`session\0${input.sessionId}`);
+    const policy = await this.policy();
     let result: NotificationAdmissionStatus = "queued";
     const document = await this.update((current) => {
       retainRevocationAuthority(prune(current, now), now);
-      if (input.kind === "ask" && !current.policy.notifyWhenAskPresented
-        || input.kind === "agent_finished" && !current.policy.notifyWhenFinished
-        || input.kind === "waiting" && !current.policy.notifyWhenWaiting) {
+      if (input.kind === "ask" && !policy.inputNeeded
+        || input.kind === "agent_finished" && !policy.finished
+        || input.kind === "waiting" && !policy.waiting) {
         result = "suppressed";
         return undefined;
       }
@@ -693,8 +697,7 @@ export class NotificationService {
     observed: boolean;
     machineId?: string;
   }): Promise<void> {
-    const document = await this.store.snapshot();
-    if (!document.policy.notifyWhenAskPresented) return;
+    if (!(await this.policy()).inputNeeded) return;
     if (input.observed) {
       await this.suppressAutomatic({
         sessionId: input.sessionId,

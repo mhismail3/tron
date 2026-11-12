@@ -16,6 +16,7 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "connections", title: "Mac Terminal", description: "This iPhone's key on the connected Mac", order: 58, harness: false },
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60, harness: false },
   { id: "sources", title: "Sources", description: "Packages and how they install", order: 70, harness: false },
+  { id: "notifications", title: "Notifications", description: "Which events send a push to this Mac's paired iPhones", order: 65, harness: true },
   { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80, harness: false },
   { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, harness: false, note: "Stored on this iPhone. It never changes what the agent does." },
 ];
@@ -449,6 +450,21 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       tap: "trust", id: "sources.npmCommand", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { global: pi("npmCommand") }, timing: "live", effect: "next-change",
       writers: ["ui", "home"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
       entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
+    },
+    {
+      id: "notifications.push.inputNeeded", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "inputNeeded"] } }, defaultValue: true, timing: "live", effect: "next-request",
+      writers: ANY_ACTOR, label: "Input needed", help: "Send a push when Tron needs an answer or approval.", order: 10, importance: "essential",
+    },
+    {
+      id: "notifications.push.finished", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "finished"] } }, defaultValue: true, timing: "live", effect: "next-request",
+      writers: ANY_ACTOR, label: "Finished", help: "Send a push when a chat finishes its work.", order: 20, importance: "essential",
+    },
+    {
+      id: "notifications.push.waiting", sessionOverridable: false, projectSettable: false, home: { layers: [] }, group: "notifications", type: types.boolean(),
+      layers: { global: { store: "gateway", path: ["notifications", "push", "waiting"] } }, defaultValue: true, timing: "live", effect: "next-request",
+      writers: ANY_ACTOR, label: "Waiting", help: "Send a push when work is waiting on background tasks.", order: 30, importance: "essential",
     },
     {
       id: "setup.sessionDir", sessionOverridable: false, projectSettable: false, group: "setup", type: types.text(4_096), layers: { global: pi("sessionDir") }, timing: "live", effect: "restart",

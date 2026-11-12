@@ -2109,6 +2109,13 @@ export class RuntimeRegistry implements SessionOperations {
     });
   }
 
+  async resolveGlobalSettings(keys: readonly string[]): Promise<Record<string, unknown>> {
+    const settings = this.settingsOwners?.model;
+    if (!settings) throw new GatewayError("conflict", "Settings are not installed yet");
+    const resolution = await settings.resolve({ kind: "global" }, undefined, keys, { storeState: false });
+    return Object.fromEntries(keys.map(key => [key, resolution.keys.find(row => row.key === key)?.value]));
+  }
+
   async modelQueueOf(role: Parameters<typeof modelQueueKey>[0], scope: "global" | "home" = "global"): Promise<string[]> {
     const settings = this.settingsOwners?.model;
     if (!settings) return [];
