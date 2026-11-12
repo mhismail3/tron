@@ -1,7 +1,8 @@
 # Tron home layout
 
 A Tron home (`~/.tron` for Stable, `~/.tron-dev` for Debug, or `TRON_DATA_DIR`) holds
-everything Tron writes on the Mac. Every path in it is declared once in
+installation-scoped Tron data on the Mac. Shared host coordination keeps its existing
+addresses. Current owned boundaries are declared once in
 [`tron-home-layout.json`](../packages/gateway/src/foundation/tron-home-layout.json): its
 owning module, writer, lifecycle, how it is rebuilt, whether it needs a backup, its
 sensitivity, its retention rule and its view. Gateway code resolves paths only through
@@ -11,12 +12,25 @@ sensitivity, its retention rule and its view. Gateway code resolves paths only t
 
 Top-level roots follow the owning process. Lifecycle is recorded per path, because a
 root's owner, not its lifecycle, decides who may write, migrate or prune it.
+`container: true` marks an aggregate whose child contracts override its descriptive
+fields; it is not a recursive lifecycle or backup policy. `subtree: true` delegates
+otherwise undeclared descendants to that boundary's owner. Explicit children take
+precedence, including the personal Profile under `workspace/files`. A container alone
+does not admit unknown children. External-owner subtrees are opaque; their registration
+is not a claim about every descendant's contents or disposability.
+
+Exports use the shipped export store limits: 30 minutes, 2 GiB per item, eight items,
+four GiB total, four readers and one production, not the blob store's capacity.
+Provider run retention has 30-day eligibility with terminal, reference and resumability
+protection, bounded batches and tombstone grace; it is not unconditional expiry.
+Installed Pi resources can contain user source and state. `internal` is mixed, including
+durable machine identity and onboarding evidence, not recursively disposable scratch.
 
 | Root | Owner | Holds |
 |---|---|---|
 | `agent/` | Pi SDK (its fixed layout), pi-subagents, extensions | settings, models, MCP, trust, credentials, subagent agents and profiles, prompts, skills, transcripts (`sessions/`), installed packages |
 | `gateway/` | Gateway stores | devices and pairing, Home (record, settings layer, tasks, cwd), settings change log, automations, connections, uploads, displays, indexes, scratch, payloads |
-| `workspace/` | `TronWorkspace` | `files/`: agents' documents; `state/<owner>/`: Profile, episodic memory, apps |
+| `workspace/` | `TronWorkspace` | lazy task `tmp/`, indexed documents in `files/` (including Profile), living owner collections in `state/`; [workspace policy](../packages/gateway/docs/internal-workspace.md) |
 | `internal/` | delegation, Mac wrapper, dev scripts | subagent run scratch, managed pi-subagents installs, Mac wrapper markers, simulator leases |
 | `logs/` | each writer rotates its own | Gateway, Mac, launcher, deploy, diagnostic exports |
 | `ios-builds/` | `scripts/ios-share-publish.py` | phone install feed |
@@ -59,3 +73,9 @@ as subject `home.profile.item` for history and Undo; it is not the Profile.
 - Moving a path is a persisted-layout migration: a one-shot, backed-up, maintainer-approved
   change (AGENTS.md), never a second reader of the old location.
 - `retention` names each entry's retention rule and its owner, or `null` when it has none.
+  It does not implement cleanup or authorize deletion. Instructions (`agent/AGENTS.md`),
+  workspace tmp, Debug PID and command shlock have registered owners. Historical backups
+  and other unregistered residues remain unknown findings; there is no backup wildcard.
+- Manifest metadata is included in compiled Gateway artifacts; source edits require a
+  later coordinated Gateway rebuild/delivery to take effect there. CLI/docs alone do
+  not require an app rebuild. No addresses, wire contracts or live bytes change.

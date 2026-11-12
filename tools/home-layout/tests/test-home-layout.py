@@ -70,6 +70,13 @@ class HomeLayoutTests(unittest.TestCase):
         result = subprocess.run(["python3", str(ROOT / TOOL), "check"], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_manifest_export_capacity_matches_the_shipped_owner(self) -> None:
+        paths = json.loads((ROOT / REGISTRY).read_text())["paths"]
+        source = (ROOT / "packages/gateway/src/sessions/session-export.ts").read_text()
+        self.assertIn("SESSION_EXPORT_MAX_ITEMS = 8;", source)
+        self.assertIn("SESSION_EXPORT_MAX_TOTAL_BYTES = 4 * 1_024 * 1_024 * 1_024;", source)
+        self.assertIn("8 items, 4 GiB total", paths["gateway/exports"]["retention"])
+
     def test_check_refuses_unregistered_literals_outside_tests(self) -> None:
         fixture = Fixture(self.base)
         fixture.write(REGISTRY, json.dumps({"version": 1, "paths": {**PATHS, "logs": entry("repo/missing")}}))
