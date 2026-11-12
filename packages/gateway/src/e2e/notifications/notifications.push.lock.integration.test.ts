@@ -58,7 +58,7 @@ describe("gateway/notifications push lock", () => {
       { role: "user", text: "fail this run" }, { role: "assistant", text: "partial" }, { role: "user", text: "start a run to stop" },
     ];
     const worker = [{ role: "user", text: "do the lock task" }, { role: "assistant", text: "Worker reply without a report." }, { role: "user",
-      text: "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input "
+      text: "[from: gateway; kind: reminder; authority: task]\nCall report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input "
         + "for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report." }];
     expect(requests.map((request) => request.messages), "each request's messages: the chat's turns so far, then the worker's turn and its reminder").toEqual([
       ...[1, 3, 5, 7, 9, 11, 13].map((count) => chat.slice(0, count)), worker.slice(0, 1), worker]);

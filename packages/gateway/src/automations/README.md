@@ -85,7 +85,10 @@ uses those same identity codecs as the scheduler, executor and cold catalog.
   revalidate the typed skill or prompt inside the slot and carry automation
   provenance. Extension commands, attachments, shell, webhooks, deployment and Gateway
   lifecycle are not automation capabilities; RuntimeSlot rejects scheduled text that
-  resolves to an extension command before any effect.
+  resolves to an extension command before any effect or retained operation ownership.
+  Recognition uses the original action text carried by admission, not the rendered
+  provenance envelope. The rejection signal is `agent-admission-rejected`; the owning
+  runtime-registry integration case also proves that no marker, lease or work survives.
 - **Settlement.** Occurrences and runs are durable before dispatch. Pre-admission
   transient failures retry with bounded backoff; accepted agent failures do not.
   Accepted work without exact terminal evidence becomes `outcomeUnknown`, blocks

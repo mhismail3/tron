@@ -73,7 +73,7 @@ export function preparePromptInput<TaskFence>(
     text = composeResourcePrompt(composedResources, text, operations.resourceExpansionCatalog());
   }
   const parsedCommand = ownership?.kind === "subagentWake" || ownership?.kind === "homeWake" || composedResources !== undefined
-    ? undefined : parsePiLiteralCommand(text);
+    ? undefined : parsePiLiteralCommand(ownership ? (queueDisplay?.text ?? text) : text);
   const extensionCommandName = parsedCommand?.name;
   const isExactExtensionCommand = extensionCommandName !== undefined
     && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
