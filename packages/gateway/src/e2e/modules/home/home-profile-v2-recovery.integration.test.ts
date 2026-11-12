@@ -59,7 +59,7 @@ it("repairs a v2-to-historical Undo audit after a real postcommit process death 
   for (const note of originals) expect({ ...committedHeads.find(head => head?.id === note.id), revisionId: note.revisionId }).toEqual(note);
   const repaired = await profile.retryPartition(f.settings.settingsChanges, undoContext.commandId, "ui");
   expect(repaired.changes).toHaveLength(2);
-  const undoFacts = (await f.settings.settingsChanges.history({ key: "home.profile.item" })).entries.filter(entry => entry.commandId === undoContext.commandId && entry.status === "applied");
+  const undoFacts = (await f.settings.settingsChanges.history({ key: "home.profile.item" }, { kind: "ui", id: "maintainer" })).entries.filter(entry => entry.commandId === undoContext.commandId && entry.status === "applied");
   expect(undoFacts.map(entry => entry.undoOf).sort()).toEqual(migrated.changes.map(entry => entry.changeId).sort());
   expect(await Promise.all(originals.map(note => knowledge!.read(note.id)))).toEqual(committedHeads);
   evidence.push({ v2UndoPostcommitCrash: true, originalUndoLinksRepaired: 2, committedHeadsNotReplayed: true });

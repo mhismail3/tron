@@ -49,9 +49,13 @@ No Profile DTO or domain inverse is invented by the settings kernel.
 
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
 worker. Its `history` action pages the durable audit (50 records by default, at most 200),
-optionally filtered by key, using the returned cursor. `undo` takes a change id and reason;
-writer grants and exact native taps still apply, and an agent cannot undo another session's
-override. Routine reversible changes, tool selection included, apply, log and can be undone.
+optionally filtered by key, using the returned cursor. The caller's actor is threaded into
+`SettingsChangePath.history` and `undo`, where `historyVisible` decides scope: an agent sees and
+undoes only changes whose target is its session or that its session initiated (its Global changes
+included); Tron Home and the maintainer see and undo every change. `undo` takes a change id and
+reason; the target session's own store is acquired through its owner, never Home's snapshot.
+Writer grants, exact native taps, expected-value checks and busy/idle rules still apply.
+Routine reversible changes, tool selection included, apply, log and can be undone.
 Widening trust/executable authority, privacy access or spend, and any install or
 irreversible effect, require an exact native tap; narrowing them is routine. Writer
 grants and scope admission apply first.

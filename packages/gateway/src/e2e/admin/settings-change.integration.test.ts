@@ -478,54 +478,160 @@ describe("settings.change", () => {
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
   });
 
-  caseIt("an agent pages its settings history and undoes without borrowing another session's authority", async owner => {
+  caseIt("an agent pages only its own settings history, never another chat's or the maintainer's rows", async owner => {
     const f = await fixture(owner);
     const cwd = join(f.root, "history-chat");
     await mkdir(cwd);
     const slot = await f.registry.create(cwd);
+    const other = await f.registry.create(cwd);
     const model = f.faux.getModel();
     await slot.setModel(model.provider, model.id);
+    await other.setModel(model.provider, model.id);
     let calls = 0;
-    const call = async (input: Record<string, unknown>) => {
+    const turn = async (chat: typeof slot, input: Record<string, unknown>) => {
       const id = `history-tool-${++calls}`;
       f.faux.setResponses([
         fauxAssistantMessage([fauxToolCall("settings", input, { id })], { stopReason: "toolUse" }),
         fauxAssistantMessage("Done"),
       ]);
-      await slot.prompt("Use the requested settings action");
-      await waitFor(() => !slot.isBusy && !slot.hasActiveAgentRun || undefined, "settings history tool turn settled");
-      const result = slot.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      await chat.prompt("Use the requested settings action");
+      await waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, "settings history tool turn settled");
+      const result = chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
       if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
       return result.message;
     };
-    expect((await call({ action: "change", reason: "Reduce retry attempts", changes: [
+    const entriesOf = (message: { details?: unknown }) => (message.details as { entries: ChangeEntry[]; nextCursor?: string }).entries;
+    const changeIdOf = (message: { details?: unknown }) => (message.details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const ownRetry = await turn(slot, { action: "change", reason: "Reduce retry attempts", changes: [
       { key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 },
-    ] })).isError).not.toBe(true);
-    const page = await call({ action: "history", key: "run.retry.maxRetries", limit: 1 });
+    ] });
+    expect(ownRetry.isError).not.toBe(true);
+    const ownId = changeIdOf(ownRetry);
+    const otherSession = await turn(other, { action: "change", reason: "Another chat's session retries", changes: [
+      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 8 },
+    ] });
+    expect(otherSession.isError).not.toBe(true);
+    const otherSessionId = changeIdOf(otherSession);
+    const otherGlobal = await turn(other, { action: "change", reason: "Another chat's private backoff", changes: [
+      { key: "run.retry.baseDelayMs", layer: "global", op: "set", value: 1_500 },
+    ] });
+    expect(otherGlobal.isError).not.toBe(true);
+    const otherGlobalId = changeIdOf(otherGlobal);
+    const maintainer = await f.change({ kind: "global" }, [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/sh" }]);
+    const maintainerId = maintainer.changes[0]!.changeId;
+    const page = await turn(slot, { action: "history", key: "run.retry.maxRetries", limit: 1 });
     expect(page.isError).not.toBe(true);
-    const entries = (page.details as { entries: ChangeEntry[] }).entries;
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ actor: { kind: "agent", sessionId: slot.id }, before: 4, after: 3 });
-    const undone = await call({ action: "undo", changeId: entries[0]!.changeId, reason: "Restore retry attempts" });
+    expect(entriesOf(page)).toHaveLength(1);
+    expect(entriesOf(page)[0]).toMatchObject({ changeId: ownId, actor: { kind: "agent", sessionId: slot.id }, before: 4, after: 3 });
+    const undone = await turn(slot, { action: "undo", changeId: ownId, reason: "Restore retry attempts" });
+    expect(undone.isError).not.toBe(true);
+    const undoId = changeIdOf(undone);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4, baseDelayMs: 1_500 });
+    expect((await f.history({ key: "run.retry.maxRetries" })).find(entry => entry.undoOf === ownId)).toMatchObject({ changeId: undoId, actor: { kind: "agent", sessionId: slot.id }, status: "applied", before: 3, after: 4 });
+    expect(entriesOf(await turn(slot, { action: "history", key: "run.retry.maxRetries" })).map(entry => entry.changeId)).toEqual([undoId, ownId]);
+    const latest = (await turn(slot, { action: "history", key: "run.retry.maxRetries", limit: 1 })).details as { entries: ChangeEntry[]; nextCursor: string };
+    expect(latest.entries.map(entry => entry.changeId)).toEqual([undoId]);
+    expect(latest.nextCursor).toBeTypeOf("string");
+    const previous = await turn(slot, { action: "history", key: "run.retry.maxRetries", cursor: latest.nextCursor, limit: 1 });
+    expect(entriesOf(previous).map(entry => entry.changeId)).toEqual([ownId]);
+    expect((await turn(slot, { action: "history", reason: "Not a history parameter" })).isError).toBe(true);
+    const everything = entriesOf(await turn(slot, { action: "history", limit: 200 }));
+    const ids = everything.map(entry => entry.changeId);
+    expect(ids).toContain(ownId);
+    for (const foreign of [otherSessionId, otherGlobalId, maintainerId]) expect(ids).not.toContain(foreign);
+    expect(everything.every(entry => entry.actor.sessionId === slot.id || entry.target.kind === "session" && entry.target.sessionId === slot.id)).toBe(true);
+    expect(JSON.stringify(everything)).not.toContain("Another chat");
+    const otherView = entriesOf(await turn(other, { action: "history", limit: 200 })).map(entry => entry.changeId);
+    expect(otherView).toEqual([otherGlobalId, otherSessionId]);
+  });
+
+  caseIt("an agent undoes only its own settings changes and refuses another chat's session change with the exact message", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "undo-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
+    const other = await f.registry.create(cwd);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await other.setModel(model.provider, model.id);
+    let calls = 0;
+    const turn = async (chat: typeof slot, input: Record<string, unknown>) => {
+      const id = `undo-tool-${++calls}`;
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", input, { id })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Done"),
+      ]);
+      await chat.prompt("Use the requested settings action");
+      await waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, "settings undo tool turn settled");
+      const result = chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+      return result.message;
+    };
+    const changeIdOf = (message: { details?: unknown }) => (message.details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const text = (message: { content: Array<{ type: string; text?: string }> }) => message.content.map(part => part.type === "text" ? part.text : "").join("");
+    const refusal = "An agent can undo only settings changes made by or in its own session";
+    const ownRetry = await turn(slot, { action: "change", reason: "Reduce retry attempts", changes: [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 },
+    ] });
+    const otherSession = await turn(other, { action: "change", reason: "Another chat's session retries", changes: [
+      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 8 },
+    ] });
+    const refusedSession = await turn(slot, { action: "undo", changeId: changeIdOf(otherSession), reason: "Attempt cross-session undo" });
+    expect(refusedSession.isError).toBe(true);
+    expect(text(refusedSession)).toBe(refusal);
+    expect((await f.service.invoke(client([other.id]), "settings.resolve", { target: { kind: "session", sessionId: other.id }, keys: ["run.retry.maxRetries"] }) as unknown as Resolution).keys[0]!.value).toBe(8);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 3 });
+    const undone = await turn(slot, { action: "undo", changeId: changeIdOf(ownRetry), reason: "Restore retry attempts" });
     expect(undone.isError).not.toBe(true);
     expect((await f.macDocument()).retry).toEqual({ maxRetries: 4 });
-    expect((await f.history({ key: "run.retry.maxRetries" }))[0]).toMatchObject({ undoOf: entries[0]!.changeId, actor: { kind: "agent", sessionId: slot.id } });
-    const latest = (await call({ action: "history", key: "run.retry.maxRetries", limit: 1 })).details as { entries: ChangeEntry[]; nextCursor: string };
-    expect(latest.entries).toHaveLength(1);
-    expect(latest.entries[0]!.undoOf).toBe(entries[0]!.changeId);
-    expect(latest.nextCursor).toBeTypeOf("string");
-    const previous = (await call({ action: "history", key: "run.retry.maxRetries", cursor: latest.nextCursor, limit: 1 })).details as { entries: ChangeEntry[] };
-    expect(previous.entries.map(entry => entry.changeId)).toEqual([entries[0]!.changeId]);
-    expect((await call({ action: "history", reason: "Not a history parameter" })).isError).toBe(true);
+    const selfUndo = await turn(other, { action: "undo", changeId: changeIdOf(otherSession), reason: "Restore the other chat's retries" });
+    expect(selfUndo.isError).not.toBe(true);
+    expect((await f.service.invoke(client([other.id]), "settings.resolve", { target: { kind: "session", sessionId: other.id }, keys: ["run.retry.maxRetries"] }) as unknown as Resolution).keys[0]!.value).not.toBe(8);
+  });
+
+  caseIt("an agent refuses to undo another chat's Global change or the maintainer's, and its own Global change stays undoable", async owner => {
+    const f = await fixture(owner);
+    const cwd = join(f.root, "global-undo-chat");
+    await mkdir(cwd);
+    const slot = await f.registry.create(cwd);
     const other = await f.registry.create(cwd);
-    const foreign = await f.change({ kind: "session", sessionId: other.id }, [
-      { key: "run.retry.maxRetries", layer: "session", op: "set", value: 8 },
-    ], { fence: { runtimeGeneration: other.snapshot().runtimeGeneration, model: other.snapshot().model } }, client([other.id]));
-    expect((await call({ action: "undo", changeId: foreign.changes[0]!.changeId, reason: "Attempt cross-session undo" })).isError).toBe(true);
-    const foreignResolution = await f.service.invoke(client([other.id]), "settings.resolve", { target: { kind: "session", sessionId: other.id }, keys: ["run.retry.maxRetries"] }) as unknown as Resolution;
-    expect(foreignResolution.keys[0]!.value).toBe(8);
-    const shell = await f.change({ kind: "global" }, [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/sh" }]);
-    expect((await call({ action: "undo", changeId: shell.changes[0]!.changeId, reason: "Attempt Home-only undo" })).isError).toBe(true);
+    const model = f.faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await other.setModel(model.provider, model.id);
+    let calls = 0;
+    const turn = async (chat: typeof slot, input: Record<string, unknown>) => {
+      const id = `global-undo-tool-${++calls}`;
+      f.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("settings", input, { id })], { stopReason: "toolUse" }),
+        fauxAssistantMessage("Done"),
+      ]);
+      await chat.prompt("Use the requested settings action");
+      await waitFor(() => !chat.isBusy && !chat.hasActiveAgentRun || undefined, "settings global undo tool turn settled");
+      const result = chat.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolCallId === id);
+      if (result?.type !== "message" || result.message.role !== "toolResult") throw new Error("No canonical settings tool result");
+      return result.message;
+    };
+    const changeIdOf = (message: { details?: unknown }) => (message.details as { changes: Array<{ changeId: string }> }).changes[0]!.changeId;
+    const text = (message: { content: Array<{ type: string; text?: string }> }) => message.content.map(part => part.type === "text" ? part.text : "").join("");
+    const refusal = "An agent can undo only settings changes made by or in its own session";
+    const otherGlobal = await turn(other, { action: "change", reason: "Another chat's private backoff", changes: [
+      { key: "run.retry.baseDelayMs", layer: "global", op: "set", value: 1_500 },
+    ] });
+    const ownGlobal = await turn(slot, { action: "change", reason: "This chat's retries", changes: [
+      { key: "run.retry.maxRetries", layer: "global", op: "set", value: 3 },
+    ] });
+    const maintainer = await f.change({ kind: "global" }, [{ key: "tools.shell.path", layer: "global", op: "set", value: "/bin/sh" }]);
+    const refusedGlobal = await turn(slot, { action: "undo", changeId: changeIdOf(otherGlobal), reason: "Attempt another chat's global undo" });
+    expect(refusedGlobal.isError).toBe(true);
+    expect(text(refusedGlobal)).toBe(refusal);
+    expect((await f.service.invoke(client(), "settings.resolve", { target: { kind: "global" }, keys: ["run.retry.baseDelayMs"] }) as unknown as Resolution).keys[0]!.value).toBe(1_500);
+    const refusedMaintainer = await turn(slot, { action: "undo", changeId: maintainer.changes[0]!.changeId, reason: "Attempt maintainer undo" });
+    expect(refusedMaintainer.isError).toBe(true);
+    expect(text(refusedMaintainer)).toBe(refusal);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 3, baseDelayMs: 1_500 });
+    const undone = await turn(slot, { action: "undo", changeId: changeIdOf(ownGlobal), reason: "Restore this chat's retries" });
+    expect(undone.isError).not.toBe(true);
+    expect((await f.macDocument()).retry).toEqual({ maxRetries: 4, baseDelayMs: 1_500 });
   });
 
   caseIt("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async owner => {
