@@ -2,7 +2,7 @@
   "store": "store-model-release-dates",
   "module": "gateway/providers",
   "files": [
-    "gateway/model-release-dates.json"
+    "cache/model-release-dates.json"
   ],
   "projection": {
     "dates": {

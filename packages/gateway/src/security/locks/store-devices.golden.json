@@ -2,8 +2,8 @@
   "store": "store-devices",
   "module": "gateway/security",
   "files": [
-    "gateway/devices.json",
-    "gateway/local-auth.json"
+    "state/devices.json",
+    "state/local-auth.json"
   ],
   "projection": {
     "devices": [
