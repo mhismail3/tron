@@ -346,6 +346,15 @@ export function createSettingsSchema(homeToolNames: readonly string[], compactio
       control: "choice", confirm: "Always trust loads every new project's extensions and hooks without asking.",
     },
     {
+      tap: "spend", id: "run.workers.maxConcurrent", sessionOverridable: false, projectSettable: false,
+      group: "workers", type: types.integer(1, 64, "count"),
+      layers: { global: { store: "gateway", path: ["homeWorkerLimit"] } }, defaultValue: 4,
+      timing: "live", effect: "delegate", direction: (before, after) => Number(after) > Number(before) ? "widen" : "narrow",
+      writers: ["ui", "home"], label: "Home worker limit", order: 45, importance: "essential",
+      help: "Maximum concurrent Home tasks. Lowering the limit does not stop existing tasks.",
+      confirm: "Raising the worker limit lets Home run more tasks concurrently.",
+    },
+    {
       tap: "spend", id: "permissions.budget.task", sessionOverridable: true, projectSettable: false, group: "workers", type: taskBudgetType(),
       layers: { home: { store: "home", path: ["budget", "task"] }, global: { store: "gateway", path: ["taskBudget"] } }, timing: { narrow: "live", widen: "fixed" }, effect: "delegate",
       direction: raisesBudget, writers: ["ui", "home"],
