@@ -66,7 +66,7 @@ async function delegateThroughHome(f: Awaited<ReturnType<typeof fixture>>, deleg
   f.faux.setResponses(Array.from({ length: 4 }, () => {
     const respond = scriptedHome(delegate, observed, refusals);
     return (context, options, state, model) => {
-      if (isWorkerTurn(context)) workerContexts.push(context.messages.map(message => message.role === "system" ? getSystemMessageText(message) : textOf(message)).join("\n"));
+      if (isWorkerTurn(context)) workerContexts.push(context.messages.filter(message => message.role === "user").map(textOf).join("\n"));
       else homeContexts.push(JSON.stringify(context));
       return respond(context, options, state, model);
     };

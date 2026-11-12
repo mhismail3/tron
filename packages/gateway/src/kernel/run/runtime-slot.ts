@@ -3650,6 +3650,15 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     return projectTree(this.displayProjection, this.runtime.session.sessionManager, this.dependencies.blobs);
   }
 
+  readResources<T>(read: () => T | Promise<T>): Promise<T> {
+    this.assertNoTrustReload();
+    return this.lane.run(async () => {
+      this.assertUsable();
+      this.assertNoTrustReload();
+      return read();
+    });
+  }
+
   commands(): CommandInfo[] {
     this.assertNoTrustReload();
     const session = this.runtime.session;

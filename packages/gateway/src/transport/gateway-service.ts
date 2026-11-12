@@ -1599,18 +1599,22 @@ export class GatewayService {
         const slot = await this.openedSlot(client, params);
         return safeJson(slot.tree());
       }
-      case "session.commands":
-        return safeJson({ commands: (await this.openedSlot(client, params)).commands() } satisfies SessionCommands);
+      case "session.commands": {
+        const slot = await this.openedSlot(client, params);
+        return slot.readResources(() => safeJson({ commands: slot.commands() } satisfies SessionCommands));
+      }
       case "session.commandDetail": {
         const slot = await this.openedSlot(client, params);
-        const detail: CommandDetail = await slot.commandDetail(
+        const detail: CommandDetail = await slot.readResources(() => slot.commandDetail(
           oneOf(params.source, "source", ["extension", "skill", "prompt"] as const),
           string(params.name, "name", { max: 8_192 }),
-        );
+        ));
         return safeJson(detail);
       }
-      case "session.subagentDetail":
-        return safeJson(await (await this.openedSlot(client, params)).subagentDetail(string(params.name, "name", { max: 8_192 })));
+      case "session.subagentDetail": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(await slot.readResources(() => slot.subagentDetail(string(params.name, "name", { max: 8_192 }))));
+      }
       case "session.export": {
         const slot = await this.openedSlot(client, params);
         return safeJson(await this.exportGate.run(
@@ -1618,10 +1622,14 @@ export class GatewayService {
           () => slot.export(oneOf(params.format, "format", ["html", "jsonl"] as const)),
         ));
       }
-      case "session.context":
-        return (await this.openedSlot(client, params)).context();
-      case "session.resources":
-        return (await this.openedSlot(client, params)).resources();
+      case "session.context": {
+        const slot = await this.openedSlot(client, params);
+        return slot.readResources(() => slot.context());
+      }
+      case "session.resources": {
+        const slot = await this.openedSlot(client, params);
+        return slot.readResources(() => slot.resources());
+      }
       case "session.reloadResources":
         return this.mutation(client, method, params, async (workToken) => {
           await (await this.openedSlot(client, params)).reload(undefined, true, false, workToken);
