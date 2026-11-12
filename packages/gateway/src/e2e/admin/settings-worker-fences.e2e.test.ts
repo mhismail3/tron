@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, type AssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, getSystemMessageText, fauxToolCall, type AssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../../test-support/wait-for.js";
 import { setHomeMemoryModels } from "../../../test-support/settings-dependencies.js";
@@ -45,7 +45,7 @@ async function gateway() {
 describe("settings worker changes and Session fences", () => {
   it("Home applies routine model/thinking changes to a settled worker without a client opening that worker", async () => {
     const f = await gateway();
-    const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
+    const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"));
     let homeCall: { prompt: string; name: string; args: Record<string, unknown> } | undefined;
     const homeResults = new Map<string, { isError: boolean; text: string; details: unknown }>();
     const respond = async (context: TranscriptContext): Promise<AssistantMessage> => {

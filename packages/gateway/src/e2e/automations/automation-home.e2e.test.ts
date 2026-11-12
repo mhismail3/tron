@@ -1,7 +1,7 @@
 import { readFile, mkdir, writeFile, rm, open } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, getSystemMessageText, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { afterEach, expect, it, vi } from "vitest";
 import { startLockGateway, type LockGateway, type LockGatewayOptions } from "../../../test-support/gateway-lock-harness.js";
 import { NotificationService } from "../../notifications/notification-service.js";
@@ -481,7 +481,8 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
     const partial = record.pendingHomeRuns[0];
     manager.appendCustomMessageEntry("tron.home-trigger.v1",
       `[from: automation; kind: trigger; authority: task]\nAutomation · ${partial.homeName}\n\n${partial.actionSnapshot.text}`, true,
-      { eventId: `automation:${partial.runId}`, trigger: { kind: "automation", sourceId: automation.id, eventId: partial.runId, title: partial.homeName } });
+      { eventId: `automation:${partial.runId}`, fullTextReference: `schedule ${JSON.stringify({ action: "show", automationId: automation.id, runId: partial.runId, offset: 0, limit: 4096 })}`,
+        trigger: { kind: "automation", sourceId: automation.id, eventId: partial.runId, title: partial.homeName } });
     const handle = await open(sessionFile, "r+"); try { await handle.sync(); } finally { await handle.close(); }
     gateway = live = await startLockGateway("automation-home-gates", { ...pushOptions, root }); owned.push(gateway);
     phone = await gateway.connect("push-restarted-phone");
@@ -516,6 +517,7 @@ it("real Gateway: paused crash claims and a partial canonical batch recover exac
     expect(relayRequests[0].path).toBe("/v3/notifications");
     const notificationAfter = JSON.parse(await readFile(`${gateway.tronHome}/state/notifications.json`, "utf8"));
     expect(notificationAfter.receipts).toEqual(notificationBefore.receipts);
+    await mkdir("test-results/2094", { recursive: true });
     await writeFile("test-results/2094/push-crash-restart-trace.json", JSON.stringify({ survivingIds, messagesBefore, messagesAfter, recovered, relayRequests, receipts: notificationAfter.receipts }, null, 2));
   } finally { for (const owner of notifications) owner.dispose(); }
 });
@@ -557,7 +559,8 @@ it("real Gateway: a singleton partial input resumes with one model turn and push
     await writeFile(recordPath, JSON.stringify(record));
     manager.appendCustomMessageEntry("tron.home-trigger.v1",
       "[from: automation; kind: trigger; authority: task]\nAutomation · Singleton recovery\n\nMessage from Singleton recovery.", true,
-      { eventId: `automation:${runId}`, trigger: { kind: "automation", sourceId: automation.id, eventId: runId, title: "Singleton recovery" } });
+      { eventId: `automation:${runId}`, fullTextReference: `schedule ${JSON.stringify({ action: "show", automationId: automation.id, runId, offset: 0, limit: 4096 })}`,
+        trigger: { kind: "automation", sourceId: automation.id, eventId: runId, title: "Singleton recovery" } });
     const handle = await open(sessionFile, "r+"); try { await handle.sync(); } finally { await handle.close(); }
     gateway = live = await startLockGateway("automation-home-gates", { ...singleOptions, root }); owned.push(gateway);
     phone = await gateway.connect("singleton-recovered-phone");
@@ -614,7 +617,7 @@ it("real Gateway: an image-sized canonical line within the prompt bound cannot b
 it("real Gateway: a Home-created automation wake cannot approve settings, trust, grants or sensitive profile decisions", async () => {
   const { gateway, phone, fire, sessionId } = await preparedGateway({ knowledge: true });
   gateway.script(Array.from({ length: 8 }, () => context => {
-    if (context.messages.some(message => message.role === "user" && JSON.stringify(message.content).includes("This is a finite Home task"))) {
+    if (context.messages.some(message => message.role === "system" && getSystemMessageText(message).includes("This is a finite Home task"))) {
       return fauxAssistantMessage([fauxToolCall("report", { resultId: "scope-setup-result", outcome: "final", text: "Scope setup completed.", evidence: ["Fixture report completed"] })], { stopReason: "toolUse" });
     }
     const last = context.messages.at(-1);

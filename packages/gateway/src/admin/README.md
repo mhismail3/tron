@@ -111,6 +111,9 @@ are installed; schema access never evaluates their late-bound service getter.
   native filenames may omit the changed settings file. Unchanged digests skip their
   canonical readers and emit no audit or push; accepted scans and observers are
   joined by `dispose`.
+- Native directory hints coalesce for 250 ms from the first hint, without resetting
+  the deadline. Concurrent settings reads create lock-file hints but cannot postpone
+  reconciliation of MCP, trust or model changes indefinitely.
 - Outside MCP and trust changes invalidate affected live slots through registry
   freshness, which reloads at idle only when effective inputs differ. Untrusted
   Project MCP remains excluded. Global model-definition changes request the
