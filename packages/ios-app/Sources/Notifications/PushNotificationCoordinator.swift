@@ -866,8 +866,6 @@ final class PushNotificationCoordinator {
         registrationTask = nil
     }
 
-    /// Every key rotation spends this launch's one automatic budget: the card, the in-loop
-    /// assertion recovery and the rejected-key retry all share it, so no path rotates twice.
     private func rotateInvalidKey() throws {
         try persistAppAttestKeyID(nil, rejected: false)
         automaticRetryAvailable = false

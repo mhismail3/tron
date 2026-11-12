@@ -144,7 +144,6 @@ final class PushRegistrationRetryTests: XCTestCase {
         )
     }
 
-    /// Reconciles the coordinator for `profile` and presents `identity` as the connected gateway.
     private func connect(
         _ harness: Harness,
         profile: GatewayProfile = PushRegistrationRetryTests.profileA,
@@ -172,7 +171,6 @@ final class PushRegistrationRetryTests: XCTestCase {
         try JSONDecoder().decode(ChangeReview.self, from: Data(Self.retryCard.utf8))
     }
 
-    /// The Gateway's answer boundary for a card: the broker accepts the first exact answer and refuses later ones.
     private func answerOnce(_ counter: AnswerCounter) -> PushRetryAnswer {
         {
             counter.attempted += 1
@@ -181,7 +179,6 @@ final class PushRegistrationRetryTests: XCTestCase {
         }
     }
 
-    /// A stopped registration after its one automatic retry: a flagged key, one attempt, no further chain.
     private func stoppedAfterAutomaticRetry() async throws -> Harness {
         let harness = try makeHarness(flagged: true)
         await connect(harness)
