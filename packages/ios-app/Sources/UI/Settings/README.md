@@ -9,7 +9,7 @@ providers, models, extensions, hooks, MCP servers, connected services, paired Ma
 
 - Shell: `SettingsView` (`SettingsGroupKind` groups, `SettingsGroupCard`).
 - Renderer: `SettingsRendererView`, `SettingsRendererRow`, `SettingsValueEditors`,
-  `SettingsChoiceSlider`, `SettingsAutosave`.
+  `SettingsChoiceSlider`.
 - Audit: `SettingsChangesView`, `SettingsChangeRow`; exact reviews use the shared
   `ChangeReviewSheet`.
 - Agent configuration: `ConfigurationSlider(Surface)`,
