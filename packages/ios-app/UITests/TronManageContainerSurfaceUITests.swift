@@ -19,7 +19,7 @@ import UIKit
                         thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.05)))
                 }
                 let model = app.descendants(matching: .any)["session-model-summary"].firstMatch
-                XCTAssertTrue(model.staticTexts["Effort"].waitForExistence(timeout: 10))
+                XCTAssertTrue(model.staticTexts["Thinking"].waitForExistence(timeout: 10))
                 let top = app.screenshot()
                 keep(top, "manage-containers-\(theme)-\(mode)-top")
                 let reference = pigment(top, app: app, frame: model.frame)

@@ -158,7 +158,7 @@ Manage Session, Home's chat and sheets, New Session, session history and subagen
   A child transcript is a read-only `ReadOnlySubagentSessionStore` lease whose only mutation is the
   capability-gated stop (`process-transcript-abort.v1`).
 - **Manage Session.** Usage card (tokens left over the used line, Compact Now trailing), then the
-  shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Effort and
+  shared primary-themed `ManageModelConfigurationCard` (catalog model/provider, Switch Model, Thinking and
   Context Window); the existing settings renderer owns reads, writes and Revert; the shared approval
   sheet owns request review.
   Tool selection uses its `SettingsToolsEditor` with the shared `AvailableToolsList`. Session
