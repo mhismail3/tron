@@ -29,8 +29,8 @@ performs cleanup nor grants deletion authority. `not pruned` records an owner ga
 | Root | Holds |
 |---|---|
 | `agent/` | Pi's fixed settings/models/MCP/trust/auth/resources layout, transcripts, subagent definitions and profiles |
-| `state/` | devices/pairing, Home record/settings/tasks/cwd, settings history, automations, connections, uploads, displays, provider runtime, machine identity, Mac progress and private SSH identity |
-| `cache/` | network discovery, search/catalog indexes, managed pi-subagents installs, transform cache and prepared Gateway payloads |
+| `state/` | devices/pairing, Home record/settings/tasks/cwd, settings history, automations, connections, uploads, displays, delegated-run records, selected Gateway payloads, machine identity, Mac progress and private SSH identity |
+| `cache/` | network discovery, search/catalog indexes, managed pi-subagents installs and transform cache |
 | `workspace/` | lazy task `tmp/`, indexed documents in `files/`, living owner collections in `state/`, and `builds/ios-ota/`; [workspace policy](../packages/gateway/docs/internal-workspace.md) |
 | `logs/` | bounded Gateway, Mac, launcher, deploy and diagnostic logs, each rotated by its writer |
 | `internal/` | existing host-wide simulator/device/coordination leases, not installation data |
@@ -66,6 +66,16 @@ or large. Logs, reconstructible indexes/runtimes, scratch/locks, and regenerated
 `state/{local-auth,enrollment}.json` are excluded. Provider credentials are copied.
 Prepared `state/payloads` are not copied: replace and bundled-offline reinstall
 move the Stable channel into the operation, or restore it by redeploying.
+`state/subagents` is backed up: delegated-run evidence and resumable results are not
+rebuildable; its owner's release policy is independent of backup selection.
+
+The registry classifies canonical names only. Before migration, old `gateway/`,
+`internal/` and `ios-builds/` addresses have no compatibility classification; unknown
+paths are copied conservatively, including regenerated old-path credentials. Recovery
+copies stay local under the private maintenance operation, never in a synced or uploaded
+location. Credential files retain mode `0600` and every ancestor directory `0700`; never sync or
+upload a recovery copy. The migration approval packet must explicitly disclose the
+old-path credential copies rather than silently excluding or redacting them.
 
 - Replace builds `partial-state-snapshot-<n>` before publishing `state-snapshot-<n>`;
   interrupted partial snapshots are rebuilt. Symlinks are copied as links and partly
