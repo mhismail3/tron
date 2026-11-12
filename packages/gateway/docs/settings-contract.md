@@ -89,7 +89,6 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `run.transport` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.httpIdleTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
 | `run.websocketConnectTimeoutMs` | — | run | project, session, global | as allowed | live | next-request | — |
-| `run.httpProxy` | — | run | global | as allowed | live | restart | — |
 | `run.cacheWarming` | — | run | global | none | fixed | reload | spend |
 | `sources.extensions` | — | sources | project, global | none | fixed | reload | trust |
 | `sources.skills` | — | sources | project, global | none | fixed | reload | trust |
@@ -97,7 +96,6 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `sources.themes` | — | sources | project, global | none | fixed | reload | — |
 | `sources.packages` | — | sources | project, global | none | fixed | reload | install |
 | `sources.npmCommand` | — | sources | global | none | live | next-change | trust |
-| `setup.sessionDir` | — | setup | global | as allowed | live | restart | — |
 | `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | irreversible |
 
 Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:
@@ -147,7 +145,7 @@ tool (Home may name a `taskId`); `outside` (observed only).
 
 Outcomes name key, layer, status and redacted `before`/`after`; `review` includes the
 exact digest-bound before/after projection and whether a native tap is required. A chat's own Session scope
-changes only while idle; `setup.sessionDir` has no writer; Home Chat compaction values are
+changes only while idle; Home Chat compaction values are
 refused. **Record:** `<tronHome>/state/settings/changes/`, append-only 500-entry segments
 listed in `index.json`, kept forever, paged by `settings.history` (a page may be empty with a
 `nextCursor`); entries hold actor, target, key, `before`/`after` (never credentials), reason,
@@ -249,7 +247,7 @@ Words and values come from the schema and resolver; iOS decides only layout.
 `settings.resolve` serves sections (Model, Workers & delegation, Compaction, Tools,
 Connection, Trusted Projects, Mac Terminal, Accounts, Sources, Storage) and badges `{ kind, label, detail?, action? }`
 (Layer, Source, Scope, Authority, State; unknown kinds render neutrally; actions go through
-`settings.change`). Controls: `toggle`, `choice`, `text`, `secret`, `list`,
+`settings.change`). Controls: `toggle`, `choice`, `text`, `list`,
 `checklist`, `catalog`, `readOnly`; the client sends what it implements and gets the declared
 control, its `fallback`, or `readOnly` with "Update Tron to edit". Stopped-runtime settings with
 no writer are not Settings rows. A declaration without a `control` has no routine editing row:
