@@ -117,6 +117,8 @@ Commands:
   home-layout migrate --home PATH (--dry-run|--status|--apply|--rollback) [--json]
                                     JSON plan/status or offline journaled renames/inverse;
                                     exits 0 clear, 1 refusal, pending or conflict, 2 error
+  context audit [--report-only]      Render context layers and diagnose duplicates,
+                                    volatility and index format; budgets are report-only
   docs modules [<path>]|signals|rpc|settings
                                     Print a generated Markdown index (module map, module
                                     README Signals, Gateway RPCs, settings keys); docs
@@ -245,6 +247,11 @@ case "$cmd" in
     ;;
   metrics)
     exec python3 "$ROOT/tools/metrics/metrics.py" "$@"
+    ;;
+  context)
+    [ "${1:-}" = audit ] || { echo 'usage: scripts/tron context audit [--report-only]' >&2; exit 2; }
+    shift
+    exec "$ROOT/scripts/tron-node" exec node "$ROOT/tools/verify/context.mjs" "$@"
     ;;
   docs)
     exec python3 "$ROOT/tools/docs/docs.py" "$@"
