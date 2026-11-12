@@ -2,7 +2,6 @@ import Foundation
 
 enum MacStartupMode: Equatable, Sendable {
     case testHost
-    case command(MacCommandLineMode)
     case debugReadOnly
     case wizard
     case onboarded
@@ -12,11 +11,9 @@ enum MacStartupMode: Equatable, Sendable {
     static func resolve(
         variant: MacRuntimeVariant,
         onboarded: Bool,
-        command: MacCommandLineMode,
         underTests: Bool
     ) -> MacStartupMode {
         if underTests { return .testHost }
-        if command.isCommand { return .command(command) }
         switch variant {
         case .xcodeDebug: return .debugReadOnly
         case .installedRelease: return onboarded ? .onboarded : .wizard
