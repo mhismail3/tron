@@ -312,7 +312,7 @@ describe("gateway/home scenario lock", () => {
     const row = (item: any) => [item.kind === "message" ? item.role : item.kind, item.semantic.kind, item.semantic.direction, item.semantic.contextEffect,
       item.semantic.lifecycle ?? "", `${item.semantic.origin.kind}${item.semantic.origin.ownerId === undefined ? "" : `:${item.semantic.origin.ownerId}`}`,
       ...(item.content ?? []).map((part: any) => part.type === "toolCall" ? `${part.name}(${JSON.stringify(part.arguments)})` : part.text)].join(" | ");
-    const RESULT_NOTICE = "Home task: Summarize notes.txt in the lock project. | outcome: final | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nThe notes say: lock notes.\n\nEvidence:\n- read notes.txt";
+    const RESULT_NOTICE = "[from: worker; kind: task-result; authority: none]\nHome task: Summarize notes.txt in the lock project. | outcome: final | subagents: 0 started, 0 stopped at end | duration: <duration>\n\nThe notes say: lock notes.\n\nEvidence:\n- read notes.txt";
     const ADMITTED = `Task admitted; a report is required for its result.\nWorker: ${MODEL} (same as Home), thinking off.`;
     const DELEGATE_ARGUMENTS = { intent: "Summarize notes.txt in the lock project.", target: "<tmp>/workspace", taskId: TASK_ID, title: "Lock task" };
     const STATUS = "status | ambientStatus | none |  | gateway";
@@ -391,7 +391,7 @@ describe("gateway/home scenario lock", () => {
       { ...ASSISTANT, stopReason: "stop", content: [{ text: "Delegated the lock task.", type: "text" }] },
       { ...ASSISTANT, stopReason: "stop", content: [{ text: "The lock task reported: lock notes.", type: "text" }] },
     ]);
-    const WORKER_PROMPT = `${INTENT}\n\nWorker at start: ${MODEL}; thinking off.`;
+    const WORKER_PROMPT = `[from: tron-home; kind: brief; authority: task]\n${INTENT}\n\nWorker at start: ${MODEL}; thinking off.`;
     const REPORT = { evidence: ["read notes.txt"], outcome: "final", resultId: "lock-result", text: "The notes say: lock notes." };
     expect(workerSessionJsonl.flatMap(message), "the worker's persisted messages").toEqual([
       { content: [{ text: WORKER_PROMPT, type: "text" }], role: "user" },

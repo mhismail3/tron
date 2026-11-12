@@ -1325,10 +1325,14 @@ describe("Home task production dispatch", () => {
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const eventsBeforeWake = f.events.length;
+    const fullReport = `Verified result ${"λ".repeat(24000)} FULL_REPORT_TAIL`;
+    let wakeBody = "";
     let request = "";
     let instructions = "";
-    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }), (context) => {
+    f.faux.setResponses([fauxAssistantMessage([reportCall("report-one", fullReport)], { stopReason: "toolUse" }), (context) => {
       request = JSON.stringify(context);
+      wakeBody = context.messages.filter(message => message.role === "user").map(message => typeof message.content === "string" ? message.content
+        : message.content.filter(part => part.type === "text").map(part => part.text).join("\n")).find(text => text.startsWith("[from: worker;")) ?? "";
       instructions = JSON.stringify(context.messages.filter(message => message.role === "system"));
       return fauxAssistantMessage("Result consumed by the wake");
     }]);
@@ -1341,6 +1345,11 @@ describe("Home task production dispatch", () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(f.events.slice(eventsBeforeWake).filter(event => event.topic === "session.extensionError")).toEqual([]);
     expect(request).toContain("Verified result");
+    expect(wakeBody).toMatch(/^\[from: worker; kind: task-result; authority: none\]\n/);
+    expect(Buffer.byteLength(wakeBody.slice(wakeBody.indexOf("\n") + 1))).toBeLessThanOrEqual(8192);
+    expect(wakeBody).toContain(`[Full text: read ${JSON.stringify(home.sessionFile)}`);
+    expect(request).not.toContain("FULL_REPORT_TAIL");
+    expect(await readFile(home.sessionFile!, "utf8")).toContain(fullReport);
     expect(instructions).toMatch(/settled result wakes Home/);
     expect(instructions).toMatch(/advisory push|task-finished push/);
     expect(instructions).toContain("do not assume task success from admission");
@@ -1526,7 +1535,7 @@ describe("Home task production dispatch", () => {
       f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "steer", taskId: run.taskId, operationId: run.operationId, text: "Home tool instruction" })], { stopReason: "toolUse" }), fauxAssistantMessage("shared steering accepted")]);
       await home.prompt("Steer the active task");
       await waitFor(() => home.snapshot().configurationBlocker === null, "Home task tool terminal");
-      expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home tool instruction"]);
+      expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["[from: tron-home; kind: steer; authority: task]\nHome tool instruction"]);
       release(); await run.completion;
       evidence.push({ case: "home-task-tool", steering: "accepted" });
     } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }
@@ -1540,7 +1549,10 @@ describe("Home task production dispatch", () => {
     let firstSteer: Promise<unknown> | undefined;
     let secondSteer: Promise<unknown> | undefined;
     const gate = new Promise<void>(resolve => { release = resolve; });
+    const homeSteer = "[from: tron-home; kind: steer; authority: task]\nHome first";
+    const maintainerSteer = "[from: maintainer; kind: steer; authority: task]\nMaintainer third";
     f.faux.setResponses([async () => { entered = true; await gate; return fauxAssistantMessage([fauxToolCall("read", { path: "missing" })], { stopReason: "toolUse" }); },
+      fauxAssistantMessage([fauxToolCall("read", { path: "missing" })], { stopReason: "toolUse" }),
       fauxAssistantMessage([fauxToolCall("read", { path: "missing" })], { stopReason: "toolUse" }),
       fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const run = await dispatch(f);
@@ -1555,7 +1567,7 @@ describe("Home task production dispatch", () => {
       const called: string[] = [];
       vi.spyOn(session, "prompt").mockImplementation(async (text: string, options: unknown) => {
         called.push(text);
-        if (text === "Home first") { steeringEntered = true; await steeringGate; }
+        if (text === homeSteer) { steeringEntered = true; await steeringGate; }
         return prompt(text, options);
       });
       const first = firstSteer = homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, text: "Home first" });
@@ -1568,12 +1580,13 @@ describe("Home task production dispatch", () => {
         const admittedWhileHeld = await Promise.race([second.then(() => true),
           new Promise<false>(resolve => { observationTimer = setTimeout(() => resolve(false), 100); })]);
         expect(admittedWhileHeld).toBe(false);
-        expect(called).toEqual(["Home first"]);
+        expect(called).toEqual([homeSteer]);
       } finally { if (observationTimer) clearTimeout(observationTimer); releaseSteer?.(); }
       await Promise.all([first, second]);
-      expect(called).toEqual(["Home first", "Maintainer second"]);
-      expect(f.signals.filter(record => record.event === "home.task.control" && record.action === "steer")).toHaveLength(2);
-      expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["Home first", "Maintainer second"]);
+      await homeOwnerOf(f.registry).maintainTask({ ...control, text: "Maintainer third" });
+      expect(called).toEqual([homeSteer, "Maintainer second", maintainerSteer]);
+      expect(f.signals.filter(record => record.event === "home.task.control" && record.action === "steer")).toHaveLength(3);
+      expect((slot as any).runtime.session.getSteeringMessages()).toEqual([homeSteer, "Maintainer second", maintainerSteer]);
       await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, operationId: "stale-operation", text: "stale" })).rejects.toThrow(/stale|changed|conflict/i);
       await expect(slot.prompt(...taskWorkerSteeringInput({ ...control, operationId: "stale-operation" }, "stale slot control"))).rejects.toThrow(/stale|changed|conflict/i);
       const service = new GatewayService({ display: displayOwnerOf(f.registry), config: { tronHome: f.tronHome }, sessions: f.registry, home: homeOwnerOf(f.registry),
@@ -1585,6 +1598,8 @@ describe("Home task production dispatch", () => {
       const result = await run.completion;
       expect(result.terminalEvidence?.outcome).toBe("final");
       const canonicalUser = JSON.stringify(slot.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "user"));
+      expect(canonicalUser).toContain("[from: tron-home; kind: steer; authority: task]");
+      expect(canonicalUser).toContain("[from: maintainer; kind: steer; authority: task]");
       expect(canonicalUser).toContain("Home first");
       expect(canonicalUser.indexOf("Maintainer second")).toBeGreaterThan(canonicalUser.indexOf("Home first"));
       await expect(homeOwnerOf(f.registry).steerTask(f.home.sessionId, { ...control, text: "late" })).rejects.toThrow(/active|stale|settled|terminal/i);
@@ -2312,12 +2327,15 @@ describe("Home task production dispatch", () => {
     expect(result.terminalEvidence).toMatchObject({ outcome, reason: "explicit-report" });
     expect(result.reportRef?.resultId).toBe("reminded-report");
     expect(f.faux.state.callCount).toBe(2);
+    expect(reminderContext).toContain("[from: gateway; kind: reminder; authority: task]");
     expect(reminderContext).toContain("Call report now");
     expect(reminderContext).toContain("partial evidence");
     expect(f.signals.filter(signal => signal.event === "home.task.report-reminder")).toHaveLength(1);
     const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
     expect(entries.filter(entry => entry.type === "message" && entry.message.role === "user")).toHaveLength(1);
-    expect(entries.filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-report-reminder.v1")).toHaveLength(1);
+    expect(entries.filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-report-reminder.v1")).toEqual([
+      expect.objectContaining({ content: expect.stringMatching(/^\[from: gateway; kind: reminder; authority: task\]\nCall report now/) }),
+    ]);
     evidence.push({ case: `report-reminder-${outcome}`, result, requests: f.faux.state.callCount });
   }, 20_000);
 

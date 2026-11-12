@@ -6,6 +6,7 @@ import { makeContextDeliveryReceipt } from "../../kernel/receipts/context-delive
 import { parseHomeTaskReport } from "../../kernel/delegation/task-report.js";
 import { HOME_TASK_RESULT_MESSAGE, INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../../kernel/receipts/invocation-receipts.js";
 import { GatewayError } from "../../errors.js";
+import { injectedText } from "../../kernel/host/injected-text.js";
 import { EpisodicMemoryError } from "../../errors.js";
 import { AsyncMutex } from "../../util/async-mutex.js";
 import type { HomeTaskRecord, HomeTaskStore } from "./home-task-store.js";
@@ -184,7 +185,7 @@ export class WakeInboxOwner {
       if (!pending) return undefined;
       const envelope = await prepareEnvelope();
       const pendingMessage = (count: number): HomeWakeMessage => ({ customType: HOME_TASK_PENDING_MESSAGE, display: true,
-        content: `${count} more task results pending.`, details: { eventId: `pending:${operationId}`, taskId: "inbox",
+        content: injectedText(`${count} more task results pending.`, "gateway", "pending", "none"), details: { eventId: `pending:${operationId}`, taskId: "inbox",
           resultRef: null, terminalEvidence: null, operationId, routeGeneration: route.routeGeneration } });
       const cost = (message: HomeWakeMessage) => estimateTokens({ role: "custom", ...message, timestamp: Date.now() });
       const count = pendingMessage(pending);
@@ -212,7 +213,7 @@ export class WakeInboxOwner {
           })()
           : `No accepted report. Outcome: ${task.terminalEvidence?.outcome ?? "unknown"} (${task.terminalEvidence?.reason ?? "unknown"}${task.terminalEvidence?.failureCause ? `; ${task.terminalEvidence.failureCause}` : ""}${task.terminalEvidence?.detail ? `: ${task.terminalEvidence.detail}` : ""}).`;
         let content = attention ? `Home worker needs attention (not a final report). Task: ${task.taskId}; worker operation: ${attention.operationId}; at: ${attention.at}.\nStep: ${attention.step}\nDone: ${attention.done}\nNext: ${attention.next}\nBlocker: ${attention.blocker}\nThis check-in did not pause the worker. Inspect task status before steering.` : `${header}\n\n${reportText}`;
-        const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content,
+        const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content: injectedText(content, "worker", "task-result", "none"),
           details: { eventId: wake.eventId, taskId: task.taskId, taskTitle: result.title ?? title, resultRef: task.reportRef, terminalEvidence: task.terminalEvidence,
             operationId, routeGeneration: route.routeGeneration } });
         if (cost(message()) > envelope.freshTokens - cost(count)) content = attention ? `Home worker needs attention: ${task.taskId}. Read its blocker with task status (check-in ${attention.id}, worker operation ${attention.operationId}).` : `${header}: immutable report, ${Buffer.byteLength(result.text)} bytes. Read the full immutable report through task action report with taskId=${task.taskId} and offset/limit pages.`;

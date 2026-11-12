@@ -47,16 +47,16 @@ export class DelegationOperations<Session extends OwnedSession> {
     return root === undefined ? Promise.resolve(asyncDirs.length === 0) : homeTaskSubagentRunsSettled(asyncDirs, root);
   }
 
-  async steerWorker(sessionId: string, control: TaskWorkerControl, text: string): Promise<void> {
+  async steerWorker(sessionId: string, control: TaskWorkerControl, text: string, from: "tron-home" | "maintainer"): Promise<void> {
     const slot = await this.sessions.acquire(sessionId);
-    await slot.prompt(...taskWorkerSteeringInput(control, text));
+    await slot.prompt(...taskWorkerSteeringInput(control, text, from));
   }
 
   async interruptWorker(sessionId: string, control: TaskWorkerControl, by: string, text?: string): Promise<string[]> {
     const slot = await this.sessions.acquire(sessionId);
     return await interruptTaskWorker(slot.ownedTurns.worker, control,
       () => this.interruptTools(slot, by,
-        text === undefined ? undefined : async () => { await slot.prompt(...taskWorkerSteeringInput(control, text)); }));
+        text === undefined ? undefined : async () => { await slot.prompt(...taskWorkerSteeringInput(control, text, by === "the maintainer" ? "maintainer" : "tron-home")); }));
   }
 
   async stopWorker(sessionId: string, control: TaskWorkerControl): Promise<void> {

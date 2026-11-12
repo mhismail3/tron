@@ -442,7 +442,7 @@ export class HomeOwner {
   }
 
   async maintainTask(control: TaskWorkerControl & { text: string }): Promise<void> {
-    await this.tasks.steer(control);
+    await this.tasks.steer(control, "maintainer");
   }
 
   async interruptTask(control: TaskWorkerControl & { text?: string }): Promise<{ interrupted: string[] }> {

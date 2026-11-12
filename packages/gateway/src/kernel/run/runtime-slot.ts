@@ -138,6 +138,7 @@ import { processHistoryDetail, subagentProcessId, subagentProcessesFromActivity 
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "./gateway-work-registry.js";
 import type { ResourceRoot } from "../resources/resource-root.js";
 import { projectAgentInstructions, type AgentInstructions } from "../../sessions/agent-instructions.js";
+import { injectedText } from "../host/injected-text.js";
 import type { ToolDisplayProjection, ToolReferences } from "../projection/tool-result.js";
 import { trustedExtensionOriginKind } from "../projection/extension-origin.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
@@ -735,7 +736,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     ].join("\n");
     try {
       const control = { taskId, operationId: worker.identity.operationId };
-      const { operationId } = await this.prompt(text, [], "steer", undefined, undefined, {
+      const { operationId } = await this.prompt(injectedText(text, "gateway", "settings", "none"), [], "steer", undefined, undefined, {
         operationId: randomUUID(), taskFence: control,
         origin: { kind: "gateway", ownerId: taskId, title: "Settings changed", confidence: "boundary" }, onTerminal: () => {},
       });
