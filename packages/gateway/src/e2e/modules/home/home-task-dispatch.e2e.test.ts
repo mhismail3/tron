@@ -13,7 +13,7 @@ import { fauxAssistantMessage, fauxToolCall, getCurrentTools, type FauxResponseF
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeTaskStore, taskIntentDigest } from "../../../modules/home/home-task-store.js";
 import { type HomeTaskDispatcher, successorTaskId, HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "../../../modules/home/home-task-dispatcher.js";
-import { HomeMemoryRefusal } from "../../../modules/home/home-request-policy.js";
+import { HomeMemoryRefusal, HomeRequestPolicy } from "../../../modules/home/home-request-policy.js";
 import { UploadStore } from "../../../machine/upload-store.js";
 import { EpisodicMemoryError } from "../../../errors.js";
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
@@ -335,6 +335,15 @@ describe("Home task authorization RPC", () => {
 describe("Home task bounded backlogs", () => {
   it("delivers a backlog across bounded activations exactly once in order without context-overflow", async () => {
     const f = await fixture(undefined, false, 19_000);
+    const headrooms: unknown[] = [];
+    const measure = HomeRequestPolicy.prototype.deliveryHeadroom;
+    vi.spyOn(HomeRequestPolicy.prototype, "deliveryHeadroom").mockImplementation(async function(this: HomeRequestPolicy, ...args: Parameters<typeof measure>) {
+      const result = await measure.apply(this, args);
+      const session = args[0];
+      headrooms.push({ tokens: result.tokens, freshTokens: result.freshTokens, tools: session.agent.state.tools.length,
+        frameTools: getCurrentTools(session.agent.state.messages).length, registeredTools: session.getAllTools().length, systemBytes: Buffer.byteLength(args[2]) });
+      return result;
+    });
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const tasks = [];
@@ -360,7 +369,7 @@ describe("Home task bounded backlogs", () => {
     }, wake, wake, wake, wake, wake, wake]);
     await home.prompt("u".repeat(20000));
     await waitFor(() => batches.flat().length === tasks.length, "backlog delivered by bounded activations").catch(error => {
-      throw new Error(JSON.stringify({ batches, firstRequestBytes: Buffer.byteLength(firstRequest), refusals: f.signals.filter(record => record.event === "refused"),
+      throw new Error(JSON.stringify({ batches, headrooms, firstRequestBytes: Buffer.byteLength(firstRequest), refusals: f.signals.filter(record => record.event === "refused"),
         errors: home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "assistant" && entry.message.errorMessage ? [entry.message.errorMessage] : []) }), { cause: error });
     });
     expect(tasks.length - batches[0]!.length).toBeGreaterThan(0);
