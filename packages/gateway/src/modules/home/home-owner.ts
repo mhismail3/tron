@@ -279,7 +279,7 @@ export class HomeOwner {
     if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw this.tasks.controlRefusal("steer", control, new GatewayError("conflict", "Home task steering is unavailable"));
     const task = await this.tasks.store.read(control.taskId);
     if (!task || task.homeId !== record.homeId || task.generation !== record.generation) throw this.tasks.controlRefusal("steer", control, new GatewayError("conflict", "Home task generation changed"), "home-generation-changed");
-    await this.tasks.steer(control);
+    await this.tasks.steer(control, "tron-home");
   }
 
   async taskTool(sessionId: string, input: unknown, confirm?: ConfirmChange): Promise<unknown> {
@@ -358,7 +358,7 @@ export class HomeOwner {
       }
       if (action === "steer") await this.steerTask(sessionId, { taskId: task.taskId, operationId, text: request.text! });
       else if (action === "interrupt") {
-        const { interrupted } = await this.tasks.interrupt({ taskId: task.taskId, operationId, ...(request.text === undefined ? {} : { text: request.text }) }, "Home");
+        const { interrupted } = await this.tasks.interrupt({ taskId: task.taskId, operationId, ...(request.text === undefined ? {} : { text: request.text }) }, "tron-home");
         return { accepted: true, action, taskId: task.taskId, sessionId: task.sessionId, operationId, interrupted, ...resolved };
       }
       else await this.stopTask({ taskId: task.taskId, operationId });
@@ -438,11 +438,11 @@ export class HomeOwner {
   }
 
   async maintainTask(control: TaskWorkerControl & { text: string }): Promise<void> {
-    await this.tasks.steer(control);
+    await this.tasks.steer(control, "maintainer");
   }
 
   async interruptTask(control: TaskWorkerControl & { text?: string }): Promise<{ interrupted: string[] }> {
-    return await this.tasks.interrupt(control, "the maintainer");
+    return await this.tasks.interrupt(control, "maintainer");
   }
 
   async stopTask(control: TaskWorkerControl): Promise<void> {

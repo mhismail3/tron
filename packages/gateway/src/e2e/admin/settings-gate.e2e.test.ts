@@ -862,7 +862,7 @@ describe("typed settings at real runtime boundaries", () => {
       const users = context.messages.filter(message => message.role === "user").map(textOf);
       if (isWorker(context)) {
         const index = workerRequests.push({ model: model.id, thinking: options?.reasoning,
-          signals: users.filter(text => text.startsWith("[Tron settings]")) }) - 1;
+          signals: users.filter(text => text.startsWith("[from: gateway; kind: settings; authority: none]\n[Tron settings]")) }) - 1;
         if (index < gates.length) {
           await gates[index]!.opened;
           return fauxAssistantMessage([fauxToolCall("bash", { command: `echo step-${index}` })], { stopReason: "toolUse" });
@@ -939,7 +939,7 @@ describe("typed settings at real runtime boundaries", () => {
     await waitFor(() => workerRequests.length >= 3 || undefined, "worker's request after approval");
     expect(workerRequests[2]).toMatchObject({ model: REASONING.id, thinking: "low" });
     expect(workerRequests[2]!.signals).toHaveLength(2);
-    expect(workerRequests[2]!.signals[1]).toMatch(/^\[Tron settings\] Tron Home changed this session's settings while you work on task live-worker\. Reason: Cheaper final step\.\n- Thinking: High → Low \(from your next model request; /);
+    expect(workerRequests[2]!.signals[1]).toMatch(/^\[from: gateway; kind: settings; authority: none\]\n\[Tron settings\] Tron Home changed this session's settings while you work on task live-worker\. Reason: Cheaper final step\.\n- Thinking: High → Low \(from your next model request; /);
     await waitFor(async () => (await homeOwnerOf(f.registry).taskStatus("live-worker").catch(() => undefined))?.lifecycle === "terminal" || undefined, "task terminal");
     await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home settled after the result");
     steps.push({ requests: workerRequests, approved });

@@ -22,6 +22,15 @@ producer and firing identity and grants no maintainer authority. A resumed trigg
 its already-written `deliveryMessage`: the native owner binds the new hidden wake input,
 then commits that original message's receipt before source acknowledgement and model input.
 The producer owns recovery and stale-route disposition; the host owns no trigger queue.
+`injected-text.ts` owns the shared `[from: …; kind: …; authority: none|task]`
+text envelope. Producers label notices at canonical admission; the request pipeline
+projects at most 8,192 UTF-8 body bytes per message across text parts, including a
+full-text reference when bounded. Home result and trigger producers reference their
+native task-report/status or automation readers; other notices reference the canonical
+session file. Trigger references travel in custom-message details so admission charges the
+same bounded projection without cutting canonical trigger text. Non-text parts remain
+intact, and the full text stays with its source. These labels convey provenance and
+scope, not approval or a grant; native attribution and refusal checks stay authoritative.
 `session-profile.ts` owns the neutral immutable runtime recipe and ordinary defaults.
 `session-lineage.ts` also owns `LineageRuntimePort<Runtime>`: single-flight runtime
 construction/publication with an opaque issuer-interpreted authority object. Its

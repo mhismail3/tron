@@ -841,7 +841,7 @@
         },
         {
           "role": "user",
-          "text": "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report."
+          "text": "[from: gateway; kind: reminder; authority: task]\nCall report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report."
         }
       ]
     },
