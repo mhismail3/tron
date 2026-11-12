@@ -1,7 +1,8 @@
 # Tron home layout
 
 A Tron home (`~/.tron` for Stable, `~/.tron-dev` for Debug, or `TRON_DATA_DIR`) holds
-everything Tron writes on the Mac. Every path in it is declared once in
+installation-scoped Tron data on the Mac. Shared host coordination keeps its existing
+addresses. Current owned boundaries are declared once in
 [`tron-home-layout.json`](../packages/gateway/src/foundation/tron-home-layout.json): its
 owning module, writer, lifecycle, how it is rebuilt, whether it needs a backup, its
 sensitivity, its retention rule and its view. Gateway code resolves paths only through
@@ -11,12 +12,25 @@ sensitivity, its retention rule and its view. Gateway code resolves paths only t
 
 Top-level roots follow the owning process. Lifecycle is recorded per path, because a
 root's owner, not its lifecycle, decides who may write, migrate or prune it.
+`container: true` marks an aggregate whose child contracts override its descriptive
+fields; it is not a recursive lifecycle or backup policy. `subtree: true` delegates
+otherwise undeclared descendants to that boundary's owner. Explicit children take
+precedence, including the personal Profile under `workspace/files`. A container alone
+does not admit unknown children. External-owner subtrees are opaque; their registration
+is not a claim about every descendant's contents or disposability.
+
+Exports use the shipped export store limits: 30 minutes, 2 GiB per item, eight items,
+four GiB total, four readers and one production, not the blob store's capacity.
+Provider run retention has 30-day eligibility with terminal, reference and resumability
+protection, bounded batches and tombstone grace; it is not unconditional expiry.
+Installed Pi resources can contain user source and state. `internal` is mixed, including
+durable machine identity and onboarding evidence, not recursively disposable scratch.
 
 | Root | Owner | Holds |
 |---|---|---|
 | `agent/` | Pi SDK (its fixed layout), pi-subagents, extensions | settings, models, MCP, trust, credentials, subagent agents and profiles, prompts, skills, transcripts (`sessions/`), installed packages |
 | `gateway/` | Gateway stores | devices and pairing, Home (record, settings layer, tasks, cwd), settings change log, automations, connections, uploads, displays, indexes, scratch, payloads |
-| `workspace/` | `TronWorkspace` | `files/`: agents' documents; `state/<owner>/`: Profile, episodic memory, apps |
+| `workspace/` | `TronWorkspace` | lazy task `tmp/`, indexed documents in `files/` (including Profile), living owner collections in `state/`; [workspace policy](../packages/gateway/docs/internal-workspace.md) |
 | `internal/` | delegation, Mac wrapper, dev scripts | subagent run scratch, managed pi-subagents installs, Mac wrapper markers, simulator leases |
 | `logs/` | each writer rotates its own | Gateway, Mac, launcher, deploy, diagnostic exports |
 | `ios-builds/` | `scripts/ios-share-publish.py` | phone install feed |
@@ -51,6 +65,39 @@ only by `ProfileStore`: one readable file among the workspace documents. The ret
 as subject `home.profile.item` for history and Undo; it is not the Profile.
 `gateway/home/profile.json` is Home's settings layer (model, thinking), not the Profile.
 
+## Read-only audit
+
+```sh
+scripts/tron home-layout audit --home /absolute/installation --json
+```
+
+`check` validates tracked source, not live disk. `audit` observes the explicitly selected
+home's metadata and prints JSON to stdout only: source revision and manifest/tool SHA256,
+root metadata, per-entry classification and matched contract, findings, errors, completion
+and truncation state. Exit **0** means complete with no findings, **1** complete with
+findings, **2** incomplete/error even when findings were also observed. Absent lazy paths
+are not errors. Paths are component-matched; explicit child contracts override delegated
+parents. Aggregate directories are enumerated; external/owner-delegated subtrees and
+unknown directories are opaque unless declared child boundaries require enumeration.
+`opaque` means descendants were not assessed, not that their contents are known safe.
+The result is an ownership-boundary audit, not an inventory of every payload byte.
+
+Traversal uses directory descriptors with no-follow opens for every home component and
+child, no-follow stat, and directory identity/metadata checks across enumeration. Symlinks
+and special files are reported, never opened; a symlink anywhere in the selected home
+address refuses with exit 2. Use a physical absolute path for custom homes. Hidden entries
+are included. Unknown directories, including backups, stay findings at their exact address.
+No payload or credential bodies are read. The default budget is 10,000 entries;
+`--max-entries N` selects a positive budget. Exhaustion is explicitly truncated, never clean.
+Read errors and detected concurrent replacements/changes make the scan incomplete. This
+is not an atomic snapshot: opaque contents and changes after observation are unassessed.
+The OS may account for directory access times; audit invokes no filesystem mutation API.
+
+There is no apply, output-file, quarantine, registration, permission repair, prune or
+migration mode. No timer or daemon runs it. Source rollback is `git revert <audit-commit>`;
+there is no live undo because audit does not write. Reports are not cleanup authority.
+CLI-only changes need no app rebuild or install.
+
 ## Rules
 
 - A new path is a registry entry first; `scripts/tron home-layout check` (a verify step)
@@ -59,3 +106,9 @@ as subject `home.profile.item` for history and Undo; it is not the Profile.
 - Moving a path is a persisted-layout migration: a one-shot, backed-up, maintainer-approved
   change (AGENTS.md), never a second reader of the old location.
 - `retention` names each entry's retention rule and its owner, or `null` when it has none.
+  It does not implement cleanup or authorize deletion. Instructions (`agent/AGENTS.md`),
+  workspace tmp, Debug PID and command shlock have registered owners. Historical backups
+  and other unregistered residues remain unknown findings; there is no backup wildcard.
+- Manifest metadata is included in compiled Gateway artifacts; source edits require a
+  later coordinated Gateway rebuild/delivery to take effect there. CLI/docs alone do
+  not require an app rebuild. No addresses, wire contracts or live bytes change.
