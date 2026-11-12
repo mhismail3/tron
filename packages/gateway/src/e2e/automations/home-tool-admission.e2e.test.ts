@@ -11,6 +11,7 @@ import { SESSION_SETTINGS_ENTRY } from "../../sessions/session-settings.js";
 import { NotificationService } from "../../notifications/notification-service.js";
 import { NotificationGrantStore } from "../../notifications/grant-store.js";
 import { PushRelayClient } from "../../notifications/relay-client.js";
+import { GatewayLogger } from "../../transport/logger.js";
 
 const owned: LockGateway[] = [];
 const notifications: NotificationService[] = [];
@@ -50,13 +51,14 @@ async function refusedCalls(gateway: LockGateway, sessionId: string): Promise<Ar
 }
 
 async function resumedHome(label: string, seedStale = true, initialNotifications = true) {
-  let gateway = await startLockGateway(`home-tool-${label}`, { ...options, ...(initialNotifications ? {} : { notifications: undefined }) });
+  const logger = new GatewayLogger();
+  let gateway = await startLockGateway(`home-tool-${label}`, { ...options, logger, ...(initialNotifications ? {} : { notifications: undefined }) });
   owned.push(gateway);
   const phone = await gateway.connect("phone");
   const originalRequest = phone.request.bind(phone);
   phone.request = async (...args) => {
     const result = await originalRequest(...args);
-    if (!result.ok) process.stderr.write(`HOME_ADMISSION_DIAGNOSTIC ${JSON.stringify(result)}\n`);
+    if (!result.ok) process.stderr.write(`HOME_ADMISSION_DIAGNOSTIC ${JSON.stringify({ result, records: logger.recent(), debug: logger.debugTail() })}\n`);
     return result;
   };
   await writeFile(join(gateway.agentDir, "AGENTS.md"), "GLOBAL_HOME_RULES_MARKER");
