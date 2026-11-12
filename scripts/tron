@@ -110,8 +110,10 @@ Commands:
          [--home-sessions <dir>] [--backtest <t0>] [--csv <dir>]
                                     Read-only outcome and diagnostic health signals diffed
                                     against the baseline (docs/HEALTH.md); never a gate
-  home-layout check                 Tron-home path registry (docs/tron-home.md): check
-                                    source literals (tools/home-layout)
+  home-layout check                 Tron-home registry: check tracked source declarations
+  home-layout audit --home PATH --json
+                                    Read-only boundary metadata; exits 0 clean, 1 findings,
+                                    2 incomplete/error (docs/tron-home.md)
   docs modules [<path>]|signals|rpc|settings
                                     Print a generated Markdown index (module map, module
                                     README Signals, Gateway RPCs, settings keys); docs

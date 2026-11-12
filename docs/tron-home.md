@@ -65,6 +65,39 @@ only by `ProfileStore`: one readable file among the workspace documents. The ret
 as subject `home.profile.item` for history and Undo; it is not the Profile.
 `gateway/home/profile.json` is Home's settings layer (model, thinking), not the Profile.
 
+## Read-only audit
+
+```sh
+scripts/tron home-layout audit --home /absolute/installation --json
+```
+
+`check` validates tracked source, not live disk. `audit` observes the explicitly selected
+home's metadata and prints JSON to stdout only: source revision and manifest/tool SHA256,
+root metadata, per-entry classification and matched contract, findings, errors, completion
+and truncation state. Exit **0** means complete with no findings, **1** complete with
+findings, **2** incomplete/error even when findings were also observed. Absent lazy paths
+are not errors. Paths are component-matched; explicit child contracts override delegated
+parents. Aggregate directories are enumerated; external/owner-delegated subtrees and
+unknown directories are opaque unless declared child boundaries require enumeration.
+`opaque` means descendants were not assessed, not that their contents are known safe.
+The result is an ownership-boundary audit, not an inventory of every payload byte.
+
+Traversal uses directory descriptors with no-follow opens for every home component and
+child, no-follow stat, and directory identity/metadata checks across enumeration. Symlinks
+and special files are reported, never opened; a symlink anywhere in the selected home
+address refuses with exit 2. Use a physical absolute path for custom homes. Hidden entries
+are included. Unknown directories, including backups, stay findings at their exact address.
+No payload or credential bodies are read. The default budget is 10,000 entries;
+`--max-entries N` selects a positive budget. Exhaustion is explicitly truncated, never clean.
+Read errors and detected concurrent replacements/changes make the scan incomplete. This
+is not an atomic snapshot: opaque contents and changes after observation are unassessed.
+The OS may account for directory access times; audit invokes no filesystem mutation API.
+
+There is no apply, output-file, quarantine, registration, permission repair, prune or
+migration mode. No timer or daemon runs it. Source rollback is `git revert <audit-commit>`;
+there is no live undo because audit does not write. Reports are not cleanup authority.
+CLI-only changes need no app rebuild or install.
+
 ## Rules
 
 - A new path is a registry entry first; `scripts/tron home-layout check` (a verify step)
