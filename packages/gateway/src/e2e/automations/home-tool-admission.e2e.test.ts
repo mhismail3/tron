@@ -55,7 +55,7 @@ async function resumedHome(label: string, seedStale = true, initialNotifications
   const phone = await gateway.connect("phone");
   await writeFile(join(gateway.agentDir, "AGENTS.md"), "GLOBAL_HOME_RULES_MARKER");
   const homeWorkspace = homeOwnerOf(gateway.registry).homeWorkspacePath();
-  await mkdir(homeWorkspace, { recursive: true });
+  await mkdir(homeWorkspace, { recursive: true, mode: 0o700 });
   await writeFile(join(homeWorkspace, "AGENTS.md"), "PROJECT_HOME_RULES_MARKER");
   const settings = JSON.parse(await readFile(join(gateway.agentDir, "settings.json"), "utf8"));
   const designated = await phone.request("home.designate", { commandId: gateway.commandId(),
@@ -261,7 +261,7 @@ it("real Gateway: a settled task result wakes Home with every tool listed and ma
     await gateway.settled(sessionId);
     const task = await phone.request("home.taskStatus", { taskId: "tool-admission-task" });
     expect(task.ok, JSON.stringify(task)).toBe(true);
-    await gateway.settled(task.result.sessionId);
+    expect(task.result).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" } });
     evidence.push({ case: "result-wake", actual: homeTools });
     expect(homeTools).toEqual([userTools, userTools, userTools, userTools]);
     expect(await refusedCalls(gateway, sessionId)).toEqual([{ tool: "edit", text: WAKE_REFUSAL }, { tool: "bash", text: WAKE_REFUSAL }]);
