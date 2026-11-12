@@ -259,9 +259,12 @@ private final class HTMLProbeListeners: @unchecked Sendable {
     private var datagramCount = 0
 
     init() throws {
-        http = try NWListener(using: .tcp)
-        idle = try NWListener(using: .tcp)
-        stun = try NWListener(using: .udp)
+        let tcp = NWParameters.tcp, udp = NWParameters.udp
+        tcp.requiredInterfaceType = .loopback
+        udp.requiredInterfaceType = .loopback
+        http = try NWListener(using: tcp)
+        idle = try NWListener(using: tcp)
+        stun = try NWListener(using: udp)
         http.newConnectionHandler = { [weak self] connection in self?.serve(connection) }
         idle.newConnectionHandler = { [weak self] connection in
             self?.record { $0.idleCount += 1 }

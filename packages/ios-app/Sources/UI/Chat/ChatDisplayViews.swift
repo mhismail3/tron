@@ -897,7 +897,7 @@ private struct DisplayHTMLArtifactView: View {
     var body: some View {
         Group {
             if let html {
-                DisplayHTMLWebView(html: html, allowsScripts: context == .sheet)
+                DisplayHTMLWebView(html: html, allowsScripts: context == .sheet && DisplayHTMLSandbox.admitsScripts)
             } else if failed {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
@@ -1074,12 +1074,20 @@ enum DisplayHTMLSandbox {
         return networkBlockRules
     }
 
+    #if TRON_PRIVATE_VARIABLE_BLUR || HOSTED_TEST
+    static let admitsScripts = true
+
     static func disablePeerConnections(_ preferences: WKPreferences) -> Bool {
         guard preferences.responds(to: NSSelectorFromString("_setPeerConnectionEnabled:")),
               preferences.responds(to: NSSelectorFromString("_peerConnectionEnabled")) else { return false }
         preferences.setValue(false, forKey: "peerConnectionEnabled")
         return preferences.value(forKey: "peerConnectionEnabled") as? Bool == false
     }
+    #else
+    static let admitsScripts = false
+
+    static func disablePeerConnections(_ preferences: WKPreferences) -> Bool { false }
+    #endif
 }
 
 private final class DisplayHTMLHostView: WKWebView {
