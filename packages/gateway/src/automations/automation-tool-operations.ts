@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { GatewayError } from "../errors.js";
+import { utf8Page } from "../kernel/host/utf8-page.js";
 import type { JsonValue } from "../protocol/types.js";
 import type { AutomationService } from "./automation-service.js";
 import type { ScheduleToolOperations, ScheduleToolRequest, ScheduleToolResult } from "./tron-schedule-extension.js";
@@ -77,6 +78,13 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
     if (request.action === "show") {
       const automation = this.service.get(requireField(request.automationId, "automationId"));
       if (!this.belongsToSession(automation, sessionId)) throw new GatewayError("not_found", "Automation does not belong to this session");
+      if (request.runId !== undefined) {
+        const run = this.service.runGet(automation.id, request.runId);
+        const text = run.actionSnapshot.kind === "sessionPrompt" ? run.actionSnapshot.text : run.actionSnapshot.message;
+        const page = { automationId: automation.id, runId: run.runId, ...utf8Page(text, "schedule show", request.offset, request.limit) };
+        return result(JSON.stringify(page), page);
+      }
+      if (request.offset !== undefined || request.limit !== undefined) throw new GatewayError("invalid_request", "schedule show: runId is required for text pages");
       return result(`Automation “${automation.name}” is ${automation.activation}.`, automation);
     }
 

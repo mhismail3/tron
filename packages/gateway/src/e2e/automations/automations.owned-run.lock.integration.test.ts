@@ -20,6 +20,7 @@ describe("gateway/automations owned-run lock", () => {
     gateways.push(gateway);
     const { sessionId, existing, workspace } = await automationOwnedRunScenario(gateway);
     const automationFile = (automationId: string) => join(gateway.tronHome, "gateway", "automations", `${automationId}.json`);
+    const prefix = "[from: automation; kind: automation; authority: task]\n";
     const recorded = gateway.record();
     const exchanges = recorded.exchanges as Array<{ method: string; params: Record<string, unknown>; response: { ok: boolean; result: any } }>;
     const results = (method: string) => exchanges.filter((exchange) => exchange.method === method).map((exchange) => exchange.response.result);
@@ -65,10 +66,10 @@ describe("gateway/automations owned-run lock", () => {
       for (const receipt of receipts) expect(receipt).toMatchObject({ operationId: raw.lastRun.operationId, sessionId: session, writer: "gateway", source: "plain" });
       for (const receipt of [receipts[0], receipts[3]]) expect(receipt.origin).toEqual({ confidence: "boundary", kind: "gateway", ownerId: raw.id, title: "Automation" });
       const bound = jsonl.find((entry) => entry.id === receipts[2].canonicalEntryId);
-      expect(bound?.message.content.map((part: { text?: string }) => part.text).join("")).toBe(text);
+      expect(bound?.message.content.map((part: { text?: string }) => part.text).join("")).toBe(`${prefix}${text}`);
       expect(jsonl.flatMap((entry) => entry.type === "message" && entry.message.role !== "system"
         ? [`${entry.message.role}:${entry.message.content.map((part: { type: string; text?: string; name?: string }) => part.type === "toolCall" ? `[${part.name}]` : part.text).join("")}`]
-        : []).slice(-4)).toEqual([`user:${text}`, "assistant:[read]", "toolResult:lock notes\n", `assistant:${answer}`]);
+        : []).slice(-4)).toEqual([`user:${prefix}${text}`,  "assistant:[read]", "toolResult:lock notes\n", `assistant:${answer}`]);
       expectSystemShapes(await gateway.canonical(session), ["chatWithAutomations#0"]);
     }
 
@@ -86,7 +87,7 @@ describe("gateway/automations owned-run lock", () => {
       ...(item.content ?? []).map((part: { type: string; text?: string; name?: string }) => part.type === "toolCall" ? `call:${part.name}` : part.text)].join(" | "))).toEqual([
       "modelChange |  | gateway", "thinkingChange |  | gateway",
       "user | completed | user | get ready for scheduled checks", "assistant:stop |  | assistant | Ready for scheduled checks.",
-      "user | completed | Automation | run the scheduled notes check", "assistant:toolUse |  | assistant | call:read",
+      `user | completed | Automation | ${prefix}run the scheduled notes check`, "assistant:toolUse |  | assistant | call:read",
       "toolResult |  | assistant | lock notes\n", "assistant:stop |  | assistant | The scheduled check found: lock notes.",
     ]);
 
@@ -95,10 +96,10 @@ describe("gateway/automations owned-run lock", () => {
       return `${role}:${text ?? ""}${toolCalls ? `[${toolCalls.join(",")}]` : ""}`;
     }))).toEqual([
       ["user:get ready for scheduled checks"],
-      ["user:get ready for scheduled checks", "assistant:Ready for scheduled checks.", "user:run the scheduled notes check"],
-      ["user:get ready for scheduled checks", "assistant:Ready for scheduled checks.", "user:run the scheduled notes check", "assistant:[read]", "toolResult:lock notes\n"],
-      ["user:run the workspace notes check"],
-      ["user:run the workspace notes check", "assistant:[read]", "toolResult:lock notes\n"],
+      ["user:get ready for scheduled checks", "assistant:Ready for scheduled checks.", `user:${prefix}run the scheduled notes check`],
+      ["user:get ready for scheduled checks", "assistant:Ready for scheduled checks.", `user:${prefix}run the scheduled notes check`, "assistant:[read]", "toolResult:lock notes\n"],
+      [`user:${prefix}run the workspace notes check`],
+      [`user:${prefix}run the workspace notes check`, "assistant:[read]", "toolResult:lock notes\n"],
     ]);
     expectRequestShapes(recorded.providerRequests, Array(5).fill("chatWithAutomations"));
 
