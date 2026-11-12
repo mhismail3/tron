@@ -144,7 +144,15 @@ export interface TaskWorkerSettingsView extends TaskWorkerSettingsState {
   resolvedFrom?: string;
 }
 
+export interface SettingsHistoryQuery {
+  key?: string;
+  cursor?: string;
+  limit?: number;
+}
+
 export interface SettingsToolAccess {
+  history(input: SettingsHistoryQuery): Promise<{ entries: unknown[]; nextCursor?: string }>;
+  undo(changeId: string, input: { reason: string; toolCallId: string; confirm?: ConfirmChange }): Promise<ChangeResult>;
   resolve(keys?: string[], taskId?: string): Promise<Resolution & { worker?: TaskWorkerSettingsView }>;
   change(changes: ChangeRequest[], input: { reason: string; dryRun?: boolean; toolCallId: string; taskId?: string; confirm?: ConfirmChange }): Promise<ChangeResult & { worker?: TaskWorkerSettingsView }>;
 }

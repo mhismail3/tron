@@ -48,7 +48,10 @@ No Profile DTO or domain inverse is invented by the settings kernel.
 ## Contract
 
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
-worker. Routine reversible changes, tool selection included, apply, log and can be undone.
+worker. Its `history` action pages the durable audit (50 records by default, at most 200),
+optionally filtered by key, using the returned cursor. `undo` takes a change id and reason;
+writer grants and exact native taps still apply, and an agent cannot undo another session's
+override. Routine reversible changes, tool selection included, apply, log and can be undone.
 Widening trust/executable authority, privacy access or spend, and any install or
 irreversible effect, require an exact native tap; narrowing them is routine. Writer
 grants and scope admission apply first.
