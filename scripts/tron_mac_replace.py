@@ -505,7 +505,7 @@ class Runner:
             self.journal.note(f'could not relaunch the previous app: {error}')
 
     def rollback(self):
-        """Restore the previous app and payload channel; keep the ~/.tron snapshot as a rollback point."""
+        """Restore the previous app and payload channel; keep the selected home-state snapshot as a rollback point."""
         platform, swap, operation = self.platform, self.data['swap'], self.journal.directory
         attempt = self.data['attempt']
         self.data['rollback'] = {'state': 'running', 'startedAt': now()}
@@ -542,7 +542,7 @@ class Runner:
             if from_revision and info.get('sourceRevision') != from_revision:
                 raise Failure(f'restored Gateway reports {info.get("sourceRevision")}, expected {from_revision}')
             self.data['rollback'] = {'state': 'restored', 'endedAt': now(),
-                                     'detail': f'previous app restored; {detail}; ~/.tron snapshot kept at {swap.get("snapshot")}'}
+                                     'detail': f'previous app restored; {detail}; selected home-state snapshot kept at {swap.get("snapshot")}'}
             self.journal.settle('rolled-back')
         except Exception as error:  # noqa: BLE001
             self.data['rollback'] = {'state': 'failed', 'endedAt': now(), 'detail': f'{error} (log: {log})'}
@@ -589,15 +589,16 @@ def prune_store(platform, operation, revision):
     """After a full replacement, keep only this operation and the build it installed.
 
     Older rollback sets are superseded: rollback restores only this operation's previous app
-    and payloads, and an older ~/.tron snapshot is never restored over newer data. Returns the
+    and payloads, and an older selected home-state snapshot is never restored over newer data. Returns the
     paths it could not delete, with the reason."""
     builds = platform.store / 'builds'
     targets = [entry for entry in sorted(builds.iterdir()) if entry.name != revision] if builds.is_dir() else []
     operations = [other for other in sorted(platform.store.iterdir())
                   if other != operation and not other.is_symlink() and (other / 'journal.json').is_file()]
-    targets += [entry for other in operations for entry in sorted(other.iterdir())
-                if entry.name in OPERATION_FILES or ROLLBACK_SET.fullmatch(entry.name)]
+    copies = [entry for other in operations for entry in sorted(other.iterdir())
+              if entry.name in OPERATION_FILES or ROLLBACK_SET.fullmatch(entry.name)]
     failures = [failure for path in targets for failure in remove_tree(path)]
+    failures += [failure for path in copies for failure in remove_tree(path, worktree=False)]
     for other in operations:
         with contextlib.suppress(OSError):
             other.rmdir()

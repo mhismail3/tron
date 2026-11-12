@@ -6,8 +6,8 @@ copy the shipped tool into a disposable Git repository with a small registry:
 `check` refuses an entry whose owner is not a module, the version 1 field shape,
 a rebuildable subtree with no prune rule, an unregistered Tron-home literal
 (Stable or Debug home, shell variable, wrapped Gateway join, Swift chain); it
-ignores tests. `audit` and `migrate` run against disposable homes and never
-change them.
+ignores tests. `audit` and migration planning are read-only; apply and rollback run only against
+disposable homes.
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ class Fixture:
 
     def run(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess[str]:
         self.git("add", "-A")
-        return subprocess.run(["python3", str(self.repo / TOOL), *args], cwd=self.repo, capture_output=True, text=True,
+        return subprocess.run(["python3", "-B", str(self.repo / TOOL), *args], cwd=self.repo, capture_output=True, text=True,
                               env={**os.environ, **(env or {})})
 
 
@@ -200,7 +200,8 @@ class HomeLayoutTests(unittest.TestCase):
                 self.assertIn(message, result.stdout)
         for retired in ([{"from": "gateway"}], [{"from": "gateway", "to": "../state"}], [{"from": "gateway", "to": "gateway"}],
                         [{"from": "gateway", "to": "state"}, {"from": "gateway", "to": "other"}], [{"from": "/gateway", "to": "state"}],
-                        [{"from": "gateway", "to": "state"}, {"from": "internal", "to": "state"}]):
+                        [{"from": "gateway", "to": "state"}, {"from": "internal", "to": "state"}],
+                        [{"from": "gateway", "to": "gateway/inside"}]):
             with self.subTest(retired=retired):
                 fixture.write(REGISTRY, registry(PATHS, retired))
                 result = fixture.run("check")
@@ -437,6 +438,43 @@ class AuditTests(unittest.TestCase):
                 self.assertEqual(report["entries"], [])
                 self.assertEqual(report["errors"][0]["reason"], "invalid_registry")
 
+    def test_maintenance_index_requires_an_owner_and_rule_for_each_entry(self) -> None:
+        maintenance = self.base / "maintenance"
+        (maintenance / "backups/2026-01-01-only-copy").mkdir(parents=True)
+        (maintenance / "replace").mkdir()
+        (maintenance / "README.md").write_text(
+            "| Entry | Former name | Owner | Created | End-of-life rule |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| replace | unchanged | mac-app/replace | 2026-01-01 | owner prunes superseded sets |\n"
+            "| backups | unchanged | maintainer | 2026-01-01 | review each copy |\n"
+            "| backups/2026-01-01-only-copy | old | | 2026-01-01 | |\n")
+        args = ("audit", "--home", str(self.home), "--json", "--maintenance", str(maintenance))
+        result = self.fixture.run(*args)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["findings"], [
+            {"path": "maintenance/backups/2026-01-01-only-copy", "reasons": ["maintenance_index"]}])
+        readme = maintenance / "README.md"
+        readme.write_text(readme.read_text().replace("| old | | 2026-01-01 | |", "| old | maintainer | 2026-01-01 | explicit approval after release proof |"))
+        before = snapshot(maintenance)
+        result = self.fixture.run(*args)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(snapshot(maintenance, contents_first=False), before)
+        readme.unlink()
+        self.assertEqual(self.fixture.run(*args).returncode, 1)
+
+    def test_registered_debug_fifo_is_allowed_but_regular_files_and_other_fifos_are_not(self) -> None:
+        paths = {**PATHS, "gateway/child-start.gate": entry(**{"class": "scratch", "type": "fifo"})}
+        self.fixture.write(REGISTRY, registry(paths))
+        (self.home / "gateway").mkdir()
+        gate = self.home / "gateway/child-start.gate"
+        os.mkfifo(gate)
+        self.assertEqual(self.audit()[0], 0)
+        gate.unlink()
+        gate.touch()
+        self.assertEqual(self.audit()[1]["findings"], [{"path": "gateway/child-start.gate", "reasons": ["expected_fifo"]}])
+        os.mkfifo(self.home / "other-fifo")
+        self.assertIn({"path": "other-fifo", "reasons": ["unknown", "unsafe_type"]}, self.audit()[1]["findings"])
+
     def test_no_effectful_audit_options_exist(self) -> None:
         before = snapshot(self.home)
         for option in ("--apply", "--prune", "--quarantine", "--output"):
@@ -555,13 +593,110 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(self.migrate("--status")[1]["state"], "nothing_declared")
         self.assertEqual(self.migrate("--dry-run")[0], 0)
 
-    def test_the_shipped_registry_declares_no_move_yet(self) -> None:
+    def test_apply_resume_and_rollback_preserve_identity_and_new_writes(self) -> None:
+        self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
+        before = (self.home / "backup-1").stat()
+        code, report = self.migrate("--apply")
+        self.assertEqual(code, 0, report)
+        destination = self.user / ".tron-maintenance/backups/2026-01-01-one"
+        self.assertFalse((self.home / "backup-1").exists())
+        self.assertEqual(destination.stat().st_ino, before.st_ino)
+        self.assertEqual(destination.stat().st_mode, before.st_mode)
+        (destination / "new-after-move").write_text("new data")
+        self.assertEqual(self.migrate("--apply")[0], 0)
+        code, report = self.migrate("--rollback")
+        self.assertEqual(code, 0, report)
+        self.assertEqual((self.home / "backup-1/new-after-move").read_text(), "new data")
+        self.assertEqual((self.home / "backup-1").stat().st_ino, before.st_ino)
+        self.assertFalse(destination.exists())
+        self.assertEqual(self.migrate("--rollback")[0], 0)
+
+    def test_a_crash_after_each_rename_resumes_without_replaying_a_move(self) -> None:
+        for crash_after in (1, 2):
+            with self.subTest(crash_after=crash_after):
+                home = self.user / f"installation-{crash_after}"
+                home.mkdir()
+                for name in ("backup-a", "backup-b"):
+                    (home / name).mkdir(mode=0o700)
+                    (home / name / "only-copy").write_text(name)
+                retired = [{"from": name, "to": f"~/.tron-maintenance/backups/{crash_after}-{name}"} for name in ("backup-a", "backup-b")]
+                self.fixture.write(REGISTRY, registry(PATHS, retired))
+                runner = self.base / "crash.py"
+                runner.write_text(
+                    "import importlib.util, os\n"
+                    f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
+                    "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+                    "original = layout.rename_exclusive\ncount = 0\n"
+                    "def rename(source, destination):\n"
+                    "    global count\n    original(source, destination)\n    count += 1\n"
+                    f"    if count == {crash_after}: os._exit(86)\n"
+                    "layout.rename_exclusive = rename\n"
+                    f"layout.main(['migrate', '--home', {str(home)!r}, '--apply'])\n")
+                identities = {name: (home / name).stat().st_ino for name in ("backup-a", "backup-b")}
+                result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True)
+                self.assertEqual(result.returncode, 86, result.stderr)
+                for lock in (home / "agent/.tron-gateway-runtime.lock.lock", self.user / ".tron-dev/agent/.tron-gateway-runtime.lock.lock"):
+                    self.assertTrue(lock.is_dir())
+                    lock.rmdir()
+                code, report = self.migrate("--apply", home=home)
+                self.assertEqual(code, 0, report)
+                self.assertEqual(self.migrate("--rollback", home=home)[0], 0)
+                for name, inode in identities.items():
+                    self.assertEqual((home / name).stat().st_ino, inode)
+                    self.assertEqual((home / name / "only-copy").read_text(), name)
+
+    def test_rollback_requires_a_journal_and_refuses_a_replaced_destination(self) -> None:
+        self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
+        self.assertEqual(self.migrate("--rollback")[0], 1)
+        self.assertEqual(self.migrate("--apply")[0], 0)
+        destination = self.user / ".tron-maintenance/backups/2026-01-01-one"
+        destination.rename(destination.with_name("preserved"))
+        destination.mkdir()
+        code, report = self.migrate("--rollback")
+        self.assertEqual(code, 1, report)
+        self.assertTrue(destination.is_dir())
+        self.assertFalse((self.home / "backup-1").exists())
+
+    def test_apply_keeps_runtime_locks_fresh_during_a_slow_rename(self) -> None:
+        self.fixture.write(REGISTRY, registry(PATHS, [self.RETIRED[1]]))
+        runner = self.base / "slow.py"
+        runner.write_text(
+            "import importlib.util, os, time\n"
+            f"spec = importlib.util.spec_from_file_location('layout', {str(self.fixture.repo / TOOL)!r})\n"
+            "layout = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(layout)\n"
+            "original = layout.rename_exclusive\n"
+            "def rename(source, destination):\n"
+            f"    lock = {str(self.home / 'agent/.tron-gateway-runtime.lock.lock')!r}\n"
+            "    stale = time.time() - 600\n    os.utime(lock, (stale, stale))\n"
+            "    deadline = time.monotonic() + 15\n"
+            "    while os.stat(lock).st_mtime < stale + 1 and time.monotonic() < deadline: time.sleep(0.05)\n"
+            "    if os.stat(lock).st_mtime < stale + 1: raise RuntimeError('runtime lock heartbeat missing')\n"
+            "    original(source, destination)\n"
+            "layout.rename_exclusive = rename\n"
+            f"raise SystemExit(layout.main(['migrate', '--home', {str(self.home)!r}, '--apply']))\n")
+        result = subprocess.run(["python3", "-B", str(runner)], env={**os.environ, "HOME": str(self.user)}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_debug_runtime_lock_refuses_all_modes_without_mutations(self) -> None:
+        lock = self.user / ".tron-dev/agent/.tron-gateway-runtime.lock.lock"
+        lock.mkdir(parents=True)
+        before = snapshot(self.user)
+        for mode in ("--dry-run", "--apply", "--rollback"):
+            code, report = self.migrate(mode)
+            self.assertEqual(code, 1, report)
+            self.assertIn("debug_gateway_running", report["blockers"])
+            self.assertEqual(snapshot(self.user, contents_first=False), before)
+
+    def test_the_shipped_registry_declares_slice_b_moves(self) -> None:
         result = subprocess.run(["python3", str(ROOT / TOOL), "migrate", "--home", str(self.home), "--status"],
                                 cwd=ROOT, capture_output=True, text=True, env={**os.environ, "HOME": str(self.user)})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout)["state"], "nothing_declared")
+        self.assertEqual(json.loads(result.stdout)["state"], "nothing_to_move")
+        moves = json.loads(result.stdout)["moves"]
+        self.assertEqual(len(moves), 14)
+        self.assertTrue(any(row["from"].endswith("x-library-20261111T1425") for row in moves))
 
-    def test_unreadable_homes_are_errors_and_no_effectful_mode_exists(self) -> None:
+    def test_unreadable_homes_and_ambiguous_modes_are_errors(self) -> None:
         link = self.base / "linked-home"
         link.symlink_to(self.home, target_is_directory=True)
         for home in (self.base / "missing", link):
@@ -571,7 +706,7 @@ class MigrateTests(unittest.TestCase):
                 self.assertEqual(report["errors"][0]["reason"], "home_unavailable")
                 self.assertEqual(report["moves"], [])
         before = snapshot(self.user)
-        for arguments in (["--apply"], ["--rollback"], [], ["--dry-run", "--status"], ["--dry-run", "--apply"]):
+        for arguments in ([], ["--dry-run", "--status"], ["--dry-run", "--apply"]):
             result = self.fixture.run("migrate", "--home", str(self.home), *arguments, env={"HOME": str(self.user)})
             self.assertEqual(result.returncode, 2, arguments)
             self.assertEqual(result.stdout, "")

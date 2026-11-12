@@ -925,6 +925,7 @@ def retention_journey():
                 sealed(operation / 'retired-stable-payloads-1')
                 (operation / 'state-snapshot-1').mkdir()
                 (operation / 'previous-app-1/Tron.app.kept').mkdir(parents=True)
+            (older / 'state-snapshot-1/.git').write_text(f'gitdir: {old_build / ".git"}\n')
             (older / 'partial-state-snapshot-2').mkdir()
             (foreign / 'knowledge-cutover-1').mkdir()
             locked = foreign / 'failed-app-2'
@@ -945,7 +946,8 @@ def retention_journey():
             record(not old_build.exists() and str(old_build) not in worktrees,
                    'a superseded build worktree with a sealed payload is deleted and unregistered')
             record((current_build / 'Gateway/app/dist/index.js').is_file(), 'the installed build is kept')
-            record(not older.exists(), 'an older operation holding only replace-owned files is deleted whole')
+            record(not older.exists() and 'git worktree remove failed' not in notes,
+                   'an older rollback copy is removed without treating a copied .git file as a worktree')
             record(sorted(p.name for p in foreign.iterdir()) == ['failed-app-2', 'knowledge-cutover-1'],
                    f'another tool\'s archive in an older operation is kept: {sorted(p.name for p in foreign.iterdir())}')
             record(sorted(p.name for p in current.iterdir()) == ['journal.json', 'journal.log', 'logs', 'previous-app-1',

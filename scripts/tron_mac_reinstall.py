@@ -515,6 +515,7 @@ class Reinstall:
         self.receipt = {'schema': 1, 'id': identifier, 'kind': self.kind, 'home': str(self.home),
                         'app': str(app), 'candidate': candidate, 'original': original,
                         'sourceRevision': revision,
+                        'layoutRegistrySha256': hashlib.sha256((self.operation / STAGED_REGISTRY).read_bytes()).hexdigest(),
                         'phase': 'awaiting-offline', 'components': {}, 'sourcePaths': {}}
         if predecessor is not None:
             self.receipt['predecessorOperationId'] = predecessor['id']
@@ -632,6 +633,9 @@ class Reinstall:
                 registry = None
             require(registry is not None and not home_layout.shape(registry),
                     'layout-registry: this operation has no valid staged Tron-home registry; begin again with --restart')
+            require(hashlib.sha256((self.operation / STAGED_REGISTRY).read_bytes()).hexdigest()
+                    == self.receipt.get('layoutRegistrySha256'),
+                    'layout-registry-digest: staged registry differs from the operation receipt; preserve it and begin again with --restart')
             self.layout_paths = registry['paths']
         return lambda path, directory: home_layout.backup_decision(self.layout_paths, str(path.relative_to(tron)), directory)
 

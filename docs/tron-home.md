@@ -15,7 +15,8 @@ Every field has a consumer; an unknown field fails `check`.
 |---|---|---|
 | `owner` | The module (or exactly `pi-sdk`, `pi-subagents`, or `extension <package>`) that may write, migrate or prune the path | `check`: must name a module or an exact external owner; package names contain no whitespace |
 | `class` | What is lost if the path is deleted: `keep` (irreplaceable), `rebuild` (its owner rebuilds it), `scratch` (working state, locks, in-flight work) or `log`. Stated on every top-level entry and wherever a child differs; otherwise inherited from the nearest ancestor | backup selection, `check`, `audit` |
-| `backup` | Overrides the default, which is: `keep` is backed up, the other classes are not. Used for the two credentials the Gateway regenerates at start and for the selected Gateway payloads | Mac replace snapshot, Mac reinstall backup, `audit` |
+| `backup` | Overrides the default, which is: `keep` is backed up, the other classes are not. Used for the selected Gateway payloads | Mac replace snapshot, Mac reinstall backup, `audit` |
+| `type` | `fifo` for the Debug start gate; other entries use the ordinary file/directory checks | `check`, `audit`: a registered FIFO is allowed without opening it; another type is `expected_fifo` |
 | `credential` | `true` when the path holds a key or token | `audit`: group or other access to the registered entry (a file, or the folder that holds the keys) is a `credential_mode` finding |
 | `container` | An aggregate whose registered children carry their own contracts; it does not admit unknown children | `audit` |
 | `subtree` | Undeclared descendants belong to this boundary's owner; explicit children still take precedence | `check`, `audit`, backup selection |
@@ -84,8 +85,9 @@ follows it; so does a name that an entry's pattern matches (`logs/mac.jsonl.bak`
   runner is launched (a resumed operation takes them from the checkout that resumes it).
 - `scripts/tron mac reinstall` stages the registry in its operation directory when the
   operation begins, then inventories and copies the selection; its frozen-source check
-  covers the same paths. A path outside the selection may change during the offline
-  window.
+  covers the same paths. Its receipt records the staged registry's SHA-256; a missing
+  digest or changed registry refuses with an instruction to preserve the operation and
+  begin again with `--restart`. A path outside the selection may change during the offline window.
 
 Both skip logs, rebuildable indexes and runtimes, scratch and locks, and
 `gateway/local-auth.json` and `gateway/enrollment.json`, which the Gateway regenerates at
@@ -98,6 +100,7 @@ by redeploying.
 
 ```sh
 scripts/tron home-layout audit --home /absolute/installation --json
+scripts/tron home-layout audit --home /absolute/installation --maintenance /absolute/maintenance --json
 ```
 
 `check` validates tracked source, not live disk. `audit` observes the explicitly selected
@@ -115,7 +118,7 @@ The result is an ownership-boundary audit, not an inventory of every payload byt
 
 Traversal uses directory descriptors with no-follow opens for every home component and
 child, no-follow stat, and directory identity/metadata checks across enumeration. Symlinks
-and special files are reported, never opened; a symlink anywhere in the selected home
+and unregistered special files are reported, never opened; the registered Debug start FIFO is allowed; a symlink anywhere in the selected home
 address refuses with exit 2. Use a physical absolute path for custom homes. Hidden entries
 are included. Unknown directories, including backups, stay findings at their exact address.
 No payload or credential bodies are read. The default budget is 10,000 entries;
@@ -124,31 +127,68 @@ Read errors and detected concurrent replacements/changes make the scan incomplet
 is not an atomic snapshot: opaque contents and changes after observation are unassessed.
 The OS may account for directory access times; audit invokes no filesystem mutation API.
 
-There is no apply, output-file, quarantine, registration, permission repair, prune or
+Audit has no apply, output-file, quarantine, registration, permission repair, prune or
 migration mode. No timer or daemon runs it. Source rollback is `git revert <audit-commit>`;
 there is no live undo because audit does not write. Reports are not cleanup authority.
 CLI-only changes need no app rebuild or install.
 
-## Migration plan
+`--maintenance PATH` explicitly includes a maintenance index check, without implicitly
+reading a sibling home. Its owner-only recovery copies are never opened. Every immediate
+entry other than `README.md`, and every entry immediately under `backups/`, needs one
+Markdown table row in the root `README.md`: `Entry`, `Owner` and a column containing
+`rule` are required headers; `Former name` and `Created` may be included. Entry names are
+relative to that root, optionally in backticks. Missing, duplicate or blank owner/rule rows
+produce `maintenance_index` findings. An absent README is a finding for each unindexed
+entry; an unsafe or unreadable index is an incomplete audit. The tool never edits the index.
+
+`workspace/state/x-library` belongs to the installed `x-library` skill.
+`ios-builds/iphone-install` belongs to `ios-device-install`; it is conservatively `keep`
+until that owner enforces its planned newest-three-per-app rule. Registry metadata does
+not pretend that an unenforced retention rule exists. Managed pi-subagents' existing
+`not pruned` entries remain an explicit unresolved retention gap, not deletion authority.
+
+## Offline migration
 
 ```sh
 scripts/tron home-layout migrate --home /absolute/installation --dry-run
 scripts/tron home-layout migrate --home /absolute/installation --status
 ```
 
-Both print JSON and change nothing; there is no apply or rollback mode. `--dry-run` lists
+These two modes print JSON and change nothing. `--dry-run` lists
 each `retired` move with its source and destination, the source's identity (type, device,
 inode, mode), its state (`pending`, `done`, `conflict`, `absent`) and what an apply would
 refuse: `destination_exists`, `unsafe_type` (a symlink or special file), `symlink_component`
 (a symlinked parent on either side), `parent_not_directory` and `cross_volume`. `~/` paths
 resolve against `$HOME`, printed as `user_home`. `blockers` holds `gateway_running`
-when the home's agent-runtime lock was refreshed in the last 60 seconds. `--status` prints
+when the home's agent-runtime lock was refreshed in the last 60 seconds, and
+`debug_gateway_running` when the sibling Debug lock was refreshed. Planning does not
+acquire or clear locks. `--status` prints
 the overall state (`nothing_declared`, `nothing_to_move`, `not_started`, `partly_applied`,
 `applied`, `conflict`) and each move's state. For `--dry-run`, exit **0** means nothing
 would be refused and **1** a refusal or a blocker. For `--status`, exit **0** means no move
 is pending and **1** a pending move or a conflict; blockers are printed but do not change
 it. Exit **2** is an unreadable home or registry. Sizes are the entry's own metadata; no tree is
 walked and no file body is read.
+
+The registry currently declares only recovery-copy renames. After the maintainer approves
+an offline live step, `--apply` creates a private journal under
+`$HOME/.tron-maintenance/layout-v2/<home-path-hash>.json`, then renames the selected entries
+with atomic no-clobber operations. No credential or recovery-copy body is read, cloned,
+rewritten or pruned. Modes and inodes survive. `--rollback` requires that journal and
+inverts only its moves, carrying later writes back rather than restoring old snapshots.
+Both modes acquire the selected home's and Debug's agent-runtime lock directories; any
+existing lock, even stale, refuses rather than stealing it. The Debug home and agent
+parents are created lazily only in these mutating modes. A held lock or a planning refusal
+causes no mutation. A crash retains its locks for explicit offline owner recovery.
+
+The journal binds the exact registry digest, source/destination and original device/inode.
+It is fsynced before any rename; rename parents are fsynced too. Resume infers a completed
+rename only from the same inode at its recorded destination. A replaced entry, occupied
+inverse destination, changed registry or unknown pre-existing destination refuses. It never
+replays an uncertain rename. The journal and `layout-v2` maintenance index row are retained
+for review, never automatically discarded. `--apply`/`--rollback` are code capabilities,
+not permission to use them on a live installation. Root renames, stored-path rewrites and
+Gateway startup stamps are not part of this recovery-copy slice.
 
 ## Rules
 
@@ -158,8 +198,8 @@ walked and no file body is read.
   and `~/.tron-dev` literals, shell variables bound to a home or a path in one
   (`STATE_DIR="$HOME/.tron-dev/gateway"`, then `"$STATE_DIR/dev.pid"`; also
   `"${OVERRIDE:-$HOME/.tron/x}/child"`), joins wrapped in `resolve()`, and chained Swift
-  `appendingPathComponent` calls. It does not read a call split across lines or a Swift
-  path built from a named constant.
+  `appendingPathComponent` chains, including chains split across lines. Other split-line
+  calls and Swift paths built from named constants are not resolved.
 - Moving a path is a persisted-layout migration: a one-shot, backed-up, maintainer-approved
   change (AGENTS.md), never a second reader of the old location.
 - `prune` states the rule an owner enforces. The registry does not implement cleanup or
