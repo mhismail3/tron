@@ -68,8 +68,8 @@ export function pushRetryReview(input: { sessionId: string; toolCallId: string; 
     items: [{
       label: "Push registration",
       before: "Stopped on the iPhone that approves this card",
-      after: "Retried once there, with one fresh App Attest key",
-      detail: "Only the iPhone that approves this card retries. No setting changes, and no other iPhone is affected.",
+      after: "Requested on that iPhone: one fresh App Attest key and one registration attempt",
+      detail: "The App Attest key belongs to this iPhone, so every paired Mac uses the new key at its next registration. The result is requested, not confirmed. No other iPhone is affected, and no setting changes.",
     }],
   };
 }

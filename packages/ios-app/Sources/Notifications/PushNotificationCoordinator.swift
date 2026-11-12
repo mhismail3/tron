@@ -329,18 +329,47 @@ struct PushWorkerClient: Sendable {
     }
 }
 
-struct PushRetryFence: Equatable, Sendable {
+struct PushConnectionIdentity: Equatable, Sendable {
     let profileID: String
-    let deviceID: String
-    let runtimeIdentity: String?
-    let client: ObjectIdentifier
-    let generation: Int
-    let cardDigest: String
+    let machineID: String
+    let runtimeEpoch: String
+    let admission: GatewayLifecycleCoordinator.Admission
 }
 
+struct PushRetryFence: Equatable, Sendable {
+    let connection: PushConnectionIdentity
+    let deviceID: String
+    let generation: Int
+}
+
+enum PushRetryRefusal: Error, Equatable, LocalizedError {
+    case notThisConnection
+    case changedBeforeRetry
+
+    var errorDescription: String? {
+        switch self {
+        case .notThisConnection:
+            "This approval belongs to another Mac connection. Nothing was approved or retried."
+        case .changedBeforeRetry:
+            "The connection changed after approval. The request was sent, but this iPhone did not retry push registration."
+        }
+    }
+}
+
+@MainActor
+typealias PushRetryGate = (() async throws -> Void) async throws -> Void
+
 struct PushRegistrationRetryApproval {
-    let fence: @MainActor (ChangeReview) -> PushRetryFence?
-    let perform: @MainActor (PushRetryFence) throws -> Void
+    let connection: @MainActor () -> PushConnectionIdentity?
+    let coordinator: PushNotificationCoordinator
+
+    func approve(_ review: ChangeReview, answer: () async throws -> Void) async throws {
+        guard let current = connection(), let fence = coordinator.retryFence(for: review, connection: current) else {
+            throw PushRetryRefusal.notThisConnection
+        }
+        try await answer()
+        try coordinator.retryAfterApprovedCard(fence, current: connection())
+    }
 }
 
 private struct PushRegistrationRetryApprovalKey: EnvironmentKey {
@@ -536,36 +565,33 @@ final class PushNotificationCoordinator {
         diagnostic = .stoppedUnavailable
     }
 
-    func retryFence(for review: ChangeReview) -> PushRetryFence? {
-        guard review.intent == .pushRegistrationRetry, review.requiresTap,
-              let context, let deviceID = context.profile.deviceId, !deviceID.isEmpty else { return nil }
-        return PushRetryFence(
-            profileID: context.profile.id,
-            deviceID: deviceID,
-            runtimeIdentity: context.runtimeIdentity,
-            client: ObjectIdentifier(context.client),
-            generation: registrationGeneration,
-            cardDigest: review.digest
-        )
+    func retryFence(for review: ChangeReview, connection: PushConnectionIdentity) -> PushRetryFence? {
+        guard review.intent == .pushRegistrationRetry, review.requiresTap, !credentialLoadFailed, registrationAdmitted,
+              let context, let deviceID = context.profile.deviceId, !deviceID.isEmpty,
+              context.profile.id == connection.profileID,
+              context.runtimeIdentity == Self.runtimeIdentity(connection) else { return nil }
+        return PushRetryFence(connection: connection, deviceID: deviceID, generation: registrationGeneration)
     }
 
-    func retryAfterApprovedCard(_ fence: PushRetryFence) throws {
-        guard !credentialLoadFailed,
-              let context,
-              registrationAdmitted,
-              context.profile.id == fence.profileID,
+    func retryAfterApprovedCard(_ fence: PushRetryFence, current: PushConnectionIdentity?) throws {
+        guard !credentialLoadFailed, let context, registrationAdmitted,
+              current == fence.connection,
+              context.profile.id == fence.connection.profileID,
               context.profile.deviceId == fence.deviceID,
-              context.runtimeIdentity == fence.runtimeIdentity,
-              ObjectIdentifier(context.client) == fence.client,
+              context.runtimeIdentity == Self.runtimeIdentity(fence.connection),
               registrationGeneration == fence.generation,
               document.appAttestKeyID != nil,
               document.appAttestKeyRejected == true,
-              registrationTask == nil else { throw PushRegistrationError.unavailable }
+              registrationTask == nil else { throw PushRetryRefusal.changedBeforeRetry }
         registrationGeneration &+= 1
         automaticRetryAvailable = false
         try rotateInvalidKey()
         diagnostic = .idle
         scheduleRegistration()
+    }
+
+    private static func runtimeIdentity(_ connection: PushConnectionIdentity) -> String {
+        "\(connection.machineID):\(connection.runtimeEpoch)"
     }
 
     private func scheduleRegistration() {
@@ -785,6 +811,7 @@ final class PushNotificationCoordinator {
                     }
                     try rotateInvalidKey()
                     recoveredInvalidKey = true
+                    automaticRetryAvailable = false
                     mode = .attestation
                     continue
                 } catch PushRegistrationError.persistence {

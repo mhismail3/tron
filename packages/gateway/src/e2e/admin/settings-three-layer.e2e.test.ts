@@ -328,6 +328,25 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     evidence.push({ case: "push-policy-global-live", changed: changed.changes[0] });
   });
 
+  it("an agent may turn a push alert off, but turning one on needs the exact native tap (privacy widening)", async () => {
+    const f = await setup();
+    await f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "global" },
+      changes: [{ key: "notifications.push.waiting", layer: "global", op: "set", value: false }],
+    });
+    const agent = { kind: "agent" as const, id: "push-agent" };
+    const widened = await f.settingsChanges.change({ kind: "global" },
+      [{ key: "notifications.push.waiting", layer: "global", op: "set", value: true }],
+      { actor: agent, reason: "Alert me again" });
+    expect(widened).toMatchObject({ status: "review", changes: [] });
+    expect((await readNotificationPolicy((names) => f.registry.resolveGlobalSettings(names))).waiting).toBe(false);
+    const narrowed = await f.settingsChanges.change({ kind: "global" },
+      [{ key: "notifications.push.waiting", layer: "global", op: "set", value: false }],
+      { actor: agent, reason: "Stop alerts while I am away" });
+    expect(narrowed).toMatchObject({ status: "applied" });
+    evidence.push({ case: "push-policy-privacy-tap", widened: widened.status, narrowed: narrowed.status });
+  });
+
   it("keeps thinking budgets and image visibility Global-only during real SDK admission", async () => {
     const f = await setup();
     const globalPath = join(f.agentDir, "settings.json");

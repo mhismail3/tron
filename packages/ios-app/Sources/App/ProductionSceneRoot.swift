@@ -107,8 +107,8 @@ struct ProductionSceneRoot: View {
             .environment(owner.model)
             .environment(owner.pushNotifications)
             .environment(\.pushRegistrationRetryApproval, PushRegistrationRetryApproval(
-                fence: { review in owner.pushNotifications.retryFence(for: review) },
-                perform: { fence in try owner.pushNotifications.retryAfterApprovedCard(fence) }
+                connection: { owner.model.pushRetryConnection },
+                coordinator: owner.pushNotifications
             ))
             .tronPresentation()
             .preferredColorScheme(owner.appearance.mode.colorScheme)

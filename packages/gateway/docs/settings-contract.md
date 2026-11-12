@@ -96,9 +96,9 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `sources.themes` | — | sources | project, global | none | fixed | reload | — |
 | `sources.packages` | — | sources | project, global | none | fixed | reload | install |
 | `sources.npmCommand` | — | sources | global | none | live | next-change | trust |
-| `notifications.push.inputNeeded` | — | notifications | global | none | live | next-request | — |
-| `notifications.push.finished` | — | notifications | global | none | live | next-request | — |
-| `notifications.push.waiting` | — | notifications | global | none | live | next-request | — |
+| `notifications.push.inputNeeded` | — | notifications | global | none | live | next-request | privacy |
+| `notifications.push.finished` | — | notifications | global | none | live | next-request | privacy |
+| `notifications.push.waiting` | — | notifications | global | none | live | next-request | privacy |
 | `setup.sessionDir` | — | setup | global | as allowed | live | restart | — |
 | `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | irreversible |
 

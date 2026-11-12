@@ -68,30 +68,44 @@ final class PushRegistrationRetryTests: XCTestCase {
         }
     }
 
-    private static let profile = GatewayProfile(
+    private final class ConnectionBox {
+        var current: PushConnectionIdentity?
+    }
+
+    private final class AnswerCounter {
+        var accepted = 0
+        var attempted = 0
+    }
+
+    private static let profileA = GatewayProfile(
         id: "profile-a", label: "Mac A", host: "push-test.example.com", port: 9848,
         machineId: "machine-a", deviceId: "device-a"
+    )
+    private static let profileB = GatewayProfile(
+        id: "profile-b", label: "Mac B", host: "push-test.example.com", port: 9848,
+        machineId: "machine-b", deviceId: "device-b"
     )
     private static let retryCard = """
     {"digest":"\(String(repeating: "a", count: 64))","title":"Retry push registration","requiresTap":true,\
     "reason":"Alerts stopped","intent":"push-registration-retry",\
-    "items":[{"label":"Push registration","before":"Stopped","after":"Retried once on this iPhone"}]}
+    "items":[{"label":"Push registration","before":"Stopped","after":"Requested"}]}
     """
 
     private struct Harness {
         let coordinator: PushNotificationCoordinator
         let credentials: CredentialMemory
         let ledger: Ledger
+        let connection: ConnectionBox
+        let gate: PushRegistrationRetryApproval
     }
 
-    private func makeHarness() throws -> Harness {
-        let rejected = PushCredentialDocument(
+    private func makeHarness(flagged: Bool) throws -> Harness {
+        let credentials = CredentialMemory(PushCredentialDocument(
             appAttestKeyID: Ledger.key(1),
             apnsToken: String(repeating: "ab", count: 32),
             grants: [:],
-            appAttestKeyRejected: true
-        )
-        let credentials = CredentialMemory(rejected)
+            appAttestKeyRejected: flagged ? true : nil
+        ))
         let ledger = Ledger()
         let appAttest = PushAppAttestClient(
             isSupported: { true },
@@ -110,14 +124,30 @@ final class PushRegistrationRetryTests: XCTestCase {
             configuration: try XCTUnwrap(PushProductConfiguration.admit(URL(string: "https://push.example.com")!)),
             transport: BoundedHTTPDataTransport(dataForRequest: { request, _ in try ledger.respond(request) })
         )
-        return Harness(coordinator: coordinator, credentials: credentials, ledger: ledger)
+        let connection = ConnectionBox()
+        let gate = PushRegistrationRetryApproval(connection: { connection.current }, coordinator: coordinator)
+        return Harness(coordinator: coordinator, credentials: credentials, ledger: ledger, connection: connection, gate: gate)
     }
 
-    private func reconcile(_ harness: Harness, profile: GatewayProfile = PushRegistrationRetryTests.profile, epoch: String = "epoch-1") async {
-        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in UnreachableSocket() })
-        await harness.coordinator.reconcile(
-            profile: profile, connected: true, gatewayRuntimeEpoch: epoch, client: client
+    private func identity(_ profile: GatewayProfile, epoch: String = "epoch-1", admission: Int = 1) -> PushConnectionIdentity {
+        PushConnectionIdentity(
+            profileID: profile.id,
+            machineID: profile.machineId,
+            runtimeEpoch: epoch,
+            admission: GatewayLifecycleCoordinator.Admission(generation: admission, connectionID: admission)
         )
+    }
+
+    /// Reconciles the coordinator for `profile` and presents `identity` as the connected gateway.
+    private func connect(
+        _ harness: Harness,
+        profile: GatewayProfile = PushRegistrationRetryTests.profileA,
+        epoch: String = "epoch-1",
+        admission: Int = 1
+    ) async {
+        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in UnreachableSocket() })
+        await harness.coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: epoch, client: client)
+        harness.connection.current = identity(profile, epoch: epoch, admission: admission)
     }
 
     private func eventually(_ message: String, _ condition: @MainActor () -> Bool) async throws {
@@ -136,9 +166,19 @@ final class PushRegistrationRetryTests: XCTestCase {
         try JSONDecoder().decode(ChangeReview.self, from: Data(Self.retryCard.utf8))
     }
 
+    /// The Gateway's answer boundary for a card: the broker accepts the first exact answer and refuses later ones.
+    private func answerOnce(_ counter: AnswerCounter) -> () async throws -> Void {
+        {
+            counter.attempted += 1
+            guard counter.accepted == 0 else { throw GatewayFailure(code: "not_found", message: "Extension interaction is no longer pending", retryable: false, details: nil) }
+            counter.accepted += 1
+        }
+    }
+
+    /// A stopped registration after its one automatic retry: a flagged key, one attempt, no further chain.
     private func stoppedAfterAutomaticRetry() async throws -> Harness {
-        let harness = try makeHarness()
-        await reconcile(harness)
+        let harness = try makeHarness(flagged: true)
+        await connect(harness)
         try await eventually("the one automatic rejected-key retry finishes") {
             harness.ledger.count(path: "/v3/installations") == 1
                 && harness.coordinator.diagnostic == .stoppedRejected
@@ -149,14 +189,20 @@ final class PushRegistrationRetryTests: XCTestCase {
 
     func testRetryCardRotatesOnceAfterAcceptedTapAndDuplicateApprovalDoesNot() async throws {
         let harness = try await stoppedAfterAutomaticRetry()
-        let fence = try XCTUnwrap(harness.coordinator.retryFence(for: try retryCardReview()))
+        let card = try retryCardReview()
+        let counter = AnswerCounter()
+        let savesBeforeCapture = harness.credentials.saveCount
+        _ = try XCTUnwrap(harness.coordinator.retryFence(for: card, connection: try XCTUnwrap(harness.connection.current)))
+        XCTAssertEqual(harness.credentials.saveCount, savesBeforeCapture, "capturing the fence writes nothing")
         try await settle()
         XCTAssertEqual(harness.ledger.keysGenerated, 1, "presenting the card rotates nothing")
         XCTAssertEqual(harness.ledger.count(path: "/v3/installations"), 1, "presenting the card registers nothing")
-        let savesBeforeAcceptance = harness.credentials.saveCount
+        XCTAssertEqual(counter.attempted, 0, "presenting the card answers nothing")
 
-        try harness.coordinator.retryAfterApprovedCard(fence)
-        XCTAssertThrowsError(try harness.coordinator.retryAfterApprovedCard(fence), "a duplicate approval must not rotate again")
+        try await harness.gate.approve(card, answer: answerOnce(counter))
+        XCTAssertEqual(counter.accepted, 1)
+        await XCTAssertThrowsErrorAsync(try await harness.gate.approve(card, answer: answerOnce(counter)))
+        XCTAssertEqual(counter.attempted, 2, "the duplicate reached the answer boundary and was refused there")
 
         try await eventually("the accepted card's single attempt is rejected once more") {
             harness.ledger.count(path: "/v3/installations") == 2
@@ -165,46 +211,78 @@ final class PushRegistrationRetryTests: XCTestCase {
         try await settle()
         XCTAssertEqual(harness.ledger.keysGenerated, 2, "exactly one fresh key after the accepted card")
         XCTAssertEqual(harness.ledger.count(path: "/v3/installations"), 2, "no automatic chain after the card attempt")
-        let attested = harness.ledger.attestedKeys
-        XCTAssertEqual(attested.count, 2)
-        if attested.count == 2 {
-            XCTAssertNotEqual(attested[0], attested[1], "the card attempt proves with the fresh key")
+        XCTAssertEqual(harness.ledger.attestedKeys.count, 2)
+        if harness.ledger.attestedKeys.count == 2 {
+            XCTAssertNotEqual(harness.ledger.attestedKeys[0], harness.ledger.attestedKeys[1], "the card attempt proves with the fresh key")
         }
-        XCTAssertGreaterThan(harness.credentials.saveCount, savesBeforeAcceptance)
     }
 
-    func testStaleProfileCannotRotateTheCurrentKey() async throws {
+    func testPresentedConnectionMismatchRefusesBeforeAnswer() async throws {
         let harness = try await stoppedAfterAutomaticRetry()
-        let fence = try XCTUnwrap(harness.coordinator.retryFence(for: try retryCardReview()))
-        let other = GatewayProfile(
-            id: "profile-b", label: "Mac B", host: "push-test.example.com", port: 9848,
-            machineId: "machine-b", deviceId: "device-b"
-        )
-        await reconcile(harness, profile: other)
+        let card = try retryCardReview()
+        let counter = AnswerCounter()
+
+        harness.connection.current = identity(Self.profileB, admission: 2)
+        await XCTAssertThrowsErrorAsync(try await harness.gate.approve(card, answer: answerOnce(counter)))
+        XCTAssertEqual(counter.attempted, 0, "a card presented for another connection is never answered")
+
+        await connect(harness, profile: Self.profileB, admission: 3)
+        harness.connection.current = identity(Self.profileA, admission: 3)
+        await XCTAssertThrowsErrorAsync(try await harness.gate.approve(card, answer: answerOnce(counter)))
+        XCTAssertEqual(counter.attempted, 0, "a coordinator for B never answers for a connected A")
         try await settle()
-        XCTAssertThrowsError(try harness.coordinator.retryAfterApprovedCard(fence))
         XCTAssertEqual(harness.ledger.keysGenerated, 1)
         XCTAssertEqual(harness.ledger.count(path: "/v3/installations"), 1)
     }
 
-    func testStaleConnectionCannotRotateTheCurrentKey() async throws {
+    func testConnectionChangeAfterAcceptanceRefusesRotation() async throws {
         let harness = try await stoppedAfterAutomaticRetry()
-        let fence = try XCTUnwrap(harness.coordinator.retryFence(for: try retryCardReview()))
-        await reconcile(harness, epoch: "epoch-2")
+        let card = try retryCardReview()
+        let counter = AnswerCounter()
+        let answer: () async throws -> Void = {
+            try await answerOnce(counter)()
+            harness.connection.current = self.identity(Self.profileA, epoch: "epoch-2", admission: 2)
+        }
+        await XCTAssertThrowsErrorAsync(try await harness.gate.approve(card, answer: answer))
+        XCTAssertEqual(counter.accepted, 1, "the accepted answer is not undone")
         try await settle()
-        XCTAssertThrowsError(try harness.coordinator.retryAfterApprovedCard(fence))
-        XCTAssertEqual(harness.ledger.keysGenerated, 1)
+        XCTAssertEqual(harness.ledger.keysGenerated, 1, "a runtime change after acceptance rotates nothing")
         XCTAssertEqual(harness.ledger.count(path: "/v3/installations"), 1)
+    }
+
+    func testUnflaggedStoredKeyRejectedInAssertionRotatesExactlyOnce() async throws {
+        let harness = try makeHarness(flagged: false)
+        await connect(harness)
+        try await eventually("the in-loop rotation and its rejection settle") {
+            harness.coordinator.diagnostic == .stoppedRejected
+        }
+        try await settle()
+        XCTAssertEqual(harness.ledger.keysGenerated, 1, "one launch rotates one key: the in-loop assertion rotation")
+        XCTAssertEqual(harness.ledger.count(path: "/v3/installations"), 2, "assertion then attestation, then no chain")
+        XCTAssertEqual(harness.ledger.attestedKeys.count, 1)
+        XCTAssertGreaterThan(harness.credentials.saveCount, 0)
     }
 
     func testOnlyAPushRetryCardWithATapYieldsAFence() async throws {
         let harness = try await stoppedAfterAutomaticRetry()
+        let current = try XCTUnwrap(harness.connection.current)
         let withoutIntent = try JSONDecoder().decode(ChangeReview.self, from: Data(
             Self.retryCard.replacingOccurrences(of: #","intent":"push-registration-retry""#, with: "").utf8))
-        XCTAssertNil(harness.coordinator.retryFence(for: withoutIntent))
+        XCTAssertNil(harness.coordinator.retryFence(for: withoutIntent, connection: current))
         let withoutTap = try JSONDecoder().decode(ChangeReview.self, from: Data(
             Self.retryCard.replacingOccurrences(of: #""requiresTap":true"#, with: #""requiresTap":false"#).utf8))
-        XCTAssertNil(harness.coordinator.retryFence(for: withoutTap))
+        XCTAssertNil(harness.coordinator.retryFence(for: withoutTap, connection: current))
         XCTAssertEqual(harness.ledger.keysGenerated, 1)
     }
+}
+
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @autoclosure () async throws -> T,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("expected an error", file: file, line: line)
+    } catch {}
 }
