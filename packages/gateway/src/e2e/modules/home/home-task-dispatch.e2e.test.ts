@@ -9,7 +9,7 @@ import { existsSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, getCurrentSystemMessage, getCurrentTools, type FauxResponseFactory } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentSystemMessage, getCurrentSystemPrompt, getCurrentTools, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeTaskStore, taskIntentDigest } from "../../../modules/home/home-task-store.js";
 import { type HomeTaskDispatcher, successorTaskId, HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "../../../modules/home/home-task-dispatcher.js";
@@ -1175,10 +1175,7 @@ describe("Home task production dispatch", () => {
   it("reloads Home for global rules but not excluded workspace or system context", async () => {
     const f = await fixture();
     const globalRules = join(f.agentDir, "AGENTS.md");
-    await writeFile(globalRules, "GLOBAL_HOME_FRESHNESS_START\n");
-    const registry = await f.restart();
-    const home = await registry.acquire(f.home.sessionId);
-    expect(home.runtime.session.systemPrompt).toContain("GLOBAL_HOME_FRESHNESS_START");
+    const home = await f.registry.acquire(f.home.sessionId);
     const before = f.signals.length;
     for (const path of [join(home.cwd, "AGENTS.md"), join(f.agentDir, "SYSTEM.md"), join(f.agentDir, "APPEND_SYSTEM.md")]) {
       await writeFile(path, "IGNORED_HOME_CONTEXT_MARKER\n");
@@ -1188,10 +1185,15 @@ describe("Home task production dispatch", () => {
     await waitFor(() => f.signals.slice(before).some(event => event.outcome === "resources-reload" && event.sessionId === home.id), "Home freshness observes the edit batch");
     expect(f.signals.slice(before).filter(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "completed")).toHaveLength(0);
     expect(home.runtime.session.systemPrompt).not.toContain("IGNORED_HOME_CONTEXT_MARKER");
+    const afterIgnored = f.signals.length;
     await writeFile(globalRules, "GLOBAL_HOME_FRESHNESS_UPDATED\n");
-    await waitFor(() => home.runtime.session.systemPrompt.includes("GLOBAL_HOME_FRESHNESS_UPDATED"), "global rules reload Home through the existing freshness owner");
-    expect(f.signals.slice(before).some(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "completed")).toBe(true);
-    expect(home.runtime.session.systemPrompt).not.toContain("IGNORED_HOME_CONTEXT_MARKER");
+    await waitFor(() => f.signals.slice(afterIgnored).some(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "completed"), "global rules reload Home through the existing freshness owner");
+    let prompt = "";
+    f.faux.setResponses([context => { prompt = getCurrentSystemPrompt(context.messages); return fauxAssistantMessage("Global rules read."); }]);
+    await home.prompt("Verify the global-only context.");
+    await waitFor(() => !home.isBusy && home.snapshot().operation === undefined, "global rules provider request settled");
+    expect(prompt).toContain("GLOBAL_HOME_FRESHNESS_UPDATED");
+    expect(prompt).not.toContain("IGNORED_HOME_CONTEXT_MARKER");
   });
 
   it("reserves a typed worker limit atomically and releases it after settlement", async () => {
