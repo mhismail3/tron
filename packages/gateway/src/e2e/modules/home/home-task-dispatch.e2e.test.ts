@@ -1184,7 +1184,7 @@ describe("Home task production dispatch", () => {
     }
     const settingsPath = join(f.agentDir, "settings.json");
     await writeFile(settingsPath, await readFile(settingsPath));
-    await waitFor(() => f.signals.slice(before).some(event => event.outcome === "resources-reload" && event.sessionId === home.id), "Home freshness observes the edit batch");
+    await waitFor(() => f.signals.slice(before).some(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "unchanged"), "Home freshness observes the edit batch");
     expect(f.signals.slice(before).filter(event => event.outcome === "resources-reload" && event.sessionId === home.id && event.reason === "completed")).toHaveLength(0);
     expect(home.runtime.session.resourceLoader.getAgentsFiles().agentsFiles).toEqual([]);
     const afterIgnored = f.signals.length;
@@ -1219,7 +1219,7 @@ describe("Home task production dispatch", () => {
     const after = await (await dispatch(f, "cap-after")).completion;
     expect(after.terminalEvidence?.outcome).toBe("final");
     evidence.push({ case: "typed-worker-limit", limit: 1, admitted: outcomes.filter(result => result.status === "fulfilled").length, after: after.taskId });
-  }, 30_000);
+  });
 
   it.each(["file", "directory"] as const)("settles unknown without replay when the live canonical %s sync is refused", async target => {
     const f = await fixture();
