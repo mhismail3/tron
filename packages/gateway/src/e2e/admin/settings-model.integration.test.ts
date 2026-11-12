@@ -77,7 +77,7 @@ async function fixture() {
     retry: { maxRetries: 5 },
     defaultTools: ["read", "bash"],
     compaction: { reserveTokens: 20_000 },
-    httpProxy: "http://proxy.invalid:8080",
+    transport: "sse",
   }));
   await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({
     retry: { maxRetries: 7 },
@@ -195,7 +195,6 @@ describe("settings.resolve", () => {
     for (const [key, expected] of Object.entries(piUntrusted)) expect(row(untrusted, key).value, key).toEqual(expected);
     expect(untrusted.diagnostics).toContainEqual({ key: "permissions.defaultProjectTrust", layer: "project", reason: "project-forbidden", path: "defaultProjectTrust", file: projectFile });
     expect(row(untrusted, "permissions.defaultProjectTrust").value).toBe("ask");
-    expect(JSON.stringify(untrusted)).not.toContain("proxy.invalid");
 
     await trust.set(project, true);
     const trusted = await resolve({ kind: "project", cwd: project });
@@ -620,7 +619,7 @@ describe("settings renderer contract", () => {
     expect(before.sections.filter(section => section.chatInline).map(section => section.id)).toEqual(["model", "workers"]);
     const groups = (...keys: string[]) => keys.map(key => before.keys.find(row => row.key === key)?.group);
     expect(groups("permissions.budget.task")).toEqual(["workers"]);
-    expect(groups("run.retry.maxRetries", "run.cacheWarming")).toEqual(["run", "run"]);
+    expect(groups("run.retry.maxRetries", "run.transport")).toEqual(["run", "run"]);
     expect(groups("context.images.block", "permissions.defaultProjectTrust")).toEqual(["tools", "trust"]);
     expect(before.keys.map(key => key.key)).not.toContain("permissions.floor");
     expect(before.sections.map(entry => entry.id)).not.toContain("advanced");
