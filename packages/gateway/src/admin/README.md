@@ -18,7 +18,7 @@ custom models, Gateway updates, iOS installs, Mac replacement and diagnostics.
 | The agents' `settings` tool and web mark | `tron-settings-extension.ts` |
 | Provider auth and model catalog | `auth-broker.ts`, `model-config-service.ts`, `global-provider-resources.ts` |
 | Packages, extensions, hooks, tools | `package-service.ts`, `package-provides.ts`, `session-free-extensions.ts`, `hook-resources.ts`, `tool-catalog.ts` |
-| MCP administration | `mcp-admin-service.ts` |
+| MCP administration | `mcp-admin-service.ts`: the one owner of `mcp.json` writes (`setServer` under its lock, refusing records it cannot carry) and the CLI bridge. Gateway composition builds one instance and passes it to `SettingsStoreAdapter` (`mcpAdmin`) and `GatewayService`; a fixture without it gets `unsupported` for MCP record writes only |
 | Install and lifecycle projections | `gateway-update-service.ts`, `ios-device-install-service.ts`, `ios-device-install-helper.ts`, `mac-replace-service.ts`, `diagnose.ts` |
 | Shared admission | `document-admission.ts` (`COMMAND_ID`, `admitTronSourceRoot`); [host control](host-control.md) |
 
@@ -93,7 +93,9 @@ are installed; schema access never evaluates their late-bound service getter.
 ## Invariants
 
 - Every write of a declared key or record subject goes through
-  `SettingsChangePath`; there are no per-key setters and no second store.
+  `SettingsChangePath`; there are no per-key setters and no second store. A
+  Tron-made `mcp.json` write runs inside the outside-change bracket, so it is
+  audited once by the change path and never as a hand edit.
 - A value at a layer the key does not allow is ignored and reported, never
   applied. A repository never grants itself trust; an untrusted `.pi/` is
   present but not applied and never written.

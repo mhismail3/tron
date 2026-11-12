@@ -354,7 +354,8 @@ describe("MCP servers through the settings change path", () => {
     const agentDir = join(tronHome, "agent");
     await mkdir(agentDir, { recursive: true });
     const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime }));
+    const settingsModel = new SettingsModel(new SettingsStoreAdapter({ schema: TEST_SETTINGS_SCHEMA, agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime,
+      mcpAdmin: new McpAdminService(agentDir, cliPath) }));
     const record = new SettingsChangeRecord(tronHome);
     settingsModel.owner.observeOutside(new OutsideChanges(TEST_SETTINGS_SCHEMA, tronHome, agentDir, record, settingsModel.owner.observedReaders));
     const changes = new SettingsChangePath(settingsModel, record, { setTrust: async () => { throw new Error("no trust writes in this proof"); } });
@@ -412,6 +413,11 @@ describe("MCP servers through the settings change path", () => {
     expect(await f.changes.change(global, commandChange, home)).toMatchObject({ status: "review", review: { requiresTap: true } });
     const exposureOnly = await f.changes.change(global, [set("docs", { command: "npx", args: ["a"], exposure: "hidden" })], home);
     expect(exposureOnly).toMatchObject({ status: "applied" });
+    const widened = [set("docs", { command: "npx", args: ["a"], exposure: "direct" })];
+    const widenedReview = await f.changes.change(global, widened, home);
+    expect(widenedReview).toMatchObject({ status: "review", review: { requiresTap: true } });
+    await approve(f, widened, widenedReview.review!);
+    expect(await f.changes.change(global, [set("docs", { command: "npx", args: ["a"], exposure: "deferred" })], home)).toMatchObject({ status: "applied" });
   });
 
   it("refuses secret-bearing fields without echoing them, and writes nothing", async () => {
@@ -425,6 +431,10 @@ describe("MCP servers through the settings change path", () => {
       { url: `https://example.com/mcp?api_key=${secret}` },
       { command: "npx", args: [`--api-key=${secret}`] },
       { command: "npx", oauth: { clientSecret: secret } },
+      { command: `npx ${secret}` },
+      { command: `API_KEY=${secret} npx`, args: ["-y", "pkg"] },
+      { command: "npx", args: [`Bearer ${secret}`] },
+      { url: `https://example.com/mcp/${secret}` },
     ];
     for (const value of attempts) {
       const error = await f.changes.change(global, [set("docs", value)], home).catch((caught: unknown) => caught);

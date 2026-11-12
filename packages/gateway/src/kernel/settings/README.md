@@ -23,6 +23,11 @@ setting and is not an approval queue.
   audited as not rolled back, naming the store, never as rolled back. Store I/O and provider admission enter through
   owner ports. `SettingsReadOwner.admitModelChoice` uses the active SDK runtime,
   including borrowed views; it captures no eligibility snapshot.
+- `mcp-server-value.ts`: the typed `tools.mcp.server` value (`{command, args?}` or `{url}`, `enabled`,
+  `exposure`), its secret refusal (credential shapes through `redactCredentials`, secret-named
+  tokens and URL parts, every field outside the allowlist), the on-disk projection that refuses
+  records it cannot carry, and the widen/narrow rule that decides the native tap. `RECORD_SUBJECTS`
+  carries its `write` declaration; `schema.recordKey()` builds the change-path declaration from it.
 - `settings-record.ts`: durable, byte/row-bounded segments, index recovery and
   paged history. Indexed immutable segments must retain their indexed row count;
   a grouped Undo requires exactly its unique, consistently sized members.
@@ -46,6 +51,12 @@ awaited observer/projection under the Home stripe; failed diffs remain ungrouped
 No Profile DTO or domain inverse is invented by the settings kernel.
 
 ## Contract
+
+Record writes (`tools.mcp.server`) are Global-only and take one qualifier, `server`. Writers are
+`ui` and `home`, as for the Home keys; agents, workers and Project layers are refused. Adding or
+enabling a server, changing its command, args or URL, or raising its visibility requires the
+native tap. Disabling, removing, or lowering exposure applies as routine. Undo uses the same path and records
+its own entry.
 
 `SettingsToolAccess` resolves and changes the current session or Home's delegated
 worker. Routine reversible changes, tool selection included, apply, log and can be undone.
