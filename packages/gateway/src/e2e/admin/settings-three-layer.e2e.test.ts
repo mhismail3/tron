@@ -11,6 +11,7 @@ import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import type { ChangeResult, Resolution } from "../../kernel/settings/tool-contract.js";
 import { displayOwnerOf, homeOwnerOf } from "../../../test-support/gateway-registry.js";
+import { readNotificationPolicy } from "../../notifications/notification-service.js";
 
 const evidence: Array<Record<string, unknown>> = [];
 afterEach(disposeFixtures);
@@ -308,6 +309,23 @@ describe("approved three-layer settings at real Gateway boundaries", () => {
     expect(unreadable.projectNotice).toEqual({ file: join(await realpath(f.cwd), ".pi", "settings.json"),
       message: "Project settings couldn't be read" });
     expect(JSON.stringify(unreadable)).not.toContain("unreadable-json-secret-value");
+  });
+
+  it("push alert policy is Global: default on, changed through the change path, read by the notification owner", async () => {
+    const f = await setup();
+    const readPolicy = () => readNotificationPolicy((names) => f.registry.resolveGlobalSettings(names));
+    expect(await readPolicy()).toEqual({ inputNeeded: true, finished: true, waiting: true });
+    const changed = await f.service.invoke(f.client, "settings.change", {
+      commandId: randomUUID(), target: { kind: "global" },
+      changes: [{ key: "notifications.push.finished", layer: "global", op: "set", value: false }],
+    }) as unknown as ChangeResult;
+    expect(changed.changes[0]).toMatchObject({ key: "notifications.push.finished", layer: "global", after: false });
+    expect(await readPolicy()).toEqual({ inputNeeded: true, finished: false, waiting: true });
+    const stored = JSON.parse(await readFile(join(f.tronHome, "gateway", "settings", "gateway.json"), "utf8"));
+    expect(stored.notifications.push).toEqual({ finished: false });
+    const history = await f.settings.settingsChanges.history({ key: "notifications.push.finished" });
+    expect(history.entries.map(entry => entry.changeId)).toContain(changed.changes[0]!.changeId);
+    evidence.push({ case: "push-policy-global-live", changed: changed.changes[0] });
   });
 
   it("keeps thinking budgets and image visibility Global-only during real SDK admission", async () => {
