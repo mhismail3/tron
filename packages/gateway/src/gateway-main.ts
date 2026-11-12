@@ -169,7 +169,7 @@ const displayArtifacts = new DisplayArtifactStore(config.tronHome);
 const display = new DisplayOwner(displayArtifacts, browserLiveViews, () => sessions);
 const macTerminalKeys = new MacTerminalService(tronHomePath(config.tronHome, "state/mac-terminal"));
 await macTerminalKeys.restore().catch(error => {
-  logger.log("warn", "Private SSH startup failed", { event: "mac-terminal.startup-failed", error: String(error) });
+  logger.log("warning", "Private SSH startup failed", { event: "mac-terminal.startup-failed", error: String(error) });
 });
 const settingsSchema = createGatewaySettingsSchema();
 const settingsModel = new SettingsModel(new SettingsStoreAdapter({
