@@ -9,11 +9,12 @@ import { existsSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, getCurrentTools, type FauxResponseFactory } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentSystemMessage, getCurrentTools, type FauxResponseFactory } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeTaskStore, taskIntentDigest } from "../../../modules/home/home-task-store.js";
 import { type HomeTaskDispatcher, successorTaskId, HOME_TASK_DISPATCH_STAGE_DEADLINE_MS } from "../../../modules/home/home-task-dispatcher.js";
-import { HomeMemoryRefusal, HomeRequestPolicy } from "../../../modules/home/home-request-policy.js";
+import { HomeMemoryRefusal } from "../../../modules/home/home-request-policy.js";
+import { estimateTokens } from "../../../kernel/pi/coding-agent.js";
 import { UploadStore } from "../../../machine/upload-store.js";
 import { EpisodicMemoryError } from "../../../errors.js";
 import { RuntimeRegistry } from "../../../kernel/session/runtime-registry.js";
@@ -335,15 +336,6 @@ describe("Home task authorization RPC", () => {
 describe("Home task bounded backlogs", () => {
   it("delivers a backlog across bounded activations exactly once in order without context-overflow", async () => {
     const f = await fixture(undefined, false, 19_000);
-    const headrooms: unknown[] = [];
-    const measure = HomeRequestPolicy.prototype.deliveryHeadroom;
-    vi.spyOn(HomeRequestPolicy.prototype, "deliveryHeadroom").mockImplementation(async function(this: HomeRequestPolicy, ...args: Parameters<typeof measure>) {
-      const result = await measure.apply(this, args);
-      const session = args[0];
-      headrooms.push({ tokens: result.tokens, freshTokens: result.freshTokens, tools: session.agent.state.tools.length,
-        frameTools: getCurrentTools(session.agent.state.messages).length, registeredTools: session.getAllTools().length, systemBytes: Buffer.byteLength(args[2]) });
-      return result;
-    });
     const model = f.faux.getModel();
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const tasks = [];
@@ -355,10 +347,12 @@ describe("Home task bounded backlogs", () => {
     await homeOwnerOf(f.registry).resumeMemory();
     const home = await f.registry.acquire(f.home.sessionId);
     const batches: string[][] = [];
-    let firstRequest = "";
+    let firstRequest = ""; let firstBatchRequest = "";
     const collect = (context: unknown, maintainer: boolean) => {
       const request = JSON.stringify(context);
-      batches.push(tasks.filter((_task, index) => request.includes(String(index).repeat(1000))).map(task => task.taskId));
+      const batch = tasks.filter((_task, index) => request.includes(String(index).repeat(1000))).map(task => task.taskId);
+      batches.push(batch);
+      if (batch.length > 0 && !firstBatchRequest) firstBatchRequest = request;
       if (!maintainer) expect(request).not.toContain("u".repeat(1000));
       return fauxAssistantMessage("Reviewed results");
     };
@@ -369,14 +363,15 @@ describe("Home task bounded backlogs", () => {
     }, wake, wake, wake, wake, wake, wake]);
     await home.prompt("u".repeat(20000));
     await waitFor(() => batches.flat().length === tasks.length, "backlog delivered by bounded activations").catch(error => {
-      throw new Error(JSON.stringify({ batches, headrooms, firstRequestBytes: Buffer.byteLength(firstRequest), refusals: f.signals.filter(record => record.event === "refused"),
+      throw new Error(JSON.stringify({ batches, firstRequestBytes: Buffer.byteLength(firstRequest), refusals: f.signals.filter(record => record.event === "refused"),
         errors: home.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "assistant" && entry.message.errorMessage ? [entry.message.errorMessage] : []) }), { cause: error });
     });
-    expect(tasks.length - batches[0]!.length).toBeGreaterThan(0);
-    expect(firstRequest).toContain("[from: gateway; kind: pending; authority: none]");
-    expect(firstRequest).toContain(`${tasks.length - batches[0]!.length} more task results pending`);
+    const deliveredBatches = batches.filter(batch => batch.length > 0);
+    expect(tasks.length - deliveredBatches[0]!.length).toBeGreaterThan(0);
+    expect(firstBatchRequest).toContain("[from: gateway; kind: pending; authority: none]");
+    expect(firstBatchRequest).toContain(`${tasks.length - deliveredBatches[0]!.length} more task results pending`);
     expect(f.signals.filter(record => record.reason === "context-overflow")).toEqual([]);
-    expect(batches.filter(batch => batch.length > 0).length).toBeGreaterThan(1);
+    expect(deliveredBatches.length).toBeGreaterThan(1);
     expect(batches.flat()).toEqual(tasks.map(t => t.taskId));
     expect(f.signals).not.toContainEqual(expect.objectContaining({ reason: "context-overflow" }));
     for (const task of tasks) {
@@ -387,7 +382,7 @@ describe("Home task bounded backlogs", () => {
   }, 30_000);
 
   it("delivers a never-fit report by reference before its successor and reads immutable bounded pages", async () => {
-    const f = await fixture(undefined, false, 14_000); const model = f.faux.getModel();
+    const f = await fixture(undefined, false, 18_000); const model = f.faux.getModel();
     const owner = homeOwnerOf(f.registry);
     await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     await owner.pauseMemory();
@@ -414,7 +409,11 @@ describe("Home task bounded backlogs", () => {
       if (page.nextOffset === null) break;
       expect(page.nextOffset).toBeGreaterThan(offset); offset = page.nextOffset;
     }
-    const report = JSON.parse(pages.map(p => p.text).join(""));
+    const fullReport = pages.map(p => p.text).join("");
+    const report = JSON.parse(fullReport);
+    const system = getCurrentSystemMessage(JSON.parse(request).messages);
+    expect(system).toBeDefined();
+    expect(estimateTokens(system!) + estimateTokens({ role: "user", content: [{ type: "text", text: fullReport }], timestamp: 0 })).toBeGreaterThan(18_000);
     expect(report.text).toBe("🦊".repeat(16384));
     await expect(owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset: -1, limit: 1024 } as any)).rejects.toThrow(/page/);
     await expect(owner.taskTool(f.home.sessionId, { action: "report", taskId: large.taskId, offset: 0, limit: 1_000_000 } as any)).rejects.toThrow(/page/);
