@@ -9858,7 +9858,7 @@ export default function (pi) {
     expect(canonicalSegmentIDs).toEqual(new Set(grouped.map((event) => event.toolSegmentId)));
     expect(settled.transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-bash"))
       .toMatchObject({ durationMs: expect.any(Number), startedAt: expect.any(String), completedAt: expect.any(String) });
-    expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
+    expect(slot.sessionFile?.startsWith(registry.sessionDirectory(cwd))).toBe(true);
   });
 
   it("projects codemode nested calls live and after a cold reload", async () => {
@@ -11566,7 +11566,7 @@ export default function (pi) {
     registries.push(registry);
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
-    expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
+    expect(slot.sessionFile?.startsWith(registry.sessionDirectory(cwd))).toBe(true);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("cache stats");
