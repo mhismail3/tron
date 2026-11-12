@@ -10,7 +10,6 @@ import { randomUUID } from "node:crypto";
 import type { SessionOperations } from "../../kernel/session/runtime-registry.js";
 import type { HomeTaskPolicy } from "./home-task-worker-choice.js";
 import { HomeChapterMaterializer } from "./home-chapter-materialization.js";
-import { HomeGlobalResources } from "./home-global-resources.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { readHomeTaskMetrics } from "./home-task-metrics.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
@@ -130,7 +129,6 @@ export class HomeOwner {
   publicationUncertain = false;
   private readonly tasks: HomeTaskDispatcher;
   readonly materializer: HomeChapterMaterializer;
-  readonly resources: HomeGlobalResources;
   private readonly inbox: WakeInboxOwner;
   private wakeRequested = false;
   private wakeDrain: Promise<void> | undefined;
@@ -157,8 +155,6 @@ export class HomeOwner {
       wakeAvailable: homeId => this.wakeAvailable(homeId),
       wake: () => this.requestWake(),
     });
-    this.resources = new HomeGlobalResources({ agentDir: options.agentDir, diagnostic: record => this.options.diagnostic?.(record),
-      homeSlot: () => { try { return options.runtimes.liveRuntime(this.routeBinding().physicalSessionId); } catch { return undefined; } } });
     this.materializer = new HomeChapterMaterializer(this, options.runtimes, options.trust, options.diagnostic);
     this.tasks = new HomeTaskDispatcher(store, authorization, options.runtimes, options.taskDiagnostic, this.inbox, options.taskPolicy);
   }

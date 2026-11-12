@@ -89,7 +89,8 @@ function replaceProjectProjection(schema: SettingsSchema, raw: Document, next: D
   return raw;
 }
 
-export async function createSettingsManager(schema: SettingsSchema, projectDir: string, agentDir: string, projectTrusted: boolean): Promise<SettingsManager> {
+export async function createSettingsManager(schema: SettingsSchema, projectDir: string, agentDir: string, projectTrusted: boolean,
+  afterReload?: (manager: SettingsManager) => Promise<void>): Promise<SettingsManager> {
   const storage: Parameters<typeof SettingsManager.fromStorage>[0] = {
     withLock(scope, transform) {
       const path = scope === "global" ? join(agentDir, "settings.json") : join(projectDir, ".pi", "settings.json");
@@ -122,6 +123,10 @@ export async function createSettingsManager(schema: SettingsSchema, projectDir: 
     },
   };
   const manager = SettingsManager.fromStorage(storage, { projectTrusted });
+  if (afterReload) {
+    const reload = manager.reload.bind(manager);
+    manager.reload = async () => { await reload(); await afterReload(manager); };
+  }
   const cacheWarming = schema.KEYS.find(key => key.id === "run.cacheWarming")!.defaultValue as ReturnType<SettingsManager["getCacheWarmingMode"]>;
   const piCacheWarming = manager.getCacheWarmingMode.bind(manager);
   manager.getCacheWarmingMode = () => {

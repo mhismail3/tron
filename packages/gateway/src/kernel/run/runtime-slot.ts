@@ -57,7 +57,7 @@ import { workerFinishTurn } from "../delegation/worker-turn-boundary.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../delegation/task-report.js";
 import { ORDINARY_SESSION_PROFILE, type SessionProfile } from "../host/session-profile.js";
 import type { ChangeContext, SessionAppliers, SettingsChangePath, SettingsNotice } from "../settings/settings-change.js";
-import type { SessionSettingsSource, SettingsModel } from "../settings/settings-model.js";
+import { setPath, type SessionSettingsSource, type SettingsModel } from "../settings/settings-model.js";
 import { SETTINGS_OUTCOME_MESSAGE, CONTEXT_DELIVERY_RECEIPT_TYPE } from "../receipts/delivery-tags.js";
 import { type SettingsSignal, type SettingsToolAccess, type TaskWorkerSettingsState, type FixedSetting, type LayerId } from "../settings/tool-contract.js";
 import type { Actor } from "../settings/settings-record.js";
@@ -189,6 +189,7 @@ interface RuntimeSlotHooks {
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
+  idle?: (slot: RuntimeSlot) => void;
   assistantResponseCompleted: (
     sessionId: string,
     completion: CanonicalAssistantCompletion,
@@ -1179,7 +1180,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
         requestChange: input => this.requestChange(input),
       };
       const managedSubagents = profile.managedSubagents ? this.dependencies.managedSubagents : undefined;
-      const settingsManager = await createSettingsManager(this.dependencies.settingsSchema, trust.projectDir, this.dependencies.agentDir, profile.projectSettings && trust.trusted);
+      const settingsManager = await createSettingsManager(this.dependencies.settingsSchema, trust.projectDir, this.dependencies.agentDir, profile.projectSettings && trust.trusted,
+        async manager => { if (this.runtime?.session.settingsManager === manager) await this.applyReloadSettings(manager); });
       const managedLoaderOptions = await managedSubagents?.loaderOptions(settingsManager,
         (content, options, owner, messages) => this.admitSubagentWake(content, options, owner, messages));
       const extensionFactories = profile.extensions !== "ordinary"
@@ -1349,6 +1351,49 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     await this.bindSession();
   }
 
+  async reloadSettingInputs(): Promise<Array<[string, unknown]>> {
+    const owners = this.dependencies.settings();
+    if (!owners) return [];
+    const keys = this.dependencies.settingsSchema.KEYS.filter(key => key.effect === "reload").map(key => key.id);
+    const source = this.reloadSettingsSource();
+    const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, source, keys, { storeState: false });
+    return resolved.keys.map(row => [row.key, row.value]);
+  }
+
+  private async applyReloadSettings(manager: SettingsManager): Promise<void> {
+    const overrides: Record<string, unknown> = {};
+    for (const [id, value] of await this.reloadSettingInputs()) {
+      const key = this.dependencies.settingsSchema.schemaKey(id);
+      const binding = key.layers.global;
+      if (binding?.store === "pi" && value !== undefined) setPath(overrides, binding.path, value);
+    }
+    manager.applyOverrides(overrides);
+  }
+
+  private reloadSettingsSource(): SessionSettingsSource {
+    const session = this.settingsSessionLayer();
+    const fixed = Object.fromEntries(Object.entries(session.fixed ?? {}).filter(([key, value]) =>
+      this.dependencies.settingsSchema.schemaKey(key).effect !== "reload" || value.from === "session" || value.from === "delegate"));
+    return this.settingsSource({ ...session, fixed });
+  }
+
+  private async refreshReloadDefaults(): Promise<void> {
+    const owners = this.dependencies.settings();
+    if (!owners) return;
+    const fixed = readSessionFixedSettings(this.sessionManager.getBranch());
+    const keys = Object.keys(fixed).filter(key => this.dependencies.settingsSchema.schemaKey(key).effect === "reload"
+      && fixed[key]!.from !== "session" && fixed[key]!.from !== "delegate");
+    if (!keys.length) return;
+    const resolved = await owners.model.resolve({ kind: "session", sessionId: this.id }, this.reloadSettingsSource(), keys, { storeState: false });
+    let changed = false;
+    for (const row of resolved.keys) {
+      if (JSON.stringify(fixed[row.key]!.value) === JSON.stringify(row.value) && fixed[row.key]!.from === row.layer) continue;
+      fixed[row.key] = { value: row.value, from: row.layer, at: new Date().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) };
+      changed = true;
+    }
+    if (changed) await this.persistSessionSettings({ fixed });
+  }
+
   private async captureFixedDefaults(): Promise<void> {
     const owners = this.dependencies.settings();
     if (!owners) return;
@@ -1399,6 +1444,8 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
     fixed[key] = { ...(origin ?? { from: "session", at: new Date().toISOString(), ref: randomUUID() }), value };
     await this.persistSessionSettings({ fixed });
   }
+
+  resourceProjectTrusted(): Promise<boolean> { return this.effectiveResourceReloadOptions()!.resolveProjectTrust(); }
 
   private effectiveResourceReloadOptions(): { resolveProjectTrust: () => Promise<boolean> } | undefined {
     const override = this.projectTrustReloadOverride;
@@ -1461,6 +1508,7 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
 
   private async reloadBoundSession(): Promise<void> {
     const session = this.runtime.session;
+    await this.refreshReloadDefaults();
     await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
     if (this.liveProfile().managedSubagents) {
       await this.dependencies.managedSubagents?.completeLoad(session.settingsManager, this.cwd, this.dependencies.agentDir, session.resourceLoader.getExtensions().extensions);
@@ -3387,8 +3435,9 @@ export class RuntimeSlot extends RunOperations<FixedSetting> {
   }
 
   public noteHomeIdle(): void {
-    if (!this.homeRequestPolicy || this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined) return;
-    this.dependencies.modules.policy("runSettled")?.().idle(this.id, this.operationWasHomeWake ? "wake" : "user");
+    if (this.phase !== "idle" || this.operation !== undefined || this.activeOperationId !== undefined) return;
+    this.hooks.idle?.(this);
+    if (this.homeRequestPolicy) this.dependencies.modules.policy("runSettled")?.().idle(this.id, this.operationWasHomeWake ? "wake" : "user");
   }
 
   readonly admitSubagentWake: ManagedInternalWake = async (content, options, owner, messages) => {
