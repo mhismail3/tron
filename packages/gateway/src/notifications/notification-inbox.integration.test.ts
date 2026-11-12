@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { NotificationGrantStore, notificationHash, type NotificationInboxEntry } from "./grant-store.js";
 import { NotificationService, type NotificationInboxChanged, type NotificationInboxItem } from "./notification-service.js";
+import { applyPushPolicyMigration, planPushPolicyMigration, restorePushPolicyMigration } from "./push-policy-migration.js";
 import type { PushRelayClient } from "./relay-client.js";
 import { GatewayService, type ClientContext } from "../transport/gateway-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -70,6 +71,7 @@ async function fixture() {
   const notifications = new NotificationService(
     store,
     { available: false, relayOrigin: "https://push.example.test" } as PushRelayClient,
+    async () => ({ inputNeeded: true, finished: true, waiting: true }),
     Date.now,
     (payload) => broadcasts.push(payload),
   );
@@ -171,3 +173,81 @@ describe("notification inbox RPCs over a real credential document", () => {
     });
   });
 });
+
+describe("push alert policy is Global settings, not registration state", () => {
+  it("admits each automatic kind by the resolved Global value at admission time", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-push-policy-"));
+    roots.push(root);
+    const store = new NotificationGrantStore(root);
+    await store.initialize();
+    const pushes: Array<{ notificationKind: string }> = [];
+    let policy = { inputNeeded: true, finished: true, waiting: true };
+    const relay = {
+      available: true,
+      relayOrigin: "https://push.example.test",
+      async send(input: { relayEnvelope: string }) {
+        pushes.push(JSON.parse(input.relayEnvelope) as { notificationKind: string });
+        return { status: "accepted_by_apns" };
+      },
+      async revoke() { return "revoked" as const; },
+    } as unknown as PushRelayClient;
+    const notifications = new NotificationService(store, relay, async () => ({ ...policy }), Date.now, () => {}, () => {}, () => {});
+    await notifications.initialize();
+    try {
+      await notifications.upsertGrant({
+        deviceId: "device_abcdefgh", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
+        secret: Buffer.alloc(32, 9).toString("base64url"), previewsEnabled: false, relayOrigin: "https://push.example.test",
+      });
+      policy = { inputNeeded: false, finished: false, waiting: true };
+      expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "finished-off", kind: "agent_finished", message: "Done." })).toBe("suppressed");
+      await notifications.userInputRequired({ sessionId: "session-policy", interactionId: "input-off", observed: false });
+      expect((await notifications.status()).pendingCount).toBe(0);
+      expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "waiting-on", kind: "waiting", message: "Waiting." })).toBe("queued");
+      policy = { inputNeeded: true, finished: true, waiting: true };
+      expect(await notifications.enqueue({ sessionId: "session-policy", sourceId: "finished-on", kind: "agent_finished", message: "Done again." })).toBe("queued");
+      await notifications.userInputRequired({ sessionId: "session-policy", interactionId: "input-on", observed: false });
+      await waitFor(() => pushes.length === 3, "three admitted pushes are accepted by the relay");
+      expect(pushes.map((push) => push.notificationKind).sort()).toEqual(["agent_finished", "ask", "waiting"]);
+      expect(Object.keys(await notifications.status()).some((key) => key.startsWith("notifyWhen"))).toBe(false);
+      record("admits each automatic kind by the resolved Global value at admission time", { pushes: pushes.map((push) => push.notificationKind) });
+    } finally {
+      notifications.dispose();
+    }
+  });
+
+  it("carries the retired store policy into the Global keys once, behind a restorable backup", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-push-policy-home-"));
+    const backupRoot = await mkdtemp(join(tmpdir(), "tron-push-policy-backup-"));
+    roots.push(home, backupRoot);
+    const documentPath = join(home, "gateway", "notifications.json");
+    const settingsPath = join(home, "gateway", "settings", "gateway.json");
+    await mkdir(join(home, "gateway"), { recursive: true, mode: 0o700 });
+    await writeFile(documentPath, JSON.stringify({
+      version: 2,
+      policy: { notifyWhenAskPresented: false, notifyWhenFinished: true, notifyWhenWaiting: false },
+      grants: [], pending: [], receipts: [], revocations: [], inbox: [],
+    }));
+    const before = await readFile(documentPath);
+    await expect(new NotificationGrantStore(home).initialize()).rejects.toThrow(/malformed/);
+
+    const plan = await planPushPolicyMigration(home);
+    expect(plan.policy).toEqual({ inputNeeded: false, finished: true, waiting: false });
+    const backup = join(backupRoot, "backup");
+    expect(await applyPushPolicyMigration(plan, backup)).toBe(true);
+    expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
+      notifications: { push: { inputNeeded: false, finished: true, waiting: false } },
+    });
+    await new NotificationGrantStore(home).initialize();
+    expect(JSON.parse(await readFile(documentPath, "utf8")).version).toBe(3);
+    expect((await planPushPolicyMigration(home)).policy).toBeUndefined();
+    expect(await applyPushPolicyMigration(await planPushPolicyMigration(home), join(backupRoot, "again"))).toBe(false);
+
+    expect(await restorePushPolicyMigration(backup)).toBe(true);
+    expect(await readFile(documentPath)).toEqual(before);
+    await expect(stat(settingsPath)).rejects.toMatchObject({ code: "ENOENT" });
+    record("carries the retired store policy into the Global keys once, behind a restorable backup", {
+      carried: plan.policy, restoredBytes: before.byteLength,
+    });
+  });
+});
+

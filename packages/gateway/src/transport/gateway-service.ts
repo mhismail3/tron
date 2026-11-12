@@ -932,7 +932,7 @@ export class GatewayService {
         });
       case "push.registration.upsert":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
-        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented", "notifyWhenFinished", "notifyWhenWaiting"]);
+        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin"]);
         if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
         const notifications = this.requireNotifications();
         void string(params.commandId, "commandId", { min: 8, max: 160 });
@@ -943,9 +943,6 @@ export class GatewayService {
           secret: string(params.secret, "secret", { min: 43, max: 171 }),
           previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
           relayOrigin: string(params.relayOrigin, "relayOrigin", { min: 1, max: 512 }),
-          ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
-          ...(params.notifyWhenFinished === undefined ? {} : { notifyWhenFinished: boolean(params.notifyWhenFinished, "notifyWhenFinished") }),
-          ...(params.notifyWhenWaiting === undefined ? {} : { notifyWhenWaiting: boolean(params.notifyWhenWaiting, "notifyWhenWaiting") }),
         };
         if (await notifications.registrationIsCurrent(input)) {
           return safeJson(await notifications.status(client.identity));

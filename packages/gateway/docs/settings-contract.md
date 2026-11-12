@@ -47,7 +47,7 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 ## Keys
 
 <!-- tron docs settings -->
-47 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
+50 keys, declared in `packages/gateway/src/kernel/settings/settings-schema.ts` (`KEYS`).
 
 | Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Native tap |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -96,6 +96,9 @@ key table's Layers/Home layers columns list those private bindings; grants own a
 | `sources.themes` | — | sources | project, global | none | fixed | reload | — |
 | `sources.packages` | — | sources | project, global | none | fixed | reload | install |
 | `sources.npmCommand` | — | sources | global | none | live | next-change | trust |
+| `notifications.push.inputNeeded` | — | notifications | global | none | live | next-request | — |
+| `notifications.push.finished` | — | notifications | global | none | live | next-request | — |
+| `notifications.push.waiting` | — | notifications | global | none | live | next-request | — |
 | `setup.sessionDir` | — | setup | global | as allowed | live | restart | — |
 | `setup.installTelemetry` | — | setup | global | as allowed | live | next-request | irreversible |
 

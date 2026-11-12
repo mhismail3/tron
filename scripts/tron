@@ -39,9 +39,13 @@ Commands:
   build gateway                     Build Gateway directly with pinned Node
   migrate connections-residue --tron-home <dir> [--apply --backup <new dir>]
   migrate connections-residue --restore --backup <dir>
+  migrate push-policy --tron-home <dir> [--apply --backup <new dir>]
+  migrate push-policy --restore --backup <dir>
                                     One-shot #2327 removal of retired connection setup
                                     operations, receipts and Raindrop collection mappings;
                                     dry run unless --apply; never at startup
+                                    Also one-shot: carry the retired push policy object into
+                                    notifications.push.* Global settings; dry run unless --apply
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
                                     Write one read-only redacted diagnostic bundle
                                     to <path>, or to a new file in the system temp
@@ -222,13 +226,25 @@ case "$cmd" in
     exec node "$GATEWAY/dist/security/mac-terminal-cli.js" "$@"
     ;;
   migrate)
-    [[ "${1:-}" == connections-residue ]] || { usage >&2; exit 64; }
-    shift
-    use_pinned_node
-    [[ -f "$GATEWAY/dist/integrations/connections-residue-migration.js" ]] || {
-      echo "Prepare it first: scripts/tron build gateway" >&2; exit 66;
-    }
-    exec node "$GATEWAY/dist/integrations/connections-residue-migration.js" "$@"
+    case "${1:-}" in
+      connections-residue)
+        shift
+        use_pinned_node
+        [[ -f "$GATEWAY/dist/integrations/connections-residue-migration.js" ]] || {
+          echo "Prepare it first: scripts/tron build gateway" >&2; exit 66;
+        }
+        exec node "$GATEWAY/dist/integrations/connections-residue-migration.js" "$@"
+        ;;
+      push-policy)
+        shift
+        use_pinned_node
+        [[ -f "$GATEWAY/dist/notifications/push-policy-migration.js" ]] || {
+          echo "Prepare it first: scripts/tron build gateway" >&2; exit 66;
+        }
+        exec node "$GATEWAY/dist/notifications/push-policy-migration.js" "$@"
+        ;;
+      *) usage >&2; exit 64 ;;
+    esac
     ;;
   diagnose)
     use_pinned_node

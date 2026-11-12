@@ -82,8 +82,7 @@ export interface NotificationInboxEntry {
 }
 
 export interface NotificationDocument {
-  version: 2;
-  policy: { notifyWhenAskPresented: boolean; notifyWhenFinished: boolean; notifyWhenWaiting: boolean };
+  version: 3;
   grants: PushGrant[];
   pending: PendingIntent[];
   receipts: NotificationReceipt[];
@@ -189,15 +188,10 @@ function isInboxEntry(value: unknown): value is NotificationInboxEntry {
       && Buffer.byteLength(v.machineId) <= 256 && !/[\u0000-\u001f\u007f]/u.test(v.machineId)))
     && ["queued", "accepted_by_apns", "failed", "ambiguous", "expired"].includes(v.outcome as string);
 }
-function validate(value: unknown): NotificationDocument {
+export function validate(value: unknown): NotificationDocument {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not object");
   const v = value as Record<string, unknown>;
-  if (!exact(v, ["version", "policy", "grants", "pending", "receipts", "revocations", "inbox"]) || v.version !== 2) throw new Error("shape");
-  if (!v.policy || typeof v.policy !== "object" || Array.isArray(v.policy)
-    || !exact(v.policy as Record<string, unknown>, ["notifyWhenAskPresented", "notifyWhenFinished", "notifyWhenWaiting"])
-    || typeof (v.policy as { notifyWhenAskPresented?: unknown }).notifyWhenAskPresented !== "boolean"
-    || typeof (v.policy as { notifyWhenFinished?: unknown }).notifyWhenFinished !== "boolean"
-    || typeof (v.policy as { notifyWhenWaiting?: unknown }).notifyWhenWaiting !== "boolean") throw new Error("policy");
+  if (!exact(v, ["version", "grants", "pending", "receipts", "revocations", "inbox"]) || v.version !== 3) throw new Error("shape");
   if (!Array.isArray(v.grants) || v.grants.length > MAXIMUM_PUSH_GRANTS || !v.grants.every(isGrant)) throw new Error("grants");
   if (!Array.isArray(v.pending) || v.pending.length > MAXIMUM_PENDING_INTENTS || !v.pending.every(isIntent)) throw new Error("pending");
   if (!Array.isArray(v.receipts) || v.receipts.length > MAXIMUM_NOTIFICATION_RECEIPTS || !v.receipts.every(isReceipt)) throw new Error("receipts");
@@ -213,7 +207,7 @@ function validate(value: unknown): NotificationDocument {
 }
 
 const empty = (): NotificationDocument => ({
-  version: 2, policy: { notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true }, grants: [], pending: [], receipts: [], revocations: [], inbox: [],
+  version: 3, grants: [], pending: [], receipts: [], revocations: [], inbox: [],
 });
 
 export class NotificationGrantStore {

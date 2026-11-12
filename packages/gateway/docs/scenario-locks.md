@@ -187,7 +187,7 @@ Knowledge lock.
 | `gateway/command-receipts/` | `CommandReceiptStore` | `gateway/transport` store-command-receipts |
 | `gateway/session-archive.json`, `session-attention.json` | archive and attention stores | `gateway/session-catalog` |
 | `gateway/runtime-markers/` | `RunMarkerStore` | `gateway/run` store-run-markers |
-| `gateway/notifications.json` (grants, inbox, policy) | `NotificationGrantStore` | `gateway/notifications` |
+| `gateway/notifications.json` (grants, inbox) | `NotificationGrantStore` | `gateway/notifications` |
 | `gateway/model-recents.json` | `RecentModelStore` | `gateway/providers` |
 | `gateway/automations/` | `AutomationStore` | `gateway/automations` |
 | `gateway/uploads/`, `upload-objects/`, `upload-bodies/` | `UploadStore` | `gateway/machine` (live) |
